@@ -107,10 +107,17 @@ list. That's why the chart felt "lost" after an appointment.
 
 ## Open / deferred (needs product or legal input)
 
-- Consent waivers, patch-test records, photo-release: **legal review required**
-  (liability, retention, audit, photo-consent law e.g. BIPA). PR4 track only.
+- Consent waivers, patch-test records, photo-release: **legal review still
+  required before prod** (liability, retention, audit, photo-consent law e.g.
+  BIPA). PR4 is BUILT but ships **behind `ENABLE_CLIENT_TECHNICAL_RECORD`
+  (off in prod)** and the migration is held for a separate apply — do not flip
+  the flag in prod until legal signs off.
 - "Do not rebook" flag: must stay strictly factual (discrimination liability).
-- Exact long-tier retention duration (indefinite vs. 18mo) — pick before PR4.
+- ~~Exact long-tier retention duration (indefinite vs. 18mo) — pick before PR4.~~
+  **Decided 2026-06-21: INDEFINITE.** Encoded as the single `TECHNICAL_RECORD_RETENTION`
+  constant in `lib/clients/technicalRecord.ts`; switching to 18mo later is a
+  one-line change plus a cleanup job. Still pending legal confirmation alongside
+  the flag flip.
 - Cross-pro exposure widens under a 30-day window (more pros hold an open window
   at once). Confirm the existing all-pros "pro feedback" sharing is still wanted
   at that wider access before PR1 ships.

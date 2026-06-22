@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Prisma } from '@prisma/client'
+import type { PhotoReleaseStatus } from '@prisma/client'
 import type { ReactNode } from 'react'
 
 import ClientNameLink from '@/app/_components/ClientNameLink'
@@ -20,6 +21,12 @@ import {
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { readEncryptedNoteOrFallback } from '@/lib/security/notesPrivacy'
 import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
+import {
+  isClientTechnicalRecordEnabled,
+  isPatchTestCurrent,
+  filterFormulaEntriesForViewer,
+  scopeConsentRecordsForViewer,
+} from '@/lib/clients/technicalRecord'
 import { formatProfessionalPublicSearchText } from '@/lib/privacy/professionalDisplayName'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { loadPublicClientProfileByClientId } from '@/app/u/[handle]/_data/loadPublicClientProfile'
@@ -27,8 +34,11 @@ import PublicProfileView from '@/app/u/[handle]/_components/PublicProfileView'
 
 import EditAlertBannerForm from './EditAlertBannerForm'
 import EditDoNotRebookForm from './EditDoNotRebookForm'
+import EditPhotoReleaseForm from './EditPhotoReleaseForm'
 import EditProfileContextForm from './EditProfileContextForm'
 import NewAllergyForm from './NewAllergyForm'
+import NewConsentForm from './NewConsentForm'
+import NewFormulaForm from './NewFormulaForm'
 import NewNoteForm from './NewNoteForm'
 import { Badge, Button, Card, buttonClassName } from '@/app/_components/ui'
 import type { BadgeTone } from '@/app/_components/ui'
@@ -47,6 +57,8 @@ const CHART_TABS = [
   { id: 'reviews-left', label: 'Reviews' },
   { id: 'pro-feedback', label: 'Pro feedback' },
   { id: 'photos', label: 'Photos' },
+  // Flag-gated (ENABLE_CLIENT_TECHNICAL_RECORD); only shown/queried when on.
+  { id: 'technical', label: 'Technical record' },
 ] as const
 
 type ChartTab = (typeof CHART_TABS)[number]['id']
@@ -245,6 +257,49 @@ type ProFeedbackRow = Prisma.ClientProfessionalNoteGetPayload<{
   select: typeof PRO_FEEDBACK_SELECT
 }>
 
+// Technical record (PR4 — flagged). Queried only when the flag is on.
+const FORMULA_SELECT = {
+  id: true,
+  createdAt: true,
+  professionalId: true,
+  brand: true,
+  developer: true,
+  ratio: true,
+  processingTimeMinutes: true,
+  resultNotesEncrypted: true,
+  booking: {
+    select: { scheduledFor: true, service: { select: { name: true } } },
+  },
+} satisfies Prisma.ClientFormulaEntrySelect
+
+const CONSENT_SELECT = {
+  id: true,
+  createdAt: true,
+  professionalId: true,
+  kind: true,
+  serviceScope: true,
+  signedAt: true,
+  proofMethod: true,
+  proofRef: true,
+  patchTestResult: true,
+  validUntil: true,
+  notesEncrypted: true,
+  professional: {
+    select: { businessName: true, firstName: true, lastName: true },
+  },
+  booking: {
+    select: { scheduledFor: true, service: { select: { name: true } } },
+  },
+} satisfies Prisma.ClientConsentRecordSelect
+
+type FormulaRow = Prisma.ClientFormulaEntryGetPayload<{
+  select: typeof FORMULA_SELECT
+}>
+
+type ConsentRow = Prisma.ClientConsentRecordGetPayload<{
+  select: typeof CONSENT_SELECT
+}>
+
 const PHASE_ORDER: Record<string, number> = { BEFORE: 0, AFTER: 1, OTHER: 2 }
 
 type TimelinePhoto = {
@@ -260,6 +315,38 @@ type TimelineVisit = {
   serviceName: string | null
   isMine: boolean
   photos: TimelinePhoto[]
+}
+
+type FormulaView = {
+  id: string
+  when: Date | null
+  serviceName: string | null
+  brand: string | null
+  developer: string | null
+  ratio: string | null
+  processingTimeMinutes: number | null
+  resultNotes: string | null
+}
+
+type ConsentView = {
+  id: string
+  scope: 'full' | 'safety'
+  kind: string
+  when: Date | null
+  serviceScope: string | null
+  signedAt: Date | null
+  proofMethod: string | null
+  proofRef: string | null
+  patchTestResult: string | null
+  validUntil: Date | null
+  notes: string | null
+  byName: string | null
+}
+
+type TechnicalRecordData = {
+  formula: FormulaView[]
+  consents: ConsentView[]
+  photoReleaseStatus: PhotoReleaseStatus
 }
 
 function firstParam(value: string | string[] | undefined): string {
@@ -556,6 +643,86 @@ async function loadPhotoTimeline(
   )
 
   return visits
+}
+
+function toFormulaView(row: FormulaRow): FormulaView {
+  return {
+    id: row.id,
+    when: row.booking?.scheduledFor ?? row.createdAt,
+    serviceName: row.booking?.service?.name ?? null,
+    brand: row.brand,
+    developer: row.developer,
+    ratio: row.ratio,
+    processingTimeMinutes: row.processingTimeMinutes,
+    // Author-only entries; decrypt the free-text result for the authoring pro.
+    resultNotes: readEncryptedNoteOrFallback(row.resultNotesEncrypted, null),
+  }
+}
+
+function toConsentView(row: ConsentRow, scope: 'full' | 'safety'): ConsentView {
+  const full = scope === 'full'
+  return {
+    id: row.id,
+    scope,
+    kind: row.kind,
+    when: row.booking?.scheduledFor ?? row.createdAt,
+    // Safety scope (another pro's patch test): only result + validity travel.
+    serviceScope: full ? row.serviceScope : null,
+    signedAt: full ? row.signedAt : null,
+    proofMethod: full ? row.proofMethod : null,
+    proofRef: full ? row.proofRef : null,
+    patchTestResult: row.patchTestResult,
+    validUntil: row.validUntil,
+    notes: full ? readEncryptedNoteOrFallback(row.notesEncrypted, null) : null,
+    byName: full
+      ? null
+      : formatPublicProfileDisplayName({
+          businessName: row.professional?.businessName,
+          firstName: row.professional?.firstName,
+          lastName: row.professional?.lastName,
+          fallback: 'Another pro',
+        }),
+  }
+}
+
+// Author-scoped formula history + scoped consent/patch-test records + the
+// client's photo-release state. Only invoked when the flag is on.
+async function loadTechnicalRecord(
+  clientId: string,
+  proId: string,
+): Promise<TechnicalRecordData> {
+  const [formulaRows, consentRows, client] = await Promise.all([
+    prisma.clientFormulaEntry.findMany({
+      where: { clientId, professionalId: proId },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      select: FORMULA_SELECT,
+    }),
+    prisma.clientConsentRecord.findMany({
+      // Own records + any pro's PATCH_TEST (safety travels); scope is applied below.
+      where: { clientId, OR: [{ professionalId: proId }, { kind: 'PATCH_TEST' }] },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      select: CONSENT_SELECT,
+    }),
+    prisma.clientProfile.findUnique({
+      where: { id: clientId },
+      select: { photoReleaseStatus: true },
+    }),
+  ])
+
+  const formula = filterFormulaEntriesForViewer(formulaRows, proId).map(
+    toFormulaView,
+  )
+  const consents = scopeConsentRecordsForViewer(consentRows, proId).map(
+    ({ record, scope }) => toConsentView(record, scope),
+  )
+
+  return {
+    formula,
+    consents,
+    photoReleaseStatus: client?.photoReleaseStatus ?? 'NOT_SET',
+  }
 }
 
 type ClientNoteRow = ClientDetailRecord['notes'][number]
@@ -1070,6 +1237,219 @@ function PhotoTimeline({ visits }: { visits: TimelineVisit[] }) {
   )
 }
 
+function patchResultTone(result: string | null): BadgeTone {
+  switch (result) {
+    case 'PASS':
+      return 'success'
+    case 'FAIL':
+      return 'danger'
+    case 'INCONCLUSIVE':
+      return 'warn'
+    default:
+      return 'neutral'
+  }
+}
+
+function photoReleaseTone(status: PhotoReleaseStatus): BadgeTone {
+  switch (status) {
+    case 'GRANTED':
+      return 'success'
+    case 'DECLINED':
+      return 'danger'
+    default:
+      return 'neutral'
+  }
+}
+
+function FormulaList({ formula }: { formula: FormulaView[] }) {
+  if (formula.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        No formula history yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {formula.map((entry) => {
+        const specs = [
+          entry.brand,
+          entry.developer,
+          entry.ratio,
+          entry.processingTimeMinutes
+            ? `${entry.processingTimeMinutes} min`
+            : null,
+        ].filter(Boolean)
+
+        return (
+          <div
+            key={entry.id}
+            className="rounded-card border border-white/10 bg-bgPrimary p-4"
+          >
+            <div className="flex items-baseline justify-between gap-3">
+              <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
+                {entry.serviceName ?? 'Formula'}
+              </div>
+              <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
+                {entry.when ? formatDate(entry.when) : '—'}
+              </div>
+            </div>
+
+            {specs.length ? (
+              <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                {specs.join(' · ')}
+              </div>
+            ) : null}
+
+            {entry.resultNotes ? (
+              <div className="mt-2 whitespace-pre-wrap text-[12px] font-semibold text-textSecondary">
+                {entry.resultNotes}
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ConsentList({
+  consents,
+  now,
+}: {
+  consents: ConsentView[]
+  now: Date
+}) {
+  if (consents.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        No consent or patch-test records yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {consents.map((record) => {
+        const isPatch = record.kind === 'PATCH_TEST'
+        const current = isPatchTestCurrent(record.validUntil, now)
+
+        return (
+          <div
+            key={record.id}
+            className="rounded-card border border-white/10 bg-bgPrimary p-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] font-black text-textPrimary">
+                  {record.kind.replace(/_/g, ' ')}
+                </span>
+                {isPatch && record.patchTestResult ? (
+                  <Badge tone={patchResultTone(record.patchTestResult)}>
+                    {record.patchTestResult}
+                  </Badge>
+                ) : null}
+                {record.scope === 'safety' ? (
+                  <Badge tone="info" size="sm">
+                    {record.byName ?? 'Another pro'}
+                  </Badge>
+                ) : null}
+              </div>
+              <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
+                {record.when ? formatDate(record.when) : '—'}
+              </div>
+            </div>
+
+            {record.serviceScope ? (
+              <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                Scope: {record.serviceScope}
+              </div>
+            ) : null}
+
+            {isPatch && record.validUntil ? (
+              <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                Valid until {formatDate(record.validUntil)}{' '}
+                <Badge tone={current ? 'success' : 'warn'} size="sm">
+                  {current ? 'current' : 'expired'}
+                </Badge>
+              </div>
+            ) : null}
+
+            {record.scope === 'full' && (record.proofMethod || record.signedAt) ? (
+              <div className="mt-1 text-[11px] font-semibold text-textSecondary/80">
+                {record.proofMethod
+                  ? `Proof: ${record.proofMethod.replace(/_/g, ' ').toLowerCase()}`
+                  : ''}
+                {record.signedAt ? ` • signed ${formatDate(record.signedAt)}` : ''}
+                {record.proofRef ? ` • ref ${record.proofRef}` : ''}
+              </div>
+            ) : null}
+
+            {record.notes ? (
+              <div className="mt-2 whitespace-pre-wrap text-[12px] font-semibold text-textSecondary">
+                {record.notes}
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function TechnicalRecordTab({
+  clientId,
+  data,
+  now,
+}: {
+  clientId: string
+  data: TechnicalRecordData
+  now: Date
+}) {
+  return (
+    <>
+      <SectionCard
+        id="photo-release"
+        title="Photo release"
+        subtitle="The client's standing before/after photo-release decision. Public sharing still requires the client to promote a photo via a review."
+        right={
+          <Badge tone={photoReleaseTone(data.photoReleaseStatus)}>
+            {data.photoReleaseStatus.replace(/_/g, ' ')}
+          </Badge>
+        }
+      >
+        <EditPhotoReleaseForm
+          clientId={clientId}
+          initialStatus={data.photoReleaseStatus}
+        />
+      </SectionCard>
+
+      <SectionCard
+        id="formula"
+        title="Formula history"
+        subtitle="Your craft record per visit — private to you, never public."
+      >
+        <div className="mb-4">
+          <NewFormulaForm clientId={clientId} />
+        </div>
+        <FormulaList formula={data.formula} />
+      </SectionCard>
+
+      <SectionCard
+        id="consent"
+        title="Consent & patch tests"
+        subtitle="Signed waivers stay private to you; patch-test results travel to any pro with access."
+      >
+        <div className="mb-4">
+          <NewConsentForm clientId={clientId} />
+        </div>
+        <ConsentList consents={data.consents} now={now} />
+      </SectionCard>
+    </>
+  )
+}
+
 function WindowCountdownBadge({
   accessUntil,
   now,
@@ -1140,13 +1520,19 @@ function ViewToggle({
 function TabNav({
   clientId,
   activeTab,
+  technicalEnabled,
 }: {
   clientId: string
   activeTab: ChartTab
+  technicalEnabled: boolean
 }) {
+  const tabs = CHART_TABS.filter(
+    (tab) => tab.id !== 'technical' || technicalEnabled,
+  )
+
   return (
     <nav className="flex flex-wrap gap-2" aria-label="Chart sections">
-      {CHART_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = tab.id === activeTab
         return (
           <Link
@@ -1369,6 +1755,8 @@ function tabContent(args: {
   clientLeftReviews: ClientLeftReviewRow[]
   proFeedback: ProFeedbackRow[]
   photoVisits: TimelineVisit[]
+  technicalRecord: TechnicalRecordData | null
+  now: Date
 }): ReactNode {
   const { tab, client, proId } = args
 
@@ -1448,6 +1836,14 @@ function tabContent(args: {
           <PhotoTimeline visits={args.photoVisits} />
         </SectionCard>
       )
+    case 'technical':
+      return args.technicalRecord ? (
+        <TechnicalRecordTab
+          clientId={client.id}
+          data={args.technicalRecord}
+          now={args.now}
+        />
+      ) : null
     case 'notes':
     default:
       return (
@@ -1494,7 +1890,12 @@ export default async function ClientDetailPage(props: {
     ({} as SearchParams)
 
   const view = normalizeView(firstParam(searchParams.view))
-  const tab = normalizeTab(firstParam(searchParams.tab))
+  const technicalEnabled = isClientTechnicalRecordEnabled()
+  const requestedTab = normalizeTab(firstParam(searchParams.tab))
+  // The technical tab only exists when the flag is on; otherwise fall back to notes
+  // (so a stale deep-link never queries the not-yet-migrated tables).
+  const tab: ChartTab =
+    requestedTab === 'technical' && !technicalEnabled ? 'notes' : requestedTab
   const now = new Date()
 
   // ---- Public-profile mode: render what the world sees (or an empty state). ----
@@ -1631,6 +2032,7 @@ export default async function ClientDetailPage(props: {
   let clientLeftReviews: ClientLeftReviewRow[] = []
   let proFeedback: ProFeedbackRow[] = []
   let photoVisits: TimelineVisit[] = []
+  let technicalRecord: TechnicalRecordData | null = null
 
   if (tab === 'products') {
     productRecs = await prisma.productRecommendation.findMany({
@@ -1654,6 +2056,9 @@ export default async function ClientDetailPage(props: {
     })
   } else if (tab === 'photos') {
     photoVisits = await loadPhotoTimeline(clientId, proId)
+  } else if (tab === 'technical' && technicalEnabled) {
+    // Flag-gated: only path that touches the PR4 tables/columns.
+    technicalRecord = await loadTechnicalRecord(clientId, proId)
   }
 
   return (
@@ -1795,7 +2200,11 @@ export default async function ClientDetailPage(props: {
       </div>
 
       <div className="mb-6">
-        <TabNav clientId={client.id} activeTab={tab} />
+        <TabNav
+          clientId={client.id}
+          activeTab={tab}
+          technicalEnabled={technicalEnabled}
+        />
       </div>
 
       <div className="grid gap-6">
@@ -1811,6 +2220,8 @@ export default async function ClientDetailPage(props: {
           clientLeftReviews,
           proFeedback,
           photoVisits,
+          technicalRecord,
+          now,
         })}
       </div>
     </main>
