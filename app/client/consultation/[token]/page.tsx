@@ -8,6 +8,7 @@ import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
 import { isRecord } from '@/lib/guards'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 
 function readProNameDisplay(value: unknown): ProNameDisplay | null {
   return value === ProNameDisplay.BUSINESS_NAME ||
@@ -842,10 +843,10 @@ export default function PublicConsultationPage({ params }: PageProps) {
         <div className="mt-2 text-sm text-textSecondary">
           {scheduledLabel ? (
             <>
-              {scheduledLabel} <span className="opacity-70">· {timeZone}</span>
+              {scheduledLabel} <span className="opacity-70">· {friendlyTimeZoneLabel(timeZone) ?? timeZone}</span>
             </>
           ) : (
-            <span>Times shown in {timeZone}</span>
+            <span>Times shown in {friendlyTimeZoneLabel(timeZone) ?? timeZone}</span>
           )}
         </div>
 

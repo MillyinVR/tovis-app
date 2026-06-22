@@ -16,7 +16,7 @@ import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInvit
 import { RebookCard } from '@/app/client/_public/RebookCard'
 import { getPublicCheckoutAvailability } from '@/lib/booking/publicCheckoutAvailability'
 import { prisma } from '@/lib/prisma'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 import {
   formatAppointmentWhen,
   formatRangeInTimeZone,
@@ -402,7 +402,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
           <span className="font-black text-textPrimary">
             {sourceAppointmentLabel}
           </span>
-          <span className="opacity-70"> · {appointmentTimeZone}</span>
+          <span className="opacity-70"> · {friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}</span>
         </div>
 
         <div className="mt-2 text-xs text-textSecondary/80">
@@ -488,7 +488,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
           {rebookInfo.label ? (
             <div className="text-sm text-textSecondary">
               {rebookInfo.label}{' '}
-              <span className="opacity-70">· {appointmentTimeZone}</span>
+              <span className="opacity-70">· {friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}</span>
             </div>
           ) : (
             <div className="text-sm text-textSecondary/75">

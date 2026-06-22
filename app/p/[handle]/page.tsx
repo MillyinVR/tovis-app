@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { friendlyTimeZoneLabel, isValidIanaTimeZone } from '@/lib/timeZone'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import { normalizeHandle } from '@/lib/handles'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
@@ -127,7 +127,7 @@ export default async function VanityProfilePage({
 
             {proTimeZone ? (
               <div className="mt-3 inline-flex rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textSecondary">
-                Time zone: <span className="ml-2 text-textPrimary">{proTimeZone}</span>
+                Time zone: <span className="ml-2 text-textPrimary">{friendlyTimeZoneLabel(proTimeZone) ?? proTimeZone}</span>
               </div>
             ) : null}
           </div>

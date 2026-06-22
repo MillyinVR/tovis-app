@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 
 import {
   DEFAULT_TIME_ZONE,
+  friendlyTimeZoneLabel,
   getZonedParts,
   sanitizeTimeZone,
   zonedTimeToUtc,
@@ -564,7 +565,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
               </InfoRow>
 
               <InfoRow label={copy.timeZoneLabel}>
-                {resolvedTimeZone} · {step} minute step
+                {friendlyTimeZoneLabel(resolvedTimeZone) ?? resolvedTimeZone} · {step} minute step
               </InfoRow>
 
               {locationId ? (

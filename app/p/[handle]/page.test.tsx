@@ -52,6 +52,7 @@ vi.mock('@/app/_components/ProSessionFooter/ProSessionFooter', () => ({
 
 vi.mock('@/lib/timeZone', () => ({
   isValidIanaTimeZone: vi.fn(() => true),
+  friendlyTimeZoneLabel: (tz: string | null | undefined) => tz ?? null,
 }))
 
 import VanityProfilePage from './page'

@@ -4,6 +4,8 @@
 import { useMemo } from 'react'
 import type { CSSProperties } from 'react'
 
+import { friendlyTimeZoneLabel } from '@/lib/timeZone'
+
 import { PX_PER_MINUTE } from '../../_utils/calendarMath'
 import { clamp } from '../../_utils/date'
 
@@ -99,7 +101,7 @@ export function TimeGutter(props: TimeGutterProps) {
   return (
     <div
       className="brand-pro-calendar-time-gutter"
-      aria-label={`Calendar time gutter, ${timeZone}`}
+      aria-label={`Calendar time gutter, ${friendlyTimeZoneLabel(timeZone) ?? timeZone}`}
       data-calendar-time-gutter="1"
     >
       <div

@@ -43,6 +43,32 @@ export function pickTimeZoneOrNull(tz: unknown): IanaTimeZone | null {
   return isValidIanaTimeZone(s) ? (s as IanaTimeZone) : null
 }
 
+/**
+ * Human-friendly timezone label for UI, e.g. "Central Time", "Pacific Time".
+ *
+ * Uses Intl `longGeneric` naming, which is DST-agnostic (no "CDT vs CST"
+ * flapping). Prefer this over rendering the raw IANA id (`America/Chicago`)
+ * anywhere a person will read it.
+ *
+ * Returns `null` for missing/invalid input so callers can hide the label
+ * instead of inventing one. Pass an invalid `tz` through and you get `null`;
+ * if Intl can't produce a name, falls back to the sanitized IANA id.
+ */
+export function friendlyTimeZoneLabel(tz: unknown): string | null {
+  const zone = pickTimeZoneOrNull(tz)
+  if (!zone) return null
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      timeZoneName: 'longGeneric',
+    }).formatToParts(new Date())
+    const name = parts.find((p) => p.type === 'timeZoneName')?.value
+    return name && name.trim() ? name : zone
+  } catch {
+    return zone
+  }
+}
+
 function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
   // Anchor at noon UTC to avoid DST weirdness while rolling dates
   const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))

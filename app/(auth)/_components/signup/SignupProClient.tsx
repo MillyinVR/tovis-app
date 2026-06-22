@@ -18,6 +18,7 @@ import { isRecord } from '@/lib/guards'
 import { sanitizeHandleInput } from '@/lib/handles'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
+import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { getTurnstileToken } from '@/lib/turnstileClient'
 import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
 import {
@@ -872,7 +873,7 @@ export default function SignupProClient() {
             <FieldLabel>{locationLabel()}</FieldLabel>
             {confirmed?.timeZoneId ? (
               <span className="text-[11px] font-black text-textSecondary/80">
-                {confirmed.timeZoneId}
+                {friendlyTimeZoneLabel(confirmed.timeZoneId) ?? confirmed.timeZoneId}
               </span>
             ) : null}
           </div>

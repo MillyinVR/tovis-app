@@ -67,6 +67,7 @@ vi.mock('@/lib/booking/publicCheckoutAvailability', () => ({
 
 vi.mock('@/lib/timeZone', () => ({
   sanitizeTimeZone: mocks.sanitizeTimeZone,
+  friendlyTimeZoneLabel: (tz: string | null | undefined) => tz ?? null,
 }))
 
 vi.mock('@/lib/formatInTimeZone', () => ({

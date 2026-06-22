@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { isRecord } from '@/lib/guards'
+import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 
 type AvailabilityQuery = {
   professionalId: string
@@ -246,7 +247,7 @@ export function RebookCard({
           />
         </label>
         <div className="text-[12px] text-textSecondary/75">
-          Times shown in {timeZone}
+          Times shown in {friendlyTimeZoneLabel(timeZone) ?? timeZone}
         </div>
       </div>
 

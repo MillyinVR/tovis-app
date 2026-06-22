@@ -11,6 +11,7 @@ import { zClass } from '@/lib/zIndex'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { clampInt } from '@/lib/guards'
 import { kmToMiles } from '@/lib/units'
+import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 import { Badge, Button, buttonClassName } from '@/app/_components/ui'
 
@@ -895,7 +896,7 @@ async function updateAdvanceNotice(
                       <div className="mt-2 text-[13px] font-semibold text-textPrimary/85">{formatLocationAddress(l)}</div>
 
                       <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                        TZ: {l.timeZone || '—'} • Lat/Lng: {l.lat ?? '—'},{l.lng ?? '—'} • Notice:{' '}
+                        Time zone: {friendlyTimeZoneLabel(l.timeZone) ?? '—'} • Lat/Lng: {l.lat ?? '—'},{l.lng ?? '—'} • Notice:{' '}
                         {formatAdvanceNotice(l.advanceNoticeMinutes)}
                         {l.type === 'MOBILE_BASE' && mobileRadiusMiles != null
                           ? ` • Radius: ${mobileRadiusMiles} mi`
