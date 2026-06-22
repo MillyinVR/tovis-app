@@ -40,6 +40,23 @@ export type LooksProProfilePreviewRow =
     select: typeof looksProProfilePreviewSelect
   }>
 
+// Client-authored looks credit the publishing client as the poster. Only the
+// PII-safe public-profile fields are surfaced (handle + avatar), matching the
+// /u/[handle] contract — never the client's real name. isPublicProfile is
+// selected so mappers can refuse to attribute a look whose author went private.
+export const looksClientAuthorPreviewSelect =
+  Prisma.validator<Prisma.ClientProfileSelect>()({
+    id: true,
+    handle: true,
+    avatarUrl: true,
+    isPublicProfile: true,
+  })
+
+export type LooksClientAuthorPreviewRow =
+  Prisma.ClientProfileGetPayload<{
+    select: typeof looksClientAuthorPreviewSelect
+  }>
+
 // Feed cards surface a live follower count next to the Follow control, so the
 // feed variant adds an index-backed `followers` count on top of the preview.
 export const looksFeedProProfileSelect =
@@ -100,6 +117,7 @@ export const looksFeedSelect =
   Prisma.validator<Prisma.LookPostSelect>()({
     id: true,
     professionalId: true,
+    clientAuthorId: true,
     serviceId: true,
 
     caption: true,
@@ -129,6 +147,10 @@ export const looksFeedSelect =
       select: looksFeedProProfileSelect,
     },
 
+    clientAuthor: {
+      select: looksClientAuthorPreviewSelect,
+    },
+
     service: {
       select: looksServicePreviewSelect,
     },
@@ -142,6 +164,7 @@ export const looksDetailSelect =
   Prisma.validator<Prisma.LookPostSelect>()({
     id: true,
     professionalId: true,
+    clientAuthorId: true,
     serviceId: true,
     primaryMediaAssetId: true,
 
@@ -169,6 +192,10 @@ export const looksDetailSelect =
 
     professional: {
       select: looksProProfilePreviewSelect,
+    },
+
+    clientAuthor: {
+      select: looksClientAuthorPreviewSelect,
     },
 
     service: {

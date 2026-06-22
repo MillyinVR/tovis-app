@@ -232,6 +232,7 @@ function makeDetailItem(): LooksDetailItemDto {
       verificationStatus: 'APPROVED',
       isPremium: true,
     },
+    clientAuthor: null,
     service: {
       id: 'service_1',
       name: 'Fade',

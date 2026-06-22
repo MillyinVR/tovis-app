@@ -35,6 +35,7 @@ function makeItem(overrides: Partial<FeedItem> = {}): FeedItem {
       location: 'San Diego, CA',
       followerCount: 0,
     },
+    clientAuthor: null,
     _count: { likes: 3, comments: 1 },
     viewerLiked: false,
     viewerSaved: false,

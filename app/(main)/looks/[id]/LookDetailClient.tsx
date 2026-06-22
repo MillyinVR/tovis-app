@@ -301,6 +301,7 @@ export default function LookDetailClient({
               lastName: item.professional.lastName,
               avatarUrl: item.professional.avatarUrl,
             }}
+            clientAuthor={item.clientAuthor}
             viewerLiked={item.viewerContext.viewerLiked}
             likeCount={item._count.likes}
             commentCount={item._count.comments}
@@ -323,8 +324,31 @@ export default function LookDetailClient({
 
           <div className="grid gap-3 p-4">
             <div className="grid gap-1">
+              {item.clientAuthor ? (
+                <Link
+                  href={`/u/${encodeURIComponent(item.clientAuthor.handle)}`}
+                  className="text-base font-extrabold no-underline hover:underline"
+                >
+                  @{item.clientAuthor.handle}
+                </Link>
+              ) : null}
+
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <div className="text-base font-extrabold">{proDisplayName}</div>
+                {item.clientAuthor ? (
+                  <span className="text-xs font-semibold text-textSecondary">
+                    with
+                  </span>
+                ) : null}
+                {item.clientAuthor ? (
+                  <Link
+                    href={`/professionals/${encodeURIComponent(item.professional.id)}`}
+                    className="text-base font-extrabold no-underline hover:underline"
+                  >
+                    {proDisplayName}
+                  </Link>
+                ) : (
+                  <div className="text-base font-extrabold">{proDisplayName}</div>
+                )}
 
                 <button
                   type="button"

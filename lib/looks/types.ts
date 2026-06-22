@@ -35,6 +35,13 @@ export type LooksProfessionalDto = {
   followerCount: number
 }
 
+// The publishing client credited on a client-authored look. PII-safe: handle
+// and avatar only (the /u/[handle] public-profile contract), never a real name.
+export type LooksClientAuthorDto = {
+  handle: string
+  avatarUrl: string | null
+}
+
 export type LooksFeedItemDto = {
   id: string
   url: string
@@ -44,6 +51,7 @@ export type LooksFeedItemDto = {
   createdAt: string
 
   professional: LooksProfessionalDto | null
+  clientAuthor: LooksClientAuthorDto | null
 
   _count: LooksCountsDto
   viewerLiked: boolean
@@ -141,6 +149,7 @@ export type LooksDetailItemDto = {
   updatedAt: string
 
   professional: LooksProProfilePreviewDto
+  clientAuthor: LooksClientAuthorDto | null
   service: LooksDetailServiceDto | null
 
   primaryMedia: LooksDetailMediaDto

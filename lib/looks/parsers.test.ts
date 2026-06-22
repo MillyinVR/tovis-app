@@ -68,6 +68,7 @@ function makeFeedDto(
       location: 'San Diego, CA',
       followerCount: 256,
     },
+    clientAuthor: null,
     _count: {
       likes: 9,
       comments: 3,
@@ -171,6 +172,7 @@ describe('lib/looks/parsers.ts', () => {
             location: null,
             followerCount: 0,
           },
+          clientAuthor: null,
           _count: {
             likes: 1,
             comments: 2,
@@ -447,6 +449,7 @@ describe('lib/looks/parsers.ts', () => {
           verificationStatus: VerificationStatus.APPROVED,
           isPremium: true,
         },
+        clientAuthor: null,
         service: {
           id: 'service_1',
           name: 'Fade',

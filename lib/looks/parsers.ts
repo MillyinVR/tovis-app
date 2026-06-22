@@ -12,6 +12,7 @@ import {
 
 import { isRecord } from '@/lib/guards'
 import type {
+  LooksClientAuthorDto,
   LooksCommentDto,
   LooksDetailAdminDto,
   LooksDetailAssetDto,
@@ -22,6 +23,13 @@ import type {
   LooksFeedItemDto,
   LooksFeedResponseDto,
 } from '@/lib/looks/types'
+
+function parseLooksClientAuthor(raw: unknown): LooksClientAuthorDto | null {
+  if (!isRecord(raw)) return null
+  const handle = pickString(raw.handle)
+  if (!handle) return null
+  return { handle, avatarUrl: pickString(raw.avatarUrl) }
+}
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
@@ -177,6 +185,7 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
       createdAt,
 
       professional,
+      clientAuthor: parseLooksClientAuthor(item.clientAuthor),
 
       _count: {
         likes: likeCount,
@@ -569,6 +578,7 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
     createdAt,
     updatedAt,
     professional,
+    clientAuthor: parseLooksClientAuthor(itemRaw.clientAuthor),
     service,
     primaryMedia,
     assets,

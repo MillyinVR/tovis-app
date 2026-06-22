@@ -29,6 +29,27 @@ import type {
 } from '@/lib/looks/types'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import type { LooksClientAuthorDto } from '@/lib/looks/types'
+
+// Shared resolver for the publishing-client credit on a client-authored look.
+// Returns null unless the author is still public AND has a handle, so a look is
+// never attributed to a client who has since gone private (the feed gate admits
+// these by public status, but detail-by-id and stale rows must re-check). Only
+// the PII-safe handle + avatar are surfaced — never a real name.
+function mapLooksClientAuthorToDto(
+  clientAuthor:
+    | { handle: string | null; avatarUrl: string | null; isPublicProfile: boolean }
+    | null
+    | undefined,
+): LooksClientAuthorDto | null {
+  if (!clientAuthor || !clientAuthor.isPublicProfile || !clientAuthor.handle) {
+    return null
+  }
+  return {
+    handle: clientAuthor.handle,
+    avatarUrl: clientAuthor.avatarUrl ?? null,
+  }
+}
 
 type MediaCommentUserShape = {
   id: string
@@ -305,6 +326,7 @@ export async function mapLooksFeedMediaToDto(args: {
           followerCount: item.professional._count?.followers ?? 0,
         }
       : null,
+    clientAuthor: mapLooksClientAuthorToDto(item.clientAuthor),
 
     _count: {
       likes: item.likeCount,
@@ -523,6 +545,7 @@ export function mapLooksDetailToDto(args: {
     updatedAt: item.updatedAt.toISOString(),
 
     professional: mapLooksProProfilePreviewToDto(item.professional),
+    clientAuthor: mapLooksClientAuthorToDto(item.clientAuthor),
 
     service: primaryService
       ? {

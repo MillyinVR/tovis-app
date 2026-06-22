@@ -45,6 +45,8 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
   return {
     id: 'look_1',
     professionalId: 'pro_1',
+    clientAuthorId: null,
+    clientAuthor: null,
     serviceId: 'service_1',
     caption: 'Fresh cut',
     priceStartingAt: null,
@@ -102,6 +104,8 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
   return {
     id: 'look_1',
     professionalId: 'pro_1',
+    clientAuthorId: null,
+    clientAuthor: null,
     serviceId: 'service_1',
     primaryMediaAssetId: 'media_1',
     caption: 'Detailed caption',
@@ -374,6 +378,7 @@ describe('lib/looks/mappers.ts', () => {
           location: 'San Diego, CA',
           followerCount: 128,
         },
+        clientAuthor: null,
         _count: {
           likes: 9,
           comments: 3,
@@ -422,6 +427,7 @@ describe('lib/looks/mappers.ts', () => {
           location: 'San Diego, CA',
           followerCount: 128,
         },
+        clientAuthor: null,
         _count: {
           likes: 9,
           comments: 3,
@@ -832,6 +838,7 @@ describe('lib/looks/mappers.ts', () => {
           verificationStatus: VerificationStatus.APPROVED,
           isPremium: true,
         },
+        clientAuthor: null,
         service: {
           id: 'service_1',
           name: 'Fade',

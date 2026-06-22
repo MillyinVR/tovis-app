@@ -813,6 +813,7 @@ export default function LooksFeed() {
                       }
                     : null
                 }
+                clientAuthor={item.clientAuthor}
                 viewerLiked={item.viewerLiked}
                 likeCount={item._count.likes}
                 commentCount={item._count.comments}

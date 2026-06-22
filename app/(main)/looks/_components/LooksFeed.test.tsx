@@ -275,6 +275,7 @@ function makeFeedItem(
       location: 'San Diego, CA',
       followerCount: 0,
     },
+    clientAuthor: null,
     _count: {
       likes: 3,
       comments: 1,
