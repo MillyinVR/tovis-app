@@ -535,3 +535,5 @@ lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:first
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:lastName: true,
 lib/referral/referralConversion.ts:direct property read:const referredName = referral.referredClient?.firstName?.trim() || 'Your referral'
 lib/referral/referralConversion.ts:optional direct property read:const referredName = referral.referredClient?.firstName?.trim() || 'Your referral'
+lib/search/index/refreshSearchIndex.ts:Prisma select/include plaintext field:firstName: true,
+lib/search/index/refreshSearchIndex.ts:Prisma select/include plaintext field:lastName: true,

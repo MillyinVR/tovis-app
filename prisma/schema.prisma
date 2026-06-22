@@ -1867,6 +1867,9 @@ model ProfessionalSearchIndex {
   verificationStatus VerificationStatus
   professionType     ProfessionType?
   businessName       String?
+  // Pre-resolved public display name (honors ProfessionalProfile.nameDisplay),
+  // written by refreshSearchIndex so search results don't re-resolve per row.
+  displayName        String?
   handle             String?
   handleNormalized   String?
   avatarUrl          String?

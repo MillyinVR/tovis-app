@@ -119,6 +119,7 @@ const ROOT_CTX = rootTenantContext('tenant_root')
 type SyntheticCandidate = {
   professionalId: string
   businessName: string | null
+  displayName: string | null
   handle: string | null
   professionType: ProfessionType | null
   avatarUrl: string | null
@@ -159,6 +160,7 @@ function makeCandidate(
 ): SyntheticCandidate {
   return {
     businessName: 'TOVIS Studio',
+    displayName: 'TOVIS Studio',
     handle: 'tovisstudio',
     professionType: ProfessionType.BARBER,
     avatarUrl: null,
@@ -334,6 +336,7 @@ describe('lib/search/pros.ts', () => {
           {
             id: 'pro_1',
             businessName: 'TOVIS Studio',
+            displayName: 'TOVIS Studio',
             handle: 'tovisstudio',
             professionType: ProfessionType.MAKEUP_ARTIST,
             avatarUrl: null,

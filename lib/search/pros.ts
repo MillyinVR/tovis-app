@@ -35,6 +35,7 @@ import {
   type DiscoveryLocationDto,
 } from '@/lib/discovery/nearby'
 import { prismaRead } from '@/lib/prisma'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { searchIndexVisibilitySql } from '@/lib/tenant'
 import type { TenantContext } from '@/lib/tenant'
@@ -159,6 +160,7 @@ function mapLocationPreview(
 type CandidateRow = {
   professionalId: string
   businessName: string | null
+  displayName: string | null
   handle: string | null
   professionType: ProfessionType | null
   avatarUrl: string | null
@@ -358,6 +360,7 @@ export async function fetchProSearchCandidates(
       SELECT DISTINCT ON (psi."professionalId")
         psi."professionalId",
         psi."businessName",
+        psi."displayName",
         psi."handle",
         psi."professionType",
         psi."avatarUrl",
@@ -472,6 +475,13 @@ export async function searchPros(
   const items: SearchProItemDto[] = materialized.map((entry) => ({
     id: entry.row.professionalId,
     businessName: entry.row.businessName,
+    // Index rows are backfilled, but fall back to the helper for any not-yet-
+    // refreshed row so the DTO's displayName is always a usable label.
+    displayName:
+      entry.row.displayName ??
+      formatProfessionalPublicDisplayName({
+        businessName: entry.row.businessName,
+      }),
     handle: entry.row.handle,
     professionType: entry.row.professionType,
     avatarUrl: entry.row.avatarUrl,

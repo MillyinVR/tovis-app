@@ -133,6 +133,9 @@ export type SearchProLocationPreviewDto = {
 export type SearchProItemDto = {
   id: string
   businessName: string | null
+  // Pre-resolved public display name (honors the pro's nameDisplay preference),
+  // resolved server-side so callers can render it directly.
+  displayName: string
   handle: string | null
   professionType: ProfessionType | null
   avatarUrl: string | null

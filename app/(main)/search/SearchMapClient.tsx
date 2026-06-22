@@ -10,7 +10,6 @@ import type { Bounds, Pin } from './_components/MapView'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
 import { isArray, isRecord } from '@/lib/guards'
-import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import DiscoverCategoryRail from './_components/DiscoverCategoryRail'
 import DiscoverGridView from './_components/DiscoverGridView'
 import DiscoverViewToggle from './_components/DiscoverViewToggle'
@@ -33,6 +32,7 @@ type ApiLocationPreview = {
 type ApiPro = {
   id: string
   businessName: string | null
+  displayName: string
   handle: string | null
   professionType: string | null
   avatarUrl: string | null
@@ -136,6 +136,7 @@ function isApiPro(value: unknown): value is ApiPro {
   return (
     typeof value.id === 'string' &&
     isNullableString(value.businessName) &&
+    typeof value.displayName === 'string' &&
     isNullableString(value.handle) &&
     isNullableString(value.professionType) &&
     isNullableString(value.avatarUrl) &&
@@ -432,7 +433,7 @@ export default function SearchMapClient() {
         id: pro.id,
         lat,
         lng,
-        label: formatProfessionalPublicDisplayName({ businessName: pro.businessName }),
+        label: pro.displayName,
         sublabel: pro.locationLabel || pro.professionType || '',
         active: pro.id === activeProId,
       })
@@ -945,7 +946,7 @@ export default function SearchMapClient() {
       lng: location?.lng ?? null,
       placeId: location?.placeId ?? null,
       formattedAddress: location?.formattedAddress ?? null,
-      name: activePro.businessName ?? null,
+      name: activePro.displayName,
     })
   }, [activePro])
 
@@ -959,7 +960,7 @@ export default function SearchMapClient() {
       lng: location?.lng ?? null,
       placeId: location?.placeId ?? null,
       formattedAddress: location?.formattedAddress ?? null,
-      name: activePro.businessName ?? null,
+      name: activePro.displayName,
     })
   }, [activePro])
 
@@ -1332,7 +1333,7 @@ export default function SearchMapClient() {
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-[14px] font-black text-textPrimary">
-                            {formatProfessionalPublicDisplayName({ businessName: activePro.businessName })}
+                            {activePro.displayName}
                           </div>
 
                           <div className="mt-1 text-[12px] font-semibold text-textSecondary">
@@ -1404,7 +1405,7 @@ export default function SearchMapClient() {
                             <div className="flex items-center justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="truncate text-[13px] font-black text-textPrimary">
-                                  {formatProfessionalPublicDisplayName({ businessName: pro.businessName })}
+                                  {pro.displayName}
                                 </div>
 
                                 <div className="mt-1 text-[12px] font-semibold text-textSecondary">

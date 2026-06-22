@@ -25,6 +25,7 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { summarizeDiscoveryOfferingsForProfessional } from '@/lib/discovery/nearby'
 import { checkProReadinessWithDb } from '@/lib/pro/readiness/proReadiness'
 
@@ -53,6 +54,7 @@ interface IndexRow {
   verificationStatus: VerificationStatus
   professionType: ProfessionType | null
   businessName: string | null
+  displayName: string | null
   handle: string | null
   handleNormalized: string | null
   avatarUrl: string | null
@@ -94,6 +96,9 @@ const PRO_FIELDS = {
   verificationStatus: true,
   professionType: true,
   businessName: true,
+  firstName: true,
+  lastName: true,
+  nameDisplay: true,
   handle: true,
   handleNormalized: true,
   avatarUrl: true,
@@ -229,6 +234,7 @@ async function upsertIndexRow(row: IndexRow, client: DbClient): Promise<void> {
       "verificationStatus",
       "professionType",
       "businessName",
+      "displayName",
       "handle",
       "handleNormalized",
       "avatarUrl",
@@ -262,6 +268,7 @@ async function upsertIndexRow(row: IndexRow, client: DbClient): Promise<void> {
       ${row.verificationStatus}::"VerificationStatus",
       ${row.professionType}::"ProfessionType",
       ${row.businessName},
+      ${row.displayName},
       ${row.handle},
       ${row.handleNormalized},
       ${row.avatarUrl},
@@ -294,6 +301,7 @@ async function upsertIndexRow(row: IndexRow, client: DbClient): Promise<void> {
       "verificationStatus" = EXCLUDED."verificationStatus",
       "professionType"     = EXCLUDED."professionType",
       "businessName"       = EXCLUDED."businessName",
+      "displayName"        = EXCLUDED."displayName",
       "handle"             = EXCLUDED."handle",
       "handleNormalized"   = EXCLUDED."handleNormalized",
       "avatarUrl"          = EXCLUDED."avatarUrl",
@@ -378,6 +386,7 @@ export async function refreshLocation(
         verificationStatus: location.professional.verificationStatus,
         professionType: location.professional.professionType,
         businessName: location.professional.businessName,
+        displayName: pickProfessionalPublicDisplayName(location.professional),
         handle: location.professional.handle,
         handleNormalized: location.professional.handleNormalized,
         avatarUrl: location.professional.avatarUrl,
@@ -495,6 +504,7 @@ export async function refreshProfessional(
           verificationStatus: location.professional.verificationStatus,
           professionType: location.professional.professionType,
           businessName: location.professional.businessName,
+          displayName: pickProfessionalPublicDisplayName(location.professional),
           handle: location.professional.handle,
           handleNormalized: location.professional.handleNormalized,
           avatarUrl: location.professional.avatarUrl,
