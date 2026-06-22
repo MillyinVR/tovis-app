@@ -1,7 +1,7 @@
 // app/u/[handle]/_data/loadPublicClientProfile.ts
 import 'server-only'
 
-import { LookPostStatus, LookPostVisibility } from '@prisma/client'
+import { LookPostStatus, LookPostVisibility, Prisma } from '@prisma/client'
 
 import { getViewerClientFollowState } from '@/lib/follows'
 import { asTrimmedString } from '@/lib/guards'
@@ -47,10 +47,33 @@ export async function loadPublicClientProfile(
   const normalized = normalizeHandle(handleParam)
   if (!normalized) return null
 
+  return loadPublicClientProfileWhere({ handleNormalized: normalized }, options)
+}
+
+/**
+ * Same public profile, keyed by clientId instead of handle. Used by the
+ * pro-facing client chart's "public profile" view (the pro already knows the
+ * client by id, not handle). Shares one body with {@link loadPublicClientProfile}
+ * — same null contract (not public / no handle → null → empty state).
+ */
+export async function loadPublicClientProfileByClientId(
+  clientId: string,
+  options?: { viewerClientId?: string | null },
+): Promise<PublicClientProfileData | null> {
+  const id = asTrimmedString(clientId)
+  if (!id) return null
+
+  return loadPublicClientProfileWhere({ id }, options)
+}
+
+async function loadPublicClientProfileWhere(
+  where: Prisma.ClientProfileWhereUniqueInput,
+  options?: { viewerClientId?: string | null },
+): Promise<PublicClientProfileData | null> {
   // Scoped to this client via the relation (not a cross-tenant lookPost discovery
   // read): the profile only ever shows its OWN author's PUBLIC published looks.
   const client = await prisma.clientProfile.findUnique({
-    where: { handleNormalized: normalized },
+    where,
     select: {
       id: true,
       handle: true,
