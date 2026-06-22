@@ -13,6 +13,8 @@ import '@/lib/brand/proCalendar.css'
 import '@/lib/brand/proLastMinute.css'
 
 import RoleFooter from '@/app/_components/RoleFooter'
+import WorkspaceSwitchLauncher from '@/app/_components/WorkspaceSwitchLauncher/WorkspaceSwitchLauncher'
+import WorkspaceMismatchProvider from '@/app/_components/WorkspaceMismatchProvider'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
 import { THEME_INIT_SCRIPT } from '@/lib/brand/theme'
 import { rgbTripletToHex } from '@/lib/brand/eyeSvg'
@@ -135,6 +137,8 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           </div>
 
           <RoleFooter />
+          <WorkspaceSwitchLauncher />
+          <WorkspaceMismatchProvider />
         </BrandProvider>
       </body>
     </html>

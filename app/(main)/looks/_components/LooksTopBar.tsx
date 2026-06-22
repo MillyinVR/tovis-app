@@ -177,6 +177,9 @@ export default function LooksTopBar(props: {
               border: 'none',
               cursor: 'pointer',
               flexShrink: 0,
+              // Shift clear of the global top-right workspace-switch launcher
+              // when it's present (multi-workspace users); 0 otherwise.
+              marginRight: 'var(--ws-switch-reserve, 0px)',
             }}
           >
             {searchOpen ? <X size={18} /> : <Search size={20} />}
