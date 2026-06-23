@@ -699,6 +699,13 @@ type CreateClientRebookedBookingFromAftercareArgs = {
   clientId: string
   aftercareClientActionTokenId: string
   scheduledFor: Date
+  /**
+   * When set and different from the source booking's location type, the rebook
+   * is created at this location mode instead of cloning the original — price,
+   * duration, location, and address snapshots are re-resolved from the offering.
+   * Only honored for single-service rebooks. Null/omitted clones the original.
+   */
+  requestedLocationType?: ServiceLocationType | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -713,6 +720,8 @@ type PerformLockedCreateRebookedBookingArgs = {
   clientId?: string | null
   aftercareId?: string | null
   aftercareClientActionTokenId?: string | null
+  /** See {@link CreateClientRebookedBookingFromAftercareArgs.requestedLocationType}. */
+  requestedLocationType?: ServiceLocationType | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -9220,37 +9229,81 @@ assertCanCreateRebookFromSourceBooking({
     MAX_BUFFER_MINUTES,
   )
 
+  // Optional client-chosen location override (e.g. rebooking a mobile visit as
+  // in-salon from the public aftercare link). When it differs from the source
+  // booking's mode, re-resolve price/duration/location from the live offering
+  // instead of cloning the original. Restricted to single-service rebooks so
+  // there are no add-ons to re-price.
+  const effectiveLocationType =
+    args.requestedLocationType ?? source.locationType
+  const isLocationOverride = effectiveLocationType !== source.locationType
+
+  if (isLocationOverride && items.length > 1) {
+    throw bookingError('INVALID_SERVICE_ITEMS', {
+      message: 'Cannot switch location type for a multi-item rebook.',
+      userMessage: 'Switching in-person/mobile isn’t available for this booking.',
+    })
+  }
+
+  const overrideOffering = isLocationOverride
+    ? await args.tx.professionalServiceOffering.findUnique({
+        where: { id: primary.offeringId },
+        select: {
+          offersInSalon: true,
+          offersMobile: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+          salonPriceStartingAt: true,
+          mobilePriceStartingAt: true,
+        },
+      })
+    : null
+
+  if (isLocationOverride && !overrideOffering) {
+    throw bookingError('OFFERING_NOT_FOUND')
+  }
+
   const validatedContextResult = await resolveValidatedBookingContext({
     tx: args.tx,
     professionalId: source.professionalId,
-    requestedLocationId: source.locationId,
-    locationType: source.locationType,
+    requestedLocationId: isLocationOverride ? null : source.locationId,
+    locationType: effectiveLocationType,
     holdLocationTimeZone: null,
     professionalTimeZone: source.professional?.timeZone ?? null,
     fallbackTimeZone: source.professional?.timeZone ?? DEFAULT_TIME_ZONE,
     requireValidTimeZone: true,
-    allowFallback: false,
+    allowFallback: isLocationOverride,
     requireCoordinates: false,
-    offering: {
-      offersInSalon: source.locationType === ServiceLocationType.SALON,
-      offersMobile: source.locationType === ServiceLocationType.MOBILE,
-      salonDurationMinutes:
-        source.locationType === ServiceLocationType.SALON
-          ? totalDurationMinutes
-          : null,
-      mobileDurationMinutes:
-        source.locationType === ServiceLocationType.MOBILE
-          ? totalDurationMinutes
-          : null,
-      salonPriceStartingAt:
-        source.locationType === ServiceLocationType.SALON
-          ? subtotalSnapshot
-          : null,
-      mobilePriceStartingAt:
-        source.locationType === ServiceLocationType.MOBILE
-          ? subtotalSnapshot
-          : null,
-    },
+    offering:
+      isLocationOverride && overrideOffering
+        ? {
+            offersInSalon: overrideOffering.offersInSalon,
+            offersMobile: overrideOffering.offersMobile,
+            salonDurationMinutes: overrideOffering.salonDurationMinutes,
+            mobileDurationMinutes: overrideOffering.mobileDurationMinutes,
+            salonPriceStartingAt: overrideOffering.salonPriceStartingAt,
+            mobilePriceStartingAt: overrideOffering.mobilePriceStartingAt,
+          }
+        : {
+            offersInSalon: source.locationType === ServiceLocationType.SALON,
+            offersMobile: source.locationType === ServiceLocationType.MOBILE,
+            salonDurationMinutes:
+              source.locationType === ServiceLocationType.SALON
+                ? totalDurationMinutes
+                : null,
+            mobileDurationMinutes:
+              source.locationType === ServiceLocationType.MOBILE
+                ? totalDurationMinutes
+                : null,
+            salonPriceStartingAt:
+              source.locationType === ServiceLocationType.SALON
+                ? subtotalSnapshot
+                : null,
+            mobilePriceStartingAt:
+              source.locationType === ServiceLocationType.MOBILE
+                ? subtotalSnapshot
+                : null,
+          },
   })
 
   if (!validatedContextResult.ok) {
@@ -9261,24 +9314,48 @@ assertCanCreateRebookFromSourceBooking({
 
   const locationContext = validatedContextResult.context
 
+  // When switching modes, the chosen mode's offering price/duration become the
+  // source of truth (mobile and in-salon legitimately differ). Otherwise keep
+  // the cloned snapshots from the original booking.
+  const effectiveTotalDurationMinutes = isLocationOverride
+    ? clampInt(
+        validatedContextResult.durationMinutes,
+        15,
+        MAX_SLOT_DURATION_MINUTES,
+      )
+    : totalDurationMinutes
+
+  const effectiveSubtotalSnapshot = isLocationOverride
+    ? new Prisma.Decimal(validatedContextResult.priceStartingAt)
+    : subtotalSnapshot
+
   await assertMobileBookingWithinRadius({
     tx: args.tx,
     professionalId: source.professionalId,
-    locationType: source.locationType,
+    locationType: effectiveLocationType,
     locationLat:
       decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
     locationLng:
       decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
-    clientAddressId: source.clientAddressId,
-    clientLat: decimalToNumber(source.clientAddressLatSnapshot),
-    clientLng: decimalToNumber(source.clientAddressLngSnapshot),
+    clientAddressId:
+      effectiveLocationType === ServiceLocationType.MOBILE
+        ? source.clientAddressId
+        : null,
+    clientLat:
+      effectiveLocationType === ServiceLocationType.MOBILE
+        ? decimalToNumber(source.clientAddressLatSnapshot)
+        : null,
+    clientLng:
+      effectiveLocationType === ServiceLocationType.MOBILE
+        ? decimalToNumber(source.clientAddressLngSnapshot)
+        : null,
   })
 
   const schedulingDecision = await enforceProCreateScheduling({
     tx: args.tx,
     now: args.now,
     requestedStart,
-    durationMinutes: totalDurationMinutes,
+    durationMinutes: effectiveTotalDurationMinutes,
     bufferMinutes,
     workingHours: locationContext.workingHours,
     timeZone: locationContext.timeZone,
@@ -9290,7 +9367,7 @@ assertCanCreateRebookFromSourceBooking({
     allowOutsideWorkingHours: false,
     professionalId: source.professionalId,
     locationId: locationContext.locationId,
-    locationType: source.locationType,
+    locationType: effectiveLocationType,
     offeringId: primary.offeringId,
     clientId: source.clientId,
   })
@@ -9341,7 +9418,7 @@ assertCanCreateRebookFromSourceBooking({
       endsAt: schedulingDecision.requestedEnd,
     },
     locationId: locationContext.locationId,
-    locationType: source.locationType,
+    locationType: effectiveLocationType,
     offeringId: primary.offeringId,
     clientId: source.clientId,
     action: 'BOOKING_CREATE',
@@ -9349,34 +9426,42 @@ assertCanCreateRebookFromSourceBooking({
   })
 
   const salonAddressSnapshotData =
-    source.locationType === ServiceLocationType.SALON
-      ? source.locationAddressSnapshot != null ||
-        source.encryptedLocationAddressSnapshotJson != null
-        ? reuseEncryptedAddressSnapshotData({
-            legacySnapshot: source.locationAddressSnapshot,
-            dedicatedEncryptedSnapshot:
-              source.encryptedLocationAddressSnapshotJson,
-            keyVersion: source.locationAddressSnapshotKeyVersion,
-            encryptedAt: source.addressSnapshotsEncryptedAt,
-            latApprox: source.locationLatApprox,
-            lngApprox: source.locationLngApprox,
-            legacyLat: source.locationLatSnapshot,
-            legacyLng: source.locationLngSnapshot,
-            fallbackLat: locationContext.lat,
-            fallbackLng: locationContext.lng,
-          })
-        : buildEncryptedAddressSnapshotData({
+    effectiveLocationType === ServiceLocationType.SALON
+      ? isLocationOverride
+        ? // Switched into in-salon: snapshot the freshly resolved salon
+          // location rather than anything cloned from the source booking.
+          buildEncryptedAddressSnapshotData({
             formattedAddress: locationContext.formattedAddress,
-            lat: source.locationLatSnapshot ?? locationContext.lat,
-            lng: source.locationLngSnapshot ?? locationContext.lng,
+            lat: locationContext.lat,
+            lng: locationContext.lng,
           })
+        : source.locationAddressSnapshot != null ||
+            source.encryptedLocationAddressSnapshotJson != null
+          ? reuseEncryptedAddressSnapshotData({
+              legacySnapshot: source.locationAddressSnapshot,
+              dedicatedEncryptedSnapshot:
+                source.encryptedLocationAddressSnapshotJson,
+              keyVersion: source.locationAddressSnapshotKeyVersion,
+              encryptedAt: source.addressSnapshotsEncryptedAt,
+              latApprox: source.locationLatApprox,
+              lngApprox: source.locationLngApprox,
+              legacyLat: source.locationLatSnapshot,
+              legacyLng: source.locationLngSnapshot,
+              fallbackLat: locationContext.lat,
+              fallbackLng: locationContext.lng,
+            })
+          : buildEncryptedAddressSnapshotData({
+              formattedAddress: locationContext.formattedAddress,
+              lat: source.locationLatSnapshot ?? locationContext.lat,
+              lng: source.locationLngSnapshot ?? locationContext.lng,
+            })
       : buildNullAddressSnapshotData({
           lat: source.locationLatApprox ?? source.locationLatSnapshot,
           lng: source.locationLngApprox ?? source.locationLngSnapshot,
         })
 
   const mobileClientAddressSnapshotData =
-    source.locationType === ServiceLocationType.MOBILE
+    effectiveLocationType === ServiceLocationType.MOBILE
       ? reuseEncryptedAddressSnapshotData({
           legacySnapshot: source.clientAddressSnapshot,
           dedicatedEncryptedSnapshot: source.encryptedClientAddressSnapshotJson,
@@ -9416,17 +9501,19 @@ assertCanCreateRebookFromSourceBooking({
         source: BookingSource.AFTERCARE,
         rebookOfBookingId: source.id,
 
-        locationType: source.locationType,
+        locationType: effectiveLocationType,
         locationId: locationContext.locationId,
         locationTimeZone: locationContext.timeZone,
 
         // Legacy expand-phase columns.
         locationAddressSnapshot: salonAddressSnapshotData.legacySnapshot,
         locationAddressSnapshotKeyVersion: salonAddressSnapshotData.keyVersion,
-        locationLatSnapshot:
-          decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
-        locationLngSnapshot:
-          decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
+        locationLatSnapshot: isLocationOverride
+          ? locationContext.lat
+          : decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
+        locationLngSnapshot: isLocationOverride
+          ? locationContext.lng
+          : decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
 
         // Dedicated encrypted snapshot columns.
         encryptedLocationAddressSnapshotJson:
@@ -9435,7 +9522,7 @@ assertCanCreateRebookFromSourceBooking({
         locationLngApprox: salonAddressSnapshotData.lngApprox,
 
         clientAddressId:
-          source.locationType === ServiceLocationType.MOBILE
+          effectiveLocationType === ServiceLocationType.MOBILE
             ? source.clientAddressId
             : null,
 
@@ -9443,11 +9530,11 @@ assertCanCreateRebookFromSourceBooking({
         clientAddressSnapshot: mobileClientAddressSnapshotData.legacySnapshot,
         clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
         clientAddressLatSnapshot:
-          source.locationType === ServiceLocationType.MOBILE
+          effectiveLocationType === ServiceLocationType.MOBILE
             ? decimalToNumber(source.clientAddressLatSnapshot)
             : null,
         clientAddressLngSnapshot:
-          source.locationType === ServiceLocationType.MOBILE
+          effectiveLocationType === ServiceLocationType.MOBILE
             ? decimalToNumber(source.clientAddressLngSnapshot)
             : null,
 
@@ -9463,10 +9550,10 @@ assertCanCreateRebookFromSourceBooking({
 
         clientTimeZoneAtBooking: source.clientTimeZoneAtBooking ?? undefined,
 
-        subtotalSnapshot,
-        serviceSubtotalSnapshot: subtotalSnapshot,
+        subtotalSnapshot: effectiveSubtotalSnapshot,
+        serviceSubtotalSnapshot: effectiveSubtotalSnapshot,
         productSubtotalSnapshot: zeroMoney(),
-        totalAmount: subtotalSnapshot,
+        totalAmount: effectiveSubtotalSnapshot,
         depositAmount: null,
         tipAmount: zeroMoney(),
         taxAmount: zeroMoney(),
@@ -9475,7 +9562,7 @@ assertCanCreateRebookFromSourceBooking({
         selectedPaymentMethod: null,
         paymentAuthorizedAt: null,
         paymentCollectedAt: null,
-        totalDurationMinutes,
+        totalDurationMinutes: effectiveTotalDurationMinutes,
         bufferMinutes,
 
         sessionStep: SessionStep.NONE,
@@ -9504,9 +9591,12 @@ assertCanCreateRebookFromSourceBooking({
       offeringId: primary.offeringId,
       itemType: BookingServiceItemType.BASE,
       parentItemId: null,
-      priceSnapshot: normalizedItems[0]?.priceSnapshot ?? new Prisma.Decimal(0),
-      durationMinutesSnapshot:
-        normalizedItems[0]?.durationMinutesSnapshot ?? totalDurationMinutes,
+      priceSnapshot: isLocationOverride
+        ? effectiveSubtotalSnapshot
+        : normalizedItems[0]?.priceSnapshot ?? new Prisma.Decimal(0),
+      durationMinutesSnapshot: isLocationOverride
+        ? effectiveTotalDurationMinutes
+        : normalizedItems[0]?.durationMinutesSnapshot ?? totalDurationMinutes,
       sortOrder: 0,
     },
     select: { id: true },
@@ -12928,6 +13018,7 @@ export async function createClientRebookedBookingFromAftercare(
       clientId: args.clientId,
       aftercareId: args.aftercareId,
       aftercareClientActionTokenId: args.aftercareClientActionTokenId,
+      requestedLocationType: args.requestedLocationType ?? null,
       requestId: args.requestId ?? null,
       idempotencyKey: args.idempotencyKey ?? null,
     })

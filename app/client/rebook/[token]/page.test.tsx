@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   bookingFindFirst: vi.fn(),
   bookingFindUnique: vi.fn(),
   professionalServiceOfferingFindFirst: vi.fn(),
+  professionalServiceOfferingFindUnique: vi.fn(),
   mediaAssetFindMany: vi.fn(),
   clientProfileFindUnique: vi.fn(),
   getPublicCheckoutAvailability: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock('@/lib/prisma', () => ({
     },
     professionalServiceOffering: {
       findFirst: mocks.professionalServiceOfferingFindFirst,
+      findUnique: mocks.professionalServiceOfferingFindUnique,
     },
     mediaAsset: {
       findMany: mocks.mediaAssetFindMany,
@@ -110,6 +112,7 @@ function makeResolvedAftercareAccess(overrides?: {
   rebookWindowStart?: Date | null
   rebookWindowEnd?: Date | null
   notes?: string | null
+  locationType?: 'SALON' | 'MOBILE'
   token?: Partial<{
     id: string
     expiresAt: Date
@@ -168,7 +171,7 @@ function makeResolvedAftercareAccess(overrides?: {
           : 'offering_1',
       status: BookingStatus.COMPLETED,
       scheduledFor: new Date('2026-04-10T18:00:00.000Z'),
-      locationType: 'SALON',
+      locationType: overrides?.locationType ?? 'SALON',
       locationId: 'location_1',
       totalDurationMinutes: 75,
       subtotalSnapshot: '125.00',
@@ -194,6 +197,7 @@ async function renderPage(args?: {
     status: BookingStatus
   } | null
   fallbackOffering?: { id: string } | null
+  offeringCaps?: { offersInSalon: boolean; offersMobile: boolean } | null
   searchParams?: Record<string, string | string[] | undefined>
 }) {
   mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
@@ -202,6 +206,9 @@ async function renderPage(args?: {
   mocks.bookingFindFirst.mockResolvedValueOnce(args?.nextBooking ?? null)
   mocks.professionalServiceOfferingFindFirst.mockResolvedValueOnce(
     args?.fallbackOffering ?? null,
+  )
+  mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce(
+    args?.offeringCaps ?? { offersInSalon: true, offersMobile: false },
   )
 
   return ClientRebookFromAftercarePage({
@@ -452,6 +459,47 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).toContain('No rebook recommendation yet.')
     expect(markup).toContain('Pick a day')
     expect(markup).not.toContain('/offerings/')
+  })
+
+  it('offers an in-salon/mobile toggle when a mobile-origin booking can also be booked in-salon', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      clientAddressId: 'client_address_1',
+    })
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({
+        offeringId: 'offering_1',
+        locationType: 'MOBILE',
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+      }),
+      nextBooking: null,
+      offeringCaps: { offersInSalon: true, offersMobile: true },
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).toContain('In-salon')
+    expect(markup).toContain('Mobile')
+  })
+
+  it('shows no location toggle for a salon-origin booking with no client address', async () => {
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({
+        offeringId: 'offering_1',
+        locationType: 'SALON',
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+      }),
+      nextBooking: null,
+      offeringCaps: { offersInSalon: true, offersMobile: true },
+    })
+
+    const markup = renderMarkup(page)
+
+    // Mobile needs the client's address, which a salon-origin booking lacks, so
+    // the toggle collapses to a single mode (no "Where" switcher).
+    expect(markup).not.toContain('>Mobile<')
   })
 
   it('shows the unavailable state when no active offering can be found', async () => {

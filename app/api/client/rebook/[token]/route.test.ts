@@ -265,13 +265,16 @@ function expectedRebookResponseBody() {
   }
 }
 
-function expectedIdempotencyRequestBody() {
+function expectedIdempotencyRequestBody(
+  overrides: { locationType?: 'SALON' | 'MOBILE' | null } = {},
+) {
   return {
     aftercareTokenId: 'token_row_1',
     aftercareId: 'aftercare_1',
     sourceBookingId: 'booking_1',
     clientId: 'client_1',
     scheduledFor: '2026-04-25T18:00:00.000Z',
+    locationType: overrides.locationType ?? null,
   }
 }
 
@@ -947,6 +950,7 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       clientId: 'client_1',
       aftercareClientActionTokenId: 'token_row_1',
       scheduledFor: new Date('2026-04-25T18:00:00.000Z'),
+      requestedLocationType: null,
       requestId: 'req_1',
       idempotencyKey: 'idem_1',
     })
@@ -965,6 +969,38 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
 
     expect(response.status).toBe(201)
     await expect(response.json()).resolves.toEqual(responseBody)
+  })
+
+  it('passes a client-chosen location type through to the rebook write boundary and idempotency body', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'started',
+      idempotencyRecordId: 'idem_record_1',
+      idempotencyKey: 'idem_1',
+      requestHash: 'hash_1',
+    })
+
+    await POST(
+      makeIdempotentRequest({
+        key: 'idem_1',
+        body: {
+          scheduledFor: '2026-04-25T18:00:00.000Z',
+          locationType: 'mobile',
+        },
+      }),
+      makeCtx('token_1'),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expectedIdempotencyRequestBody({ locationType: 'MOBILE' }),
+      }),
+    )
+
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedLocationType: 'MOBILE' }),
+    )
   })
 
   it('maps BookingError through bookingJsonFail for GET', async () => {

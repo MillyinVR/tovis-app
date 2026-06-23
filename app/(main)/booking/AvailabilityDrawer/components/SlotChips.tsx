@@ -5,12 +5,14 @@ import { memo, useCallback, useMemo } from 'react'
 
 import type { ProCard, SelectedHold } from '../types'
 import {
+  DAY_PERIOD_ORDER,
   formatSlotFullLabel,
   formatSlotLabel,
-  getHourInTimeZone,
+  groupSlotsByPeriod,
+  type DayPeriod,
 } from '@/lib/bookingTime'
 
-type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
+type Period = DayPeriod
 
 type SlotChipsProps = {
   pro: ProCard
@@ -66,13 +68,7 @@ const PERIOD_META: Record<
   },
 }
 
-const PERIOD_ORDER: Period[] = ['MORNING', 'AFTERNOON', 'EVENING']
-
-function periodOfHour(hour: number): Period {
-  if (hour < 12) return 'MORNING'
-  if (hour < 17) return 'AFTERNOON'
-  return 'EVENING'
-}
+const PERIOD_ORDER = DAY_PERIOD_ORDER
 
 function slotChipTestId(slotIndex: number): string {
   return `availability-slot-${slotIndex}`
@@ -186,21 +182,10 @@ function SlotChips({
 }: SlotChipsProps) {
   const allSlots = useMemo(() => dedupeSlots(slotsForDay), [slotsForDay])
 
-  const slotsByPeriod = useMemo<Record<Period, string[]>>(() => {
-    const grouped: Record<Period, string[]> = {
-      MORNING: [],
-      AFTERNOON: [],
-      EVENING: [],
-    }
-
-    for (const slotISO of allSlots) {
-      const hour = getHourInTimeZone(slotISO, appointmentTz)
-      if (hour == null) continue
-      grouped[periodOfHour(hour)].push(slotISO)
-    }
-
-    return grouped
-  }, [allSlots, appointmentTz])
+  const slotsByPeriod = useMemo<Record<Period, string[]>>(
+    () => groupSlotsByPeriod(allSlots, appointmentTz),
+    [allSlots, appointmentTz],
+  )
 
   const periodDisabled = useMemo<Record<Period, boolean>>(
     () => ({
