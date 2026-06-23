@@ -387,8 +387,13 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
       expect(hasText(page, 'AWAITING APPROVAL')).toBe(true)
       expect(hasText(page, 'Waiting on client')).toBe(true)
       expect(
-        hasText(page, 'Secure approval is required before the session can move forward.'),
+        hasText(
+          page,
+          'Secure approval is required before you can start the service.',
+        ),
       ).toBe(true)
+      expect(hasText(page, 'While you wait, take BEFORE photos now.')).toBe(true)
+      expect(hasText(page, 'Before photos')).toBe(true)
       expect(hasText(page, 'In-person fallback')).toBe(true)
       expect(
         hasText(
@@ -401,7 +406,7 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
       expect(hasText(page, '← Back to consultation')).toBe(true)
   })
 
-  it('maps approved waiting state forward to before photos', async () => {
+  it('flips the combined waiting/before-photos screen to approved with a continue-to-service action', async () => {
     const page = await renderPage({
       booking: makeBooking({
         sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
@@ -417,13 +422,18 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
           destinationSnapshot: 'client@example.com',
         },
       }),
+      beforeCount: 1,
+      afterCount: 0,
+      aftercare: null,
     })
 
-    expect(hasText(page, 'Before photos')).toBe(true)
     expect(hasText(page, 'CONSULTATION APPROVED')).toBe(true)
-    expect(hasText(page, 'Start service')).toBe(true)
-    expect(hasText(page, 'Or add more before photos first')).toBe(true)
-    expect(hasText(page, '+ Add photo via camera')).toBe(true)
+    expect(hasText(page, 'Consultation approved')).toBe(true)
+    expect(hasText(page, 'Before photos')).toBe(true)
+    expect(hasText(page, 'Continue to service')).toBe(true)
+    expect(hasText(page, 'Add more before photos')).toBe(true)
+    // The page stays put on approval (no auto-redirect to a separate screen).
+    expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
   it('shows proof details and suppresses in-person fallback when proof already exists', async () => {

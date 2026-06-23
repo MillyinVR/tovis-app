@@ -11,7 +11,7 @@ import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
-import { Role, SessionStep } from '@prisma/client'
+import { MediaPhase, Role, SessionStep } from '@prisma/client'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
@@ -20,7 +20,8 @@ import {
   normalizeJsonObjectPayload,
   type JsonObjectPayload,
 } from '@/app/api/_utils/jsonPayload'
-import { finishBookingSession } from '@/lib/booking/writeBoundary'
+import { prisma } from '@/lib/prisma'
+import { finishSessionToAfterPhotos } from '@/lib/booking/finishSessionToAfterPhotos'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 export const dynamic = 'force-dynamic'
@@ -71,11 +72,13 @@ function readRequestId(request: Request): string | null {
  * Finish session.
  *
  * Important:
- * - Does not complete the booking. Aftercare send does that later.
+ * - Does not complete the booking and does NOT send aftercare to the client.
  * - Requires startedAt inside writeBoundary.
- * - Canonical behavior: move session into FINISH_REVIEW.
- * - Idempotent: if already in FINISH_REVIEW / AFTER_PHOTOS / DONE,
- *   returns a stable nextHref.
+ * - Canonical behavior: finish the in-progress service and finalize the menu in
+ *   one step (SERVICE_IN_PROGRESS → FINISH_REVIEW → AFTER_PHOTOS), so the pro
+ *   goes straight to after photos with no intermediate "Ready for wrap-up"
+ *   screen. Line-item finalization still happens (in FINISH_REVIEW).
+ * - Idempotent: if already in AFTER_PHOTOS / DONE, returns a stable nextHref.
  */
 export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
@@ -131,22 +134,32 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     idempotencyRecordId = idempotency.idempotencyRecordId
 
-    const result = await finishBookingSession({
+    const result = await finishSessionToAfterPhotos({
       bookingId,
       professionalId,
       requestId,
       idempotencyKey: idempotency.idempotencyKey,
     })
 
+    const afterCount = await prisma.mediaAsset.count({
+      where: {
+        bookingId,
+        phase: MediaPhase.AFTER,
+        uploadedByRole: Role.PRO,
+      },
+    })
+
     const responseBody = normalizeJsonObjectPayload({
-      booking: result.booking,
+      booking: {
+        id: bookingId,
+        sessionStep: result.sessionStep,
+      },
       nextHref: nextHrefFromState({
-        bookingId: result.booking.id,
-        sessionStep: result.booking.sessionStep,
-        afterCount: result.afterCount,
+        bookingId,
+        sessionStep: result.sessionStep,
+        afterCount,
       }),
-      afterCount: result.afterCount,
-      meta: result.meta,
+      afterCount,
     })
 
     await completeRouteIdempotency({

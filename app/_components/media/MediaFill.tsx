@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
+import MediaLoading from '@/app/_components/media/MediaLoading'
 import { cn } from '@/lib/utils'
 
 type MediaType = 'IMAGE' | 'VIDEO'
@@ -128,6 +129,10 @@ export default function MediaFill(props: Props) {
   if (!resolvedUrl) {
     if (!showPlaceholder) return null
 
+    if (isLoading) {
+      return <MediaLoading className={className} />
+    }
+
     return (
       <div
         className={cn(
@@ -137,7 +142,7 @@ export default function MediaFill(props: Props) {
         )}
         title={error ?? 'Missing media'}
       >
-        {error ? 'Media unavailable' : isLoading ? 'Loading…' : 'Missing media'}
+        {error ? 'Media unavailable' : 'Missing media'}
       </div>
     )
   }

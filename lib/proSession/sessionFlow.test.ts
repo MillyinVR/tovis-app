@@ -87,7 +87,7 @@ describe('getSessionCenterState', () => {
     })
   })
 
-  it('keeps pending client consultation on the session hub', () => {
+  it('sends pending client consultation to the before camera', () => {
     expect(
       getSessionCenterState({
         mode: 'ACTIVE',
@@ -97,9 +97,9 @@ describe('getSessionCenterState', () => {
         hasAfterMedia: false,
       }),
     ).toEqual({
-      label: 'Waiting',
-      action: 'NAVIGATE',
-      href: '/pro/bookings/booking_1/session',
+      label: 'Before photos',
+      action: 'CAPTURE_BEFORE',
+      href: '/pro/bookings/booking_1/session/before-photos',
     })
   })
 
@@ -151,7 +151,7 @@ describe('getSessionCenterState', () => {
     })
   })
 
-  it('sends finish review to aftercare creation', () => {
+  it('sends a (transient) finish-review booking to the after camera', () => {
     expect(
       getSessionCenterState({
         mode: 'ACTIVE',
@@ -161,9 +161,9 @@ describe('getSessionCenterState', () => {
         hasAfterMedia: false,
       }),
     ).toEqual({
-      label: 'Create aftercare',
-      action: 'NAVIGATE',
-      href: '/pro/bookings/booking_1/aftercare',
+      label: 'After photos',
+      action: 'CAPTURE_AFTER',
+      href: '/pro/bookings/booking_1/session/after-photos',
     })
   })
 
@@ -183,7 +183,7 @@ describe('getSessionCenterState', () => {
     })
   })
 
-  it('sends after-photo step with media to aftercare send flow', () => {
+  it('sends after-photo step with media to the wrap-up checklist', () => {
     expect(
       getSessionCenterState({
         mode: 'ACTIVE',
@@ -193,9 +193,9 @@ describe('getSessionCenterState', () => {
         hasAfterMedia: true,
       }),
     ).toEqual({
-      label: 'Send aftercare',
+      label: 'Wrap up',
       action: 'NAVIGATE',
-      href: '/pro/bookings/booking_1/aftercare',
+      href: '/pro/bookings/booking_1/session',
     })
   })
 

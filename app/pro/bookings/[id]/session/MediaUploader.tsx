@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import MediaFill from '@/app/_components/media/MediaFill'
+import MediaLoading from '@/app/_components/media/MediaLoading'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
@@ -474,48 +475,38 @@ export default function MediaUploader({
         {previewUrl ? (
           <div className="rounded-card border border-white/10 bg-bgPrimary p-2">
             <div className="relative aspect-[9/16] w-full overflow-hidden rounded-card border border-white/10 bg-black">
-              <MediaFill
-                src={previewUrl}
-                mediaType={mediaType}
-                alt="Preview"
-                fit="cover"
-                className="absolute inset-0 h-full w-full"
-                videoProps={{
-                  controls: true,
-                  playsInline: true,
-                  preload: 'metadata',
-                  muted: false,
-                }}
-                imgProps={{
-                  draggable: false,
-                  loading: 'eager',
-                  decoding: 'async',
-                }}
-              />
-
               {showProgress ? (
-                <div className="absolute inset-x-0 bottom-0 p-2">
-                  <div className="brand-pro-session-upload-progress">
-                    <div
-                      className="brand-pro-session-upload-progress-bar"
-                      style={{
-                        width:
-                          status === 'COMPRESSING'
-                            ? '15%'
-                            : status === 'SAVING'
-                              ? '100%'
-                              : `${Math.max(20, uploadPercent)}%`,
-                      }}
-                      role="progressbar"
-                      aria-valuenow={
-                        status === 'UPLOADING' ? uploadPercent : undefined
-                      }
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                    />
-                  </div>
-                </div>
-              ) : null}
+                <MediaLoading
+                  className="absolute inset-0"
+                  percent={
+                    status === 'SAVING'
+                      ? 100
+                      : status === 'UPLOADING' && uploadPercent > 0
+                        ? uploadPercent
+                        : null
+                  }
+                  label={statusLabel(status, uploadPercent)}
+                />
+              ) : (
+                <MediaFill
+                  src={previewUrl}
+                  mediaType={mediaType}
+                  alt="Preview"
+                  fit="cover"
+                  className="absolute inset-0 h-full w-full"
+                  videoProps={{
+                    controls: true,
+                    playsInline: true,
+                    preload: 'metadata',
+                    muted: false,
+                  }}
+                  imgProps={{
+                    draggable: false,
+                    loading: 'eager',
+                    decoding: 'async',
+                  }}
+                />
+              )}
             </div>
 
             {message ? (

@@ -361,11 +361,13 @@ export function getSessionScreenKey({
     return 'SERVICE_IN_PROGRESS'
   }
 
-  if (effectiveStep === SessionStep.FINISH_REVIEW) {
-    return 'FINISH_REVIEW'
-  }
-
-  if (effectiveStep === SessionStep.AFTER_PHOTOS) {
+  if (
+    effectiveStep === SessionStep.FINISH_REVIEW ||
+    effectiveStep === SessionStep.AFTER_PHOTOS
+  ) {
+    // FINISH_REVIEW is a transient internal step on the way to AFTER_PHOTOS;
+    // both resolve to the after-photos / wrap-up surface (the hub decides
+    // between capture and the wrap-up checklist based on after-photo count).
     return 'WRAP_UP'
   }
 
@@ -428,10 +430,12 @@ export function getSessionCenterState({
   }
 
   if (step === SessionStep.CONSULTATION_PENDING_CLIENT) {
+    // While waiting on the client's consultation approval the pro can already
+    // capture before photos — surface the camera, not a dead "Waiting" button.
     return {
-      label: 'Waiting',
-      action: 'NAVIGATE',
-      href: routes.sessionHub,
+      label: 'Before photos',
+      action: 'CAPTURE_BEFORE',
+      href: routes.beforePhotos,
     }
   }
 
@@ -460,10 +464,13 @@ export function getSessionCenterState({
   }
 
   if (step === SessionStep.FINISH_REVIEW) {
+    // Legacy/transient: finishing service now passes straight through
+    // FINISH_REVIEW to AFTER_PHOTOS, but if a booking is still parked here,
+    // send the pro to after photos rather than a dead-end.
     return {
-      label: 'Create aftercare',
-      action: 'NAVIGATE',
-      href: routes.aftercare,
+      label: 'After photos',
+      action: 'CAPTURE_AFTER',
+      href: routes.afterPhotos,
     }
   }
 
@@ -476,10 +483,12 @@ export function getSessionCenterState({
       }
     }
 
+    // After photos are captured → next is the wrap-up checklist (aftercare,
+    // payment, checkout) which lives on the session hub.
     return {
-      label: 'Send aftercare',
+      label: 'Wrap up',
       action: 'NAVIGATE',
-      href: routes.aftercare,
+      href: routes.sessionHub,
     }
   }
 

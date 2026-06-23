@@ -328,7 +328,7 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
     expect(hasText(page, 'After photos')).toBe(true)
     expect(hasText(page, 'WRAP-UP · AFTER PHOTOS')).toBe(true)
     expect(hasText(page, 'After photos saved')).toBe(true)
-    expect(hasText(page, 'Continue to aftercare')).toBe(true)
+    expect(hasText(page, 'Wrap up')).toBe(true)
     expect(hasText(page, 'Upload after photos')).toBe(true)
     expect(hasText(page, 'MediaUploader:AFTER')).toBe(true)
 
@@ -359,19 +359,26 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
     expect(grids[0]?.props['data-count']).toBe('1')
   })
 
-  it('redirects to the session hub when session step is FINISH_REVIEW', async () => {
-    await expect(
-      renderPage({
-        booking: makeBooking({
-          sessionStep: SessionStep.FINISH_REVIEW,
-        }),
+  it('renders the after-photo upload UI when session step is FINISH_REVIEW (transient pass-through)', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        sessionStep: SessionStep.FINISH_REVIEW,
       }),
-    ).rejects.toMatchObject({
-      href: '/pro/bookings/booking_1/session',
+      afterCount: 0,
+      mediaRows: [],
     })
 
-    expect(mocks.mediaAssetCount).not.toHaveBeenCalled()
-    expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(hasText(page, 'Upload after photos')).toBe(true)
+    expect(hasText(page, 'MediaUploader:AFTER')).toBe(true)
+    expect(mocks.redirect).not.toHaveBeenCalled()
+
+    expect(mocks.mediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        phase: MediaPhase.AFTER,
+        uploadedByRole: Role.PRO,
+      },
+    })
   })
 
   it('redirects to the session hub when session step is SERVICE_IN_PROGRESS', async () => {
