@@ -266,6 +266,38 @@ export function dateTimeLocalToUtcIso(value: string, timeZone: string): string {
 }
 
 /**
+ * Strict wall-clock parts -> UTC, for a time a human explicitly picks
+ * (appointment start, calendar block, last-minute window).
+ *
+ * Throws if the local wall time does not exist or is ambiguous in `timeZone`
+ * (a DST gap or fall-back overlap) — callers should catch and prompt for a
+ * different time rather than silently shifting it. For day-boundary / range
+ * math whose input is always midnight, use the best-effort `zonedTimeToUtc`
+ * from `lib/timeZone` instead; throwing there would break range queries.
+ */
+export function zonedPartsToUtcStrict(parts: {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second?: number
+  timeZone: string
+}): Date {
+  return localPartsToUtcDate(
+    {
+      year: parts.year,
+      month: parts.month,
+      day: parts.day,
+      hour: parts.hour,
+      minute: parts.minute,
+      second: parts.second ?? 0,
+    },
+    parts.timeZone
+  )
+}
+
+/**
  * Convert a local calendar date in the provided timezone into UTC start/end bounds.
  *
  * start = local YYYY-MM-DD 00:00:00

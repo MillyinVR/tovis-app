@@ -9,6 +9,7 @@
 
 import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, ymdInTimeZone } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
+import { zonedPartsToUtcStrict } from '@/lib/booking/dateTime'
 
 type DateLike = Date | string | number
 
@@ -193,6 +194,77 @@ export function toISOFromDatetimeLocalInTimeZone(value: string, timeZone: string
   const utc = zonedTimeToUtc({ year, month, day, hour, minute, second: 0, timeZone: tz })
   if (Number.isNaN(utc.getTime())) return null
   return utc.toISOString()
+}
+
+/**
+ * Result of a strict wall-clock -> UTC conversion for a human-picked time.
+ * 'MALFORMED' = unparseable input; 'DST_INVALID' = the wall time does not exist
+ * or is ambiguous on that day (a daylight-saving gap/overlap).
+ */
+export type WallTimeToUtcResult =
+  | { ok: true; iso: string }
+  | { ok: false; reason: 'MALFORMED' | 'DST_INVALID' }
+
+/** User-facing copy for each WallTimeToUtcResult failure reason. */
+export const WALL_TIME_ERROR_MESSAGE: Record<
+  Exclude<WallTimeToUtcResult, { ok: true }>['reason'],
+  string
+> = {
+  MALFORMED: 'Enter a valid date and time.',
+  DST_INVALID:
+    "That time doesn't exist on this day due to daylight saving time. Please pick another time.",
+}
+
+/**
+ * Strict wall-clock parts -> UTC ISO for a time a human explicitly picks.
+ * Unlike the best-effort converters, this reports a DST gap/overlap so the UI
+ * can ask for another time instead of silently shifting it.
+ */
+export function partsToUtcIsoStrict(parts: {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second?: number
+  timeZone: string
+}): WallTimeToUtcResult {
+  const ok = [parts.year, parts.month, parts.day, parts.hour, parts.minute].every(
+    (n) => Number.isFinite(n),
+  )
+  if (!ok) return { ok: false, reason: 'MALFORMED' }
+
+  try {
+    const utc = zonedPartsToUtcStrict({
+      ...parts,
+      timeZone: sanitizeTimeZone(parts.timeZone, 'UTC'),
+    })
+    return { ok: true, iso: utc.toISOString() }
+  } catch {
+    return { ok: false, reason: 'DST_INVALID' }
+  }
+}
+
+/**
+ * Strict datetime-local ("YYYY-MM-DDTHH:mm") -> UTC ISO for a human-picked time.
+ * Reports DST gaps/overlaps (see {@link partsToUtcIsoStrict}) instead of
+ * silently shifting them, unlike {@link toISOFromDatetimeLocalInTimeZone}.
+ */
+export function datetimeLocalToUtcIsoStrict(
+  value: string,
+  timeZone: string,
+): WallTimeToUtcResult {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value || '')
+  if (!m) return { ok: false, reason: 'MALFORMED' }
+
+  return partsToUtcIsoStrict({
+    year: Number(m[1]),
+    month: Number(m[2]),
+    day: Number(m[3]),
+    hour: Number(m[4]),
+    minute: Number(m[5]),
+    timeZone,
+  })
 }
 
 /**

@@ -15,8 +15,12 @@ import {
   getZonedParts,
   isValidIanaTimeZone,
   sanitizeTimeZone,
-  zonedTimeToUtc,
 } from '@/lib/timeZone'
+import {
+  datetimeLocalToUtcIsoStrict,
+  WALL_TIME_ERROR_MESSAGE,
+  type WallTimeToUtcResult,
+} from '@/lib/time'
 import { readErrorMessage, safeJsonRecord } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
@@ -292,38 +296,6 @@ function buildInitialTierPlans(): TierPlanFormState[] {
   }))
 }
 
-function parseDatetimeLocal(value: string) {
-  const match = value.match(
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/,
-  )
-
-  if (!match) {
-    return null
-  }
-
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const day = Number(match[3])
-  const hour = Number(match[4])
-  const minute = Number(match[5])
-
-  if (!year || month < 1 || month > 12 || day < 1 || day > 31) {
-    return null
-  }
-
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return null
-  }
-
-  return {
-    year,
-    month,
-    day,
-    hour,
-    minute,
-  }
-}
-
 function toDatetimeLocalFromIso(isoUtc: string, timeZone: string): string {
   const date = new Date(isoUtc)
 
@@ -343,21 +315,8 @@ function toDatetimeLocalFromIso(isoUtc: string, timeZone: string): string {
 function datetimeLocalToIso(
   value: string,
   timeZone: string,
-): string | null {
-  const parts = parseDatetimeLocal(value)
-
-  if (!parts) {
-    return null
-  }
-
-  const safeTimeZone = sanitizeTimeZone(timeZone, 'UTC')
-  const utc = zonedTimeToUtc({
-    ...parts,
-    second: 0,
-    timeZone: safeTimeZone,
-  })
-
-  return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
+): WallTimeToUtcResult {
+  return datetimeLocalToUtcIsoStrict(value, timeZone)
 }
 
 function prettyWhenInTimeZone(isoUtc: string, timeZone: string): string {
@@ -1025,19 +984,19 @@ function useLastMinuteOpeningsController({
         throw new Error('Select at least one offering.')
       }
 
-      const startAt = datetimeLocalToIso(startAtLocal, timeZone)
+      const startRes = datetimeLocalToIso(startAtLocal, timeZone)
 
-      if (!startAt) {
-        throw new Error('Start time is invalid.')
+      if (!startRes.ok) {
+        throw new Error(WALL_TIME_ERROR_MESSAGE[startRes.reason])
       }
+      const startAt = startRes.iso
 
-      const endAt = useEndAt
-        ? datetimeLocalToIso(endAtLocal, timeZone)
-        : null
+      const endRes = useEndAt ? datetimeLocalToIso(endAtLocal, timeZone) : null
 
-      if (useEndAt && !endAt) {
-        throw new Error('End time is invalid.')
+      if (endRes && !endRes.ok) {
+        throw new Error(WALL_TIME_ERROR_MESSAGE[endRes.reason])
       }
+      const endAt = endRes && endRes.ok ? endRes.iso : null
 
       if (endAt && new Date(endAt).getTime() <= new Date(startAt).getTime()) {
         throw new Error('End must be after start.')

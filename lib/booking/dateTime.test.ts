@@ -5,6 +5,7 @@ import {
   dateTimeLocalToUtcIso,
   utcIsoToDateTimeLocal,
   utcDateToLocalParts,
+  zonedPartsToUtcStrict,
 } from './dateTime'
 
 describe('lib/booking/dateTime', () => {
@@ -65,5 +66,46 @@ describe('lib/booking/dateTime', () => {
     expect(() => dateTimeLocalToUtcIso(ambiguousLocal, tz)).toThrow(
       /does not exist or is ambiguous/i,
     )
+  })
+
+  describe('zonedPartsToUtcStrict', () => {
+    it('converts a normal wall time to the matching UTC instant', () => {
+      const utc = zonedPartsToUtcStrict({
+        year: 2026,
+        month: 1,
+        day: 15,
+        hour: 9,
+        minute: 30,
+        timeZone: 'America/New_York',
+      })
+      // EST (UTC-5) in January
+      expect(utc.toISOString()).toBe('2026-01-15T14:30:00.000Z')
+    })
+
+    it('throws on a nonexistent spring-forward wall time', () => {
+      expect(() =>
+        zonedPartsToUtcStrict({
+          year: 2026,
+          month: 3,
+          day: 8,
+          hour: 2,
+          minute: 30,
+          timeZone: 'America/New_York',
+        }),
+      ).toThrow(/does not exist or is ambiguous/i)
+    })
+
+    it('throws on an ambiguous fall-back wall time', () => {
+      expect(() =>
+        zonedPartsToUtcStrict({
+          year: 2026,
+          month: 11,
+          day: 1,
+          hour: 1,
+          minute: 30,
+          timeZone: 'America/New_York',
+        }),
+      ).toThrow(/does not exist or is ambiguous/i)
+    })
   })
 })

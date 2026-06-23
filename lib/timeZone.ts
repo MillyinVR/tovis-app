@@ -144,6 +144,14 @@ export function timeZoneOffsetMinutes(atUtc: Date, timeZone: string) {
 /**
  * Convert a wall-clock datetime in timeZone => UTC Date instant.
  * Uses fixed-point refinement to handle DST jumps.
+ *
+ * BEST-EFFORT: at a DST gap or fall-back overlap this silently picks one
+ * instant rather than reporting the problem. Use it for day-boundary / range /
+ * navigation math whose input is always midnight (never in a gap). For a time a
+ * human explicitly picks (appointment, calendar block), use the strict
+ * `zonedPartsToUtcStrict` (lib/booking/dateTime) / `partsToUtcIsoStrict`
+ * (lib/bookingTime), which reject nonexistent/ambiguous times so the UI can
+ * prompt for another.
  */
 export function zonedTimeToUtc(args: {
   year: number
