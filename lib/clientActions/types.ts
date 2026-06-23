@@ -189,6 +189,13 @@ export type ClientActionOrchestrationInput = {
   resendMode: ClientActionResendMode
 
   /**
+   * Discriminates one intentional resend from the next (e.g. an incrementing
+   * aftercare version). Only consulted for RESEND; without it, repeat resends
+   * collapse to a single "resend:default" send cycle and dedupe.
+   */
+  sendVersion?: string | null
+
+  /**
    * Optional overrides for the issuing flow.
    */
   issuedByUserId?: string | null
