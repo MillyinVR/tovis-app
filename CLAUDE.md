@@ -16,6 +16,15 @@ will catch them.
   from the generated Prisma client; don't hand-redeclare model shapes or write
   around the schema. Backed by `npm run typecheck` plus the write-boundary
   guards (`check:booking-boundary`, `check:lifecycle-field-writes`).
+- **Time & timezones go through `lib/time`.** All date/time formatting and
+  timezone math import from `@/lib/time` (the single barrel re-exporting
+  `lib/timeZone`, `lib/formatInTimeZone`, `lib/bookingTime`,
+  `lib/booking/dateTime`, `lib/booking/timeZoneTruth`). Never reach for raw
+  `Intl.DateTimeFormat`, `toLocaleDateString`/`toLocaleTimeString`, or a
+  date-shaped `toLocaleString` — they skip timezone sanitization and silently
+  render in the server's zone (UTC on Vercel). Store instants as UTC; resolve a
+  timezone only at the edges. *Enforced* by `check:no-raw-datetime-format`
+  (baseline-tracked; migrate entries to `@/lib/time` and shrink the list).
 - **UI must follow the white-label rules.**
   - No hardcoded brand strings — user-facing copy comes from `lib/brand`.
     *Enforced* by `check:no-hardcoded-brand-strings`.
