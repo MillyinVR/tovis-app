@@ -9,8 +9,8 @@ import {
   friendlyTimeZoneLabel,
   getZonedParts,
   sanitizeTimeZone,
-  zonedTimeToUtc,
 } from '@/lib/timeZone'
+import { partsToUtcIsoStrict, WALL_TIME_ERROR_MESSAGE } from '@/lib/time'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
@@ -82,6 +82,7 @@ type BlockTimeModalCopy = {
   invalidDurationError: string
   locationRequiredError: string
   invalidUtcStartError: string
+  dstInvalidTimeError: string
   invalidEndTimeError: string
 
   responseMissingDataError: string
@@ -186,6 +187,7 @@ const DEFAULT_COPY: BlockTimeModalCopy = {
   locationRequiredError:
     'Select a location first, or choose "Block all locations".',
   invalidUtcStartError: 'Invalid start time.',
+  dstInvalidTimeError: WALL_TIME_ERROR_MESSAGE.DST_INVALID,
   invalidEndTimeError: 'End time must be after start time.',
 
   responseMissingDataError: 'Block created but response was missing data.',
@@ -307,7 +309,7 @@ function buildPayload(args: BuildPayloadArgs): CreatedBlockPayload {
     throw new Error(args.copy.locationRequiredError)
   }
 
-  const startsAt = zonedTimeToUtc({
+  const startResult = partsToUtcIsoStrict({
     year: parsedDate.year,
     month: parsedDate.month,
     day: parsedDate.day,
@@ -317,9 +319,15 @@ function buildPayload(args: BuildPayloadArgs): CreatedBlockPayload {
     timeZone: args.timeZone,
   })
 
-  if (!Number.isFinite(startsAt.getTime())) {
-    throw new Error(args.copy.invalidUtcStartError)
+  if (!startResult.ok) {
+    throw new Error(
+      startResult.reason === 'DST_INVALID'
+        ? args.copy.dstInvalidTimeError
+        : args.copy.invalidUtcStartError,
+    )
   }
+
+  const startsAt = new Date(startResult.iso)
 
   const endsAt = new Date(
     startsAt.getTime() + durationMinutes * CALENDAR_MS_PER_MINUTE,

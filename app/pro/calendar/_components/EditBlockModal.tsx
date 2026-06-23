@@ -10,8 +10,8 @@ import {
   minutesSinceMidnightInTimeZone,
   sanitizeTimeZone,
   ymdInTimeZone,
-  zonedTimeToUtc,
 } from '@/lib/timeZone'
+import { partsToUtcIsoStrict, WALL_TIME_ERROR_MESSAGE } from '@/lib/time'
 import { readErrorMessage, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
@@ -79,6 +79,7 @@ type EditBlockModalCopy = {
   invalidStartTimeError: string
   invalidDurationError: string
   invalidUtcStartError: string
+  dstInvalidTimeError: string
   invalidEndTimeError: string
 
   loadFailedError: string
@@ -185,6 +186,7 @@ const DEFAULT_COPY: EditBlockModalCopy = {
   invalidStartTimeError: 'Pick a valid start time.',
   invalidDurationError: 'Pick a valid duration.',
   invalidUtcStartError: 'Invalid start time.',
+  dstInvalidTimeError: WALL_TIME_ERROR_MESSAGE.DST_INVALID,
   invalidEndTimeError: 'End time must be after start time.',
 
   loadFailedError: 'Failed to load block.',
@@ -302,7 +304,7 @@ function buildPatchPayload(args: BuildPatchPayloadArgs): PatchBlockPayload {
     copy: args.copy,
   })
 
-  const startsAt = zonedTimeToUtc({
+  const startResult = partsToUtcIsoStrict({
     year: parsedDate.year,
     month: parsedDate.month,
     day: parsedDate.day,
@@ -312,9 +314,15 @@ function buildPatchPayload(args: BuildPatchPayloadArgs): PatchBlockPayload {
     timeZone: args.timeZone,
   })
 
-  if (!Number.isFinite(startsAt.getTime())) {
-    throw new Error(args.copy.invalidUtcStartError)
+  if (!startResult.ok) {
+    throw new Error(
+      startResult.reason === 'DST_INVALID'
+        ? args.copy.dstInvalidTimeError
+        : args.copy.invalidUtcStartError,
+    )
   }
+
+  const startsAt = new Date(startResult.iso)
 
   const endsAt = new Date(
     startsAt.getTime() + durationMinutes * CALENDAR_MS_PER_MINUTE,

@@ -24,11 +24,11 @@ import {
   type PlacePrediction,
 } from '@/lib/clientAddresses/placesAutocomplete'
 import { moneyToString } from '@/lib/money'
+import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import {
-  isValidIanaTimeZone,
-  sanitizeTimeZone,
-  zonedTimeToUtc,
-} from '@/lib/timeZone'
+  datetimeLocalToUtcIsoStrict,
+  WALL_TIME_ERROR_MESSAGE,
+} from '@/lib/time'
 
 type ServiceLocationType = 'SALON' | 'MOBILE'
 type ProfessionalLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
@@ -172,43 +172,6 @@ function defaultDatetimeLocal(): string {
   )}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
-function parseDatetimeLocal(value: string): {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-} | null {
-  if (!value || typeof value !== 'string') return null
-
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
-  if (!match) return null
-
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const day = Number(match[3])
-  const hour = Number(match[4])
-  const minute = Number(match[5])
-
-  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
-
-  return { year, month, day, hour, minute }
-}
-
-function toUtcIsoFromDatetimeLocalInTimeZone(
-  value: string,
-  timeZone: string,
-): string | null {
-  const parts = parseDatetimeLocal(value)
-  if (!parts) return null
-
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const utcDate = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
-
-  if (Number.isNaN(utcDate.getTime())) return null
-  return utcDate.toISOString()
-}
 
 function pickDisplayPrice(
   offering: ProBookingNewOfferingDTO,
@@ -1007,15 +970,17 @@ export default function NewBookingForm({
       }
     }
 
-    const scheduledForISO = toUtcIsoFromDatetimeLocalInTimeZone(
+    const scheduledResult = datetimeLocalToUtcIsoStrict(
       scheduledAt,
       bookingTimeZone,
     )
 
-    if (!scheduledForISO) {
-      setError('Please choose a valid date and time.')
+    if (!scheduledResult.ok) {
+      setError(WALL_TIME_ERROR_MESSAGE[scheduledResult.reason])
       return
     }
+
+    const scheduledForISO = scheduledResult.iso
 
     const clientPayload =
       clientMode === 'new'

@@ -68,9 +68,13 @@ export {
   getHourInTimeZone,
   ymdInTimeZoneFromIso,
   toISOFromDatetimeLocalInTimeZone,
+  partsToUtcIsoStrict,
+  datetimeLocalToUtcIsoStrict,
+  WALL_TIME_ERROR_MESSAGE,
   isoToDatetimeLocalInTimeZone,
   formatInBookingTimeZone,
 } from '@/lib/bookingTime'
+export type { WallTimeToUtcResult } from '@/lib/bookingTime'
 
 // 3. wall clock <-> UTC, local-day bounds, datetime-local <-> UTC
 export {
@@ -84,6 +88,7 @@ export {
   utcDateToLocalYmd,
   utcIsoToLocalYmd,
   utcDateToLocalParts,
+  zonedPartsToUtcStrict,
 } from '@/lib/booking/dateTime'
 
 // Client-side input <-> UTC helpers (datetime-local form fields)

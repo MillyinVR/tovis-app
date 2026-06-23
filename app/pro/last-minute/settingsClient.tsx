@@ -10,6 +10,11 @@ import {
   sanitizeTimeZone,
   zonedTimeToUtc,
 } from '@/lib/timeZone'
+import {
+  datetimeLocalToUtcIsoStrict,
+  WALL_TIME_ERROR_MESSAGE,
+  type WallTimeToUtcResult,
+} from '@/lib/time'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
@@ -101,22 +106,6 @@ function clampMinutes(n: number): number | null {
   return v
 }
 
-function parseDatetimeLocal(value: string) {
-  const m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
-  if (!m) return null
-
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-  const hour = Number(m[4])
-  const minute = Number(m[5])
-
-  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
-
-  return { year, month, day, hour, minute }
-}
-
 function toDatetimeLocalFromIso(isoUtc: string, timeZone: string) {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return ''
@@ -128,13 +117,8 @@ function toDatetimeLocalFromIso(isoUtc: string, timeZone: string) {
   return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
 }
 
-function datetimeLocalToIso(value: string, timeZone: string) {
-  const parts = parseDatetimeLocal(value)
-  if (!parts) return null
-
-  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
-  const utc = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
-  return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
+function datetimeLocalToIso(value: string, timeZone: string): WallTimeToUtcResult {
+  return datetimeLocalToUtcIsoStrict(value, timeZone)
 }
 
 function fmtRangeInTimeZone(startIsoUtc: string, endIsoUtc: string, timeZone: string) {
@@ -387,12 +371,17 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     setErr(null)
 
     try {
-      const startIso = datetimeLocalToIso(blockStart, timeZone)
-      const endIso = datetimeLocalToIso(blockEnd, timeZone)
+      const startRes = datetimeLocalToIso(blockStart, timeZone)
+      const endRes = datetimeLocalToIso(blockEnd, timeZone)
 
-      if (!startIso || !endIso) {
-        throw new Error('Pick valid start and end times.')
+      if (!startRes.ok) {
+        throw new Error(WALL_TIME_ERROR_MESSAGE[startRes.reason])
       }
+      if (!endRes.ok) {
+        throw new Error(WALL_TIME_ERROR_MESSAGE[endRes.reason])
+      }
+      const startIso = startRes.iso
+      const endIso = endRes.iso
       if (+new Date(endIso) <= +new Date(startIso)) {
         throw new Error('Block end must be after start.')
       }
