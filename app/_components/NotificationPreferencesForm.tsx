@@ -24,6 +24,8 @@ type EventMeta = {
   eventKey: string
   label: string
   supportedChannels: ChannelId[]
+  // Critical events (e.g. payment receipts) whose email can never be turned off.
+  emailLocked?: boolean
 }
 
 type CategoryMeta = {
@@ -67,6 +69,19 @@ function eventSupportedChannels(
   return map
 }
 
+// Events whose email is mandatory (payment receipts etc.) — the primary-channel
+// mapping must keep their email on, and they don't count toward deciding the
+// active primary channel.
+function lockedEmailEvents(categories: CategoryMeta[]): Set<string> {
+  const set = new Set<string>()
+  for (const category of categories) {
+    for (const event of category.events) {
+      if (event.emailLocked) set.add(event.eventKey)
+    }
+  }
+  return set
+}
+
 // Which single external channel the current toggles correspond to, or null when
 // it's a mix the simple selector can't represent ("Custom"). We only look at
 // events that support BOTH email and SMS — those are the ones a primary-channel
@@ -75,11 +90,14 @@ export function deriveActivePreference(
   payload: PreferencesPayload,
 ): ChannelPreference | null {
   const supported = eventSupportedChannels(payload.categories)
+  const locked = lockedEmailEvents(payload.categories)
   let sawDual = false
   let allEmail = true
   let allSms = true
 
   for (const [eventKey, channels] of supported) {
+    // Email-locked events are forced to email; they're not part of the choice.
+    if (locked.has(eventKey)) continue
     if (!channels.includes('EMAIL') || !channels.includes('SMS')) continue
     sawDual = true
     const state = payload.events[eventKey]
@@ -105,6 +123,7 @@ export function applyPreferredChannel(
   channel: 'EMAIL' | 'SMS',
 ): Record<string, ChannelState> {
   const supported = eventSupportedChannels(payload.categories)
+  const locked = lockedEmailEvents(payload.categories)
   const nextEvents: Record<string, ChannelState> = {}
 
   for (const [eventKey, channels] of supported) {
@@ -116,6 +135,7 @@ export function applyPreferredChannel(
     const supportsEmail = channels.includes('EMAIL')
     const supportsSms = channels.includes('SMS')
     const supportsBoth = supportsEmail && supportsSms
+    const emailMandatory = locked.has(eventKey)
 
     if (channel === 'EMAIL') {
       nextEvents[eventKey] = {
@@ -127,7 +147,13 @@ export function applyPreferredChannel(
       nextEvents[eventKey] = {
         inAppEnabled: current.inAppEnabled,
         smsEnabled: supportsSms ? true : current.smsEnabled,
-        emailEnabled: supportsBoth ? false : current.emailEnabled,
+        // A critical event keeps email on no matter what; otherwise email turns
+        // off only when SMS is an available alternative for this event.
+        emailEnabled: emailMandatory
+          ? true
+          : supportsBoth
+            ? false
+            : current.emailEnabled,
       }
     }
   }
@@ -473,6 +499,10 @@ export default function NotificationPreferencesForm({
                   <div className="flex flex-wrap items-center gap-4">
                     {event.supportedChannels.map((channel) => {
                       const meta = CHANNELS[channel]
+                      // Critical events (payment receipts etc.) always email —
+                      // the toggle is locked on so the UI matches the engine.
+                      const emailLocked =
+                        channel === 'EMAIL' && event.emailLocked === true
                       return (
                         <div
                           key={channel}
@@ -480,14 +510,20 @@ export default function NotificationPreferencesForm({
                         >
                           <span className="text-[11px] font-black uppercase tracking-[var(--ls-caps)] text-textSecondary">
                             {meta.label}
+                            {emailLocked ? (
+                              <span className="ml-1 normal-case text-textSecondary/70">
+                                (always on)
+                              </span>
+                            ) : null}
                           </span>
                           <ToggleSwitch
-                            checked={state[meta.stateKey]}
+                            checked={emailLocked ? true : state[meta.stateKey]}
                             onChange={(next) =>
                               setChannel(event.eventKey, meta.stateKey, next)
                             }
                             label={`${event.label} — ${meta.label}`}
                             size="sm"
+                            disabled={emailLocked}
                           />
                         </div>
                       )

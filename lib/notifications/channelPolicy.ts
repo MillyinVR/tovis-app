@@ -251,10 +251,19 @@ function buildChannelEvaluation(args: {
   }
 
   if (!isPreferenceEnabledForChannel(args.channel, args.preference)) {
-    return {
-      channel: args.channel,
-      enabled: false,
-      reason: 'PREFERENCE_DISABLED',
+    // Critical events (e.g. payment receipts) must always reach the recipient by
+    // email — a channel preference can never silence them. Capability was already
+    // checked above, so this only fires when an email destination exists.
+    const emailForced =
+      args.channel === NotificationChannel.EMAIL &&
+      getNotificationEventDefinition(args.key).emailAlwaysOn === true
+
+    if (!emailForced) {
+      return {
+        channel: args.channel,
+        enabled: false,
+        reason: 'PREFERENCE_DISABLED',
+      }
     }
   }
 

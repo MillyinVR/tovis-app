@@ -45,6 +45,12 @@ export type NotificationEventDefinition = {
   defaultChannelsByRecipient: Partial<
     Record<NotificationRecipientKind, readonly NotificationChannel[]>
   >
+  // Critical events whose EMAIL channel can never be turned off by a recipient
+  // preference (e.g. payment receipts / refunds / action-required). The channel
+  // policy forces email through even when the recipient disabled it, and the
+  // preferences UI shows the email toggle locked on. Capability still applies —
+  // a recipient with no email address still can't receive email.
+  emailAlwaysOn?: boolean
 }
 
 const PRO_ALL_CHANNELS: readonly NotificationChannel[] = [
@@ -364,6 +370,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultPriority: NotificationPriority.NORMAL,
     transactional: true,
     allowQuietHoursBypass: false,
+    emailAlwaysOn: true,
     templateKey: 'payment_collected',
     supportedRecipients: [
       NotificationRecipientKind.PRO,
@@ -382,6 +389,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     // Tier A urgent: a payment that needs action (e.g. failed/3DS) is
     // time-critical, so it bypasses quiet hours.
     allowQuietHoursBypass: true,
+    emailAlwaysOn: true,
     templateKey: 'payment_action_required',
     supportedRecipients: [
       NotificationRecipientKind.PRO,
@@ -398,6 +406,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultPriority: NotificationPriority.NORMAL,
     transactional: true,
     allowQuietHoursBypass: false,
+    emailAlwaysOn: true,
     templateKey: 'payment_refunded',
     supportedRecipients: [
       NotificationRecipientKind.PRO,
@@ -584,6 +593,16 @@ export function isRecipientSupportedForEvent(
   return getNotificationEventDefinition(key).supportedRecipients.includes(
     recipientKind,
   )
+}
+
+/**
+ * Whether the EMAIL channel for this event is mandatory — it can never be turned
+ * off by a recipient preference (critical events like payment receipts). Used by
+ * the channel policy to force email through and by the preferences UI to lock
+ * the email toggle on.
+ */
+export function isEmailAlwaysOnEvent(key: NotificationEventKey): boolean {
+  return getNotificationEventDefinition(key).emailAlwaysOn === true
 }
 
 export function getDefaultChannelsForRecipient(args: {

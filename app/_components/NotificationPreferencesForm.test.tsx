@@ -30,6 +30,12 @@ function makePayload(): PreferencesPayload {
             label: 'In-app only',
             supportedChannels: ['IN_APP'],
           },
+          {
+            eventKey: 'evt_payment',
+            label: 'Payment receipt',
+            supportedChannels: ['IN_APP', 'EMAIL', 'SMS'],
+            emailLocked: true,
+          },
         ],
       },
     ],
@@ -41,6 +47,11 @@ function makePayload(): PreferencesPayload {
         emailEnabled: true,
       },
       evt_inapp_only: {
+        inAppEnabled: true,
+        smsEnabled: true,
+        emailEnabled: true,
+      },
+      evt_payment: {
         inAppEnabled: true,
         smsEnabled: true,
         emailEnabled: true,
@@ -74,10 +85,21 @@ describe('applyPreferredChannel', () => {
     expect(next.evt_email_only?.emailEnabled).toBe(true)
   })
 
+  it('keeps email on for an email-locked (critical) event under TEXT', () => {
+    const next = applyPreferredChannel(makePayload(), 'SMS')
+    // Critical events always email — never silenced by the primary-channel pick.
+    expect(next.evt_payment?.emailEnabled).toBe(true)
+  })
+
   it('always keeps in-app enabled', () => {
     const email = applyPreferredChannel(makePayload(), 'EMAIL')
     const sms = applyPreferredChannel(makePayload(), 'SMS')
-    for (const key of ['evt_dual', 'evt_email_only', 'evt_inapp_only']) {
+    for (const key of [
+      'evt_dual',
+      'evt_email_only',
+      'evt_inapp_only',
+      'evt_payment',
+    ]) {
       expect(email[key]?.inAppEnabled).toBe(true)
       expect(sms[key]?.inAppEnabled).toBe(true)
     }
