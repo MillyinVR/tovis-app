@@ -51,8 +51,6 @@ app/pro/bookings/[id]/aftercare/AftercareForm.tsx|const parts = new Intl.DateTim
 app/pro/bookings/[id]/aftercare/AvailabilityCalendarPopup.tsx|return new Intl.DateTimeFormat('en-US', {
 app/pro/bookings/[id]/aftercare/ClientProfilePanel.tsx|return new Intl.DateTimeFormat('en-US', {
 app/pro/bookings/[id]/aftercare/RebookSlotPicker.tsx|return new Intl.DateTimeFormat(undefined, {
-app/pro/bookings/[id]/aftercare/page.tsx|return new Intl.DateTimeFormat('en-US', {
-app/pro/bookings/[id]/session/page.tsx|return new Intl.DateTimeFormat('en-US', {
 app/pro/calendar/_components/CalendarDesktopShell.tsx|const formatter = new Intl.DateTimeFormat(undefined, {
 app/pro/calendar/_components/CalendarDesktopShell.tsx|const timeFormatter = new Intl.DateTimeFormat(undefined, {
 app/pro/calendar/_components/ConfirmChangeModal.tsx|return date.toLocaleString(undefined, {

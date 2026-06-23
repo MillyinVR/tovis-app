@@ -13,6 +13,7 @@ import ClientProfilePanel from './ClientProfilePanel'
 import ServicesReceivedCard from './ServicesReceivedCard'
 
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
+import { formatInTimeZone } from '@/lib/time'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToFixed2String } from '@/lib/money'
 import { fullName } from '@/lib/names'
@@ -61,15 +62,18 @@ function dateToIso(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
 }
 
-function toDisplayDateTime(value: Date | null | undefined): string | null {
+function toDisplayDateTime(
+  value: Date | null | undefined,
+  timeZone: string,
+): string | null {
   if (!value) return null
 
-  return new Intl.DateTimeFormat('en-US', {
+  return formatInTimeZone(value, timeZone, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(value)
+  })
 }
 
 function buildPublicAccessSummary(args: {
@@ -294,6 +298,7 @@ function SummaryCard({
   draftSavedAt,
   sentToClientAt,
   version,
+  timeZone,
 }: {
   publicAccess: PublicAccessSummary
   hasDraft: boolean
@@ -302,10 +307,11 @@ function SummaryCard({
   draftSavedAt: Date | null | undefined
   sentToClientAt: Date | null | undefined
   version: number | null | undefined
+  timeZone: string
 }) {
-  const lastEditedLabel = toDisplayDateTime(lastEditedAt)
-  const draftSavedLabel = toDisplayDateTime(draftSavedAt)
-  const sentToClientLabel = toDisplayDateTime(sentToClientAt)
+  const lastEditedLabel = toDisplayDateTime(lastEditedAt, timeZone)
+  const draftSavedLabel = toDisplayDateTime(draftSavedAt, timeZone)
+  const sentToClientLabel = toDisplayDateTime(sentToClientAt, timeZone)
 
   return (
     <Card accent>
@@ -717,6 +723,7 @@ export default async function ProAftercarePage({ params }: PageProps) {
           draftSavedAt={aftercare?.draftSavedAt}
           sentToClientAt={aftercare?.sentToClientAt}
           version={aftercare?.version}
+          timeZone={timeZone}
         />
 
         <div className="mt-4">
