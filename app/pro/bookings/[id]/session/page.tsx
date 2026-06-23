@@ -23,6 +23,7 @@ import MarkPaidButton from './MarkPaidButton'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
+import { formatInTimeZone, resolveApptTimeZoneFromValues } from '@/lib/time'
 import {
   recordInPersonConsultationDecision,
   transitionSessionStep,
@@ -116,32 +117,38 @@ function firstMoneyLabel(
   return text ? `$${text}` : ''
 }
 
-function formatDateTime(value: Date | null | undefined): string | null {
+function formatDateTime(
+  value: Date | null | undefined,
+  timeZone: string,
+): string | null {
   if (!value) return null
 
-  return new Intl.DateTimeFormat('en-US', {
+  return formatInTimeZone(value, timeZone, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(value)
+  })
 }
 
-function formatTimeOnly(value: Date | null | undefined): string {
+function formatTimeOnly(value: Date | null | undefined, timeZone: string): string {
   if (!value) return '—'
 
-  return new Intl.DateTimeFormat('en-US', {
+  return formatInTimeZone(value, timeZone, {
     hour: 'numeric',
     minute: '2-digit',
-  }).format(value)
+  })
 }
 
 function formatAppointmentLine(args: {
   clientName: string
   scheduledFor: Date | null
   durationLabel: string
+  timeZone: string
 }): string {
-  const when = args.scheduledFor ? formatDateTime(args.scheduledFor) : 'Time TBD'
+  const when = args.scheduledFor
+    ? formatDateTime(args.scheduledFor, args.timeZone)
+    : 'Time TBD'
   return `${args.clientName} · ${when ?? 'Time TBD'} · ${args.durationLabel}`
 }
 
@@ -964,6 +971,7 @@ function ServiceInProgressView({
   durationLabel,
   beforeCount,
   onFinish,
+  timeZone,
 }: {
   serviceName: string
   clientName: string
@@ -971,6 +979,7 @@ function ServiceInProgressView({
   durationLabel: string
   beforeCount: number
   onFinish: ServerAction
+  timeZone: string
 }) {
   return (
     <PageShell>
@@ -1001,7 +1010,7 @@ function ServiceInProgressView({
 
           <div className="brand-pro-session-timer-sub">
             <ClockIcon />
-            Started at {formatTimeOnly(startedAt)} · {durationLabel} booked
+            Started at {formatTimeOnly(startedAt, timeZone)} · {durationLabel} booked
           </div>
         </section>
 
@@ -1054,6 +1063,7 @@ function WrapUpView({
   hasCheckoutClosed,
   hasConsultationApproved,
   markPaidMethods,
+  timeZone,
 }: {
   bookingId: string
   serviceName: string
@@ -1067,6 +1077,7 @@ function WrapUpView({
   hasCheckoutClosed: boolean
   hasConsultationApproved: boolean
   markPaidMethods: ManualCollectablePaymentMethod[]
+  timeZone: string
 }) {
   const checklist = buildProSessionCloseoutChecklist({
     afterCount,
@@ -1141,7 +1152,7 @@ function WrapUpView({
               <div className="brand-pro-session-check-sub">
                 {aftercareItem?.subtitle ?? 'missing'}
                 {aftercareLastEditedAt && !hasFinalizedAftercare
-                  ? ` · last edited ${formatDateTime(aftercareLastEditedAt)}`
+                  ? ` · last edited ${formatDateTime(aftercareLastEditedAt, timeZone)}`
                   : ''}
               </div>
             </div>
@@ -1422,6 +1433,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
       professionalId: true,
       status: true,
       scheduledFor: true,
+      locationTimeZone: true,
       startedAt: true,
       finishedAt: true,
       sessionStep: true,
@@ -1517,6 +1529,14 @@ export default async function ProBookingSessionPage(props: PageProps) {
     booking.client?.user?.email ||
     'Client'
 
+  // Render all times in the appointment's timezone (snapshot first, pro tz as
+  // fallback) so a server component never displays them in the server's zone.
+  const timeZoneResult = resolveApptTimeZoneFromValues({
+    bookingLocationTimeZone: booking.locationTimeZone,
+    professionalTimeZone: user?.professionalProfile?.timeZone,
+  })
+  const appointmentTimeZone = timeZoneResult.ok ? timeZoneResult.timeZone : 'UTC'
+
   const durationMinutes =
     booking.totalDurationMinutes ?? sumDurations(booking.serviceItems)
   const durationLabel =
@@ -1549,7 +1569,10 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const proofDecisionLabel = consultationProof
     ? labelForConsultationDecision(consultationProof.decision)
     : null
-  const proofActedAtLabel = formatDateTime(consultationProof?.actedAt)
+  const proofActedAtLabel = formatDateTime(
+    consultationProof?.actedAt,
+    appointmentTimeZone,
+  )
   const proofDestination =
     consultationProof?.destinationSnapshot?.trim() || null
 
@@ -1604,6 +1627,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
     clientName,
     scheduledFor: booking.scheduledFor,
     durationLabel,
+    timeZone: appointmentTimeZone,
   })
 
   const toConsult = transitionAction.bind(
@@ -1713,6 +1737,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
         durationLabel={durationLabel}
         beforeCount={beforeCount}
         onFinish={finishService}
+        timeZone={appointmentTimeZone}
       />
     )
   }
@@ -1738,6 +1763,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
         hasCheckoutClosed={hasCheckoutClosed}
         hasConsultationApproved={hasConsultationApproved}
         markPaidMethods={markPaidMethods}
+        timeZone={appointmentTimeZone}
       />
     )
   }

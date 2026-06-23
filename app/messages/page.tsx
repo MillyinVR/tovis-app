@@ -13,6 +13,7 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { formatInTimeZone } from '@/lib/time'
 import { initialsForName } from '@/lib/initials'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
@@ -61,6 +62,7 @@ type InboxThread = {
 type BookingLookup = {
   id: string
   scheduledFor: Date | null
+  locationTimeZone: string | null
   service: {
     name: string | null
   } | null
@@ -231,14 +233,18 @@ function formatShortDate(date: Date): string {
   }).format(date)
 }
 
-function formatBookingTime(date: Date | null | undefined): string | null {
+function formatBookingTime(
+  date: Date | null | undefined,
+  timeZone: string | null | undefined,
+): string | null {
   if (!date) return null
 
-  return new Intl.DateTimeFormat(undefined, {
+  // Snapshot timezone first; formatInTimeZone sanitizes null/invalid to UTC.
+  return formatInTimeZone(date, timeZone ?? 'UTC', {
     weekday: 'short',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function formatMinuteOfDay(value: number | null): string | null {
@@ -321,7 +327,7 @@ function buildEyebrow(params: {
   if (thread.contextType === MessageThreadContextType.BOOKING) {
     const booking = thread.bookingId ? bookingMap.get(thread.bookingId) ?? null : null
     const serviceName = booking?.service?.name ?? null
-    const when = formatBookingTime(booking?.scheduledFor)
+    const when = formatBookingTime(booking?.scheduledFor, booking?.locationTimeZone)
 
     return ['BOOKING CONFIRMED', serviceName, when]
       .filter(isPresentString)
@@ -518,6 +524,7 @@ async function findBookingLookups(bookingIds: string[]): Promise<BookingLookup[]
     select: {
       id: true,
       scheduledFor: true,
+      locationTimeZone: true,
       service: { select: { name: true } },
     },
   })
