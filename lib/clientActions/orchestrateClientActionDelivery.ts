@@ -125,6 +125,7 @@ export function orchestrateClientActionDelivery(
       recipientPhone: validatedRecipient.value.recipientPhone,
     },
     resendMode: input.resendMode,
+    sendVersion: input.sendVersion ?? null,
   })
 
   const plan: ClientActionOrchestrationPlan = {

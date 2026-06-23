@@ -97,6 +97,7 @@ import { clampInt } from '@/lib/pick'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
+import type { ClientActionResendMode } from '@/lib/clientActions/types'
 import {
   normalizeAddress,
   resolveHeldSalonAddressText,
@@ -2267,6 +2268,7 @@ async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
   aftercareVersion: number
   actorUserId: string
   shouldAttempt: boolean
+  resendMode: ClientActionResendMode
 }): Promise<AftercareAccessDeliverySummary> {
   if (!args.shouldAttempt) {
     return {
@@ -2313,6 +2315,7 @@ async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
       bookingId: args.booking.id,
       aftercareId: args.aftercareId,
       aftercareVersion: args.aftercareVersion,
+      resendMode: args.resendMode,
       issuedByUserId: args.actorUserId,
       recipientUserId: args.booking.client.userId ?? null,
       recipientEmail,
@@ -10421,8 +10424,15 @@ if (args.rebookSlot) {
   })
 
   const existingAftercare = booking.aftercareSummary
-  const shouldQueueAftercareAccessDelivery =
-    args.sendToClient && !existingAftercare?.sentToClientAt
+  // (Re)send to the client on EVERY explicit send — not just the first one.
+  // "Send update to client" must re-deliver the aftercare magic link (text +
+  // email); previously this was gated to the first send, so updates silently
+  // delivered nothing.
+  const shouldQueueAftercareAccessDelivery = args.sendToClient
+  // A resend (already sent once) uses RESEND mode + the new version so the
+  // delivery isn't deduped against the original send.
+  const aftercareDeliveryResendMode: ClientActionResendMode =
+    existingAftercare?.sentToClientAt ? 'RESEND' : 'INITIAL_SEND'
     const incomingVersion =
     typeof args.version === 'number' && Number.isFinite(args.version)
       ? Math.trunc(args.version)
@@ -10478,6 +10488,7 @@ const incomingAftercareComparable = {
 
 if (
   existingAftercare &&
+  !args.sendToClient &&
   !args.createRebookReminder &&
   !args.createProductReminder &&
   areAuditValuesEqual(existingAftercareComparable, incomingAftercareComparable)
@@ -10626,6 +10637,7 @@ const aftercareAccessDelivery =
     aftercareVersion: aftercare.version,
     actorUserId: args.actorUserId,
     shouldAttempt: shouldQueueAftercareAccessDelivery,
+    resendMode: aftercareDeliveryResendMode,
   })
 
 const aftercareSentAt =

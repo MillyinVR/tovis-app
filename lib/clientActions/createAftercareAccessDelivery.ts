@@ -134,6 +134,13 @@ function buildOrchestrationPlan(
       timeZone: asTrimmedString(args.recipientTimeZone),
     },
     resendMode: normalizeResendMode(args.resendMode),
+    // Each aftercare send bumps the version; using it as the send-cycle
+    // discriminator makes every resend a fresh delivery instead of deduping
+    // against the prior send.
+    sendVersion:
+      typeof args.aftercareVersion === 'number'
+        ? String(args.aftercareVersion)
+        : null,
     issuedByUserId: asTrimmedString(args.issuedByUserId),
     expiresAtOverride: args.expiresAtOverride ?? null,
     metadata: null,
