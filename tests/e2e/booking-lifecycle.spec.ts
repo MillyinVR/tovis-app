@@ -767,10 +767,13 @@ test.describe('full booking lifecycle launch proof', () => {
         baseURL: resolvedBaseUrl,
       })
 
+      // Finishing the service now finalizes the menu in one step and lands on
+      // AFTER_PHOTOS (the "Ready for wrap-up" screen was removed). The
+      // /final-review call below is an idempotent re-confirm from AFTER_PHOTOS.
       booking = await expectBookingState({
         bookingId,
         status: BookingStatus.IN_PROGRESS,
-        step: SessionStep.FINISH_REVIEW,
+        step: SessionStep.AFTER_PHOTOS,
       })
 
       await postJson({
