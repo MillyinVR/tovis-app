@@ -72,6 +72,8 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
             startedAt: true,
             finishedAt: true,
             locationType: true,
+            locationTimeZone: true,
+            clientTimeZoneAtBooking: true,
             service: {
               select: {
                 id: true,
@@ -173,6 +175,14 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
           startedAt: asIso(token.booking.startedAt),
           finishedAt: asIso(token.booking.finishedAt),
           locationType: token.booking.locationType,
+          // The appointment happens at the service location, so display times
+          // in the location's zone (snapshot) — not the pro's profile zone,
+          // which can differ (e.g. a CA appointment under a Central-time pro).
+          appointmentTimeZone:
+            token.booking.locationTimeZone ??
+            token.booking.clientTimeZoneAtBooking ??
+            token.booking.professional.timeZone ??
+            null,
           service: token.booking.service
             ? {
                 id: token.booking.service.id,

@@ -82,6 +82,7 @@ type BookingDto = {
   startedAt: string | null
   finishedAt: string | null
   locationType: string | null
+  appointmentTimeZone: string | null
   service: {
     id: string
     name: string | null
@@ -220,6 +221,14 @@ function formatDateOnly(value: unknown, timeZone: string | null | undefined): st
 }
 
 
+function formatDurationMinutes(value: unknown): string | null {
+  const minutes =
+    typeof value === 'number' ? value : Number(String(value ?? '').trim())
+  return Number.isFinite(minutes) && minutes > 0
+    ? `${Math.round(minutes)} min`
+    : null
+}
+
 type ProposedItemView = {
   key: string
   title: string
@@ -248,10 +257,11 @@ function extractProposedItems(value: unknown): ProposedItemView[] {
       safeText(item.serviceName) ||
       `Proposed service ${index + 1}`
 
+    // Client-facing: show category + price + duration, never internal IDs.
     const subtitleParts = [
-      safeText(item.offeringName),
-      safeText(item.offeringId),
-      safeText(item.serviceId),
+      safeText(item.categoryName),
+      formatMoney(item.price),
+      formatDurationMinutes(item.durationMinutes),
     ].filter(Boolean)
 
     return {
@@ -451,6 +461,7 @@ function parseBooking(value: unknown): BookingDto | null {
     startedAt: readStringOrNull(value.startedAt),
     finishedAt: readStringOrNull(value.finishedAt),
     locationType: readStringOrNull(value.locationType),
+    appointmentTimeZone: readStringOrNull(value.appointmentTimeZone),
     service,
     client: {
       id: readStringOrNull(client.id) ?? '',
@@ -792,7 +803,12 @@ export default function PublicConsultationPage({ params }: PageProps) {
   }
 
   const { data } = state
-  const timeZone = safeText(data.booking.professional.timeZone, 'UTC')
+  // Show appointment times in the service location's zone (e.g. a CA booking
+  // reads as Pacific), not the pro's profile zone. Falls back to the pro zone
+  // only if no location snapshot exists.
+  const timeZone =
+    safeText(data.booking.appointmentTimeZone) ||
+    safeText(data.booking.professional.timeZone, 'UTC')
   const serviceTitle =
     safeText(data.booking.service?.name) || 'Consultation'
   const clientLabel = [data.booking.client.firstName, data.booking.client.lastName]
