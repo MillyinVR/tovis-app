@@ -87,6 +87,10 @@ function makePublicConsultationToken(overrides?: {
       startedAt: null,
       finishedAt: null,
       locationType: 'SALON',
+      // Location zone (Pacific) differs from the pro's profile zone (Central)
+      // below — appointmentTimeZone must reflect the location.
+      locationTimeZone: 'America/Los_Angeles',
+      clientTimeZoneAtBooking: null,
       service: {
         id: 'service_1',
         name: 'Haircut',
@@ -100,7 +104,7 @@ function makePublicConsultationToken(overrides?: {
       professional: {
         id: 'pro_1',
         businessName: 'TOVIS Studio',
-        timeZone: 'America/Los_Angeles',
+        timeZone: 'America/Chicago',
       },
     },
     consultationApproval: {
@@ -240,6 +244,7 @@ describe('GET /api/public/consultation/[token]', () => {
         startedAt: null,
         finishedAt: null,
         locationType: 'SALON',
+        appointmentTimeZone: 'America/Los_Angeles',
         service: {
           id: 'service_1',
           name: 'Haircut',
@@ -253,7 +258,7 @@ describe('GET /api/public/consultation/[token]', () => {
         professional: {
           id: 'pro_1',
           businessName: 'TOVIS Studio',
-          timeZone: 'America/Los_Angeles',
+          timeZone: 'America/Chicago',
         },
       },
       approval: {
