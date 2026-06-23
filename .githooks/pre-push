@@ -1,0 +1,16 @@
+#!/bin/sh
+#
+# Pre-push guard: run the same checks CI does (typecheck + the full unit suite)
+# before anything leaves your machine, so a red build is caught locally instead
+# of on the PR. The full vitest run is ~15s; typecheck adds ~10s.
+#
+# Bypass for a genuine emergency with:  git push --no-verify
+#
+# Wired up automatically via the repo's postinstall (sets core.hooksPath to
+# .githooks). If it isn't running, run:  git config core.hooksPath .githooks
+set -e
+
+echo "▶ pre-push: typecheck + unit tests (bypass with --no-verify)…"
+npm run typecheck
+npx vitest run
+echo "✓ pre-push checks passed"

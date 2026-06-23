@@ -145,6 +145,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultPriority: NotificationPriority.NORMAL,
     transactional: true,
     allowQuietHoursBypass: false,
+    // A booking confirmation must always reach the recipient by email — it's the
+    // record of the appointment and can't be silenced by a channel preference.
+    emailAlwaysOn: true,
     templateKey: 'booking_confirmed',
     supportedRecipients: [
       NotificationRecipientKind.PRO,
@@ -192,6 +195,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultPriority: NotificationPriority.HIGH,
     transactional: true,
     allowQuietHoursBypass: true,
+    emailAlwaysOn: true,
     templateKey: 'booking_cancelled_by_client',
     supportedRecipients: [
       NotificationRecipientKind.PRO,
@@ -208,6 +212,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultPriority: NotificationPriority.HIGH,
     transactional: true,
     allowQuietHoursBypass: true,
+    emailAlwaysOn: true,
     templateKey: 'booking_cancelled_by_pro',
     supportedRecipients: [
       NotificationRecipientKind.PRO,
@@ -226,6 +231,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultPriority: NotificationPriority.HIGH,
     transactional: true,
     allowQuietHoursBypass: true,
+    emailAlwaysOn: true,
     templateKey: 'booking_cancelled_by_admin',
     supportedRecipients: [
       NotificationRecipientKind.PRO,
