@@ -2,7 +2,9 @@
 
 import { Role } from '@prisma/client'
 
-import { jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { normalizePaymentMethodInput } from '@/lib/payments/acceptedMethods'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
@@ -44,6 +46,23 @@ type MarkPaidSuccessBody = {
 function normalizeBookingId(raw: string | null | undefined): string | null {
   const value = raw?.trim()
   return value ? value : null
+}
+
+async function readSelectedPaymentMethod(
+  request: Request,
+): Promise<ReturnType<typeof normalizePaymentMethodInput>> {
+  let body: unknown = null
+  try {
+    body = await request.json()
+  } catch {
+    return undefined
+  }
+
+  if (typeof body !== 'object' || body === null) return undefined
+
+  return normalizePaymentMethodInput(
+    (body as Record<string, unknown>).selectedPaymentMethod,
+  )
 }
 
 function buildSuccessBody(result: {
@@ -103,6 +122,15 @@ export async function POST(request: Request, context: RouteContext) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
+    const selectedPaymentMethod = await readSelectedPaymentMethod(request)
+
+    if (!selectedPaymentMethod) {
+      return jsonFail(
+        400,
+        'Choose how the client paid (cash, tap to pay, Venmo, Zelle, Apple Cash, or card on file).',
+      )
+    }
+
     const rateLimit = await enforceRateLimit({
       bucket: 'pro:bookings:write',
       key: proRateLimitKey({
@@ -128,6 +156,7 @@ export async function POST(request: Request, context: RouteContext) {
         bookingId,
         professionalId: auth.professionalId,
         action: 'MARK_PAID',
+        selectedPaymentMethod,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -148,6 +177,7 @@ export async function POST(request: Request, context: RouteContext) {
       bookingId,
       professionalId: auth.professionalId,
       actorUserId: auth.user.id,
+      selectedPaymentMethod,
       requestId: pickString(request.headers.get('x-request-id')),
       idempotencyKey: idempotency.idempotencyKey,
     })
@@ -159,6 +189,9 @@ export async function POST(request: Request, context: RouteContext) {
       responseStatus: 200,
       responseBody,
     })
+
+    // Payment collected — deliver the receipt notification immediately.
+    kickNotificationDrain()
 
     return jsonOk(responseBody)
   } catch (error: unknown) {

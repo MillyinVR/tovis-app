@@ -3,7 +3,7 @@ import Link from 'next/link'
 
 import { Card, buttonClassName } from '@/app/_components/ui'
 
-import AftercareBeforeAfter from './AftercareBeforeAfter'
+import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import type {
   ClientHomeAction,
   ClientHomeBooking,

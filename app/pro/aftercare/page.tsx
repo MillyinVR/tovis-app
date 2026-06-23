@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 
 import { prisma } from '@/lib/prisma'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
+import { loadBookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
+import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 
 export const dynamic = 'force-dynamic'
 
@@ -165,6 +167,13 @@ export default async function ProAftercarePage() {
 
   const summaries = [...rows].sort(compareSummaries)
 
+  // Before/after photos are the primary way a pro recognizes an aftercare they
+  // sent — load them for every listed booking and surface them at the top of
+  // each card (mirrors the client-side aftercare view).
+  const beforeAfterByBooking = await loadBookingBeforeAfterThumbs(
+    summaries.map((summary) => summary.bookingId),
+  )
+
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8 text-textPrimary">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
@@ -196,6 +205,7 @@ export default async function ProAftercarePage() {
             const serviceName = summary.booking.service?.name ?? 'Service'
             const clientName = getClientName(summary.booking.client)
             const status = getStatus(summary)
+            const beforeAfter = beforeAfterByBooking.get(summary.bookingId)
 
             return (
               <Link
@@ -203,6 +213,14 @@ export default async function ProAftercarePage() {
                 href={aftercareHref(summary.bookingId)}
                 className="tovis-glass rounded-card block border border-white/10 bg-bgSecondary p-4 transition hover:bg-surfaceGlass"
               >
+                {beforeAfter ? (
+                  <AftercareBeforeAfter
+                    media={beforeAfter}
+                    serviceName={serviceName}
+                    className="mb-4"
+                  />
+                ) : null}
+
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">

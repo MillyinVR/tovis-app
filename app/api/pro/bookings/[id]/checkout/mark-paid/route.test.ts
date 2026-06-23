@@ -80,7 +80,10 @@ function makeJsonResponse(status: number, payload: unknown): Response {
   })
 }
 
-function makeRequest(headers?: Record<string, string>): Request {
+function makeRequest(
+  headers?: Record<string, string>,
+  body: Record<string, unknown> | null = { selectedPaymentMethod: 'CASH' },
+): Request {
   return new Request(
     'http://localhost/api/pro/bookings/booking_1/checkout/mark-paid',
     {
@@ -89,6 +92,7 @@ function makeRequest(headers?: Record<string, string>): Request {
         'content-type': 'application/json',
         ...(headers ?? {}),
       },
+      ...(body === null ? {} : { body: JSON.stringify(body) }),
     },
   )
 }
@@ -268,6 +272,22 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
     expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
+  it('rejects with 400 when no payment method is supplied, before rate limit or idempotency', async () => {
+    const result = await POST(makeRequest(undefined, null), makeContext())
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error:
+        'Choose how the client paid (cash, tap to pay, Venmo, Zelle, Apple Cash, or card on file).',
+    })
+
+    expect(mocks.proRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markProBookingCheckoutPaid).not.toHaveBeenCalled()
+  })
+
   it('returns rate-limit response before idempotency or mark-paid mutation', async () => {
     const blockedDecision = {
       allowed: false,
@@ -384,6 +404,7 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
         bookingId: 'booking_1',
         professionalId: 'pro_123',
         action: 'MARK_PAID',
+        selectedPaymentMethod: 'CASH',
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -398,6 +419,7 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
       bookingId: 'booking_1',
       professionalId: 'pro_123',
       actorUserId: 'user_pro_1',
+      selectedPaymentMethod: 'CASH',
       requestId: 'req_123',
       idempotencyKey: 'idem_mark_paid_1',
     })

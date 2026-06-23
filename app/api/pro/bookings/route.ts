@@ -11,6 +11,7 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import {
   isBookingError,
@@ -377,6 +378,11 @@ export async function POST(req: Request) {
       responseStatus: 201,
       responseBody,
     })
+
+    // The booking transaction has committed, so any confirmation / claim-invite
+    // notifications it enqueued are now visible — drain them immediately (after
+    // the response) instead of waiting for the cron tick.
+    kickNotificationDrain()
 
     return jsonOk(responseBody, 201)
   } catch (error: unknown) {

@@ -15,7 +15,7 @@ import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import AftercareBeforeAfter from '@/app/client/(gated)/_components/AftercareBeforeAfter'
+import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 
 import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'

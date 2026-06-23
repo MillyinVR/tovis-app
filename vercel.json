@@ -15,7 +15,7 @@
     },
     {
       "path": "/api/internal/jobs/notifications/process",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/internal/jobs/last-minute/process",

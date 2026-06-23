@@ -19,6 +19,7 @@ import {
   createBookingCloseoutAuditLog,
 } from '@/lib/booking/closeoutAudit'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { createConsultationActionDelivery } from '@/lib/clientActions/createConsultationActionDelivery'
 import {
   isBookingError,
@@ -929,6 +930,10 @@ export async function POST(req: Request, ctx: RouteContext) {
       responseStatus: 200,
       responseBody,
     })
+
+    // The consultation proposal + its client notification have committed —
+    // deliver the magic-link email/SMS right away rather than on the next cron.
+    kickNotificationDrain()
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {

@@ -673,6 +673,54 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
     })
   })
 
+  it('honors the agreed consultation price over the offering catalog price', async () => {
+    const { basePrice, addOnPrice } = installApprovedMutationMocks()
+
+    // The pro and client agreed on prices that differ from the catalog
+    // "starting at" prices (100 / 25). The approved booking snapshots must
+    // reflect the agreed quote.
+    installBookingFindUniqueMocks({
+      consultationBooking: makePendingApprovalBooking({
+        proposedServicesJson: {
+          currency: 'USD',
+          items: [
+            { offeringId: 'off_base', sortOrder: 0, price: '200.00' },
+            { offeringId: 'off_addon', sortOrder: 1, price: '40.00' },
+          ],
+        } satisfies Prisma.JsonObject,
+      }),
+    })
+
+    await approveConsultationAndMaterializeBooking({
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      professionalId: PROFESSIONAL_ID,
+    })
+
+    // Base item persists the agreed price (200), not the catalog price (100).
+    const baseCreate = mocks.txBookingServiceItemCreate.mock.calls[0]?.[0]
+    expect(baseCreate.data.priceSnapshot.toString()).toBe('200')
+    expect(baseCreate.data.priceSnapshot.toString()).not.toBe(
+      basePrice.toString(),
+    )
+
+    // Add-on item persists the agreed price (40), not the catalog price (25).
+    const addOnCreateMany =
+      mocks.txBookingServiceItemCreateMany.mock.calls[0]?.[0]
+    expect(addOnCreateMany.data[0].priceSnapshot.toString()).toBe('40')
+    expect(addOnCreateMany.data[0].priceSnapshot.toString()).not.toBe(
+      addOnPrice.toString(),
+    )
+
+    // The totals computation receives the agreed prices, so the rolled-up
+    // subtotal reflects the quote rather than the catalog.
+    const totalsInput =
+      mocks.computeBookingItemLikeTotals.mock.calls[0]?.[0]
+    expect(totalsInput.map((item: { priceSnapshot: Prisma.Decimal }) =>
+      item.priceSnapshot.toString(),
+    )).toEqual(['200', '40'])
+  })
+
   it.each([
     {
       label: 'missing items',

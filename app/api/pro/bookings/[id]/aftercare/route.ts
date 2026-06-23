@@ -23,6 +23,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -922,7 +923,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     const requestMeta = readRequestMeta(req)
 
-    return await withRouteIdempotency<JsonObjectPayload>(
+    const response = await withRouteIdempotency<JsonObjectPayload>(
       {
         request: req,
         actor: {
@@ -975,6 +976,15 @@ export async function POST(req: Request, ctx: RouteContext) {
         return { status: 200, body: responseBody }
       },
     )
+
+    // When the aftercare was sent to the client, its magic-link email/SMS was
+    // enqueued inside the (now-committed) transaction — deliver it immediately
+    // rather than waiting for the cron tick.
+    if (parsedBody.value.sendToClient) {
+      kickNotificationDrain()
+    }
+
+    return response
   } catch (error: unknown) {
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {

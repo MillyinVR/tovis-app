@@ -1,5 +1,6 @@
 // app/api/bookings/[id]/reschedule/route.ts
 import { Role, type Prisma } from '@prisma/client'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import {
@@ -155,6 +156,9 @@ export async function POST(req: Request, ctx: RouteContext) {
       responseStatus: 200,
       responseBody,
     })
+
+    // Booking rescheduled — deliver the new-time notification now.
+    kickNotificationDrain()
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {

@@ -4,11 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import {
-  getZonedParts,
-  sanitizeTimeZone,
-  zonedTimeToUtc,
-} from '@/lib/timeZone'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import {
@@ -20,7 +16,6 @@ import {
   addDaysToYmd,
   compareYmd,
   isoToYmdInTimeZone,
-  stepDatetimeLocal,
   stepYmd,
   todayYmdInTimeZone,
   ymdToIsoEndOfDay,
@@ -28,6 +23,9 @@ import {
   type StepUnit,
 } from './aftercareDates'
 import AvailabilityCalendarPopup from './AvailabilityCalendarPopup'
+import RebookSlotPicker, {
+  type SelectedRebookSlot,
+} from './RebookSlotPicker'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
@@ -60,12 +58,28 @@ type RecommendedProduct = {
 type Props = {
   bookingId: string
   timeZone: string
+  // Source-booking context used to propose a real next-appointment slot from the
+  // pro's own availability (same service + location).
+  rebookProfessionalId: string
+  rebookServiceId: string
+  rebookOfferingId: string | null
+  rebookLocationType: 'SALON' | 'MOBILE'
+  rebookLocationId: string
+  rebookClientAddressId: string | null
   existingNotes: string
   existingRebookedFor: string | null
   existingRebookMode?: RebookMode | null
   existingRebookWindowStart?: string | null
   existingRebookWindowEnd?: string | null
   existingRebookDeclinedAt?: string | null
+  // The previously-saved exact next-appointment slot, if any (for prefill).
+  existingRebookSlot?: {
+    offeringId: string | null
+    locationId: string
+    locationType: 'SALON' | 'MOBILE'
+    startsAt: string
+    endsAt: string
+  } | null
   existingMedia: MediaItem[]
   existingRecommendedProducts?: RecommendedProduct[]
 
@@ -163,63 +177,6 @@ function safeId() {
   return `${Date.now()}-${Math.random()}`
 }
 
-function isoToDatetimeLocalInTimeZone(
-  iso: string | null,
-  timeZone: string,
-): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-
-  const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
-  const p = getZonedParts(d, tz)
-
-  const yyyy = String(p.year).padStart(4, '0')
-  const mm = String(p.month).padStart(2, '0')
-  const dd = String(p.day).padStart(2, '0')
-  const hh = String(p.hour).padStart(2, '0')
-  const mi = String(p.minute).padStart(2, '0')
-
-  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
-}
-
-function isoFromDatetimeLocalInTimeZone(
-  value: string,
-  timeZone: string,
-): string | null {
-  const v = (value || '').trim()
-  if (!v) return null
-
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(v)
-  if (!m) return null
-
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-  const hour = Number(m[4])
-  const minute = Number(m[5])
-
-  if (![year, month, day, hour, minute].every(Number.isFinite)) return null
-  if (month < 1 || month > 12) return null
-  if (day < 1 || day > 31) return null
-  if (hour < 0 || hour > 23) return null
-  if (minute < 0 || minute > 59) return null
-
-  const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
-  const utc = zonedTimeToUtc({
-    year,
-    month,
-    day,
-    hour,
-    minute,
-    second: 0,
-    timeZone: tz,
-  })
-
-  if (Number.isNaN(utc.getTime())) return null
-  return utc.toISOString()
-}
-
 function cardClass() {
   return 'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
 }
@@ -312,12 +269,19 @@ function toDisplayDateTime(iso: string | null | undefined, timeZone: string) {
 export default function AftercareForm({
   bookingId,
   timeZone,
+  rebookProfessionalId,
+  rebookServiceId,
+  rebookOfferingId,
+  rebookLocationType,
+  rebookLocationId,
+  rebookClientAddressId,
   existingNotes,
   existingRebookedFor,
   existingRebookMode,
   existingRebookWindowStart,
   existingRebookWindowEnd,
   existingRebookDeclinedAt,
+  existingRebookSlot,
   existingMedia,
   existingRecommendedProducts,
   existingDraftSavedAt,
@@ -346,13 +310,13 @@ export default function AftercareForm({
   const [productsError, setProductsError] = useState<string | null>(null)
 
   const [rebookMode, setRebookMode] = useState<RebookMode>('NONE')
-  const [rebookAt, setRebookAt] = useState<string>('')
+  const [rebookSlot, setRebookSlot] = useState<SelectedRebookSlot | null>(null)
   const [windowStart, setWindowStart] = useState<string>('')
   const [windowEnd, setWindowEnd] = useState<string>('')
 
-  // Which date field, if any, has the "open my calendar" popup showing.
+  // Which window date field, if any, has the "open my calendar" popup showing.
   const [pickerTarget, setPickerTarget] = useState<
-    'nextVisit' | 'windowStart' | 'windowEnd' | null
+    'windowStart' | 'windowEnd' | null
   >(null)
 
   const [createRebookReminder, setCreateRebookReminder] = useState(false)
@@ -395,10 +359,16 @@ export default function AftercareForm({
 
     setRebookMode(inferred)
 
-    setRebookAt(
-      existingRebookedFor
-        ? isoToDatetimeLocalInTimeZone(existingRebookedFor, tz)
-        : '',
+    setRebookSlot(
+      existingRebookSlot && existingRebookSlot.offeringId
+        ? {
+            offeringId: existingRebookSlot.offeringId,
+            locationId: existingRebookSlot.locationId,
+            locationType: existingRebookSlot.locationType,
+            startsAt: existingRebookSlot.startsAt,
+            endsAt: existingRebookSlot.endsAt,
+          }
+        : null,
     )
     setWindowStart(
       existingRebookWindowStart
@@ -431,6 +401,7 @@ export default function AftercareForm({
     existingRebookedFor,
     existingRebookWindowStart,
     existingRebookWindowEnd,
+    existingRebookSlot,
     existingRecommendedProducts,
     existingDraftSavedAt,
     existingSentToClientAt,
@@ -472,7 +443,7 @@ export default function AftercareForm({
     [sortedMedia],
   )
 
-  const hasBookedDate = Boolean(rebookAt.trim())
+  const hasBookedDate = Boolean(rebookSlot)
   const hasWindowStart = Boolean(windowStart.trim())
   const hasWindowEnd = Boolean(windowEnd.trim())
 
@@ -512,7 +483,7 @@ export default function AftercareForm({
     markDirty()
 
     if (next === 'NONE') {
-      setRebookAt('')
+      setRebookSlot(null)
       setWindowStart('')
       setWindowEnd('')
       setCreateRebookReminder(false)
@@ -526,9 +497,14 @@ export default function AftercareForm({
     }
 
     if (next === 'RECOMMENDED_WINDOW') {
-      setRebookAt('')
+      setRebookSlot(null)
       setCreateRebookReminder(false)
     }
+  }
+
+  function onPickRebookSlot(slot: SelectedRebookSlot | null) {
+    setRebookSlot(slot)
+    markDirty()
   }
 
   // Setting/stepping the window start keeps the end at least one day after it
@@ -560,20 +536,7 @@ export default function AftercareForm({
     )
   }
 
-  function stepNextVisit(unit: StepUnit) {
-    markDirty()
-    setRebookAt((prev) => stepDatetimeLocal(prev, unit, tomorrowYmd))
-  }
-
   // Calendar-popup pickers (return a "YYYY-MM-DD" day).
-  function pickNextVisitDate(ymd: string) {
-    markDirty()
-    setRebookAt((prev) => {
-      const time = /T(\d{2}:\d{2})$/.exec(prev)?.[1] ?? '12:00'
-      return `${ymd}T${time}`
-    })
-  }
-
   function pickWindowEnd(ymd: string) {
     const minEnd = windowStart ? addDaysToYmd(windowStart, 1) : null
     applyWindowEnd(minEnd && compareYmd(ymd, minEnd) < 0 ? minEnd : ymd)
@@ -624,7 +587,10 @@ export default function AftercareForm({
   }
 
   function buildPayload(sendToClient: boolean) {
-    const rebookISO = isoFromDatetimeLocalInTimeZone(rebookAt, tz)
+    // The booked next appointment is now driven by a real picked slot; its
+    // startsAt is the canonical rebookedFor.
+    const rebookISO =
+      rebookMode === 'BOOKED_NEXT_APPOINTMENT' ? rebookSlot?.startsAt ?? null : null
     const windowStartISO = ymdToIsoStartOfDay(windowStart, tz)
     const windowEndISO = ymdToIsoEndOfDay(windowEnd, tz)
 
@@ -664,7 +630,17 @@ export default function AftercareForm({
       notes: notes.trim().slice(0, NOTES_MAX) || '',
       recommendedProducts: sanitizedProducts,
       rebookMode,
-      rebookedFor: rebookMode === 'BOOKED_NEXT_APPOINTMENT' ? rebookISO : null,
+      rebookedFor: rebookISO,
+      rebookSlot:
+        rebookMode === 'BOOKED_NEXT_APPOINTMENT' && rebookSlot
+          ? {
+              offeringId: rebookSlot.offeringId,
+              locationId: rebookSlot.locationId,
+              locationType: rebookSlot.locationType,
+              startsAt: rebookSlot.startsAt,
+              endsAt: rebookSlot.endsAt,
+            }
+          : null,
       rebookWindowStart:
         rebookMode === 'RECOMMENDED_WINDOW' ? windowStartISO : null,
       rebookWindowEnd:
@@ -685,22 +661,25 @@ export default function AftercareForm({
   function validateBeforePost(sendToClient: boolean) {
     if (!bookingId) return 'Missing booking id.'
 
-    const rebookISO = isoFromDatetimeLocalInTimeZone(rebookAt, tz)
     const windowStartISO = ymdToIsoStartOfDay(windowStart, tz)
     const windowEndISO = ymdToIsoEndOfDay(windowEnd, tz)
     const now = Date.now()
 
     if (rebookMode === 'BOOKED_NEXT_APPOINTMENT') {
-      if (!rebookISO) {
-        return 'Pick a recommended next booking date, or change rebook mode to “None”.'
+      if (!rebookOfferingId) {
+        return 'This booking has no service offering set, so an exact next appointment can’t be proposed. Use “Booking window” instead.'
       }
 
-      const rebookDate = new Date(rebookISO)
+      if (!rebookSlot) {
+        return 'Pick an available next-appointment time, or change rebook mode to “None”.'
+      }
+
+      const rebookDate = new Date(rebookSlot.startsAt)
       if (
         Number.isNaN(rebookDate.getTime()) ||
         rebookDate.getTime() <= now
       ) {
-        return 'Recommended next booking must be in the future.'
+        return 'The next appointment must be in the future.'
       }
     }
 
@@ -1181,30 +1160,25 @@ export default function AftercareForm({
                 </div>
               ) : null}
 
-              <label className={labelClass()} htmlFor="rebookAt">
-                Recommended next booking
+              <label className={labelClass()}>
+                Next appointment time
               </label>
-              <input
-                id="rebookAt"
-                type="datetime-local"
-                value={rebookAt}
+              <RebookSlotPicker
+                professionalId={rebookProfessionalId}
+                serviceId={rebookServiceId}
+                offeringId={rebookOfferingId}
+                locationType={rebookLocationType}
+                locationId={rebookLocationId}
+                clientAddressId={rebookClientAddressId}
+                timeZone={tz}
+                minYmd={tomorrowYmd}
+                value={rebookSlot}
                 disabled={disabled}
-                onChange={(e) => {
-                  setRebookAt(e.target.value)
-                  markDirty()
-                }}
-                className={inputClass(Boolean(disabled))}
-              />
-              <StepButtons
-                disabled={disabled}
-                onStep={stepNextVisit}
-                onOpenCalendar={() => setPickerTarget('nextVisit')}
+                onChange={onPickRebookSlot}
               />
               <div className="mt-2 text-xs font-semibold text-textSecondary">
-                This shows on the client’s summary and can power a reminder.
-              </div>
-              <div className="mt-1 text-[11px] font-semibold text-textSecondary">
-                Timezone: <span className="text-textPrimary">{tz}</span>
+                Pick a real open time from your schedule. It shows on the
+                client’s summary and can power a reminder.
               </div>
             </div>
           ) : null}
@@ -1400,32 +1374,25 @@ export default function AftercareForm({
           open
           tz={tz}
           title={
-            pickerTarget === 'nextVisit'
-              ? 'Pick a next-booking date'
-              : pickerTarget === 'windowStart'
-                ? 'Pick a window start date'
-                : 'Pick a window end date'
+            pickerTarget === 'windowStart'
+              ? 'Pick a window start date'
+              : 'Pick a window end date'
           }
           minYmd={
-            pickerTarget === 'nextVisit'
-              ? todayYmd
-              : pickerTarget === 'windowStart'
-                ? tomorrowYmd
-                : windowStart
-                  ? addDaysToYmd(windowStart, 1) ?? tomorrowYmd
-                  : tomorrowYmd
+            pickerTarget === 'windowStart'
+              ? tomorrowYmd
+              : windowStart
+                ? addDaysToYmd(windowStart, 1) ?? tomorrowYmd
+                : tomorrowYmd
           }
           anchorYmd={
-            pickerTarget === 'nextVisit'
-              ? rebookAt.slice(0, 10) || undefined
-              : pickerTarget === 'windowStart'
-                ? windowStart || undefined
-                : windowEnd || windowStart || undefined
+            pickerTarget === 'windowStart'
+              ? windowStart || undefined
+              : windowEnd || windowStart || undefined
           }
           onClose={() => setPickerTarget(null)}
           onPick={(ymd) => {
-            if (pickerTarget === 'nextVisit') pickNextVisitDate(ymd)
-            else if (pickerTarget === 'windowStart') applyWindowStart(ymd)
+            if (pickerTarget === 'windowStart') applyWindowStart(ymd)
             else pickWindowEnd(ymd)
           }}
         />
