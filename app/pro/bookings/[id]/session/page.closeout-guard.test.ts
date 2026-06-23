@@ -22,11 +22,24 @@ describe('pro booking session closeout guard', () => {
     expect(source).not.toMatch(/nextStep:\s*['"]DONE['"]/)
   })
 
-  it('routes wrap-up through final review and after photos, not direct completion', () => {
-    expect(source).toContain('async function wrapUpAction')
-    expect(source).toContain('confirmBookingFinalReview')
+  it('routes finish through final-review finalization and after photos, not direct completion', () => {
+    // Finishing the service finalizes the menu (FINISH_REVIEW) and lands on
+    // after photos via the shared helper — never a direct jump to completion.
+    expect(source).toContain('async function finishServiceAction')
+    expect(source).toContain('finishSessionToAfterPhotos')
     expect(source).toContain('redirect(afterPhotosHref(bookingId))')
     expect(source).toContain('Finish closeout')
+  })
+
+  it('finalizes the booking review inside the finish helper', () => {
+    const helperPath = path.join(
+      __dirname,
+      '../../../../../lib/booking/finishSessionToAfterPhotos.ts',
+    )
+    const helperSource = fs.readFileSync(helperPath, 'utf8')
+
+    expect(helperSource).toContain('finishBookingSession')
+    expect(helperSource).toContain('confirmBookingFinalReview')
   })
 
   it('allows read-only DONE rendering for already-completed sessions', () => {

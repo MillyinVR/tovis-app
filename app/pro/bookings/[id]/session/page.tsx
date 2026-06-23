@@ -24,10 +24,10 @@ import MarkPaidButton from './MarkPaidButton'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import {
-  confirmBookingFinalReview,
   recordInPersonConsultationDecision,
   transitionSessionStep,
 } from '@/lib/booking/writeBoundary'
+import { finishSessionToAfterPhotos } from '@/lib/booking/finishSessionToAfterPhotos'
 import {
   afterPhotosHref,
   aftercareHref,
@@ -266,7 +266,7 @@ async function inPersonDecisionAction(
   revalidatePath(sessionHubHref(bookingId))
 }
 
-async function wrapUpAction(bookingId: string) {
+async function finishServiceAction(bookingId: string) {
   'use server'
 
   const user = await getCurrentUser().catch(() => null)
@@ -284,21 +284,6 @@ async function wrapUpAction(bookingId: string) {
       professionalId: true,
       status: true,
       finishedAt: true,
-      sessionStep: true,
-      subtotalSnapshot: true,
-      serviceItems: {
-        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-        select: {
-          id: true,
-          serviceId: true,
-          offeringId: true,
-          itemType: true,
-          priceSnapshot: true,
-          durationMinutesSnapshot: true,
-          notes: true,
-          sortOrder: true,
-        },
-      },
     },
   })
 
@@ -309,34 +294,9 @@ async function wrapUpAction(bookingId: string) {
     redirect(sessionHubHref(bookingId))
   }
 
-  if (booking.sessionStep !== SessionStep.FINISH_REVIEW) {
-    redirect(sessionHubHref(bookingId))
-  }
-
-  if (booking.serviceItems.length === 0) {
-    redirect(sessionHubHref(bookingId))
-  }
-
-  await confirmBookingFinalReview({
-    bookingId,
-    professionalId,
-    finalLineItems: booking.serviceItems.map((item, index) => ({
-      bookingServiceItemId: item.id,
-      serviceId: item.serviceId,
-      offeringId: item.offeringId,
-      itemType:
-        item.itemType ??
-        (index === 0
-          ? BookingServiceItemType.BASE
-          : BookingServiceItemType.ADD_ON),
-      price: item.priceSnapshot,
-      durationMinutes: item.durationMinutesSnapshot,
-      notes: item.notes,
-      sortOrder: item.sortOrder,
-    })),
-    expectedSubtotal: booking.subtotalSnapshot,
-    recommendedProducts: [],
-  })
+  // Finish the in-progress service and finalize the menu in one step, then go
+  // straight to after photos — no intermediate "Ready for wrap-up" screen.
+  await finishSessionToAfterPhotos({ bookingId, professionalId })
 
   redirect(afterPhotosHref(bookingId))
 }
@@ -659,26 +619,6 @@ function PhotoGrid({
   )
 }
 
-function WaitingForClientBanner() {
-  return (
-    <section className="brand-pro-session-wait-banner">
-      <div className="brand-pro-session-wait-icon">
-        <CameraIcon />
-      </div>
-
-      <div className="brand-pro-session-wait-body">
-        <div className="brand-pro-session-wait-title">While you wait…</div>
-
-        <div className="brand-pro-session-card-body">
-          Tap the <strong>camera</strong> in the footer and take{' '}
-          <strong>BEFORE</strong> photos now. Keeps the flow clean once the
-          client approves.
-        </div>
-      </div>
-    </section>
-  )
-}
-
 function ProofCard({
   decisionLabel,
   methodLabel,
@@ -872,68 +812,124 @@ function ConsultationView({
   )
 }
 
-function WaitingView({
+function WaitingBeforePhotosView({
+  bookingId,
   serviceName,
   subtitle,
   totalLabel,
   approvalStatus,
-  showWaitingBanner,
+  beforeCount,
   canUseInPersonFallback,
   approveInPerson,
   rejectInPerson,
   toConsult,
+  toService,
 }: {
+  bookingId: string
   serviceName: string
   subtitle: string
   totalLabel: string
   approvalStatus: ConsultationApprovalStatus | null
-  showWaitingBanner: boolean
+  beforeCount: number
   canUseInPersonFallback: boolean
   approveInPerson: ServerAction
   rejectInPerson: ServerAction
   toConsult: ServerAction
+  toService: ServerAction
 }) {
+  const approved = isConsultationApproved(approvalStatus)
+  const canContinue = approved && beforeCount > 0
+
   return (
     <PageShell>
       <SessionHeader
         backHref="/pro/bookings"
-        backLabel="Session hub"
-        kicker="⏳ AWAITING APPROVAL"
-        kickerTone="pending"
+        backLabel="All bookings"
+        kicker={approved ? '◆ CONSULTATION APPROVED' : '⏳ AWAITING APPROVAL'}
+        kickerTone={approved ? 'success' : 'pending'}
         title={serviceName}
         titleSize="sm"
-        subtitle={`Consultation sent · ${totalLabel} proposed`}
+        subtitle={
+          approved
+            ? `Approved · ${totalLabel}`
+            : `Consultation sent · ${totalLabel} proposed`
+        }
         border
       />
 
       <div className="brand-pro-session-scroll no-scroll">
-        <Card>
+        <Card tone={approved ? 'success' : undefined}>
           <div className="brand-pro-session-chip-row mb-2">
-            <Pill label={labelForConsultationStatus(approvalStatus)} tone="pending" />
+            <Pill
+              label={labelForConsultationStatus(approvalStatus)}
+              tone={approved ? 'success' : 'pending'}
+            />
             <span className="brand-pro-session-muted text-[10px] font-bold">
-              Waiting on client
+              {approved ? 'Consultation approved' : 'Waiting on client'}
             </span>
           </div>
 
           <div className="brand-pro-session-card-body">
-            Secure approval is required before the session can move forward.
+            {approved
+              ? 'You’re approved. Finish your before photos, then continue to service.'
+              : 'Secure approval is required before you can start the service. While you wait, take BEFORE photos now.'}
           </div>
         </Card>
 
-        {showWaitingBanner ? <WaitingForClientBanner /> : null}
+        <section className="mt-4 mb-4">
+          <div className="brand-pro-session-photo-header">
+            <div className="brand-pro-session-section-title">
+              Before photos
+            </div>
 
-        <Card>
-          <div className="brand-pro-session-section-title">
-            In-person fallback
+            <div className="brand-pro-session-photo-count">
+              <CheckIcon size={10} />
+              {beforeCount} captured
+            </div>
           </div>
 
-          <div className="brand-pro-session-card-body mt-1">
-            Only use this if the client is physically present and cannot access
-            their secure link. It will be logged honestly as{' '}
-            <strong>in-person on pro device</strong>.
-          </div>
+          <PhotoGrid count={beforeCount} addHref={beforePhotosHref(bookingId)} />
 
-          {canUseInPersonFallback ? (
+          <div className="mt-3">
+            <ActionLink
+              href={beforePhotosHref(bookingId)}
+              variant={beforeCount > 0 ? 'ghost' : 'primary'}
+            >
+              <CameraIcon size={14} />
+              {beforeCount > 0 ? 'Add more before photos' : 'Take before photos'}
+            </ActionLink>
+          </div>
+        </section>
+
+        {approved ? (
+          canContinue ? (
+            <form action={toService}>
+              <PendingActionButton
+                pendingLabel="Starting…"
+                transitionLabel="Starting service…"
+              >
+                Continue to service <ArrowRightIcon />
+              </PendingActionButton>
+            </form>
+          ) : (
+            <div className="brand-pro-session-help-text">
+              Add at least one before photo to continue to service.
+            </div>
+          )
+        ) : null}
+
+        {!approved && canUseInPersonFallback ? (
+          <Card>
+            <div className="brand-pro-session-section-title">
+              In-person fallback
+            </div>
+
+            <div className="brand-pro-session-card-body mt-1">
+              Only use this if the client is physically present and cannot access
+              their secure link. It will be logged honestly as{' '}
+              <strong>in-person on pro device</strong>.
+            </div>
+
             <div className="brand-pro-session-fallback-actions">
               <form action={approveInPerson}>
                 <PendingActionButton variant="ghost" pendingLabel="Recording…">
@@ -946,86 +942,16 @@ function WaitingView({
                 <PendingActionButton variant="danger" pendingLabel="Recording…">Record decline</PendingActionButton>
               </form>
             </div>
-          ) : null}
-        </Card>
+          </Card>
+        ) : null}
 
-        <form action={toConsult} className="pt-3 pb-4">
-          <PendingActionButton variant="ghost" pendingLabel="Going back…">← Back to consultation</PendingActionButton>
-        </form>
+        {!approved ? (
+          <form action={toConsult} className="pt-3 pb-4">
+            <PendingActionButton variant="ghost" pendingLabel="Going back…">← Back to consultation</PendingActionButton>
+          </form>
+        ) : null}
 
         <div className="brand-pro-session-help-text">{subtitle}</div>
-      </div>
-    </PageShell>
-  )
-}
-
-function BeforePhotosView({
-  serviceName,
-  clientName,
-  totalLabel,
-  beforeCount,
-  toService,
-  bookingId,
-}: {
-  serviceName: string
-  clientName: string
-  totalLabel: string
-  beforeCount: number
-  toService: ServerAction
-  bookingId: string
-}) {
-  return (
-    <PageShell>
-      <SessionHeader
-        backHref={sessionHubHref(bookingId)}
-        backLabel="Session hub"
-        kicker="◆ CONSULTATION APPROVED"
-        kickerTone="success"
-        title="Before photos"
-        titleSize="sm"
-        subtitle={`${clientName} · ${serviceName}`}
-        border
-      />
-
-      <div className="brand-pro-session-scroll no-scroll">
-        <div className="brand-pro-session-chip-row mb-4">
-          <Pill label="CONSULTATION APPROVED" state="done" />
-          <Pill label={`${totalLabel} AGREED`} state="done" />
-        </div>
-
-        <section className="mb-4">
-          <div className="brand-pro-session-photo-header">
-            <div className="brand-pro-session-section-title">
-              Before photos
-            </div>
-
-            <div className="brand-pro-session-photo-count">
-              <CheckIcon size={10} />
-              {beforeCount} captured
-            </div>
-          </div>
-
-          <PhotoGrid
-            count={beforeCount}
-            addHref={beforePhotosHref(bookingId)}
-          />
-        </section>
-
-        <form action={toService}>
-          <PendingActionButton pendingLabel="Starting…" transitionLabel="Starting service…">
-            Start service <ArrowRightIcon />
-          </PendingActionButton>
-        </form>
-
-        <div className="brand-pro-session-help-text">
-          Or add more before photos first
-        </div>
-
-        <div className="mt-3 pb-4">
-          <ActionLink href={beforePhotosHref(bookingId)} variant="ghost">
-            + Add photo via camera
-          </ActionLink>
-        </div>
       </div>
     </PageShell>
   )
@@ -1037,14 +963,14 @@ function ServiceInProgressView({
   startedAt,
   durationLabel,
   beforeCount,
-  toFinishReview,
+  onFinish,
 }: {
   serviceName: string
   clientName: string
   startedAt: Date | null
   durationLabel: string
   beforeCount: number
-  toFinishReview: ServerAction
+  onFinish: ServerAction
 }) {
   return (
     <PageShell>
@@ -1101,62 +1027,15 @@ function ServiceInProgressView({
           </div>
         </Card>
 
-        <form action={toFinishReview}>
+        <form action={onFinish}>
           <PendingActionButton pendingLabel="Finishing…" transitionLabel="Finishing service…">
             Finish service <ArrowRightIcon />
           </PendingActionButton>
         </form>
 
         <div className="brand-pro-session-help-text pb-4">
-          Moves to wrap-up: after photos + aftercare
+          Moves to after photos
         </div>
-      </div>
-    </PageShell>
-  )
-}
-
-function FinishReviewView({
-  bookingId,
-  serviceName,
-  clientName,
-  toWrapUp,
-}: {
-  bookingId: string
-  serviceName: string
-  clientName: string
-  toWrapUp: ServerAction
-}) {
-  return (
-    <PageShell>
-      <SessionHeader
-        backHref={sessionHubHref(bookingId)}
-        backLabel="Session hub"
-        kicker="WRAP-UP"
-        kickerTone="muted"
-        title="Finish review"
-        titleSize="sm"
-        subtitle={`${clientName} · ${serviceName}`}
-        border
-      />
-
-      <div className="brand-pro-session-scroll no-scroll">
-        <Card accent>
-          <div className="brand-pro-session-card-heading">
-            <span className="brand-pro-session-card-dot" />
-            Ready for wrap-up
-          </div>
-
-          <div className="brand-pro-session-card-body">
-            Next you’ll capture after photos and finalize aftercare. Order
-            does not matter, but both need to be done before completion.
-          </div>
-
-          <form action={toWrapUp} className="mt-3">
-            <PendingActionButton pendingLabel="Wrapping up…" transitionLabel="Moving to wrap-up…">
-              Go to wrap-up <ArrowRightIcon />
-            </PendingActionButton>
-          </form>
-        </Card>
       </div>
     </PageShell>
   )
@@ -1705,7 +1584,6 @@ export default async function ProBookingSessionPage(props: PageProps) {
     }),
   ])
 
-  const hasBeforePhoto = beforeCount > 0
   const hasAfterPhoto = afterCount > 0
   const hasAftercareDraft = Boolean(aftercare?.id)
   const hasFinalizedAftercare = Boolean(aftercare?.sentToClientAt)
@@ -1743,12 +1621,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
     bookingId,
     SessionStep.SERVICE_IN_PROGRESS,
   )
-  const toFinishReview = transitionAction.bind(
-    null,
-    bookingId,
-    SessionStep.FINISH_REVIEW,
-  )
-  const toWrapUp = wrapUpAction.bind(null, bookingId)
+  const finishService = finishServiceAction.bind(null, bookingId)
   const approveInPerson = inPersonDecisionAction.bind(
     null,
     bookingId,
@@ -1805,39 +1678,29 @@ export default async function ProBookingSessionPage(props: PageProps) {
     )
   }
 
-  if (screenKey === 'WAITING_ON_CLIENT') {
+  // Waiting-on-approval and before-photos are one combined screen now: the pro
+  // can capture before photos while the consultation is pending, and the same
+  // page flips to "approved" + "continue to service" once the client approves.
+  if (screenKey === 'WAITING_ON_CLIENT' || screenKey === 'BEFORE_PHOTOS') {
     return (
       <>
-        <WaitingView
+        <WaitingBeforePhotosView
+          bookingId={booking.id}
           serviceName={serviceName}
           subtitle={subtitle}
           totalLabel={totalLabel}
           approvalStatus={approvalStatus}
-          showWaitingBanner={
-            isConsultationPending(approvalStatus) && !hasBeforePhoto
-          }
+          beforeCount={beforeCount}
           canUseInPersonFallback={
             isConsultationPending(approvalStatus) && !hasConsultationProof
           }
           approveInPerson={approveInPerson}
           rejectInPerson={rejectInPerson}
           toConsult={toConsult}
+          toService={toService}
         />
         {proofCard}
       </>
-    )
-  }
-
-  if (screenKey === 'BEFORE_PHOTOS') {
-    return (
-      <BeforePhotosView
-        serviceName={serviceName}
-        clientName={clientName}
-        totalLabel={totalLabel}
-        beforeCount={beforeCount}
-        toService={toService}
-        bookingId={booking.id}
-      />
     )
   }
 
@@ -1849,23 +1712,18 @@ export default async function ProBookingSessionPage(props: PageProps) {
         startedAt={booking.startedAt}
         durationLabel={durationLabel}
         beforeCount={beforeCount}
-        toFinishReview={toFinishReview}
+        onFinish={finishService}
       />
     )
   }
 
-  if (screenKey === 'FINISH_REVIEW') {
-    return (
-      <FinishReviewView
-        bookingId={booking.id}
-        serviceName={serviceName}
-        clientName={clientName}
-        toWrapUp={toWrapUp}
-      />
-    )
-  }
-
+  // After photos → wrap-up. The wrap-up checklist only makes sense once at
+  // least one after photo exists; before that, send the pro to capture them.
   if (screenKey === 'WRAP_UP') {
+    if (!hasAfterPhoto) {
+      redirect(afterPhotosHref(booking.id))
+    }
+
     return (
       <WrapUpView
         bookingId={booking.id}

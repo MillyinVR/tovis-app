@@ -1,74 +1,43 @@
 // app/api/pro/bookings/[id]/session/finish/route.test.ts
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BookingStatus, Role, SessionStep } from '@prisma/client'
+import { Role, SessionStep } from '@prisma/client'
 import { bookingError } from '@/lib/booking/errors'
 
 const IDEMPOTENCY_ROUTE = 'POST /api/pro/bookings/[id]/session/finish'
 
-const defaultFinishResponse = {
-  booking: {
-    id: 'booking_1',
-    status: BookingStatus.IN_PROGRESS,
-    sessionStep: SessionStep.FINISH_REVIEW,
-    startedAt: '2026-03-17T13:00:00.000Z',
-    finishedAt: '2026-03-17T14:00:00.000Z',
-  },
-  nextHref: '/pro/bookings/booking_1/session',
-  afterCount: 0,
-  meta: {
-    mutated: true,
-    noOp: false,
-  },
+function expectedBody(args: {
+  sessionStep: SessionStep
+  afterCount: number
+  nextHref: string
+}) {
+  return {
+    booking: {
+      id: 'booking_1',
+      sessionStep: args.sessionStep,
+    },
+    nextHref: args.nextHref,
+    afterCount: args.afterCount,
+  }
 }
 
-const afterPhotosResponse = {
-  booking: {
-    id: 'booking_1',
-    status: BookingStatus.IN_PROGRESS,
-    sessionStep: SessionStep.AFTER_PHOTOS,
-    startedAt: '2026-03-17T13:00:00.000Z',
-    finishedAt: '2026-03-17T14:00:00.000Z',
-  },
+const afterPhotosResponse = expectedBody({
+  sessionStep: SessionStep.AFTER_PHOTOS,
+  afterCount: 0,
   nextHref: '/pro/bookings/booking_1/session/after-photos',
-  afterCount: 0,
-  meta: {
-    mutated: false,
-    noOp: true,
-  },
-}
+})
 
-const aftercareReadyResponse = {
-  booking: {
-    id: 'booking_1',
-    status: BookingStatus.IN_PROGRESS,
-    sessionStep: SessionStep.AFTER_PHOTOS,
-    startedAt: '2026-03-17T13:00:00.000Z',
-    finishedAt: '2026-03-17T14:00:00.000Z',
-  },
-  nextHref: '/pro/bookings/booking_1/aftercare',
+const wrapUpResponse = expectedBody({
+  sessionStep: SessionStep.AFTER_PHOTOS,
   afterCount: 2,
-  meta: {
-    mutated: false,
-    noOp: true,
-  },
-}
+  nextHref: '/pro/bookings/booking_1/aftercare',
+})
 
-const doneResponse = {
-  booking: {
-    id: 'booking_1',
-    status: BookingStatus.COMPLETED,
-    sessionStep: SessionStep.DONE,
-    startedAt: '2026-03-17T13:00:00.000Z',
-    finishedAt: '2026-03-17T14:00:00.000Z',
-  },
-  nextHref: '/pro/bookings/booking_1/aftercare',
+const doneResponse = expectedBody({
+  sessionStep: SessionStep.DONE,
   afterCount: 2,
-  meta: {
-    mutated: false,
-    noOp: true,
-  },
-}
+  nextHref: '/pro/bookings/booking_1/aftercare',
+})
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
@@ -76,7 +45,8 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
   pickString: vi.fn(),
 
-  finishBookingSession: vi.fn(),
+  finishSessionToAfterPhotos: vi.fn(),
+  mediaCount: vi.fn(),
 
   beginRouteIdempotency: vi.fn(),
   completeRouteIdempotency: vi.fn(),
@@ -101,8 +71,16 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
   isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
 }))
 
-vi.mock('@/lib/booking/writeBoundary', () => ({
-  finishBookingSession: mocks.finishBookingSession,
+vi.mock('@/lib/booking/finishSessionToAfterPhotos', () => ({
+  finishSessionToAfterPhotos: mocks.finishSessionToAfterPhotos,
+}))
+
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    mediaAsset: {
+      count: mocks.mediaCount,
+    },
+  },
 }))
 
 vi.mock('@/lib/idempotency', () => ({
@@ -200,20 +178,12 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
-    mocks.finishBookingSession.mockResolvedValue({
-      booking: {
-        id: 'booking_1',
-        status: BookingStatus.IN_PROGRESS,
-        sessionStep: SessionStep.FINISH_REVIEW,
-        startedAt: new Date('2026-03-17T13:00:00.000Z'),
-        finishedAt: new Date('2026-03-17T14:00:00.000Z'),
-      },
-      afterCount: 0,
-      meta: {
-        mutated: true,
-        noOp: false,
-      },
+    // Default: finishing service lands the booking in AFTER_PHOTOS with no
+    // after photos captured yet.
+    mocks.finishSessionToAfterPhotos.mockResolvedValue({
+      sessionStep: SessionStep.AFTER_PHOTOS,
     })
+    mocks.mediaCount.mockResolvedValue(0)
   })
 
   it('returns auth response when requirePro fails', async () => {
@@ -228,7 +198,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
 
     expect(result).toBe(authRes)
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
-    expect(mocks.finishBookingSession).not.toHaveBeenCalled()
+    expect(mocks.finishSessionToAfterPhotos).not.toHaveBeenCalled()
   })
 
   it('returns BOOKING_ID_REQUIRED when route param id is missing', async () => {
@@ -243,7 +213,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     )
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
-    expect(mocks.finishBookingSession).not.toHaveBeenCalled()
+    expect(mocks.finishSessionToAfterPhotos).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
         ok: false,
@@ -292,7 +262,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       },
     })
 
-    expect(mocks.finishBookingSession).not.toHaveBeenCalled()
+    expect(mocks.finishSessionToAfterPhotos).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
@@ -312,7 +282,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     const result = await POST(makeIdempotentRequest(), makeCtx())
 
     expect(result).toBe(handledResponse)
-    expect(mocks.finishBookingSession).not.toHaveBeenCalled()
+    expect(mocks.finishSessionToAfterPhotos).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
@@ -333,7 +303,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     const result = await POST(makeIdempotentRequest(), makeCtx())
 
     expect(result).toBe(handledResponse)
-    expect(mocks.finishBookingSession).not.toHaveBeenCalled()
+    expect(mocks.finishSessionToAfterPhotos).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
@@ -341,7 +311,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     const handledResponse = {
       ok: true,
       status: 200,
-      data: defaultFinishResponse,
+      data: afterPhotosResponse,
     }
 
     mocks.beginRouteIdempotency.mockResolvedValueOnce({
@@ -352,11 +322,11 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     const result = await POST(makeIdempotentRequest(), makeCtx())
 
     expect(result).toBe(handledResponse)
-    expect(mocks.finishBookingSession).not.toHaveBeenCalled()
+    expect(mocks.finishSessionToAfterPhotos).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('finishes the booking session, completes idempotency, and returns session hub href', async () => {
+  it('finishes the service, completes idempotency, and routes to after photos', async () => {
     expectIdempotencyStarted('idem_finish_success_1')
 
     const result = await POST(
@@ -386,7 +356,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       },
     })
 
-    expect(mocks.finishBookingSession).toHaveBeenCalledWith({
+    expect(mocks.finishSessionToAfterPhotos).toHaveBeenCalledWith({
       bookingId: 'booking_1',
       professionalId: 'pro_123',
       requestId: null,
@@ -396,19 +366,19 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
-      responseBody: defaultFinishResponse,
+      responseBody: afterPhotosResponse,
     })
 
-    expect(mocks.jsonOk).toHaveBeenCalledWith(defaultFinishResponse, 200)
+    expect(mocks.jsonOk).toHaveBeenCalledWith(afterPhotosResponse, 200)
 
     expect(result).toEqual({
       ok: true,
       status: 200,
-      data: defaultFinishResponse,
+      data: afterPhotosResponse,
     })
   })
 
-  it('passes request id header through to finishBookingSession', async () => {
+  it('passes request id header through to finishSessionToAfterPhotos', async () => {
     expectIdempotencyStarted('idem_finish_with_request_id_1')
 
     await POST(
@@ -419,7 +389,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       makeCtx(),
     )
 
-    expect(mocks.finishBookingSession).toHaveBeenCalledWith({
+    expect(mocks.finishSessionToAfterPhotos).toHaveBeenCalledWith({
       bookingId: 'booking_1',
       professionalId: 'pro_123',
       requestId: 'request_123',
@@ -430,20 +400,10 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
   it('routes AFTER_PHOTOS with zero after photos to after photos upload', async () => {
     expectIdempotencyStarted('idem_finish_after_photos_empty_1')
 
-    mocks.finishBookingSession.mockResolvedValueOnce({
-      booking: {
-        id: 'booking_1',
-        status: BookingStatus.IN_PROGRESS,
-        sessionStep: SessionStep.AFTER_PHOTOS,
-        startedAt: new Date('2026-03-17T13:00:00.000Z'),
-        finishedAt: new Date('2026-03-17T14:00:00.000Z'),
-      },
-      afterCount: 0,
-      meta: {
-        mutated: false,
-        noOp: true,
-      },
+    mocks.finishSessionToAfterPhotos.mockResolvedValueOnce({
+      sessionStep: SessionStep.AFTER_PHOTOS,
     })
+    mocks.mediaCount.mockResolvedValueOnce(0)
 
     const result = await POST(
       makeIdempotentRequest('idem_finish_after_photos_empty_1'),
@@ -463,23 +423,13 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     })
   })
 
-  it('routes AFTER_PHOTOS with existing after photos to aftercare', async () => {
+  it('routes AFTER_PHOTOS with existing after photos to wrap-up (aftercare)', async () => {
     expectIdempotencyStarted('idem_finish_after_photos_ready_1')
 
-    mocks.finishBookingSession.mockResolvedValueOnce({
-      booking: {
-        id: 'booking_1',
-        status: BookingStatus.IN_PROGRESS,
-        sessionStep: SessionStep.AFTER_PHOTOS,
-        startedAt: new Date('2026-03-17T13:00:00.000Z'),
-        finishedAt: new Date('2026-03-17T14:00:00.000Z'),
-      },
-      afterCount: 2,
-      meta: {
-        mutated: false,
-        noOp: true,
-      },
+    mocks.finishSessionToAfterPhotos.mockResolvedValueOnce({
+      sessionStep: SessionStep.AFTER_PHOTOS,
     })
+    mocks.mediaCount.mockResolvedValueOnce(2)
 
     const result = await POST(
       makeIdempotentRequest('idem_finish_after_photos_ready_1'),
@@ -489,33 +439,23 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
-      responseBody: aftercareReadyResponse,
+      responseBody: wrapUpResponse,
     })
 
     expect(result).toEqual({
       ok: true,
       status: 200,
-      data: aftercareReadyResponse,
+      data: wrapUpResponse,
     })
   })
 
   it('routes DONE to aftercare', async () => {
     expectIdempotencyStarted('idem_finish_done_1')
 
-    mocks.finishBookingSession.mockResolvedValueOnce({
-      booking: {
-        id: 'booking_1',
-        status: BookingStatus.COMPLETED,
-        sessionStep: SessionStep.DONE,
-        startedAt: new Date('2026-03-17T13:00:00.000Z'),
-        finishedAt: new Date('2026-03-17T14:00:00.000Z'),
-      },
-      afterCount: 2,
-      meta: {
-        mutated: false,
-        noOp: true,
-      },
+    mocks.finishSessionToAfterPhotos.mockResolvedValueOnce({
+      sessionStep: SessionStep.DONE,
     })
+    mocks.mediaCount.mockResolvedValueOnce(2)
 
     const result = await POST(
       makeIdempotentRequest('idem_finish_done_1'),
@@ -536,7 +476,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
   })
 
   it('maps booking errors to jsonFail and marks idempotency failed', async () => {
-    mocks.finishBookingSession.mockRejectedValueOnce(
+    mocks.finishSessionToAfterPhotos.mockRejectedValueOnce(
       bookingError('BOOKING_NOT_FOUND', {
         message: 'Booking was not found for this professional.',
         userMessage: 'Booking not found.',
@@ -577,7 +517,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       .mockImplementation(() => undefined)
 
     const error = new Error('boom')
-    mocks.finishBookingSession.mockRejectedValueOnce(error)
+    mocks.finishSessionToAfterPhotos.mockRejectedValueOnce(error)
 
     try {
       const result = await POST(

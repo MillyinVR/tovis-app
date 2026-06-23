@@ -41,7 +41,7 @@ export type CreateClientClaimInviteDeliveryResult = {
 }
 
 function buildInviteTitle(args: { brandName: string }): string {
-  return `Claim your ${args.brandName} profile`
+  return `You’ve been booked with ${args.brandName}`
 }
 
 function buildInviteBody(args: {
@@ -51,10 +51,10 @@ function buildInviteBody(args: {
   const invitedName = asTrimmedString(args.invitedName)
 
   if (invitedName) {
-    return `${invitedName}, you’ve been invited to claim your ${args.brandName} client profile and access your booking details.`
+    return `${invitedName}, your appointment with ${args.brandName} is booked. Tap to view your booking details and finish setting up your profile.`
   }
 
-  return `You’ve been invited to claim your ${args.brandName} client profile and access your booking details.`
+  return `Your appointment with ${args.brandName} is booked. Tap to view your booking details and finish setting up your profile.`
 }
 
 function buildInvitePayload(

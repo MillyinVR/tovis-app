@@ -251,17 +251,17 @@ function StatusCard({
       </div>
 
       <div className="brand-pro-session-card-body">
-        {afterCount} after photo{afterCount === 1 ? '' : 's'} uploaded.
-        Aftercare is unlocked.
+        {afterCount} after photo{afterCount === 1 ? '' : 's'} uploaded. You’re
+        ready to wrap up.
       </div>
 
       <div className="mt-3">
         <Link
-          href={aftercareHref(bookingId)}
+          href={sessionHubHref(bookingId)}
           className="brand-pro-session-button brand-focus"
           data-full="true"
         >
-          Continue to aftercare <ArrowRightIcon />
+          Wrap up <ArrowRightIcon />
         </Link>
       </div>
 
@@ -335,11 +335,13 @@ export default async function ProAfterPhotosPage(props: PageProps) {
     redirect(aftercareHref(bookingId))
   }
 
-  if (step === SessionStep.FINISH_REVIEW) {
-    redirect(sessionHubHref(bookingId))
-  }
-
-  if (step !== SessionStep.AFTER_PHOTOS) {
+  // After photos are captured once the service is finished. FINISH_REVIEW is a
+  // transient internal step we now pass through on the way to AFTER_PHOTOS, so
+  // accept both rather than bouncing the pro back to the hub.
+  if (
+    step !== SessionStep.AFTER_PHOTOS &&
+    step !== SessionStep.FINISH_REVIEW
+  ) {
     redirect(sessionHubHref(bookingId))
   }
   const [mediaOutcome, afterCount] = await Promise.all([
