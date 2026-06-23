@@ -125,15 +125,13 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     window.dispatchEvent = vi.fn()
   })
 
-  it('sends aftercare and shows friendly closeout blocker copy instead of raw blocker codes', async () => {
+  it('sends aftercare and navigates to the wrap-up screen', async () => {
+    // Outstanding closeout (payment/checkout) now shows on the wrap-up
+    // checklist, not in the form — sending just proceeds there.
     mockAftercareResponse({
       bookingFinished: false,
       clientNotified: true,
-      completionBlockers: [
-        'AFTER_PHOTOS_REQUIRED',
-        'PAYMENT_NOT_COLLECTED',
-        'CHECKOUT_NOT_PAID_OR_WAIVED',
-      ],
+      completionBlockers: ['PAYMENT_NOT_COLLECTED', 'CHECKOUT_NOT_PAID_OR_WAIVED'],
     })
 
     renderForm()
@@ -141,85 +139,16 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     await clickSendToClient()
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/free to start your next booking/i),
-      ).toBeInTheDocument()
+      expect(mocks.routerPush).toHaveBeenCalledWith(
+        '/pro/bookings/booking_1/session',
+      )
     })
-
-    expect(screen.getByText(/After photos required:/i)).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        /Add at least one after photo before this booking can be completed\./i,
-      ),
-    ).toBeInTheDocument()
-
-    expect(screen.getByText(/Payment not collected:/i)).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        /Collect or confirm payment before this booking can be completed\./i,
-      ),
-    ).toBeInTheDocument()
-
-    expect(
-      screen.getByText(/Checkout not paid or waived:/i),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        /Mark checkout as paid or waived before this booking can be completed\./i,
-      ),
-    ).toBeInTheDocument()
-
-    expect(
-      screen.queryByText(/AFTER_PHOTOS_REQUIRED/),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByText(/PAYMENT_NOT_COLLECTED/),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByText(/CHECKOUT_NOT_PAID_OR_WAIVED/),
-    ).not.toBeInTheDocument()
 
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1)
     expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
 
-  it('ignores unknown closeout blocker codes from the API response', async () => {
-    mockAftercareResponse({
-      bookingFinished: false,
-      clientNotified: true,
-      completionBlockers: [
-        'NOPE',
-        'AFTERCARE_NOT_SENT',
-        null,
-        123,
-        'PAYMENT_NOT_COLLECTED',
-      ],
-    })
-
-    renderForm()
-
-    await clickSendToClient()
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/free to start your next booking/i),
-      ).toBeInTheDocument()
-    })
-
-    expect(screen.getByText(/Aftercare not sent:/i)).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        /Send the aftercare summary to the client before this booking can be completed\./i,
-      ),
-    ).toBeInTheDocument()
-
-    expect(screen.getByText(/Payment not collected:/i)).toBeInTheDocument()
-
-    expect(screen.queryByText(/NOPE/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/123/)).not.toBeInTheDocument()
-  })
-
-  it('redirects when aftercare send finishes the booking and API returns a safe redirect', async () => {
+  it('navigates to wrap-up even when the send completes the booking', async () => {
     mockAftercareResponse({
       bookingFinished: true,
       clientNotified: true,
@@ -232,14 +161,10 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     await clickSendToClient()
 
     await waitFor(() => {
-      expect(mocks.routerReplace).toHaveBeenCalledWith(
+      expect(mocks.routerPush).toHaveBeenCalledWith(
         '/pro/bookings/booking_1/session',
       )
     })
-
-    expect(
-      screen.getByText(/Aftercare sent\. Booking completed\./i),
-    ).toBeInTheDocument()
   })
 
   it('shows normal sent message when there are no blockers and booking is not completed yet', async () => {

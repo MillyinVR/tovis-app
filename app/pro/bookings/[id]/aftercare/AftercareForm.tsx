@@ -11,7 +11,6 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
-import { getCloseoutBlockerDisplays } from '@/lib/booking/closeoutBlockers'
 import {
   addDaysToYmd,
   compareYmd,
@@ -793,19 +792,6 @@ export default function AftercareForm({
       const aftercare = isRecord(r?.aftercare) ? r.aftercare : null
 
       const clientNotified = r?.clientNotified === true
-      const bookingFinished = r?.bookingFinished === true
-
-      const completionBlockers = getCloseoutBlockerDisplays(
-        Array.isArray(r?.completionBlockers) ? r.completionBlockers : [],
-      )
-
-      const redirectTo =
-        typeof r?.redirectTo === 'string' &&
-        r.redirectTo.trim() &&
-        r.redirectTo.startsWith('/') &&
-        !r.redirectTo.startsWith('//')
-          ? r.redirectTo
-          : null
 
       setDraftSavedAt(
         typeof aftercare?.draftSavedAt === 'string'
@@ -832,31 +818,17 @@ export default function AftercareForm({
     router.refresh()
     dispatchForceRefresh()
 
-    if (sendToClient && clientNotified && bookingFinished && redirectTo) {
-      setSuccess('Aftercare sent. Booking completed.')
-      router.replace(redirectTo)
-      return
-    }
-
     if (sendToClient) {
-      if (completionBlockers.length > 0) {
-        setSuccess(
-          [
-            'Aftercare sent — you’re free to start your next booking.',
-            'To finish this booking’s closeout (do it anytime from Bookings):',
-            ...completionBlockers.map(
-              (blocker) => `${blocker.label}: ${blocker.description}`,
-            ),
-          ].join(' '),
-        )
-        return
-      }
-
+      // Sending aftercare proceeds to the wrap-up screen, where the "sent"
+      // status plus payment/checkout closeout live. Any remaining closeout
+      // items show there as to-dos; a fully-closed booking lands on the hub's
+      // done state.
       setSuccess(
         clientNotified
           ? 'Aftercare sent to client.'
           : 'Aftercare saved and marked sent, but client delivery was not queued.',
       )
+      router.push(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
       return
     }
 
