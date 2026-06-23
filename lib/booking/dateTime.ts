@@ -1,5 +1,5 @@
 // lib/booking/dateTime.ts
-import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
+import { getZonedParts, isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 
 type DateParts = {
   year: number
@@ -88,49 +88,18 @@ function parseDateTimeLocal(value: string): DateParts {
   return { year, month, day, hour, minute, second }
 }
 
-function getFormatter(timeZone: string): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    hour12: false,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
-
-function normalizeHour24(parts: DateParts): DateParts {
-  if (parts.hour !== 24) return parts
-
-  // Defensive normalization. With hourCycle:'h23' this should not normally happen,
-  // but if an environment still emits 24, treat it as 00 on the same formatted day.
-  return {
-    ...parts,
-    hour: 0,
-  }
-}
-
+/**
+ * Read local wall-clock parts for a UTC instant in `timeZone`.
+ *
+ * Delegates to the single timezone-math engine in `lib/timeZone.ts`
+ * (`getZonedParts`) so there is exactly one Intl-based UTC→parts conversion
+ * in the codebase. `getZonedParts` already forces a 24-hour cycle and hardens
+ * the rare "hour=24" case (rolling to 00:00 of the next day), so no local
+ * formatter or hour-24 normalization is needed here.
+ */
 function getDatePartsInTimeZone(date: Date, timeZone: string): DateParts {
   const tz = assertValidTimeZone(timeZone)
-  const formatter = getFormatter(tz)
-  const parts = formatter.formatToParts(date)
-
-  const map = new Map<string, string>()
-  for (const part of parts) {
-    if (part.type !== 'literal') {
-      map.set(part.type, part.value)
-    }
-  }
-
-  const year = Number(map.get('year'))
-  const month = Number(map.get('month'))
-  const day = Number(map.get('day'))
-  const hour = Number(map.get('hour'))
-  const minute = Number(map.get('minute'))
-  const second = Number(map.get('second'))
+  const { year, month, day, hour, minute, second } = getZonedParts(date, tz)
 
   if (
     !Number.isFinite(year) ||
@@ -143,7 +112,7 @@ function getDatePartsInTimeZone(date: Date, timeZone: string): DateParts {
     throw new Error(`Failed to read date parts for timezone ${tz}`)
   }
 
-  return normalizeHour24({ year, month, day, hour, minute, second })
+  return { year, month, day, hour, minute, second }
 }
 
 /**
