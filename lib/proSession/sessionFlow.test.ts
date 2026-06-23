@@ -183,7 +183,7 @@ describe('getSessionCenterState', () => {
     })
   })
 
-  it('sends after-photo step with media to the wrap-up checklist', () => {
+  it('sends after-photo step with media to the aftercare summary', () => {
     expect(
       getSessionCenterState({
         mode: 'ACTIVE',
@@ -193,9 +193,9 @@ describe('getSessionCenterState', () => {
         hasAfterMedia: true,
       }),
     ).toEqual({
-      label: 'Wrap up',
+      label: 'Aftercare',
       action: 'NAVIGATE',
-      href: '/pro/bookings/booking_1/session',
+      href: '/pro/bookings/booking_1/aftercare',
     })
   })
 

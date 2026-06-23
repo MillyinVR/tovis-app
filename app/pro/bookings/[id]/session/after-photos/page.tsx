@@ -251,17 +251,17 @@ function StatusCard({
       </div>
 
       <div className="brand-pro-session-card-body">
-        {afterCount} after photo{afterCount === 1 ? '' : 's'} uploaded. You’re
-        ready to wrap up.
+        {afterCount} after photo{afterCount === 1 ? '' : 's'} uploaded. Next,
+        fill out the aftercare summary for your client.
       </div>
 
       <div className="mt-3">
         <Link
-          href={sessionHubHref(bookingId)}
+          href={aftercareHref(bookingId)}
           className="brand-pro-session-button brand-focus"
           data-full="true"
         >
-          Wrap up <ArrowRightIcon />
+          Continue to aftercare <ArrowRightIcon />
         </Link>
       </div>
 

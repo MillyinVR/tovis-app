@@ -328,7 +328,7 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
     expect(hasText(page, 'After photos')).toBe(true)
     expect(hasText(page, 'WRAP-UP · AFTER PHOTOS')).toBe(true)
     expect(hasText(page, 'After photos saved')).toBe(true)
-    expect(hasText(page, 'Wrap up')).toBe(true)
+    expect(hasText(page, 'Continue to aftercare')).toBe(true)
     expect(hasText(page, 'Upload after photos')).toBe(true)
     expect(hasText(page, 'MediaUploader:AFTER')).toBe(true)
 

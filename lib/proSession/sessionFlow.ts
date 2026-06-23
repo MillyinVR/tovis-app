@@ -483,12 +483,12 @@ export function getSessionCenterState({
       }
     }
 
-    // After photos are captured → next is the wrap-up checklist (aftercare,
-    // payment, checkout) which lives on the session hub.
+    // After photos captured → compose the aftercare summary next. The wrap-up
+    // checklist (send to client, payment, checkout) follows from there.
     return {
-      label: 'Wrap up',
+      label: 'Aftercare',
       action: 'NAVIGATE',
-      href: routes.sessionHub,
+      href: routes.aftercare,
     }
   }
 
