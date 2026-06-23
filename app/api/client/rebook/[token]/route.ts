@@ -1,6 +1,6 @@
 // app/api/client/rebook/[token]/route.ts
 
-import { AftercareRebookMode, Role } from '@prisma/client'
+import { AftercareRebookMode, Role, ServiceLocationType } from '@prisma/client'
 
 import {
   pickIsoDate,
@@ -8,6 +8,7 @@ import {
   jsonFail,
   jsonOk,
 } from '@/app/api/_utils'
+import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import {
   markAftercareAccessTokenUsed,
@@ -68,6 +69,7 @@ type RebookIdempotencyRequestBody = {
   sourceBookingId: string
   clientId: string
   scheduledFor: string
+  locationType: ServiceLocationType | null
 }
 
 async function getRouteToken(
@@ -160,6 +162,16 @@ function parseScheduledFor(body: unknown): Date | null {
   return pickIsoDate(body.scheduledFor)
 }
 
+/**
+ * Optional client-chosen location mode. Returns null when omitted (clone the
+ * original booking's location). Feasibility (mode offered, address present) is
+ * enforced downstream in the write boundary.
+ */
+function parseRequestedLocationType(body: unknown): ServiceLocationType | null {
+  if (!isRecord(body)) return null
+  return normalizeLocationType(body.locationType)
+}
+
 function validateFutureScheduledFor(
   scheduledFor: Date,
   now: Date,
@@ -231,6 +243,7 @@ function buildRebookIdempotencyRequestBody(args: {
   sourceBookingId: string
   clientId: string
   scheduledFor: Date
+  locationType: ServiceLocationType | null
 }): RebookIdempotencyRequestBody {
   return {
     aftercareTokenId: args.aftercareTokenId,
@@ -238,6 +251,7 @@ function buildRebookIdempotencyRequestBody(args: {
     sourceBookingId: args.sourceBookingId,
     clientId: args.clientId,
     scheduledFor: args.scheduledFor.toISOString(),
+    locationType: args.locationType,
   }
 }
 
@@ -300,6 +314,8 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
       return jsonFail(400, 'Missing or invalid scheduledFor.')
     }
 
+    const requestedLocationType = parseRequestedLocationType(rawBody)
+
     const now = new Date()
     const invalidFutureTime = validateFutureScheduledFor(scheduledFor, now)
 
@@ -349,6 +365,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
           sourceBookingId: resolved.booking.id,
           clientId: resolved.booking.clientId,
           scheduledFor,
+          locationType: requestedLocationType,
         }),
         messages: {
           missingKey: 'Missing idempotency key.',
@@ -365,6 +382,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
           clientId: resolved.booking.clientId,
           aftercareClientActionTokenId: resolved.token.id,
           scheduledFor,
+          requestedLocationType,
           requestId,
           idempotencyKey: idem.idempotencyKey,
         })

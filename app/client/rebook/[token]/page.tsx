@@ -9,11 +9,15 @@ import {
   ClientClaimStatus,
   MediaPhase,
   MediaVisibility,
+  ServiceLocationType,
 } from '@prisma/client'
 
 import { CompletePaymentCard } from '@/app/client/_public/CompletePaymentCard'
 import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
-import { RebookCard } from '@/app/client/_public/RebookCard'
+import {
+  RebookCard,
+  type PublicRebookLocationMode,
+} from '@/app/client/_public/RebookCard'
 import { getPublicCheckoutAvailability } from '@/lib/booking/publicCheckoutAvailability'
 import { prisma } from '@/lib/prisma'
 import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
@@ -192,6 +196,58 @@ function SectionCard(props: {
   )
 }
 
+function buildPublicRebookLocationModes(args: {
+  originalType: ServiceLocationType
+  originalLocationId: string
+  clientAddressId: string | null
+  offersInSalon: boolean | null
+  offersMobile: boolean | null
+}): PublicRebookLocationMode[] {
+  const {
+    originalType,
+    originalLocationId,
+    clientAddressId,
+    offersInSalon,
+    offersMobile,
+  } = args
+
+  const salonMode: PublicRebookLocationMode = {
+    type: 'SALON',
+    label: 'In-salon',
+    locationId:
+      originalType === ServiceLocationType.SALON ? originalLocationId : '',
+    clientAddressId: null,
+  }
+
+  const mobileMode: PublicRebookLocationMode = {
+    type: 'MOBILE',
+    label: 'Mobile',
+    locationId:
+      originalType === ServiceLocationType.MOBILE ? originalLocationId : '',
+    clientAddressId,
+  }
+
+  // In-salon needs no client data; mobile needs the saved address (only present
+  // when the original visit was mobile). The original mode is always bookable.
+  const salonFeasible =
+    originalType === ServiceLocationType.SALON || offersInSalon === true
+  const mobileFeasible =
+    Boolean(clientAddressId) &&
+    (originalType === ServiceLocationType.MOBILE || offersMobile === true)
+
+  const modes: PublicRebookLocationMode[] = []
+  if (salonFeasible) modes.push(salonMode)
+  if (mobileFeasible) modes.push(mobileMode)
+
+  if (!modes.some((mode) => mode.type === originalType)) {
+    modes.unshift(
+      originalType === ServiceLocationType.MOBILE ? mobileMode : salonMode,
+    )
+  }
+
+  return modes
+}
+
 async function getActiveOfferingId(args: {
   professionalId: string
   serviceId: string | null
@@ -305,6 +361,26 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
   const bookingLocation = await prisma.booking.findUnique({
     where: { id: booking.id },
     select: { clientAddressId: true },
+  })
+
+  // Which location modes the client can rebook into on this public link. The
+  // original mode is always offered; the other is offered only when the pro
+  // supports it AND we can actually book it here — mobile needs the client's
+  // saved address, which exists only when the original visit was mobile.
+  const offeringCaps = offeringId
+    ? await prisma.professionalServiceOffering.findUnique({
+        where: { id: offeringId },
+        select: { offersInSalon: true, offersMobile: true },
+      })
+    : null
+
+  const rebookClientAddressId = bookingLocation?.clientAddressId ?? null
+  const locationModes = buildPublicRebookLocationModes({
+    originalType: booking.locationType,
+    originalLocationId: booking.locationId ?? '',
+    clientAddressId: rebookClientAddressId,
+    offersInSalon: offeringCaps?.offersInSalon ?? null,
+    offersMobile: offeringCaps?.offersMobile ?? null,
   })
 
   const inviteClient = await prisma.clientProfile.findUnique({
@@ -517,13 +593,8 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
             <div className="mt-2">
               <RebookCard
                 token={routeToken}
-                availability={{
-                  professionalId: booking.professionalId,
-                  serviceId: booking.serviceId ?? '',
-                  locationType: booking.locationType,
-                  locationId: booking.locationId ?? '',
-                  clientAddressId: bookingLocation?.clientAddressId ?? null,
-                }}
+                professionalId={booking.professionalId}
+                serviceId={booking.serviceId ?? ''}
                 timeZone={appointmentTimeZone}
                 windowStartIso={
                   rebookInfo.mode === 'RECOMMENDED_WINDOW'
@@ -535,6 +606,8 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
                     ? rebookInfo.windowEnd.toISOString()
                     : null
                 }
+                locationModes={locationModes}
+                initialLocationType={booking.locationType}
               />
 
               <div className="mt-3 text-xs text-textSecondary/75">

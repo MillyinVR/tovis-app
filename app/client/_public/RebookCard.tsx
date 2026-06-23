@@ -3,24 +3,52 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { isRecord } from '@/lib/guards'
+import {
+  DAY_PERIOD_ORDER,
+  firstNonEmptyPeriod,
+  groupSlotsByPeriod,
+  type DayPeriod,
+} from '@/lib/bookingTime'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 
-type AvailabilityQuery = {
-  professionalId: string
-  serviceId: string
-  locationType: string
+const PERIOD_LABEL: Record<DayPeriod, string> = {
+  MORNING: 'Morning',
+  AFTERNOON: 'Afternoon',
+  EVENING: 'Evening',
+}
+
+const PERIOD_EMPTY_COPY: Record<DayPeriod, string> = {
+  MORNING: 'No morning times on this day.',
+  AFTERNOON: 'No afternoon times on this day.',
+  EVENING: 'No evening times on this day.',
+}
+
+/**
+ * A location mode (in-salon / mobile) the client may rebook into, with the
+ * availability-query identifiers it needs. Built server-side so the card only
+ * ever shows modes that are actually bookable on this public link.
+ */
+export type PublicRebookLocationMode = {
+  type: 'SALON' | 'MOBILE'
+  label: string
+  /** Empty string lets the availability API resolve the pro's default location. */
   locationId: string
+  /** Required for MOBILE (resolves coordinates); null for SALON. */
   clientAddressId: string | null
 }
 
 type Props = {
   /** The AFTERCARE_ACCESS ClientActionToken from the page URL. */
   token: string
-  availability: AvailabilityQuery
+  professionalId: string
+  serviceId: string
   timeZone: string
   /** Recommended rebook window (ISO), if the pro set one. */
   windowStartIso: string | null
   windowEndIso: string | null
+  /** Bookable location modes (1 = no toggle, 2 = in-salon/mobile toggle). */
+  locationModes: PublicRebookLocationMode[]
+  initialLocationType: 'SALON' | 'MOBILE'
 }
 
 type SlotsState =
@@ -71,11 +99,25 @@ function buildIdempotencyKey(token: string, slotIso: string): string {
 
 export function RebookCard({
   token,
-  availability,
+  professionalId,
+  serviceId,
   timeZone,
   windowStartIso,
   windowEndIso,
+  locationModes,
+  initialLocationType,
 }: Props) {
+  const [locationType, setLocationType] = useState<'SALON' | 'MOBILE'>(
+    initialLocationType,
+  )
+
+  const activeMode = useMemo(
+    () =>
+      locationModes.find((mode) => mode.type === locationType) ??
+      locationModes[0],
+    [locationModes, locationType],
+  )
+
   const todayYmd = useMemo(
     () => ymdInTimeZone(new Date(), timeZone),
     [timeZone],
@@ -100,6 +142,8 @@ export function RebookCard({
 
   const [date, setDate] = useState<string>(minDate)
   const [slotsState, setSlotsState] = useState<SlotsState>({ kind: 'idle' })
+  // The client's explicit daypart tap, or null to follow the auto-default.
+  const [selectedPeriod, setSelectedPeriod] = useState<DayPeriod | null>(null)
   const [booking, setBooking] = useState<
     | { kind: 'idle' }
     | { kind: 'submitting'; slotIso: string }
@@ -118,21 +162,22 @@ export function RebookCard({
   )
 
   useEffect(() => {
-    if (!date) return
+    if (!date || !activeMode) return
+    const mode = activeMode
     let cancelled = false
 
     async function load() {
       setSlotsState({ kind: 'loading' })
 
       const params = new URLSearchParams({
-        professionalId: availability.professionalId,
-        serviceId: availability.serviceId,
-        locationType: availability.locationType,
-        locationId: availability.locationId,
+        professionalId,
+        serviceId,
+        locationType: mode.type,
+        locationId: mode.locationId,
         date,
       })
-      if (availability.clientAddressId) {
-        params.set('clientAddressId', availability.clientAddressId)
+      if (mode.clientAddressId) {
+        params.set('clientAddressId', mode.clientAddressId)
       }
 
       try {
@@ -172,10 +217,25 @@ export function RebookCard({
     return () => {
       cancelled = true
     }
-  }, [date, availability, withinWindow])
+  }, [date, professionalId, serviceId, activeMode, withinWindow])
+
+  const slotsByPeriod = useMemo(
+    () =>
+      groupSlotsByPeriod(
+        slotsState.kind === 'ready' ? slotsState.slots : [],
+        timeZone,
+      ),
+    [slotsState, timeZone],
+  )
+
+  // Open to the daypart the client is most likely to want: keep their explicit
+  // tap when it still has times, otherwise fall to the first daypart
+  // (morning→evening) that does. Derived in render so a new day's slots
+  // re-resolve the active tab without a setState-in-effect cascade.
+  const period = firstNonEmptyPeriod(slotsByPeriod, selectedPeriod ?? 'AFTERNOON')
 
   async function handleBook(slotIso: string) {
-    if (booking.kind === 'submitting') return
+    if (booking.kind === 'submitting' || !activeMode) return
     setBooking({ kind: 'submitting', slotIso })
 
     try {
@@ -189,7 +249,10 @@ export function RebookCard({
             'Idempotency-Key': idempotencyKey,
             'x-idempotency-key': idempotencyKey,
           },
-          body: JSON.stringify({ scheduledFor: slotIso }),
+          body: JSON.stringify({
+            scheduledFor: slotIso,
+            locationType: activeMode.type,
+          }),
         },
       )
 
@@ -213,6 +276,8 @@ export function RebookCard({
     }
   }
 
+  if (!activeMode) return null
+
   if (booking.kind === 'booked') {
     return (
       <div className="rounded-card border border-toneSuccess/20 bg-toneSuccess/5 p-4">
@@ -229,6 +294,39 @@ export function RebookCard({
 
   return (
     <div className="mt-4">
+      {locationModes.length > 1 ? (
+        <div className="mb-4">
+          <div className="mb-1.5 text-[12px] font-black text-textSecondary">
+            Where
+          </div>
+          <div className="inline-flex gap-1.5 rounded-full border border-white/10 bg-bgPrimary/35 p-1">
+            {locationModes.map((mode) => {
+              const active = mode.type === locationType
+              return (
+                <button
+                  key={mode.type}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    if (active) return
+                    setBooking({ kind: 'idle' })
+                    setLocationType(mode.type)
+                  }}
+                  className={[
+                    'rounded-full px-4 py-1.5 text-[12px] font-black transition',
+                    active
+                      ? 'bg-accentPrimary text-bgPrimary'
+                      : 'text-textSecondary hover:bg-white/10',
+                  ].join(' ')}
+                >
+                  {mode.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
           <span className="text-[12px] font-black text-textSecondary">
@@ -262,23 +360,62 @@ export function RebookCard({
             {maxDate ? ' within your recommended window' : ''}.
           </div>
         ) : slotsState.kind === 'ready' ? (
-          <div className="flex flex-wrap gap-2">
-            {slotsState.slots.map((iso) => {
-              const isSubmitting =
-                booking.kind === 'submitting' && booking.slotIso === iso
-              return (
-                <button
-                  key={iso}
-                  type="button"
-                  onClick={() => void handleBook(iso)}
-                  disabled={booking.kind === 'submitting'}
-                  className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSubmitting ? 'Booking…' : formatSlotTime(iso, timeZone)}
-                </button>
-              )
-            })}
-          </div>
+          <>
+            <div className="grid grid-cols-3 gap-1.5">
+              {DAY_PERIOD_ORDER.map((nextPeriod) => {
+                const active = period === nextPeriod
+                const disabled = slotsByPeriod[nextPeriod].length === 0
+                return (
+                  <button
+                    key={nextPeriod}
+                    type="button"
+                    aria-pressed={active}
+                    disabled={disabled}
+                    title={disabled ? 'No times in this period' : ''}
+                    onClick={() => {
+                      if (disabled || active) return
+                      setSelectedPeriod(nextPeriod)
+                    }}
+                    className={[
+                      'rounded-full border px-0 py-1.75 text-[10px] font-black uppercase tracking-widest transition font-mono',
+                      active
+                        ? 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary'
+                        : 'border-white/10 bg-bgPrimary/35 text-textSecondary hover:bg-white/10',
+                      disabled
+                        ? 'cursor-not-allowed opacity-40 hover:bg-bgPrimary/35'
+                        : 'cursor-pointer',
+                    ].join(' ')}
+                  >
+                    {PERIOD_LABEL[nextPeriod]}
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2" aria-live="polite">
+              {slotsByPeriod[period].length > 0 ? (
+                slotsByPeriod[period].map((iso) => {
+                  const isSubmitting =
+                    booking.kind === 'submitting' && booking.slotIso === iso
+                  return (
+                    <button
+                      key={iso}
+                      type="button"
+                      onClick={() => void handleBook(iso)}
+                      disabled={booking.kind === 'submitting'}
+                      className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSubmitting ? 'Booking…' : formatSlotTime(iso, timeZone)}
+                    </button>
+                  )
+                })
+              ) : (
+                <div className="text-sm text-textSecondary">
+                  {PERIOD_EMPTY_COPY[period]}
+                </div>
+              )}
+            </div>
+          </>
         ) : null}
       </div>
 

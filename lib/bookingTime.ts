@@ -101,6 +101,66 @@ export function getHourInTimeZone(isoUtc: string, timeZone: string): number | nu
 }
 
 /**
+ * The three booking dayparts surfaced to clients as Morning / Afternoon /
+ * Evening filters. Shared by the in-app AvailabilityDrawer and the public
+ * aftercare rebook card so both bucket slots identically.
+ */
+export type DayPeriod = 'MORNING' | 'AFTERNOON' | 'EVENING'
+
+export const DAY_PERIOD_ORDER: readonly DayPeriod[] = [
+  'MORNING',
+  'AFTERNOON',
+  'EVENING',
+]
+
+/** Bucket an hour (0-23, already resolved in the appointment tz) into a daypart. */
+export function dayPeriodOfHour(hour: number): DayPeriod {
+  if (hour < 12) return 'MORNING'
+  if (hour < 17) return 'AFTERNOON'
+  return 'EVENING'
+}
+
+/**
+ * Group UTC slot ISO strings into Morning / Afternoon / Evening buckets using
+ * the hour each slot falls on *in the appointment timezone*. Slots whose hour
+ * can't be resolved are dropped.
+ */
+export function groupSlotsByPeriod(
+  slots: readonly string[],
+  timeZone: string,
+): Record<DayPeriod, string[]> {
+  const grouped: Record<DayPeriod, string[]> = {
+    MORNING: [],
+    AFTERNOON: [],
+    EVENING: [],
+  }
+
+  for (const isoUtc of slots) {
+    const hour = getHourInTimeZone(isoUtc, timeZone)
+    if (hour == null) continue
+    grouped[dayPeriodOfHour(hour)].push(isoUtc)
+  }
+
+  return grouped
+}
+
+/**
+ * Pick the daypart to open to: keep `preferred` when it has slots, otherwise
+ * fall back to the first daypart (in Morning→Evening order) that has one.
+ * Returns `preferred` when every bucket is empty so callers keep a stable tab.
+ */
+export function firstNonEmptyPeriod(
+  grouped: Record<DayPeriod, string[]>,
+  preferred: DayPeriod,
+): DayPeriod {
+  if (grouped[preferred].length > 0) return preferred
+  for (const period of DAY_PERIOD_ORDER) {
+    if (grouped[period].length > 0) return period
+  }
+  return preferred
+}
+
+/**
  * Convert a datetime-local input ("YYYY-MM-DDTHH:mm") into a UTC ISO instant,
  * interpreted as occurring in the provided timezone.
  *
