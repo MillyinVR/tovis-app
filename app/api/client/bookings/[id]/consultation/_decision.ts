@@ -18,6 +18,7 @@ import {
 import { approveConsultationAndMaterializeBooking } from '@/lib/booking/writeBoundary'
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import {
   BookingCloseoutAuditAction,
   ConsultationApprovalStatus,
@@ -341,6 +342,9 @@ const idempotencyRequest = new Request(
         action,
       })
 
+      // Client approved the consultation — notify the pro now.
+      kickNotificationDrain()
+
       return jsonOk(responseBody, 200)
     }
 
@@ -466,6 +470,9 @@ const idempotencyRequest = new Request(
       actorUserId: user.id,
       action,
     })
+
+    // Client rejected the consultation — notify the pro now.
+    kickNotificationDrain()
 
     return jsonOk(responseBody, 200)
   } catch (e: unknown) {

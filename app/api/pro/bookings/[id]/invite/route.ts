@@ -8,6 +8,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -262,6 +263,9 @@ export async function POST(request: Request, ctx: RouteContext) {
         preferredContactMethod: invite.preferredContactMethod,
       },
     })
+
+    // Claim invite enqueued — deliver the email/SMS link now.
+    kickNotificationDrain()
 
     return jsonOk(
       {

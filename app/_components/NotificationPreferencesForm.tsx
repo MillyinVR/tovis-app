@@ -39,7 +39,7 @@ type QuietHoursState = {
   endMinutes: number
 }
 
-type PreferencesPayload = {
+export type PreferencesPayload = {
   categories: CategoryMeta[]
   events: Record<string, ChannelState>
   quietHours: QuietHoursState
@@ -49,6 +49,90 @@ const CHANNELS: Record<ChannelId, { stateKey: keyof ChannelState; label: string 
   IN_APP: { stateKey: 'inAppEnabled', label: 'In-app' },
   SMS: { stateKey: 'smsEnabled', label: 'SMS' },
   EMAIL: { stateKey: 'emailEnabled', label: 'Email' },
+}
+
+// A single "how do you want to hear from us" choice. PUSH is reserved for when
+// push notifications ship — it's shown disabled today.
+type ChannelPreference = 'EMAIL' | 'SMS' | 'PUSH'
+
+function eventSupportedChannels(
+  categories: CategoryMeta[],
+): Map<string, ChannelId[]> {
+  const map = new Map<string, ChannelId[]>()
+  for (const category of categories) {
+    for (const event of category.events) {
+      map.set(event.eventKey, event.supportedChannels)
+    }
+  }
+  return map
+}
+
+// Which single external channel the current toggles correspond to, or null when
+// it's a mix the simple selector can't represent ("Custom"). We only look at
+// events that support BOTH email and SMS — those are the ones a primary-channel
+// choice actually decides between.
+export function deriveActivePreference(
+  payload: PreferencesPayload,
+): ChannelPreference | null {
+  const supported = eventSupportedChannels(payload.categories)
+  let sawDual = false
+  let allEmail = true
+  let allSms = true
+
+  for (const [eventKey, channels] of supported) {
+    if (!channels.includes('EMAIL') || !channels.includes('SMS')) continue
+    sawDual = true
+    const state = payload.events[eventKey]
+    if (!state) continue
+    if (!(state.emailEnabled && !state.smsEnabled)) allEmail = false
+    if (!(state.smsEnabled && !state.emailEnabled)) allSms = false
+  }
+
+  if (!sawDual) return null
+  if (allEmail) return 'EMAIL'
+  if (allSms) return 'SMS'
+  return null
+}
+
+// Map a primary-channel choice onto every event's per-channel toggles. Rules:
+// - In-app is never touched (it's the durable inbox and is never paused).
+// - The chosen channel is enabled wherever the event supports it.
+// - The other external channel is disabled ONLY when the chosen channel is also
+//   available for that event — so an email-only event still emails under "Text",
+//   and no event is ever fully silenced.
+export function applyPreferredChannel(
+  payload: PreferencesPayload,
+  channel: 'EMAIL' | 'SMS',
+): Record<string, ChannelState> {
+  const supported = eventSupportedChannels(payload.categories)
+  const nextEvents: Record<string, ChannelState> = {}
+
+  for (const [eventKey, channels] of supported) {
+    const current = payload.events[eventKey] ?? {
+      inAppEnabled: true,
+      smsEnabled: true,
+      emailEnabled: true,
+    }
+    const supportsEmail = channels.includes('EMAIL')
+    const supportsSms = channels.includes('SMS')
+    const supportsBoth = supportsEmail && supportsSms
+
+    if (channel === 'EMAIL') {
+      nextEvents[eventKey] = {
+        inAppEnabled: current.inAppEnabled,
+        emailEnabled: supportsEmail ? true : current.emailEnabled,
+        smsEnabled: supportsBoth ? false : current.smsEnabled,
+      }
+    } else {
+      nextEvents[eventKey] = {
+        inAppEnabled: current.inAppEnabled,
+        smsEnabled: supportsSms ? true : current.smsEnabled,
+        emailEnabled: supportsBoth ? false : current.emailEnabled,
+      }
+    }
+  }
+
+  return { ...payload.events, ...nextEvents }
 }
 
 function minutesToTimeValue(minutes: number): string {
@@ -70,8 +154,12 @@ function timeValueToMinutes(value: string): number | null {
 
 export default function NotificationPreferencesForm({
   endpoint,
+  showChannelPreference = false,
 }: {
   endpoint: string
+  // When true, render a simple "preferred channel" selector (Email / Text /
+  // Push-coming-soon) above the detailed per-notification toggles.
+  showChannelPreference?: boolean
 }) {
   const [payload, setPayload] = useState<PreferencesPayload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -130,6 +218,18 @@ export default function NotificationPreferencesForm({
       })
     },
     [],
+  )
+
+  const choosePreferredChannel = useCallback((channel: 'EMAIL' | 'SMS') => {
+    setSuccess(null)
+    setPayload((prev) =>
+      prev ? { ...prev, events: applyPreferredChannel(prev, channel) } : prev,
+    )
+  }, [])
+
+  const activePreference = useMemo(
+    () => (payload ? deriveActivePreference(payload) : null),
+    [payload],
   )
 
   const setQuietHours = useCallback((next: Partial<QuietHoursState>) => {
@@ -199,8 +299,83 @@ export default function NotificationPreferencesForm({
 
   const qh = payload.quietHours
 
+  const preferenceOptions: {
+    id: ChannelPreference
+    label: string
+    hint: string
+    disabled?: boolean
+  }[] = [
+    { id: 'EMAIL', label: 'Email', hint: 'Get them in your inbox' },
+    { id: 'SMS', label: 'Text', hint: 'Get them by SMS' },
+    {
+      id: 'PUSH',
+      label: 'Push',
+      hint: 'Coming soon',
+      disabled: true,
+    },
+  ]
+
   return (
     <div className="flex flex-col gap-5">
+      {/* Preferred channel */}
+      {showChannelPreference ? (
+        <section className="brand-glass p-4 sm:p-5">
+          <div className="max-w-md">
+            <div className="text-sm font-black tracking-[var(--ls-caps)] text-textPrimary">
+              How would you like to hear from us?
+            </div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-textSecondary">
+              Pick one and we&apos;ll send notifications there instead of every
+              channel. You&apos;ll always see them in-app, and you can still
+              fine-tune individual notifications below.
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {preferenceOptions.map((option) => {
+              const active = !option.disabled && activePreference === option.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  disabled={option.disabled}
+                  aria-pressed={active}
+                  onClick={() =>
+                    option.disabled
+                      ? undefined
+                      : choosePreferredChannel(option.id as 'EMAIL' | 'SMS')
+                  }
+                  className={[
+                    'flex flex-col items-start gap-0.5 rounded-card border px-3 py-2 text-left transition',
+                    option.disabled
+                      ? 'cursor-not-allowed border-textPrimary/10 opacity-60'
+                      : active
+                        ? 'border-transparent bg-accentPrimary text-bgPrimary'
+                        : 'border-textPrimary/15 text-textPrimary hover:border-textPrimary/30',
+                  ].join(' ')}
+                >
+                  <span className="text-[13px] font-black">{option.label}</span>
+                  <span
+                    className={[
+                      'text-[11px] font-semibold',
+                      active ? 'text-bgPrimary/80' : 'text-textSecondary',
+                    ].join(' ')}
+                  >
+                    {option.hint}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
+          {activePreference === null ? (
+            <div className="mt-2 text-[11px] font-semibold text-textSecondary">
+              Your notifications are customized below.
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {/* SMS consent note */}
       <div className="rounded-card border border-toneInfo/30 bg-toneInfo/10 px-3 py-2 text-xs font-semibold leading-5 text-textSecondary">
         SMS messages are only sent when you have a verified phone number and have

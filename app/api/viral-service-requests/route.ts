@@ -9,6 +9,7 @@ import {
 } from '@/lib/viralRequests'
 import { toViralRequestDto } from '@/lib/viralRequests/contracts'
 import { emitAdminViralRequestPending } from '@/lib/notifications/adminNotifications'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
 
@@ -126,6 +127,8 @@ export async function POST(req: Request) {
     } catch (notifyError) {
       console.error('viral request admin notify error', notifyError)
     }
+
+    kickNotificationDrain()
 
     return jsonOk(
       {

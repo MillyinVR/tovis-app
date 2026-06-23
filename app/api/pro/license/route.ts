@@ -11,6 +11,7 @@
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { emitAdminVerificationReviewNeeded } from '@/lib/notifications/adminNotifications'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { prisma } from '@/lib/prisma'
 import { isUsStateCode } from '@/lib/usStates'
 
@@ -83,6 +84,8 @@ export async function PATCH(req: Request) {
     } catch (notifyError) {
       console.error('PATCH /api/pro/license admin notify error', notifyError)
     }
+
+    kickNotificationDrain()
 
     return jsonOk({ license: updated })
   } catch (error: unknown) {

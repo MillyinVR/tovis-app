@@ -108,7 +108,10 @@ export default function ClientSettingsPage() {
           description="Choose how you hear from us for each kind of update, and set quiet hours."
         />
 
-        <NotificationPreferencesForm endpoint="/api/client/notification-preferences" />
+        <NotificationPreferencesForm
+          endpoint="/api/client/notification-preferences"
+          showChannelPreference
+        />
       </section>
 
       <section className="brand-glass p-5 sm:p-6">
