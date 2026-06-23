@@ -159,7 +159,7 @@ describe('evaluateProSchedulingDecision', () => {
     })
   })
 
-  it('returns STEP_MISMATCH when start is off step', async () => {
+  it('allows an off-step start for pro-scheduled bookings (pros may pick any minute)', async () => {
     mocks.isStartAlignedToWorkingWindowStep.mockReturnValueOnce({
       ok: false,
       code: 'STEP_MISMATCH',
@@ -170,21 +170,17 @@ describe('evaluateProSchedulingDecision', () => {
 
     const result = await evaluateProSchedulingDecision(makeArgs())
 
-    expect(mocks.addMinutes).toHaveBeenCalledWith(requestedStart, 1)
-    expect(mocks.checkAdvanceNotice).not.toHaveBeenCalled()
-    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+    // Off-step is intentionally not fatal for pros — the remaining guards
+    // (advance notice, working hours, conflicts) still run.
+    expect(mocks.checkAdvanceNotice).toHaveBeenCalled()
+    expect(mocks.ensureWithinWorkingHours).toHaveBeenCalled()
+    expect(mocks.getTimeRangeConflict).toHaveBeenCalled()
 
     expect(result).toEqual({
-      ok: false,
-      code: 'STEP_MISMATCH',
-      logHint: {
-        requestedStart,
-        requestedEnd: new Date('2026-03-11T19:31:00.000Z'),
-        conflictType: 'STEP_BOUNDARY',
-        meta: {
-          stepMinutes: 15,
-          nearestBoundary: '2026-03-11T19:15:00.000Z',
-        },
+      ok: true,
+      value: {
+        requestedEnd,
+        appliedOverrides: [],
       },
     })
   })

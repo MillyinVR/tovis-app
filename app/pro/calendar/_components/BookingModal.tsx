@@ -6,10 +6,7 @@ import type { ReactNode } from 'react'
 
 import type { BookingDetails, ServiceOption } from '../_types'
 
-import {
-  DEFAULT_CALENDAR_STEP_MINUTES,
-  SECONDS_PER_MINUTE,
-} from '../_constants'
+import { SECONDS_PER_MINUTE } from '../_constants'
 
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { DEFAULT_TIME_ZONE, friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
@@ -187,8 +184,9 @@ type SummaryRowProps = {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_DURATION_MINUTES = 60
-const TIME_INPUT_STEP_SECONDS =
-  DEFAULT_CALENDAR_STEP_MINUTES * SECONDS_PER_MINUTE
+// Pros may set an appointment at ANY minute — the time input is 1-minute
+// granularity, independent of the calendar grid's display step.
+const TIME_INPUT_STEP_SECONDS = SECONDS_PER_MINUTE
 
 const DEFAULT_COPY: BookingModalCopy = {
   eyebrow: '◆ Booking',

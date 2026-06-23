@@ -1,7 +1,6 @@
 // lib/booking/policies/proSchedulingPolicy.ts
 
 import { Prisma, ServiceLocationType } from '@prisma/client'
-import { addMinutes } from '@/lib/booking/conflicts'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import {
@@ -103,18 +102,12 @@ export async function evaluateProSchedulingDecision(
   })
 
   if (!stepCheck.ok) {
-    if (stepCheck.code === 'STEP_MISMATCH') {
-      return policyFail('STEP_MISMATCH', {
-        requestedStart: args.requestedStart,
-        requestedEnd: addMinutes(args.requestedStart, 1),
-        conflictType: 'STEP_BOUNDARY',
-        meta: {
-          stepMinutes: args.stepMinutes,
-          ...(stepCheck.meta ?? {}),
-        },
-      })
-    }
-
+    // A pro setting an appointment on their own calendar may pick ANY start
+    // minute. The step grid (e.g. 30-min slots, anchored to the working-window
+    // start) is a client self-booking nicety, not a constraint on the pro — so
+    // STEP_MISMATCH is intentionally NOT fatal here. Only the working-hours
+    // codes from the alignment helper are surfaced; working hours, advance
+    // notice, max-days-ahead, and conflicts are all still enforced below.
     if (stepCheck.code === 'WORKING_HOURS_REQUIRED') {
       return policyFail('WORKING_HOURS_REQUIRED', {
         requestedStart: args.requestedStart,
