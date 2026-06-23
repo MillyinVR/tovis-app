@@ -36,6 +36,10 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import {
+  acceptedPaymentMethodsSelect,
+  buildAcceptedPaymentMethods,
+} from '@/lib/payments/acceptedMethods'
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
 import { parseMoney } from '@/lib/money'
 import {
@@ -550,6 +554,10 @@ type MarkProBookingCheckoutPaidArgs = {
   bookingId: string
   professionalId: string
   actorUserId: string
+  // The method the pro collected payment with (cash, Venmo, etc). Recorded on
+  // the booking so the receipt/aftercare reflects how the client actually paid.
+  // Acceptance against the pro's payment settings is validated at the route edge.
+  selectedPaymentMethod?: PaymentMethod | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -7237,12 +7245,36 @@ await enforceBookingOverlapPolicy({
 type ConsultationProposedServiceItem = {
   offeringId: string
   sortOrder: number
+  // The price the pro and client agreed on during the consultation, in dollars.
+  // Stored on the proposal as a decimal string (e.g. "120.00"); null when the
+  // proposal carried no usable price, in which case we fall back to the
+  // offering's catalog price during materialization.
+  agreedPrice: Prisma.Decimal | null
 }
 
 function isJsonObjectRecord(
   value: Prisma.JsonValue,
 ): value is Prisma.JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+// The consultation proposal stores each line item's agreed price as a decimal
+// dollars string (see buildProposalJson in the consultation-proposal route).
+// Parse it back into a Decimal so the approved booking snapshots reflect what
+// was actually quoted, not the offering's catalog "starting at" price.
+function parseConsultationAgreedPrice(
+  value: Prisma.JsonValue,
+): Prisma.Decimal | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const trimmed = String(value).trim()
+  if (!trimmed) return null
+  try {
+    const decimal = new Prisma.Decimal(trimmed)
+    if (!decimal.isFinite() || decimal.isNegative()) return null
+    return decimal
+  } catch {
+    return null
+  }
 }
 
 function parseConsultationProposedItems(
@@ -7276,6 +7308,7 @@ function parseConsultationProposedItems(
         typeof row.sortOrder === 'number' && Number.isFinite(row.sortOrder)
           ? row.sortOrder
           : index,
+      agreedPrice: parseConsultationAgreedPrice(row.price ?? null),
     }
   })
 }
@@ -7372,12 +7405,24 @@ const offeringIds = Array.from(
   }
 })
 
-  const normalizedItems = buildNormalizedBookingItemsFromRequestedOfferings({
-    requestedItems,
-    locationType: booking.locationType,
-    stepMinutes: 15,
-    offeringById,
-    badItemsCode: 'INVALID_SERVICE_ITEMS',
+  const normalizedItemsFromCatalog =
+    buildNormalizedBookingItemsFromRequestedOfferings({
+      requestedItems,
+      locationType: booking.locationType,
+      stepMinutes: 15,
+      offeringById,
+      badItemsCode: 'INVALID_SERVICE_ITEMS',
+    })
+
+  // Honor the price the pro and client agreed on during the consultation.
+  // requestedItems/normalizedItems are built in the same order as proposedItems,
+  // so index alignment holds. Where the proposal carried an agreed price, it is
+  // the source of truth for the booking snapshot; otherwise we keep the
+  // offering's catalog price.
+  const normalizedItems = normalizedItemsFromCatalog.map((item, index) => {
+    const agreedPrice = proposedItems[index]?.agreedPrice ?? null
+    if (!agreedPrice) return item
+    return { ...item, priceSnapshot: agreedPrice }
   })
 
   const {
@@ -11140,6 +11185,7 @@ async function performLockedUpdateProCheckoutCloseout(args: {
   actorUserId: string
   checkoutStatus: BookingCheckoutStatus
   paymentCollectedAt: Date
+  selectedPaymentMethod?: PaymentMethod | null
   route: string
   requestId?: string | null
   idempotencyKey?: string | null
@@ -11242,6 +11288,31 @@ async function performLockedUpdateProCheckoutCloseout(args: {
     })
   }
 
+  // When the pro records how the client paid, the method must be one the pro
+  // actually accepts, and never a Stripe card (those are only "paid" once Stripe
+  // confirms the charge — they cannot be marked paid by hand).
+  if (args.selectedPaymentMethod) {
+    if (args.selectedPaymentMethod === PaymentMethod.STRIPE_CARD) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Stripe card payments cannot be marked paid manually.',
+        userMessage: 'Card payments must be confirmed through Stripe checkout.',
+      })
+    }
+
+    const paymentSettings =
+      await args.tx.professionalPaymentSettings.findUnique({
+        where: { professionalId: args.professionalId },
+        select: acceptedPaymentMethodsSelect,
+      })
+
+    if (!buildAcceptedPaymentMethods(paymentSettings).has(args.selectedPaymentMethod)) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Selected payment method is not enabled for this professional.',
+        userMessage: 'That payment method is not enabled in your payment settings.',
+      })
+    }
+  }
+
   const oldCheckoutState = buildCheckoutAuditSnapshot({
     checkoutStatus: booking.checkoutStatus,
     selectedPaymentMethod: booking.selectedPaymentMethod,
@@ -11268,6 +11339,12 @@ async function performLockedUpdateProCheckoutCloseout(args: {
       checkoutStatus: args.checkoutStatus,
       paymentAuthorizedAt: nextPaymentAuthorizedAt,
       paymentCollectedAt: nextPaymentCollectedAt,
+      // Record how the client paid when the pro supplies it; never overwrite an
+      // existing method with null (e.g. WAIVED, or a pro confirmation with no
+      // method change).
+      ...(args.selectedPaymentMethod
+        ? { selectedPaymentMethod: args.selectedPaymentMethod }
+        : {}),
     },
     select: PRO_CHECKOUT_CLOSEOUT_SELECT,
   })
@@ -12459,6 +12536,7 @@ export async function markProBookingCheckoutPaid(
         actorUserId: args.actorUserId,
         checkoutStatus: BookingCheckoutStatus.PAID,
         paymentCollectedAt: now,
+        selectedPaymentMethod: args.selectedPaymentMethod ?? null,
         route: 'lib/booking/writeBoundary.ts:markProBookingCheckoutPaid',
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,

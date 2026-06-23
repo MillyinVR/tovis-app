@@ -19,6 +19,7 @@ import ConsultationForm, {
 } from '../ConsultationForm'
 import PendingActionButton from './PendingActionButton'
 import ElapsedTimer from './_components/ElapsedTimer'
+import MarkPaidButton from './MarkPaidButton'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
@@ -48,6 +49,11 @@ import { moneyToFixed2String, type MoneyInput } from '@/lib/money'
 import { fullName } from '@/lib/names'
 import { buildProSessionCloseoutChecklist } from '@/lib/proSession/closeoutChecklist'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
+import {
+  acceptedPaymentMethodsSelect,
+  listManualCollectablePaymentMethods,
+  type ManualCollectablePaymentMethod,
+} from '@/lib/payments/acceptedMethods'
 
 export const dynamic = 'force-dynamic'
 
@@ -1168,6 +1174,7 @@ function WrapUpView({
   hasPaymentCollected,
   hasCheckoutClosed,
   hasConsultationApproved,
+  markPaidMethods,
 }: {
   bookingId: string
   serviceName: string
@@ -1180,6 +1187,7 @@ function WrapUpView({
   hasPaymentCollected: boolean
   hasCheckoutClosed: boolean
   hasConsultationApproved: boolean
+  markPaidMethods: ManualCollectablePaymentMethod[]
 }) {
   const checklist = buildProSessionCloseoutChecklist({
     afterCount,
@@ -1277,6 +1285,12 @@ function WrapUpView({
               <div className="brand-pro-session-check-sub">
                 {paymentItem?.subtitle ?? 'not collected'}
               </div>
+              {!hasPaymentCollected ? (
+                <MarkPaidButton
+                  bookingId={bookingId}
+                  methods={markPaidMethods}
+                />
+              ) : null}
             </div>
 
             <Pill
@@ -1603,6 +1617,14 @@ export default async function ProBookingSessionPage(props: PageProps) {
   if (!booking) notFound()
   if (booking.professionalId !== professionalId) redirect('/pro')
 
+  // Payment methods the pro can record as collected in person (for clients who
+  // don't self-checkout). Excludes Stripe card — that path is gated to Stripe.
+  const paymentSettings = await prisma.professionalPaymentSettings.findUnique({
+    where: { professionalId },
+    select: acceptedPaymentMethodsSelect,
+  })
+  const markPaidMethods = listManualCollectablePaymentMethods(paymentSettings)
+
   const bookingStatus = booking.status
   const rawStep = booking.sessionStep ?? SessionStep.NONE
   const approvalStatus = booking.consultationApproval?.status ?? null
@@ -1857,6 +1879,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
         hasPaymentCollected={hasPaymentCollected}
         hasCheckoutClosed={hasCheckoutClosed}
         hasConsultationApproved={hasConsultationApproved}
+        markPaidMethods={markPaidMethods}
       />
     )
   }

@@ -12,6 +12,7 @@ import {
   declineClientAftercareNextAppointment,
 } from '@/lib/booking/writeBoundary'
 import { isBookingError } from '@/lib/booking/errors'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
@@ -58,12 +59,13 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     if (action === 'DECLINE') {
       await declineClientAftercareNextAppointment({ bookingId, clientId })
+      kickNotificationDrain()
       return jsonOk({ ok: true })
     }
 
     const requestId = readRequestId(req)
 
-    return await withRouteIdempotency<ConfirmResponseBody>(
+    const response = await withRouteIdempotency<ConfirmResponseBody>(
       {
         request: req,
         actor: {
@@ -102,6 +104,12 @@ export async function POST(req: Request, ctx: RouteContext) {
         }
       },
     )
+
+    // Next appointment confirmed (new booking created) — deliver its
+    // confirmation immediately.
+    kickNotificationDrain()
+
+    return response
   } catch (error: unknown) {
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {

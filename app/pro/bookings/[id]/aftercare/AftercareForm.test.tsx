@@ -50,6 +50,12 @@ function renderForm(props?: Partial<React.ComponentProps<typeof AftercareForm>>)
     <AftercareForm
       bookingId="booking_1"
       timeZone="America/Los_Angeles"
+      rebookProfessionalId="pro_1"
+      rebookServiceId="service_1"
+      rebookOfferingId="offering_1"
+      rebookLocationType="SALON"
+      rebookLocationId="location_1"
+      rebookClientAddressId={null}
       existingNotes="Use gentle cleanser tonight."
       existingRebookedFor={null}
       existingRebookMode="NONE"

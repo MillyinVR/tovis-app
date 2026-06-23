@@ -1,6 +1,7 @@
 // app/api/pro/bookings/[id]/cancel/route.ts
 
 import { BookingStatus, Prisma, Role } from '@prisma/client'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 import { requirePro, jsonFail, jsonOk } from '@/app/api/_utils'
 import {
@@ -155,6 +156,9 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       responseStatus: 200,
       responseBody,
     })
+
+    // Booking cancelled — deliver the cancellation / refund notification now.
+    kickNotificationDrain()
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {

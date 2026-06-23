@@ -25,6 +25,11 @@ import {
 } from '@/app/api/_utils/jsonPayload'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { updateClientBookingCheckout } from '@/lib/booking/writeBoundary'
+import {
+  buildAcceptedPaymentMethods,
+  normalizePaymentMethodInput,
+} from '@/lib/payments/acceptedMethods'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
@@ -70,32 +75,6 @@ function parseBoolean(value: unknown): boolean {
   return false
 }
 
-function normalizePaymentMethodInput(value: unknown): PaymentMethod | undefined {
-  if (typeof value !== 'string') return undefined
-
-  const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, '_')
-  if (!normalized) return undefined
-
-  switch (normalized) {
-    case PaymentMethod.CASH:
-      return PaymentMethod.CASH
-    case PaymentMethod.CARD_ON_FILE:
-      return PaymentMethod.CARD_ON_FILE
-    case PaymentMethod.TAP_TO_PAY:
-      return PaymentMethod.TAP_TO_PAY
-    case PaymentMethod.VENMO:
-      return PaymentMethod.VENMO
-    case PaymentMethod.ZELLE:
-      return PaymentMethod.ZELLE
-    case PaymentMethod.APPLE_CASH:
-      return PaymentMethod.APPLE_CASH
-    case PaymentMethod.STRIPE_CARD:
-      return PaymentMethod.STRIPE_CARD
-    default:
-      return undefined
-  }
-}
-
 function parseBody(body: Record<string, unknown>): ParsedBodyResult {
   const parsedTip = parseTipAmount(body.tipAmount)
   if (!parsedTip.ok) return parsedTip
@@ -124,34 +103,6 @@ function parseBody(body: Record<string, unknown>): ParsedBodyResult {
       confirmPayment: parseBoolean(body.confirmPayment),
     },
   }
-}
-
-function buildAcceptedPaymentMethods(
-  settings:
-    | {
-        acceptCash: boolean
-        acceptCardOnFile: boolean
-        acceptTapToPay: boolean
-        acceptVenmo: boolean
-        acceptZelle: boolean
-        acceptAppleCash: boolean
-        acceptStripeCard: boolean
-      }
-    | null,
-): Set<PaymentMethod> {
-  const out = new Set<PaymentMethod>()
-
-  if (!settings) return out
-
-  if (settings.acceptCash) out.add(PaymentMethod.CASH)
-  if (settings.acceptCardOnFile) out.add(PaymentMethod.CARD_ON_FILE)
-  if (settings.acceptTapToPay) out.add(PaymentMethod.TAP_TO_PAY)
-  if (settings.acceptVenmo) out.add(PaymentMethod.VENMO)
-  if (settings.acceptZelle) out.add(PaymentMethod.ZELLE)
-  if (settings.acceptAppleCash) out.add(PaymentMethod.APPLE_CASH)
-  if (settings.acceptStripeCard) out.add(PaymentMethod.STRIPE_CARD)
-
-  return out
 }
 
 function buildIdempotencyRequestBody(args: {
@@ -383,6 +334,10 @@ export async function POST(req: NextRequest, props: RouteContext) {
       responseStatus: 200,
       responseBody,
     })
+
+    // Checkout committed (e.g. payment confirmed) — deliver any receipt /
+    // completion notification immediately.
+    kickNotificationDrain()
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {

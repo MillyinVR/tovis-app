@@ -27,6 +27,7 @@ import {
 } from '@prisma/client'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import { resolveAppointmentSchedulingContext } from '@/lib/booking/timeZoneTruth'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { moneyToFixed2String } from '@/lib/money'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { isRecord } from '@/lib/guards'
@@ -585,6 +586,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       responseStatus: 200,
       responseBody,
     })
+
+    // Booking edited — if the client was notified of the change, deliver it now.
+    if (notifyClient === true) {
+      kickNotificationDrain()
+    }
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {

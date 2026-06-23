@@ -430,6 +430,11 @@ export default async function ProAftercarePage({ params }: PageProps) {
       id: true,
       professionalId: true,
       clientId: true,
+      serviceId: true,
+      offeringId: true,
+      locationType: true,
+      locationId: true,
+      clientAddressId: true,
       status: true,
       startedAt: true,
       finishedAt: true,
@@ -519,6 +524,15 @@ export default async function ProAftercarePage({ params }: PageProps) {
           rebookWindowStart: true,
           rebookWindowEnd: true,
           rebookDeclinedAt: true,
+          rebookSlot: {
+            select: {
+              offeringId: true,
+              locationId: true,
+              locationType: true,
+              startsAt: true,
+              endsAt: true,
+            },
+          },
           draftSavedAt: true,
           sentToClientAt: true,
           lastEditedAt: true,
@@ -721,6 +735,12 @@ export default async function ProAftercarePage({ params }: PageProps) {
           <AftercareForm
             bookingId={bookingId}
             timeZone={timeZone}
+            rebookProfessionalId={booking.professionalId}
+            rebookServiceId={booking.serviceId}
+            rebookOfferingId={booking.offeringId}
+            rebookLocationType={booking.locationType}
+            rebookLocationId={booking.locationId}
+            rebookClientAddressId={booking.clientAddressId}
             existingNotes={aftercare?.notes ?? ''}
             existingRebookMode={aftercare?.rebookMode ?? AftercareRebookMode.NONE}
             existingRebookedFor={dateToIso(aftercare?.rebookedFor)}
@@ -729,6 +749,17 @@ export default async function ProAftercarePage({ params }: PageProps) {
             )}
             existingRebookWindowEnd={dateToIso(aftercare?.rebookWindowEnd)}
             existingRebookDeclinedAt={dateToIso(aftercare?.rebookDeclinedAt)}
+            existingRebookSlot={
+              aftercare?.rebookSlot
+                ? {
+                    offeringId: aftercare.rebookSlot.offeringId,
+                    locationId: aftercare.rebookSlot.locationId,
+                    locationType: aftercare.rebookSlot.locationType,
+                    startsAt: aftercare.rebookSlot.startsAt.toISOString(),
+                    endsAt: aftercare.rebookSlot.endsAt.toISOString(),
+                  }
+                : null
+            }
             existingMedia={existingMedia}
             existingRecommendedProducts={existingRecommendedProducts}
             existingDraftSavedAt={dateToIso(aftercare?.draftSavedAt)}

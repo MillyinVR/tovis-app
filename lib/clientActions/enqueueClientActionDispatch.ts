@@ -1,6 +1,7 @@
 // lib/clientActions/enqueueClientActionDispatch.ts
 
 import {
+  ContactMethod,
   NotificationChannel,
   NotificationEventKey,
   NotificationPriority,
@@ -99,28 +100,62 @@ function resolveEventKey(
   return eventKey
 }
 
+function contactMethodToChannel(
+  method: ContactMethod,
+): NotificationChannel | null {
+  if (method === ContactMethod.EMAIL) return NotificationChannel.EMAIL
+  if (method === ContactMethod.SMS) return NotificationChannel.SMS
+  return null
+}
+
+/**
+ * Fan a client-action magic link out to EVERY channel the action allows AND the
+ * recipient has a destination for — so a new client with both an email and a
+ * phone receives the claim/consultation/aftercare link by BOTH email and text,
+ * not just the single email-preferred channel. enqueueDispatch still gates each
+ * requested channel by the event's default channels, capability (verified
+ * destination + SMS consent), Twilio config, and recipient preferences, so this
+ * only widens the *request*; it never forces an undeliverable channel.
+ *
+ * Falls back to the single resolved primary method if, unexpectedly, no allowed
+ * method has an available destination (resolution already guaranteed one).
+ */
 function resolveRequestedChannels(
   plan: ClientActionOrchestrationPlan,
 ): readonly NotificationChannel[] {
-  const method = plan.resolvedDelivery.method
+  const email = asTrimmedString(plan.recipient.recipientEmail)
+  const phone = asTrimmedString(plan.recipient.recipientPhone)
 
+  const channels: NotificationChannel[] = []
+  const pushUnique = (channel: NotificationChannel | null) => {
+    if (channel && !channels.includes(channel)) channels.push(channel)
+  }
+
+  for (const method of plan.definition.delivery.allowedContactMethods) {
+    if (method === ContactMethod.EMAIL && !email) continue
+    if (method === ContactMethod.SMS && !phone) continue
+    pushUnique(contactMethodToChannel(method))
+  }
+
+  if (channels.length > 0) {
+    return channels
+  }
+
+  const method = plan.resolvedDelivery.method
   if (!method) {
     throw new Error(
       `clientActions/enqueueClientActionDispatch: missing resolved delivery method for ${plan.definition.type}.`,
     )
   }
 
-  if (method === 'EMAIL') {
-    return [NotificationChannel.EMAIL]
+  const fallback = contactMethodToChannel(method)
+  if (!fallback) {
+    throw new Error(
+      `clientActions/enqueueClientActionDispatch: unsupported contact method ${String(method)} for ${plan.definition.type}.`,
+    )
   }
 
-  if (method === 'SMS') {
-    return [NotificationChannel.SMS]
-  }
-
-  throw new Error(
-    `clientActions/enqueueClientActionDispatch: unsupported contact method ${String(method)} for ${plan.definition.type}.`,
-  )
+  return [fallback]
 }
 
 /**

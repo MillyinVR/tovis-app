@@ -1,6 +1,7 @@
 // app/api/bookings/[id]/cancel/route.ts
 
 import { Role, type Prisma } from '@prisma/client'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
@@ -180,7 +181,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       return rateLimitExceededResponse(rateLimit)
     }
 
-    return await withRouteIdempotency<CancelResponseBody>(
+    const response = await withRouteIdempotency<CancelResponseBody>(
       {
         request: req,
         actor: {
@@ -233,6 +234,11 @@ export async function POST(req: Request, ctx: RouteContext) {
         return { status: 200, body: toCancelResponseBody(result) }
       },
     )
+
+    // Cancellation (and any auto-refund) committed — deliver the notices now.
+    kickNotificationDrain()
+
+    return response
   } catch (error: unknown) {
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {

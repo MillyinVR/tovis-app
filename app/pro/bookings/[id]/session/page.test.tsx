@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   bookingFindUnique: vi.fn(),
   mediaAssetCount: vi.fn(),
   aftercareSummaryFindFirst: vi.fn(),
+  professionalPaymentSettingsFindUnique: vi.fn(),
 
   getCurrentUser: vi.fn(),
 
@@ -58,6 +59,9 @@ vi.mock('@/lib/prisma', () => ({
     aftercareSummary: {
       findFirst: mocks.aftercareSummaryFindFirst,
     },
+    professionalPaymentSettings: {
+      findUnique: mocks.professionalPaymentSettingsFindUnique,
+    },
   },
 }))
 
@@ -102,6 +106,13 @@ vi.mock('./PendingActionButton', () => ({
       { type: 'submit', 'data-variant': variant, disabled },
       children,
     ),
+}))
+
+// Client component (uses hooks); stub it so the server-component tree walk in
+// extractText doesn't invoke real React hooks.
+vi.mock('./MarkPaidButton', () => ({
+  default: () =>
+    React.createElement('div', { 'data-testid': 'mark-paid-button' }),
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
@@ -282,6 +293,10 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
     })
 
     mocks.getCurrentUser.mockResolvedValue(makeCurrentUser())
+
+    // No saved payment settings by default — the wrap-up just renders the
+    // "turn on a payment method" hint; individual tests don't assert on it.
+    mocks.professionalPaymentSettingsFindUnique.mockResolvedValue(null)
 
     mocks.transitionSessionStep.mockResolvedValue({
       ok: true,

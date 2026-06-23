@@ -21,6 +21,7 @@ import {
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { resolveDiscoveryFinalize } from '@/lib/booking/resolveDiscoveryFinalize'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
@@ -609,7 +610,7 @@ export async function POST(request: Request) {
       aftercare: Boolean(body.aftercareToken),
     })
 
-    return await withRouteIdempotency<FinalizeSuccessBody>(
+    const response = await withRouteIdempotency<FinalizeSuccessBody>(
       {
         request,
         actor: buildIdempotencyActor(ownership),
@@ -703,6 +704,12 @@ export async function POST(request: Request) {
         return { status: 201, body: responseBody }
       },
     )
+
+    // Booking finalized — deliver its confirmation (client + pro) immediately
+    // rather than waiting for the cron tick.
+    kickNotificationDrain()
+
+    return response
   } catch (error: unknown) {
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {

@@ -19,6 +19,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { confirmBookingFinalReview } from '@/lib/booking/writeBoundary'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import {
   AftercareRebookMode,
   BookingServiceItemType,
@@ -461,6 +462,9 @@ export async function POST(req: Request, ctx: RouteContext) {
       responseStatus: 200,
       responseBody,
     })
+
+    // Final review confirmed — deliver any client-facing notification now.
+    kickNotificationDrain()
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
