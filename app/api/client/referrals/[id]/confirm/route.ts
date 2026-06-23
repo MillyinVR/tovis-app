@@ -3,6 +3,7 @@ import { NotificationEventKey, ReferralStatus } from '@prisma/client'
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 import { createClientNotification } from '@/lib/notifications/clientNotifications'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,6 +59,8 @@ export async function POST(_req: Request, ctx: RouteContext) {
       href: '/looks',
       dedupeKey: `REFERRAL_CONFIRMED:${referral.id}`,
     }).catch(() => null)
+
+    kickNotificationDrain()
 
     return jsonOk({ confirmed: true }, 200)
   } catch (err) {

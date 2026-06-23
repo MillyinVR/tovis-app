@@ -18,6 +18,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/internal/jobs/notifications/health",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/last-minute/process",
       "schedule": "*/5 * * * *"
     },

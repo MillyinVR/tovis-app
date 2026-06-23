@@ -8,6 +8,7 @@ import {
   CLIENT_NOTIFICATION_EVENT_KEYS,
   PRO_NOTIFICATION_EVENT_KEYS,
   getDefaultChannelsForRecipient,
+  isEmailAlwaysOnEvent,
 } from './eventKeys'
 
 /**
@@ -167,6 +168,12 @@ export type NotificationCategoryEventMeta = {
   label: string
   /** Channels this event can use for this audience (the only toggles shown). */
   supportedChannels: NotificationChannel[]
+  /**
+   * When true, the EMAIL toggle is locked on — this is a critical event (e.g. a
+   * payment receipt) whose email can never be turned off. The engine enforces
+   * this regardless of the saved preference; the UI just reflects it.
+   */
+  emailLocked: boolean
 }
 
 export type NotificationCategoryMeta = {
@@ -209,10 +216,14 @@ export function getNotificationCategoriesForAudience(
     for (const eventKey of def.eventKeys) {
       if (!allowed.has(eventKey)) continue
       covered.add(eventKey)
+      const supportedChannels = supportedChannelsFor(eventKey, recipientKind)
       events.push({
         eventKey,
         label: EVENT_LABELS[eventKey],
-        supportedChannels: supportedChannelsFor(eventKey, recipientKind),
+        supportedChannels,
+        emailLocked:
+          isEmailAlwaysOnEvent(eventKey) &&
+          supportedChannels.includes(NotificationChannel.EMAIL),
       })
     }
 

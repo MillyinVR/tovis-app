@@ -313,6 +313,46 @@ describe('lib/notifications/channelPolicy', () => {
       ])
     })
 
+    it('forces EMAIL through for a critical (payment) event even when the recipient disabled email', () => {
+      const result = resolveChannelPolicy({
+        key: NotificationEventKey.PAYMENT_COLLECTED,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities(),
+        preference: makePreference({ emailEnabled: false }),
+      })
+
+      expect(result.selectedChannels).toContain(NotificationChannel.EMAIL)
+      expect(
+        result.evaluations.find(
+          (e) => e.channel === NotificationChannel.EMAIL,
+        ),
+      ).toEqual({
+        channel: NotificationChannel.EMAIL,
+        enabled: true,
+        reason: null,
+      })
+    })
+
+    it('still cannot email a critical event when there is no email destination', () => {
+      const result = resolveChannelPolicy({
+        key: NotificationEventKey.PAYMENT_COLLECTED,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities({ hasEmailDestination: false }),
+        preference: makePreference({ emailEnabled: false }),
+      })
+
+      expect(result.selectedChannels).not.toContain(NotificationChannel.EMAIL)
+      expect(
+        result.evaluations.find(
+          (e) => e.channel === NotificationChannel.EMAIL,
+        ),
+      ).toEqual({
+        channel: NotificationChannel.EMAIL,
+        enabled: false,
+        reason: 'MISSING_EMAIL_DESTINATION',
+      })
+    })
+
     it('suppresses SMS and EMAIL during quiet hours but keeps IN_APP enabled', () => {
       const result = resolveChannelPolicy({
         key: NotificationEventKey.APPOINTMENT_REMINDER,

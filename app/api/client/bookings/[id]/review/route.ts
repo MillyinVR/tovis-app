@@ -23,6 +23,7 @@ import {
   UploadSessionError,
   validateUploadSession,
 } from '@/lib/media/uploadSession'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
@@ -634,6 +635,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         )
       }
     }
+
+    // Review submitted — deliver the pro's "new review" notification now.
+    kickNotificationDrain()
 
     return jsonOk(responseBody, responseStatus)
   } catch (error: unknown) {
