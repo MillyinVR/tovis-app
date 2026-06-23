@@ -204,7 +204,11 @@ describe('MediaUploader', () => {
 
     expect(fetchMock.mock.calls.some(([u]) => u === MEDIA_URL)).toBe(false)
     expect(mockRefresh).not.toHaveBeenCalled()
-    expect(screen.getByTestId('media-fill')).toBeInTheDocument()
+    // On failure the preview shows an error state (file kept for retry), not a
+    // blob preview / "Missing media".
+    expect(
+      screen.getByText('Upload failed — retry below.'),
+    ).toBeInTheDocument()
 
     const retry = screen.getByRole('button', { name: /retry upload/i })
     expect(retry).toBeInTheDocument()

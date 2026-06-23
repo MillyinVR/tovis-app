@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import MediaFill from '@/app/_components/media/MediaFill'
 import MediaLoading from '@/app/_components/media/MediaLoading'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
@@ -475,36 +474,31 @@ export default function MediaUploader({
         {previewUrl ? (
           <div className="rounded-card border border-white/10 bg-bgPrimary p-2">
             <div className="relative aspect-[9/16] w-full overflow-hidden rounded-card border border-white/10 bg-black">
-              {showProgress ? (
+              {error ? (
+                <div className="grid h-full w-full place-items-center px-4 text-center text-[11px] font-black text-textSecondary">
+                  Upload failed — retry below.
+                </div>
+              ) : (
+                // Keep the branded loader up for the whole lifecycle —
+                // compress → upload → save → router.refresh — and let it clear
+                // only when the refreshed grid actually has the image. Never
+                // fall back to a blob preview (it can't render and flashes
+                // "Missing media"). Bar tracks real upload % then sits at 100
+                // while the save + refresh finish.
                 <MediaLoading
                   className="absolute inset-0"
                   percent={
-                    status === 'SAVING'
-                      ? 100
-                      : status === 'UPLOADING' && uploadPercent > 0
-                        ? uploadPercent
+                    status === 'UPLOADING' && uploadPercent > 0
+                      ? uploadPercent
+                      : status === 'SAVING' || isRefreshing
+                        ? 100
                         : null
                   }
-                  label={statusLabel(status, uploadPercent)}
-                />
-              ) : (
-                <MediaFill
-                  src={previewUrl}
-                  mediaType={mediaType}
-                  alt="Preview"
-                  fit="cover"
-                  className="absolute inset-0 h-full w-full"
-                  videoProps={{
-                    controls: true,
-                    playsInline: true,
-                    preload: 'metadata',
-                    muted: false,
-                  }}
-                  imgProps={{
-                    draggable: false,
-                    loading: 'eager',
-                    decoding: 'async',
-                  }}
+                  label={
+                    showProgress
+                      ? statusLabel(status, uploadPercent)
+                      : 'Finishing…'
+                  }
                 />
               )}
             </div>
