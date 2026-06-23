@@ -21,6 +21,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
 import { refundBookingPayment } from '@/lib/booking/refunds'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { proRateLimitKey } from '@/lib/rateLimit/identity'
@@ -167,7 +168,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       return rateLimitExceededResponse(rateLimit)
     }
 
-    return await withRouteIdempotency<RefundRouteBody>(
+    const response = await withRouteIdempotency<RefundRouteBody>(
       {
         request: req,
         actor: {
@@ -233,6 +234,12 @@ export async function POST(req: Request, ctx: RouteContext) {
         throw new RefundProcessingError(result.message)
       },
     )
+
+    // A successful refund enqueues the client's refund notification — deliver
+    // it now (no-op for skipped/invalid outcomes, which enqueue nothing).
+    kickNotificationDrain()
+
+    return response
   } catch (error: unknown) {
     if (error instanceof RefundProcessingError) {
       return jsonFail(

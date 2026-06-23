@@ -2,6 +2,7 @@ import { NotificationEventKey } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 
+import { isEmailAlwaysOnEvent } from './eventKeys'
 import {
   DEFAULT_QUIET_HOURS_END_MINUTES,
   DEFAULT_QUIET_HOURS_START_MINUTES,
@@ -193,7 +194,9 @@ export async function saveNotificationPreferences(
     const data = {
       inAppEnabled: channels.inAppEnabled,
       smsEnabled: channels.smsEnabled,
-      emailEnabled: channels.emailEnabled,
+      // Critical events always email — never persist email-off for them, so the
+      // stored row matches what the engine actually delivers.
+      emailEnabled: isEmailAlwaysOnEvent(eventKey) ? true : channels.emailEnabled,
       quietHoursStartMinutes: quiet.quietHoursStartMinutes,
       quietHoursEndMinutes: quiet.quietHoursEndMinutes,
     }

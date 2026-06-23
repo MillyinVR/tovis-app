@@ -10,6 +10,7 @@ import {
   toggleProFollow,
 } from '@/lib/follows'
 import { createLookFollowerNewProNotification } from '@/lib/notifications/lookFollowerNew'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
 
@@ -102,6 +103,7 @@ export async function POST(_req: Request, ctx: RouteContext) {
       }).catch((error) => {
         console.error('POST /api/pros/[id]/follow notify error', error)
       })
+      kickNotificationDrain()
     }
 
     return jsonOk(

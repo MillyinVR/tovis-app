@@ -17,6 +17,7 @@ import {
   toggleClientFollow,
 } from '@/lib/follows'
 import { createClientFollowNotification } from '@/lib/notifications/clientFollowNew'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
 
@@ -100,6 +101,7 @@ export async function POST(_req: Request, ctx: RouteContext<{ handle: string }>)
           error,
         )
       })
+      kickNotificationDrain()
     }
 
     return jsonOk(

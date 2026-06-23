@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { emitAdminVerificationReviewNeeded } from '@/lib/notifications/adminNotifications'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { VerificationStatus, VerificationDocumentType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -100,6 +101,8 @@ export async function POST(req: Request) {
     } catch (notifyError) {
       console.error('POST /api/pro/verification-docs admin notify error', notifyError)
     }
+
+    kickNotificationDrain()
 
     return jsonOk({ id: created.id }, 201)
   } catch (e) {
