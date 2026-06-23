@@ -259,7 +259,11 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     key: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
     defaultPriority: NotificationPriority.NORMAL,
     transactional: true,
-    allowQuietHoursBypass: false,
+    // Pro-initiated, in-session approval the client is actively waiting on —
+    // must reach them immediately even during quiet hours (mirrors
+    // CLIENT_CLAIM_INVITE). Otherwise a late-evening consultation is deferred
+    // to morning and the pro is stuck mid-session.
+    allowQuietHoursBypass: true,
     templateKey: 'consultation_proposal_sent',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
@@ -337,7 +341,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     key: NotificationEventKey.AFTERCARE_READY,
     defaultPriority: NotificationPriority.NORMAL,
     transactional: true,
-    allowQuietHoursBypass: false,
+    // Pro-initiated at end of session (client pays / rebooks via the magic
+    // link) — deliver immediately rather than deferring to morning quiet-hours
+    // end. Mirrors CLIENT_CLAIM_INVITE / CONSULTATION_PROPOSAL_SENT.
+    allowQuietHoursBypass: true,
     templateKey: 'aftercare_ready',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
