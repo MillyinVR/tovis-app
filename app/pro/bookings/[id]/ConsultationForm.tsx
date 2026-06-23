@@ -47,6 +47,7 @@ type ServiceOption = {
   serviceName: string
   categoryName: string | null
   defaultPrice: number | null
+  defaultDurationMinutes: number | null
 }
 
 type LineItem = {
@@ -199,6 +200,7 @@ function parseServiceOptions(payload: unknown): ServiceOption[] {
       serviceName,
       categoryName: pickNullableString(row.categoryName),
       defaultPrice: pickNullableNumber(row.defaultPrice),
+      defaultDurationMinutes: pickNullableNumber(row.defaultDurationMinutes),
     })
   }
 
@@ -453,6 +455,15 @@ export default function ConsultationForm({
           ? selectedService.defaultPrice.toFixed(2)
           : ''
 
+    // Pre-fill duration from the offering's default so the line item is valid
+    // immediately — otherwise an empty duration silently disables "Send to
+    // client". The pro can still edit it.
+    const durationMinutes =
+      selectedService.defaultDurationMinutes !== null &&
+      selectedService.defaultDurationMinutes > 0
+        ? String(selectedService.defaultDurationMinutes)
+        : ''
+
     setItems((previousItems) =>
       sortLineItems([
         ...previousItems,
@@ -465,7 +476,7 @@ export default function ConsultationForm({
           label: selectedService.serviceName,
           categoryName: selectedService.categoryName,
           price,
-          durationMinutes: '',
+          durationMinutes,
           notes: '',
           sortOrder: previousItems.length,
           source: 'PROPOSAL',
@@ -858,6 +869,14 @@ export default function ConsultationForm({
       <div className="brand-pro-session-help-text">
         Client sees line items + total and must approve before you proceed.
       </div>
+
+      {!canSubmit && !saving && items.length > 0 ? (
+        <div className="brand-pro-session-help-text">
+          {total <= 0
+            ? 'Add a price to each service before you can send.'
+            : 'Each service needs a valid price and duration (in minutes) before you can send.'}
+        </div>
+      ) : null}
 
       {message ? (
         <div className="brand-pro-session-success">{message}</div>
