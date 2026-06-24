@@ -2993,7 +2993,10 @@ function assertClientCanEditBookingCheckoutProducts(
   clientId: string,
 ): void {
   if (booking.clientId !== clientId) {
-    throw bookingError('FORBIDDEN')
+    // A booking the caller doesn't own is indistinguishable from one that
+    // doesn't exist — return the same 404 either way so the id space can't be
+    // enumerated via a 403-vs-404 status difference.
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -3046,7 +3049,9 @@ function assertClientCanUpdateBookingCheckout(
   clientId: string,
 ): void {
   if (booking.clientId !== clientId) {
-    throw bookingError('FORBIDDEN')
+    // Uniform 404 for a non-owned booking — see the no-enumeration rationale in
+    // assertClientCanEditBookingCheckoutProducts.
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -3083,7 +3088,9 @@ function assertClientCanCreateBookingReview(
   clientId: string,
 ): void {
   if (booking.clientId !== clientId) {
-    throw bookingError('FORBIDDEN')
+    // Uniform 404 for a non-owned booking — see the no-enumeration rationale in
+    // assertClientCanEditBookingCheckoutProducts.
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {

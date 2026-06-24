@@ -150,6 +150,22 @@ describe('lib/booking/writeBoundary upsertClientBookingCheckoutProducts lifecycl
     )
   })
 
+  it('returns a uniform 404 for a booking the caller does not own (no id enumeration)', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeBooking({ clientId: 'client_2' }),
+    )
+
+    await expect(
+      upsertClientBookingCheckoutProducts(makeArgs()),
+    ).rejects.toMatchObject({
+      code: 'BOOKING_NOT_FOUND',
+    })
+
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+    expect(mocks.txCheckoutProductItemDeleteMany).not.toHaveBeenCalled()
+    expect(mocks.txCheckoutProductItemCreateMany).not.toHaveBeenCalled()
+  })
+
   it('rejects product edits when aftercare is missing', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(
       makeBooking({

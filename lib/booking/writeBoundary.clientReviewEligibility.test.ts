@@ -145,17 +145,19 @@ describe('lib/booking/writeBoundary assertClientBookingReviewEligibility', () =>
     })
   })
 
-  it('rejects when booking belongs to another client', async () => {
+  it('returns a uniform 404 for a booking the caller does not own (no id enumeration)', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(
       makeBooking({
         clientId: 'client_other',
       }),
     )
 
+    // Same code as a missing booking — a 403-vs-404 difference would leak that
+    // the booking id exists.
     await expect(
       assertClientBookingReviewEligibility(makeArgs()),
     ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+      code: 'BOOKING_NOT_FOUND',
     })
   })
 
