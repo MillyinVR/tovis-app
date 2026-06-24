@@ -14,6 +14,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/internal/jobs/stripe-reconciliation",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/notifications/process",
       "schedule": "* * * * *"
     },
