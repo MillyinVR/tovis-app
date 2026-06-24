@@ -107,6 +107,7 @@ export type ProProfileManagementReview = {
   body: string | null
   createdAt: string
   clientName: string
+  clientHref: string | null
   mediaAssets: ProProfileManagementReviewMedia[]
 }
 

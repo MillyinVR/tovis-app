@@ -10,6 +10,7 @@ import { buildLookPolicyInput, loadLookAccess } from '@/lib/looks/access'
 import { canViewLookPost } from '@/lib/looks/guards'
 import { mapLooksCommentToDto } from '@/lib/looks/mappers'
 import { buildLookCommentSelect } from '@/lib/looks/commentSelect'
+import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { ModerationStatus, Role } from '@prisma/client'
 import type { LooksCommentRepliesListResponseDto } from '@/lib/looks/types'
 
@@ -54,6 +55,7 @@ export async function GET(
 
     const viewerUserId = viewer?.id ?? null
     const viewerIsAdmin = viewer?.role === Role.ADMIN
+    const clientLinkViewer = await loadClientLinkViewer(viewer)
 
     // Replies read oldest-first (conversation order), matching IG threads.
     const [rows, replyCount] = await prisma.$transaction([
@@ -80,7 +82,11 @@ export async function GET(
       lookPostId,
       parentCommentId,
       replies: rows.map((row) =>
-        mapLooksCommentToDto(row, { viewerUserId, viewerIsAdmin }),
+        mapLooksCommentToDto(row, {
+          viewerUserId,
+          viewerIsAdmin,
+          clientLinkViewer,
+        }),
       ),
       replyCount,
     }

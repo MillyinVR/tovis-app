@@ -24,6 +24,7 @@ import {
 import { mapLooksCommentToDto } from '@/lib/looks/mappers'
 import { buildLookCommentSelect } from '@/lib/looks/commentSelect'
 import { buildLookPolicyInput, loadLookAccess } from '@/lib/looks/access'
+import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { ModerationStatus, Role } from '@prisma/client'
 import type {
   LooksCommentCreateResponseDto,
@@ -75,6 +76,7 @@ export async function GET(req: Request, ctx: RouteContext) {
 
     const viewerUserId = viewer?.id ?? null
     const viewerIsAdmin = viewer?.role === Role.ADMIN
+    const clientLinkViewer = await loadClientLinkViewer(viewer)
 
     // Top-level comments only; replies are loaded on demand per thread. The
     // look's stored commentCount already includes replies (matches IG/TikTok),
@@ -101,7 +103,11 @@ export async function GET(req: Request, ctx: RouteContext) {
     const body: LooksCommentsListResponseDto = {
       lookPostId,
       comments: rows.map((row) =>
-        mapLooksCommentToDto(row, { viewerUserId, viewerIsAdmin }),
+        mapLooksCommentToDto(row, {
+          viewerUserId,
+          viewerIsAdmin,
+          clientLinkViewer,
+        }),
       ),
       commentsCount,
     }
@@ -187,6 +193,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     const viewerUserId = auth.user.id
     const viewerIsAdmin = auth.user.role === Role.ADMIN
+    const clientLinkViewer = await loadClientLinkViewer(auth.user)
 
     const result = await prisma.$transaction(async (tx) => {
       const comment = await tx.lookComment.create({
@@ -214,6 +221,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       comment: mapLooksCommentToDto(result.comment, {
         viewerUserId,
         viewerIsAdmin,
+        clientLinkViewer,
       }),
       commentsCount: result.commentsCount,
     }

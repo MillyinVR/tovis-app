@@ -246,9 +246,12 @@ function makeCommentRow(id = 'comment_1', body = 'Nice work') {
     user: {
       id: 'user_2',
       clientProfile: {
+        id: 'client_1',
         firstName: 'Tori',
         lastName: 'Morales',
         avatarUrl: null,
+        handle: null,
+        isPublicProfile: false,
       },
       professionalProfile: null,
     },
@@ -264,6 +267,7 @@ function makeCommentDto(id = 'comment_1', body = 'Nice work') {
       id: 'user_2',
       displayName: 'Tori Morales',
       avatarUrl: null,
+      profileHref: null,
     },
   }
 }

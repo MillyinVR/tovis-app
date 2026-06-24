@@ -10,7 +10,12 @@ function comment(overrides?: Partial<UiComment>): UiComment {
     id: 'comment_1',
     body: 'Existing comment',
     createdAt: '2026-04-20T18:00:00.000Z',
-    user: { id: 'user_1', displayName: 'Tori Morales', avatarUrl: null },
+    user: {
+      id: 'user_1',
+      displayName: 'Tori Morales',
+      avatarUrl: null,
+      profileHref: null,
+    },
     parentCommentId: null,
     likeCount: 2,
     replyCount: 0,

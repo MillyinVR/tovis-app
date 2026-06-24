@@ -2,6 +2,7 @@ import { ReferralStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { prismaRead } from '@/lib/prisma'
+import { professionalProfileHref } from '@/lib/profiles/profileHrefs'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +47,9 @@ export async function GET() {
         ? [r.professional.firstName, r.professional.lastName]
             .filter(Boolean)
             .join(' ')
+        : null,
+      proHref: r.professional
+        ? professionalProfileHref(r.professional.id)
         : null,
       rewardTier: r.rewardTier,
       rewardValue: r.rewardValue ? Number(r.rewardValue) : null,

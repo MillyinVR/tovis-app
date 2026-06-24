@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonOk, requireClient } from '@/app/api/_utils'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { professionalProfileHref } from '@/lib/profiles/profileHrefs'
 import {
   LastMinuteOfferType,
   LastMinuteRecipientStatus,
@@ -155,6 +156,7 @@ export async function GET() {
         pickProfessionalPublicDisplayName(opening.professional) ??
         opening.professional.handle ??
         'Your pro',
+      proHref: professionalProfileHref(opening.professional.id),
       avatarUrl: opening.professional.avatarUrl ?? null,
       serviceLabel: serviceSummary(opening.services),
       startAt: opening.startAt.toISOString(),

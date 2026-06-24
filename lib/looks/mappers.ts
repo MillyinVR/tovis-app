@@ -28,6 +28,12 @@ import type {
   LooksRenderedMediaDto,
 } from '@/lib/looks/types'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
+import {
+  EMPTY_CLIENT_LINK_VIEWER,
+  professionalProfileHref,
+  resolveClientProfileHref,
+  type ClientLinkViewer,
+} from '@/lib/profiles/profileHrefs'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { LooksClientAuthorDto } from '@/lib/looks/types'
 
@@ -38,9 +44,15 @@ import type { LooksClientAuthorDto } from '@/lib/looks/types'
 // the PII-safe handle + avatar are surfaced — never a real name.
 function mapLooksClientAuthorToDto(
   clientAuthor:
-    | { handle: string | null; avatarUrl: string | null; isPublicProfile: boolean }
+    | {
+        id: string
+        handle: string | null
+        avatarUrl: string | null
+        isPublicProfile: boolean
+      }
     | null
     | undefined,
+  clientLinkViewer: ClientLinkViewer,
 ): LooksClientAuthorDto | null {
   if (!clientAuthor || !clientAuthor.isPublicProfile || !clientAuthor.handle) {
     return null
@@ -48,17 +60,31 @@ function mapLooksClientAuthorToDto(
   return {
     handle: clientAuthor.handle,
     avatarUrl: clientAuthor.avatarUrl ?? null,
+    // Public author always has a /u/[handle] link; for an authorized pro viewer
+    // it upgrades to the pro chart (see resolveClientProfileHref).
+    profileHref: resolveClientProfileHref(
+      {
+        clientProfileId: clientAuthor.id,
+        handle: clientAuthor.handle,
+        isPublicProfile: clientAuthor.isPublicProfile,
+      },
+      clientLinkViewer,
+    ),
   }
 }
 
 type MediaCommentUserShape = {
   id: string
   clientProfile: {
+    id: string
     firstName: string
     lastName: string
     avatarUrl: string | null
+    handle: string | null
+    isPublicProfile: boolean
   } | null
   professionalProfile: {
+    id: string
     businessName: string | null
     firstName: string | null
     lastName: string | null
@@ -83,6 +109,9 @@ type MediaCommentRowShape = {
 export type LooksCommentViewerContext = {
   viewerUserId: string | null
   viewerIsAdmin: boolean
+  // Lets a comment author's name/avatar upgrade to the pro chart link when the
+  // viewer is a pro who can open that client. Omitted → public links only.
+  clientLinkViewer?: ClientLinkViewer
 }
 
 type StoredMediaShape = {
@@ -184,10 +213,14 @@ function pickMediaServiceTagIds(
   return [...ids]
 }
 
-function normalizeCommentUser(user: MediaCommentUserShape): {
+function normalizeCommentUser(
+  user: MediaCommentUserShape,
+  clientLinkViewer: ClientLinkViewer,
+): {
   id: string
   displayName: string
   avatarUrl: string | null
+  profileHref: string | null
 } {
   const clientFirst = user.clientProfile?.firstName?.trim() ?? ''
   const clientLast = user.clientProfile?.lastName?.trim() ?? ''
@@ -206,7 +239,39 @@ function normalizeCommentUser(user: MediaCommentUserShape): {
       user.clientProfile?.avatarUrl ??
       user.professionalProfile?.avatarUrl ??
       null,
+    profileHref: resolveCommentUserProfileHref(user, clientLinkViewer, {
+      clientNameShown: Boolean(clientFullName),
+    }),
   }
+}
+
+// Links a comment author to a profile, matching whichever identity is displayed:
+// a client shown by name resolves through the shared client-link rule (pro chart
+// when the viewer can open them, else /u/[handle]); a pro links to their
+// /professionals/[id] page. Returns null when no profile is addressable.
+function resolveCommentUserProfileHref(
+  user: MediaCommentUserShape,
+  clientLinkViewer: ClientLinkViewer,
+  { clientNameShown }: { clientNameShown: boolean },
+): string | null {
+  if (clientNameShown) {
+    return user.clientProfile
+      ? resolveClientProfileHref(
+          {
+            clientProfileId: user.clientProfile.id,
+            handle: user.clientProfile.handle,
+            isPublicProfile: user.clientProfile.isPublicProfile,
+          },
+          clientLinkViewer,
+        )
+      : null
+  }
+
+  if (user.professionalProfile) {
+    return professionalProfileHref(user.professionalProfile.id)
+  }
+
+  return null
 }
 
 async function renderAssetUrls(input: {
@@ -291,8 +356,10 @@ export async function mapLooksFeedMediaToDto(args: {
   viewerLiked: boolean
   viewerSaved: boolean
   viewerFollows: boolean
+  clientLinkViewer?: ClientLinkViewer
 }): Promise<LooksFeedItemDto | null> {
   const { item, viewerLiked, viewerSaved, viewerFollows } = args
+  const clientLinkViewer = args.clientLinkViewer ?? EMPTY_CLIENT_LINK_VIEWER
   const primaryMedia: FeedPrimaryMediaShape = item.primaryMediaAsset
 
   const rendered = await renderAssetUrls({
@@ -334,7 +401,7 @@ export async function mapLooksFeedMediaToDto(args: {
           followerCount: item.professional._count?.followers ?? 0,
         }
       : null,
-    clientAuthor: mapLooksClientAuthorToDto(item.clientAuthor),
+    clientAuthor: mapLooksClientAuthorToDto(item.clientAuthor, clientLinkViewer),
 
     _count: {
       likes: item.likeCount,
@@ -370,7 +437,10 @@ export function mapLooksCommentToDto(
     id: comment.id,
     body: comment.body,
     createdAt: comment.createdAt.toISOString(),
-    user: normalizeCommentUser(comment.user),
+    user: normalizeCommentUser(
+      comment.user,
+      viewer.clientLinkViewer ?? EMPTY_CLIENT_LINK_VIEWER,
+    ),
     parentCommentId: comment.parentCommentId,
     likeCount: comment.likeCount,
     replyCount: comment.replyCount,
@@ -535,8 +605,10 @@ export function mapLooksDetailToDto(args: {
     isOwner: boolean
     canModerate: boolean
   }
+  clientLinkViewer?: ClientLinkViewer
 }): LooksDetailItemDto {
   const { item, viewerContext } = args
+  const clientLinkViewer = args.clientLinkViewer ?? EMPTY_CLIENT_LINK_VIEWER
 
   const resolvedPrimaryService = resolveLookPrimaryService({
     serviceId: item.serviceId,
@@ -555,7 +627,7 @@ export function mapLooksDetailToDto(args: {
     updatedAt: item.updatedAt.toISOString(),
 
     professional: mapLooksProProfilePreviewToDto(item.professional),
-    clientAuthor: mapLooksClientAuthorToDto(item.clientAuthor),
+    clientAuthor: mapLooksClientAuthorToDto(item.clientAuthor, clientLinkViewer),
 
     service: primaryService
       ? {

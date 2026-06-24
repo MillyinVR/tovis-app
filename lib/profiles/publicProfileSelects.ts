@@ -104,8 +104,15 @@ export const publicReviewClientUserSelect =
 
 export const publicReviewClientSelect =
   Prisma.validator<Prisma.ClientProfileSelect>()({
+    // Used server-side to upgrade the link to the pro chart when the viewer is an
+    // authorized pro; never sent to the client (see resolveClientProfileHref).
+    id: true,
     firstName: true,
     lastName: true,
+    // Linking a reviewer to their /u/[handle] profile is only possible once
+    // they've opted into a public creator identity with a handle.
+    handle: true,
+    isPublicProfile: true,
     user: {
       select: publicReviewClientUserSelect,
     },

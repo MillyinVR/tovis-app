@@ -7,6 +7,8 @@ import MediaPortfolioToggle from './MediaPortfolioToggle'
 import HashJumpHighlight from './HashJumpHighlight'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { loadClientLinkViewer } from '@/lib/clientVisibility'
+import { resolveClientProfileHref } from '@/lib/profiles/profileHrefs'
 
 function pickNonEmptyString(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
@@ -19,6 +21,7 @@ export default async function ProReviewsPage() {
   }
 
   const proId = user.professionalProfile.id
+  const clientLinkViewer = await loadClientLinkViewer(user)
 
   // ✅ Option A: load canonical storage pointers for media assets
   const reviews = await prisma.review.findMany({
@@ -59,6 +62,16 @@ export default async function ProReviewsPage() {
       const first = pickNonEmptyString(rev.client?.firstName)
       const last = pickNonEmptyString(rev.client?.lastName)
       const clientName = `${first} ${last}`.trim() || 'Client'
+      const clientHref = rev.client
+        ? resolveClientProfileHref(
+            {
+              clientProfileId: rev.client.id,
+              handle: rev.client.handle,
+              isPublicProfile: rev.client.isPublicProfile,
+            },
+            clientLinkViewer,
+          )
+        : null
       const date = new Date(rev.createdAt).toLocaleDateString()
       const reviewAnchor = `review-${rev.id}`
 
@@ -102,6 +115,7 @@ export default async function ProReviewsPage() {
         createdAtISO: new Date(rev.createdAt).toISOString(),
         date,
         clientName,
+        clientHref,
         reviewAnchor,
         mediaTiles,
       }
@@ -174,7 +188,18 @@ export default async function ProReviewsPage() {
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12, color: 'rgb(var(--text-muted))' }}>
-                      {rev.clientName} • {rev.date}
+                      {rev.clientHref ? (
+                        <Link
+                          href={rev.clientHref}
+                          style={{ color: 'inherit', textDecoration: 'none' }}
+                          className="hover:underline"
+                        >
+                          {rev.clientName}
+                        </Link>
+                      ) : (
+                        rev.clientName
+                      )}{' '}
+                      • {rev.date}
                     </div>
 
                     <div

@@ -2,6 +2,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 
 import { isRecord } from '@/lib/guards'
 import RemoteImage from '@/app/_components/media/RemoteImage'
@@ -16,6 +17,7 @@ export type ReviewForPanel = {
   body: string | null
   createdAt: string
   clientName?: string | null
+  clientHref?: string | null
 
   helpfulCount?: number
   viewerHelpful?: boolean
@@ -319,7 +321,19 @@ function ReviewsPanelInner({
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 650, fontSize: 13 }}>{name}</div>
+                    <div style={{ fontWeight: 650, fontSize: 13 }}>
+                      {review.clientHref ? (
+                        <Link
+                          href={review.clientHref}
+                          style={{ color: 'inherit', textDecoration: 'none' }}
+                          className="hover:underline"
+                        >
+                          {name}
+                        </Link>
+                      ) : (
+                        name
+                      )}
+                    </div>
                     <div
                       style={{
                         fontSize: 11,

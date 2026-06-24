@@ -20,13 +20,21 @@ export function buildLookCommentSelect(viewerUserId: string | null) {
         id: true,
         clientProfile: {
           select: {
+            // Used server-side to upgrade the link to the pro chart for an
+            // authorized pro viewer; never sent to the client.
+            id: true,
             firstName: true,
             lastName: true,
             avatarUrl: true,
+            // Linking the comment author to their /u/[handle] profile is only
+            // possible once they've opted into a public creator identity.
+            handle: true,
+            isPublicProfile: true,
           },
         },
         professionalProfile: {
           select: {
+            id: true,
             businessName: true,
             firstName: true,
             lastName: true,

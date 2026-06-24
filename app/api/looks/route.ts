@@ -14,6 +14,7 @@ import {
 import { looksFeedSelect } from '@/lib/looks/selects'
 import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
 import { buildLooksViewerFlagResolver } from '@/lib/looks/viewerFlags'
+import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
 
@@ -132,11 +133,14 @@ export async function GET(req: Request) {
       items,
     })
 
+    const clientLinkViewer = await loadClientLinkViewer(user)
+
     const mapped = await Promise.all(
       items.map((item) =>
         mapLooksFeedMediaToDto({
           item,
           ...resolveViewerFlags(item),
+          clientLinkViewer,
         }),
       ),
     )

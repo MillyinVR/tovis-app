@@ -308,6 +308,7 @@ function makeComment(
       id: 'user_1',
       displayName: 'Tori Morales',
       avatarUrl: null,
+      profileHref: null,
     },
     parentCommentId: null,
     likeCount: 0,

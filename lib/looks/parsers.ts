@@ -28,7 +28,11 @@ function parseLooksClientAuthor(raw: unknown): LooksClientAuthorDto | null {
   if (!isRecord(raw)) return null
   const handle = pickString(raw.handle)
   if (!handle) return null
-  return { handle, avatarUrl: pickString(raw.avatarUrl) }
+  return {
+    handle,
+    avatarUrl: pickString(raw.avatarUrl),
+    profileHref: pickString(raw.profileHref),
+  }
 }
 
 function pickString(value: unknown): string | null {
@@ -240,6 +244,7 @@ export function parseLooksComment(raw: unknown): LooksCommentDto | null {
       id: userId,
       displayName,
       avatarUrl: pickString(userRaw.avatarUrl),
+      profileHref: pickString(userRaw.profileHref),
     },
     parentCommentId: pickString(raw.parentCommentId),
     likeCount: pickNumber(raw.likeCount) ?? 0,

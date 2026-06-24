@@ -324,13 +324,17 @@ export default function LookDetailClient({
 
           <div className="grid gap-3 p-4">
             <div className="grid gap-1">
-              {item.clientAuthor ? (
+              {item.clientAuthor?.profileHref ? (
                 <Link
-                  href={`/u/${encodeURIComponent(item.clientAuthor.handle)}`}
+                  href={item.clientAuthor.profileHref}
                   className="text-base font-extrabold no-underline hover:underline"
                 >
                   @{item.clientAuthor.handle}
                 </Link>
+              ) : item.clientAuthor ? (
+                <span className="text-base font-extrabold">
+                  @{item.clientAuthor.handle}
+                </span>
               ) : null}
 
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
