@@ -5,7 +5,6 @@ import {
   BookingServiceItemType,
   BookingStatus,
   Prisma,
-  ServiceLocationType,
   SessionStep,
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -13,7 +12,10 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
-import { pickFormattedAddressFromSnapshot } from '@/lib/booking/snapshots'
+import {
+  resolveBookingLocationMeta,
+  type BookingLocationMeta,
+} from '@/lib/booking/locationMeta'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
@@ -208,36 +210,6 @@ function CloseoutBadge({ bookingId }: { bookingId: string }) {
       Payment due
     </Link>
   )
-}
-
-type BookingLocationMeta = {
-  formattedAddress: string | null
-  lat: number | null
-  lng: number | null
-  isMobile: boolean
-}
-
-// SALON → pro-location snapshot (muted pin). MOBILE → client-address snapshot,
-// the place the pro travels to (accent pin + "Mobile" tag).
-function resolveBookingLocationMeta(booking: BookingRow): BookingLocationMeta {
-  const isMobile = booking.locationType === ServiceLocationType.MOBILE
-
-  const snapshot = isMobile
-    ? booking.clientAddressSnapshot
-    : booking.locationAddressSnapshot
-  const lat = isMobile
-    ? booking.clientAddressLatSnapshot
-    : booking.locationLatSnapshot
-  const lng = isMobile
-    ? booking.clientAddressLngSnapshot
-    : booking.locationLngSnapshot
-
-  return {
-    formattedAddress: pickFormattedAddressFromSnapshot(snapshot),
-    lat: typeof lat === 'number' && Number.isFinite(lat) ? lat : null,
-    lng: typeof lng === 'number' && Number.isFinite(lng) ? lng : null,
-    isMobile,
-  }
 }
 
 function PinIcon({ className }: { className?: string }) {

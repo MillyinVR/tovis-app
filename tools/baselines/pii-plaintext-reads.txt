@@ -329,10 +329,10 @@ app/pro/bookings/[id]/aftercare/page.tsx:direct property read:booking.client?.us
 app/pro/bookings/[id]/aftercare/page.tsx:direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
 app/pro/bookings/[id]/aftercare/page.tsx:optional direct property read:booking.client?.user?.email ||
 app/pro/bookings/[id]/aftercare/page.tsx:optional direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
-app/pro/bookings/[id]/page.tsx:direct property read:{booking.client.firstName} {booking.client.lastName}
-app/pro/bookings/[id]/page.tsx:direct property read:{booking.client.phone ? ` • ${booking.client.phone}` : ''}
-app/pro/bookings/[id]/page.tsx:direct property read:{booking.client.user?.email ? ` • ${booking.client.user.email}` : ''}
-app/pro/bookings/[id]/page.tsx:optional direct property read:{booking.client.user?.email ? ` • ${booking.client.user.email}` : ''}
+app/pro/bookings/[id]/page.tsx:direct property read:booking.client.lastName ?? ''
+app/pro/bookings/[id]/page.tsx:direct property read:const clientContact = [booking.client.user?.email, booking.client.phone]
+app/pro/bookings/[id]/page.tsx:direct property read:const clientName = `${booking.client.firstName ?? ''} ${
+app/pro/bookings/[id]/page.tsx:optional direct property read:const clientContact = [booking.client.user?.email, booking.client.phone]
 app/pro/bookings/[id]/session/after-photos/page.tsx:Prisma select/include plaintext field:email: true,
 app/pro/bookings/[id]/session/after-photos/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/bookings/[id]/session/after-photos/page.tsx:Prisma select/include plaintext field:lastName: true,
