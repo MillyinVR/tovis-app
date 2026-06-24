@@ -30,6 +30,7 @@ import {
   zonedTimeToUtc,
 } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
+import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { isCloseoutPaymentAndAftercareComplete } from '@/lib/booking/closeoutState'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
@@ -387,33 +388,6 @@ function FilterPills({ active }: { active: StatusFilter }) {
       })}
     </div>
   )
-}
-
-async function resolveProScheduleTimeZone(
-  proId: string,
-  proTimeZoneRaw: unknown,
-): Promise<string> {
-  const locations = await prisma.professionalLocation.findMany({
-    where: {
-      professionalId: proId,
-      isBookable: true,
-    },
-    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-    select: {
-      timeZone: true,
-    },
-    take: 50,
-  })
-
-  for (const location of locations) {
-    const tz = pickTimeZoneOrNull(location.timeZone)
-    if (tz) return tz
-  }
-
-  const proTz = pickTimeZoneOrNull(proTimeZoneRaw)
-  if (proTz) return proTz
-
-  return DEFAULT_TIME_ZONE
 }
 
 function bookingDisplayTimeZone(

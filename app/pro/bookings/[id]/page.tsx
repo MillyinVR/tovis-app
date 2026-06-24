@@ -16,6 +16,7 @@ import { Avatar } from '@/app/_components/ui'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 import { pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
+import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { pickString } from '@/lib/pick'
 import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
 import { mapsHrefFromLocation } from '@/lib/maps'
@@ -179,37 +180,6 @@ function CardIcon({ className }: { className?: string }) {
       <path d="M2.5 10h19" />
     </svg>
   )
-}
-
-/**
- * Schedule timezone for a pro (calendar owner):
- * Prefer primary bookable location tz, else any bookable, else pro.profile tz, else UTC.
- */
-async function resolveProScheduleTimeZone(
-  proId: string,
-  proTimeZoneRaw: unknown,
-): Promise<string> {
-  const primary = await prisma.professionalLocation.findFirst({
-    where: { professionalId: proId, isBookable: true, isPrimary: true },
-    select: { timeZone: true },
-  })
-
-  const primaryTz = pickTimeZoneOrNull(primary?.timeZone)
-  if (primaryTz) return primaryTz
-
-  const anyLocation = await prisma.professionalLocation.findFirst({
-    where: { professionalId: proId, isBookable: true },
-    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-    select: { timeZone: true },
-  })
-
-  const anyTz = pickTimeZoneOrNull(anyLocation?.timeZone)
-  if (anyTz) return anyTz
-
-  const proTz = pickTimeZoneOrNull(proTimeZoneRaw)
-  if (proTz) return proTz
-
-  return FALLBACK_TZ
 }
 
 function resolveAppointmentTimeZone(

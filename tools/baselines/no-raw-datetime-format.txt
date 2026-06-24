@@ -75,9 +75,6 @@ app/pro/calendar/_utils/monthGrid.ts|const monthYearFormatter = new Intl.DateTim
 app/pro/calendar/_viewModel/proCalendarDisplay.ts|const format = (options: Intl.DateTimeFormatOptions): string =>
 app/pro/calendar/_viewModel/proCalendarDisplay.ts|new Intl.DateTimeFormat(undefined, { timeZone, ...options })
 app/pro/calendar/_viewModel/proCalendarDisplay.ts|return new Intl.DateTimeFormat(undefined, {
-app/pro/clients/[id]/page.tsx|return date.toLocaleString(undefined, {
-app/pro/clients/[id]/page.tsx|return value.toLocaleString(undefined, { month: 'short', day: 'numeric' })
-app/pro/clients/page.tsx|return `Last booking: ${booking.scheduledFor.toLocaleDateString(undefined, {
 app/pro/last-minute/OpeningsClient.tsx|const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 app/pro/last-minute/OpeningsClient.tsx|return new Intl.DateTimeFormat(undefined, {
 app/pro/last-minute/settingsClient.tsx|const left = new Intl.DateTimeFormat(undefined, {

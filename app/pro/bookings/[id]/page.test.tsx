@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
   redirect: vi.fn(),
   bookingFindFirst: vi.fn(),
-  professionalLocationFindFirst: vi.fn(),
+  professionalLocationFindMany: vi.fn(),
   getProClientVisibility: vi.fn(),
 }))
 
@@ -45,7 +45,7 @@ vi.mock('@/lib/prisma', () => ({
       findFirst: mocks.bookingFindFirst,
     },
     professionalLocation: {
-      findFirst: mocks.professionalLocationFindFirst,
+      findMany: mocks.professionalLocationFindMany,
     },
   },
 }))
@@ -161,9 +161,9 @@ function makeBooking(overrides?: Record<string, unknown>) {
 }
 
 async function renderPage(booking?: Record<string, unknown>) {
-  mocks.professionalLocationFindFirst.mockResolvedValue({
-    timeZone: 'America/Chicago',
-  })
+  mocks.professionalLocationFindMany.mockResolvedValue([
+    { timeZone: 'America/Chicago' },
+  ])
   mocks.bookingFindFirst.mockResolvedValueOnce(booking ?? makeBooking())
   mocks.getProClientVisibility.mockResolvedValue({ canViewClient: true })
 

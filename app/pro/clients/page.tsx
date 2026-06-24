@@ -6,6 +6,8 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { proClientVisibilityWhere } from '@/lib/clientVisibility'
+import { formatInTimeZone } from '@/lib/time'
+import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 
 import NewClientForm from './NewClientForm'
 import ClientNameLink from '@/app/_components/ClientNameLink'
@@ -14,10 +16,13 @@ import { Card, buttonClassName } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
 
-function formatLastSeen(booking: { scheduledFor: Date } | null) {
+function formatLastSeen(
+  booking: { scheduledFor: Date } | null,
+  tz: string,
+) {
   if (!booking) return 'No bookings yet'
 
-  return `Last booking: ${booking.scheduledFor.toLocaleDateString(undefined, {
+  return `Last booking: ${formatInTimeZone(booking.scheduledFor, tz, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -44,6 +49,13 @@ export default async function ProClientsPage() {
 
   const proId = user.professionalProfile.id
   const now = new Date()
+
+  // Render the "Last booking" date in the pro's business timezone, not the
+  // server zone (UTC on Vercel), so evening appointments show the right day.
+  const scheduleTz = await resolveProScheduleTimeZone(
+    proId,
+    user.professionalProfile.timeZone,
+  )
 
   // Single source of truth for chart access — same rule the page gate and the
   // clickable name use, so the list can never disagree with them.
@@ -153,7 +165,7 @@ export default async function ProClientsPage() {
                       </div>
 
                       <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
-                        {formatLastSeen(lastBooking)}
+                        {formatLastSeen(lastBooking, scheduleTz)}
                       </div>
                     </div>
 
