@@ -37,7 +37,8 @@ vi.mock('@/lib/search/pros', () => ({
   fetchProSearchCandidates: mocks.fetchProSearchCandidates,
 }))
 
-import { loadNearbyPros } from './nearbyPros'
+import { loadNearbyPros, toPublicNearbyProCard } from './nearbyPros'
+import type { NearbyProCard } from './nearbyPros'
 
 const DEFAULT_WORKING_HOURS = {
   mon: { enabled: true, start: '09:00', end: '17:00' },
@@ -537,5 +538,67 @@ describe('lib/discovery/nearbyPros.ts', () => {
       // pro_nodist dropped (null distance); limit slices the rest to 2.
       expect(result.map((card) => card.id)).toEqual(['pro_a', 'pro_b'])
     })
+  })
+})
+
+describe('toPublicNearbyProCard', () => {
+  function makeCard(): NearbyProCard {
+    const location = {
+      id: 'loc_1',
+      formattedAddress: '742 Evergreen Terrace',
+      city: 'Springfield',
+      state: 'OR',
+      timeZone: 'America/Los_Angeles',
+      placeId: 'place_home',
+      lat: 44.0462123,
+      lng: -123.0220456,
+      isPrimary: true,
+      workingHours: {},
+    }
+
+    return {
+      id: 'pro_1',
+      businessName: 'Home Studio',
+      handle: 'homestudio',
+      professionType: null,
+      avatarUrl: null,
+      locationLabel: 'Springfield, OR',
+      distanceMiles: 1.4,
+      ratingAvg: 5,
+      ratingCount: 3,
+      minPrice: 60,
+      supportsMobile: true,
+      closestLocation: { ...location },
+      primaryLocation: { ...location },
+    }
+  }
+
+  it('strips exact address + placeId and coarsens coordinates on both locations', () => {
+    const publicCard = toPublicNearbyProCard(makeCard())
+
+    for (const loc of [publicCard.closestLocation, publicCard.primaryLocation]) {
+      expect(loc.formattedAddress).toBeNull()
+      expect(loc.placeId).toBeNull()
+      // Rooftop precision removed — coarsened to a ~1.1km (2-decimal) grid.
+      expect(loc.lat).toBe(44.05)
+      expect(loc.lng).toBe(-123.02)
+      // Non-sensitive coarse fields are preserved.
+      expect(loc.city).toBe('Springfield')
+      expect(loc.state).toBe('OR')
+    }
+
+    // Distance is computed upstream from exact coords and is left untouched.
+    expect(publicCard.distanceMiles).toBe(1.4)
+  })
+
+  it('passes null coordinates through unchanged', () => {
+    const card = makeCard()
+    card.closestLocation.lat = null
+    card.closestLocation.lng = null
+
+    const publicCard = toPublicNearbyProCard(card)
+
+    expect(publicCard.closestLocation.lat).toBeNull()
+    expect(publicCard.closestLocation.lng).toBeNull()
   })
 })

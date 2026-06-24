@@ -70,6 +70,46 @@ export type NearbyProCard = {
   primaryLocation: DiscoveryLocationDto
 }
 
+// `/api/pros/nearby` is unauthenticated. Exact (rooftop-precision) coordinates
+// reverse-geocode to a pro's address — which for mobile/home-based pros is their
+// residence — and `formattedAddress`/`placeId` are the address outright. So the
+// public payload must carry only coarse, neighborhood-level location. Distance
+// is computed server-side from the exact coordinates BEFORE this redaction, so
+// the displayed distance stays accurate; only the map pin is approximate.
+const PUBLIC_COORD_DECIMALS = 2 // ~1.1 km grid
+
+function coarsenPublicCoordinate(value: number | null): number | null {
+  if (value == null || !Number.isFinite(value)) return null
+  const factor = 10 ** PUBLIC_COORD_DECIMALS
+  return Math.round(value * factor) / factor
+}
+
+function toPublicDiscoveryLocation(
+  location: DiscoveryLocationDto,
+): DiscoveryLocationDto {
+  return {
+    ...location,
+    formattedAddress: null,
+    placeId: null,
+    lat: coarsenPublicCoordinate(location.lat),
+    lng: coarsenPublicCoordinate(location.lng),
+  }
+}
+
+/**
+ * Redact a nearby card for an UNAUTHENTICATED audience: strip the exact street
+ * address + place id and coarsen coordinates to a neighborhood grid on both the
+ * closest and primary location. Apply this at the public route boundary — never
+ * inside `loadNearbyPros`, whose exact output also feeds the search index.
+ */
+export function toPublicNearbyProCard(card: NearbyProCard): NearbyProCard {
+  return {
+    ...card,
+    closestLocation: toPublicDiscoveryLocation(card.closestLocation),
+    primaryLocation: toPublicDiscoveryLocation(card.primaryLocation),
+  }
+}
+
 function toDecimal(value: number): Prisma.Decimal {
   return new Prisma.Decimal(String(value))
 }
