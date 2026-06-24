@@ -72,6 +72,7 @@ const REFUNDABLE_BOOKING_SELECT = {
   stripePaymentIntentId: true,
   stripePaymentStatus: true,
   stripeAmountTotal: true,
+  stripeAmountRefunded: true,
   stripeApplicationFeeAmount: true,
   stripeCurrency: true,
 } satisfies Prisma.BookingSelect
@@ -97,13 +98,14 @@ async function lockBookingForRefund(
   `
 }
 
-/** Sum of amounts that are already committed against the captured total. */
-async function sumReservedCents(
+/** Sum of BookingRefund amounts for the given statuses on a booking. */
+async function sumRefundCents(
   tx: Prisma.TransactionClient,
   bookingId: string,
+  statuses: BookingRefundStatus[],
 ): Promise<number> {
   const reserved = await tx.bookingRefund.aggregate({
-    where: { bookingId, status: { in: RESERVING_STATUSES } },
+    where: { bookingId, status: { in: statuses } },
     _sum: { amountCents: true },
   })
 
@@ -160,7 +162,29 @@ async function reserveRefund(input: RefundBookingInput): Promise<Reservation> {
     }
 
     const capturedTotal = booking.stripeAmountTotal as number
-    const reserved = await sumReservedCents(tx, input.bookingId)
+
+    // Refunds come from two sources that must BOTH count against the captured
+    // total, without double-counting their overlap:
+    //   • Rows WE created — PENDING (in flight) + SUCCEEDED (settled).
+    //   • Stripe's authoritative cumulative refunded total (`stripeAmountRefunded`,
+    //     synced from charge.refunded). This already includes our SUCCEEDED rows
+    //     once their webhooks land, PLUS Dashboard/external refunds that never
+    //     create a row here.
+    // Our SUCCEEDED rows are the overlap, so the Stripe-only (Dashboard) portion
+    // is `stripeAmountRefunded − ourSucceeded` (clamped at 0 for webhook lag).
+    // reserved = ourReservingRows + dashboardOnly is conservative against an
+    // in-flight PENDING refund and a concurrent Dashboard refund at the same time.
+    const reservedByRows = await sumRefundCents(
+      tx,
+      input.bookingId,
+      RESERVING_STATUSES,
+    )
+    const succeededByRows = await sumRefundCents(tx, input.bookingId, [
+      BookingRefundStatus.SUCCEEDED,
+    ])
+    const refundedPerStripe = booking.stripeAmountRefunded ?? 0
+    const dashboardOnly = Math.max(0, refundedPerStripe - succeededByRows)
+    const reserved = reservedByRows + dashboardOnly
     const remaining = capturedTotal - reserved
 
     if (remaining <= 0) {
@@ -508,11 +532,31 @@ export async function reconcileChargeRefundInTransaction(
 ): Promise<{ handled: boolean }> {
   const booking = await tx.booking.findUnique({
     where: { stripePaymentIntentId: input.paymentIntentId },
-    select: { id: true, stripeAmountTotal: true, stripePaymentStatus: true },
+    select: {
+      id: true,
+      stripeAmountTotal: true,
+      stripeAmountRefunded: true,
+      stripePaymentStatus: true,
+    },
   })
 
   if (!booking) {
     return { handled: false }
+  }
+
+  // Record Stripe's authoritative cumulative refunded total so the refund
+  // reservation math sees Dashboard/external refunds that create no
+  // BookingRefund row. Monotonic max guards against out-of-order webhooks
+  // reporting a stale (smaller) cumulative total.
+  const nextRefundedTotal = Math.max(
+    booking.stripeAmountRefunded ?? 0,
+    input.amountRefundedCents,
+  )
+  if (nextRefundedTotal !== (booking.stripeAmountRefunded ?? 0)) {
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: { stripeAmountRefunded: nextRefundedTotal },
+    })
   }
 
   for (const refund of input.refunds) {
