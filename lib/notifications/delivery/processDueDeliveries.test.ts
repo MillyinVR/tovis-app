@@ -740,7 +740,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     })
   })
 
-  it('marks orchestration error when provider send throws', async () => {
+  it('reschedules a retry (not a permanent drop) when an orchestration error has attempts remaining', async () => {
     const now = new Date('2026-04-09T12:00:00.000Z')
     const { providers, inAppSend } = makeProviders()
 
@@ -755,6 +755,74 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           provider: NotificationProvider.INTERNAL_REALTIME,
           destination: 'client_1',
           templateKey: 'booking_confirmed',
+          attemptCount: 0,
+          maxAttempts: 3,
+        }),
+      ],
+    })
+
+    inAppSend.mockRejectedValue(new Error('redis offline'))
+
+    const result = await processDueDeliveries({
+      providers,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    const expectedNextAttemptAt = new Date(now.getTime() + 60_000)
+
+    expect(mockCompleteDeliveryAttempt).toHaveBeenCalledWith({
+      kind: 'RETRYABLE_FAILURE',
+      deliveryId: 'delivery_throw_1',
+      leaseToken: 'lease_token_1',
+      attemptedAt: now,
+      nextAttemptAt: expectedNextAttemptAt,
+      code: 'DELIVERY_ORCHESTRATION_ERROR',
+      message: 'redis offline',
+      providerStatus: 'orchestration_error',
+      responseMeta: {
+        source: 'processDueDeliveries',
+        provider: NotificationProvider.INTERNAL_REALTIME,
+        channel: NotificationChannel.IN_APP,
+      },
+    })
+
+    expect(result).toEqual({
+      claimedCount: 1,
+      processedCount: 1,
+      sentCount: 0,
+      retryScheduledCount: 1,
+      finalFailureCount: 0,
+      orchestrationErrorCount: 0,
+      outcomes: [
+        {
+          deliveryId: 'delivery_throw_1',
+          provider: NotificationProvider.INTERNAL_REALTIME,
+          channel: NotificationChannel.IN_APP,
+          result: 'RETRY_SCHEDULED',
+          nextAttemptAt: expectedNextAttemptAt,
+        },
+      ],
+    })
+  })
+
+  it('finalizes an orchestration error as a permanent failure only once attempts are exhausted', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, inAppSend } = makeProviders()
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_throw_exhausted',
+          channel: NotificationChannel.IN_APP,
+          provider: NotificationProvider.INTERNAL_REALTIME,
+          destination: 'client_1',
+          templateKey: 'booking_confirmed',
+          attemptCount: 2,
+          maxAttempts: 3,
         }),
       ],
     })
@@ -769,7 +837,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     expect(mockCompleteDeliveryAttempt).toHaveBeenCalledWith({
       kind: 'FINAL_FAILURE',
-      deliveryId: 'delivery_throw_1',
+      deliveryId: 'delivery_throw_exhausted',
       leaseToken: 'lease_token_1',
       attemptedAt: now,
       code: 'DELIVERY_ORCHESTRATION_ERROR',
@@ -791,7 +859,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
       orchestrationErrorCount: 1,
       outcomes: [
         {
-          deliveryId: 'delivery_throw_1',
+          deliveryId: 'delivery_throw_exhausted',
           provider: NotificationProvider.INTERNAL_REALTIME,
           channel: NotificationChannel.IN_APP,
           result: 'ORCHESTRATION_ERROR',
@@ -852,7 +920,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     })
   })
 
-  it('marks orchestration error and finalizes when delivery templateKey mismatches the event definition', async () => {
+  it('reschedules a templateKey-mismatch orchestration error while attempts remain', async () => {
     const now = new Date('2026-04-09T12:00:00.000Z')
     const { providers, inAppSend } = makeProviders()
 
@@ -868,6 +936,8 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           provider: NotificationProvider.INTERNAL_REALTIME,
           destination: 'client_1',
           eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+          attemptCount: 0,
+          maxAttempts: 3,
         }),
       ],
     })
@@ -880,11 +950,14 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     expect(inAppSend).not.toHaveBeenCalled()
 
+    const expectedNextAttemptAt = new Date(now.getTime() + 60_000)
+
     expect(mockCompleteDeliveryAttempt).toHaveBeenCalledWith({
-      kind: 'FINAL_FAILURE',
+      kind: 'RETRYABLE_FAILURE',
       deliveryId: 'delivery_bad_template',
       leaseToken: 'lease_token_1',
       attemptedAt: now,
+      nextAttemptAt: expectedNextAttemptAt,
       code: 'DELIVERY_ORCHESTRATION_ERROR',
       message:
         'processDueDeliveries: delivery templateKey totally_invalid_template_key does not match event BOOKING_CONFIRMED (booking_confirmed)',
@@ -900,23 +973,22 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
       claimedCount: 1,
       processedCount: 1,
       sentCount: 0,
-      retryScheduledCount: 0,
+      retryScheduledCount: 1,
       finalFailureCount: 0,
-      orchestrationErrorCount: 1,
+      orchestrationErrorCount: 0,
       outcomes: [
         {
           deliveryId: 'delivery_bad_template',
           provider: NotificationProvider.INTERNAL_REALTIME,
           channel: NotificationChannel.IN_APP,
-          result: 'ORCHESTRATION_ERROR',
-          message:
-            'processDueDeliveries: delivery templateKey totally_invalid_template_key does not match event BOOKING_CONFIRMED (booking_confirmed)',
+          result: 'RETRY_SCHEDULED',
+          nextAttemptAt: expectedNextAttemptAt,
         },
       ],
     })
   })
 
-  it('appends finalization failure detail to the orchestration error message', async () => {
+  it('keeps the delivery claimable (lease-expiry recovery) when even recording the retry fails', async () => {
     const now = new Date('2026-04-09T12:00:00.000Z')
     const { providers, inAppSend } = makeProviders()
 
@@ -931,6 +1003,8 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           provider: NotificationProvider.INTERNAL_REALTIME,
           destination: 'client_1',
           templateKey: 'booking_confirmed',
+          attemptCount: 0,
+          maxAttempts: 3,
         }),
       ],
     })
@@ -960,7 +1034,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
           channel: NotificationChannel.IN_APP,
           result: 'ORCHESTRATION_ERROR',
           message:
-            'redis offline Finalization also failed: db finalize failed',
+            'redis offline Retry scheduling also failed: db finalize failed',
         },
       ],
     })

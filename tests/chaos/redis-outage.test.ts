@@ -181,11 +181,16 @@ describe('chaos: Redis outage', () => {
       batchSize: 25,
     })
 
+    // A transient outage must NOT permanently drop the message: with attempts
+    // remaining it's rescheduled with backoff, not finalized.
+    const expectedNextAttemptAt = new Date(NOW.getTime() + 60_000)
+
     expect(mocks.completeDeliveryAttempt).toHaveBeenCalledWith({
-      kind: 'FINAL_FAILURE',
+      kind: 'RETRYABLE_FAILURE',
       deliveryId: 'delivery_redis_outage_1',
       leaseToken: LEASE_TOKEN,
       attemptedAt: NOW,
+      nextAttemptAt: expectedNextAttemptAt,
       code: 'DELIVERY_ORCHESTRATION_ERROR',
       message:
         'Redis is not configured. Set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN.',
@@ -201,17 +206,16 @@ describe('chaos: Redis outage', () => {
       claimedCount: 1,
       processedCount: 1,
       sentCount: 0,
-      retryScheduledCount: 0,
+      retryScheduledCount: 1,
       finalFailureCount: 0,
-      orchestrationErrorCount: 1,
+      orchestrationErrorCount: 0,
       outcomes: [
         {
           deliveryId: 'delivery_redis_outage_1',
           provider: NotificationProvider.INTERNAL_REALTIME,
           channel: NotificationChannel.IN_APP,
-          result: 'ORCHESTRATION_ERROR',
-          message:
-            'Redis is not configured. Set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN.',
+          result: 'RETRY_SCHEDULED',
+          nextAttemptAt: expectedNextAttemptAt,
         },
       ],
     })

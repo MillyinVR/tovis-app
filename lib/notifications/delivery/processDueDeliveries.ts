@@ -232,12 +232,70 @@ async function sendWithProvider(args: {
     `processDueDeliveries: unsupported provider ${provider} for channel ${channel}`,
   )
 }
-async function finalizeOrchestrationFailure(args: {
+// An orchestration/render error (a missing env var, a template renderer throw,
+// a transient DB hiccup) is almost always transient or operator-fixable — it
+// must NOT permanently drop a critical delivery the way a hard provider reject
+// does. So reschedule with backoff while the retry budget remains, giving an
+// operator time to fix the config before the message is given up on; only
+// finalize once attempts are exhausted. Either way the result is tagged
+// ORCHESTRATION_ERROR for telemetry; the retry path is also counted as a
+// scheduled retry.
+async function handleOrchestrationFailure(args: {
   delivery: ClaimedNotificationDelivery
   leaseToken: string
   attemptedAt: Date
   message: string
-}): Promise<string> {
+}): Promise<ProcessedDeliveryOutcome> {
+  const base = {
+    deliveryId: args.delivery.id,
+    provider: args.delivery.provider,
+    channel: args.delivery.channel,
+  }
+
+  const responseMeta = {
+    source: 'processDueDeliveries',
+    provider: args.delivery.provider,
+    channel: args.delivery.channel,
+  }
+
+  if (hasRetryAttemptsRemaining(args.delivery)) {
+    const nextAttemptAt = buildNextAttemptAt({
+      attemptedAt: args.attemptedAt,
+      nextAttemptCount: args.delivery.attemptCount + 1,
+    })
+
+    try {
+      await completeDeliveryAttempt({
+        kind: 'RETRYABLE_FAILURE',
+        deliveryId: args.delivery.id,
+        leaseToken: args.leaseToken,
+        attemptedAt: args.attemptedAt,
+        nextAttemptAt,
+        code: 'DELIVERY_ORCHESTRATION_ERROR',
+        message: args.message,
+        providerStatus: 'orchestration_error',
+        responseMeta,
+      })
+
+      return { ...base, result: 'RETRY_SCHEDULED', nextAttemptAt }
+    } catch (finalizeError) {
+      // Even recording the retry failed (e.g. the same DB outage). Leave the row
+      // untouched — its lease expires and a later drain reclaims it, so the
+      // delivery is still not lost.
+      const finalizeMessage = normalizeErrorMessage(
+        finalizeError,
+        'Unknown delivery finalization error.',
+      )
+
+      return {
+        ...base,
+        result: 'ORCHESTRATION_ERROR',
+        message: `${args.message} Retry scheduling also failed: ${finalizeMessage}`,
+      }
+    }
+  }
+
+  // Retry budget exhausted — finalize as a permanent failure.
   try {
     await completeDeliveryAttempt({
       kind: 'FINAL_FAILURE',
@@ -247,21 +305,21 @@ async function finalizeOrchestrationFailure(args: {
       code: 'DELIVERY_ORCHESTRATION_ERROR',
       message: args.message,
       providerStatus: 'orchestration_error',
-      responseMeta: {
-        source: 'processDueDeliveries',
-        provider: args.delivery.provider,
-        channel: args.delivery.channel,
-      },
+      responseMeta,
     })
 
-    return args.message
+    return { ...base, result: 'ORCHESTRATION_ERROR', message: args.message }
   } catch (finalizeError) {
     const finalizeMessage = normalizeErrorMessage(
       finalizeError,
       'Unknown delivery finalization error.',
     )
 
-    return `${args.message} Finalization also failed: ${finalizeMessage}`
+    return {
+      ...base,
+      result: 'ORCHESTRATION_ERROR',
+      message: `${args.message} Finalization also failed: ${finalizeMessage}`,
+    }
   }
 }
 
@@ -374,20 +432,12 @@ async function processClaimedDelivery(args: {
       'Unknown orchestration error.',
     )
 
-    const finalizedMessage = await finalizeOrchestrationFailure({
+    return handleOrchestrationFailure({
       delivery: args.delivery,
       leaseToken,
       attemptedAt: args.now,
       message,
     })
-
-    return {
-      deliveryId: args.delivery.id,
-      provider: args.delivery.provider,
-      channel: args.delivery.channel,
-      result: 'ORCHESTRATION_ERROR',
-      message: finalizedMessage,
-    }
   }
 }
 
