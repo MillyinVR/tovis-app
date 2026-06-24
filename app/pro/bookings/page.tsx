@@ -31,6 +31,7 @@ import {
 } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { isCloseoutPaymentAndAftercareComplete } from '@/lib/booking/closeoutState'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
@@ -390,15 +391,6 @@ function FilterPills({ active }: { active: StatusFilter }) {
   )
 }
 
-function bookingDisplayTimeZone(
-  bookingLocationTimeZone: unknown,
-  scheduleTz: string,
-) {
-  const bookingTz = pickTimeZoneOrNull(bookingLocationTimeZone)
-  if (bookingTz) return bookingTz
-  return sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
-}
-
 function formatWhenForRow(date: Date, tz: string) {
   const safe = isValidIanaTimeZone(tz) ? tz : DEFAULT_TIME_ZONE
   return formatAppointmentWhen(date, safe)
@@ -532,7 +524,7 @@ function Section({
           {items.map((booking, index) => {
             const dur = durationLabel(booking.totalDurationMinutes)
             const canLinkClient = visibleClientIdSet.has(String(booking.client.id))
-            const rowTz = bookingDisplayTimeZone(
+            const rowTz = resolveAppointmentDisplayTimeZone(
               booking.locationTimeZone,
               scheduleTz,
             )

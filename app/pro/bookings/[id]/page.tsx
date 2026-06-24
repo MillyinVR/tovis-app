@@ -14,17 +14,15 @@ import {
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { Avatar } from '@/app/_components/ui'
 import { getProClientVisibility } from '@/lib/clientVisibility'
-import { pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { pickString } from '@/lib/pick'
 import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { paymentMethodLabel } from '@/lib/payments/acceptedMethods'
 
 export const dynamic = 'force-dynamic'
-
-const FALLBACK_TZ = 'UTC'
 
 function safeUpper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
@@ -182,15 +180,6 @@ function CardIcon({ className }: { className?: string }) {
   )
 }
 
-function resolveAppointmentTimeZone(
-  bookingLocationTimeZone: unknown,
-  scheduleTz: string,
-) {
-  const bookingTz = pickTimeZoneOrNull(bookingLocationTimeZone)
-  if (bookingTz) return bookingTz
-  return sanitizeTimeZone(scheduleTz, FALLBACK_TZ)
-}
-
 function formatMoney(
   v: Prisma.Decimal | null | undefined,
 ): string | null {
@@ -247,7 +236,10 @@ export default async function ProBookingDetailPage(props: {
     proId,
     user.professionalProfile.timeZone,
   )
-  const apptTz = resolveAppointmentTimeZone(booking.locationTimeZone, scheduleTz)
+  const apptTz = resolveAppointmentDisplayTimeZone(
+    booking.locationTimeZone,
+    scheduleTz,
+  )
 
   // A booking is refundable while it has a captured Stripe payment. Once fully
   // refunded the status becomes REFUNDED, which hides the action automatically.
