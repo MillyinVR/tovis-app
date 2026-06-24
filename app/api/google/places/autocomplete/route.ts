@@ -7,6 +7,7 @@ import {
   jsonOk,
   pickString,
   safeJson,
+  enforceGoogleProxyRateLimit,
 } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { isAbortError } from '@/lib/http'
@@ -131,6 +132,9 @@ function parsePrediction(pp: Record<string, unknown>): Prediction | null {
 
 export async function GET(req: Request) {
   try {
+    const limited = await enforceGoogleProxyRateLimit()
+    if (limited) return limited
+
     const { searchParams } = new URL(req.url)
 
     const input = pickString(searchParams.get('input'))

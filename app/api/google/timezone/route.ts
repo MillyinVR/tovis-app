@@ -10,12 +10,16 @@ import {
   pickNumber,
   pickString,
   safeJson,
+  enforceGoogleProxyRateLimit,
 } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
   try {
+    const limited = await enforceGoogleProxyRateLimit()
+    if (limited) return limited
+
     const { searchParams } = new URL(req.url)
 
     const lat = pickNumber(searchParams.get('lat'))
