@@ -5,6 +5,7 @@ import {
   BookingServiceItemType,
   BookingStatus,
   Prisma,
+  ServiceLocationType,
   SessionStep,
 } from '@prisma/client'
 
@@ -121,6 +122,9 @@ function makeBooking(overrides?: {
   checkoutStatus?: BookingCheckoutStatus
   paymentCollectedAt?: Date | null
   aftercareSentAt?: Date | null
+  locationType?: ServiceLocationType
+  salonAddress?: string
+  mobileAddress?: string
 }) {
   return {
     id: overrides?.id ?? 'booking_1',
@@ -137,6 +141,18 @@ function makeBooking(overrides?: {
         ? overrides.finishedAt
         : null,
     locationTimeZone: 'America/Los_Angeles',
+
+    locationType: overrides?.locationType ?? ServiceLocationType.SALON,
+    locationAddressSnapshot: overrides?.salonAddress
+      ? { formattedAddress: overrides.salonAddress }
+      : null,
+    locationLatSnapshot: null,
+    locationLngSnapshot: null,
+    clientAddressSnapshot: overrides?.mobileAddress
+      ? { formattedAddress: overrides.mobileAddress }
+      : null,
+    clientAddressLatSnapshot: null,
+    clientAddressLngSnapshot: null,
 
     checkoutStatus: overrides?.checkoutStatus ?? BookingCheckoutStatus.NOT_READY,
     paymentCollectedAt:
@@ -296,6 +312,16 @@ function findAnchors(node: PageNode): Array<React.ReactElement<AnchorProps>> {
   return []
 }
 
+// The redesigned header always shows a "Payment due" STAT card, so a raw text
+// match no longer isolates the per-card CloseoutBadge. The badge is the only
+// "Payment due" rendered as an anchor (to the session closeout), so assert on
+// anchors carrying that text instead.
+function findPaymentDueBadges(node: PageNode) {
+  return findAnchors(node).filter((anchor) =>
+    extractText(anchor).includes('Payment due'),
+  )
+}
+
 describe('app/pro/bookings/page.tsx', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -324,7 +350,6 @@ describe('app/pro/bookings/page.tsx', () => {
   it('renders the Active filter pill for IN_PROGRESS bookings', async () => {
     const page = await renderPage()
 
-    expect(hasText(page, 'Filter')).toBe(true)
     expect(hasText(page, 'All')).toBe(true)
     expect(hasText(page, 'Pending')).toBe(true)
     expect(hasText(page, 'Accepted')).toBe(true)
@@ -415,11 +440,9 @@ describe('app/pro/bookings/page.tsx', () => {
       todayBookings: [needsCloseoutBooking],
     })
 
-    expect(hasText(page, 'Payment due')).toBe(true)
-
-    const anchors = findAnchors(page)
+    const badges = findPaymentDueBadges(page)
     expect(
-      anchors.some(
+      badges.some(
         (anchor) =>
           anchor.props.href === '/pro/bookings/booking_closeout_1/session',
       ),
@@ -442,7 +465,7 @@ describe('app/pro/bookings/page.tsx', () => {
       todayBookings: [closedOutBooking],
     })
 
-    expect(hasText(page, 'Payment due')).toBe(false)
+    expect(findPaymentDueBadges(page)).toHaveLength(0)
   })
 
   it('does not render the Payment due badge before aftercare is sent', async () => {
@@ -458,7 +481,46 @@ describe('app/pro/bookings/page.tsx', () => {
       todayBookings: [activeBooking],
     })
 
-    expect(hasText(page, 'Payment due')).toBe(false)
+    expect(findPaymentDueBadges(page)).toHaveLength(0)
+  })
+
+  it('renders a tap-for-directions maps link when the booking has a resolved address', async () => {
+    const salonBooking = makeBooking({
+      id: 'booking_addr_1',
+      status: BookingStatus.ACCEPTED,
+      salonAddress: 'Studio 9 — 1423 W Lake St, Chicago IL',
+    })
+
+    const page = await renderPage({ todayBookings: [salonBooking] })
+
+    expect(hasText(page, 'Studio 9 — 1423 W Lake St, Chicago IL')).toBe(true)
+
+    const mapsAnchors = findAnchors(page).filter((anchor) =>
+      (anchor.props.href ?? '').includes('google.com/maps'),
+    )
+    expect(mapsAnchors.length).toBeGreaterThan(0)
+    expect(
+      mapsAnchors.some((anchor) => (anchor.props.href ?? '').includes('Lake')),
+    ).toBe(true)
+  })
+
+  it('marks a MOBILE booking address with the Mobile tag and links to it', async () => {
+    const mobileBooking = makeBooking({
+      id: 'booking_mobile_1',
+      status: BookingStatus.ACCEPTED,
+      locationType: ServiceLocationType.MOBILE,
+      mobileAddress: '2120 N Hoyne Ave, Chicago IL',
+    })
+
+    const page = await renderPage({ todayBookings: [mobileBooking] })
+
+    expect(hasText(page, '2120 N Hoyne Ave, Chicago IL')).toBe(true)
+    expect(hasText(page, 'Mobile')).toBe(true)
+    expect(
+      findAnchors(page).some((anchor) =>
+        (anchor.props.href ?? '').includes('Hoyne'),
+      ),
+    ).toBe(true)
   })
 
   it('falls back to All when an unknown status filter is provided', async () => {

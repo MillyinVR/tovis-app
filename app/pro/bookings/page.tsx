@@ -5,6 +5,7 @@ import {
   BookingServiceItemType,
   BookingStatus,
   Prisma,
+  ServiceLocationType,
   SessionStep,
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -12,9 +13,11 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
+import { pickFormattedAddressFromSnapshot } from '@/lib/booking/snapshots'
+import { mapsHrefFromLocation } from '@/lib/maps'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
-import { Badge } from '@/app/_components/ui'
+import { Avatar, Badge } from '@/app/_components/ui'
 import type { BadgeTone } from '@/app/_components/ui'
 import {
   DEFAULT_TIME_ZONE,
@@ -63,6 +66,19 @@ const bookingSelect = {
       sentToClientAt: true,
     },
   },
+
+  // Appointment location — drives the tap-for-directions chip. SALON bookings
+  // read the pro-location snapshot; MOBILE bookings read the client-address
+  // snapshot (where the pro physically travels). Snapshots are captured at
+  // booking time; `pickFormattedAddressFromSnapshot` reads display text without
+  // needing decryption (encrypted-only rows simply resolve to null → no chip).
+  locationType: true,
+  locationAddressSnapshot: true,
+  locationLatSnapshot: true,
+  locationLngSnapshot: true,
+  clientAddressSnapshot: true,
+  clientAddressLatSnapshot: true,
+  clientAddressLngSnapshot: true,
 
   totalDurationMinutes: true,
   subtotalSnapshot: true,
@@ -191,6 +207,175 @@ function CloseoutBadge({ bookingId }: { bookingId: string }) {
     >
       Payment due
     </Link>
+  )
+}
+
+type BookingLocationMeta = {
+  formattedAddress: string | null
+  lat: number | null
+  lng: number | null
+  isMobile: boolean
+}
+
+// SALON → pro-location snapshot (muted pin). MOBILE → client-address snapshot,
+// the place the pro travels to (accent pin + "Mobile" tag).
+function resolveBookingLocationMeta(booking: BookingRow): BookingLocationMeta {
+  const isMobile = booking.locationType === ServiceLocationType.MOBILE
+
+  const snapshot = isMobile
+    ? booking.clientAddressSnapshot
+    : booking.locationAddressSnapshot
+  const lat = isMobile
+    ? booking.clientAddressLatSnapshot
+    : booking.locationLatSnapshot
+  const lng = isMobile
+    ? booking.clientAddressLngSnapshot
+    : booking.locationLngSnapshot
+
+  return {
+    formattedAddress: pickFormattedAddressFromSnapshot(snapshot),
+    lat: typeof lat === 'number' && Number.isFinite(lat) ? lat : null,
+    lng: typeof lng === 'number' && Number.isFinite(lng) ? lng : null,
+    isMobile,
+  }
+}
+
+function PinIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      aria-hidden
+      className={['fill-none stroke-current', className].filter(Boolean).join(' ')}
+      strokeWidth={1.9}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 21s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z" />
+      <circle cx="12" cy="9" r="2.5" />
+    </svg>
+  )
+}
+
+function ExternalIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      aria-hidden
+      className={['fill-none stroke-current', className].filter(Boolean).join(' ')}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
+    </svg>
+  )
+}
+
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      aria-hidden
+      className={['fill-none stroke-current', className].filter(Boolean).join(' ')}
+      strokeWidth={1.9}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.5 2" />
+    </svg>
+  )
+}
+
+// Tap-for-directions chip. Hands off to the device's default maps app via the
+// shared `lib/maps` helper (no duplicate URL logic). Rendered only when the
+// booking has a resolved address; lives as its own anchor so it stays an
+// independent ≥44px tap target on the card.
+function LocationChip({ meta }: { meta: BookingLocationMeta }) {
+  if (!meta.formattedAddress) return null
+
+  const href = mapsHrefFromLocation({
+    formattedAddress: meta.formattedAddress,
+    lat: meta.lat,
+    lng: meta.lng,
+  })
+
+  const inner = (
+    <>
+      <PinIcon
+        className={meta.isMobile ? 'text-accentPrimary' : 'text-textMuted'}
+      />
+      {meta.isMobile ? (
+        <span className="shrink-0 font-mono text-[8px] font-bold uppercase tracking-[0.12em] text-accentPrimary">
+          Mobile
+        </span>
+      ) : null}
+      <span className="truncate text-[12px] text-textSecondary">
+        {meta.formattedAddress}
+      </span>
+    </>
+  )
+
+  const chipBase =
+    'mt-2 inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-white/10 bg-bgPrimary px-3 py-2'
+
+  if (!href) {
+    return <div className={chipBase}>{inner}</div>
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`${chipBase} transition hover:border-accentPrimary/40`}
+    >
+      {inner}
+      <ExternalIcon className="text-textMuted" />
+    </a>
+  )
+}
+
+function StatCard({
+  value,
+  label,
+  tone,
+}: {
+  value: number
+  label: string
+  tone?: 'accent' | 'warn'
+}) {
+  const cardCls =
+    tone === 'warn'
+      ? 'border-toneWarn/30 bg-toneWarn/10'
+      : 'border-white/10 bg-bgSecondary'
+  const valueCls =
+    tone === 'accent'
+      ? 'text-accentPrimary'
+      : tone === 'warn'
+        ? 'text-toneWarn'
+        : 'text-textPrimary'
+  const labelCls = tone === 'warn' ? 'text-toneWarn' : 'text-textSecondary/70'
+
+  return (
+    <div
+      className={`tovis-glass min-w-30 flex-1 rounded-card border px-4 py-3 ${cardCls}`}
+    >
+      <div className={`font-display text-[24px] font-bold ${valueCls}`}>
+        {value}
+      </div>
+      <div
+        className={`mt-0.5 font-mono text-[9px] font-bold uppercase tracking-[0.16em] ${labelCls}`}
+      >
+        {label}
+      </div>
+    </div>
   )
 }
 
@@ -398,7 +583,7 @@ function Section({
         <EmptyState title="No bookings here yet." />
       ) : (
         <div className="grid gap-3">
-          {items.map((booking) => {
+          {items.map((booking, index) => {
             const dur = durationLabel(booking.totalDurationMinutes)
             const canLinkClient = visibleClientIdSet.has(String(booking.client.id))
             const rowTz = bookingDisplayTimeZone(
@@ -406,26 +591,22 @@ function Section({
               scheduleTz,
             )
             const { baseName, addOnNames } = getBaseAndAddOnNames(booking)
+            const locationMeta = resolveBookingLocationMeta(booking)
+            const clientName = `${booking.client.firstName ?? ''} ${
+              booking.client.lastName ?? ''
+            }`.trim()
 
             return (
               <div
                 key={booking.id}
-                className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4"
+                className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 transition hover:border-accentPrimary/30"
               >
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-[13px] font-black text-textPrimary">
-                          {baseName}
-                        </div>
-
-                        {addOnNames.length ? (
-                          <div className="mt-1 truncate text-[12px] text-textSecondary">
-                            + {addOnNames.join(', ')}
-                          </div>
-                        ) : null}
-                      </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-display text-[15px] font-bold text-textPrimary">
+                        {baseName}
+                      </h3>
 
                       <StatusPill status={booking.status} />
 
@@ -434,34 +615,58 @@ function Section({
                       ) : null}
                     </div>
 
-                    <div className="mt-1 text-[12px] text-textSecondary">
-                      <ClientNameLink
-                        canLink={canLinkClient}
-                        clientId={booking.client.id}
-                      >
-                        {booking.client.firstName} {booking.client.lastName}
-                      </ClientNameLink>
-                      {booking.client.user?.email
-                        ? ` • ${booking.client.user.email}`
-                        : ''}
-                      {booking.client.phone ? ` • ${booking.client.phone}` : ''}
+                    {addOnNames.length ? (
+                      <div className="mt-1 truncate text-[12px] text-textSecondary">
+                        + {addOnNames.join(', ')}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <Avatar
+                        name={clientName || undefined}
+                        index={index}
+                        size="sm"
+                        aria-hidden
+                      />
+                      <div className="min-w-0 text-[12px] text-textSecondary">
+                        <ClientNameLink
+                          canLink={canLinkClient}
+                          clientId={booking.client.id}
+                        >
+                          {clientName || 'Client'}
+                        </ClientNameLink>
+                        {booking.client.user?.email
+                          ? ` • ${booking.client.user.email}`
+                          : ''}
+                        {booking.client.phone
+                          ? ` • ${booking.client.phone}`
+                          : ''}
+                      </div>
                     </div>
 
-                    <div className="mt-2 text-[12px] text-textSecondary">
-                      {formatWhenForRow(booking.scheduledFor, rowTz)}
-                      {dur ? ` • ${dur} min` : ''}
+                    <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-textSecondary">
+                      <span className="inline-flex items-center gap-1.5">
+                        <ClockIcon className="text-textMuted" />
+                        {formatWhenForRow(booking.scheduledFor, rowTz)}
+                        {dur ? ` • ${dur} min` : ''}
+                      </span>
                     </div>
-
-                      {booking.status === BookingStatus.IN_PROGRESS ? (
-                        <div className="mt-1 text-[11px] font-bold text-accentPrimary">
-                          Session step:{' '}
-                          {String(booking.sessionStep ?? SessionStep.NONE).replaceAll('_', ' ')}
-                        </div>
-                      ) : null}
 
                     <div className="mt-2">
                       <PriceBlock booking={booking} />
                     </div>
+
+                    <LocationChip meta={locationMeta} />
+
+                    {booking.status === BookingStatus.IN_PROGRESS ? (
+                      <div className="mt-2 font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accentPrimary">
+                        Session ·{' '}
+                        {String(booking.sessionStep ?? SessionStep.NONE).replaceAll(
+                          '_',
+                          ' ',
+                        )}
+                      </div>
+                    ) : null}
 
                     <div className="mt-3 flex flex-wrap gap-3">
                       <Link
@@ -595,16 +800,36 @@ export default async function ProBookingsPage(props: {
 
   const showTz = pickTimeZoneOrNull(scheduleTz)
 
+  // Operational at-a-glance counts from the currently-loaded buckets. "Payment
+  // due" is the needsCloseout set (aftercare sent, payment not yet collected) —
+  // the same warn-styled "don't forget me" surface the cards carry.
+  const activeBuckets = [...todayBookings, ...upcomingBookings, ...pastBookings]
+  const todayCount = todayBookings.length
+  const inSessionCount = activeBuckets.filter(
+    (booking) => booking.status === BookingStatus.IN_PROGRESS,
+  ).length
+  const paymentDueCount = activeBuckets.filter((booking) =>
+    needsCloseout(booking),
+  ).length
+
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8">
       <header className="mb-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-[22px] font-black text-textPrimary">Bookings</h1>
+            <div className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-accentPrimary">
+              Studio · Bookings
+            </div>
+            <h1 className="mt-1.5 font-display text-[28px] font-bold tracking-tight text-textPrimary">
+              Bookings
+            </h1>
             <div className="mt-1 text-[12px] text-textSecondary">
-              Today, upcoming, active, past, and cancelled.
+              Today, upcoming, and past.
               {showTz ? (
-                <span className="text-textSecondary/70"> ({showTz})</span>
+                <span className="font-mono text-[11px] text-textSecondary/70">
+                  {' · '}
+                  {showTz}
+                </span>
               ) : null}
             </div>
           </div>
@@ -617,10 +842,13 @@ export default async function ProBookingsPage(props: {
           </Link>
         </div>
 
+        <div className="mt-4 flex flex-wrap gap-2.5">
+          <StatCard value={todayCount} label="Today" />
+          <StatCard value={inSessionCount} label="In session" tone="accent" />
+          <StatCard value={paymentDueCount} label="Payment due" tone="warn" />
+        </div>
+
         <div className="mt-4">
-          <div className="mb-2 text-[12px] font-black text-textPrimary">
-            Filter
-          </div>
           <FilterPills active={statusFilter} />
         </div>
       </header>
