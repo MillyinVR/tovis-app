@@ -107,7 +107,22 @@ const PLAINTEXT_PII_FIELDS = [
   'stripeCustomerId',
 ]
 
+// Fields flagged ONLY when selected/filtered out of a Prisma model row
+// (`lat: true`, `lat: { ... }`), never on a bare `.lat` property read. `lat`
+// and `lng` are extremely common identifiers on non-PII objects (Google Maps
+// SDK results, map viewports, markers, geometry), so guarding direct property
+// reads would drown the guard in noise. Pulling precise coordinates out of a DB
+// row is the real leak class — the same one that required coarsening
+// /api/pros/nearby (see lib/discovery/nearbyPros.ts). Note: `latApprox`/
+// `lngApprox` are intentionally coarsened indexing surrogates and are NOT PII.
+const SELECT_ONLY_PII_FIELDS = ['lat', 'lng']
+
+// Direct/optional property reads only match the full plaintext field set;
+// select/where patterns additionally match the select-only coordinate fields.
 const FIELD_PATTERN = PLAINTEXT_PII_FIELDS.map(escapeRegExp).join('|')
+const SELECTABLE_FIELD_PATTERN = [...PLAINTEXT_PII_FIELDS, ...SELECT_ONLY_PII_FIELDS]
+  .map(escapeRegExp)
+  .join('|')
 
 const VIOLATION_PATTERNS = [
   {
@@ -120,11 +135,11 @@ const VIOLATION_PATTERNS = [
   },
   {
     name: 'Prisma select/include plaintext field',
-    regex: new RegExp(String.raw`^\s*(?:${FIELD_PATTERN})\s*:\s*true\s*,?\s*$`, 'u'),
+    regex: new RegExp(String.raw`^\s*(?:${SELECTABLE_FIELD_PATTERN})\s*:\s*true\s*,?\s*$`, 'u'),
   },
   {
     name: 'Prisma where/order plaintext field',
-    regex: new RegExp(String.raw`^\s*(?:${FIELD_PATTERN})\s*:\s*\{`, 'u'),
+    regex: new RegExp(String.raw`^\s*(?:${SELECTABLE_FIELD_PATTERN})\s*:\s*\{`, 'u'),
   },
 ]
 
