@@ -109,6 +109,25 @@ function CameraIcon({ size = 16 }: { size?: number }) {
   )
 }
 
+function LockIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  )
+}
+
 function PageShell({ children }: { children: ReactNode }) {
   return <main className="brand-pro-session-page">{children}</main>
 }
@@ -404,6 +423,7 @@ export default async function ProBeforePhotosPage(props: PageProps) {
     fullName(booking.client?.firstName, booking.client?.lastName) ||
     booking.client?.user?.email ||
     'Client'
+  const clientFirst = clientName.split(' ')[0] || clientName
 
   return (
     <PageShell>
@@ -416,13 +436,15 @@ export default async function ProBeforePhotosPage(props: PageProps) {
       />
 
       <div className="brand-pro-session-scroll no-scroll">
-        <StatusCard
-          hasBefore={hasBefore}
-          consultApproved={consultApproved}
-          approvalStatus={approvalStatus}
-          canContinue={canContinue}
-          continueToService={continueToService}
-        />
+        <div className="brand-pro-session-privacy">
+          <span className="brand-pro-session-privacy-icon">
+            <LockIcon />
+          </span>
+          <div>
+            Saved <strong>privately</strong> for you and {clientFirst}. Used for
+            the after-photo comparison at wrap-up.
+          </div>
+        </div>
 
         <section className="mt-4">
           <div className="brand-pro-session-photo-header">
@@ -440,14 +462,38 @@ export default async function ProBeforePhotosPage(props: PageProps) {
         </section>
 
         <section className="mt-4">
-          <Card>
-            <div className="brand-pro-session-card-heading">
-              <CameraIcon />
-              Upload before photos
+          <div className="brand-pro-session-capture">
+            <span className="brand-pro-session-capture-icon">
+              <CameraIcon size={26} />
+            </span>
+
+            <div className="brand-pro-session-capture-title">
+              Take or upload before photos
             </div>
 
-            <MediaUploader bookingId={bookingId} phase="BEFORE" />
-          </Card>
+            <div className="brand-pro-session-capture-sub">
+              Tap to capture or choose a file. It uploads automatically and
+              compresses for you.
+            </div>
+
+            <div className="w-full">
+              <MediaUploader bookingId={bookingId} phase="BEFORE" />
+            </div>
+
+            <div className="brand-cap brand-pro-session-capture-formats">
+              JPG · PNG · MP4 up to 30MB · auto-compressed
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-4">
+          <StatusCard
+            hasBefore={hasBefore}
+            consultApproved={consultApproved}
+            approvalStatus={approvalStatus}
+            canContinue={canContinue}
+            continueToService={continueToService}
+          />
         </section>
 
         <section className="mt-4 pb-4">
@@ -455,10 +501,6 @@ export default async function ProBeforePhotosPage(props: PageProps) {
             <MediaPreviewGrid items={items} title="Uploaded before media" />
           </Card>
         </section>
-
-        <div className="brand-pro-session-help-text pb-4">
-          Continue locked: <strong>{String(!canContinue)}</strong>
-        </div>
       </div>
     </PageShell>
   )

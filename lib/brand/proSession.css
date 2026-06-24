@@ -745,6 +745,71 @@
   color: rgb(var(--color-acid));
 }
 
+/* Privacy banner — "every shot is saved privately" reassurance. */
+.brand-pro-session-privacy {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+  border: 1px solid rgb(var(--surface-glass) / 0.1);
+  border-radius: var(--radius-card);
+  background: rgb(var(--surface-glass) / 0.025);
+  color: rgb(var(--text-secondary));
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.brand-pro-session-privacy-icon {
+  flex-shrink: 0;
+  color: rgb(var(--text-muted));
+}
+
+.brand-pro-session-privacy strong {
+  color: rgb(var(--text-primary));
+}
+
+/* Big tap-to-capture / upload target. */
+.brand-pro-session-capture {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 18px;
+  border: 1.5px dashed rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-card);
+  background: rgb(var(--surface-glass) / 0.025);
+  text-align: center;
+}
+
+.brand-pro-session-capture-icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border-radius: 16px;
+  background: rgb(var(--accent-primary));
+  color: rgb(var(--on-accent));
+}
+
+.brand-pro-session-capture-title {
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.brand-pro-session-capture-sub {
+  max-width: 300px;
+  color: rgb(var(--text-muted));
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.brand-pro-session-capture-formats {
+  color: rgb(var(--text-muted));
+  font-size: 8.5px;
+}
+
 /* ──────────────────────────────────────────────────────────────────
    Timer / progress
 ────────────────────────────────────────────────────────────────── */

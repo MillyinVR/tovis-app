@@ -329,8 +329,9 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
     expect(hasText(page, 'WRAP-UP · AFTER PHOTOS')).toBe(true)
     expect(hasText(page, 'After photos saved')).toBe(true)
     expect(hasText(page, 'Continue to aftercare')).toBe(true)
-    expect(hasText(page, 'Upload after photos')).toBe(true)
+    expect(hasText(page, 'Take or upload after photos')).toBe(true)
     expect(hasText(page, 'MediaUploader:AFTER')).toBe(true)
+    expect(hasText(page, 'for you and')).toBe(true)
 
     const uploaders = findElementsByTestId(page, 'media-uploader')
     expect(uploaders).toHaveLength(1)
@@ -368,7 +369,7 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
       mediaRows: [],
     })
 
-    expect(hasText(page, 'Upload after photos')).toBe(true)
+    expect(hasText(page, 'Take or upload after photos')).toBe(true)
     expect(hasText(page, 'MediaUploader:AFTER')).toBe(true)
     expect(mocks.redirect).not.toHaveBeenCalled()
 
