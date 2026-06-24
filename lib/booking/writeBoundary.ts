@@ -14240,11 +14240,27 @@ async function performLockedApplyStripePaymentFailed(args: {
     throw bookingError('BOOKING_NOT_FOUND')
   }
 
+  // Never downgrade a payment that already landed. `payment_intent.payment_failed`
+  // only describes a failed *attempt*, which logically precedes capture — but
+  // Stripe does not guarantee webhook ordering, so a stale failed-attempt event
+  // can arrive AFTER the success/refund/dispute event. Applying it would flip a
+  // paid booking to FAILED, which also makes `isCapturedStripePayment` false and
+  // blocks refunds. Treat it as a no-op once a captured state is recorded.
+  const CAPTURED_TERMINAL_STATUSES: ReadonlyArray<StripePaymentStatus> = [
+    StripePaymentStatus.SUCCEEDED,
+    StripePaymentStatus.REFUNDED,
+    StripePaymentStatus.DISPUTED,
+  ]
+
   const alreadyApplied =
     booking.stripeLastEventId === args.stripeEventId &&
     booking.stripePaymentStatus === StripePaymentStatus.FAILED
 
-  if (alreadyApplied) {
+  const wouldDowngradeCaptured =
+    booking.stripePaymentStatus != null &&
+    CAPTURED_TERMINAL_STATUSES.includes(booking.stripePaymentStatus)
+
+  if (alreadyApplied || wouldDowngradeCaptured) {
     return {
       bookingId: booking.id,
       bookingCompleted: booking.status === BookingStatus.COMPLETED,

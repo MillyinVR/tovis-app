@@ -8,6 +8,7 @@ lib/availability/data/otherPros.test.ts|as unknown as|client: readClient as unkn
 lib/boards/index.test.ts|as unknown as|return await callback(db as unknown as Prisma.TransactionClient)
 lib/boards/index.test.ts|as unknown as|return db as unknown as Prisma.TransactionClient
 lib/boards/index.test.ts|as unknown as|return db as unknown as PrismaClient
+lib/booking/applyStripePaymentFailed.test.ts|as unknown as|return { tx: tx as unknown as Prisma.TransactionClient, update }
 lib/booking/holdPolicy.overlapContract.test.ts|as unknown as|} as unknown as Prisma.TransactionClient
 lib/booking/refunds.test.ts|as unknown as|return txRef.current as unknown as Prisma.TransactionClient
 lib/booking/schedulingConflicts.test.ts|as unknown as|return tx as unknown as PrismaTransactionClient

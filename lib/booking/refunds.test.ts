@@ -136,6 +136,7 @@ function setBooking(overrides: Record<string, unknown> = {}) {
     stripePaymentIntentId: 'pi_123',
     stripePaymentStatus: StripePaymentStatus.SUCCEEDED,
     stripeAmountTotal: 10000,
+    stripeAmountRefunded: 0,
     stripeApplicationFeeAmount: null,
     stripeCurrency: 'usd',
     ...overrides,
@@ -373,6 +374,100 @@ describe('refundBookingPayment — partial refunds', () => {
   })
 })
 
+describe('refundBookingPayment — dashboard/external refunds (no BookingRefund row)', () => {
+  it('caps an auto refund at the remainder after a Stripe-side refund we never itemized', async () => {
+    // $30 already refunded via the Stripe Dashboard: no BookingRefund row, only
+    // the cumulative total Stripe reported. A full auto-refund must NOT re-refund
+    // the whole $100 — it can only give back the remaining $70.
+    setBooking({ stripeAmountTotal: 10000, stripeAmountRefunded: 3000 })
+    mocks.stripeRefundsCreate.mockResolvedValueOnce({ id: 're_auto' })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    expect(mocks.stripeRefundsCreate.mock.calls.at(-1)?.[0]).toMatchObject({
+      amount: 7000,
+    })
+  })
+
+  it('skips entirely when a dashboard refund already covered the full capture', async () => {
+    setBooking({ stripeAmountTotal: 10000, stripeAmountRefunded: 10000 })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result.outcome).toBe('SKIPPED')
+    expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects an explicit amount that exceeds the remainder after a dashboard refund', async () => {
+    setBooking({ stripeAmountTotal: 10000, stripeAmountRefunded: 6000 })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.DISCRETIONARY,
+      amountCents: 5000, // only 4000 remains
+    })
+
+    expect(result.outcome).toBe('INVALID')
+    expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
+  })
+
+  it('counts an in-flight PENDING refund AND a concurrent dashboard refund without overlap', async () => {
+    // $40 of our own refund is in flight (PENDING, not yet reflected in Stripe's
+    // total), and a separate $30 dashboard refund already succeeded on Stripe.
+    // True committed = 4000 + 3000 = 7000, so only 3000 remains. A naive max()
+    // would see max(4000, 3000) = 4000 and wrongly free 6000 → over-refund.
+    setBooking({ stripeAmountTotal: 10000, stripeAmountRefunded: 3000 })
+    mocks.refundRows.push({
+      id: 'refund_pending',
+      bookingId: 'booking_1',
+      amountCents: 4000,
+      status: BookingRefundStatus.PENDING,
+    })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.DISCRETIONARY,
+      amountCents: 4000, // exceeds the true 3000 remainder
+    })
+
+    expect(result.outcome).toBe('INVALID')
+    expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
+  })
+
+  it('does not double-count our own SUCCEEDED refund once its webhook syncs Stripe’s total', async () => {
+    // We refunded $40 (SUCCEEDED row) and Stripe's total now reflects it (4000).
+    // ourSucceeded (4000) is the overlap, so dashboardOnly = 4000 − 4000 = 0 and
+    // reserved = 4000 (not 8000). The remaining $60 stays refundable.
+    setBooking({ stripeAmountTotal: 10000, stripeAmountRefunded: 4000 })
+    mocks.refundRows.push({
+      id: 'refund_ours',
+      bookingId: 'booking_1',
+      amountCents: 4000,
+      stripeRefundId: 're_ours',
+      status: BookingRefundStatus.SUCCEEDED,
+    })
+    mocks.stripeRefundsCreate.mockResolvedValueOnce({ id: 're_next' })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.DISCRETIONARY,
+      amountCents: 6000,
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    expect(mocks.stripeRefundsCreate.mock.calls.at(-1)?.[0]).toMatchObject({
+      amount: 6000,
+    })
+  })
+})
+
 describe('refundBookingPayment — Stripe failure', () => {
   it('marks the reserved refund FAILED and releases the reservation', async () => {
     setBooking()
@@ -512,9 +607,10 @@ describe('reconcileChargeRefundInTransaction', () => {
     expect(mockEmitPaymentRefunded).not.toHaveBeenCalled()
   })
 
-  it('does not re-update a booking already marked REFUNDED', async () => {
+  it('does not re-update a booking already marked REFUNDED and synced', async () => {
     setBooking({
       stripeAmountTotal: 10000,
+      stripeAmountRefunded: 10000,
       stripePaymentStatus: StripePaymentStatus.REFUNDED,
     })
 
@@ -526,5 +622,34 @@ describe('reconcileChargeRefundInTransaction', () => {
     })
 
     expect(mocks.bookingUpdates).toHaveLength(0)
+  })
+
+  it('records Stripe’s cumulative refunded total so dashboard refunds are tracked', async () => {
+    setBooking({ stripeAmountTotal: 10000, stripeAmountRefunded: 0 })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 3000,
+      chargeAmountCents: 10000,
+      // Dashboard refund: succeeded on Stripe, but no BookingRefund row exists.
+      refunds: [{ id: 're_dash', status: 'succeeded', amountCents: 3000 }],
+    })
+
+    expect(mocks.bookingUpdates).toContainEqual({ stripeAmountRefunded: 3000 })
+  })
+
+  it('never lowers the refunded total on an out-of-order (stale) webhook', async () => {
+    setBooking({ stripeAmountTotal: 10000, stripeAmountRefunded: 5000 })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 3000, // stale: less than what we already recorded
+      chargeAmountCents: 10000,
+      refunds: [{ id: 're_old', status: 'succeeded', amountCents: 3000 }],
+    })
+
+    expect(
+      mocks.bookingUpdates.some((u) => 'stripeAmountRefunded' in u),
+    ).toBe(false)
   })
 })

@@ -2488,6 +2488,11 @@ model Booking {
   stripeAmountSubtotal        Int?
   stripeAmountTotal           Int?
   stripeApplicationFeeAmount  Int?
+  // Stripe's authoritative cumulative SUCCEEDED-refund total (minor units),
+  // synced from charge.refunded webhooks. Includes refunds issued outside the
+  // app (e.g. the Stripe Dashboard) that never create a BookingRefund row, so
+  // the refund-reservation math can't double-refund what Stripe already gave back.
+  stripeAmountRefunded        Int                          @default(0)
   stripeCurrency              String?                      @db.VarChar(3)
   stripePaidAt                DateTime?
   stripeLastEventId           String?
