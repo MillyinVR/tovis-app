@@ -361,9 +361,11 @@ app/pro/bookings/new/BookingCreateContent.tsx:Prisma select/include plaintext fi
 app/pro/bookings/new/BookingCreateContent.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/bookings/new/BookingCreateContent.tsx:Prisma select/include plaintext field:lastName: true,
 app/pro/bookings/new/BookingCreateContent.tsx:Prisma select/include plaintext field:phone: true,
+app/pro/bookings/new/NewBookingForm.tsx:direct property read:? `${newClient.firstName} ${newClient.lastName}`.trim()
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:? item.email.trim()
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:? item.fullName.trim()
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:? item.phone.trim()
+app/pro/bookings/new/NewBookingForm.tsx:direct property read:?.fullName ?? '')
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:Boolean(normalizeOptionalInput(address.postalCode)) ||
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:`${dtoMatch.firstName} ${dtoMatch.lastName}`.trim() || 'Client'
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:const email = client.email ? ` • ${client.email}` : ''
@@ -373,6 +375,7 @@ app/pro/bookings/new/NewBookingForm.tsx:direct property read:normalizeOptionalIn
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:normalizeOptionalInput(client.firstName) &&
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:normalizeOptionalInput(client.lastName) &&
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:return `${client.fullName}${email}${phone}`
+app/pro/bookings/new/NewBookingForm.tsx:direct property read:serviceAddress.addressLine1.trim() ||
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:typeof item.email === 'string' && item.email.trim()
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:typeof item.fullName === 'string' && item.fullName.trim()
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:typeof item.phone === 'string' && item.phone.trim()
@@ -383,6 +386,7 @@ app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={newClient.ph
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddress.addressLine1}
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddress.addressLine2}
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddress.postalCode}
+app/pro/bookings/new/NewBookingForm.tsx:optional direct property read:?.fullName ?? '')
 app/pro/bookings/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/bookings/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/pro/bookings/page.tsx:Prisma select/include plaintext field:phone: true,

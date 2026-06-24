@@ -378,6 +378,74 @@ function normalizeServiceAddresses(data: unknown): ClientServiceAddressOption[] 
   return out
 }
 
+const SUMMARY_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+]
+
+// Pretty-prints the picked wall-clock for the summary rail. This is the exact
+// local time the pro typed (no instant, no zone math), so it's plain string
+// formatting — the @/lib/time barrel is for instants and stays the source of
+// truth for the actual UTC conversion at submit.
+function formatWallClock(local: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(local)
+  if (!m) return ''
+
+  const month = SUMMARY_MONTHS[Number(m[2]) - 1] ?? ''
+  const day = Number(m[3])
+  const hour24 = Number(m[4])
+  const minute = m[5]
+  const period = hour24 >= 12 ? 'PM' : 'AM'
+  const hour12 = ((hour24 + 11) % 12) + 1
+
+  return `${month} ${day}, ${hour12}:${minute} ${period}`
+}
+
+function FormCard({
+  step,
+  title,
+  children,
+}: {
+  step: number
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+      <div className="mb-3.5 flex items-center gap-2">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accentPrimary font-mono text-[9px] font-bold text-bgPrimary">
+          {step}
+        </span>
+        <span className="font-display text-[15px] font-bold text-textPrimary">
+          {title}
+        </span>
+      </div>
+      <div className="grid gap-4">{children}</div>
+    </section>
+  )
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <span className="text-[12.5px] text-textMuted">{label}</span>
+      <span className="text-right font-display text-[13px] font-bold text-textPrimary">
+        {value || '—'}
+      </span>
+    </div>
+  )
+}
+
 export default function NewBookingForm({
   clients,
   offerings,
@@ -1100,11 +1168,45 @@ export default function NewBookingForm({
 
   const tzLabel = sanitizeTimeZone(bookingTimeZone, 'UTC')
 
+  // Live tallies for the desktop summary rail — derived from the same state the
+  // form already tracks; no new sources of truth.
+  const summaryClientName =
+    clientMode === 'new'
+      ? `${newClient.firstName} ${newClient.lastName}`.trim()
+      : (existingClientOptions.find((option) => option.id === clientId)
+          ?.fullName ?? '')
+  const summaryService = selectedOffering
+    ? selectedOffering.title || selectedOffering.service.name
+    : ''
+  const summaryDuration = selectedOffering
+    ? pickDisplayDurationMinutes(selectedOffering, locationType)
+    : 0
+  const summaryPrice = selectedOffering
+    ? moneyToString(pickDisplayPrice(selectedOffering, locationType))
+    : null
+  const summaryWhere = (() => {
+    if (locationType === 'SALON') {
+      return selectedLocation ? `Salon · ${selectedLocation.label}` : 'Salon'
+    }
+    if (addressMode === 'existing') {
+      const saved = selectedClientAddresses.find(
+        (address) => address.id === clientAddressId,
+      )
+      return saved ? `Mobile · ${saved.label}` : 'Mobile'
+    }
+    const typed =
+      serviceAddress.formattedAddress.trim() ||
+      serviceAddress.addressLine1.trim() ||
+      serviceAddress.label.trim()
+    return typed ? `Mobile · ${typed}` : 'Mobile'
+  })()
+  const summaryWhen = formatWallClock(scheduledAt)
+
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="tovis-glass grid gap-4 rounded-card border border-white/10 bg-bgSecondary p-4"
-    >
+    <form onSubmit={handleSubmit}>
+      <div className="grid gap-3.5 lg:grid-cols-[1fr_20rem] lg:items-start">
+        <div className="grid gap-3.5">
+          <FormCard step={1} title="Client">
       <div className="grid gap-2">
         <div className={label}>
           Client <span className="text-textSecondary">*</span>
@@ -1285,7 +1387,9 @@ export default function NewBookingForm({
           </div>
         </div>
       )}
+          </FormCard>
 
+          <FormCard step={2} title="Service &amp; place">
       <div className="grid gap-2">
         <div className={label}>
           Booking mode <span className="text-textSecondary">*</span>
@@ -1708,7 +1812,9 @@ export default function NewBookingForm({
           )}
         </div>
       ) : null}
+          </FormCard>
 
+          <FormCard step={3} title="When">
       <div className="grid gap-2">
         <label htmlFor="datetime" className={label}>
           Date &amp; time <span className="text-textSecondary">*</span>
@@ -1744,6 +1850,7 @@ export default function NewBookingForm({
           className={`${field} min-h-24 resize-y`}
         />
       </div>
+          </FormCard>
 
       {overridePrompt ? (
         <div className="grid gap-3 rounded-card border border-toneWarn/25 bg-toneWarn/10 p-3">
@@ -1800,24 +1907,52 @@ export default function NewBookingForm({
           To create this booking: {submitBlockers[0]}
         </div>
       ) : null}
+        </div>
 
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={handleCancel}
-          disabled={loading}
-          className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
-        >
-          Cancel
-        </button>
+        <aside className="lg:sticky lg:top-4">
+          <div className="tovis-glass rounded-card border border-white/10 bg-bgSurface p-4">
+            <div className="font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-accentPrimary">
+              Booking summary
+            </div>
 
-        <button
-          type="submit"
-          disabled={submitDisabled}
-          className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
-        >
-          {loading ? 'Creating…' : 'Create booking'}
-        </button>
+            <div className="mt-3 grid gap-2.5">
+              <SummaryRow label="Client" value={summaryClientName} />
+              <SummaryRow label="Service" value={summaryService} />
+              <SummaryRow label="Where" value={summaryWhere} />
+              <SummaryRow label="When" value={summaryWhen} />
+              <SummaryRow
+                label="Duration"
+                value={summaryDuration ? `${summaryDuration} min` : ''}
+              />
+            </div>
+
+            <div className="mt-3.5 flex items-baseline justify-between border-t border-dashed border-white/10 pt-3.5">
+              <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-textMuted">
+                Total
+              </span>
+              <span className="font-display text-[24px] font-bold text-textPrimary">
+                {summaryPrice ? `$${summaryPrice}` : '—'}
+              </span>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitDisabled}
+              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-accentPrimary text-[14px] font-black text-bgPrimary transition hover:bg-accentPrimaryHover disabled:opacity-60"
+            >
+              {loading ? 'Creating…' : 'Create booking'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={loading}
+              className="mt-2.5 flex h-11 w-full items-center justify-center rounded-xl border border-white/10 bg-bgPrimary text-[13px] font-black text-textPrimary transition hover:border-white/20 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+          </div>
+        </aside>
       </div>
     </form>
   )
