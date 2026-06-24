@@ -10,21 +10,26 @@ export default async function NewBookingPage(props: {
   const searchParams = await props.searchParams
 
   return (
-    <main className="mx-auto w-full max-w-215 px-4 pb-24 pt-8">
+    <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8">
       <Link
         href="/pro"
-        className="inline-block text-[12px] font-black text-textSecondary hover:text-textPrimary"
+        className="inline-flex items-center gap-1.5 text-textMuted transition hover:text-textSecondary"
       >
-        ← Back to dashboard
+        <span aria-hidden>←</span>
+        <span className="font-mono text-[10px] font-bold uppercase tracking-widest">
+          Dashboard
+        </span>
       </Link>
 
-      <div className="mt-3">
-        <h1 className="text-[22px] font-black text-textPrimary">
+      <div className="mt-3.5">
+        <div className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-accentPrimary">
+          Studio · New booking
+        </div>
+        <h1 className="mt-1.5 font-display text-[28px] font-bold tracking-tight text-textPrimary">
           New booking
         </h1>
-        <p className="mt-1 text-[12px] text-textSecondary">
-          Create a booking for a client and choose whether it is salon or mobile
-          before saving.
+        <p className="mt-1.5 text-[13px] text-textSecondary">
+          Book a client in a few taps — salon or mobile, new face or regular.
         </p>
       </div>
 
