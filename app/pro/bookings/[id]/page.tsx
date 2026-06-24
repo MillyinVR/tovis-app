@@ -14,16 +14,15 @@ import {
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { Avatar } from '@/app/_components/ui'
 import { getProClientVisibility } from '@/lib/clientVisibility'
-import { pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
+import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { pickString } from '@/lib/pick'
 import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { paymentMethodLabel } from '@/lib/payments/acceptedMethods'
 
 export const dynamic = 'force-dynamic'
-
-const FALLBACK_TZ = 'UTC'
 
 function safeUpper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
@@ -181,46 +180,6 @@ function CardIcon({ className }: { className?: string }) {
   )
 }
 
-/**
- * Schedule timezone for a pro (calendar owner):
- * Prefer primary bookable location tz, else any bookable, else pro.profile tz, else UTC.
- */
-async function resolveProScheduleTimeZone(
-  proId: string,
-  proTimeZoneRaw: unknown,
-): Promise<string> {
-  const primary = await prisma.professionalLocation.findFirst({
-    where: { professionalId: proId, isBookable: true, isPrimary: true },
-    select: { timeZone: true },
-  })
-
-  const primaryTz = pickTimeZoneOrNull(primary?.timeZone)
-  if (primaryTz) return primaryTz
-
-  const anyLocation = await prisma.professionalLocation.findFirst({
-    where: { professionalId: proId, isBookable: true },
-    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-    select: { timeZone: true },
-  })
-
-  const anyTz = pickTimeZoneOrNull(anyLocation?.timeZone)
-  if (anyTz) return anyTz
-
-  const proTz = pickTimeZoneOrNull(proTimeZoneRaw)
-  if (proTz) return proTz
-
-  return FALLBACK_TZ
-}
-
-function resolveAppointmentTimeZone(
-  bookingLocationTimeZone: unknown,
-  scheduleTz: string,
-) {
-  const bookingTz = pickTimeZoneOrNull(bookingLocationTimeZone)
-  if (bookingTz) return bookingTz
-  return sanitizeTimeZone(scheduleTz, FALLBACK_TZ)
-}
-
 function formatMoney(
   v: Prisma.Decimal | null | undefined,
 ): string | null {
@@ -277,7 +236,10 @@ export default async function ProBookingDetailPage(props: {
     proId,
     user.professionalProfile.timeZone,
   )
-  const apptTz = resolveAppointmentTimeZone(booking.locationTimeZone, scheduleTz)
+  const apptTz = resolveAppointmentDisplayTimeZone(
+    booking.locationTimeZone,
+    scheduleTz,
+  )
 
   // A booking is refundable while it has a captured Stripe payment. Once fully
   // refunded the status becomes REFUNDED, which hides the action automatically.

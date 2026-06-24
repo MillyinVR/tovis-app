@@ -27,6 +27,9 @@ import {
   filterFormulaEntriesForViewer,
   scopeConsentRecordsForViewer,
 } from '@/lib/clients/technicalRecord'
+import { formatInTimeZone } from '@/lib/time'
+import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { formatProfessionalPublicSearchText } from '@/lib/privacy/professionalDisplayName'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { loadPublicClientProfileByClientId } from '@/app/u/[handle]/_data/loadPublicClientProfile'
@@ -129,6 +132,7 @@ const BOOKING_ROW_SELECT = {
   id: true,
   status: true,
   scheduledFor: true,
+  locationTimeZone: true,
   createdAt: true,
   finishedAt: true,
   totalDurationMinutes: true,
@@ -174,6 +178,7 @@ const PRODUCT_REC_SELECT = {
       booking: {
         select: {
           scheduledFor: true,
+          locationTimeZone: true,
         },
       },
     },
@@ -232,6 +237,7 @@ const TIMELINE_MEDIA_SELECT = {
   booking: {
     select: {
       scheduledFor: true,
+      locationTimeZone: true,
       service: { select: { name: true } },
     },
   },
@@ -268,7 +274,11 @@ const FORMULA_SELECT = {
   processingTimeMinutes: true,
   resultNotesEncrypted: true,
   booking: {
-    select: { scheduledFor: true, service: { select: { name: true } } },
+    select: {
+      scheduledFor: true,
+      locationTimeZone: true,
+      service: { select: { name: true } },
+    },
   },
 } satisfies Prisma.ClientFormulaEntrySelect
 
@@ -288,7 +298,11 @@ const CONSENT_SELECT = {
     select: { businessName: true, firstName: true, lastName: true },
   },
   booking: {
-    select: { scheduledFor: true, service: { select: { name: true } } },
+    select: {
+      scheduledFor: true,
+      locationTimeZone: true,
+      service: { select: { name: true } },
+    },
   },
 } satisfies Prisma.ClientConsentRecordSelect
 
@@ -312,6 +326,7 @@ type TimelinePhoto = {
 type TimelineVisit = {
   bookingId: string
   when: Date | null
+  whenLocationTimeZone: string | null
   serviceName: string | null
   isMine: boolean
   photos: TimelinePhoto[]
@@ -320,6 +335,7 @@ type TimelineVisit = {
 type FormulaView = {
   id: string
   when: Date | null
+  whenLocationTimeZone: string | null
   serviceName: string | null
   brand: string | null
   developer: string | null
@@ -333,6 +349,7 @@ type ConsentView = {
   scope: 'full' | 'safety'
   kind: string
   when: Date | null
+  whenLocationTimeZone: string | null
   serviceScope: string | null
   signedAt: Date | null
   proofMethod: string | null
@@ -379,18 +396,18 @@ function decimalToNumber(value: Prisma.Decimal | null): number | null {
   return value === null ? null : Number(value)
 }
 
-function formatDate(value: Date | string): string {
+function formatDate(value: Date | string, tz: string): string {
   const date = typeof value === 'string' ? new Date(value) : value
 
-  return date.toLocaleString(undefined, {
+  return formatInTimeZone(date, tz, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
   })
 }
 
-function formatShortDate(value: Date): string {
-  return value.toLocaleString(undefined, { month: 'short', day: 'numeric' })
+function formatShortDate(value: Date, tz: string): string {
+  return formatInTimeZone(value, tz, { month: 'short', day: 'numeric' })
 }
 
 function safeUpper(value: unknown): string {
@@ -478,7 +495,7 @@ function normalizeBookingFilter(raw: unknown): BookingFilter {
     : 'ALL'
 }
 
-function buildBookingSearchIndex(booking: BookingRow): string {
+function buildBookingSearchIndex(booking: BookingRow, tz: string): string {
   const parts = [
     booking.service?.name,
     booking.service?.category?.name,
@@ -487,7 +504,12 @@ function buildBookingSearchIndex(booking: BookingRow): string {
     booking.aftercareSummary?.notes,
     String(booking.totalDurationMinutes ?? ''),
     String(booking.totalAmount ?? booking.subtotalSnapshot ?? ''),
-    booking.scheduledFor ? formatDate(booking.scheduledFor) : '',
+    booking.scheduledFor
+      ? formatDate(
+          booking.scheduledFor,
+          resolveAppointmentDisplayTimeZone(booking.locationTimeZone, tz),
+        )
+      : '',
   ]
 
   return parts
@@ -544,13 +566,14 @@ function upcomingBookingFromRows(rows: BookingRow[]): BookingRow | null {
 function filterBookingsBySearch(args: {
   rows: BookingRow[]
   query: string
+  tz: string
 }): BookingRow[] {
   const normalizedQuery = args.query.toLowerCase()
 
   if (!normalizedQuery) return args.rows
 
   return args.rows.filter((booking) =>
-    buildBookingSearchIndex(booking).includes(normalizedQuery),
+    buildBookingSearchIndex(booking, args.tz).includes(normalizedQuery),
   )
 }
 
@@ -617,6 +640,7 @@ async function loadPhotoTimeline(
       visit = {
         bookingId,
         when: row.booking?.scheduledFor ?? null,
+        whenLocationTimeZone: row.booking?.locationTimeZone ?? null,
         serviceName: row.booking?.service?.name ?? null,
         isMine: row.professionalId === proId,
         photos: [],
@@ -649,6 +673,7 @@ function toFormulaView(row: FormulaRow): FormulaView {
   return {
     id: row.id,
     when: row.booking?.scheduledFor ?? row.createdAt,
+    whenLocationTimeZone: row.booking?.locationTimeZone ?? null,
     serviceName: row.booking?.service?.name ?? null,
     brand: row.brand,
     developer: row.developer,
@@ -666,6 +691,7 @@ function toConsentView(row: ConsentRow, scope: 'full' | 'safety'): ConsentView {
     scope,
     kind: row.kind,
     when: row.booking?.scheduledFor ?? row.createdAt,
+    whenLocationTimeZone: row.booking?.locationTimeZone ?? null,
     // Safety scope (another pro's patch test): only result + validity travel.
     serviceScope: full ? row.serviceScope : null,
     signedAt: full ? row.signedAt : null,
@@ -727,7 +753,7 @@ async function loadTechnicalRecord(
 
 type ClientNoteRow = ClientDetailRecord['notes'][number]
 
-function NoteCard({ note }: { note: ClientNoteRow }) {
+function NoteCard({ note, tz }: { note: ClientNoteRow; tz: string }) {
   return (
     <div className="rounded-card border border-white/10 bg-bgPrimary p-4">
       <div className="flex items-baseline justify-between gap-3">
@@ -736,7 +762,7 @@ function NoteCard({ note }: { note: ClientNoteRow }) {
         </div>
 
         <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-          {formatDate(note.createdAt)}
+          {formatDate(note.createdAt, tz)}
         </div>
       </div>
 
@@ -750,7 +776,13 @@ function NoteCard({ note }: { note: ClientNoteRow }) {
 // Groups the pro's own notes by kind (General / Consultation / Communication
 // style). DO_NOT_REBOOK notes are excluded here — they surface in their own
 // author-only banner near the pinned zone.
-function ClientNotesList({ client }: { client: ClientDetailRecord }) {
+function ClientNotesList({
+  client,
+  tz,
+}: {
+  client: ClientDetailRecord
+  tz: string
+}) {
   const { groups } = partitionNotesByKind(client.notes)
 
   if (groups.length === 0) {
@@ -769,7 +801,7 @@ function ClientNotesList({ client }: { client: ClientDetailRecord }) {
             {group.label}
           </div>
           {group.notes.map((note) => (
-            <NoteCard key={note.id} note={note} />
+            <NoteCard key={note.id} note={note} tz={tz} />
           ))}
         </div>
       ))}
@@ -777,7 +809,13 @@ function ClientNotesList({ client }: { client: ClientDetailRecord }) {
   )
 }
 
-function ClientAllergiesList({ client }: { client: ClientDetailRecord }) {
+function ClientAllergiesList({
+  client,
+  tz,
+}: {
+  client: ClientDetailRecord
+  tz: string
+}) {
   if (client.allergies.length === 0) {
     return (
       <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
@@ -810,7 +848,7 @@ function ClientAllergiesList({ client }: { client: ClientDetailRecord }) {
           ) : null}
 
           <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
-            Recorded {formatDate(allergy.createdAt)}
+            Recorded {formatDate(allergy.createdAt, tz)}
             {allergy.recordedBy
               ? ` • by ${formatPublicProfileDisplayName({
                   businessName: allergy.recordedBy.businessName,
@@ -903,10 +941,12 @@ function ServiceHistoryList({
   bookingRowsFiltered,
   bookingRowsAll,
   proId,
+  tz,
 }: {
   bookingRowsFiltered: BookingRow[]
   bookingRowsAll: BookingRow[]
   proId: string
+  tz: string
 }) {
   if (bookingRowsFiltered.length === 0) {
     return (
@@ -936,7 +976,10 @@ function ServiceHistoryList({
         const total =
           moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ??
           '0.00'
-        const when = formatDate(booking.scheduledFor)
+        const when = formatDate(
+          booking.scheduledFor,
+          resolveAppointmentDisplayTimeZone(booking.locationTimeZone, tz),
+        )
         const proName = formatPublicProfileDisplayName({
           businessName: booking.professional?.businessName,
           firstName: booking.professional?.firstName,
@@ -1005,8 +1048,10 @@ function ServiceHistoryList({
 
 function ProductRecommendationsList({
   productRecs,
+  tz,
 }: {
   productRecs: ProductRecommendationRow[]
+  tz: string
 }) {
   if (productRecs.length === 0) {
     return (
@@ -1043,7 +1088,13 @@ function ProductRecommendationsList({
             </div>
 
             <div className="shrink-0 text-[12px] font-semibold text-textSecondary">
-              {formatDate(recommendation.aftercareSummary.booking.scheduledFor)}
+              {formatDate(
+                recommendation.aftercareSummary.booking.scheduledFor,
+                resolveAppointmentDisplayTimeZone(
+                  recommendation.aftercareSummary.booking.locationTimeZone,
+                  tz,
+                ),
+              )}
             </div>
           </div>
         </div>
@@ -1054,8 +1105,10 @@ function ProductRecommendationsList({
 
 function ClientLeftReviewsList({
   reviews,
+  tz,
 }: {
   reviews: ClientLeftReviewRow[]
+  tz: string
 }) {
   if (reviews.length === 0) {
     return (
@@ -1099,7 +1152,7 @@ function ClientLeftReviewsList({
               </div>
 
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                {formatDate(review.createdAt)}
+                {formatDate(review.createdAt, tz)}
               </div>
             </div>
 
@@ -1115,7 +1168,13 @@ function ClientLeftReviewsList({
   )
 }
 
-function ProFeedbackList({ feedback }: { feedback: ProFeedbackRow[] }) {
+function ProFeedbackList({
+  feedback,
+  tz,
+}: {
+  feedback: ProFeedbackRow[]
+  tz: string
+}) {
   if (feedback.length === 0) {
     return (
       <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
@@ -1154,7 +1213,7 @@ function ProFeedbackList({ feedback }: { feedback: ProFeedbackRow[] }) {
               </div>
 
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                {formatDate(note.createdAt)}
+                {formatDate(note.createdAt, tz)}
               </div>
             </div>
 
@@ -1168,7 +1227,13 @@ function ProFeedbackList({ feedback }: { feedback: ProFeedbackRow[] }) {
   )
 }
 
-function PhotoTimeline({ visits }: { visits: TimelineVisit[] }) {
+function PhotoTimeline({
+  visits,
+  tz,
+}: {
+  visits: TimelineVisit[]
+  tz: string
+}) {
   if (visits.length === 0) {
     return (
       <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
@@ -1199,7 +1264,15 @@ function PhotoTimeline({ visits }: { visits: TimelineVisit[] }) {
                 </Badge>
               )}
               <span className="text-[11px] font-semibold text-textSecondary">
-                {visit.when ? formatDate(visit.when) : '—'}
+                {visit.when
+                  ? formatDate(
+                      visit.when,
+                      resolveAppointmentDisplayTimeZone(
+                        visit.whenLocationTimeZone,
+                        tz,
+                      ),
+                    )
+                  : '—'}
               </span>
             </div>
           </div>
@@ -1261,7 +1334,13 @@ function photoReleaseTone(status: PhotoReleaseStatus): BadgeTone {
   }
 }
 
-function FormulaList({ formula }: { formula: FormulaView[] }) {
+function FormulaList({
+  formula,
+  tz,
+}: {
+  formula: FormulaView[]
+  tz: string
+}) {
   if (formula.length === 0) {
     return (
       <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
@@ -1292,7 +1371,15 @@ function FormulaList({ formula }: { formula: FormulaView[] }) {
                 {entry.serviceName ?? 'Formula'}
               </div>
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                {entry.when ? formatDate(entry.when) : '—'}
+                {entry.when
+                  ? formatDate(
+                      entry.when,
+                      resolveAppointmentDisplayTimeZone(
+                        entry.whenLocationTimeZone,
+                        tz,
+                      ),
+                    )
+                  : '—'}
               </div>
             </div>
 
@@ -1317,9 +1404,11 @@ function FormulaList({ formula }: { formula: FormulaView[] }) {
 function ConsentList({
   consents,
   now,
+  tz,
 }: {
   consents: ConsentView[]
   now: Date
+  tz: string
 }) {
   if (consents.length === 0) {
     return (
@@ -1357,7 +1446,15 @@ function ConsentList({
                 ) : null}
               </div>
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                {record.when ? formatDate(record.when) : '—'}
+                {record.when
+                  ? formatDate(
+                      record.when,
+                      resolveAppointmentDisplayTimeZone(
+                        record.whenLocationTimeZone,
+                        tz,
+                      ),
+                    )
+                  : '—'}
               </div>
             </div>
 
@@ -1369,7 +1466,7 @@ function ConsentList({
 
             {isPatch && record.validUntil ? (
               <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                Valid until {formatDate(record.validUntil)}{' '}
+                Valid until {formatDate(record.validUntil, tz)}{' '}
                 <Badge tone={current ? 'success' : 'warn'} size="sm">
                   {current ? 'current' : 'expired'}
                 </Badge>
@@ -1381,7 +1478,7 @@ function ConsentList({
                 {record.proofMethod
                   ? `Proof: ${record.proofMethod.replace(/_/g, ' ').toLowerCase()}`
                   : ''}
-                {record.signedAt ? ` • signed ${formatDate(record.signedAt)}` : ''}
+                {record.signedAt ? ` • signed ${formatDate(record.signedAt, tz)}` : ''}
                 {record.proofRef ? ` • ref ${record.proofRef}` : ''}
               </div>
             ) : null}
@@ -1402,10 +1499,12 @@ function TechnicalRecordTab({
   clientId,
   data,
   now,
+  tz,
 }: {
   clientId: string
   data: TechnicalRecordData
   now: Date
+  tz: string
 }) {
   return (
     <>
@@ -1433,7 +1532,7 @@ function TechnicalRecordTab({
         <div className="mb-4">
           <NewFormulaForm clientId={clientId} />
         </div>
-        <FormulaList formula={data.formula} />
+        <FormulaList formula={data.formula} tz={tz} />
       </SectionCard>
 
       <SectionCard
@@ -1444,7 +1543,7 @@ function TechnicalRecordTab({
         <div className="mb-4">
           <NewConsentForm clientId={clientId} />
         </div>
-        <ConsentList consents={data.consents} now={now} />
+        <ConsentList consents={data.consents} now={now} tz={tz} />
       </SectionCard>
     </>
   )
@@ -1453,9 +1552,11 @@ function TechnicalRecordTab({
 function WindowCountdownBadge({
   accessUntil,
   now,
+  tz,
 }: {
   accessUntil: Date | null
   now: Date
+  tz: string
 }) {
   if (!accessUntil) {
     return <Badge tone="success">Access open</Badge>
@@ -1469,7 +1570,7 @@ function WindowCountdownBadge({
   return (
     <Badge tone={tone}>
       <span aria-hidden>⏳</span>
-      Access · {left} · closes {formatShortDate(accessUntil)}
+      Access · {left} · closes {formatShortDate(accessUntil, tz)}
     </Badge>
   )
 }
@@ -1757,8 +1858,9 @@ function tabContent(args: {
   photoVisits: TimelineVisit[]
   technicalRecord: TechnicalRecordData | null
   now: Date
+  tz: string
 }): ReactNode {
-  const { tab, client, proId } = args
+  const { tab, client, proId, tz } = args
 
   switch (tab) {
     case 'allergies':
@@ -1772,7 +1874,7 @@ function tabContent(args: {
             <NewAllergyForm clientId={client.id} />
           </div>
 
-          <ClientAllergiesList client={client} />
+          <ClientAllergiesList client={client} tz={tz} />
         </SectionCard>
       )
     case 'history':
@@ -1793,6 +1895,7 @@ function tabContent(args: {
             bookingRowsFiltered={args.bookingRowsFiltered}
             bookingRowsAll={args.bookingRowsAll}
             proId={proId}
+            tz={tz}
           />
         </SectionCard>
       )
@@ -1803,7 +1906,7 @@ function tabContent(args: {
           title="Products recommended"
           subtitle="Recommendations tied to aftercare entries."
         >
-          <ProductRecommendationsList productRecs={args.productRecs} />
+          <ProductRecommendationsList productRecs={args.productRecs} tz={tz} />
         </SectionCard>
       )
     case 'reviews-left':
@@ -1813,7 +1916,7 @@ function tabContent(args: {
           title="Reviews they left"
           subtitle="All reviews this client has left (across any professional)."
         >
-          <ClientLeftReviewsList reviews={args.clientLeftReviews} />
+          <ClientLeftReviewsList reviews={args.clientLeftReviews} tz={tz} />
         </SectionCard>
       )
     case 'pro-feedback':
@@ -1823,7 +1926,7 @@ function tabContent(args: {
           title="Pro feedback"
           subtitle="Notes from professionals who serviced this client in the past (shared with pros)."
         >
-          <ProFeedbackList feedback={args.proFeedback} />
+          <ProFeedbackList feedback={args.proFeedback} tz={tz} />
         </SectionCard>
       )
     case 'photos':
@@ -1833,7 +1936,7 @@ function tabContent(args: {
           title="Before / after photos"
           subtitle="Per-visit gallery. Your own craft is always here; another pro's photos appear only when the client has shared them publicly."
         >
-          <PhotoTimeline visits={args.photoVisits} />
+          <PhotoTimeline visits={args.photoVisits} tz={tz} />
         </SectionCard>
       )
     case 'technical':
@@ -1842,6 +1945,7 @@ function tabContent(args: {
           clientId={client.id}
           data={args.technicalRecord}
           now={args.now}
+          tz={tz}
         />
       ) : null
     case 'notes':
@@ -1856,7 +1960,7 @@ function tabContent(args: {
             <NewNoteForm clientId={client.id} />
           </div>
 
-          <ClientNotesList client={client} />
+          <ClientNotesList client={client} tz={tz} />
         </SectionCard>
       )
   }
@@ -1885,6 +1989,13 @@ export default async function ClientDetailPage(props: {
   const accessUntil = gate.visibility.accessUntil
   const messageHref = buildProToClientMessageHref({ proId, clientId })
 
+  // Display every date in the pro's business timezone (not the server zone,
+  // which is UTC on Vercel and would render evening appointments on the wrong day).
+  const scheduleTz = await resolveProScheduleTimeZone(
+    proId,
+    user.professionalProfile.timeZone,
+  )
+
   const searchParams =
     (await props.searchParams?.catch(() => ({} as SearchParams))) ??
     ({} as SearchParams)
@@ -1912,7 +2023,7 @@ export default async function ClientDetailPage(props: {
             ← Back to clients
           </Link>
 
-          <WindowCountdownBadge accessUntil={accessUntil} now={now} />
+          <WindowCountdownBadge accessUntil={accessUntil} now={now} tz={scheduleTz} />
         </div>
 
         <div className="mb-6">
@@ -2024,7 +2135,11 @@ export default async function ClientDetailPage(props: {
     const matched = bookingRowsAll.filter((booking) =>
       bookingMatchesFilter(booking, { bookingFilter, proId, myServiceIds, now }),
     )
-    bookingRowsFiltered = filterBookingsBySearch({ rows: matched, query: bookingQ })
+    bookingRowsFiltered = filterBookingsBySearch({
+      rows: matched,
+      query: bookingQ,
+      tz: scheduleTz,
+    })
   }
 
   // Per-tab heavy queries — only the active tab pays for its data.
@@ -2071,7 +2186,7 @@ export default async function ClientDetailPage(props: {
           ← Back to clients
         </Link>
 
-        <WindowCountdownBadge accessUntil={accessUntil} now={now} />
+        <WindowCountdownBadge accessUntil={accessUntil} now={now} tz={scheduleTz} />
       </div>
 
       <div className="mb-6">
@@ -2106,7 +2221,13 @@ export default async function ClientDetailPage(props: {
                 <div>
                   Last booking:{' '}
                   <span className="font-black text-textPrimary">
-                    {formatDate(lastVisit.scheduledFor)}
+                    {formatDate(
+                      lastVisit.scheduledFor,
+                      resolveAppointmentDisplayTimeZone(
+                        lastVisit.locationTimeZone,
+                        scheduleTz,
+                      ),
+                    )}
                   </span>
                 </div>
               ) : null}
@@ -2115,7 +2236,13 @@ export default async function ClientDetailPage(props: {
                 <div>
                   Next booking:{' '}
                   <span className="font-black text-textPrimary">
-                    {formatDate(upcoming.scheduledFor)}
+                    {formatDate(
+                      upcoming.scheduledFor,
+                      resolveAppointmentDisplayTimeZone(
+                        upcoming.locationTimeZone,
+                        scheduleTz,
+                      ),
+                    )}
                   </span>
                 </div>
               ) : null}
@@ -2222,6 +2349,7 @@ export default async function ClientDetailPage(props: {
           photoVisits,
           technicalRecord,
           now,
+          tz: scheduleTz,
         })}
       </div>
     </main>
