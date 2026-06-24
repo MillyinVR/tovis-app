@@ -915,437 +915,462 @@ export default function AftercareForm({
         </div>
       </div>
 
-      <div className={cardClass()}>
-        <div className={sectionTitleClass()}>Photos</div>
-        <div className={subtleTextClass()}>
-          Visible to you + the client (PRO_CLIENT). Not public.
-        </div>
-
-        <div className="mt-3 grid gap-4">
-          <div>
-            <div className="text-sm font-black text-textPrimary">Before</div>
+      {/*
+        Desktop reflows into two columns (see .brand-aftercare-columns); on
+        mobile/tablet the columns linearize in DOM order back to a single
+        stack. Left = the visual record + the instructions written from it.
+        Right = the repeat-visit drivers (rebook, products, reminders). The
+        Save/Send actions stay full-width below both columns.
+      */}
+      <div className="brand-aftercare-columns">
+        <div className="brand-aftercare-col">
+          <div className={cardClass()}>
+            <div className={sectionTitleClass()}>Photos</div>
             <div className={subtleTextClass()}>
-              Before photos/videos from this booking.
+              Visible to you + the client (PRO_CLIENT). Not public.
             </div>
-            <MediaGrid items={beforeMedia} />
-          </div>
 
-          <div>
-            <div className="text-sm font-black text-textPrimary">After</div>
-            <div className={subtleTextClass()}>
-              After photos/videos from this booking.
-            </div>
-            <MediaGrid items={afterMedia} />
-          </div>
-
-          {otherMedia.length ? (
-            <div>
-              <div className="text-sm font-black text-textPrimary">Other</div>
-              <div className={subtleTextClass()}>
-                Extra photos/videos attached to this booking.
+            <div className="mt-3 grid gap-4">
+              <div>
+                <div className="text-sm font-black text-textPrimary">
+                  Before
+                </div>
+                <div className={subtleTextClass()}>
+                  Before photos/videos from this booking.
+                </div>
+                <MediaGrid items={beforeMedia} />
               </div>
-              <MediaGrid items={otherMedia} />
-            </div>
-          ) : null}
-        </div>
-      </div>
 
-      <div className={cardClass()}>
-        <div className={sectionTitleClass()}>Recommended products</div>
-        <div className={subtleTextClass()}>
-          Add products with links (Amazon storefront, pro shop, etc.). Links must
-          be http/https.
-        </div>
+              <div>
+                <div className="text-sm font-black text-textPrimary">After</div>
+                <div className={subtleTextClass()}>
+                  After photos/videos from this booking.
+                </div>
+                <MediaGrid items={afterMedia} />
+              </div>
 
-        <div className="mt-3 grid gap-3">
-          {products.length === 0 ? (
-            <div className="text-sm font-semibold text-textSecondary">
-              No products added yet.
-            </div>
-          ) : (
-            products.map((p, idx) => (
-              <div
-                key={p.id}
-                className="rounded-card border border-white/10 bg-bgPrimary p-3"
-              >
-                <div className="flex items-center justify-between gap-3">
+              {otherMedia.length ? (
+                <div>
                   <div className="text-sm font-black text-textPrimary">
-                    Product {idx + 1}
+                    Other
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => removeProduct(p.id)}
-                    disabled={disabled}
-                    className={secondaryBtn(Boolean(disabled))}
-                  >
-                    Remove
-                  </button>
-                </div>
-
-                <div className="mt-3 grid gap-3">
-                  <div>
-                    <label className={labelClass()}>Product name</label>
-                    <input
-                      value={p.name}
-                      disabled={disabled}
-                      maxLength={PRODUCT_NAME_MAX}
-                      onChange={(e) =>
-                        updateProduct(p.id, { name: e.target.value })
-                      }
-                      placeholder="e.g. Sulfate-free shampoo"
-                      className={inputClass(Boolean(disabled))}
-                    />
+                  <div className={subtleTextClass()}>
+                    Extra photos/videos attached to this booking.
                   </div>
-
-                  <div>
-                    <label className={labelClass()}>Product link</label>
-                    <input
-                      value={p.url}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        updateProduct(p.id, { url: e.target.value })
-                      }
-                      placeholder="https://amazon.com/…"
-                      className={inputClass(Boolean(disabled))}
-                    />
-                    {p.url.trim() && !isValidHttpUrl(p.url) ? (
-                      <div className="mt-1 text-xs font-semibold text-microAccent">
-                        Link must be a valid http/https URL.
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <label className={labelClass()}>Note (optional)</label>
-                    <input
-                      value={pickString(p.note)}
-                      disabled={disabled}
-                      maxLength={PRODUCT_NOTE_MAX}
-                      onChange={(e) =>
-                        updateProduct(p.id, { note: e.target.value })
-                      }
-                      placeholder="e.g. Use 2–3x/week to maintain shine"
-                      className={inputClass(Boolean(disabled))}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-
-          <button
-            type="button"
-            onClick={addProduct}
-            disabled={disabled || products.length >= MAX_PRODUCTS}
-            className={secondaryBtn(
-              Boolean(disabled || products.length >= MAX_PRODUCTS),
-            )}
-          >
-            + Add product
-          </button>
-
-          {productsError ? (
-            <div className="text-sm font-semibold text-microAccent">
-              {productsError}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className={cardClass()}>
-        <div className={sectionTitleClass()}>Aftercare instructions</div>
-        <div className={subtleTextClass()}>
-          Write this like doctor instructions: clear, specific, and actionable.
-        </div>
-
-        <div className="mt-3">
-          <label className={labelClass()} htmlFor="notes">
-            Notes
-          </label>
-          <textarea
-            id="notes"
-            value={notes}
-            onChange={(e) => {
-              setNotes(e.target.value.slice(0, NOTES_MAX))
-              markDirty()
-            }}
-            rows={5}
-            disabled={disabled}
-            placeholder="E.g. wash after 48 hours, use sulfate-free shampoo, avoid tight ponytails for 7 days…"
-            className={[
-              'w-full resize-y rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
-              disabled
-                ? 'cursor-not-allowed opacity-60'
-                : 'focus:border-white/20',
-            ].join(' ')}
-          />
-          <div className="mt-1 text-xs font-semibold text-textSecondary">
-            {notes.length}/{NOTES_MAX}
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3">
-          <div className="text-sm font-black text-textPrimary">
-            Rebook guidance
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => onChangeMode('NONE')}
-              disabled={disabled}
-              className={pillClass(rebookMode === 'NONE')}
-            >
-              None
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onChangeMode('BOOKED_NEXT_APPOINTMENT')}
-              disabled={disabled}
-              className={pillClass(
-                rebookMode === 'BOOKED_NEXT_APPOINTMENT',
-              )}
-              title="Recommend a single ideal next booking date"
-            >
-              Next booking date
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onChangeMode('RECOMMENDED_WINDOW')}
-              disabled={disabled}
-              className={pillClass(rebookMode === 'RECOMMENDED_WINDOW')}
-              title="Recommend a date range the client should book within"
-            >
-              Booking window
-            </button>
-          </div>
-
-          {showBooked ? (
-            <div className="mt-4">
-              {existingRebookDeclinedAt ? (
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <span className="brand-pro-session-pill" data-tone="danger">
-                    Client declined
-                  </span>
-                  <span className="text-xs font-semibold text-textSecondary">
-                    They declined the time you proposed. Pick a new time and
-                    re-send to offer another.
-                  </span>
+                  <MediaGrid items={otherMedia} />
                 </div>
               ) : null}
-
-              <label className={labelClass()}>
-                Next appointment time
-              </label>
-              <RebookSlotPicker
-                professionalId={rebookProfessionalId}
-                serviceId={rebookServiceId}
-                offeringId={rebookOfferingId}
-                locationType={rebookLocationType}
-                locationId={rebookLocationId}
-                clientAddressId={rebookClientAddressId}
-                timeZone={tz}
-                minYmd={tomorrowYmd}
-                value={rebookSlot}
-                disabled={disabled}
-                onChange={onPickRebookSlot}
-              />
-              <div className="mt-2 text-xs font-semibold text-textSecondary">
-                Pick a real open time from your schedule. It shows on the
-                client’s summary and can power a reminder.
-              </div>
             </div>
-          ) : null}
-
-          {showWindow ? (
-            <div className="mt-4 grid gap-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className={labelClass()}>Window start</label>
-                  <input
-                    type="date"
-                    value={windowStart}
-                    min={tomorrowYmd}
-                    disabled={disabled}
-                    onChange={(e) => applyWindowStart(e.target.value)}
-                    className={inputClass(Boolean(disabled))}
-                  />
-                  <StepButtons
-                    disabled={disabled}
-                    onStep={stepWindowStart}
-                    onOpenCalendar={() => setPickerTarget('windowStart')}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelClass()}>Window end</label>
-                  <input
-                    type="date"
-                    value={windowEnd}
-                    min={
-                      windowStart
-                        ? addDaysToYmd(windowStart, 1) ?? tomorrowYmd
-                        : tomorrowYmd
-                    }
-                    disabled={disabled}
-                    onChange={(e) => applyWindowEnd(e.target.value)}
-                    className={inputClass(Boolean(disabled))}
-                  />
-                  <StepButtons
-                    disabled={disabled}
-                    onStep={stepWindowEnd}
-                    onOpenCalendar={() => setPickerTarget('windowEnd')}
-                  />
-                </div>
-              </div>
-
-              {windowError ? (
-                <div className="text-sm font-semibold text-microAccent">
-                  {windowError}
-                </div>
-              ) : (
-                <div className="text-xs font-semibold text-textSecondary">
-                  Just dates — the client books an available time within this
-                  range from your schedule.
-                </div>
-              )}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3">
-          <div className="text-sm font-black text-textPrimary">
-            Smart reminders
           </div>
 
-          <label
-            className={[
-              'mt-3 flex items-center gap-2 text-sm font-semibold',
-              rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
-                ? 'text-textPrimary'
-                : 'text-textSecondary opacity-60',
-            ].join(' ')}
-            title={
-              rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
-                ? undefined
-                : 'Rebook reminders only apply to a single recommended date (not window mode).'
-            }
-          >
-            <input
-              type="checkbox"
-              checked={createRebookReminder}
-              disabled={
-                !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) ||
-                disabled
+          <div className={cardClass()}>
+            <div className={sectionTitleClass()}>Aftercare instructions</div>
+            <div className={subtleTextClass()}>
+              Write this like doctor instructions: clear, specific, and
+              actionable.
+            </div>
+
+            <div className="mt-3">
+              <label className={labelClass()} htmlFor="notes">
+                Notes
+              </label>
+              <textarea
+                id="notes"
+                value={notes}
+                onChange={(e) => {
+                  setNotes(e.target.value.slice(0, NOTES_MAX))
+                  markDirty()
+                }}
+                rows={5}
+                disabled={disabled}
+                placeholder="E.g. wash after 48 hours, use sulfate-free shampoo, avoid tight ponytails for 7 days…"
+                className={[
+                  'w-full resize-y rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
+                  disabled
+                    ? 'cursor-not-allowed opacity-60'
+                    : 'focus:border-white/20',
+                ].join(' ')}
+              />
+              <div className="mt-1 text-xs font-semibold text-textSecondary">
+                {notes.length}/{NOTES_MAX}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="brand-aftercare-col">
+          <div className={cardClass()}>
+            <div className={sectionTitleClass()}>Rebook</div>
+            <div className={subtleTextClass()}>
+              The single biggest driver of repeat visits — propose the exact
+              next appointment, or a booking window, before the client leaves.
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onChangeMode('NONE')}
+                disabled={disabled}
+                className={pillClass(rebookMode === 'NONE')}
+              >
+                None
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeMode('BOOKED_NEXT_APPOINTMENT')}
+                disabled={disabled}
+                className={pillClass(
+                  rebookMode === 'BOOKED_NEXT_APPOINTMENT',
+                )}
+                title="Recommend a single ideal next booking date"
+              >
+                Next booking date
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeMode('RECOMMENDED_WINDOW')}
+                disabled={disabled}
+                className={pillClass(rebookMode === 'RECOMMENDED_WINDOW')}
+                title="Recommend a date range the client should book within"
+              >
+                Booking window
+              </button>
+            </div>
+
+            {showBooked ? (
+              <div className="mt-4">
+                {existingRebookDeclinedAt ? (
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <span
+                      className="brand-pro-session-pill"
+                      data-tone="danger"
+                    >
+                      Client declined
+                    </span>
+                    <span className="text-xs font-semibold text-textSecondary">
+                      They declined the time you proposed. Pick a new time and
+                      re-send to offer another.
+                    </span>
+                  </div>
+                ) : null}
+
+                <label className={labelClass()}>Next appointment time</label>
+                <RebookSlotPicker
+                  professionalId={rebookProfessionalId}
+                  serviceId={rebookServiceId}
+                  offeringId={rebookOfferingId}
+                  locationType={rebookLocationType}
+                  locationId={rebookLocationId}
+                  clientAddressId={rebookClientAddressId}
+                  timeZone={tz}
+                  minYmd={tomorrowYmd}
+                  value={rebookSlot}
+                  disabled={disabled}
+                  onChange={onPickRebookSlot}
+                />
+                <div className="mt-2 text-xs font-semibold text-textSecondary">
+                  Pick a real open time from your schedule. It shows on the
+                  client’s summary and can power a reminder.
+                </div>
+              </div>
+            ) : null}
+
+            {showWindow ? (
+              <div className="mt-4 grid gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className={labelClass()}>Window start</label>
+                    <input
+                      type="date"
+                      value={windowStart}
+                      min={tomorrowYmd}
+                      disabled={disabled}
+                      onChange={(e) => applyWindowStart(e.target.value)}
+                      className={inputClass(Boolean(disabled))}
+                    />
+                    <StepButtons
+                      disabled={disabled}
+                      onStep={stepWindowStart}
+                      onOpenCalendar={() => setPickerTarget('windowStart')}
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelClass()}>Window end</label>
+                    <input
+                      type="date"
+                      value={windowEnd}
+                      min={
+                        windowStart
+                          ? addDaysToYmd(windowStart, 1) ?? tomorrowYmd
+                          : tomorrowYmd
+                      }
+                      disabled={disabled}
+                      onChange={(e) => applyWindowEnd(e.target.value)}
+                      className={inputClass(Boolean(disabled))}
+                    />
+                    <StepButtons
+                      disabled={disabled}
+                      onStep={stepWindowEnd}
+                      onOpenCalendar={() => setPickerTarget('windowEnd')}
+                    />
+                  </div>
+                </div>
+
+                {windowError ? (
+                  <div className="text-sm font-semibold text-microAccent">
+                    {windowError}
+                  </div>
+                ) : (
+                  <div className="text-xs font-semibold text-textSecondary">
+                    Just dates — the client books an available time within this
+                    range from your schedule.
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          <div className={cardClass()}>
+            <div className={sectionTitleClass()}>Recommended products</div>
+            <div className={subtleTextClass()}>
+              Add products with links (Amazon storefront, pro shop, etc.). Links
+              must be http/https.
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              {products.length === 0 ? (
+                <div className="text-sm font-semibold text-textSecondary">
+                  No products added yet.
+                </div>
+              ) : (
+                products.map((p, idx) => (
+                  <div
+                    key={p.id}
+                    className="rounded-card border border-white/10 bg-bgPrimary p-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-black text-textPrimary">
+                        Product {idx + 1}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeProduct(p.id)}
+                        disabled={disabled}
+                        className={secondaryBtn(Boolean(disabled))}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="mt-3 grid gap-3">
+                      <div>
+                        <label className={labelClass()}>Product name</label>
+                        <input
+                          value={p.name}
+                          disabled={disabled}
+                          maxLength={PRODUCT_NAME_MAX}
+                          onChange={(e) =>
+                            updateProduct(p.id, { name: e.target.value })
+                          }
+                          placeholder="e.g. Sulfate-free shampoo"
+                          className={inputClass(Boolean(disabled))}
+                        />
+                      </div>
+
+                      <div>
+                        <label className={labelClass()}>Product link</label>
+                        <input
+                          value={p.url}
+                          disabled={disabled}
+                          onChange={(e) =>
+                            updateProduct(p.id, { url: e.target.value })
+                          }
+                          placeholder="https://amazon.com/…"
+                          className={inputClass(Boolean(disabled))}
+                        />
+                        {p.url.trim() && !isValidHttpUrl(p.url) ? (
+                          <div className="mt-1 text-xs font-semibold text-microAccent">
+                            Link must be a valid http/https URL.
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div>
+                        <label className={labelClass()}>Note (optional)</label>
+                        <input
+                          value={pickString(p.note)}
+                          disabled={disabled}
+                          maxLength={PRODUCT_NOTE_MAX}
+                          onChange={(e) =>
+                            updateProduct(p.id, { note: e.target.value })
+                          }
+                          placeholder="e.g. Use 2–3x/week to maintain shine"
+                          className={inputClass(Boolean(disabled))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+
+              <button
+                type="button"
+                onClick={addProduct}
+                disabled={disabled || products.length >= MAX_PRODUCTS}
+                className={secondaryBtn(
+                  Boolean(disabled || products.length >= MAX_PRODUCTS),
+                )}
+              >
+                + Add product
+              </button>
+
+              {productsError ? (
+                <div className="text-sm font-semibold text-microAccent">
+                  {productsError}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className={cardClass()}>
+            <div className={sectionTitleClass()}>Smart reminders</div>
+            <div className={subtleTextClass()}>
+              Nudge Future You to check in at the right time.
+            </div>
+
+            <label
+              className={[
+                'mt-3 flex items-center gap-2 text-sm font-semibold',
+                rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
+                  ? 'text-textPrimary'
+                  : 'text-textSecondary opacity-60',
+              ].join(' ')}
+              title={
+                rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
+                  ? undefined
+                  : 'Rebook reminders only apply to a single recommended date (not window mode).'
               }
-              onChange={(e) => {
-                setCreateRebookReminder(e.target.checked)
-                markDirty()
-              }}
-            />
-            <span>
-              Create a rebook reminder{' '}
-              <select
-                value={rebookDaysBefore}
+            >
+              <input
+                type="checkbox"
+                checked={createRebookReminder}
                 disabled={
                   !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) ||
                   disabled
                 }
                 onChange={(e) => {
-                  setRebookDaysBefore(e.target.value)
+                  setCreateRebookReminder(e.target.checked)
                   markDirty()
                 }}
-                className={[
-                  'mx-1 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-xs font-black text-textPrimary',
-                  !(rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate) ||
-                  disabled
-                    ? 'cursor-not-allowed opacity-60'
-                    : '',
-                ].join(' ')}
-              >
-                <option value="1">1 day</option>
-                <option value="2">2 days</option>
-                <option value="3">3 days</option>
-                <option value="7">7 days</option>
-              </select>
-              before the recommended date.
-            </span>
-          </label>
+              />
+              <span>
+                Create a rebook reminder{' '}
+                <select
+                  value={rebookDaysBefore}
+                  disabled={
+                    !(
+                      rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
+                    ) || disabled
+                  }
+                  onChange={(e) => {
+                    setRebookDaysBefore(e.target.value)
+                    markDirty()
+                  }}
+                  className={[
+                    'mx-1 rounded-full border border-white/10 bg-bgPrimary px-2 py-1 text-xs font-black text-textPrimary',
+                    !(
+                      rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
+                    ) || disabled
+                      ? 'cursor-not-allowed opacity-60'
+                      : '',
+                  ].join(' ')}
+                >
+                  <option value="1">1 day</option>
+                  <option value="2">2 days</option>
+                  <option value="3">3 days</option>
+                  <option value="7">7 days</option>
+                </select>
+                before the recommended date.
+              </span>
+            </label>
 
-          <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-textPrimary">
-            <input
-              type="checkbox"
-              checked={createProductReminder}
-              disabled={disabled}
-              onChange={(e) => {
-                setCreateProductReminder(e.target.checked)
-                markDirty()
-              }}
-            />
-            <span>
-              Create a product follow-up{' '}
-              <select
-                value={productDaysAfter}
+            <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-textPrimary">
+              <input
+                type="checkbox"
+                checked={createProductReminder}
                 disabled={disabled}
                 onChange={(e) => {
-                  setProductDaysAfter(e.target.value)
+                  setCreateProductReminder(e.target.checked)
                   markDirty()
                 }}
-                className={[
-                  'mx-1 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-xs font-black text-textPrimary',
-                  disabled ? 'cursor-not-allowed opacity-60' : '',
-                ].join(' ')}
-              >
-                <option value="3">3 days</option>
-                <option value="7">7 days</option>
-                <option value="14">14 days</option>
-                <option value="30">30 days</option>
-              </select>
-              after the booking.
-            </span>
-          </label>
+              />
+              <span>
+                Create a product follow-up{' '}
+                <select
+                  value={productDaysAfter}
+                  disabled={disabled}
+                  onChange={(e) => {
+                    setProductDaysAfter(e.target.value)
+                    markDirty()
+                  }}
+                  className={[
+                    'mx-1 rounded-full border border-white/10 bg-bgPrimary px-2 py-1 text-xs font-black text-textPrimary',
+                    disabled ? 'cursor-not-allowed opacity-60' : '',
+                  ].join(' ')}
+                >
+                  <option value="3">3 days</option>
+                  <option value="7">7 days</option>
+                  <option value="14">14 days</option>
+                  <option value="30">30 days</option>
+                </select>
+                after the booking.
+              </span>
+            </label>
 
-          <div className="mt-2 text-xs font-semibold text-textSecondary">
-            These go into your Reminders tab so Future You remembers to check in.
+            <div className="mt-2 text-xs font-semibold text-textSecondary">
+              These go into your Reminders tab so Future You remembers to check
+              in.
+            </div>
           </div>
         </div>
-
-        {error ? (
-          <div className="mt-3 text-sm font-semibold text-microAccent">
-            {error}
-          </div>
-        ) : null}
-
-        {success ? (
-          <div className="mt-3 text-sm font-semibold text-textPrimary">
-            {success}
-          </div>
-        ) : null}
-
-        {readOnly ? null : (
-          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              disabled={disabled || !!windowError}
-              onClick={() => postAftercare(false)}
-              className={secondaryBtn(Boolean(disabled || !!windowError))}
-            >
-              {loading ? 'Saving…' : 'Save draft'}
-            </button>
-
-            <button
-              type="button"
-              disabled={disabled || !!windowError}
-              onClick={() => postAftercare(true)}
-              className={primaryBtn(Boolean(disabled || !!windowError))}
-            >
-              {loading ? 'Sending…' : finalized ? 'Send update to client' : 'Send to client'}
-            </button>
-          </div>
-        )}
       </div>
+
+      {error ? (
+        <div className="text-sm font-semibold text-microAccent">{error}</div>
+      ) : null}
+
+      {success ? (
+        <div className="text-sm font-semibold text-textPrimary">{success}</div>
+      ) : null}
+
+      {readOnly ? null : (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            disabled={disabled || !!windowError}
+            onClick={() => postAftercare(false)}
+            className={secondaryBtn(Boolean(disabled || !!windowError))}
+          >
+            {loading ? 'Saving…' : 'Save draft'}
+          </button>
+
+          <button
+            type="button"
+            disabled={disabled || !!windowError}
+            onClick={() => postAftercare(true)}
+            className={primaryBtn(Boolean(disabled || !!windowError))}
+          >
+            {loading
+              ? 'Sending…'
+              : finalized
+                ? 'Send update to client'
+                : 'Send to client'}
+          </button>
+        </div>
+      )}
 
       {pickerTarget ? (
         <AvailabilityCalendarPopup

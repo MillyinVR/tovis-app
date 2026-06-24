@@ -233,7 +233,14 @@ function severityLabel(severity: string): string {
 }
 
 function PageShell({ children }: { children: ReactNode }) {
-  return <main className="brand-pro-session-page">{children}</main>
+  // Opt this page into the wider desktop shell so the aftercare editor can
+  // reflow into two columns at >=1024px. Every other session screen keeps the
+  // default narrow mobile shell (no data-wide), so the flow stays consistent.
+  return (
+    <main className="brand-pro-session-page" data-wide="true">
+      {children}
+    </main>
+  )
 }
 
 // Safety-first allergy alert. The client's allergies are also managed lower in
