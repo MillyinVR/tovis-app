@@ -29,6 +29,7 @@ import {
 } from '@/lib/clients/technicalRecord'
 import { formatInTimeZone } from '@/lib/time'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { formatProfessionalPublicSearchText } from '@/lib/privacy/professionalDisplayName'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { loadPublicClientProfileByClientId } from '@/app/u/[handle]/_data/loadPublicClientProfile'
@@ -131,6 +132,7 @@ const BOOKING_ROW_SELECT = {
   id: true,
   status: true,
   scheduledFor: true,
+  locationTimeZone: true,
   createdAt: true,
   finishedAt: true,
   totalDurationMinutes: true,
@@ -176,6 +178,7 @@ const PRODUCT_REC_SELECT = {
       booking: {
         select: {
           scheduledFor: true,
+          locationTimeZone: true,
         },
       },
     },
@@ -234,6 +237,7 @@ const TIMELINE_MEDIA_SELECT = {
   booking: {
     select: {
       scheduledFor: true,
+      locationTimeZone: true,
       service: { select: { name: true } },
     },
   },
@@ -270,7 +274,11 @@ const FORMULA_SELECT = {
   processingTimeMinutes: true,
   resultNotesEncrypted: true,
   booking: {
-    select: { scheduledFor: true, service: { select: { name: true } } },
+    select: {
+      scheduledFor: true,
+      locationTimeZone: true,
+      service: { select: { name: true } },
+    },
   },
 } satisfies Prisma.ClientFormulaEntrySelect
 
@@ -290,7 +298,11 @@ const CONSENT_SELECT = {
     select: { businessName: true, firstName: true, lastName: true },
   },
   booking: {
-    select: { scheduledFor: true, service: { select: { name: true } } },
+    select: {
+      scheduledFor: true,
+      locationTimeZone: true,
+      service: { select: { name: true } },
+    },
   },
 } satisfies Prisma.ClientConsentRecordSelect
 
@@ -314,6 +326,7 @@ type TimelinePhoto = {
 type TimelineVisit = {
   bookingId: string
   when: Date | null
+  whenLocationTimeZone: string | null
   serviceName: string | null
   isMine: boolean
   photos: TimelinePhoto[]
@@ -322,6 +335,7 @@ type TimelineVisit = {
 type FormulaView = {
   id: string
   when: Date | null
+  whenLocationTimeZone: string | null
   serviceName: string | null
   brand: string | null
   developer: string | null
@@ -335,6 +349,7 @@ type ConsentView = {
   scope: 'full' | 'safety'
   kind: string
   when: Date | null
+  whenLocationTimeZone: string | null
   serviceScope: string | null
   signedAt: Date | null
   proofMethod: string | null
@@ -489,7 +504,12 @@ function buildBookingSearchIndex(booking: BookingRow, tz: string): string {
     booking.aftercareSummary?.notes,
     String(booking.totalDurationMinutes ?? ''),
     String(booking.totalAmount ?? booking.subtotalSnapshot ?? ''),
-    booking.scheduledFor ? formatDate(booking.scheduledFor, tz) : '',
+    booking.scheduledFor
+      ? formatDate(
+          booking.scheduledFor,
+          resolveAppointmentDisplayTimeZone(booking.locationTimeZone, tz),
+        )
+      : '',
   ]
 
   return parts
@@ -620,6 +640,7 @@ async function loadPhotoTimeline(
       visit = {
         bookingId,
         when: row.booking?.scheduledFor ?? null,
+        whenLocationTimeZone: row.booking?.locationTimeZone ?? null,
         serviceName: row.booking?.service?.name ?? null,
         isMine: row.professionalId === proId,
         photos: [],
@@ -652,6 +673,7 @@ function toFormulaView(row: FormulaRow): FormulaView {
   return {
     id: row.id,
     when: row.booking?.scheduledFor ?? row.createdAt,
+    whenLocationTimeZone: row.booking?.locationTimeZone ?? null,
     serviceName: row.booking?.service?.name ?? null,
     brand: row.brand,
     developer: row.developer,
@@ -669,6 +691,7 @@ function toConsentView(row: ConsentRow, scope: 'full' | 'safety'): ConsentView {
     scope,
     kind: row.kind,
     when: row.booking?.scheduledFor ?? row.createdAt,
+    whenLocationTimeZone: row.booking?.locationTimeZone ?? null,
     // Safety scope (another pro's patch test): only result + validity travel.
     serviceScope: full ? row.serviceScope : null,
     signedAt: full ? row.signedAt : null,
@@ -953,7 +976,10 @@ function ServiceHistoryList({
         const total =
           moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ??
           '0.00'
-        const when = formatDate(booking.scheduledFor, tz)
+        const when = formatDate(
+          booking.scheduledFor,
+          resolveAppointmentDisplayTimeZone(booking.locationTimeZone, tz),
+        )
         const proName = formatPublicProfileDisplayName({
           businessName: booking.professional?.businessName,
           firstName: booking.professional?.firstName,
@@ -1064,7 +1090,10 @@ function ProductRecommendationsList({
             <div className="shrink-0 text-[12px] font-semibold text-textSecondary">
               {formatDate(
                 recommendation.aftercareSummary.booking.scheduledFor,
-                tz,
+                resolveAppointmentDisplayTimeZone(
+                  recommendation.aftercareSummary.booking.locationTimeZone,
+                  tz,
+                ),
               )}
             </div>
           </div>
@@ -1235,7 +1264,15 @@ function PhotoTimeline({
                 </Badge>
               )}
               <span className="text-[11px] font-semibold text-textSecondary">
-                {visit.when ? formatDate(visit.when, tz) : '—'}
+                {visit.when
+                  ? formatDate(
+                      visit.when,
+                      resolveAppointmentDisplayTimeZone(
+                        visit.whenLocationTimeZone,
+                        tz,
+                      ),
+                    )
+                  : '—'}
               </span>
             </div>
           </div>
@@ -1334,7 +1371,15 @@ function FormulaList({
                 {entry.serviceName ?? 'Formula'}
               </div>
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                {entry.when ? formatDate(entry.when, tz) : '—'}
+                {entry.when
+                  ? formatDate(
+                      entry.when,
+                      resolveAppointmentDisplayTimeZone(
+                        entry.whenLocationTimeZone,
+                        tz,
+                      ),
+                    )
+                  : '—'}
               </div>
             </div>
 
@@ -1401,7 +1446,15 @@ function ConsentList({
                 ) : null}
               </div>
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                {record.when ? formatDate(record.when, tz) : '—'}
+                {record.when
+                  ? formatDate(
+                      record.when,
+                      resolveAppointmentDisplayTimeZone(
+                        record.whenLocationTimeZone,
+                        tz,
+                      ),
+                    )
+                  : '—'}
               </div>
             </div>
 
@@ -2168,7 +2221,13 @@ export default async function ClientDetailPage(props: {
                 <div>
                   Last booking:{' '}
                   <span className="font-black text-textPrimary">
-                    {formatDate(lastVisit.scheduledFor, scheduleTz)}
+                    {formatDate(
+                      lastVisit.scheduledFor,
+                      resolveAppointmentDisplayTimeZone(
+                        lastVisit.locationTimeZone,
+                        scheduleTz,
+                      ),
+                    )}
                   </span>
                 </div>
               ) : null}
@@ -2177,7 +2236,13 @@ export default async function ClientDetailPage(props: {
                 <div>
                   Next booking:{' '}
                   <span className="font-black text-textPrimary">
-                    {formatDate(upcoming.scheduledFor, scheduleTz)}
+                    {formatDate(
+                      upcoming.scheduledFor,
+                      resolveAppointmentDisplayTimeZone(
+                        upcoming.locationTimeZone,
+                        scheduleTz,
+                      ),
+                    )}
                   </span>
                 </div>
               ) : null}

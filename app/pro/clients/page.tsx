@@ -8,6 +8,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { proClientVisibilityWhere } from '@/lib/clientVisibility'
 import { formatInTimeZone } from '@/lib/time'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 
 import NewClientForm from './NewClientForm'
 import ClientNameLink from '@/app/_components/ClientNameLink'
@@ -17,10 +18,17 @@ import { Card, buttonClassName } from '@/app/_components/ui'
 export const dynamic = 'force-dynamic'
 
 function formatLastSeen(
-  booking: { scheduledFor: Date } | null,
-  tz: string,
+  booking: { scheduledFor: Date; locationTimeZone: string | null } | null,
+  fallbackTz: string,
 ) {
   if (!booking) return 'No bookings yet'
+
+  // Show the last appointment in the zone where it took place, not the pro's
+  // home zone (a NY pro who served a client in LA should see Pacific time).
+  const tz = resolveAppointmentDisplayTimeZone(
+    booking.locationTimeZone,
+    fallbackTz,
+  )
 
   return `Last booking: ${formatInTimeZone(booking.scheduledFor, tz, {
     month: 'short',
@@ -82,7 +90,7 @@ export default async function ProClientsPage() {
         where: { professionalId: proId },
         orderBy: { scheduledFor: 'desc' },
         take: 1,
-        select: { scheduledFor: true },
+        select: { scheduledFor: true, locationTimeZone: true },
       },
     },
   })
