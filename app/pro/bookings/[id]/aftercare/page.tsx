@@ -192,8 +192,99 @@ function LinkIcon({ size = 12 }: { size?: number }) {
   )
 }
 
+function AlertTriangleIcon({ size = 19 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 3.5L22 20H2z" />
+      <path d="M12 9.5v5" />
+      <path d="M12 17.1v.1" />
+    </svg>
+  )
+}
+
+type AftercareAllergy = {
+  id: string
+  label: string
+  severity: string
+  description: string | null
+}
+
+const ALLERGY_SEVERITY_RANK: Record<string, number> = {
+  CRITICAL: 4,
+  HIGH: 3,
+  MODERATE: 2,
+  LOW: 1,
+}
+
+function severityLabel(severity: string): string {
+  const value = severity.toUpperCase()
+  if (!value) return ''
+  return value.charAt(0) + value.slice(1).toLowerCase()
+}
+
 function PageShell({ children }: { children: ReactNode }) {
   return <main className="brand-pro-session-page">{children}</main>
+}
+
+// Safety-first allergy alert. The client's allergies are also managed lower in
+// ClientProfilePanel; this surfaces them prominently at the very top so the pro
+// can't miss a contraindication before writing aftercare. Pros-only — never
+// shown to the client. Most-severe first.
+function AllergyAlert({ allergies }: { allergies: AftercareAllergy[] }) {
+  const sorted = [...allergies].sort(
+    (a, b) =>
+      (ALLERGY_SEVERITY_RANK[b.severity.toUpperCase()] ?? 0) -
+      (ALLERGY_SEVERITY_RANK[a.severity.toUpperCase()] ?? 0),
+  )
+
+  return (
+    <section className="brand-pro-session-card" data-tone="danger">
+      <div className="brand-pro-session-allergy-head">
+        <span className="brand-pro-session-allergy-icon">
+          <AlertTriangleIcon />
+        </span>
+        <div>
+          <div className="brand-pro-session-allergy-title">
+            Allergy on file — check before any product or color
+          </div>
+          <div className="brand-pro-session-allergy-note">
+            Private to pros only — never shown to the client.
+          </div>
+        </div>
+      </div>
+
+      <div className="brand-pro-session-allergy-list">
+        {sorted.map((allergy) => (
+          <div key={allergy.id} className="brand-pro-session-allergy-item">
+            <div className="brand-pro-session-allergy-label">
+              {allergy.label}{' '}
+              <span
+                className="brand-pro-session-allergy-sev"
+                data-severity={allergy.severity.toLowerCase()}
+              >
+                · {severityLabel(allergy.severity)}
+              </span>
+            </div>
+            {allergy.description ? (
+              <div className="brand-pro-session-allergy-desc">
+                {allergy.description}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
 }
 
 function Card({
@@ -725,6 +816,12 @@ export default async function ProAftercarePage({ params }: PageProps) {
       />
 
       <div className="brand-pro-session-scroll no-scroll">
+        {clientAllergies.length > 0 ? (
+          <div className="mb-4">
+            <AllergyAlert allergies={clientAllergies} />
+          </div>
+        ) : null}
+
         {readOnly ? (
           <Card tone="success">
             <div className="brand-pro-session-section-title">
