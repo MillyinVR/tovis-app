@@ -34,21 +34,26 @@ function isProductionRuntimeEnv() {
   )
 }
 
-function databaseLooksProduction() {
-  const databaseUrl = process.env.DATABASE_URL
-  const host = parseDatabaseHost(databaseUrl)
-
+function hostLooksProduction(host) {
   if (!host) return false
 
   const explicitProductionHosts = listFromEnv(process.env.PRODUCTION_DATABASE_HOSTS)
   if (explicitProductionHosts.includes(host)) return true
 
   // Conservative default: if someone runs a local script against a hosted
-  // Supabase URL without explicitly allowing it, block destructive scripts.
+  // Supabase URL without explicitly allowing it, treat it as production.
   if (host.includes('supabase.co')) return true
   if (host.includes('pooler.supabase.com')) return true
 
   return false
+}
+
+function databaseLooksProduction() {
+  return hostLooksProduction(parseDatabaseHost(process.env.DATABASE_URL))
+}
+
+function describeDatabaseHost() {
+  return parseDatabaseHost(process.env.DATABASE_URL) || '(unparseable / unset)'
 }
 
 function requireSafeScriptRun(options = {}) {
@@ -90,4 +95,8 @@ function requireSafeScriptRun(options = {}) {
 
 module.exports = {
   requireSafeScriptRun,
+  parseDatabaseHost,
+  hostLooksProduction,
+  databaseLooksProduction,
+  describeDatabaseHost,
 }
