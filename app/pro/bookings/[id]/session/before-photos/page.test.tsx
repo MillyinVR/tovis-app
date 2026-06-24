@@ -337,8 +337,9 @@ describe('app/pro/bookings/[id]/session/before-photos/page.tsx', () => {
     expect(hasText(page, 'CONSULTATION APPROVED')).toBe(true)
     expect(hasText(page, 'Before photos saved')).toBe(true)
     expect(hasText(page, 'Continue to service')).toBe(true)
-    expect(hasText(page, 'Upload before photos')).toBe(true)
+    expect(hasText(page, 'Take or upload before photos')).toBe(true)
     expect(hasText(page, 'MediaUploader:BEFORE')).toBe(true)
+    expect(hasText(page, 'for you and')).toBe(true)
 
     const uploaders = findElementsByTestId(page, 'media-uploader')
     expect(uploaders).toHaveLength(1)
