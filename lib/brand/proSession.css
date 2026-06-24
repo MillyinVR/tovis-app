@@ -326,6 +326,77 @@
 }
 
 /* ──────────────────────────────────────────────────────────────────
+   Aftercare safety allergy alert (surfaced above everything, pros only)
+────────────────────────────────────────────────────────────────── */
+
+.brand-pro-session-allergy-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-pro-session-allergy-icon {
+  flex-shrink: 0;
+  color: rgb(var(--tone-danger));
+}
+
+.brand-pro-session-allergy-title {
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.brand-pro-session-allergy-note {
+  margin-top: 1px;
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+}
+
+.brand-pro-session-allergy-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.brand-pro-session-allergy-item {
+  padding: 10px 12px;
+  border: 1px solid rgb(var(--tone-danger) / 0.2);
+  border-radius: var(--radius-inner);
+  background: rgb(var(--tone-danger) / 0.06);
+}
+
+.brand-pro-session-allergy-label {
+  color: rgb(var(--text-primary));
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.brand-pro-session-allergy-sev {
+  font-weight: 800;
+}
+
+.brand-pro-session-allergy-sev[data-severity='high'],
+.brand-pro-session-allergy-sev[data-severity='critical'] {
+  color: rgb(var(--tone-danger));
+}
+
+.brand-pro-session-allergy-sev[data-severity='moderate'] {
+  color: rgb(var(--tone-warn));
+}
+
+.brand-pro-session-allergy-sev[data-severity='low'] {
+  color: rgb(var(--text-muted));
+}
+
+.brand-pro-session-allergy-desc {
+  margin-top: 3px;
+  color: rgb(var(--text-secondary));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* ──────────────────────────────────────────────────────────────────
    Buttons
 ────────────────────────────────────────────────────────────────── */
 

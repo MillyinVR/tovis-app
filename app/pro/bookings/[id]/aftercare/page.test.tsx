@@ -624,5 +624,23 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     expect(markup).toContain('data-client-id="client_1"')
     expect(markup).toContain('data-allergy-count="1"')
     expect(markup).toContain('data-note-count="1"')
+
+    // Safety allergy alert is surfaced prominently at the top (pros only),
+    // with the allergy label + capitalized severity.
+    expect(markup).toContain('Allergy on file')
+    expect(markup).toContain('Private to pros only')
+    expect(markup).toContain('PPD')
+    expect(markup).toContain('High')
+  })
+
+  it('omits the allergy alert when the client has no allergies on file', async () => {
+    const page = await renderPage({
+      booking: makeBooking({ allergies: [] }),
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).not.toContain('Allergy on file')
+    expect(markup).toContain('data-allergy-count="0"')
   })
 })
