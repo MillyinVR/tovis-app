@@ -406,6 +406,24 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
       expect(hasText(page, '← Back to consultation')).toBe(true)
   })
 
+  it('renders the persistent 4-step rail outside the consultation state', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+        consultationStatus: ConsultationApprovalStatus.PENDING,
+        proof: null,
+      }),
+      beforeCount: 0,
+      afterCount: 0,
+      aftercare: null,
+    })
+
+    // The rail shows all four step labels even in waiting; "Wrap-up" only
+    // appears via the rail here, so it proves the rail is now persistent
+    // (it used to render only in the consultation state).
+    expect(hasText(page, 'Wrap-up')).toBe(true)
+  })
+
   it('flips the combined waiting/before-photos screen to approved with a continue-to-service action', async () => {
     const page = await renderPage({
       booking: makeBooking({

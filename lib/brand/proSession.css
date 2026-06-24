@@ -197,70 +197,86 @@
    Step rows
 ────────────────────────────────────────────────────────────────── */
 
-.brand-pro-session-step-list {
-  display: grid;
+/* Horizontal 4-step rail — persistent across the active session states
+   (Consult · Before · Service · Wrap-up) so the pro never loses their place. */
+.brand-pro-session-rail {
+  display: flex;
+  margin: 16px 0 20px;
 }
 
-.brand-pro-session-step-row {
+.brand-pro-session-rail-step {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-pro-session-rail-track-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 9px 0;
-  border-bottom: 1px solid rgb(var(--surface-glass) / 0.05);
+  width: 100%;
 }
 
-.brand-pro-session-step-dot {
+.brand-pro-session-rail-track {
+  flex: 1;
+  height: 2px;
+  border-radius: 2px;
+  background: rgb(var(--surface-glass) / 0.1);
+}
+
+.brand-pro-session-rail-track[data-on='true'] {
+  background: rgb(var(--accent-primary));
+}
+
+/* Edge tracks (left of the first dot, right of the last) stay invisible so the
+   rail reads as a connected line with clean ends — must win over data-on. */
+.brand-pro-session-rail-track[data-edge='true'] {
+  background: transparent;
+}
+
+.brand-pro-session-rail-dot {
   display: grid;
   flex-shrink: 0;
   width: 26px;
   height: 26px;
   place-items: center;
-  border: 1px solid rgb(var(--surface-glass) / 0.14);
+  border: 1.5px solid rgb(var(--surface-glass) / 0.14);
   border-radius: var(--radius-pill);
-  background: rgb(var(--surface-glass) / 0.02);
+  background: transparent;
   color: rgb(var(--text-muted));
-  font-size: 10px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
 }
 
-.brand-pro-session-step-row[data-state='active'] .brand-pro-session-step-dot {
-  border: 2px solid rgb(var(--accent-primary));
+.brand-pro-session-rail-step[data-state='active'] .brand-pro-session-rail-dot {
+  border-color: rgb(var(--accent-primary));
   background: rgb(var(--accent-primary) / 0.12);
   color: rgb(var(--accent-primary-hover));
 }
 
-.brand-pro-session-step-row[data-state='done'] .brand-pro-session-step-dot {
-  border: 2px solid rgb(var(--tone-success));
-  background: rgb(var(--tone-success) / 0.1);
-  color: rgb(var(--tone-success));
+.brand-pro-session-rail-step[data-state='done'] .brand-pro-session-rail-dot {
+  border-color: rgb(var(--accent-primary));
+  background: rgb(var(--accent-primary));
+  color: rgb(var(--on-accent));
 }
 
-.brand-pro-session-step-label {
+.brand-pro-session-rail-label {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: rgb(var(--text-muted));
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.2;
 }
 
-.brand-pro-session-step-row[data-state='active'] .brand-pro-session-step-label {
+.brand-pro-session-rail-step[data-state='active'] .brand-pro-session-rail-label {
   color: rgb(var(--text-primary));
-  font-weight: 850;
 }
 
-.brand-pro-session-step-row[data-state='done'] .brand-pro-session-step-label {
+.brand-pro-session-rail-step[data-state='done'] .brand-pro-session-rail-label {
   color: rgb(var(--text-secondary));
-}
-
-.brand-pro-session-step-active-dot {
-  flex-shrink: 0;
-  width: 5px;
-  height: 5px;
-  margin-left: auto;
-  border-radius: var(--radius-pill);
-  background: rgb(var(--accent-primary-hover));
-  box-shadow: 0 0 6px rgb(var(--accent-primary-hover) / 0.8);
 }
 
 /* ──────────────────────────────────────────────────────────────────

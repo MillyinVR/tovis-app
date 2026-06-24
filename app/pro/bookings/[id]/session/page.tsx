@@ -566,28 +566,55 @@ function ActionLink({
 }
 
 
+// Short labels for the compact horizontal rail (the source labels in
+// sessionFlow stay long-form for other surfaces / tests).
+const SESSION_RAIL_LABELS: Record<string, string> = {
+  consultation: 'Consult',
+  beforePhotos: 'Before',
+  service: 'Service',
+  wrapUp: 'Wrap-up',
+}
+
+// Persistent 4-step rail shown across consultation → before → service →
+// wrap-up. A step's two connecting tracks turn accent once it's done; the
+// outermost edges stay invisible so the rail reads as one clean line.
 function StepRows({ effectiveStep }: { effectiveStep: SessionStep }) {
   const steps = buildSessionStepItems(effectiveStep)
+  const lastIndex = steps.length - 1
 
   return (
-    <div className="brand-pro-session-step-list">
-      {steps.map((step) => (
-        <div
-          key={step.key}
-          className="brand-pro-session-step-row"
-          data-state={step.state}
-        >
-          <div className="brand-pro-session-step-dot">
-            {step.state === 'done' ? <CheckIcon size={10} /> : step.number}
+    <div className="brand-pro-session-rail">
+      {steps.map((step, index) => {
+        const trackOn = step.state === 'done'
+
+        return (
+          <div
+            key={step.key}
+            className="brand-pro-session-rail-step"
+            data-state={step.state}
+          >
+            <div className="brand-pro-session-rail-track-row">
+              <span
+                className="brand-pro-session-rail-track"
+                data-on={trackOn}
+                data-edge={index === 0}
+              />
+              <span className="brand-pro-session-rail-dot">
+                {step.state === 'done' ? <CheckIcon size={12} /> : step.number}
+              </span>
+              <span
+                className="brand-pro-session-rail-track"
+                data-on={trackOn}
+                data-edge={index === lastIndex}
+              />
+            </div>
+
+            <span className="brand-pro-session-rail-label">
+              {SESSION_RAIL_LABELS[step.key] ?? step.label}
+            </span>
           </div>
-
-          <span className="brand-pro-session-step-label">{step.label}</span>
-
-          {step.state === 'active' ? (
-            <span className="brand-pro-session-step-active-dot" />
-          ) : null}
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -821,6 +848,7 @@ function ConsultationView({
 
 function WaitingBeforePhotosView({
   bookingId,
+  effectiveStep,
   serviceName,
   subtitle,
   totalLabel,
@@ -833,6 +861,7 @@ function WaitingBeforePhotosView({
   toService,
 }: {
   bookingId: string
+  effectiveStep: SessionStep
   serviceName: string
   subtitle: string
   totalLabel: string
@@ -865,6 +894,8 @@ function WaitingBeforePhotosView({
       />
 
       <div className="brand-pro-session-scroll no-scroll">
+        <StepRows effectiveStep={effectiveStep} />
+
         <Card tone={approved ? 'success' : undefined}>
           <div className="brand-pro-session-chip-row mb-2">
             <Pill
@@ -967,6 +998,7 @@ function WaitingBeforePhotosView({
 function ServiceInProgressView({
   serviceName,
   clientName,
+  effectiveStep,
   startedAt,
   durationLabel,
   beforeCount,
@@ -975,6 +1007,7 @@ function ServiceInProgressView({
 }: {
   serviceName: string
   clientName: string
+  effectiveStep: SessionStep
   startedAt: Date | null
   durationLabel: string
   beforeCount: number
@@ -999,6 +1032,8 @@ function ServiceInProgressView({
       <div className="brand-pro-session-divider" />
 
       <div className="brand-pro-session-scroll no-scroll" data-roomy="true">
+        <StepRows effectiveStep={effectiveStep} />
+
         <section className="brand-pro-session-timer-card">
           <div className="brand-cap brand-pro-session-muted mb-2">
             ELAPSED
@@ -1052,6 +1087,7 @@ function ServiceInProgressView({
 
 function WrapUpView({
   bookingId,
+  effectiveStep,
   serviceName,
   clientName,
   afterCount,
@@ -1066,6 +1102,7 @@ function WrapUpView({
   timeZone,
 }: {
   bookingId: string
+  effectiveStep: SessionStep
   serviceName: string
   clientName: string
   afterCount: number
@@ -1115,6 +1152,8 @@ function WrapUpView({
       />
 
       <div className="brand-pro-session-scroll no-scroll">
+        <StepRows effectiveStep={effectiveStep} />
+
         <Card>
           <div className="brand-pro-session-section-title mb-3">
             Wrap-up checklist
@@ -1719,6 +1758,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
       <>
         <WaitingBeforePhotosView
           bookingId={booking.id}
+          effectiveStep={effectiveStep}
           serviceName={serviceName}
           subtitle={subtitle}
           totalLabel={totalLabel}
@@ -1742,6 +1782,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
       <ServiceInProgressView
         serviceName={serviceName}
         clientName={clientName}
+        effectiveStep={effectiveStep}
         startedAt={booking.startedAt}
         durationLabel={durationLabel}
         beforeCount={beforeCount}
@@ -1761,6 +1802,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
     return (
       <WrapUpView
         bookingId={booking.id}
+        effectiveStep={effectiveStep}
         serviceName={serviceName}
         clientName={clientName}
         afterCount={afterCount}
