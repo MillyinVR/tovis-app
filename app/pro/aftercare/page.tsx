@@ -6,6 +6,11 @@ import { prisma } from '@/lib/prisma'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { loadBookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  resolveApptTimeZoneFromValues,
+} from '@/lib/time'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,10 +18,13 @@ function aftercareHref(bookingId: string) {
   return `/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`
 }
 
-function formatDateTime(value: Date | null) {
+// These are administrative timestamps (draft saved / sent / created) in the
+// pro's own management list, so we render them in the pro's timezone via the
+// `@/lib/time` barrel rather than a raw, server-zone `toLocaleString`.
+function formatDateTime(value: Date | null, timeZone: string) {
   if (!value) return '—'
 
-  return value.toLocaleString(undefined, {
+  return formatInTimeZone(value, timeZone, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -123,6 +131,9 @@ export default async function ProAftercarePage() {
   }
 
   const professionalId = auth.professionalId
+  // Fallback only — the appointment's own location timezone wins per row below,
+  // so timestamps read correctly even when the pro travels outside home base.
+  const professionalTimeZone = auth.user.professionalProfile?.timeZone
 
   const rows = await prisma.aftercareSummary.findMany({
     where: {
@@ -144,6 +155,7 @@ export default async function ProAftercarePage() {
       booking: {
         select: {
           id: true,
+          locationTimeZone: true,
           service: {
             select: {
               name: true,
@@ -206,6 +218,14 @@ export default async function ProAftercarePage() {
             const clientName = getClientName(summary.booking.client)
             const status = getStatus(summary)
             const beforeAfter = beforeAfterByBooking.get(summary.bookingId)
+            // Appointment location timezone wins (pro timezone as fallback) so
+            // these read in the zone where the appointment actually happened.
+            const tzResult = resolveApptTimeZoneFromValues({
+              bookingLocationTimeZone: summary.booking.locationTimeZone,
+              professionalTimeZone,
+              fallback: DEFAULT_TIME_ZONE,
+            })
+            const timeZone = tzResult.ok ? tzResult.timeZone : DEFAULT_TIME_ZONE
 
             return (
               <Link
@@ -249,11 +269,11 @@ export default async function ProAftercarePage() {
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <MetaItem
                     label="Draft saved"
-                    value={formatDateTime(summary.draftSavedAt)}
+                    value={formatDateTime(summary.draftSavedAt, timeZone)}
                   />
                   <MetaItem
                     label="Sent to client"
-                    value={formatDateTime(summary.sentToClientAt)}
+                    value={formatDateTime(summary.sentToClientAt, timeZone)}
                   />
                   <MetaItem
                     label="Rebook mode"
@@ -261,7 +281,7 @@ export default async function ProAftercarePage() {
                   />
                   <MetaItem
                     label="Created"
-                    value={formatDateTime(summary.createdAt)}
+                    value={formatDateTime(summary.createdAt, timeZone)}
                   />
                 </div>
               </Link>

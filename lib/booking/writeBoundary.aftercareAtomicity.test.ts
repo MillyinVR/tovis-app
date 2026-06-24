@@ -369,4 +369,45 @@ describe('lib/booking/writeBoundary aftercare atomicity', () => {
       },
     })
   })
+
+  it('rejects aftercare edits once the booking is completed (read-only)', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce({
+      ...makeAftercareEligibleBooking(),
+      status: BookingStatus.COMPLETED,
+      sessionStep: SessionStep.DONE,
+      finishedAt: TEST_NOW,
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      paymentCollectedAt: TEST_NOW,
+    })
+
+    await expect(
+      upsertBookingAftercare({
+        bookingId: 'booking_1',
+        professionalId: 'pro_1',
+        actorUserId: 'user_pro_1',
+        notes: 'Trying to edit a finished booking.',
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+        rebookWindowStart: null,
+        rebookWindowEnd: null,
+        rebookSlot: null,
+        createRebookReminder: false,
+        rebookReminderDaysBefore: 7,
+        createProductReminder: false,
+        productReminderDaysAfter: 14,
+        recommendedProducts: [],
+        sendToClient: true,
+        version: 1,
+        requestId: 'req_aftercare_atomicity_completed',
+        idempotencyKey: 'idem_aftercare_atomicity_completed',
+      }),
+    ).rejects.toMatchObject({
+      code: 'BOOKING_CANNOT_EDIT_COMPLETED',
+    })
+
+    expect(mocks.txAftercareSummaryUpsert).not.toHaveBeenCalled()
+    expect(mocks.txAftercareSummaryUpdate).not.toHaveBeenCalled()
+    expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
 })

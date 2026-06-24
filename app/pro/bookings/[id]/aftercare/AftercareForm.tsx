@@ -88,6 +88,9 @@ type Props = {
   existingLastEditedAt?: string | null
   existingVersion?: number | null
   existingIsFinalized?: boolean
+  // When true the booking is already completed: render the aftercare as a
+  // locked, no-edit summary (disable every input, hide the save/send actions).
+  readOnly?: boolean
 }
 
 const FORCE_EVENT = 'tovis:pro-session:force'
@@ -288,6 +291,7 @@ export default function AftercareForm({
   existingLastEditedAt,
   existingVersion,
   existingIsFinalized,
+  readOnly = false,
 }: Props) {
   const router = useRouter()
 
@@ -845,7 +849,7 @@ export default function AftercareForm({
 
   const showBooked = rebookMode === 'BOOKED_NEXT_APPOINTMENT'
   const showWindow = rebookMode === 'RECOMMENDED_WINDOW'
-  const disabled = loading
+  const disabled = loading || readOnly
 
   const finalized = Boolean(sentToClientAt || existingIsFinalized)
   const draftExists = Boolean(draftSavedAt) && !finalized
@@ -1320,25 +1324,27 @@ export default function AftercareForm({
           </div>
         ) : null}
 
-        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            disabled={disabled || !!windowError}
-            onClick={() => postAftercare(false)}
-            className={secondaryBtn(Boolean(disabled || !!windowError))}
-          >
-            {loading ? 'Saving…' : 'Save draft'}
-          </button>
+        {readOnly ? null : (
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={disabled || !!windowError}
+              onClick={() => postAftercare(false)}
+              className={secondaryBtn(Boolean(disabled || !!windowError))}
+            >
+              {loading ? 'Saving…' : 'Save draft'}
+            </button>
 
-          <button
-            type="button"
-            disabled={disabled || !!windowError}
-            onClick={() => postAftercare(true)}
-            className={primaryBtn(Boolean(disabled || !!windowError))}
-          >
-            {loading ? 'Sending…' : finalized ? 'Send update to client' : 'Send to client'}
-          </button>
-        </div>
+            <button
+              type="button"
+              disabled={disabled || !!windowError}
+              onClick={() => postAftercare(true)}
+              className={primaryBtn(Boolean(disabled || !!windowError))}
+            >
+              {loading ? 'Sending…' : finalized ? 'Send update to client' : 'Send to client'}
+            </button>
+          </div>
+        )}
       </div>
 
       {pickerTarget ? (

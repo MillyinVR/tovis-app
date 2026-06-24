@@ -1357,9 +1357,18 @@ function TerminalView({
           </div>
 
           {!isCancelled ? (
-            <div className="mt-3">
+            <div className="mt-3 grid gap-2">
               <ActionLink href={aftercareHref(bookingId)}>
                 View aftercare
+              </ActionLink>
+              <ActionLink href="/pro/calendar" variant="ghost">
+                Calendar
+              </ActionLink>
+              <ActionLink href="/pro/bookings" variant="ghost">
+                All bookings
+              </ActionLink>
+              <ActionLink href="/pro/aftercare" variant="ghost">
+                Aftercare tab
               </ActionLink>
             </div>
           ) : null}

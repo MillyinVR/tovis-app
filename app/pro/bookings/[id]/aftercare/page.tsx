@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import {
   AftercareRebookMode,
+  BookingStatus,
   MediaPhase,
   SessionStep,
 } from '@prisma/client'
@@ -21,7 +22,6 @@ import { prisma } from '@/lib/prisma'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import {
   aftercareHref,
-  isTerminalBooking,
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
@@ -588,19 +588,29 @@ export default async function ProAftercarePage({ params }: PageProps) {
   if (!booking) notFound()
   if (booking.professionalId !== professionalId) redirect('/pro')
 
-  if (
-    !booking.startedAt ||
-    isTerminalBooking(booking.status, booking.finishedAt)
-  ) {
+  const isCancelled = booking.status === BookingStatus.CANCELLED
+
+  // A completed booking has no live session to act on, but the pro still wants
+  // to *review* the aftercare they just finished. Serve it as a locked,
+  // read-only summary instead of bouncing back to the session hub. We key on
+  // status === COMPLETED (not finishedAt) to match the write boundary exactly:
+  // a live session can carry a finishedAt while still being IN_PROGRESS, and
+  // its aftercare must stay editable.
+  const readOnly = booking.status === BookingStatus.COMPLETED
+
+  // Nothing to view for cancelled or never-started bookings.
+  if (isCancelled || !booking.startedAt) {
     redirect(sessionHubHref(bookingId))
   }
 
-  const step = booking.sessionStep ?? SessionStep.NONE
-  const allowedHere =
-    step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
+  if (!readOnly) {
+    const step = booking.sessionStep ?? SessionStep.NONE
+    const allowedHere =
+      step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
 
-  if (!allowedHere) {
-    redirect(sessionHubHref(bookingId))
+    if (!allowedHere) {
+      redirect(sessionHubHref(bookingId))
+    }
   }
 
   const timeZoneResult = await resolveApptTimeZone({
@@ -715,16 +725,59 @@ export default async function ProAftercarePage({ params }: PageProps) {
       />
 
       <div className="brand-pro-session-scroll no-scroll">
-        <SummaryCard
-          publicAccess={publicAccess}
-          hasDraft={hasAftercareDraft}
-          isFinalized={hasFinalizedAftercare}
-          lastEditedAt={aftercare?.lastEditedAt}
-          draftSavedAt={aftercare?.draftSavedAt}
-          sentToClientAt={aftercare?.sentToClientAt}
-          version={aftercare?.version}
-          timeZone={timeZone}
-        />
+        {readOnly ? (
+          <Card tone="success">
+            <div className="brand-pro-session-section-title">
+              This booking is completed.
+            </div>
+            <div className="brand-pro-session-card-body mt-1">
+              You’re viewing the finished aftercare. It’s read-only now that the
+              session is closed out.
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href="/pro/calendar"
+                prefetch
+                className="brand-pro-session-button brand-focus"
+                data-variant="ghost"
+                data-full={false}
+              >
+                Calendar
+              </Link>
+              <Link
+                href="/pro/bookings"
+                prefetch
+                className="brand-pro-session-button brand-focus"
+                data-variant="ghost"
+                data-full={false}
+              >
+                All bookings
+              </Link>
+              <Link
+                href="/pro/aftercare"
+                prefetch
+                className="brand-pro-session-button brand-focus"
+                data-variant="ghost"
+                data-full={false}
+              >
+                Aftercare tab
+              </Link>
+            </div>
+          </Card>
+        ) : null}
+
+        <div className={readOnly ? 'mt-4' : undefined}>
+          <SummaryCard
+            publicAccess={publicAccess}
+            hasDraft={hasAftercareDraft}
+            isFinalized={hasFinalizedAftercare}
+            lastEditedAt={aftercare?.lastEditedAt}
+            draftSavedAt={aftercare?.draftSavedAt}
+            sentToClientAt={aftercare?.sentToClientAt}
+            version={aftercare?.version}
+            timeZone={timeZone}
+          />
+        </div>
 
         <div className="mt-4">
           <ServicesReceivedCard services={serviceLines} pricing={pricing} />
@@ -774,6 +827,7 @@ export default async function ProAftercarePage({ params }: PageProps) {
             existingLastEditedAt={dateToIso(aftercare?.lastEditedAt)}
             existingVersion={aftercare?.version ?? null}
             existingIsFinalized={hasFinalizedAftercare}
+            readOnly={readOnly}
           />
         </div>
       </div>

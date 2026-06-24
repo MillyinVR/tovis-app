@@ -10494,6 +10494,18 @@ if (args.rebookSlot) {
     })
   }
 
+  // Once the booking is COMPLETED its aftercare is read-only. We key on status
+  // (not finishedAt) on purpose: a live session can carry a finishedAt while
+  // still being IN_PROGRESS, and that send is exactly what triggers closeout —
+  // completion is the *result* of this write, never a precondition here.
+  if (booking.status === BookingStatus.COMPLETED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
+      message: 'This booking is completed; aftercare is read-only.',
+      userMessage:
+        'This booking is completed. Its aftercare can no longer be edited.',
+    })
+  }
+
   if (booking.status === BookingStatus.PENDING) {
     throw bookingError('FORBIDDEN', {
       message: 'Aftercare can’t be posted until the booking is confirmed.',
@@ -10606,7 +10618,10 @@ if (
     bookingFinished: false,
     completionBlockers: [],
     booking:
-      booking.status === BookingStatus.COMPLETED || booking.finishedAt
+      // A COMPLETED booking can never reach here (it throws above), so a
+      // present finishedAt is the only remaining "session already finished"
+      // signal worth surfacing on this no-op return.
+      booking.finishedAt
         ? {
             status: booking.status,
             sessionStep: booking.sessionStep ?? SessionStep.NONE,
