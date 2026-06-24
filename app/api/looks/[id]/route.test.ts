@@ -117,6 +117,12 @@ vi.mock('@/lib/looks/selects', () => ({
   looksDetailSelect: mocks.looksDetailSelect,
 }))
 
+vi.mock('@/lib/clientVisibility', () => ({
+  loadClientLinkViewer: vi.fn(async () => ({
+    proVisibleClientIds: new Set<string>(),
+  })),
+}))
+
 import { GET } from './route'
 
 type Params = { id: string }
@@ -435,6 +441,7 @@ describe('app/api/looks/[id]/route.ts', () => {
         isOwner: false,
         canModerate: false,
       },
+      clientLinkViewer: { proVisibleClientIds: new Set() },
     })
 
     expect(body).toEqual({
@@ -500,6 +507,7 @@ describe('app/api/looks/[id]/route.ts', () => {
         isOwner: false,
         canModerate: false,
       },
+      clientLinkViewer: { proVisibleClientIds: new Set() },
     })
 
     expect(body).toEqual({
@@ -555,6 +563,7 @@ describe('app/api/looks/[id]/route.ts', () => {
         isOwner: true,
         canModerate: false,
       },
+      clientLinkViewer: { proVisibleClientIds: new Set() },
     })
 
     expect(body).toEqual({
@@ -618,6 +627,7 @@ describe('app/api/looks/[id]/route.ts', () => {
         isOwner: false,
         canModerate: true,
       },
+      clientLinkViewer: { proVisibleClientIds: new Set() },
     })
 
     expect(body).toEqual({

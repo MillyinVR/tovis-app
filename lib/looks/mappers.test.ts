@@ -550,11 +550,15 @@ describe('lib/looks/mappers.ts', () => {
           user: {
             id: 'user_1',
             clientProfile: {
+              id: 'client_1',
               firstName: 'Tori',
               lastName: 'Morales',
               avatarUrl: 'https://cdn.example.com/client-avatar.jpg',
+              handle: 'tori',
+              isPublicProfile: true,
             },
             professionalProfile: {
+              id: 'pro_1',
               businessName: 'Other Name',
               firstName: 'Tori',
               lastName: 'Morales',
@@ -573,6 +577,8 @@ describe('lib/looks/mappers.ts', () => {
           id: 'user_1',
           displayName: 'Tori Morales',
           avatarUrl: 'https://cdn.example.com/client-avatar.jpg',
+          // Shown as a client → links to the /u/[handle] creator profile.
+          profileHref: '/u/tori',
         },
         parentCommentId: null,
         likeCount: 3,
@@ -580,6 +586,82 @@ describe('lib/looks/mappers.ts', () => {
         viewerLiked: true,
         viewerCanDelete: true,
       })
+    })
+
+    it('omits the client profile link when the author is not a public creator', () => {
+      const result = mapLooksCommentToDto(
+        {
+          id: 'comment_1',
+          body: 'This is fire',
+          createdAt: new Date('2026-04-18T12:00:00.000Z'),
+          userId: 'user_1',
+          parentCommentId: null,
+          likeCount: 0,
+          replyCount: 0,
+          likes: [],
+          user: {
+            id: 'user_1',
+            clientProfile: {
+              id: 'client_1',
+              firstName: 'Tori',
+              lastName: 'Morales',
+              avatarUrl: null,
+              handle: null,
+              isPublicProfile: false,
+            },
+            professionalProfile: null,
+          },
+        },
+        { viewerUserId: null, viewerIsAdmin: false },
+      )
+
+      expect(result.user.profileHref).toBeNull()
+    })
+
+    it('upgrades a client author link to the pro chart for an authorized pro viewer', () => {
+      const row = {
+        id: 'comment_1',
+        body: 'This is fire',
+        createdAt: new Date('2026-04-18T12:00:00.000Z'),
+        userId: 'user_1',
+        parentCommentId: null,
+        likeCount: 0,
+        replyCount: 0,
+        likes: [],
+        user: {
+          id: 'user_1',
+          clientProfile: {
+            id: 'client_1',
+            firstName: 'Tori',
+            lastName: 'Morales',
+            avatarUrl: null,
+            // Not a public creator: only the pro-chart upgrade can link this name.
+            handle: null,
+            isPublicProfile: false,
+          },
+          professionalProfile: null,
+        },
+      }
+
+      // Pro who can open client_1 → chart link.
+      expect(
+        mapLooksCommentToDto(row, {
+          viewerUserId: 'pro_user',
+          viewerIsAdmin: false,
+          clientLinkViewer: {
+            proVisibleClientIds: new Set(['client_1']),
+          },
+        }).user.profileHref,
+      ).toBe('/pro/clients/client_1')
+
+      // Same author, viewer without access → no link (not public).
+      expect(
+        mapLooksCommentToDto(row, {
+          viewerUserId: 'pro_user',
+          viewerIsAdmin: false,
+          clientLinkViewer: { proVisibleClientIds: new Set(['other']) },
+        }).user.profileHref,
+      ).toBeNull()
     })
 
     it('falls back to professional business name when no client name exists', () => {
@@ -597,6 +679,7 @@ describe('lib/looks/mappers.ts', () => {
             id: 'user_2',
             clientProfile: null,
             professionalProfile: {
+              id: 'pro_2',
               businessName: 'TOVIS Studio',
               firstName: 'Solo',
               lastName: 'Pro',
@@ -608,6 +691,8 @@ describe('lib/looks/mappers.ts', () => {
       )
 
       expect(result.user.displayName).toBe('TOVIS Studio')
+      // Shown as a pro → links to the /professionals/[id] profile.
+      expect(result.user.profileHref).toBe('/professionals/pro_2')
     })
 
     it('falls back to the professional real name when no business name is set', () => {
@@ -625,6 +710,7 @@ describe('lib/looks/mappers.ts', () => {
             id: 'user_3',
             clientProfile: null,
             professionalProfile: {
+              id: 'pro_3',
               businessName: null,
               firstName: 'Jordan',
               lastName: 'Rivera',

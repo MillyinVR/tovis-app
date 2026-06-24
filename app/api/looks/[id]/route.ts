@@ -6,6 +6,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { loadLookAccess } from '@/lib/looks/access'
+import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import {
   canCommentOnLookPost,
   canModerateLookPost,
@@ -135,6 +136,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
           isOwner: access.isOwner,
           canModerate,
         },
+        clientLinkViewer: await loadClientLinkViewer(viewer),
       }),
     }
 

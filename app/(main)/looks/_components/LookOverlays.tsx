@@ -50,8 +50,10 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
   // their /u/[handle] profile), while the pro stays visible + followable below.
   const clientAuthor = m.clientAuthor ?? null
   const posterName = clientAuthor ? `@${clientAuthor.handle}` : proDisplayName
+  // Server-resolved poster link: /u/[handle], or the pro chart for an authorized
+  // pro viewer; falls back to the pro for non-client-authored looks.
   const posterHref = clientAuthor
-    ? `/u/${encodeURIComponent(clientAuthor.handle)}`
+    ? clientAuthor.profileHref
     : pro?.id
       ? `/professionals/${encodeURIComponent(pro.id)}`
       : null

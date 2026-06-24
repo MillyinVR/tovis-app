@@ -3,8 +3,10 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { BookingStatus, MediaVisibility, Role } from '@prisma/client'
 
+import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { getCurrentUser } from '@/lib/currentUser'
 import { messageStartHref } from '@/lib/messages'
+import type { ClientLinkViewer } from '@/lib/profiles/profileHrefs'
 import { prisma } from '@/lib/prisma'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import {
@@ -161,6 +163,7 @@ export default async function PublicProfessionalProfilePage({
       ? await loadReviewsForUi({
           professionalId: profileRow.id,
           viewerUserId,
+          clientLinkViewer: await loadClientLinkViewer(viewer),
         })
       : []
 
@@ -245,6 +248,7 @@ async function loadPortfolioTiles(professionalId: string) {
 async function loadReviewsForUi(args: {
   professionalId: string
   viewerUserId: string | null
+  clientLinkViewer: ClientLinkViewer
 }) {
   const reviews = await prisma.review.findMany({
     where: { professionalId: args.professionalId },
@@ -254,7 +258,10 @@ async function loadReviewsForUi(args: {
   })
 
   if (!args.viewerUserId || reviews.length === 0) {
-    return mapPublicReviewsToDtos({ reviews })
+    return mapPublicReviewsToDtos({
+      reviews,
+      clientLinkViewer: args.clientLinkViewer,
+    })
   }
 
   const helpfulRows = await prisma.reviewHelpful.findMany({
@@ -272,6 +279,7 @@ async function loadReviewsForUi(args: {
     viewerHelpfulReviewIds: new Set(
       helpfulRows.map((row) => row.reviewId),
     ),
+    clientLinkViewer: args.clientLinkViewer,
   })
 }
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import { safeJson } from '@/lib/http'
@@ -11,6 +12,7 @@ type Offer = {
   expiresAt: string | null
   expired: boolean
   proName: string
+  proHref: string
   avatarUrl: string | null
   serviceLabel: string
   startAt: string
@@ -204,7 +206,13 @@ export default function OffersListClient() {
                   </div>
 
                   <p className="mt-1 text-sm text-textMuted">
-                    {offer.proName} · {formatWhen(offer.startAt, offer.timeZone)}
+                    <Link
+                      href={offer.proHref}
+                      className="font-medium text-textPrimary hover:underline"
+                    >
+                      {offer.proName}
+                    </Link>{' '}
+                    · {formatWhen(offer.startAt, offer.timeZone)}
                   </p>
 
                   {offer.note ? (

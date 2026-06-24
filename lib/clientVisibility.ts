@@ -1,6 +1,10 @@
 // lib/clientVisibility.ts
 import { prisma } from '@/lib/prisma'
 import { BookingStatus, Prisma } from '@prisma/client'
+import {
+  EMPTY_CLIENT_LINK_VIEWER,
+  type ClientLinkViewer,
+} from '@/lib/profiles/profileHrefs'
 
 export type ClientVisibilityReason =
   | 'ACTIVE_BOOKING'
@@ -220,4 +224,25 @@ export async function getVisibleClientIdSetForPro(proId: string): Promise<Set<st
 export async function assertProCanViewClient(proId: string, clientId: string) {
   const visibility = await getProClientVisibility(proId, clientId)
   return visibility.canViewClient ? { ok: true as const, visibility } : { ok: false as const, visibility }
+}
+
+/**
+ * Build the {@link ClientLinkViewer} context for resolving client-name links.
+ * A viewing pro gets the batched set of clients they may open (so links upgrade
+ * to the chart tab view); everyone else gets an empty set (public links only).
+ */
+export async function loadClientLinkViewer(
+  viewer:
+    | { role: string; professionalProfile?: { id: string } | null }
+    | null
+    | undefined,
+): Promise<ClientLinkViewer> {
+  if (viewer?.role === 'PRO' && viewer.professionalProfile) {
+    return {
+      proVisibleClientIds: await getVisibleClientIdSetForPro(
+        viewer.professionalProfile.id,
+      ),
+    }
+  }
+  return EMPTY_CLIENT_LINK_VIEWER
 }

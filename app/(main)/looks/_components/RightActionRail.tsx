@@ -49,6 +49,7 @@ type ProMini = {
 type ClientAuthorMini = {
   handle: string
   avatarUrl: string | null
+  profileHref: string | null
 } | null
 
 type RightActionRailProps = {
@@ -148,9 +149,10 @@ export default function RightActionRail({
   const [saved, setSaved] = useState(viewerSaved)
 
   // The rail avatar credits the poster: the publishing client on a
-  // client-authored look (linking to /u/[handle]), otherwise the pro.
+  // client-authored look (server-resolved link — /u/[handle], or the pro chart
+  // for an authorized pro viewer), otherwise the pro.
   const posterHref = clientAuthor
-    ? `/u/${encodeURIComponent(clientAuthor.handle)}`
+    ? clientAuthor.profileHref
     : pro?.id
       ? `/professionals/${encodeURIComponent(pro.id)}`
       : null

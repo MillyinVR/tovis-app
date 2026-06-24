@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { safeJson } from '@/lib/http'
 
@@ -10,6 +11,7 @@ type Referral = {
   referredFirstName: string
   referredAvatarUrl: string | null
   proName: string | null
+  proHref: string | null
   rewardTier: string | null
   rewardValue: number | null
   rewardAppliedAt: string | null
@@ -176,7 +178,21 @@ export default function ReferralListClient() {
 
                   <p className="mt-1 text-sm text-textMuted">
                     Tapped {formatDate(r.createdAt)}
-                    {r.proName ? ` · Booked with ${r.proName}` : ''}
+                    {r.proName ? (
+                      <>
+                        {' · Booked with '}
+                        {r.proHref ? (
+                          <Link
+                            href={r.proHref}
+                            className="font-medium text-textPrimary hover:underline"
+                          >
+                            {r.proName}
+                          </Link>
+                        ) : (
+                          r.proName
+                        )}
+                      </>
+                    ) : null}
                   </p>
 
                   {reward && (

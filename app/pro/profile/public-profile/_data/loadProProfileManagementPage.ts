@@ -17,6 +17,11 @@ import { countFollowers } from '@/lib/follows'
 import { isRecord } from '@/lib/guards'
 import { vanityLinkFor } from '@/lib/handles'
 import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
+import { loadClientLinkViewer } from '@/lib/clientVisibility'
+import {
+  resolveClientProfileHref,
+  type ClientLinkViewer,
+} from '@/lib/profiles/profileHrefs'
 import { qrSvgFor } from '@/lib/media/qr'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
@@ -124,8 +129,11 @@ const reviewSelect = Prisma.validator<Prisma.ReviewSelect>()({
   },
   client: {
     select: {
+      id: true,
       firstName: true,
       lastName: true,
+      handle: true,
+      isPublicProfile: true,
       user: {
         select: {
           email: true,
@@ -214,7 +222,7 @@ export async function loadProProfileManagementPage({
     }),
     tab === 'portfolio' ? loadPortfolio(pro.id) : emptyPortfolio(),
     tab === 'reviews'
-      ? loadReviews(pro.id)
+      ? loadReviews(pro.id, await loadClientLinkViewer(user))
       : Promise.resolve<ProProfileManagementReview[]>([]),
   ])
 
@@ -323,6 +331,7 @@ async function emptyPortfolio(): Promise<ProProfileManagementPortfolio> {
 
 async function loadReviews(
   professionalId: string,
+  clientLinkViewer: ClientLinkViewer,
 ): Promise<ProProfileManagementReview[]> {
   const reviews = await prisma.review.findMany({
     where: { professionalId },
@@ -331,11 +340,14 @@ async function loadReviews(
     select: reviewSelect,
   })
 
-  return Promise.all(reviews.map(mapReviewForUi))
+  return Promise.all(
+    reviews.map((review) => mapReviewForUi(review, clientLinkViewer)),
+  )
 }
 
 async function mapReviewForUi(
   review: ReviewRow,
+  clientLinkViewer: ClientLinkViewer,
 ): Promise<ProProfileManagementReview> {
   const mediaAssets = await Promise.all(
     review.mediaAssets.map(mapReviewMediaForUi),
@@ -352,6 +364,16 @@ async function mapReviewForUi(
       firstName: review.client?.firstName ?? null,
       lastName: review.client?.lastName ?? null,
     }),
+    clientHref: review.client
+      ? resolveClientProfileHref(
+          {
+            clientProfileId: review.client.id,
+            handle: review.client.handle,
+            isPublicProfile: review.client.isPublicProfile,
+          },
+          clientLinkViewer,
+        )
+      : null,
     mediaAssets: mediaAssets.filter(isNonNull),
   }
 }

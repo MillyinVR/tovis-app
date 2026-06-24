@@ -2,6 +2,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { Heart, User as UserIcon, X } from 'lucide-react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
@@ -88,19 +89,43 @@ function CommentRow({
     onDelete(comment)
   }
 
+  const { displayName, avatarUrl, profileHref } = comment.user
+  const avatar = (
+    <CommentAvatar
+      displayName={displayName}
+      avatarUrl={avatarUrl}
+      size={depth === 0 ? 36 : 28}
+    />
+  )
+
   return (
     <div className="flex gap-2.5">
-      <CommentAvatar
-        displayName={comment.user.displayName}
-        avatarUrl={comment.user.avatarUrl}
-        size={depth === 0 ? 36 : 28}
-      />
+      {profileHref ? (
+        <Link
+          href={profileHref}
+          aria-label={`View profile: ${displayName}`}
+          className="flex-[0_0_auto] rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary"
+        >
+          {avatar}
+        </Link>
+      ) : (
+        avatar
+      )}
 
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className="truncate text-[12.5px] font-extrabold text-textPrimary">
-            {comment.user.displayName}
-          </span>
+          {profileHref ? (
+            <Link
+              href={profileHref}
+              className="truncate text-[12.5px] font-extrabold text-textPrimary hover:underline"
+            >
+              {displayName}
+            </Link>
+          ) : (
+            <span className="truncate text-[12.5px] font-extrabold text-textPrimary">
+              {displayName}
+            </span>
+          )}
           <span className="flex-[0_0_auto] text-[11px] text-textSecondary">
             {formatRelativeTimeCompact(comment.createdAt)}
           </span>

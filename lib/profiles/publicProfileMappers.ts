@@ -9,6 +9,11 @@ import { requiresLicense } from '@/lib/licensing/licenseRequirement'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import {
+  EMPTY_CLIENT_LINK_VIEWER,
+  resolveClientProfileHref,
+  type ClientLinkViewer,
+} from '@/lib/profiles/profileHrefs'
+import {
   formatAvatarUrl,
   formatAverageRating,
   formatBio,
@@ -123,6 +128,9 @@ export type PublicReviewDto = {
   body: string | null
   createdAt: string
   clientName: string
+  // Link to the reviewer's /u/[handle] profile, or null when they have no public
+  // creator identity (keeps the reviewer's name PII-safe and unlinked).
+  clientHref: string | null
   helpfulCount: number
   viewerHelpful: boolean
   mediaAssets: PublicReviewMediaDto[]
@@ -423,8 +431,9 @@ export async function mapPublicReviewMediaAssetToDto(
 export async function mapPublicReviewToDto(args: {
   review: PublicReviewRow
   viewerHelpfulReviewIds?: ReadonlySet<string>
+  clientLinkViewer?: ClientLinkViewer
 }): Promise<PublicReviewDto> {
-  const { review, viewerHelpfulReviewIds } = args
+  const { review, viewerHelpfulReviewIds, clientLinkViewer } = args
 
   const mediaAssets = await Promise.all(
     review.mediaAssets.map((asset) => mapPublicReviewMediaAssetToDto(asset)),
@@ -441,6 +450,16 @@ export async function mapPublicReviewToDto(args: {
       lastName: review.client?.lastName ?? null,
       email: review.client?.user?.email ?? null,
     }),
+    clientHref: review.client
+      ? resolveClientProfileHref(
+          {
+            clientProfileId: review.client.id,
+            handle: review.client.handle,
+            isPublicProfile: review.client.isPublicProfile,
+          },
+          clientLinkViewer ?? EMPTY_CLIENT_LINK_VIEWER,
+        )
+      : null,
     helpfulCount: review.helpfulCount ?? 0,
     viewerHelpful: viewerHelpfulReviewIds?.has(review.id) ?? false,
     mediaAssets: mediaAssets.filter(isNonNull),
@@ -450,14 +469,16 @@ export async function mapPublicReviewToDto(args: {
 export async function mapPublicReviewsToDtos(args: {
   reviews: PublicReviewRow[]
   viewerHelpfulReviewIds?: ReadonlySet<string>
+  clientLinkViewer?: ClientLinkViewer
 }): Promise<PublicReviewDto[]> {
-  const { reviews, viewerHelpfulReviewIds } = args
+  const { reviews, viewerHelpfulReviewIds, clientLinkViewer } = args
 
   return Promise.all(
     reviews.map((review) =>
       mapPublicReviewToDto({
         review,
         viewerHelpfulReviewIds,
+        clientLinkViewer,
       }),
     ),
   )

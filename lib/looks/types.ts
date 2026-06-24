@@ -40,6 +40,9 @@ export type LooksProfessionalDto = {
 export type LooksClientAuthorDto = {
   handle: string
   avatarUrl: string | null
+  // Link to the author's profile: /u/[handle], or the pro chart for an authorized
+  // pro viewer (resolved server-side). Always set for a surfaced public author.
+  profileHref: string | null
 }
 
 export type LooksFeedItemDto = {
@@ -173,6 +176,9 @@ export type LooksCommentUserDto = {
   id: string
   displayName: string
   avatarUrl: string | null
+  // Link to the author's public profile (/u/[handle] for clients,
+  // /professionals/[id] for pros), or null when no public profile is addressable.
+  profileHref: string | null
 }
 
 export type LooksCommentDto = {

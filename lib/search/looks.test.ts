@@ -79,6 +79,12 @@ vi.mock('@/lib/looks/mappers', () => ({
   mapLooksFeedMediaToDto: mocks.mapLooksFeedMediaToDto,
 }))
 
+vi.mock('@/lib/clientVisibility', () => ({
+  loadClientLinkViewer: vi.fn(async () => ({
+    proVisibleClientIds: new Set<string>(),
+  })),
+}))
+
 import { searchLooks } from './looks'
 
 function makeLookRow(
@@ -323,6 +329,7 @@ describe('lib/search/looks.ts', () => {
       viewerLiked: false,
       viewerSaved: false,
       viewerFollows: false,
+      clientLinkViewer: { proVisibleClientIds: new Set() },
     })
 
     expect(result).toEqual({
@@ -398,6 +405,7 @@ describe('lib/search/looks.ts', () => {
       viewerLiked: false,
       viewerSaved: true,
       viewerFollows: false,
+      clientLinkViewer: { proVisibleClientIds: new Set() },
     })
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(2, {
@@ -405,6 +413,7 @@ describe('lib/search/looks.ts', () => {
       viewerLiked: true,
       viewerSaved: false,
       viewerFollows: false,
+      clientLinkViewer: { proVisibleClientIds: new Set() },
     })
 
     expect(mocks.encodeLooksFeedCursor).toHaveBeenCalledWith({
