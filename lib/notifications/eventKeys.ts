@@ -144,7 +144,12 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     key: NotificationEventKey.BOOKING_CONFIRMED,
     defaultPriority: NotificationPriority.NORMAL,
     transactional: true,
-    allowQuietHoursBypass: false,
+    // Bypass quiet hours: a confirmation is a transactional receipt for an action
+    // the recipient JUST took, so it must arrive immediately — not be deferred to
+    // 08:00 (which reads as "I booked and never got a confirmation"). This matches
+    // every sibling booking-lifecycle event (request/rescheduled/started/cancelled
+    // all bypass); BOOKING_CONFIRMED was the lone exception.
+    allowQuietHoursBypass: true,
     // A booking confirmation must always reach the recipient by email — it's the
     // record of the appointment and can't be silenced by a channel preference.
     emailAlwaysOn: true,

@@ -14,6 +14,7 @@ import {
   type NotificationPreferenceLike,
   type RecipientChannelCapabilities,
 } from './channelPolicy'
+import { getNotificationEventDefinition } from './eventKeys'
 
 function makeCapabilities(
   overrides: Partial<RecipientChannelCapabilities> = {},
@@ -222,6 +223,43 @@ describe('lib/notifications/channelPolicy', () => {
       expect(result.evaluations.map((evaluation) => evaluation.channel)).toEqual(
         [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
       )
+    })
+
+    it('treats BOOKING_CONFIRMED as a quiet-hours-bypassing event (the delivery path derives runtime bypass from this flag)', () => {
+      // Guards the lever itself: the delivery worker requests quiet-hours bypass
+      // for exactly the events whose definition allows it, so this flag is what
+      // keeps a late-night confirmation from deferring to 08:00.
+      expect(
+        getNotificationEventDefinition(NotificationEventKey.BOOKING_CONFIRMED)
+          .allowQuietHoursBypass,
+      ).toBe(true)
+    })
+
+    it('delivers a Tier-B confirmation immediately during quiet hours (no email defer)', () => {
+      // The delivery path requests bypass exactly when the event allows it, so a
+      // confirmation booked at 23:00 must NOT defer its email to 08:00 — it's a
+      // receipt for an action the client just took.
+      const result = resolveChannelPolicy({
+        key: NotificationEventKey.BOOKING_CONFIRMED,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities(),
+        preference: makePreference({
+          quietHoursStartMinutes: 22 * 60,
+          quietHoursEndMinutes: 7 * 60,
+        }),
+        recipientLocalMinutes: 23 * 60,
+        bypassQuietHours: true,
+      })
+
+      expect(result.allowQuietHoursBypass).toBe(true)
+      expect(result.selectedChannels).toEqual([
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+      ])
+      expect(result.evaluations).toEqual([
+        { channel: NotificationChannel.IN_APP, enabled: true, reason: null },
+        { channel: NotificationChannel.EMAIL, enabled: true, reason: null },
+      ])
     })
 
     it('narrows channels using requestedChannels without expanding beyond defaults', () => {
