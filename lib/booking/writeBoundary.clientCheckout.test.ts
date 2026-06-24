@@ -439,6 +439,24 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
     expect(mocks.recordStatusTransition).not.toHaveBeenCalled()
   })
 
+  it('returns a uniform 404 for a booking the caller does not own (no id enumeration)', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeClientCheckoutBooking({ clientId: 'client_2' }),
+    )
+
+    await expect(
+      updateClientBookingCheckout({
+        bookingId: 'booking_1',
+        clientId: 'client_1',
+        tipAmount: '5.00',
+      }),
+    ).rejects.toMatchObject({
+      code: 'BOOKING_NOT_FOUND',
+    })
+
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
+
   it('rejects checkout updates before aftercare is finalized', async () => {
     const booking = makeClientCheckoutBooking({
       aftercareSummary: {
