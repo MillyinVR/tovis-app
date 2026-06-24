@@ -98,6 +98,8 @@ app/admin/permissions/page.tsx:direct property read:<div className="text-sm font
 app/admin/permissions/page.tsx:direct property read:{u.email}
 app/admin/permissions/page.tsx:optional direct property read:<div className="text-sm font-extrabold">{u?.email ?? p.adminUserId}</div>
 app/admin/professionals/[id]/page.tsx:Prisma select/include plaintext field:email: true,
+app/admin/professionals/[id]/page.tsx:Prisma select/include plaintext field:lat: true,
+app/admin/professionals/[id]/page.tsx:Prisma select/include plaintext field:lng: true,
 app/admin/professionals/[id]/page.tsx:Prisma select/include plaintext field:postalCode: true,
 app/admin/professionals/[id]/page.tsx:direct property read:const email = pro.user?.email || 'No email'
 app/admin/professionals/[id]/page.tsx:direct property read:loc.postalCode?.trim() ||
@@ -132,6 +134,8 @@ app/api/auth/register/route.ts:direct property read:const verificationEmail = no
 app/api/auth/register/route.ts:direct property read:if (user.phone) {
 app/api/auth/register/route.ts:direct property read:res.cookies.set('tovis_client_zip', signupLocation.postalCode, {
 app/api/auth/register/route.ts:direct property read:typeof v.postalCode === 'string' &&
+app/api/availability/other-pros/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/availability/other-pros/route.ts:Prisma select/include plaintext field:lng: true,
 app/api/calendar/route.ts:Prisma select/include plaintext field:email: true,
 app/api/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
@@ -151,11 +155,17 @@ app/api/client/bookings/route.ts:Prisma select/include plaintext field:firstName
 app/api/client/bookings/route.ts:Prisma select/include plaintext field:lastName: true,
 app/api/client/openings/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/client/openings/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/client/openings/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/client/openings/route.ts:Prisma select/include plaintext field:lng: true,
 app/api/client/priority-offer/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/client/priority-offer/route.ts:Prisma select/include plaintext field:lastName: true,
 app/api/client/referrals/[id]/confirm/route.ts:direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
 app/api/client/referrals/[id]/confirm/route.ts:optional direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
 app/api/client/referrals/route.ts:direct property read:? [r.professional.firstName, r.professional.lastName]
+app/api/client/saved-services/providers/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/client/saved-services/providers/route.ts:Prisma select/include plaintext field:lng: true,
+app/api/client/saved-services/providers/route.ts:Prisma where/order plaintext field:lat: {
+app/api/client/saved-services/providers/route.ts:Prisma where/order plaintext field:lng: {
 app/api/client/settings/route.ts:Prisma select/include plaintext field:dateOfBirth: true,
 app/api/client/settings/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/client/settings/route.ts:Prisma select/include plaintext field:lastName: true,
@@ -172,6 +182,8 @@ app/api/internal/cron/retry-verification-emails/route.ts:Prisma select/include p
 app/api/internal/cron/retry-verification-emails/route.ts:direct property read:const email = normalizeEmail(candidate.email)
 app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:lng: true,
 app/api/pro-license/verify/route.ts:direct property read:? nameBlock.firstName
 app/api/pro-license/verify/route.ts:direct property read:? nameBlock.lastName
 app/api/pro-license/verify/route.ts:direct property read:typeof nameBlock.firstName === 'string'
@@ -223,6 +235,8 @@ app/api/pro/membership/portal/route.ts:direct property read:if (!sub?.stripeCust
 app/api/pro/membership/portal/route.ts:optional direct property read:if (!sub?.stripeCustomerId) {
 app/api/pro/onboarding/location/route.ts:direct property read:const effectivePostalCode = geo.postalCode || postalCode
 app/api/pro/onboarding/location/route.ts:direct property read:const postalCode = pickString(body.postalCode)
+app/api/pro/openings/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/pro/openings/route.ts:Prisma select/include plaintext field:lng: true,
 app/api/pro/payments/stripe/connect-account/route.ts:Prisma select/include plaintext field:stripeAccountId: true,
 app/api/pro/payments/stripe/connect-account/route.ts:direct property read:const email = typeof user.email === 'string' ? user.email.trim() : ''
 app/api/pro/payments/stripe/connect-account/route.ts:direct property read:if (existingSettings?.stripeAccountId) {
@@ -247,7 +261,11 @@ app/api/pro/waitlist/route.ts:optional direct property read:row.client?.firstNam
 app/api/pro/waitlist/route.ts:optional direct property read:row.client?.lastName ?? null,
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
+app/booking/[id]/page.tsx:Prisma select/include plaintext field:lat: true,
+app/booking/[id]/page.tsx:Prisma select/include plaintext field:lng: true,
 app/client/(gated)/_data/getClientHomeData.ts:Prisma select/include plaintext field:
+app/client/(gated)/_data/getClientHomeData.ts:Prisma select/include plaintext field:lat: true,
+app/client/(gated)/_data/getClientHomeData.ts:Prisma select/include plaintext field:lng: true,
 app/client/(gated)/aftercare/page.tsx:Prisma select/include plaintext field:
 app/client/(gated)/aftercare/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/client/(gated)/aftercare/page.tsx:Prisma select/include plaintext field:lastName: true,
@@ -417,6 +435,8 @@ app/pro/clients/page.tsx:direct property read:{client.user?.email ? client.user.
 app/pro/clients/page.tsx:optional direct property read:{client.user?.email ? client.user.email : 'No email'}
 app/pro/locations/LocationsClient.tsx:direct property read:if (l.postalCode) return `ZIP ${l.postalCode}`
 app/pro/locations/LocationsClient.tsx:direct property read:{pickedPlace.postalCode ? ` • ${pickedPlace.postalCode}` : null}
+app/pro/locations/page.tsx:Prisma select/include plaintext field:lat: true,
+app/pro/locations/page.tsx:Prisma select/include plaintext field:lng: true,
 app/pro/locations/page.tsx:Prisma select/include plaintext field:postalCode: true,
 app/pro/membership/page.tsx:direct property read:hasBillingAccount={Boolean(sub?.stripeCustomerId)}
 app/pro/membership/page.tsx:optional direct property read:hasBillingAccount={Boolean(sub?.stripeCustomerId)}
@@ -436,10 +456,16 @@ app/pro/verification/page.tsx:Prisma select/include plaintext field:firstName: t
 app/pro/verification/page.tsx:Prisma select/include plaintext field:lastName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:firstName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:lastName: true,
+lib/availability/core/placement.ts:Prisma select/include plaintext field:lat: true,
+lib/availability/core/placement.ts:Prisma select/include plaintext field:lng: true,
 lib/availability/data/offeringContext.ts:Prisma select/include plaintext field:firstName: true,
 lib/availability/data/offeringContext.ts:Prisma select/include plaintext field:lastName: true,
 lib/availability/data/otherPros.ts:Prisma select/include plaintext field:firstName: true,
 lib/availability/data/otherPros.ts:Prisma select/include plaintext field:lastName: true,
+lib/availability/data/otherPros.ts:Prisma select/include plaintext field:lat: true,
+lib/availability/data/otherPros.ts:Prisma select/include plaintext field:lng: true,
+lib/availability/data/otherPros.ts:Prisma where/order plaintext field:lat: {
+lib/availability/data/otherPros.ts:Prisma where/order plaintext field:lng: {
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:email: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:firstName: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:lastName: true,
@@ -451,6 +477,8 @@ lib/booking/createProBookingWithClient.ts:direct property read:const lastName = 
 lib/booking/createProBookingWithClient.ts:direct property read:const recipientEmail = asTrimmedString(clientSnapshot.email)
 lib/booking/createProBookingWithClient.ts:direct property read:if (args.email && !args.phone) return ContactMethod.EMAIL
 lib/booking/createProBookingWithClient.ts:direct property read:if (args.phone && !args.email) return ContactMethod.SMS
+lib/booking/pickLocation.ts:Prisma select/include plaintext field:
+lib/booking/pickLocation.ts:Prisma select/include plaintext field:lng: true,
 lib/booking/resolveProBookingClient.ts:Prisma select/include plaintext field:email: true,
 lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(input.email) ||
 lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(input.firstName) ||
@@ -462,6 +490,8 @@ lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(v
 lib/booking/writeBoundary.ts:Prisma select/include plaintext field:email: true,
 lib/booking/writeBoundary.ts:Prisma select/include plaintext field:firstName: true,
 lib/booking/writeBoundary.ts:Prisma select/include plaintext field:lastName: true,
+lib/booking/writeBoundary.ts:Prisma select/include plaintext field:lat: true,
+lib/booking/writeBoundary.ts:Prisma select/include plaintext field:lng: true,
 lib/booking/writeBoundary.ts:Prisma select/include plaintext field:phone: true,
 lib/booking/writeBoundary.ts:Prisma select/include plaintext field:stripeAccountId: true,
 lib/booking/writeBoundary.ts:direct property read:`${(booking.client?.firstName ?? '').trim()} ${(booking.client?.lastName ?? '').trim()}`.trim()
@@ -496,12 +526,24 @@ lib/currentUser.ts:Prisma select/include plaintext field:email: true,
 lib/currentUser.ts:Prisma select/include plaintext field:firstName: true,
 lib/currentUser.ts:Prisma select/include plaintext field:lastName: true,
 lib/currentUser.ts:Prisma select/include plaintext field:phone: true,
+lib/discovery/nearbyPros.ts:Prisma select/include plaintext field:lat: true,
+lib/discovery/nearbyPros.ts:Prisma select/include plaintext field:lng: true,
+lib/discovery/nearbyPros.ts:Prisma where/order plaintext field:lat: {
+lib/discovery/nearbyPros.ts:Prisma where/order plaintext field:lng: {
 lib/dto/clientBooking.ts:Prisma select/include plaintext field:
 lib/dto/clientBooking.ts:Prisma select/include plaintext field:firstName: true
 lib/dto/clientBooking.ts:Prisma select/include plaintext field:lastName: true
 lib/dto/clientBooking.ts:direct property read:Boolean(b.consultationNotes) ||
 lib/follows/index.ts:Prisma select/include plaintext field:firstName: true,
 lib/follows/index.ts:Prisma select/include plaintext field:lastName: true,
+lib/lastMinute/audience/buildTier3DiscoveryAudience.ts:Prisma select/include plaintext field:lat: true,
+lib/lastMinute/audience/buildTier3DiscoveryAudience.ts:Prisma select/include plaintext field:lng: true,
+lib/lastMinute/audience/buildTier3DiscoveryAudience.ts:Prisma where/order plaintext field:lat: { not: null },
+lib/lastMinute/audience/buildTier3DiscoveryAudience.ts:Prisma where/order plaintext field:lng: { not: null },
+lib/lastMinute/commands/createLastMinuteOpening.ts:Prisma select/include plaintext field:lat: true,
+lib/lastMinute/commands/createLastMinuteOpening.ts:Prisma select/include plaintext field:lng: true,
+lib/lastMinute/openingSelect.ts:Prisma select/include plaintext field:lat: true,
+lib/lastMinute/openingSelect.ts:Prisma select/include plaintext field:lng: true,
 lib/looks/commentSelect.ts:Prisma select/include plaintext field:firstName: true,
 lib/looks/commentSelect.ts:Prisma select/include plaintext field:lastName: true,
 lib/looks/mappers.ts:direct property read:const clientFirst = user.clientProfile?.firstName?.trim() ?? ''
@@ -529,6 +571,8 @@ lib/notifications/proNotifications.ts:Prisma select/include plaintext field:emai
 lib/notifications/proNotifications.ts:Prisma select/include plaintext field:phone: true,
 lib/notifications/proNotifications.ts:direct property read:const profilePhone = normNullableString(professional.phone, 64)
 lib/notifications/proNotifications.ts:direct property read:const userPhone = normNullableString(professional.user.phone, 64)
+lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lat: true,
+lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lng: true,
 lib/profiles/publicProfileFormatting.ts:direct property read:const firstName = trimToNull(input.firstName)
 lib/profiles/publicProfileFormatting.ts:direct property read:const lastName = trimToNull(input.lastName)
 lib/profiles/publicProfileFormatting.ts:direct property read:return trimToNull(input.email) ?? 'Client'
@@ -539,3 +583,7 @@ lib/referral/referralConversion.ts:direct property read:const referredName = ref
 lib/referral/referralConversion.ts:optional direct property read:const referredName = referral.referredClient?.firstName?.trim() || 'Your referral'
 lib/search/index/refreshSearchIndex.ts:Prisma select/include plaintext field:firstName: true,
 lib/search/index/refreshSearchIndex.ts:Prisma select/include plaintext field:lastName: true,
+lib/search/index/refreshSearchIndex.ts:Prisma select/include plaintext field:lat: true,
+lib/search/index/refreshSearchIndex.ts:Prisma select/include plaintext field:lng: true,
+lib/search/index/refreshSearchIndex.ts:Prisma where/order plaintext field:lat: { not: null },
+lib/search/index/refreshSearchIndex.ts:Prisma where/order plaintext field:lng: { not: null },
