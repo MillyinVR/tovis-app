@@ -19,6 +19,7 @@ import { rootTenantContext } from '@/lib/tenant/context'
 import { getRootTenantId } from '@/lib/tenant/resolveTenant'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 export const runtime = 'nodejs'
 
 const DEFAULT_TAKE = 50

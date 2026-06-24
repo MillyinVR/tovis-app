@@ -24,6 +24,7 @@ import {
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const DEFAULT_TAKE = 25
 const MAX_TAKE = 100

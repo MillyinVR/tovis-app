@@ -11,6 +11,7 @@ import { NotificationEventKey, Prisma } from '@prisma/client'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 export const runtime = 'nodejs'
 
 const DEFAULT_TAKE = 100

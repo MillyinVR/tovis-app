@@ -8,6 +8,7 @@ import {
 import { logLooksSocialJobBatchEvent } from '@/lib/observability/looksSocialJobEvents'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const DEFAULT_TAKE = 100
 const MAX_TAKE = 250

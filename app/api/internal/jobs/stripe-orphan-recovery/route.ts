@@ -37,6 +37,7 @@ import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 export const runtime = 'nodejs'
 
 const MIN_AGE_MINUTES = 30

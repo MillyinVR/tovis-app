@@ -28,6 +28,7 @@ import { prisma } from '@/lib/prisma'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 export const runtime = 'nodejs'
 
 const DEFAULT_STALE_PENDING_HOURS = 48
