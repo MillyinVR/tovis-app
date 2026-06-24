@@ -80,6 +80,7 @@ vi.mock('./AftercareForm', () => ({
     existingLastEditedAt,
     existingVersion,
     existingIsFinalized,
+    readOnly,
   }: {
     bookingId: string
     timeZone: string
@@ -95,6 +96,7 @@ vi.mock('./AftercareForm', () => ({
     existingLastEditedAt: string | null
     existingVersion: number | null
     existingIsFinalized: boolean
+    readOnly?: boolean
   }) =>
     React.createElement(
       'div',
@@ -117,6 +119,7 @@ vi.mock('./AftercareForm', () => ({
         'data-existing-version':
           existingVersion == null ? '' : String(existingVersion),
         'data-existing-is-finalized': existingIsFinalized ? 'true' : 'false',
+        'data-read-only': readOnly ? 'true' : 'false',
       },
       'AftercareForm',
     ),
@@ -360,11 +363,11 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     })
   })
 
-  it('redirects back to session hub when booking is terminal or not started', async () => {
+  it('redirects back to session hub when booking is cancelled or not started', async () => {
     await expect(
       renderPage({
         booking: makeBooking({
-          finishedAt: new Date('2026-04-12T21:00:00.000Z'),
+          status: BookingStatus.CANCELLED,
         }),
       }),
     ).rejects.toMatchObject({
@@ -380,6 +383,27 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     ).rejects.toMatchObject({
       href: '/pro/bookings/booking_1/session',
     })
+  })
+
+  it('renders completed bookings as a locked, read-only aftercare summary', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: new Date('2026-04-12T21:00:00.000Z'),
+      }),
+    })
+
+    const markup = renderMarkup(page)
+
+    // Does not redirect — it serves the finished aftercare instead.
+    expect(mocks.redirect).not.toHaveBeenCalled()
+    expect(markup).toContain('This booking is completed.')
+    expect(markup).toContain('data-read-only="true"')
+    // Next-step links on the read-only banner.
+    expect(markup).toContain('/pro/calendar')
+    expect(markup).toContain('/pro/bookings')
+    expect(markup).toContain('/pro/aftercare')
   })
 
   it('redirects back to session hub when session step is not allowed here', async () => {

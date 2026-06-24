@@ -45,7 +45,6 @@ app/client/consultation/[token]/page.tsx|return new Intl.DateTimeFormat(undefine
 app/messages/page.tsx|return new Intl.DateTimeFormat(undefined, {
 app/messages/thread/[id]/ThreadClient.tsx|return new Intl.DateTimeFormat(undefined, {
 app/messages/thread/[id]/page.tsx|return new Intl.DateTimeFormat(undefined, {
-app/pro/aftercare/page.tsx|return value.toLocaleString(undefined, {
 app/pro/bookings/[id]/aftercare/AftercareForm.tsx|const get = (type: Intl.DateTimeFormatPartTypes) =>
 app/pro/bookings/[id]/aftercare/AftercareForm.tsx|const parts = new Intl.DateTimeFormat('en-US', {
 app/pro/bookings/[id]/aftercare/AvailabilityCalendarPopup.tsx|return new Intl.DateTimeFormat('en-US', {
