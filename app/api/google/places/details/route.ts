@@ -1,6 +1,11 @@
 // app/api/google/places/details/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
+import {
+  getGoogleMapsKey,
+  fetchWithTimeout,
+  safeJson,
+  enforceGoogleProxyRateLimit,
+} from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { isAbortError } from '@/lib/http'
 
@@ -71,6 +76,9 @@ function readDisplayNameText(displayName: unknown): string | null {
 
 export async function GET(req: Request) {
   try {
+    const limited = await enforceGoogleProxyRateLimit()
+    if (limited) return limited
+
     const { searchParams } = new URL(req.url)
 
     const placeIdRaw = pickString(searchParams.get('placeId'))

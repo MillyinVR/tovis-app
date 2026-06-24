@@ -1,6 +1,11 @@
 // app/api/google/geocode/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
+import {
+  getGoogleMapsKey,
+  fetchWithTimeout,
+  safeJson,
+  enforceGoogleProxyRateLimit,
+} from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,6 +69,9 @@ function getErrorMessage(data: GoogleGeocodeResponse, fallback: string): string 
 
 export async function GET(req: Request) {
   try {
+    const limited = await enforceGoogleProxyRateLimit()
+    if (limited) return limited
+
     const { searchParams } = new URL(req.url)
 
     const postalCode = pickString(searchParams.get('postalCode'))

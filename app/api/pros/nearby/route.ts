@@ -1,6 +1,6 @@
 // app/api/pros/nearby/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { loadNearbyPros } from '@/lib/discovery/nearbyPros'
+import { loadNearbyPros, toPublicNearbyProCard } from '@/lib/discovery/nearbyPros'
 import { clampInt } from '@/lib/pick'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
 import { asTrimmedString } from '@/lib/guards'
@@ -88,9 +88,11 @@ export async function GET(req: Request) {
       await resolveTenantContextForRequest(req),
     )
 
+    // Redact exact address + coordinates before returning — this route is
+    // public/unauthenticated. Distance is already computed from exact coords.
     return jsonOk({
       ok: true,
-      pros,
+      pros: pros.map(toPublicNearbyProCard),
     })
   } catch (e) {
     console.error('GET /api/pros/nearby error', e)

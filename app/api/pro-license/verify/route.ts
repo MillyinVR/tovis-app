@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
+import { getCurrentUser } from '@/lib/currentUser'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 
 // States with automated verification (backed by DCA BreEZe API).
 const AUTOMATED_STATES = new Set(['CA'])
@@ -208,6 +210,24 @@ function isProfession(value: string): value is Profession {
 
 export async function POST(req: Request) {
   try {
+    // This route proxies the CA DCA BreEZe government API using the platform's
+    // secret credentials and returns licensee PII. Require an authenticated user and
+    // throttle per-user so it can't be used to enumerate licensees or burn the
+    // government API quota.
+    const user = await getCurrentUser()
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: 'Authentication required.' },
+        { status: 401 },
+      )
+    }
+
+    const limited = await enforceRateLimit({
+      bucket: 'pro-license:verify',
+      identity: await rateLimitIdentity(user.id),
+    })
+    if (limited) return limited
+
     const body = (await req.json().catch(() => ({}))) as Partial<VerifyReq>
 
     const state = String(body.state ?? '').trim().toUpperCase()
@@ -340,7 +360,9 @@ export async function POST(req: Request) {
                 : null,
           }
         : null,
-      raw: data, // for audit/demo; later store a snapshot server-side
+      // NOTE: the full upstream `data` payload is intentionally NOT returned —
+      // it carries unredacted government record fields. If an audit snapshot is
+      // needed, persist it server-side rather than leaking it to the client.
     })
   } catch (error: unknown) {
     return NextResponse.json(

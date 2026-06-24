@@ -43,9 +43,18 @@ vi.mock('@/app/api/_utils', () => ({
   },
 }))
 
-vi.mock('@/lib/discovery/nearbyPros', () => ({
-  loadNearbyPros: mocks.loadNearbyPros,
-}))
+// Keep the real `toPublicNearbyProCard` redaction; only stub the DB loader.
+vi.mock('@/lib/discovery/nearbyPros', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/discovery/nearbyPros')>(
+      '@/lib/discovery/nearbyPros',
+    )
+
+  return {
+    ...actual,
+    loadNearbyPros: mocks.loadNearbyPros,
+  }
+})
 
 vi.mock('@/lib/tenant', () => ({
   resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
@@ -115,8 +124,8 @@ describe('app/api/pros/nearby/route.ts', () => {
           state: 'CA',
           timeZone: 'America/Los_Angeles',
           placeId: 'place_2',
-          lat: 32.72,
-          lng: -117.16,
+          lat: 32.7234567,
+          lng: -117.1638421,
           isPrimary: true,
           workingHours: {},
         },
@@ -127,8 +136,8 @@ describe('app/api/pros/nearby/route.ts', () => {
           state: 'CA',
           timeZone: 'America/Los_Angeles',
           placeId: 'place_2',
-          lat: 32.72,
-          lng: -117.16,
+          lat: 32.7234567,
+          lng: -117.1638421,
           isPrimary: true,
           workingHours: {},
         },
@@ -172,13 +181,15 @@ describe('app/api/pros/nearby/route.ts', () => {
           ratingCount: 9,
           minPrice: 85,
           supportsMobile: false,
+          // Public payload: exact street address + placeId stripped, coords
+          // coarsened to a ~1.1km grid. Distance (0.8) stays exact.
           closestLocation: {
             id: 'loc_2',
-            formattedAddress: '123 Main St',
+            formattedAddress: null,
             city: 'San Diego',
             state: 'CA',
             timeZone: 'America/Los_Angeles',
-            placeId: 'place_2',
+            placeId: null,
             lat: 32.72,
             lng: -117.16,
             isPrimary: true,
@@ -186,11 +197,11 @@ describe('app/api/pros/nearby/route.ts', () => {
           },
           primaryLocation: {
             id: 'loc_2',
-            formattedAddress: '123 Main St',
+            formattedAddress: null,
             city: 'San Diego',
             state: 'CA',
             timeZone: 'America/Los_Angeles',
-            placeId: 'place_2',
+            placeId: null,
             lat: 32.72,
             lng: -117.16,
             isPrimary: true,

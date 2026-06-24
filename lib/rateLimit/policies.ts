@@ -18,6 +18,7 @@ export type RateLimitBucket =
   | 'pro:locations:write'
   | 'pro:working-hours:write'
   | 'google:proxy'
+  | 'pro-license:verify'
   | 'messages:send'
   | 'messages:read'
   | 'nfc:tap'
@@ -143,6 +144,12 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 60,
     windowSeconds: 60,
     prefix: 'rl:google:proxy',
+    mode: 'redis-only',
+  },
+  'pro-license:verify': {
+    limit: 20,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:pro-license:verify',
     mode: 'redis-only',
   },
   'messages:send': {

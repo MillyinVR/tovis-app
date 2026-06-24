@@ -5,7 +5,10 @@
  * Single source of truth for Google Maps / Places / Timezone calls.
  */
 
+import type { NextResponse } from 'next/server'
+
 import { isRecord } from '@/lib/guards'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 
 const DEFAULT_TIMEOUT_MS = 8000
 const MIN_GOOGLE_RADIUS_METERS = 1
@@ -19,6 +22,21 @@ export function getGoogleMapsKey(): string {
   }
 
   return key
+}
+
+/**
+ * Per-IP throttle for the unauthenticated Google proxy routes (geocode,
+ * places autocomplete/details, timezone). These routes inject the platform's
+ * secret Maps key server-side, so without a limit anyone can use them as a free
+ * proxy and run up the Google bill or exhaust quota. They can't require auth — the
+ * signup address flow calls them before an account exists — so we throttle by
+ * trusted client IP. Returns a 429 response to return as-is, or null to proceed.
+ */
+export async function enforceGoogleProxyRateLimit(): Promise<NextResponse | null> {
+  return enforceRateLimit({
+    bucket: 'google:proxy',
+    identity: await rateLimitIdentity(),
+  })
 }
 
 /**
