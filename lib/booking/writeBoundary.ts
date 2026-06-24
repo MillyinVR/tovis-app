@@ -13181,6 +13181,157 @@ export async function declineClientAftercareNextAppointment(
   })
 }
 
+type SendExistingAftercareDraftArgs = {
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+}
+
+/**
+ * Send an already-saved aftercare draft to the client straight from the pro's
+ * aftercare list (the "Send" action). Flips the draft to sent, queues the
+ * magic-link delivery, and raises the AFTERCARE_READY client notification by
+ * reusing the exact helpers the full upsert path uses — so there is a single
+ * send SSOT and no duplicated delivery/notification logic. Idempotent: a no-op
+ * when the summary was already sent. Foreign/missing bookings 404 uniformly.
+ */
+export async function sendExistingAftercareDraft(
+  args: SendExistingAftercareDraftArgs,
+): Promise<{ ok: true }> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+
+  return prisma.$transaction(async (tx) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: AFTERCARE_UPSERT_BOOKING_SELECT,
+    })
+
+    if (!booking || booking.professionalId !== args.professionalId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    const aftercare = booking.aftercareSummary
+    if (!aftercare) {
+      throw bookingError('AFTERCARE_NOT_COMPLETED', {
+        message: 'No aftercare draft exists to send.',
+        userMessage: 'Start an aftercare summary before sending it.',
+      })
+    }
+
+    // Already sent → idempotent success (the list simply hadn't refreshed yet).
+    if (aftercare.sentToClientAt) {
+      return { ok: true as const }
+    }
+
+    await maybeCreateAftercareAccessDeliveryInBoundary({
+      tx,
+      booking,
+      aftercareId: aftercare.id,
+      aftercareVersion: aftercare.version,
+      actorUserId: args.actorUserId,
+      shouldAttempt: true,
+      resendMode: 'INITIAL_SEND',
+    })
+
+    await tx.aftercareSummary.update({
+      where: { id: aftercare.id },
+      data: { sentToClientAt: new Date(), draftSavedAt: null },
+    })
+
+    const notes = (aftercare.notes ?? '').trim()
+    await createUpdateClientNotification({
+      tx,
+      clientId: booking.clientId,
+      bookingId: booking.id,
+      aftercareId: aftercare.id,
+      eventKey: NotificationEventKey.AFTERCARE_READY,
+      title: `Aftercare: ${booking.service?.name ?? 'Your appointment'}`,
+      body: notes.length > 0 ? notes.slice(0, 240) : null,
+      dedupeKey: makeAftercareClientNotifDedupeKey(booking.id),
+      href: `/client/bookings/${booking.id}?step=aftercare`,
+      data: {
+        bookingId: booking.id,
+        aftercareId: aftercare.id,
+        notificationReason: 'AFTERCARE_SENT',
+      },
+    })
+
+    return { ok: true as const }
+  })
+}
+
+type NudgeAftercareRebookArgs = {
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+}
+
+/**
+ * Re-ping a client about an aftercare the pro already sent (the "Nudge" action
+ * on sent cards). Re-delivers the aftercare magic link — RESEND revokes the
+ * outstanding token and issues a fresh one — and refreshes the AFTERCARE_READY
+ * notification. Only valid once the summary has been sent; spam protection is
+ * enforced by the caller's rate limit.
+ */
+export async function nudgeAftercareRebook(
+  args: NudgeAftercareRebookArgs,
+): Promise<{ ok: true }> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+
+  return prisma.$transaction(async (tx) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: AFTERCARE_UPSERT_BOOKING_SELECT,
+    })
+
+    if (!booking || booking.professionalId !== args.professionalId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    const aftercare = booking.aftercareSummary
+    if (!aftercare || !aftercare.sentToClientAt) {
+      throw bookingError('AFTERCARE_NOT_COMPLETED', {
+        message: 'Aftercare must be sent before it can be nudged.',
+        userMessage: 'Send the aftercare before nudging the client.',
+      })
+    }
+
+    await maybeCreateAftercareAccessDeliveryInBoundary({
+      tx,
+      booking,
+      aftercareId: aftercare.id,
+      aftercareVersion: aftercare.version,
+      actorUserId: args.actorUserId,
+      shouldAttempt: true,
+      resendMode: 'RESEND',
+    })
+
+    const notes = (aftercare.notes ?? '').trim()
+    await createUpdateClientNotification({
+      tx,
+      clientId: booking.clientId,
+      bookingId: booking.id,
+      aftercareId: aftercare.id,
+      eventKey: NotificationEventKey.AFTERCARE_READY,
+      title: `Aftercare: ${booking.service?.name ?? 'Your appointment'}`,
+      body: notes.length > 0 ? notes.slice(0, 240) : null,
+      dedupeKey: makeAftercareClientNotifDedupeKey(booking.id),
+      href: `/client/bookings/${booking.id}?step=aftercare`,
+      data: {
+        bookingId: booking.id,
+        aftercareId: aftercare.id,
+        notificationReason: 'AFTERCARE_NUDGE',
+      },
+    })
+
+    return { ok: true as const }
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Stripe checkout — single internal boundary
 // ---------------------------------------------------------------------------

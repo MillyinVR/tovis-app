@@ -131,4 +131,61 @@ export const COPY = {
     hintNotes: 'Aftercare notes',
     openCta: 'Open',
   },
+
+  // Pro-side "all aftercare" list at /pro/aftercare. The list a pro lands on to
+  // see every summary they've sent, saved, or closed out — recognized by its
+  // before & after, with the rebook nudge surfaced. GLOSSARY: user-facing copy
+  // says "booking", so the design's "Visit"/"Next visit" become "Booking"/
+  // "Next booking" here.
+  proAftercareList: {
+    eyebrow: 'Studio · Aftercare',
+    title: 'Aftercare',
+    subtitle:
+      'Summaries you’ve sent and saved for your bookings. Recognize each one by its before & after.',
+    countSuffix: 'shown',
+
+    summaryToSend: 'to send',
+    summaryAwaiting: 'awaiting rebook',
+    summaryOverdue: 'overdue',
+
+    searchPlaceholder: 'Search client or service',
+    searchLabel: 'Search aftercare',
+    sortLabel: 'Sort',
+    sortNeedsAction: 'Needs action',
+    sortRecent: 'Recent',
+
+    filterAll: 'All',
+    filterDrafts: 'Drafts',
+    filterSent: 'Sent',
+    filterFinished: 'Finished',
+
+    statusDraft: 'Draft',
+    statusSent: 'Sent',
+    statusFinished: 'Finished',
+
+    bookingChipLabel: 'Booking',
+    rebookRecommended: 'Rebook',
+    rebookOverdue: 'Overdue',
+    rebookNext: 'Next booking',
+
+    actionSend: 'Send',
+    actionNudge: 'Nudge',
+    actionOpen: 'Open',
+
+    agoSaved: 'Saved',
+    agoSent: 'Sent',
+    agoBooked: 'Booked',
+    agoSuffix: 'ago',
+
+    clientFallback: 'Client',
+    serviceFallback: 'Service',
+
+    emptyTitle: 'No aftercare summaries yet',
+    emptyBody:
+      'Drafts and sent summaries will appear here once you start using aftercare on bookings.',
+    emptyFiltered: 'No aftercare matches your search or filter.',
+
+    sendError: 'Couldn’t send that aftercare. Please try again.',
+    nudgeError: 'Couldn’t send that nudge. Please try again.',
+  },
 } as const
