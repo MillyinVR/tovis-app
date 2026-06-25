@@ -34,6 +34,7 @@ import {
   isOpenNowAtLocation,
   type DiscoveryLocationDto,
 } from '@/lib/discovery/nearby'
+import { coarsenPublicCoordinate } from '@/lib/discovery/publicCoordinates'
 import { prismaRead } from '@/lib/prisma'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
@@ -137,6 +138,11 @@ export function parseSearchProsParams(
   }
 }
 
+// `/api/search/pros` is unauthenticated, so the location preview must be redacted
+// to neighborhood precision — same posture as `/api/pros/nearby`. The exact
+// street address (formattedAddress/placeId) is stripped and coordinates coarsened;
+// distanceMiles is computed in SQL from exact coords before this mapping, so the
+// displayed distance stays accurate while the map pin is approximate.
 function mapLocationPreview(
   location: DiscoveryLocationDto | null,
 ): SearchProLocationPreviewDto | null {
@@ -144,13 +150,13 @@ function mapLocationPreview(
 
   return {
     id: location.id,
-    formattedAddress: location.formattedAddress,
+    formattedAddress: null,
     city: location.city,
     state: location.state,
     timeZone: location.timeZone,
-    placeId: location.placeId,
-    lat: location.lat,
-    lng: location.lng,
+    placeId: null,
+    lat: coarsenPublicCoordinate(location.lat),
+    lng: coarsenPublicCoordinate(location.lng),
     isPrimary: location.isPrimary,
   }
 }
