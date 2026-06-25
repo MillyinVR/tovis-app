@@ -15,6 +15,7 @@
 import { readOptionalEnv } from '@/lib/env'
 import { readPostmarkEmailConfig } from '@/lib/notifications/config'
 import { readSentryDsn } from '@/lib/observability/sentryConfig'
+import { isAeadKeyringValid } from '@/lib/security/crypto/aead'
 
 type RequiredEnvCheck = {
   name: string
@@ -41,6 +42,19 @@ const REQUIRED_PRODUCTION_ENV: readonly RequiredEnvCheck[] = [
     isPresent: () => readPostmarkEmailConfig() !== null,
     hint: 'set POSTMARK_SERVER_TOKEN + POSTMARK_NOTIFICATION_FROM_EMAIL (or POSTMARK_FROM_EMAIL / EMAIL_FROM)',
   },
+  {
+    // Read lazily by the AEAD layer (first PII op), so a dropped/mangled keyring
+    // would otherwise boot green + pass smoke and only throw on the first
+    // allergy/notes/phone read — a subsystem silently going dark post-deploy.
+    name: 'PII encryption keyring',
+    isPresent: () => isAeadKeyringValid(),
+    hint: 'set PII_AEAD_KEYS_JSON to a JSON object of base64 32-byte keys',
+  },
+  {
+    name: 'Database URL',
+    isPresent: () => Boolean(readOptionalEnv('DATABASE_URL')),
+    hint: 'set DATABASE_URL (pooled Postgres connection)',
+  },
 ]
 
 /**
@@ -64,10 +78,41 @@ export function collectMissingProductionEnv(): string[] {
 }
 
 /**
+ * Vercel scheduled (cron) invocations authenticate with `CRON_SECRET`, but the
+ * job-auth guard prefers `INTERNAL_JOB_SECRET` when set. If both are set and
+ * DIFFER, every cron 401s silently — the whole drift-healing layer (Stripe
+ * reconciliation/requeue/orphan-recovery, notification drain, hold cleanup) goes
+ * dark with no error. Warn loudly so the misconfig is visible. Not fail-closed:
+ * either secret alone is valid, so this is a divergence footgun, not a missing
+ * requirement.
+ */
+export function warnOnDivergentCronSecrets(): void {
+  if (!isProductionRuntime()) return
+
+  const internal = readOptionalEnv('INTERNAL_JOB_SECRET')
+  const cron = readOptionalEnv('CRON_SECRET')
+
+  if (internal && cron && internal !== cron) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        app: 'tovis',
+        namespace: 'startup',
+        event: 'divergent_cron_secrets',
+        message:
+          'INTERNAL_JOB_SECRET and CRON_SECRET are both set but differ. The job guard prefers INTERNAL_JOB_SECRET, but Vercel cron sends CRON_SECRET — every scheduled job will 401. Set them to the same value (or unset INTERNAL_JOB_SECRET).',
+      }),
+    )
+  }
+}
+
+/**
  * Throw when a production server is missing any required env var. No-op outside
  * production. Call once at startup (instrumentation.register).
  */
 export function validateProductionStartupEnv(): void {
+  warnOnDivergentCronSecrets()
+
   const missing = collectMissingProductionEnv()
   if (missing.length === 0) return
 
