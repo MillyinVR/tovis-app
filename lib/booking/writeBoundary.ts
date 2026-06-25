@@ -68,9 +68,11 @@ import {
 import { bookingError, type BookingErrorCode } from '@/lib/booking/errors'
 import {
   HOLD_MINUTES,
+  HOLD_OVERLAP_CONSTRAINT_NAME,
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
+import { isExclusionConstraintError } from '@/lib/prismaErrors'
 import {
   addMinutes,
   durationOrFallback,
@@ -6891,17 +6893,30 @@ afterHoldPolicyMs = Date.now()
       meta: buildMeta(true),
     }
   } catch (error: unknown) {
-    if (
+    // P2002 = exact-start unique collision; 23P01 = overlapping-range GIST
+    // EXCLUDE backstop (BookingHold_no_active_professional_overlap). Both mean
+    // another hold/booking won the slot under the schedule lock; surface a clean
+    // TIME_HELD conflict rather than a 500.
+    const isExactStartCollision =
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
-    ) {
+    const isOverlapCollision = isExclusionConstraintError(
+      error,
+      HOLD_OVERLAP_CONSTRAINT_NAME,
+    )
+
+    if (isExactStartCollision || isOverlapCollision) {
+      const conflictKind = isExactStartCollision
+        ? 'exact_start'
+        : 'overlap_range'
 
             afterHoldInsertMs = Date.now()
       afterScheduleVersionMs = afterHoldInsertMs
 
       logHoldCreateTiming(
         buildHoldCreateTiming('p2002_conflict', {
-          prismaCode: error.code,
+          prismaCode: isExactStartCollision ? 'P2002' : '23P01',
+          conflictKind,
         }),
       )
       logHoldConflict({
@@ -6915,7 +6930,8 @@ afterHoldPolicyMs = Date.now()
         clientId,
         clientAddressId,
         meta: {
-          prismaCode: error.code,
+          prismaCode: isExactStartCollision ? 'P2002' : '23P01',
+          conflictKind,
         },
       })
 

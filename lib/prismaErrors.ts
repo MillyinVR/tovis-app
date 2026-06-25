@@ -17,3 +17,24 @@ export function isUniqueConstraintError(
     error.code === 'P2002'
   )
 }
+
+/**
+ * True for a Postgres GIST EXCLUDE constraint violation (SQLSTATE 23P01) raised
+ * by the named constraint. Prisma does not map 23P01 to a dedicated error code
+ * for typed queries, so it surfaces as a known- or unknown-request error whose
+ * message carries the constraint name; we match on that. Used by the booking
+ * write boundary to convert an overlap-exclusion backstop trip into a clean
+ * conflict instead of an opaque 500.
+ */
+export function isExclusionConstraintError(
+  error: unknown,
+  constraintName: string,
+): boolean {
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError ||
+    error instanceof Prisma.PrismaClientUnknownRequestError
+  ) {
+    return error.message.includes(constraintName)
+  }
+  return false
+}
