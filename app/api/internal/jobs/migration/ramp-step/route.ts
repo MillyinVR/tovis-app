@@ -15,6 +15,7 @@ import {
 import { runRampStep } from '@/lib/migration/rampStepJob'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 export const runtime = 'nodejs'
 
 async function runJob(req: Request) {

@@ -14,6 +14,7 @@ import {
 import { runCalendarResync } from '@/lib/migration/calendarResync'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 export const runtime = 'nodejs'
 
 async function runJob(req: Request) {

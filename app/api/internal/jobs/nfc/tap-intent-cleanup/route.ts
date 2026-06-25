@@ -11,6 +11,7 @@ import { pruneExpiredTapIntents } from '@/lib/nfc/cleanupTapIntents'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 async function handle(req: Request) {
   if (!isAuthorizedJobRequest(req)) {

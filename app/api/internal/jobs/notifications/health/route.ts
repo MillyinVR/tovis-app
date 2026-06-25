@@ -15,6 +15,7 @@ import { evaluateNotificationDeliveryHealth } from '@/lib/notifications/delivery
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 async function runJob(req: Request) {
   const secret = getInternalJobSecret()
