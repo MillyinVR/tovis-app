@@ -10,6 +10,7 @@ import {
   matchesDiscoveryOfferingFilters,
   type DiscoveryLocationDto,
 } from '@/lib/discovery/nearby'
+import { coarsenPublicCoordinate } from '@/lib/discovery/publicCoordinates'
 import { prisma } from '@/lib/prisma'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
@@ -68,20 +69,6 @@ export type NearbyProCard = {
   supportsMobile: boolean
   closestLocation: DiscoveryLocationDto
   primaryLocation: DiscoveryLocationDto
-}
-
-// `/api/pros/nearby` is unauthenticated. Exact (rooftop-precision) coordinates
-// reverse-geocode to a pro's address — which for mobile/home-based pros is their
-// residence — and `formattedAddress`/`placeId` are the address outright. So the
-// public payload must carry only coarse, neighborhood-level location. Distance
-// is computed server-side from the exact coordinates BEFORE this redaction, so
-// the displayed distance stays accurate; only the map pin is approximate.
-const PUBLIC_COORD_DECIMALS = 2 // ~1.1 km grid
-
-function coarsenPublicCoordinate(value: number | null): number | null {
-  if (value == null || !Number.isFinite(value)) return null
-  const factor = 10 ** PUBLIC_COORD_DECIMALS
-  return Math.round(value * factor) / factor
 }
 
 function toPublicDiscoveryLocation(
