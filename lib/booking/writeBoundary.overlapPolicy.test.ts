@@ -549,6 +549,8 @@ function mockNoConflictsAllowed() {
 
   mocks.decideBookingOverlapPermission.mockReturnValue({
     ok: true,
+    mode: 'NO_OVERLAP',
+    conflicts: [],
   })
 }
 
@@ -1077,6 +1079,16 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
 
     mocks.decideBookingOverlapPermission.mockReturnValueOnce({
       ok: true,
+      mode: 'PRO_AUTHORIZED_OVERLAP',
+      conflicts: [
+        {
+          kind: 'BOOKING',
+          id: 'conflict_booking_1',
+          professionalId: 'pro_1',
+          startsAt: new Date('2026-01-01T18:00:00.000Z'),
+          endsAt: new Date('2026-01-01T19:00:00.000Z'),
+        },
+      ],
     })
 
     await expect(
@@ -1272,6 +1284,16 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
 
     mocks.decideBookingOverlapPermission.mockReturnValueOnce({
       ok: true,
+      mode: 'PRO_AUTHORIZED_OVERLAP',
+      conflicts: [
+        {
+          kind: 'BOOKING',
+          id: 'conflict_booking_1',
+          professionalId: 'pro_1',
+          startsAt: new Date('2026-01-01T18:00:00.000Z'),
+          endsAt: new Date('2026-01-01T19:00:00.000Z'),
+        },
+      ],
     })
 
     await expect(
@@ -1366,6 +1388,16 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
 
     mocks.decideBookingOverlapPermission.mockReturnValueOnce({
       ok: true,
+      mode: 'PRO_AUTHORIZED_OVERLAP',
+      conflicts: [
+        {
+          kind: 'BOOKING',
+          id: 'conflict_booking_1',
+          professionalId: 'pro_1',
+          startsAt: new Date('2026-01-01T18:00:00.000Z'),
+          endsAt: new Date('2026-01-01T19:00:00.000Z'),
+        },
+      ],
     })
 
     mocks.txBookingCreate.mockResolvedValueOnce({
@@ -1468,6 +1500,16 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
 
     mocks.decideBookingOverlapPermission.mockReturnValueOnce({
       ok: true,
+      mode: 'PRO_AUTHORIZED_OVERLAP',
+      conflicts: [
+        {
+          kind: 'BOOKING',
+          id: 'conflict_booking_1',
+          professionalId: 'pro_1',
+          startsAt: new Date('2026-01-01T18:00:00.000Z'),
+          endsAt: new Date('2026-01-01T19:00:00.000Z'),
+        },
+      ],
     })
 
     mocks.txBookingCreate.mockResolvedValueOnce({

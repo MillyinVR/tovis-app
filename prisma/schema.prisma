@@ -2428,6 +2428,12 @@ model Booking {
   scheduledFor DateTime
   status       BookingStatus @default(PENDING)
 
+  // When true, this booking is exempt from the overlap EXCLUDE constraint
+  // (Booking_no_active_professional_overlap). Set only by the write boundary when
+  // a PRO/ADMIN intentionally double-books, or an aftercare pre-selected slot
+  // overlaps — derived from the overlap policy decision, never from client input.
+  allowsOverlap Boolean @default(false)
+
   // Booking mode: SALON or MOBILE
   locationType ServiceLocationType
 
@@ -2779,6 +2785,12 @@ model BookingHold {
 
   scheduledFor DateTime
   expiresAt    DateTime
+
+  // Mirrors Booking.allowsOverlap: a hold flagged for an authorized overlap is
+  // exempt from BookingHold_no_active_professional_overlap. Defaults false;
+  // clients can't authorize overlap and pros create bookings directly (no hold),
+  // so this is effectively always false today — kept for symmetry/future use.
+  allowsOverlap Boolean @default(false)
 
   locationType ServiceLocationType
 

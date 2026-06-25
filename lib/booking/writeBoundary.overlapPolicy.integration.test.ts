@@ -339,6 +339,8 @@ describe('writeBoundary overlap policy integration', () => {
 
     mocks.decideBookingOverlapPermission.mockReturnValue({
       ok: true,
+      mode: 'NO_OVERLAP',
+      conflicts: [],
     })
 
     // Default: no opening incentive (zero discount). Tests that exercise a discount override this.

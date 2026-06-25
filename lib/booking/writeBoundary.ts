@@ -67,6 +67,7 @@ import {
 } from '@/lib/booking/scheduleTransaction'
 import { bookingError, type BookingErrorCode } from '@/lib/booking/errors'
 import {
+  BOOKING_OVERLAP_CONSTRAINT_NAME,
   HOLD_MINUTES,
   HOLD_OVERLAP_CONSTRAINT_NAME,
   MAX_BUFFER_MINUTES,
@@ -4750,7 +4751,7 @@ async function enforceBookingOverlapPolicy(args: {
   excludeHoldId?: string | null
   excludeBookingId?: string | null
   now: Date
-}): Promise<void> {
+}): Promise<{ allowsOverlap: boolean }> {
   const conflicts = await findSchedulingConflicts({
     tx: args.tx,
     professionalId: args.requestedWindow.professionalId,
@@ -4769,7 +4770,12 @@ async function enforceBookingOverlapPolicy(args: {
   })
 
   if (decision.ok) {
-    return
+    // An authorized overlap (PRO/ADMIN double-book, or an aftercare pre-selected
+    // slot landing on a conflict) must be exempted from the DB overlap EXCLUDE
+    // constraint, or the booking write hits a raw 23P01. A no-conflict booking
+    // stays bound by the constraint (allowsOverlap = false), preserving the
+    // durable no-double-book guarantee against races and direct writes.
+    return { allowsOverlap: decision.conflicts.length > 0 }
   }
 
   logOverlapDecisionBlocked({
@@ -8288,7 +8294,7 @@ async function performLockedFinalizeBookingFromHold(args: {
         })
       : null
 
-  await enforceBookingOverlapPolicy({
+  const overlapDecision = await enforceBookingOverlapPolicy({
     tx: args.tx,
     actor: {
       kind: 'CLIENT',
@@ -8401,6 +8407,7 @@ async function performLockedFinalizeBookingFromHold(args: {
         ...tenantAttribution,
         scheduledFor: requestedStart,
         status: args.initialStatus,
+        allowsOverlap: overlapDecision.allowsOverlap,
         source: args.source,
         discoveryProvenance,
         // Remix attribution: the validated look this booking was started from.
@@ -8511,6 +8518,13 @@ async function performLockedFinalizeBookingFromHold(args: {
         }
       }
 
+      throw bookingError('TIME_NOT_AVAILABLE')
+    }
+
+    // 23P01: the DB overlap EXCLUDE constraint rejected the insert — a real
+    // conflict the app check missed (a race against a concurrent booking). Map
+    // to a clean domain error instead of leaking a raw Prisma 500.
+    if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
       throw bookingError('TIME_NOT_AVAILABLE')
     }
 
@@ -8881,7 +8895,7 @@ async function performLockedCreateProBooking(args: {
     })
   }
 
-  await enforceBookingOverlapPolicy({
+  const overlapDecision = await enforceBookingOverlapPolicy({
     tx: args.tx,
     actor: {
       kind: 'PRO',
@@ -8952,6 +8966,7 @@ async function performLockedCreateProBooking(args: {
         ...tenantAttribution,
         scheduledFor: requestedStart,
         status: getProCreatedBookingStatus(),
+        allowsOverlap: overlapDecision.allowsOverlap,
         source: importMode ? BookingSource.IMPORTED : BookingSource.DISCOVERY,
         creationIdempotencyKey: args.idempotencyKey ?? null,
 
@@ -9034,6 +9049,11 @@ async function performLockedCreateProBooking(args: {
         if (replayed) return replayed
       }
 
+      throw bookingError('TIME_BOOKED')
+    }
+
+    // 23P01: DB overlap EXCLUDE rejected the insert (race the app check missed).
+    if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
       throw bookingError('TIME_BOOKED')
     }
 
@@ -9395,7 +9415,7 @@ assertCanCreateRebookFromSourceBooking({
     clientId: source.clientId,
   })
 
-  await enforceBookingOverlapPolicy({
+  const overlapDecision = await enforceBookingOverlapPolicy({
     tx: args.tx,
     actor:
       args.clientId
@@ -9521,6 +9541,7 @@ assertCanCreateRebookFromSourceBooking({
 
         scheduledFor: requestedStart,
         status: args.initialStatus,
+        allowsOverlap: overlapDecision.allowsOverlap,
         source: BookingSource.AFTERCARE,
         rebookOfBookingId: source.id,
 
@@ -9601,6 +9622,11 @@ assertCanCreateRebookFromSourceBooking({
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
+      throw bookingError('TIME_BOOKED')
+    }
+
+    // 23P01: DB overlap EXCLUDE rejected the insert (race the app check missed).
+    if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
       throw bookingError('TIME_BOOKED')
     }
 
@@ -10146,8 +10172,11 @@ if (args.notifyClient) {
     })
   }
 
+  // Only re-evaluated (and thus reset) when the occupied range actually changes;
+  // otherwise the booking keeps its current allowsOverlap value.
+  let rescheduleAllowsOverlap: boolean | undefined
   if (occupancyChanged) {
-    await enforceBookingOverlapPolicy({
+    const overlapDecision = await enforceBookingOverlapPolicy({
       tx: args.tx,
       actor: {
         kind: 'PRO',
@@ -10170,6 +10199,7 @@ if (args.notifyClient) {
       excludeBookingId: existing.id,
       now: args.now,
     })
+    rescheduleAllowsOverlap = overlapDecision.allowsOverlap
   }
 
   if (normalizedServiceItems) {
@@ -10231,6 +10261,12 @@ if (args.notifyClient) {
       // replaces (or clears) whatever an earlier override left behind.
       ...(schedulingDecision.appliedOverrides.length > 0
         ? { clientVisibleOverrideNote: normalizedOverrideReason }
+        : {}),
+      // Re-stamp overlap exemption when the occupied range changed: a pro who
+      // reschedules onto an occupied slot is an authorized overlap; one who
+      // reschedules into a free slot returns the booking to constraint coverage.
+      ...(rescheduleAllowsOverlap !== undefined
+        ? { allowsOverlap: rescheduleAllowsOverlap }
         : {}),
       scheduledFor: finalStart,
       bufferMinutes: finalBuffer,
