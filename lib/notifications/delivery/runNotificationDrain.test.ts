@@ -196,6 +196,7 @@ describe('lib/notifications/delivery/runNotificationDrain', () => {
       claim: {
         now: NOW,
         batchSize: 250,
+        leaseMs: 120_000,
       },
     })
 
@@ -211,7 +212,9 @@ describe('lib/notifications/delivery/runNotificationDrain', () => {
     await drainDueNotifications()
 
     expect(mocks.processDueDeliveries).toHaveBeenCalledWith(
-      expect.objectContaining({ claim: { now: NOW, batchSize: 100 } }),
+      expect.objectContaining({
+        claim: { now: NOW, batchSize: 100, leaseMs: 120_000 },
+      }),
     )
   })
 
