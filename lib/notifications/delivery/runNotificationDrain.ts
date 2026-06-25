@@ -34,6 +34,19 @@ import { getRootTenantId } from '@/lib/tenant/resolveTenant'
 export const NOTIFICATION_DRAIN_DEFAULT_BATCH = 100
 export const NOTIFICATION_DRAIN_MAX_BATCH = 250
 
+// Lease must exceed the drain function's wall-clock ceiling. The process cron
+// runs every 60s with maxDuration=60s, and a batch is leased up front then
+// processed serially. With a 60s lease (≈ the cron period AND the function
+// timeout) a slow batch's early-claimed rows could free up WHILE this drain was
+// still working through them — letting the next cron tick reclaim and re-send the
+// same delivery (a real duplicate, billed Twilio/Postmark message). 120s >
+// maxDuration guarantees no row a live drain still holds is reclaimable by an
+// overlapping tick; a row only frees once the holding function is provably dead.
+// (Residual at-least-once on a crash AFTER a provider send but BEFORE recording
+// completion remains — Twilio/Postmark expose no native idempotency key; tracked
+// as a follow-up.)
+export const NOTIFICATION_DRAIN_LEASE_MS = 120_000
+
 function buildRealtimeChannel(recipientInAppTargetId: string): string {
   return `notifications:in-app:${recipientInAppTargetId}`
 }
@@ -185,6 +198,7 @@ export async function drainDueNotifications(args?: {
     claim: {
       now,
       batchSize,
+      leaseMs: NOTIFICATION_DRAIN_LEASE_MS,
     },
   })
 }

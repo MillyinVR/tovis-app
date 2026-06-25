@@ -170,6 +170,7 @@ describe('chaos: DB degradation', () => {
       claim: {
         now: expect.any(Date),
         batchSize: 10,
+        leaseMs: 120_000,
       },
     })
 
