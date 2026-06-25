@@ -348,12 +348,14 @@ function bookingData(args: {
   status?: BookingStatus
   durationMinutes?: number
   bufferMinutes?: number
+  allowsOverlap?: boolean
 }): Prisma.BookingCreateInput {
   const durationMinutes = args.durationMinutes ?? 60
   const bufferMinutes = args.bufferMinutes ?? 15
   const isMobile = args.locationType === ServiceLocationType.MOBILE
 
   return {
+    allowsOverlap: args.allowsOverlap ?? false,
     client: {
       connect: {
         id: args.clientId,
@@ -432,6 +434,7 @@ async function createDirectBooking(args: {
   status?: BookingStatus
   durationMinutes?: number
   bufferMinutes?: number
+  allowsOverlap?: boolean
 }): Promise<string> {
   if (!fixtures) throw new Error('Fixtures not initialized')
 
@@ -454,6 +457,7 @@ async function createDirectBooking(args: {
       status: args.status,
       durationMinutes: args.durationMinutes,
       bufferMinutes: args.bufferMinutes,
+      allowsOverlap: args.allowsOverlap,
     }),
     select: { id: true },
   })
@@ -1096,6 +1100,77 @@ describe('booking overlap concurrency integration', () => {
         },
       }),
     ).resolves.toBe(1)
+  })
+
+  it('database ALLOWS an overlapping booking flagged allowsOverlap (authorized PRO/ADMIN double-book)', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const startA = futureUtc(17, 18, 0)
+    const startB = futureUtc(17, 18, 30)
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: startA,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    // The authorized overlap carries the flag → exempt from the EXCLUDE
+    // constraint → the insert succeeds instead of raising 23P01.
+    await createDirectBooking({
+      clientId: fx.clients[1].clientId,
+      start: startB,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      allowsOverlap: true,
+    })
+
+    await expect(
+      db.booking.count({ where: { professionalId: fx.professionalId } }),
+    ).resolves.toBe(2)
+  })
+
+  it('a flagged (allowsOverlap) booking does not block a later NORMAL booking on the same slot', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const startA = futureUtc(18, 18, 0)
+    const startB = futureUtc(18, 18, 30)
+
+    // First booking is the authorized overlap (flagged → out of the index).
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: startA,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      allowsOverlap: true,
+    })
+
+    // A normal booking overlapping the flagged one still inserts: the flagged
+    // row isn't in the GIST index, so there is nothing for it to collide with.
+    await createDirectBooking({
+      clientId: fx.clients[1].clientId,
+      start: startB,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await expect(
+      db.booking.count({ where: { professionalId: fx.professionalId } }),
+    ).resolves.toBe(2)
   })
 
   it('database allows direct adjacent active bookings for the same professional', async () => {
