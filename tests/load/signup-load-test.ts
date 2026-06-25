@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 
 import { assertLoadTestDeliverySafe } from './_deliverySafety'
+import { vercelBypassHeaders } from './_vercelBypass'
 
 type Stage = {
   name: string
@@ -218,6 +219,9 @@ function buildHeaders(args: {
     'content-type': 'application/json',
     origin,
     referer: `${origin}/`,
+    // Skip Vercel Deployment Protection on a protected preview target (no-op
+    // unless VERCEL_AUTOMATION_BYPASS_SECRET is set).
+    ...vercelBypassHeaders(),
   }
 
   if (args.trustedHeaderName && args.trustedIpPrefix) {
