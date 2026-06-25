@@ -20,6 +20,10 @@ import {
 
 import { addMinutes } from '@/lib/booking/conflicts'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import {
+  BOOKING_OVERLAP_CONSTRAINT_NAME,
+  HOLD_OVERLAP_CONSTRAINT_NAME,
+} from '@/lib/booking/constants'
 import { deleteExpiredHoldsForProfessional } from '@/lib/booking/holdCleanup'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 
@@ -39,7 +43,7 @@ const db = new PrismaClient({
   },
 })
 
-const BOOKING_OVERLAP_CONSTRAINT = 'Booking_no_active_professional_overlap'
+const BOOKING_OVERLAP_CONSTRAINT = BOOKING_OVERLAP_CONSTRAINT_NAME
 
 type TestClient = {
   userId: string
@@ -598,15 +602,23 @@ async function createLockedHold(args: {
   })
 }
 
-async function createExpiredHold(args: {
+// Inserts a hold straight into the table with no schedule lock and no app-level
+// conflict check — exercises the database overlap constraint directly.
+async function createDirectHold(args: {
   clientId: string
   start: Date
   locationId: string
   locationType: ServiceLocationType
+  durationMinutes?: number
+  bufferMinutes?: number
+  expiresAt?: Date
 }): Promise<string> {
   if (!fixtures) throw new Error('Fixtures not initialized')
 
-  const requestedEnd = addMinutes(args.start, 75)
+  const isMobile = args.locationType === ServiceLocationType.MOBILE
+  const durationMinutes = args.durationMinutes ?? 60
+  const bufferMinutes = args.bufferMinutes ?? 15
+  const requestedEnd = addMinutes(args.start, durationMinutes + bufferMinutes)
 
   const hold = await db.bookingHold.create({
     data: {
@@ -614,7 +626,7 @@ async function createExpiredHold(args: {
       professionalId: fixtures.professionalId,
       clientId: args.clientId,
       scheduledFor: args.start,
-      expiresAt: addMinutes(new Date(), -1),
+      expiresAt: args.expiresAt ?? addMinutes(new Date(), 15),
       locationType: args.locationType,
       locationId: args.locationId,
       locationTimeZone: 'America/Los_Angeles',
@@ -623,18 +635,34 @@ async function createExpiredHold(args: {
       },
       locationLatSnapshot: 32.7157,
       locationLngSnapshot: -117.1611,
-      clientAddressId: null,
-      clientAddressSnapshot: Prisma.JsonNull,
-      clientAddressLatSnapshot: null,
-      clientAddressLngSnapshot: null,
-      durationMinutesSnapshot: 60,
-      bufferMinutesSnapshot: 15,
+      clientAddressId: isMobile
+        ? (fixtures.clients[0].clientAddressId ?? null)
+        : null,
+      clientAddressSnapshot: isMobile
+        ? { formattedAddress: '1 Client Ave, San Diego, CA 92101' }
+        : Prisma.JsonNull,
+      clientAddressLatSnapshot: isMobile ? 32.7157 : null,
+      clientAddressLngSnapshot: isMobile ? -117.1611 : null,
+      durationMinutesSnapshot: durationMinutes,
+      bufferMinutesSnapshot: bufferMinutes,
       endsAtSnapshot: requestedEnd,
     },
     select: { id: true },
   })
 
   return hold.id
+}
+
+function createExpiredHold(args: {
+  clientId: string
+  start: Date
+  locationId: string
+  locationType: ServiceLocationType
+}): Promise<string> {
+  return createDirectHold({
+    ...args,
+    expiresAt: addMinutes(new Date(), -1),
+  })
 }
 
 function sleep(ms: number): Promise<void> {
@@ -694,19 +722,32 @@ function errorText(error: unknown): string {
   return String(error)
 }
 
-async function expectDbBookingOverlapRejection(
+async function expectDbConstraintRejection(
+  constraintName: string,
   action: () => Promise<unknown>,
 ): Promise<void> {
   try {
     await action()
   } catch (error: unknown) {
-    expect(errorText(error)).toContain(BOOKING_OVERLAP_CONSTRAINT)
+    expect(errorText(error)).toContain(constraintName)
     return
   }
 
   throw new Error(
-    `Expected database overlap constraint ${BOOKING_OVERLAP_CONSTRAINT} to reject the write.`,
+    `Expected database overlap constraint ${constraintName} to reject the write.`,
   )
+}
+
+function expectDbBookingOverlapRejection(
+  action: () => Promise<unknown>,
+): Promise<void> {
+  return expectDbConstraintRejection(BOOKING_OVERLAP_CONSTRAINT, action)
+}
+
+function expectDbHoldOverlapRejection(
+  action: () => Promise<unknown>,
+): Promise<void> {
+  return expectDbConstraintRejection(HOLD_OVERLAP_CONSTRAINT_NAME, action)
 }
 
 beforeAll(async () => {
@@ -1145,5 +1186,128 @@ describe('booking overlap concurrency integration', () => {
         },
       }),
     ).resolves.toBe(4)
+  })
+
+  it('database rejects direct overlapping holds for the same professional', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const startA = futureUtc(18, 18, 0)
+    const startB = futureUtc(18, 18, 30)
+
+    await createDirectHold({
+      clientId: fx.clients[0].clientId,
+      start: startA,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await expectDbHoldOverlapRejection(() =>
+      createDirectHold({
+        clientId: fx.clients[1].clientId,
+        start: startB,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+        bufferMinutes: 15,
+      }),
+    )
+
+    await expect(
+      db.bookingHold.count({
+        where: { professionalId: fx.professionalId },
+      }),
+    ).resolves.toBe(1)
+  })
+
+  it('database allows direct adjacent holds for the same professional', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const startA = futureUtc(19, 18, 0)
+    const startB = futureUtc(19, 19, 15)
+
+    await createDirectHold({
+      clientId: fx.clients[0].clientId,
+      start: startA,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await createDirectHold({
+      clientId: fx.clients[1].clientId,
+      start: startB,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await expect(
+      db.bookingHold.count({
+        where: { professionalId: fx.professionalId },
+      }),
+    ).resolves.toBe(2)
+  })
+
+  it('overlap constraint is expiry-agnostic: an expired hold blocks an overlapping insert until swept inline', async () => {
+    // The GIST EXCLUDE predicate cannot reference now(), so it covers ALL holds
+    // regardless of expiry. Correctness therefore relies on the create path
+    // sweeping expired holds (deleteExpiredHoldsForProfessional) inside the
+    // schedule lock BEFORE inserting. This test pins both halves of that
+    // contract: an expired overlapping hold is rejected by the raw constraint,
+    // and the same insert succeeds once the expired hold is swept.
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const startA = futureUtc(20, 18, 0)
+    const startB = futureUtc(20, 18, 30)
+
+    const expiredHoldId = await createExpiredHold({
+      clientId: fx.clients[0].clientId,
+      start: startA,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    await expectDbHoldOverlapRejection(() =>
+      createDirectHold({
+        clientId: fx.clients[1].clientId,
+        start: startB,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+        bufferMinutes: 15,
+      }),
+    )
+
+    await db.$transaction((tx) =>
+      deleteExpiredHoldsForProfessional({
+        tx,
+        professionalId: fx.professionalId,
+        now: new Date(),
+      }),
+    )
+
+    await expect(db.bookingHold.count({ where: { id: expiredHoldId } })).resolves.toBe(0)
+
+    await createDirectHold({
+      clientId: fx.clients[1].clientId,
+      start: startB,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await expect(
+      db.bookingHold.count({
+        where: { professionalId: fx.professionalId },
+      }),
+    ).resolves.toBe(1)
   })
 })
