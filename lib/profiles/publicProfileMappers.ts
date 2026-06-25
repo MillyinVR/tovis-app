@@ -18,7 +18,6 @@ import {
   formatAverageRating,
   formatBio,
   formatBusinessName,
-  formatClientName,
   formatCompactCount,
   formatDateIso,
   formatDisplayHandle,
@@ -27,6 +26,7 @@ import {
   formatProfessionLabel,
   formatProfileLocation,
   formatPublicProfileDisplayName,
+  formatPublicReviewerName,
 } from '@/lib/profiles/publicProfileFormatting'
 import type {
   PublicOfferingRow,
@@ -445,10 +445,9 @@ export async function mapPublicReviewToDto(args: {
     headline: pickString(review.headline),
     body: pickString(review.body),
     createdAt: formatDateIso(review.createdAt),
-    clientName: formatClientName({
+    clientName: formatPublicReviewerName({
       firstName: review.client?.firstName ?? null,
       lastName: review.client?.lastName ?? null,
-      email: review.client?.user?.email ?? null,
     }),
     clientHref: review.client
       ? resolveClientProfileHref(

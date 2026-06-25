@@ -251,6 +251,28 @@ export function formatClientName(input: {
   return trimToNull(input.email) ?? 'Client'
 }
 
+/**
+ * Public-facing reviewer name: first name + last initial ("Jane D."), the
+ * convention for public reviews. Unlike formatClientName (used in the pro's own
+ * authenticated client views), this NEVER exposes the full last name and NEVER
+ * falls back to the reviewer's email — a reviewer on a public pro profile must
+ * not be identifiable by full name or contact info. Falls back to a generic
+ * label when no usable name is set.
+ */
+export function formatPublicReviewerName(input: {
+  firstName?: string | null
+  lastName?: string | null
+}): string {
+  const firstName = trimToNull(input.firstName)
+  const lastName = trimToNull(input.lastName)
+  const lastInitial = lastName ? `${lastName.charAt(0).toUpperCase()}.` : null
+
+  if (firstName && lastInitial) return `${firstName} ${lastInitial}`
+  if (firstName) return firstName
+
+  return 'Client'
+}
+
 export function formatDisplayTimeZone(value: string | null | undefined): string | null {
   const timeZone = trimToNull(value)
 

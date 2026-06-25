@@ -576,7 +576,6 @@ lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lng: tru
 lib/profiles/publicProfileFormatting.ts:direct property read:const firstName = trimToNull(input.firstName)
 lib/profiles/publicProfileFormatting.ts:direct property read:const lastName = trimToNull(input.lastName)
 lib/profiles/publicProfileFormatting.ts:direct property read:return trimToNull(input.email) ?? 'Client'
-lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:email: true,
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:firstName: true,
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:lastName: true,
 lib/referral/referralConversion.ts:direct property read:const referredName = referral.referredClient?.firstName?.trim() || 'Your referral'

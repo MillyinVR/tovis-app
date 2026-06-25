@@ -97,15 +97,14 @@ export const publicPortfolioMediaAssetSelect =
     },
   })
 
-export const publicReviewClientUserSelect =
-  Prisma.validator<Prisma.UserSelect>()({
-    email: true,
-  })
-
 export const publicReviewClientSelect =
   Prisma.validator<Prisma.ClientProfileSelect>()({
-    // Used server-side to upgrade the link to the pro chart when the viewer is an
-    // authorized pro; never sent to the client (see resolveClientProfileHref).
+    // id + name are used server-side: id to upgrade the link to the pro chart for
+    // an authorized pro viewer (never sent to the client — see
+    // resolveClientProfileHref), name to render a redacted public reviewer label
+    // (first name + last initial — see formatPublicReviewerName). The reviewer's
+    // email is intentionally NOT selected: a public pro profile must not expose
+    // reviewer contact info.
     id: true,
     firstName: true,
     lastName: true,
@@ -113,9 +112,6 @@ export const publicReviewClientSelect =
     // they've opted into a public creator identity with a handle.
     handle: true,
     isPublicProfile: true,
-    user: {
-      select: publicReviewClientUserSelect,
-    },
   })
 
 export const publicReviewMediaAssetSelect =
@@ -181,10 +177,6 @@ export type PublicPortfolioMediaAssetRow =
   Prisma.MediaAssetGetPayload<{
     select: typeof publicPortfolioMediaAssetSelect
   }>
-
-export type PublicReviewClientUserRow = Prisma.UserGetPayload<{
-  select: typeof publicReviewClientUserSelect
-}>
 
 export type PublicReviewClientRow = Prisma.ClientProfileGetPayload<{
   select: typeof publicReviewClientSelect

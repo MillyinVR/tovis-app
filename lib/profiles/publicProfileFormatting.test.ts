@@ -1,7 +1,45 @@
 // lib/profiles/publicProfileFormatting.test.ts
 import { describe, expect, it } from 'vitest'
 
-import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import {
+  formatPublicProfileDisplayName,
+  formatPublicReviewerName,
+} from '@/lib/profiles/publicProfileFormatting'
+
+describe('formatPublicReviewerName', () => {
+  it('renders first name + last initial', () => {
+    expect(formatPublicReviewerName({ firstName: 'Jane', lastName: 'Doe' })).toBe(
+      'Jane D.',
+    )
+  })
+
+  it('uppercases the last initial', () => {
+    expect(
+      formatPublicReviewerName({ firstName: 'Jane', lastName: 'doe' }),
+    ).toBe('Jane D.')
+  })
+
+  it('shows only the first name when there is no last name', () => {
+    expect(formatPublicReviewerName({ firstName: 'Jane', lastName: null })).toBe(
+      'Jane',
+    )
+  })
+
+  it('never exposes the full last name', () => {
+    expect(
+      formatPublicReviewerName({ firstName: 'Jane', lastName: 'Doe' }),
+    ).not.toContain('Doe')
+  })
+
+  it('falls back to a generic label when no name is set (never an email)', () => {
+    expect(formatPublicReviewerName({ firstName: null, lastName: null })).toBe(
+      'Client',
+    )
+    expect(formatPublicReviewerName({ firstName: '  ', lastName: 'Smith' })).toBe(
+      'Client',
+    )
+  })
+})
 
 describe('formatPublicProfileDisplayName', () => {
   it('prefers the business name when present', () => {
