@@ -183,6 +183,7 @@ import {
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
+import { captureStripeAmountMismatch } from '@/lib/observability/bookingEvents'
 import {
   ADDRESS_KEY_VERSION,
   buildAddressPrivacyWriteData,
@@ -14207,6 +14208,25 @@ async function performLockedApplyStripePaymentSucceeded(args: {
       bookingCompleted: booking.status === BookingStatus.COMPLETED,
       meta: buildMeta(false),
     }
+  }
+
+  // Reconcile captured vs expected: the captured amount IS the money that moved,
+  // so we still record it below — but a mismatch against the booking's expected
+  // total means a short-pay / over-pay / wrong-currency capture that must be
+  // surfaced for human reconciliation instead of being accepted as truth
+  // silently. Only meaningful once a total is set.
+  const expectedTotalCents = decimalToCents(booking.totalAmount)
+  if (
+    args.amountReceivedCents != null &&
+    expectedTotalCents > 0 &&
+    args.amountReceivedCents !== expectedTotalCents
+  ) {
+    captureStripeAmountMismatch({
+      bookingId: booking.id,
+      expectedCents: expectedTotalCents,
+      receivedCents: args.amountReceivedCents,
+      currency: args.currency ?? booking.stripeCurrency,
+    })
   }
 
   const oldState = buildCheckoutAuditSnapshot({

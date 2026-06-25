@@ -172,6 +172,54 @@ export function captureStripeDisputeAlert(input: {
   )
 }
 
+/**
+ * Flags a captured Stripe payment whose `amount_received` does not match the
+ * booking's expected total. The webhook records the captured amount as the
+ * source of truth (it IS the money that moved), but a mismatch means a short-pay,
+ * over-pay, or wrong-currency capture that needs human reconciliation — so it
+ * must not pass silently. Sentry (error) + a structured log line.
+ */
+export function captureStripeAmountMismatch(input: {
+  bookingId: string
+  expectedCents: number
+  receivedCents: number
+  currency: string | null
+}): void {
+  Sentry.withScope((scope) => {
+    scope.setLevel('error')
+    scope.setTag('area', 'payments')
+    scope.setTag('payments.event', 'amount_mismatch')
+    scope.setTag('booking.id', input.bookingId)
+
+    scope.setContext('stripe_amount_mismatch', {
+      bookingId: input.bookingId,
+      expectedCents: input.expectedCents,
+      receivedCents: input.receivedCents,
+      deltaCents: input.receivedCents - input.expectedCents,
+      currency: input.currency,
+    })
+
+    Sentry.captureMessage(
+      `Stripe capture amount mismatch on booking ${input.bookingId}: expected ${input.expectedCents}, received ${input.receivedCents}`,
+      'error',
+    )
+  })
+
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      app: 'tovis',
+      namespace: 'payments',
+      event: 'amount_mismatch',
+      bookingId: input.bookingId,
+      expectedCents: input.expectedCents,
+      receivedCents: input.receivedCents,
+      deltaCents: input.receivedCents - input.expectedCents,
+      currency: input.currency,
+    }),
+  )
+}
+
 // Register the Sentry sink once at module load. The lifecycleContract module
 // keeps a registry of sinks and emits to all of them on drift.
 let driftSinkRegistered = false
