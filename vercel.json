@@ -18,6 +18,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/internal/jobs/stripe-webhook-requeue",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/notifications/process",
       "schedule": "* * * * *"
     },
