@@ -838,3 +838,58 @@ Result: file exists, fences closed, trailing newline present; checklist row "SHA
 - This proof covers the documented decision only. No code has changed. lib/security/crypto/hashLookup.ts still uses SHA-256.
 - The HMAC-SHA256 migration is intentionally deferred. It is not tracked by this proof and remains an open future ticket.
 - No CI/staging/prod runs apply — this is documentation, not runtime behavior.
+
+---
+
+## Proof run — deployed signup load proof (isolated staging)
+
+- Checklist item: Deployed signup load proof (the launch gate previously blocked on the absence of an isolated staging environment).
+- Owner: Tori Morales
+- Date: 2026-06-25
+- App commit deployed: `2c80cdec` (main HEAD; #356–#360 merged)
+- Status: PASS at launch floor (10–25 rps clean); throughput ceiling identified at ~40 rps on free-tier staging.
+- Environment:
+  - Local: harness only (`tests/load/signup-load-test.ts`)
+  - Staging app: Vercel **preview** deployment (`VERCEL_ENV=preview`)
+  - Staging DB: dedicated Supabase project `tovis-staging` (`wbujonpayicvocvvoutk`, us-west-1) — **fully isolated from prod** (`rqhhvuaoksuvbvlypztn`). Migrated via `prisma migrate deploy` + `pnpm seed`.
+  - Real delivery: **suppressed** — `LOAD_TEST_DISABLE_REAL_DELIVERY=1` on the preview. Runtime logs confirm Twilio `status:"load_test_suppressed"` and the email verification path early-returns before Postmark (no real SMS/email sent).
+  - Captcha: Cloudflare Turnstile **test keys** on the preview (always-pass), so the harness token validates.
+  - Reachability: Vercel Deployment Protection bypassed via Protection Bypass for Automation (`x-vercel-protection-bypass`).
+  - Distinct client IPs simulated via a staging-only `AUTH_TRUSTED_IP_HEADER=x-load-test-client-ip` + harness `LOAD_TEST_TRUSTED_IP_*` (so per-IP rate limiting doesn't collapse all requests into one bucket).
+
+### Test summary
+
+`tests/load/signup-load-test.ts` driven against the deployed staging preview, POSTing `/api/auth/register` (CLIENT signups). Three configs were measured. Each signup writes a real `User`/`ClientProfile` into the isolated staging DB (verified present; prod untouched).
+
+| Profile / config | Requests | 201 OK | 500 | Real-fail % | p95 (ms) | p99 (ms) |
+|---|---|---|---|---|---|---|
+| **baseline** 10 rps (pgbouncer, no conn-limit) | 600 | 600 | 0 | **0%** | 1417 | 3641 |
+| **baseline** 25 rps | 1500 | 1500 | 0 | **0%** | 1325 | 1437 |
+| launch 50 rps | 3000 | 2468 | 532 | 18% | 3575 | 4165 |
+| launch 100 rps | 6000 | 2473 | 3524 | 59% | 4477 | 7166 |
+| launch 10 rps w/ `connection_limit=1` | 600 | 537 | 62 | 10% | 2941 | 3953 |
+
+### Findings
+
+- **Signup works end-to-end on a real deployment.** At the launch traffic *floor* (10–25 rps) the deployed signup pipeline is clean: 0 failures, 0 throttles, p95 ≈ 1.3–1.4 s.
+- **Ceiling ≈ 40 successful signups/sec on this (free) tier.** Beyond ~40 rps the failures are DB-connection errors from Vercel runtime logs: `FATAL: (EMAXCONN) max client connections reached` and `Transaction API error: Unable to start a transaction in the given time`. This is the **Supabase free-tier pooler's global client-connection cap**, hit when the serverless fleet fans out under burst — an infra ceiling of the staging tier, not a code defect.
+- **`connection_limit=1` makes it worse, not better** (10 rps regressed to 10% failures). The register flow uses DB transactions, so one connection per instance starves the transaction. Lowering `connection_limit` is the wrong lever.
+
+### Commands run
+
+```bash
+# (env values redacted; secrets passed via process env, not committed)
+STAGING_BASE_URL=<preview-url> \
+VERCEL_AUTOMATION_BYPASS_SECRET=<secret> \
+TURNSTILE_TEST_TOKEN=dummy LOAD_TEST_DELIVERY_SAFE=1 \
+LOAD_TEST_PHONE_POOL_FILE=<pool> \
+LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-load-test-client-ip LOAD_TEST_TRUSTED_IP_PREFIX=10.x \
+LOAD_TEST_PROFILE=baseline|launch \
+pnpm exec tsx tests/load/signup-load-test.ts
+```
+
+### Limitations / next steps
+
+- This proves the **signup** step only. The other 7 launch-load steps (holds, booking-finalize, checkout, media, notifications, stripe-replay) still need their fixtures wired against staging to run the full `verify:launch-ops` suite deployed.
+- The ~40 rps ceiling is the **free-tier** staging DB. **Production runs on a paid Supabase tier** with much higher pooler limits; re-prove the 100 rps target there (or against a paid staging tier) before treating 100 rps as met. Candidate prod-side mitigations if needed: paid pooler capacity, Prisma Accelerate / a connection multiplexer, or Vercel fluid-compute concurrency tuning — **not** a lowered `connection_limit`.
+- Staging carries ~21k synthetic `signup.load+*@example.com` users from these runs; harmless (isolated), truncate for a clean slate if desired.
