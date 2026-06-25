@@ -677,6 +677,21 @@ type ApplyStripePaymentFailedArgs = {
   bookingIdHint?: string | null
 }
 
+/**
+ * Resolved intent of a `charge.dispute.*` event:
+ * - OPEN  — a dispute (or early-fraud warning with funds withdrawn) is active.
+ * - WON   — the dispute closed in our favour; the captured payment stands.
+ * - LOST  — the dispute closed against us; funds are gone.
+ */
+export type StripeDisputeOutcome = 'OPEN' | 'WON' | 'LOST'
+
+type ApplyStripeDisputeArgs = {
+  stripePaymentIntentId: string
+  stripeEventId: string
+  outcome: StripeDisputeOutcome
+  bookingIdHint?: string | null
+}
+
 type ApplyStripeCheckoutSessionStatusArgs = {
   stripeCheckoutSessionId: string
   stripePaymentIntentId: string | null
@@ -14130,6 +14145,20 @@ async function performLockedApplyStripePaymentSucceeded(args: {
     throw bookingError('BOOKING_NOT_FOUND')
   }
 
+  // Out-of-order protection: a dispute is a more-recent, higher-severity state
+  // than a (re-delivered) `payment_intent.succeeded`. Stripe does not guarantee
+  // webhook ordering and our requeue/orphan-recovery paths can replay a stale
+  // success — never let that silently flip a DISPUTED booking back to SUCCEEDED.
+  // A genuinely won dispute is restored explicitly via
+  // applyStripeDisputeInTransaction, not here.
+  if (booking.stripePaymentStatus === StripePaymentStatus.DISPUTED) {
+    return {
+      bookingId: booking.id,
+      bookingCompleted: booking.status === BookingStatus.COMPLETED,
+      meta: buildMeta(false),
+    }
+  }
+
   const alreadyApplied =
     booking.stripeLastEventId === args.stripeEventId &&
     booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED &&
@@ -14321,6 +14350,72 @@ async function performLockedApplyStripePaymentFailed(args: {
   }
 }
 
+async function performLockedApplyStripeDispute(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  stripePaymentIntentId: string
+  stripeEventId: string
+  outcome: StripeDisputeOutcome
+}): Promise<ApplyStripePaymentResult> {
+  const booking: StripeWebhookBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: STRIPE_WEBHOOK_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  const targetStatus =
+    args.outcome === 'WON'
+      ? StripePaymentStatus.SUCCEEDED
+      : StripePaymentStatus.DISPUTED
+
+  const noop: ApplyStripePaymentResult = {
+    bookingId: booking.id,
+    bookingCompleted: booking.status === BookingStatus.COMPLETED,
+    meta: buildMeta(false),
+  }
+
+  // A won dispute only RESTORES a booking we previously marked DISPUTED. If the
+  // booking moved on (e.g. a refund landed), never clobber that state.
+  if (
+    args.outcome === 'WON' &&
+    booking.stripePaymentStatus !== StripePaymentStatus.DISPUTED
+  ) {
+    return noop
+  }
+
+  // Idempotent: an exact event replay, or a non-restoring event whose target
+  // state is already recorded (created → funds_withdrawn → closed-lost all map
+  // to DISPUTED), is a no-op.
+  const isReplay = booking.stripeLastEventId === args.stripeEventId
+  const alreadyAtTarget = booking.stripePaymentStatus === targetStatus
+  if (isReplay || (alreadyAtTarget && args.outcome !== 'WON')) {
+    return noop
+  }
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      stripePaymentStatus: targetStatus,
+      stripePaymentIntentId: args.stripePaymentIntentId,
+      stripeLastEventId: args.stripeEventId,
+    },
+    select: {
+      id: true,
+      status: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    bookingId: updated.id,
+    bookingCompleted: updated.status === BookingStatus.COMPLETED,
+    meta: buildMeta(true),
+  }
+}
+
 async function performLockedApplyStripeCheckoutSessionStatus(args: {
   tx: Prisma.TransactionClient
   bookingId: string
@@ -14468,6 +14563,46 @@ export async function applyStripePaymentFailedInTransaction(
     bookingId: lockedBooking.id,
     stripePaymentIntentId,
     stripeEventId,
+  })
+}
+
+export async function applyStripeDisputeInTransaction(
+  tx: Prisma.TransactionClient,
+  args: ApplyStripeDisputeArgs,
+): Promise<ApplyStripePaymentResult | null> {
+  const stripePaymentIntentId = args.stripePaymentIntentId.trim()
+  const stripeEventId = args.stripeEventId.trim()
+
+  if (!stripePaymentIntentId || !stripeEventId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe payment intent id and event id are required.',
+    })
+  }
+
+  const booking = await findBookingForStripeWebhook({
+    db: tx,
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripePaymentIntentId,
+  })
+
+  if (!booking) return null
+
+  await lockProfessionalSchedule(tx, booking.professionalId)
+
+  const lockedBooking = await findBookingForStripeWebhook({
+    db: tx,
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripePaymentIntentId,
+  })
+
+  if (!lockedBooking) return null
+
+  return performLockedApplyStripeDispute({
+    tx,
+    bookingId: lockedBooking.id,
+    stripePaymentIntentId,
+    stripeEventId,
+    outcome: args.outcome,
   })
 }
 

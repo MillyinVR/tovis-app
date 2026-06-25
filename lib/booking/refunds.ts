@@ -56,6 +56,7 @@ export type RefundBookingInput = {
 export type RefundSkipReason =
   | 'NOT_STRIPE_PAYMENT'
   | 'PAYMENT_NOT_CAPTURED'
+  | 'PAYMENT_DISPUTED'
   | 'NOTHING_TO_REFUND'
 
 export type RefundInvalidCode = 'BOOKING_NOT_FOUND' | 'INVALID_AMOUNT'
@@ -148,6 +149,17 @@ async function reserveRefund(input: RefundBookingInput): Promise<Reservation> {
         code: 'BOOKING_NOT_FOUND',
         message: 'Booking not found.',
       }
+    }
+
+    // A disputed charge has had (or is having) its funds pulled by Stripe and
+    // the transfer reversed off the pro. Issuing our own refund on top would
+    // double-refund the client and over-claw the pro. Freeze the automated
+    // refund path until the dispute resolves (a won dispute restores SUCCEEDED
+    // via applyStripeDisputeInTransaction, re-opening refunds). Disputed bookings
+    // also fail isCapturedStripePayment below; this explicit branch surfaces the
+    // real reason instead of the misleading PAYMENT_NOT_CAPTURED.
+    if (booking.stripePaymentStatus === StripePaymentStatus.DISPUTED) {
+      return { kind: 'skip', reason: 'PAYMENT_DISPUTED' }
     }
 
     if (!isCapturedStripePayment(booking)) {

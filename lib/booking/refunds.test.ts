@@ -184,6 +184,20 @@ describe('refundBookingPayment — eligibility', () => {
     expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
   })
 
+  it('freezes refunds on a DISPUTED booking (no Stripe refund call)', async () => {
+    // Captured total present, but the charge is disputed — Stripe has already
+    // reversed the transfer, so we must not refund on top of the dispute.
+    setBooking({ stripePaymentStatus: StripePaymentStatus.DISPUTED })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result).toEqual({ outcome: 'SKIPPED', reason: 'PAYMENT_DISPUTED' })
+    expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
+  })
+
   it('returns INVALID for an unknown booking', async () => {
     mocks.booking = null
 
