@@ -168,6 +168,22 @@ function getAeadKey(keyVersion: string): Buffer {
   return key
 }
 
+/**
+ * True when PII_AEAD_KEYS_JSON is present AND parses into a valid keyring (≥1
+ * base64 32-byte key). Used by the production startup env contract so a dropped
+ * or mangled keyring fails the boot loudly instead of throwing lazily on the
+ * first allergy/notes/phone read. Mirrors what the consuming code requires by
+ * exercising the real loader.
+ */
+export function isAeadKeyringValid(): boolean {
+  try {
+    readKeyring()
+    return true
+  } catch {
+    return false
+  }
+}
+
 function readKeyring(): Keyring {
   const rawEnv = process.env[KEY_ENV_NAME]
 
