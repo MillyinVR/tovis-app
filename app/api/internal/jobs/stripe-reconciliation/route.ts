@@ -7,14 +7,19 @@
 // Dashboard (which creates no BookingRefund row). For each recently-paid Stripe
 // booking we ask Stripe for the authoritative refunded total and re-drive the
 // same reconcile path the webhook uses. The heal is idempotent, so a booking
-// already in sync is a cheap no-op.
+// already in sync is a cheap no-op. Both the final-bill charge and the separate
+// new-client deposit charge are swept.
 //
 // Per-booking failures are captured and tallied; one bad PaymentIntent never
 // blocks the rest of the sweep.
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
-import { reconcileStripeRefunds } from '@/lib/booking/stripeReconciliation'
+import {
+  reconcileStripeDeposits,
+  reconcileStripeRefunds,
+  type ReconcileRunResult,
+} from '@/lib/booking/stripeReconciliation'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
@@ -38,14 +43,23 @@ async function runJob(req: Request): Promise<Response> {
   const now = new Date()
 
   try {
-    const run = await reconcileStripeRefunds({ now })
+    // Final-bill and deposit charges are independent PaymentIntents; sweep both.
+    const [refunds, deposits] = await Promise.all([
+      reconcileStripeRefunds({ now }),
+      reconcileStripeDeposits({ now }),
+    ])
 
-    return jsonOk({
-      ok: true,
+    const shape = (run: ReconcileRunResult) => ({
       candidatesScanned: run.candidatesScanned,
       capped: run.capped,
       tally: run.tally,
       sample: run.results.slice(0, 20),
+    })
+
+    return jsonOk({
+      ok: true,
+      refunds: shape(refunds),
+      deposits: shape(deposits),
       ranAt: now.toISOString(),
     })
   } catch (error: unknown) {
