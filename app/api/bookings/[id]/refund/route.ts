@@ -20,7 +20,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
-import { refundBookingPayment } from '@/lib/booking/refunds'
+import { refundBookingPayment, type RefundSkipReason } from '@/lib/booking/refunds'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
@@ -75,7 +75,7 @@ function parseAmountCents(
 }
 
 function skippedResponse(
-  reason: 'NOT_STRIPE_PAYMENT' | 'PAYMENT_NOT_CAPTURED' | 'NOTHING_TO_REFUND',
+  reason: RefundSkipReason,
 ): { status: number; body: RefundErrorBody } {
   if (reason === 'NOTHING_TO_REFUND') {
     return {
@@ -83,6 +83,18 @@ function skippedResponse(
       body: {
         ok: false,
         error: 'This booking is already fully refunded.',
+        code: reason,
+      },
+    }
+  }
+
+  if (reason === 'PAYMENT_DISPUTED') {
+    return {
+      status: 409,
+      body: {
+        ok: false,
+        error:
+          'This booking has an open or lost payment dispute. Refunds are blocked until the dispute resolves.',
         code: reason,
       },
     }

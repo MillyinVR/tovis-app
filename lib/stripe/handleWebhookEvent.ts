@@ -18,12 +18,15 @@ import {
 import {
   applyStripeCheckoutSessionStatusInTransaction,
   applyStripeDepositSucceededInTransaction,
+  applyStripeDisputeInTransaction,
   applyStripePaymentFailedInTransaction,
   applyStripePaymentSucceededInTransaction,
   reconcileDepositChargeRefundInTransaction,
   DISCOVERY_DEPOSIT_CHECKOUT_KIND,
+  type StripeDisputeOutcome,
 } from '@/lib/booking/writeBoundary'
 import { reconcileChargeRefundInTransaction } from '@/lib/booking/refunds'
+import { captureStripeDisputeAlert } from '@/lib/observability/bookingEvents'
 import { applyStripeSubscriptionInTransaction } from '@/lib/membership/syncSubscription'
 
 export type StripeWebhookResult = {
@@ -324,6 +327,72 @@ async function handleChargeRefunded(
   }
 }
 
+function getDisputePaymentIntentId(dispute: Stripe.Dispute): string | null {
+  if (typeof dispute.payment_intent === 'string') return dispute.payment_intent
+  if (
+    dispute.payment_intent &&
+    typeof dispute.payment_intent === 'object' &&
+    typeof dispute.payment_intent.id === 'string'
+  ) {
+    return dispute.payment_intent.id
+  }
+  return null
+}
+
+export function resolveDisputeOutcome(
+  eventType: string,
+  dispute: Stripe.Dispute,
+): StripeDisputeOutcome {
+  if (eventType === 'charge.dispute.closed') {
+    // On close the status is the terminal verdict. Only an actual `lost` keeps
+    // funds gone; `won` and the early-fraud `warning_closed` mean no loss, so we
+    // restore the payment rather than leave it frozen forever.
+    return dispute.status === 'lost' ? 'LOST' : 'WON'
+  }
+  // created / updated / funds_withdrawn — the dispute is active.
+  return 'OPEN'
+}
+
+export async function handleChargeDispute(
+  tx: Prisma.TransactionClient,
+  dispute: Stripe.Dispute,
+  eventType: string,
+  stripeEventId: string,
+): Promise<StripeWebhookResult> {
+  const paymentIntentId = getDisputePaymentIntentId(dispute)
+
+  if (!paymentIntentId) {
+    return { handled: false, message: `${eventType} missing payment_intent.` }
+  }
+
+  const outcome = resolveDisputeOutcome(eventType, dispute)
+
+  const result = await applyStripeDisputeInTransaction(tx, {
+    stripePaymentIntentId: paymentIntentId,
+    stripeEventId,
+    outcome,
+  })
+
+  if (!result) {
+    return { handled: false, message: `${eventType} booking not found.` }
+  }
+
+  // Alert on an active or lost dispute (money at risk). A won dispute is good
+  // news (payment restored) and needs no page.
+  if (outcome !== 'WON') {
+    captureStripeDisputeAlert({
+      bookingId: result.bookingId,
+      paymentIntentId,
+      disputeId: dispute.id,
+      disputeStatus: dispute.status,
+      outcome,
+      eventType,
+    })
+  }
+
+  return { handled: true, message: `${eventType} applied (${outcome}).` }
+}
+
 async function handleSubscriptionEvent(
   tx: Prisma.TransactionClient,
   subscription: Stripe.Subscription,
@@ -434,6 +503,17 @@ export async function handleStripeEvent(
 
     case 'charge.refunded':
       return handleChargeRefunded(tx, event.data.object as Stripe.Charge)
+
+    case 'charge.dispute.created':
+    case 'charge.dispute.updated':
+    case 'charge.dispute.funds_withdrawn':
+    case 'charge.dispute.closed':
+      return handleChargeDispute(
+        tx,
+        event.data.object as Stripe.Dispute,
+        event.type,
+        event.id,
+      )
 
     case 'account.updated':
       return handleAccountUpdated(tx, event.data.object as Stripe.Account)

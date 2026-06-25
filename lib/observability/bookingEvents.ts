@@ -119,6 +119,59 @@ export function captureLifecycleDrift(event: LifecycleDriftEvent): void {
   )
 }
 
+/**
+ * Surfaces a Stripe payment dispute on a booking as a high-severity operational
+ * alert (Sentry + a structured log line). Disputes are rare and money-critical —
+ * a destination-charge dispute reverses the transfer off the pro and debits the
+ * platform — so a human must see every one. Fired on dispute OPEN and LOST; a
+ * won dispute (which restores the payment) does not alert.
+ */
+export function captureStripeDisputeAlert(input: {
+  bookingId: string
+  paymentIntentId: string
+  disputeId: string
+  disputeStatus: string
+  outcome: 'OPEN' | 'WON' | 'LOST'
+  eventType: string
+}): void {
+  Sentry.withScope((scope) => {
+    scope.setLevel('error')
+    scope.setTag('area', 'payments')
+    scope.setTag('payments.event', 'stripe_dispute')
+    scope.setTag('payments.dispute.outcome', input.outcome)
+    scope.setTag('booking.id', input.bookingId)
+
+    scope.setContext('stripe_dispute', {
+      bookingId: input.bookingId,
+      paymentIntentId: input.paymentIntentId,
+      disputeId: input.disputeId,
+      disputeStatus: input.disputeStatus,
+      outcome: input.outcome,
+      eventType: input.eventType,
+    })
+
+    Sentry.captureMessage(
+      `Stripe dispute (${input.outcome}) on booking ${input.bookingId} [${input.eventType}]`,
+      'error',
+    )
+  })
+
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      app: 'tovis',
+      namespace: 'payments',
+      event: 'stripe_dispute',
+      outcome: input.outcome,
+      eventType: input.eventType,
+      bookingId: input.bookingId,
+      paymentIntentId: input.paymentIntentId,
+      disputeId: input.disputeId,
+      disputeStatus: input.disputeStatus,
+    }),
+  )
+}
+
 // Register the Sentry sink once at module load. The lifecycleContract module
 // keeps a registry of sinks and emits to all of them on drift.
 let driftSinkRegistered = false
