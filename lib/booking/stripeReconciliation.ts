@@ -15,12 +15,17 @@
 // monotonic max, refund-row updates match on `stripeRefundId`, and refund
 // notifications dedupe per refund id.
 //
+// New-client deposits ride a separate PaymentIntent and are reconciled by the
+// parallel `reconcileStripeDeposits` sweep below, which re-drives the deposit
+// webhook path the same way.
+//
 // Cost is kept low: one Stripe call (retrieve PaymentIntent) per candidate to
 // read the authoritative refunded total; a second call (list refunds) plus a
 // DB transaction run ONLY when there is refund activity to settle.
 
 import type Stripe from 'stripe'
 import {
+  BookingDepositStatus,
   BookingRefundStatus,
   PaymentProvider,
   StripePaymentStatus,
@@ -30,6 +35,7 @@ import {
   reconcileChargeRefundInTransaction,
   type ChargeRefundReconcileInput,
 } from '@/lib/booking/refunds'
+import { reconcileDepositChargeRefundInTransaction } from '@/lib/booking/writeBoundary'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
@@ -92,17 +98,29 @@ function getLatestCharge(paymentIntent: Stripe.PaymentIntent): Stripe.Charge | n
   return null
 }
 
-async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileResult> {
+type ChargeAmounts = {
+  stripeRefundedCents: number
+  chargeAmountCents: number
+}
+
+type RetrievedCharge =
+  | { kind: 'ok'; amounts: ChargeAmounts }
+  | { kind: 'stripe_lookup_failed' }
+  | { kind: 'charge_missing' }
+
+// Shared first step for both the final-bill and deposit paths: ask Stripe for
+// the authoritative refunded/charge totals on a PaymentIntent. Failures are
+// captured here so each candidate stays isolated from the rest of the sweep.
+async function retrieveChargeAmounts(args: {
+  paymentIntentId: string
+  bookingId: string
+  fallbackChargeAmountCents: number
+}): Promise<RetrievedCharge> {
   const stripe = getStripe()
-  const base = {
-    bookingId: candidate.id,
-    paymentIntentId: candidate.stripePaymentIntentId,
-    localRefundedCents: candidate.stripeAmountRefunded,
-  }
 
   let paymentIntent: Stripe.PaymentIntent
   try {
-    paymentIntent = await stripe.paymentIntents.retrieve(candidate.stripePaymentIntentId, {
+    paymentIntent = await stripe.paymentIntents.retrieve(args.paymentIntentId, {
       expand: ['latest_charge'],
     })
   } catch (error: unknown) {
@@ -110,20 +128,46 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
       error,
       route: ROUTE,
       event: 'STRIPE_LOOKUP_FAILED',
-      bookingId: candidate.id,
+      bookingId: args.bookingId,
     })
-    return { ...base, outcome: 'stripe_lookup_failed', stripeRefundedCents: candidate.stripeAmountRefunded }
+    return { kind: 'stripe_lookup_failed' }
   }
 
   const charge = getLatestCharge(paymentIntent)
   if (!charge) {
-    return { ...base, outcome: 'charge_missing', stripeRefundedCents: candidate.stripeAmountRefunded }
+    return { kind: 'charge_missing' }
   }
 
-  const stripeRefundedCents =
-    typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0
-  const chargeAmountCents =
-    typeof charge.amount === 'number' ? charge.amount : candidate.stripeAmountTotal ?? 0
+  return {
+    kind: 'ok',
+    amounts: {
+      stripeRefundedCents:
+        typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0,
+      chargeAmountCents:
+        typeof charge.amount === 'number'
+          ? charge.amount
+          : args.fallbackChargeAmountCents,
+    },
+  }
+}
+
+async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileResult> {
+  const base = {
+    bookingId: candidate.id,
+    paymentIntentId: candidate.stripePaymentIntentId,
+    localRefundedCents: candidate.stripeAmountRefunded,
+  }
+
+  const retrieved = await retrieveChargeAmounts({
+    paymentIntentId: candidate.stripePaymentIntentId,
+    bookingId: candidate.id,
+    fallbackChargeAmountCents: candidate.stripeAmountTotal ?? 0,
+  })
+  if (retrieved.kind !== 'ok') {
+    return { ...base, outcome: retrieved.kind, stripeRefundedCents: candidate.stripeAmountRefunded }
+  }
+
+  const { stripeRefundedCents, chargeAmountCents } = retrieved.amounts
 
   const amountDrift = stripeRefundedCents !== candidate.stripeAmountRefunded
   const hasPendingRows = candidate.pendingRefundCount > 0
@@ -139,7 +183,7 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
   // charge.refunded webhook does.
   let refunds: ChargeRefundReconcileInput['refunds']
   try {
-    const list = await stripe.refunds.list({
+    const list = await getStripe().refunds.list({
       payment_intent: candidate.stripePaymentIntentId,
       limit: STRIPE_REFUND_PAGE_SIZE,
     })
@@ -199,6 +243,26 @@ export type ReconcileRunResult = {
   results: BookingReconcileResult[]
 }
 
+function buildRunResult(
+  candidatesScanned: number,
+  results: BookingReconcileResult[],
+): ReconcileRunResult {
+  const tally = results.reduce<Record<ReconcileOutcome, number>>(
+    (acc, result) => {
+      acc[result.outcome] += 1
+      return acc
+    },
+    { ...EMPTY_TALLY },
+  )
+
+  return {
+    candidatesScanned,
+    capped: candidatesScanned === MAX_BOOKINGS_PER_RUN,
+    tally,
+    results,
+  }
+}
+
 export async function reconcileStripeRefunds(opts?: { now?: Date }): Promise<ReconcileRunResult> {
   const now = opts?.now ?? new Date()
   const windowStart = new Date(now.getTime() - RECONCILE_WINDOW_DAYS * 24 * 3_600_000)
@@ -248,18 +312,125 @@ export async function reconcileStripeRefunds(opts?: { now?: Date }): Promise<Rec
     )
   }
 
-  const tally = results.reduce<Record<ReconcileOutcome, number>>(
-    (acc, result) => {
-      acc[result.outcome] += 1
-      return acc
-    },
-    { ...EMPTY_TALLY },
-  )
+  return buildRunResult(candidates.length, results)
+}
 
-  return {
-    candidatesScanned: candidates.length,
-    capped: candidates.length === MAX_BOOKINGS_PER_RUN,
-    tally,
-    results,
+// ---------------------------------------------------------------------------
+// Deposit reconciliation
+//
+// New-client deposits ride their OWN Stripe PaymentIntent
+// (`depositStripePaymentIntentId`), distinct from the final-bill charge above,
+// and carry no BookingRefund rows — a deposit is refunded once, in full or part,
+// straight on its charge. The webhook path keeps `depositStatus` in sync via
+// reconcileDepositChargeRefundInTransaction; this sweep re-drives the SAME path
+// for the lost-webhook / Dashboard-refund cases, exactly mirroring the final-bill
+// sweep. The deposit PI is independent of the final-bill `paymentProvider`, so we
+// filter only on the deposit fields.
+// ---------------------------------------------------------------------------
+
+type DepositCandidate = {
+  id: string
+  depositStripePaymentIntentId: string
+  depositStatus: BookingDepositStatus
+  depositChargeFallbackCents: number
+}
+
+function decimalDollarsToCents(value: { toString(): string } | null): number {
+  if (value == null) return 0
+  const parsed = Number(value.toString())
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) : 0
+}
+
+async function reconcileDepositBooking(
+  candidate: DepositCandidate,
+): Promise<BookingReconcileResult> {
+  const base = {
+    bookingId: candidate.id,
+    paymentIntentId: candidate.depositStripePaymentIntentId,
+    // Deposits store no local refunded-cents column; 0 is the "nothing recorded"
+    // baseline this sweep heals from.
+    localRefundedCents: 0,
   }
+
+  const retrieved = await retrieveChargeAmounts({
+    paymentIntentId: candidate.depositStripePaymentIntentId,
+    bookingId: candidate.id,
+    fallbackChargeAmountCents: candidate.depositChargeFallbackCents,
+  })
+  if (retrieved.kind !== 'ok') {
+    return { ...base, outcome: retrieved.kind, stripeRefundedCents: 0 }
+  }
+
+  const { stripeRefundedCents, chargeAmountCents } = retrieved.amounts
+
+  // No refund on Stripe, or we already recorded REFUNDED: nothing to heal, and
+  // the heal is a no-op write we can skip.
+  if (
+    stripeRefundedCents === 0 ||
+    candidate.depositStatus === BookingDepositStatus.REFUNDED
+  ) {
+    return { ...base, outcome: 'in_sync', stripeRefundedCents }
+  }
+
+  try {
+    const result = await prisma.$transaction((tx) =>
+      reconcileDepositChargeRefundInTransaction(tx, {
+        paymentIntentId: candidate.depositStripePaymentIntentId,
+        amountRefundedCents: stripeRefundedCents,
+        chargeAmountCents,
+      }),
+    )
+    if (!result.handled) {
+      return { ...base, outcome: 'booking_not_found', stripeRefundedCents }
+    }
+  } catch (error: unknown) {
+    captureBookingException({
+      error,
+      route: ROUTE,
+      event: 'RECONCILE_FAILED',
+      bookingId: candidate.id,
+    })
+    return { ...base, outcome: 'reconcile_failed', stripeRefundedCents }
+  }
+
+  return { ...base, outcome: 'refund_drift_healed', stripeRefundedCents }
+}
+
+export async function reconcileStripeDeposits(opts?: { now?: Date }): Promise<ReconcileRunResult> {
+  const now = opts?.now ?? new Date()
+  const windowStart = new Date(now.getTime() - RECONCILE_WINDOW_DAYS * 24 * 3_600_000)
+
+  const candidates = await prisma.booking.findMany({
+    where: {
+      depositStripePaymentIntentId: { not: null },
+      depositStatus: {
+        in: [BookingDepositStatus.PAID, BookingDepositStatus.REFUNDED],
+      },
+      depositPaidAt: { gte: windowStart },
+    },
+    select: {
+      id: true,
+      depositStripePaymentIntentId: true,
+      depositStatus: true,
+      depositAmount: true,
+    },
+    orderBy: { depositPaidAt: 'asc' },
+    take: MAX_BOOKINGS_PER_RUN,
+  })
+
+  const results: BookingReconcileResult[] = []
+  for (const candidate of candidates) {
+    if (!candidate.depositStripePaymentIntentId) continue
+
+    results.push(
+      await reconcileDepositBooking({
+        id: candidate.id,
+        depositStripePaymentIntentId: candidate.depositStripePaymentIntentId,
+        depositStatus: candidate.depositStatus,
+        depositChargeFallbackCents: decimalDollarsToCents(candidate.depositAmount),
+      }),
+    )
+  }
+
+  return buildRunResult(candidates.length, results)
 }

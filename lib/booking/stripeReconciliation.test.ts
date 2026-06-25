@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
   transaction: vi.fn(),
   reconcileChargeRefund: vi.fn(),
+  reconcileDepositRefund: vi.fn(),
   captureException: vi.fn(),
 }))
 
@@ -27,11 +28,21 @@ vi.mock('@/lib/booking/refunds', () => ({
   reconcileChargeRefundInTransaction: mocks.reconcileChargeRefund,
 }))
 
+// Mock the (large) writeBoundary module so we only pull in the one deposit
+// reconcile helper the deposit sweep depends on.
+vi.mock('@/lib/booking/writeBoundary', () => ({
+  reconcileDepositChargeRefundInTransaction: mocks.reconcileDepositRefund,
+}))
+
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureException,
 }))
 
-import { reconcileStripeRefunds } from '@/lib/booking/stripeReconciliation'
+import {
+  reconcileStripeDeposits,
+  reconcileStripeRefunds,
+} from '@/lib/booking/stripeReconciliation'
+import { BookingDepositStatus } from '@prisma/client'
 
 type CandidateOverrides = {
   id?: string
@@ -68,6 +79,7 @@ beforeEach(() => {
   // Default: the reconcile transaction simply runs its callback with a stub tx.
   mocks.transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb({}))
   mocks.reconcileChargeRefund.mockResolvedValue({ handled: true })
+  mocks.reconcileDepositRefund.mockResolvedValue({ handled: true })
 })
 
 describe('reconcileStripeRefunds', () => {
@@ -221,5 +233,149 @@ describe('reconcileStripeRefunds', () => {
       { stripePaidAt: { gte: new Date('2026-05-10T12:00:00Z') } },
       { paymentCollectedAt: { gte: new Date('2026-05-10T12:00:00Z') } },
     ])
+  })
+})
+
+type DepositOverrides = {
+  id?: string
+  depositStripePaymentIntentId?: string
+  depositStatus?: BookingDepositStatus
+  depositAmount?: { toString(): string } | null
+}
+
+function depositCandidate(overrides: DepositOverrides = {}) {
+  return {
+    id: overrides.id ?? 'booking_d1',
+    depositStripePaymentIntentId:
+      overrides.depositStripePaymentIntentId ?? 'pi_dep_1',
+    depositStatus: overrides.depositStatus ?? BookingDepositStatus.PAID,
+    depositAmount:
+      overrides.depositAmount === undefined ? '50.00' : overrides.depositAmount,
+  }
+}
+
+describe('reconcileStripeDeposits', () => {
+  it('marks a deposit in_sync without opening a transaction when Stripe shows no refund', async () => {
+    mocks.findMany.mockResolvedValue([depositCandidate()])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(chargeIntent({ amountRefunded: 0 }))
+
+    const run = await reconcileStripeDeposits()
+
+    expect(run.tally.in_sync).toBe(1)
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(mocks.reconcileDepositRefund).not.toHaveBeenCalled()
+  })
+
+  it('skips the heal when the deposit is already recorded REFUNDED', async () => {
+    mocks.findMany.mockResolvedValue([
+      depositCandidate({ depositStatus: BookingDepositStatus.REFUNDED }),
+    ])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(
+      chargeIntent({ amount: 5_000, amountRefunded: 5_000 }),
+    )
+
+    const run = await reconcileStripeDeposits()
+
+    expect(run.tally.in_sync).toBe(1)
+    expect(mocks.reconcileDepositRefund).not.toHaveBeenCalled()
+  })
+
+  it('heals a Dashboard deposit refund the webhook never recorded', async () => {
+    mocks.findMany.mockResolvedValue([depositCandidate()])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(
+      chargeIntent({ amount: 5_000, amountRefunded: 5_000 }),
+    )
+
+    const run = await reconcileStripeDeposits()
+
+    expect(run.tally.refund_drift_healed).toBe(1)
+    expect(mocks.reconcileDepositRefund).toHaveBeenCalledTimes(1)
+    const input = mocks.reconcileDepositRefund.mock.calls[0]![1]
+    expect(input).toMatchObject({
+      paymentIntentId: 'pi_dep_1',
+      amountRefundedCents: 5_000,
+      chargeAmountCents: 5_000,
+    })
+  })
+
+  it('falls back to the local deposit amount when the charge amount is absent', async () => {
+    mocks.findMany.mockResolvedValue([depositCandidate({ depositAmount: '50.00' })])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(
+      chargeIntent({ charge: { object: 'charge', amount_refunded: 5_000 } }),
+    )
+
+    await reconcileStripeDeposits()
+
+    const input = mocks.reconcileDepositRefund.mock.calls[0]![1]
+    expect(input.chargeAmountCents).toBe(5_000)
+  })
+
+  it('classifies a charge-less deposit PaymentIntent as charge_missing', async () => {
+    mocks.findMany.mockResolvedValue([depositCandidate()])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(chargeIntent({ charge: null }))
+
+    const run = await reconcileStripeDeposits()
+
+    expect(run.tally.charge_missing).toBe(1)
+    expect(mocks.reconcileDepositRefund).not.toHaveBeenCalled()
+  })
+
+  it('isolates a Stripe lookup failure to the one deposit', async () => {
+    mocks.findMany.mockResolvedValue([
+      depositCandidate({ id: 'd_bad', depositStripePaymentIntentId: 'pi_bad' }),
+      depositCandidate({ id: 'd_ok', depositStripePaymentIntentId: 'pi_ok' }),
+    ])
+    mocks.paymentIntentsRetrieve.mockImplementation(async (id: string) => {
+      if (id === 'pi_bad') throw new Error('stripe down')
+      return chargeIntent({ amountRefunded: 0 })
+    })
+
+    const run = await reconcileStripeDeposits()
+
+    expect(run.tally.stripe_lookup_failed).toBe(1)
+    expect(run.tally.in_sync).toBe(1)
+    expect(mocks.captureException).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports booking_not_found when the deposit reconcile finds no booking', async () => {
+    mocks.findMany.mockResolvedValue([depositCandidate()])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(
+      chargeIntent({ amount: 5_000, amountRefunded: 5_000 }),
+    )
+    mocks.reconcileDepositRefund.mockResolvedValue({ handled: false })
+
+    const run = await reconcileStripeDeposits()
+
+    expect(run.tally.booking_not_found).toBe(1)
+  })
+
+  it('captures a deposit reconcile transaction failure without aborting the sweep', async () => {
+    mocks.findMany.mockResolvedValue([depositCandidate()])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(
+      chargeIntent({ amount: 5_000, amountRefunded: 5_000 }),
+    )
+    mocks.transaction.mockRejectedValue(new Error('deadlock'))
+
+    const run = await reconcileStripeDeposits()
+
+    expect(run.tally.reconcile_failed).toBe(1)
+    expect(mocks.captureException).toHaveBeenCalledTimes(1)
+  })
+
+  it('queries deposit-paid bookings within the reconciliation window', async () => {
+    mocks.findMany.mockResolvedValue([])
+    const now = new Date('2026-06-24T12:00:00Z')
+
+    await reconcileStripeDeposits({ now })
+
+    const args = mocks.findMany.mock.calls[0]![0]
+    expect(args.take).toBe(150)
+    expect(args.where.depositStripePaymentIntentId).toEqual({ not: null })
+    expect(args.where.depositStatus).toEqual({
+      in: [BookingDepositStatus.PAID, BookingDepositStatus.REFUNDED],
+    })
+    expect(args.where.depositPaidAt).toEqual({
+      gte: new Date('2026-05-10T12:00:00Z'),
+    })
   })
 })
