@@ -706,6 +706,7 @@ load test gap
 ## Related runbooks
 
 ```text
+docs/runbooks/db-restore.md          ← data LOSS / recovery (vs. this doc: unreachable)
 docs/runbooks/health-readiness.md
 docs/runbooks/redis-outage.md
 docs/runbooks/stripe-degradation.md

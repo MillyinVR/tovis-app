@@ -5,20 +5,21 @@
 //
 // WHY THIS EXISTS
 // ---------------
-// Dev and prod currently resolve to the SAME Supabase database (`.env.local`
-// and `.env.production.local` carry an identical DATABASE_URL). That makes a
+// `.env.local` points at the PRODUCTION Supabase database. That makes a
 // muscle-memory `prisma db push` / `prisma migrate dev` / `prisma migrate reset`
 // from the repo root a one-keystroke way to mutate or wipe production. The
 // existing `_safe-script-guard.cjs` only protects our own `.cjs` scripts
-// (seed, repair-*) — it never sees the Prisma CLI. This closes that gap for
-// every path that routes through `npm run db:push` / `migrate:dev` /
+// (seed, repair-*) — it never sees the Prisma CLI. This wrapper closes that gap
+// for every path that routes through `npm run db:push` / `migrate:dev` /
 // `migrate:reset` (and the generic `npm run db:guard -- <args>`).
 //
-// RESIDUAL GAP (read this): a raw `npx prisma db push` typed directly still
-// bypasses this wrapper — npm/Prisma offer no pre-command hook we can attach to.
-// The durable fix is to make the local DB the default `.env.local` target. This
-// wrapper is the cheap, committable first layer; it covers the documented
-// commands and the scripted paths.
+// PRIMARY GUARD IS `prisma.config.ts`: it is loaded by the Prisma CLI itself,
+// so it catches even a raw `npx prisma db push` typed directly — it loads
+// `.env.development.local` (local dev DB) above `.env.local`, and refuses any
+// db-touching command that targets the prod ref unless `ALLOW_PROD_DB=1`. See
+// `docs/local-dev-database.md`. This `.cjs` wrapper is a complementary
+// defense-in-depth layer for the npm-script paths; the host-based check below
+// still adds value when someone runs `npm run db:push` with a prod URL in env.
 //
 // `migrate deploy` is intentionally NOT guarded — it is the sanctioned
 // production migration path invoked by the Vercel build, and it only applies
