@@ -332,6 +332,7 @@ type DepositCandidate = {
   id: string
   depositStripePaymentIntentId: string
   depositStatus: BookingDepositStatus
+  depositRefundedCents: number
   depositChargeFallbackCents: number
 }
 
@@ -347,9 +348,7 @@ async function reconcileDepositBooking(
   const base = {
     bookingId: candidate.id,
     paymentIntentId: candidate.depositStripePaymentIntentId,
-    // Deposits store no local refunded-cents column; 0 is the "nothing recorded"
-    // baseline this sweep heals from.
-    localRefundedCents: 0,
+    localRefundedCents: candidate.depositRefundedCents,
   }
 
   const retrieved = await retrieveChargeAmounts({
@@ -363,10 +362,13 @@ async function reconcileDepositBooking(
 
   const { stripeRefundedCents, chargeAmountCents } = retrieved.amounts
 
-  // No refund on Stripe, or we already recorded REFUNDED: nothing to heal, and
-  // the heal is a no-op write we can skip.
+  // Nothing to heal when: no refund on Stripe; we already recorded at least the
+  // Stripe cumulative (partials included, via depositRefundedCents); or the
+  // deposit is already fully REFUNDED. The REFUNDED check also covers legacy rows
+  // refunded before depositRefundedCents existed (backfilled to 0).
   if (
     stripeRefundedCents === 0 ||
+    stripeRefundedCents <= candidate.depositRefundedCents ||
     candidate.depositStatus === BookingDepositStatus.REFUNDED
   ) {
     return { ...base, outcome: 'in_sync', stripeRefundedCents }
@@ -412,6 +414,7 @@ export async function reconcileStripeDeposits(opts?: { now?: Date }): Promise<Re
       id: true,
       depositStripePaymentIntentId: true,
       depositStatus: true,
+      depositRefundedCents: true,
       depositAmount: true,
     },
     orderBy: { depositPaidAt: 'asc' },
@@ -427,6 +430,7 @@ export async function reconcileStripeDeposits(opts?: { now?: Date }): Promise<Re
         id: candidate.id,
         depositStripePaymentIntentId: candidate.depositStripePaymentIntentId,
         depositStatus: candidate.depositStatus,
+        depositRefundedCents: candidate.depositRefundedCents,
         depositChargeFallbackCents: decimalDollarsToCents(candidate.depositAmount),
       }),
     )

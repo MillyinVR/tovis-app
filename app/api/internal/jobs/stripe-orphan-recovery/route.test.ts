@@ -293,7 +293,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
     expect(mocks.applyStripePaymentSucceeded).toHaveBeenCalledWith({
       bookingIdHint: 'bk_1',
       stripePaymentIntentId: 'pi_1',
-      stripeEventId: 'orphan_recovery:cs_1',
+      stripeEventId: 'stripe:pi_succeeded:pi_1',
       amountReceivedCents: 5000,
       currency: 'usd',
     })
@@ -331,7 +331,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
     expect(mocks.applyStripePaymentSucceeded).toHaveBeenCalledWith({
       bookingIdHint: 'bk_string_pi',
       stripePaymentIntentId: 'pi_string_1',
-      stripeEventId: 'orphan_recovery:cs_string_pi',
+      stripeEventId: 'stripe:pi_succeeded:pi_string_1',
       amountReceivedCents: 7500,
       currency: 'usd',
     })

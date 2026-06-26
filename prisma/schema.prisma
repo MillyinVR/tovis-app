@@ -441,8 +441,8 @@ enum BookingDiscoveryProvenance {
 enum BookingDepositStatus {
   NONE // no deposit required for this booking
   PENDING // deposit checkout created, not yet paid
-  PAID // deposit captured
-  REFUNDED // deposit refunded (fully or partially)
+  PAID // deposit captured (may be PARTIALLY refunded — see depositRefundedCents)
+  REFUNDED // deposit FULLY refunded (partial refunds stay PAID + accumulate depositRefundedCents)
   FAILED // deposit charge failed / expired
 }
 
@@ -2521,6 +2521,11 @@ model Booking {
   depositStripeChargeId        String?
   depositPaidAt                DateTime?
   depositCreditedAt            DateTime? // when the deposit was applied against the final total
+  // Cumulative cents refunded against the deposit charge. depositStatus only
+  // flips to REFUNDED once this reaches the full deposit-charge total; a partial
+  // refund keeps depositStatus PAID + records the cents so a later full refund
+  // isn't blocked and we can't over-refund. See lib/booking/refunds.ts.
+  depositRefundedCents         Int                  @default(0)
 
   // One-time platform discovery fee (cents), captured as the Stripe application
   // fee on the deposit charge. refundedAt is set when the fee is returned, so a

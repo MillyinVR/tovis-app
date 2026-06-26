@@ -149,10 +149,12 @@ async function recoverBooking(args: {
         ? session.currency
         : null
 
-  // Stable synthetic idempotency key for this recovery path.
-  // If this job retries the same paid session, the write boundary can no-op
-  // after the first successful recovery.
-  const stripeEventId = `orphan_recovery:${args.stripeCheckoutSessionId}`
+  // Provenance marker for this apply, derived from the PaymentIntent (NOT a
+  // session-scoped `orphan_recovery:*` id). The write boundary dedupes
+  // payment-succeeded on the booking's terminal STATE, not on this id, so a live
+  // `payment_intent.succeeded` arriving after a recovery (or vice-versa) no-ops
+  // instead of re-applying — both paths converge on the same logical fact.
+  const stripeEventId = `stripe:pi_succeeded:${stripePaymentIntentId}`
 
   try {
     const result = await applyStripePaymentSucceeded({

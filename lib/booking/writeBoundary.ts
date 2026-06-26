@@ -14075,34 +14075,60 @@ export async function reconcileDepositChargeRefundInTransaction(
 ): Promise<{ handled: boolean }> {
   const booking = await tx.booking.findFirst({
     where: { depositStripePaymentIntentId: args.paymentIntentId },
-    select: { id: true, discoveryFeeRefundedAt: true, depositStatus: true },
+    select: {
+      id: true,
+      discoveryFeeRefundedAt: true,
+      depositStatus: true,
+      discoveryFeeAmount: true,
+      depositRefundedCents: true,
+    },
   })
 
   if (!booking) return { handled: false }
 
-  const fullyRefunded =
-    args.chargeAmountCents > 0 && args.amountRefundedCents >= args.chargeAmountCents
+  // `amountRefundedCents` is Stripe's authoritative cumulative refund on the
+  // deposit charge. Take a monotonic max so an out-of-order webhook reporting a
+  // stale (smaller) total can't roll the counter back.
+  const prevRefundedCents = booking.depositRefundedCents
+  const nextRefundedCents = Math.max(prevRefundedCents, args.amountRefundedCents)
+
+  // The deposit charge = deposit portion + the platform fee (application fee).
+  // depositStatus tracks the DEPOSIT portion returned to the client, so flip to
+  // REFUNDED only once that portion is fully back; a sub-deposit partial (e.g. a
+  // dashboard refund) stays PAID + records cents so it can't block a later refund
+  // (N5). The fee timestamp still keys on the FULL charge being refunded.
+  const feeCents = booking.discoveryFeeAmount ?? 0
+  const depositPortionCents = Math.max(0, args.chargeAmountCents - feeCents)
+  const depositPortionFullyRefunded =
+    depositPortionCents > 0 && nextRefundedCents >= depositPortionCents
+  const fullChargeRefunded =
+    args.chargeAmountCents > 0 && nextRefundedCents >= args.chargeAmountCents
 
   await tx.booking.update({
     where: { id: booking.id },
     data: {
-      depositStatus: BookingDepositStatus.REFUNDED,
+      depositRefundedCents: nextRefundedCents,
+      ...(depositPortionFullyRefunded
+        ? { depositStatus: BookingDepositStatus.REFUNDED }
+        : {}),
       // Only a full refund returns the fee; never clear an existing timestamp.
-      ...(fullyRefunded && !booking.discoveryFeeRefundedAt
+      ...(fullChargeRefunded && !booking.discoveryFeeRefundedAt
         ? { discoveryFeeRefundedAt: args.now ?? new Date() }
         : {}),
     },
   })
 
-  // Emit the refund receipt only on the transition into REFUNDED. The deposit
-  // rides a single PaymentIntent and is refunded once, so the PI id is a stable
-  // dedupe discriminator (no per-refund id available on this path).
-  if (booking.depositStatus !== BookingDepositStatus.REFUNDED) {
+  // Emit a refund receipt whenever the cumulative refunded amount rises (each
+  // partial included). The discriminator carries the new cumulative so a
+  // `charge.refunded` replay at the same total dedupes; the amount is the delta
+  // (this refund). App-initiated refunds already advanced the counter, so this
+  // sees no rise and stays silent — they notify via their own path.
+  if (nextRefundedCents > prevRefundedCents) {
     await emitPaymentRefundedNotifications({
       tx,
       bookingId: booking.id,
-      refundDiscriminator: `deposit:${args.paymentIntentId}`,
-      amountRefundedCents: args.amountRefundedCents,
+      refundDiscriminator: `deposit:${args.paymentIntentId}:${nextRefundedCents}`,
+      amountRefundedCents: nextRefundedCents - prevRefundedCents,
     })
   }
 
@@ -14196,8 +14222,17 @@ async function performLockedApplyStripePaymentSucceeded(args: {
     }
   }
 
+  // Idempotency is keyed on the booking's terminal payment STATE, not on which
+  // event id last touched it. payment_intent.succeeded for a booking's single PI
+  // is one logical fact however many ways it arrives — a live webhook redelivery,
+  // the requeue cron, or the orphan-recovery sweep (which previously applied under
+  // a synthetic `orphan_recovery:*` id). Matching on event-id equality let a
+  // second path with a different id RE-apply (redundant closeout + duplicate
+  // audit log + a misleading mutated=true). Once SUCCEEDED + PAID + collected, the
+  // success is recorded; any later arrival no-ops. (A won dispute restores
+  // SUCCEEDED via applyStripeDisputeInTransaction, which is the only way back here,
+  // and that path is what re-enables refunds.)
   const alreadyApplied =
-    booking.stripeLastEventId === args.stripeEventId &&
     booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED &&
     booking.checkoutStatus === BookingCheckoutStatus.PAID &&
     booking.paymentCollectedAt !== null
