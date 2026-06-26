@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import type { SubscriptionStatus } from '@prisma/client'
 import type { Entitlement, PlanKey } from '@/lib/pro/entitlements'
+import { formatRoundedDollars } from '@/lib/money'
 
 type PlanPrice = {
   interval: 'month' | 'year'
@@ -41,7 +42,7 @@ const ENTITLEMENT_LABELS: Record<Entitlement, string> = {
 }
 
 function dollars(cents: number): string {
-  return `$${(cents / 100).toFixed(0)}`
+  return formatRoundedDollars(cents / 100) ?? `$${Math.round(cents / 100)}`
 }
 
 function formatDate(iso: string | null): string | null {

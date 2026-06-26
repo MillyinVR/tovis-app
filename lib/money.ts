@@ -255,3 +255,47 @@ export function formatMoneyFromUnknown(value: unknown): string | null {
 
   return null
 }
+
+/**
+ * Display a money value as whole dollars with a leading `$` and grouped
+ * thousands — the marketing / price-badge form ("$80", "$1,200"). Rounds to the
+ * nearest dollar (no cents). Built on `moneyToNumber`, so it accepts a
+ * Prisma.Decimal, number, or money string. Returns null for nullish or
+ * uninterpretable input. Single source of truth for the rounded-price badges
+ * across discover, booking, and pro surfaces; callers add their own surrounding
+ * copy ("From ", "+").
+ */
+export function formatRoundedDollars(value: MoneyInput | null | undefined): string | null {
+  const amount = moneyToNumber(value)
+  if (amount === null) return null
+
+  return `$${Math.round(amount).toLocaleString('en-US')}`
+}
+
+/**
+ * Display an integer-cents amount (the unit Stripe works in) as currency.
+ * Single source of truth for "cents → on-screen money" in payment surfaces.
+ *
+ * - style 'symbol' (default): locale currency, e.g. 8000 → "$80.00".
+ * - style 'code': bare amount + uppercase currency code, e.g. 8000 → "80.00 USD"
+ *   (the form used in refund confirmations).
+ *
+ * Falls back to the 'code' form if `Intl.NumberFormat` rejects the currency.
+ */
+export function formatCents(
+  amountCents: number,
+  options: { currency?: string | null; style?: 'symbol' | 'code' } = {},
+): string {
+  const dollars = amountCents / 100
+  const code = (options.currency ?? 'usd').toUpperCase()
+
+  if (options.style === 'code') {
+    return `${dollars.toFixed(2)} ${code}`
+  }
+
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).format(dollars)
+  } catch {
+    return `${dollars.toFixed(2)} ${code}`
+  }
+}

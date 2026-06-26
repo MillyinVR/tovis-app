@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { endAvailabilityMetric } from '../../AvailabilityDrawer/perf/availabilityPerf'
+import { formatRoundedDollars } from '@/lib/money'
 import { zClass } from '@/lib/zIndex'
 import type {
   BookingSource,
@@ -56,9 +57,7 @@ function formatMinutes(min: number): string | null {
 }
 
 function formatMoneyLabel(value: string): string {
-  const amount = Number(value)
-  if (Number.isFinite(amount)) return `$${amount.toFixed(0)}`
-  return `$${value}`
+  return formatRoundedDollars(value) ?? `$${value}`
 }
 
 function parseCommaIds(raw: string | null, max: number): string[] {

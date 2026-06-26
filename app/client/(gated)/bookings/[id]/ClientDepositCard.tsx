@@ -3,7 +3,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { formatMoneyFromUnknown } from '@/lib/money'
+import { formatCents, formatMoneyFromUnknown } from '@/lib/money'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -25,7 +25,7 @@ type DepositSessionResponse = {
 }
 
 function centsToMoney(cents: number): string {
-  return formatMoneyFromUnknown((cents / 100).toFixed(2)) ?? `$${(cents / 100).toFixed(2)}`
+  return formatCents(cents)
 }
 
 export default function ClientDepositCard({

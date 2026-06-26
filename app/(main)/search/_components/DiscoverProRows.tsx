@@ -3,6 +3,7 @@
 
 import type { MutableRefObject } from 'react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatRoundedDollars } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { preferredProLocation, type ApiPro } from '../_lib/discoverProTypes'
 
@@ -17,9 +18,8 @@ interface DiscoverProRowsProps {
 }
 
 function formatPriceLabel(minPrice: number | null): string | null {
-  if (typeof minPrice !== 'number' || !Number.isFinite(minPrice)) return null
-
-  return `FROM $${Math.round(minPrice)}`
+  const dollars = formatRoundedDollars(minPrice)
+  return dollars ? `FROM ${dollars}` : null
 }
 
 export default function DiscoverProRows({ pros, activeProId, onSelect, itemRefs }: DiscoverProRowsProps) {

@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { asTrimmedString, isRecord } from '@/lib/guards'
+import { formatRoundedDollars } from '@/lib/money'
 import { safeJson } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { parseLooksFeedEnvelope } from '@/lib/looks/parsers'
@@ -23,9 +24,8 @@ interface LooksBookableGridProps {
 }
 
 function formatStartingPrice(price: number | null): string | null {
-  if (typeof price !== 'number' || !Number.isFinite(price)) return null
-
-  return `From $${Math.round(price)}`
+  const dollars = formatRoundedDollars(price)
+  return dollars ? `From ${dollars}` : null
 }
 
 export default function LooksBookableGrid({ categorySlug }: LooksBookableGridProps) {

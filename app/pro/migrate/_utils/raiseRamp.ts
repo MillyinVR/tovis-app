@@ -11,6 +11,7 @@ import {
   floorStepValue,
   nextStepPrice,
 } from '@/lib/migration/priceRamp'
+import { formatRoundedDollars } from '@/lib/money'
 
 import type { PriceGrace } from '../_types'
 
@@ -46,7 +47,7 @@ export function buildRampSchedule(grace: PriceGrace, start: Date): RampStep[] {
 }
 
 export function formatMoney(n: number): string {
-  return `$${Math.round(n).toLocaleString()}`
+  return formatRoundedDollars(n) ?? `$${Math.round(n)}`
 }
 
 export function formatRampDate(d: Date): string {

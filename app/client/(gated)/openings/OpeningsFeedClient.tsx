@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import { isRecord } from '@/lib/guards'
+import { moneyToString } from '@/lib/money'
 import { usePresenceSignalsBatch } from '@/lib/presence/usePresenceSignalsBatch'
 import type {
   PresenceBatchItem,
@@ -56,7 +57,8 @@ function num(value: unknown): number | null {
 }
 
 function money(value: number): string {
-  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`
+  const formatted = moneyToString(value)
+  return formatted ? `$${formatted}` : `$${value}`
 }
 
 function formatWhen(iso: string, timeZone: string | null): string {

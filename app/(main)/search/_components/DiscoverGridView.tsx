@@ -3,6 +3,7 @@
 
 import Link from 'next/link'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import { formatRoundedDollars } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
 export interface DiscoverGridPro {
@@ -24,9 +25,8 @@ interface DiscoverGridViewProps {
 }
 
 function formatPrice(minPrice: number | null | undefined): string {
-  if (typeof minPrice !== 'number') return 'VIEW'
-
-  return `FROM $${Math.round(minPrice)}`
+  const dollars = formatRoundedDollars(minPrice)
+  return dollars ? `FROM ${dollars}` : 'VIEW'
 }
 
 function formatMeta(pro: DiscoverGridPro): string {

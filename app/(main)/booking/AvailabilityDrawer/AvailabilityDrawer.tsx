@@ -22,6 +22,7 @@ import type {
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { asTrimmedString, getRecordProp, isRecord } from '@/lib/guards'
+import { formatRoundedDollars } from '@/lib/money'
 
 import AppointmentTypeToggle from './components/AppointmentTypeToggle'
 import ClientAddressCreateModal from './components/ClientAddressCreateModal'
@@ -772,7 +773,7 @@ export default function AvailabilityDrawer(props: {
     if (rawPrice) {
       const n = Number(rawPrice)
       if (Number.isFinite(n) && n > 0) {
-        parts.push(`$${n.toFixed(0)}`)
+        parts.push(formatRoundedDollars(n) ?? `$${Math.round(n)}`)
       }
     }
 

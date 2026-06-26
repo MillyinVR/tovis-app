@@ -2,6 +2,7 @@
 'use client'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatRoundedDollars } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
 // Structural subset of the discover ApiPro — the rail only needs identity, a
@@ -22,9 +23,8 @@ interface TrendingProRailProps {
 }
 
 function formatPriceBadge(minPrice: number | null | undefined): string | null {
-  if (typeof minPrice !== 'number') return null
-
-  return `$${Math.round(minPrice)}+`
+  const dollars = formatRoundedDollars(minPrice)
+  return dollars ? `${dollars}+` : null
 }
 
 export default function TrendingProRail({ pros, onSelectPro }: TrendingProRailProps) {
