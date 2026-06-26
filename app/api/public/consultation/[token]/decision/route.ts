@@ -19,6 +19,7 @@ import {
   rejectConsultationByClientActionToken,
 } from '@/lib/booking/writeBoundary'
 import { prisma } from '@/lib/prisma'
+import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
 import {
   clientActionTokenRateLimitPrefix,
   hashClientActionToken,
@@ -108,14 +109,9 @@ function readRequestMeta(req: Request): RequestMeta {
     readHeaderValue(req, 'x-idempotency-key') ??
     null
 
-  const forwardedFor = readHeaderValue(req, 'x-forwarded-for')
-  const realIp = readHeaderValue(req, 'x-real-ip')
-
-  const forwardedIp = forwardedFor
-    ? pickString(forwardedFor.split(',')[0] ?? null)
-    : null
-
-  const ipAddress = forwardedIp ?? realIp ?? null
+  // Use the trusted-IP resolver so a spoofed x-forwarded-for can't forge the
+  // consent-proof audit trail — only the platform-trusted edge header is honored.
+  const ipAddress = getTrustedClientIpFromRequest(req)
   const userAgent = readHeaderValue(req, 'user-agent') ?? null
 
   return {
@@ -175,10 +171,9 @@ function buildApproveResponseBody(args: {
       decision: args.result.proof.decision,
       method: args.result.proof.method,
       actedAt: args.result.proof.actedAt.toISOString(),
-      recordedByUserId: args.result.proof.recordedByUserId,
-      clientActionTokenId: args.result.proof.clientActionTokenId,
-      contactMethod: args.result.proof.contactMethod,
-      destinationSnapshot: args.result.proof.destinationSnapshot,
+      // Internal audit fields (recordedByUserId, clientActionTokenId) and
+      // counterparty contact (contactMethod, destinationSnapshot) are NOT
+      // returned to the token bearer — see the GET route for the same redaction.
     },
     meta: args.result.meta,
   })
@@ -201,10 +196,9 @@ function buildRejectResponseBody(args: {
       decision: args.result.proof.decision,
       method: args.result.proof.method,
       actedAt: args.result.proof.actedAt.toISOString(),
-      recordedByUserId: args.result.proof.recordedByUserId,
-      clientActionTokenId: args.result.proof.clientActionTokenId,
-      contactMethod: args.result.proof.contactMethod,
-      destinationSnapshot: args.result.proof.destinationSnapshot,
+      // Internal audit fields (recordedByUserId, clientActionTokenId) and
+      // counterparty contact (contactMethod, destinationSnapshot) are NOT
+      // returned to the token bearer — see the GET route for the same redaction.
     },
     meta: args.result.meta,
   })

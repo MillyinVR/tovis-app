@@ -27,10 +27,6 @@ const approvedResponseBody = {
     decision: 'APPROVED',
     method: 'REMOTE_SECURE_LINK',
     actedAt: '2026-04-12T18:00:00.000Z',
-    recordedByUserId: null,
-    clientActionTokenId: 'token_row_1',
-    contactMethod: 'EMAIL',
-    destinationSnapshot: 'client@example.com',
   },
   meta: {
     mutated: true,
@@ -51,10 +47,6 @@ const rejectedResponseBody = {
     decision: 'REJECTED',
     method: 'REMOTE_SECURE_LINK',
     actedAt: '2026-04-12T18:30:00.000Z',
-    recordedByUserId: null,
-    clientActionTokenId: 'token_row_2',
-    contactMethod: 'SMS',
-    destinationSnapshot: '+15551234567',
   },
   meta: {
     mutated: true,
