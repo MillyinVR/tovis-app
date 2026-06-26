@@ -69,6 +69,22 @@ type QuietHoursWindow = {
 const DEFAULT_QUIET_HOURS_START_MINUTES = 22 * 60
 const DEFAULT_QUIET_HOURS_END_MINUTES = 8 * 60
 
+/**
+ * Conservative quiet-hours fallback zone for recipients we have NO timezone for
+ * (unclaimed / phone-only clients whose profile and booking-location zones are
+ * both absent). Used ONLY to gate quiet hours — never for scheduling truth.
+ *
+ * The generic app fallback is UTC (lib/timeZone), but UTC fails the TCPA goal
+ * here: a US-Pacific recipient's 03:00 local is 11:00 UTC, OUTSIDE a 22:00–08:00
+ * UTC window, so a UTC-gated send would still fire in the middle of their night.
+ * Enforcing the window in a real US business zone instead means a missing-zone
+ * recipient is DEFERRED rather than texted at 3am. We pick the eastern zone
+ * (most-populous, and the policy note specifically forbids defaulting to
+ * America/Los_Angeles); the booking-location zone is already preferred upstream
+ * whenever it exists, so this only bites the genuinely zone-less tail.
+ */
+const QUIET_HOURS_FALLBACK_TIME_ZONE = 'America/New_York'
+
 const zonedDateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>()
 
 function normalizeNow(value: Date): Date {
@@ -446,18 +462,12 @@ export function evaluateRuntimeDeliveryChannelPolicy(
     }
   }
 
-  const recipientTimeZone = normalizeTimeZone(args.recipientTimeZone)
-  if (!recipientTimeZone) {
-    return {
-      action: 'SEND',
-      reason: 'NO_RECIPIENT_TIME_ZONE',
-      allowQuietHoursBypass,
-      quietHoursStartMinutes: quietHoursWindow.quietHoursStartMinutes,
-      quietHoursEndMinutes: quietHoursWindow.quietHoursEndMinutes,
-      recipientLocalMinutes: null,
-      nextAttemptAt: null,
-    }
-  }
+  // Fail SAFE, not open: a recipient with NO usable timezone (and a configured
+  // quiet-hours window) must still have quiet hours enforced — in a conservative
+  // business zone — rather than be eligible to send around the clock. Sending at
+  // 3am local is a TCPA risk; deferring is not.
+  const recipientTimeZone =
+    normalizeTimeZone(args.recipientTimeZone) ?? QUIET_HOURS_FALLBACK_TIME_ZONE
 
   const recipientLocalMinutes = getRecipientLocalMinutes({
     at: now,

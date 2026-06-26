@@ -141,7 +141,10 @@ describe('lib/notifications/delivery/runtimeChannelPolicy', () => {
     })
   })
 
-  it('returns SEND when recipient timezone is missing', () => {
+  it('fails SAFE (DEFER) inside quiet hours when recipient timezone is missing', () => {
+    // 06:30 UTC = 02:30 in the conservative fallback zone (America/New_York,
+    // EDT) — inside a 22:00–08:00 window. A missing zone must NOT fail open into
+    // a 3am send; it defers to quiet-hours end (08:00 EDT = 12:00 UTC).
     const now = new Date('2026-04-09T06:30:00.000Z')
 
     const result = evaluateRuntimeDeliveryChannelPolicy({
@@ -156,17 +159,17 @@ describe('lib/notifications/delivery/runtimeChannelPolicy', () => {
     })
 
     expect(result).toEqual({
-      action: 'SEND',
-      reason: 'NO_RECIPIENT_TIME_ZONE',
+      action: 'DEFER',
+      reason: 'QUIET_HOURS',
       allowQuietHoursBypass: false,
       quietHoursStartMinutes: 22 * 60,
       quietHoursEndMinutes: 8 * 60,
-      recipientLocalMinutes: null,
-      nextAttemptAt: null,
+      recipientLocalMinutes: 2 * 60 + 30,
+      nextAttemptAt: new Date('2026-04-09T12:00:00.000Z'),
     })
   })
 
-  it('returns SEND when recipient timezone is invalid', () => {
+  it('fails SAFE (DEFER) inside quiet hours when recipient timezone is invalid', () => {
     const now = new Date('2026-04-09T06:30:00.000Z')
 
     const result = evaluateRuntimeDeliveryChannelPolicy({
@@ -181,12 +184,39 @@ describe('lib/notifications/delivery/runtimeChannelPolicy', () => {
     })
 
     expect(result).toEqual({
-      action: 'SEND',
-      reason: 'NO_RECIPIENT_TIME_ZONE',
+      action: 'DEFER',
+      reason: 'QUIET_HOURS',
       allowQuietHoursBypass: false,
       quietHoursStartMinutes: 22 * 60,
       quietHoursEndMinutes: 8 * 60,
-      recipientLocalMinutes: null,
+      recipientLocalMinutes: 2 * 60 + 30,
+      nextAttemptAt: new Date('2026-04-09T12:00:00.000Z'),
+    })
+  })
+
+  it('still SENDs a missing-timezone recipient outside the fallback-zone quiet hours', () => {
+    // 18:00 UTC = 14:00 in the fallback zone (America/New_York, EDT) — daytime,
+    // so the fail-safe does not needlessly defer.
+    const now = new Date('2026-04-09T18:00:00.000Z')
+
+    const result = evaluateRuntimeDeliveryChannelPolicy({
+      key: NotificationEventKey.APPOINTMENT_REMINDER,
+      channel: NotificationChannel.SMS,
+      now,
+      recipientTimeZone: null,
+      preference: buildPreference({
+        quietHoursStartMinutes: 22 * 60,
+        quietHoursEndMinutes: 8 * 60,
+      }),
+    })
+
+    expect(result).toEqual({
+      action: 'SEND',
+      reason: 'OUTSIDE_QUIET_HOURS',
+      allowQuietHoursBypass: false,
+      quietHoursStartMinutes: 22 * 60,
+      quietHoursEndMinutes: 8 * 60,
+      recipientLocalMinutes: 14 * 60,
       nextAttemptAt: null,
     })
   })
