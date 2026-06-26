@@ -117,11 +117,60 @@ export function warnOnDivergentCronSecrets(): void {
 }
 
 /**
+ * Connection-pooling footguns that degrade prod silently rather than failing a
+ * boot. Warnings (not fail-closed) because either condition still boots:
+ *
+ *  1. Pooled DATABASE_URL with no `connection_limit`. On Vercel every serverless
+ *     instance opens its own Prisma pool sized to `num_cpus*2+1` by default;
+ *     under fan-out that overruns the Postgres/pooler max connections and reads
+ *     start erroring with "too many connections" (memory: the deployed signup
+ *     load proof hit the free-tier pooler EMAXCONN ceiling). Size it explicitly.
+ *  2. DIRECT_URL pointing at the TRANSACTION pooler (port 6543 / pgbouncer).
+ *     Prisma migrate takes a session advisory lock, which transaction pooling
+ *     can't hold — `migrate deploy` hangs/fails (memory: "migrate diff hangs on
+ *     pooler"). The migrate path must use the direct or session endpoint (5432).
+ *
+ * See docs/runbooks/deploy-and-rollback.md and .env.example.
+ */
+export function warnOnDatabasePoolingMisconfig(): void {
+  if (!isProductionRuntime()) return
+
+  const databaseUrl = readOptionalEnv('DATABASE_URL')
+  if (databaseUrl && !/[?&]connection_limit=/.test(databaseUrl)) {
+    console.error(
+      JSON.stringify({
+        level: 'warning',
+        app: 'tovis',
+        namespace: 'startup',
+        event: 'database_url_no_connection_limit',
+        message:
+          'DATABASE_URL has no connection_limit. On serverless each instance opens its own pool; without an explicit limit, fan-out can exhaust Postgres/pooler connections. Add ?connection_limit=N sized for your pool. See docs/runbooks/deploy-and-rollback.md.',
+      }),
+    )
+  }
+
+  const directUrl = readOptionalEnv('DIRECT_URL')
+  if (directUrl && (/:6543(\/|\?|$)/.test(directUrl) || /pgbouncer=true/.test(directUrl))) {
+    console.error(
+      JSON.stringify({
+        level: 'warning',
+        app: 'tovis',
+        namespace: 'startup',
+        event: 'direct_url_on_transaction_pooler',
+        message:
+          'DIRECT_URL points at the transaction pooler (port 6543 / pgbouncer=true). Prisma migrate needs a session-scoped advisory lock the transaction pooler cannot hold — migrate deploy will hang. Point DIRECT_URL at the direct/session endpoint (port 5432). See docs/runbooks/deploy-and-rollback.md.',
+      }),
+    )
+  }
+}
+
+/**
  * Throw when a production server is missing any required env var. No-op outside
  * production. Call once at startup (instrumentation.register).
  */
 export function validateProductionStartupEnv(): void {
   warnOnDivergentCronSecrets()
+  warnOnDatabasePoolingMisconfig()
 
   const missing = collectMissingProductionEnv()
   if (missing.length === 0) return

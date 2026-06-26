@@ -23,6 +23,32 @@ incident runbooks in this directory.
   job/cron secret, or Postmark config crashes startup
   (`lib/observability/startupEnvValidation.ts`).
 
+## Database connection pooling (Supabase)
+
+Three connection vars, each with a distinct job. Misconfiguring them degrades
+prod silently, so boot emits warnings (not fail-closed) for the two footguns
+below — watch the deploy logs.
+
+- **`DATABASE_URL` → pooler endpoint, with an explicit `?connection_limit=N`.**
+  On serverless every instance opens its own Prisma pool (default
+  `num_cpus*2+1`); under fan-out that overruns the pooler's max connections and
+  reads start failing with "too many connections" (the deployed signup load
+  proof hit the free-tier pooler `EMAXCONN` ceiling). Size `connection_limit` to
+  `floor(pooler_max / expected_concurrent_instances)`. Boot warns
+  `database_url_no_connection_limit` when the param is absent.
+- **`DIRECT_URL` → direct or *session* pooler endpoint, port `5432`.** Prisma
+  migrate takes a **session-scoped advisory lock**, which the **transaction**
+  pooler (port `6543` / `pgbouncer=true`) cannot hold — `migrate deploy` hangs.
+  Use `db.<ref>.supabase.co:5432` (direct) or the session pooler on `5432`; never
+  the `:6543` transaction pooler. Boot warns `direct_url_on_transaction_pooler`
+  if it sees `:6543` / `pgbouncer=true`.
+- **`DATABASE_URL_READ` → read replica (optional).** Hot read paths (discover,
+  availability, public profile) use `lib/prisma.ts` `prismaRead`; when this is
+  set they hit the replica instead of the primary pool, preserving the primary's
+  connection budget for writes. Unset → reads fall back to the primary client
+  (correct, just no offload). Replica lag is 1–5s, so read-after-write paths stay
+  on the primary `prisma` client by design.
+
 ## Pre-deploy checklist (every deploy)
 
 ```bash

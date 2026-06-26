@@ -4,6 +4,7 @@ import {
   collectMissingProductionEnv,
   isProductionRuntime,
   validateProductionStartupEnv,
+  warnOnDatabasePoolingMisconfig,
   warnOnDivergentCronSecrets,
 } from './startupEnvValidation'
 
@@ -25,6 +26,7 @@ const MANAGED_ENV_KEYS = [
   'EMAIL_FROM',
   'PII_AEAD_KEYS_JSON',
   'DATABASE_URL',
+  'DIRECT_URL',
   'AUTH_TRUSTED_IP_HEADER',
 ] as const
 
@@ -37,7 +39,8 @@ function setFullyConfiguredProductionEnv() {
   process.env.POSTMARK_SERVER_TOKEN = 'pm-server-token'
   process.env.POSTMARK_NOTIFICATION_FROM_EMAIL = 'noreply@example.com'
   process.env.PII_AEAD_KEYS_JSON = VALID_AEAD_KEYRING
-  process.env.DATABASE_URL = 'postgresql://user:pass@localhost:5432/db'
+  process.env.DATABASE_URL =
+    'postgresql://user:pass@localhost:5432/db?connection_limit=10'
   process.env.AUTH_TRUSTED_IP_HEADER = 'x-vercel-forwarded-for'
 }
 
@@ -191,6 +194,76 @@ describe('warnOnDivergentCronSecrets', () => {
 
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     warnOnDivergentCronSecrets()
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+})
+
+describe('warnOnDatabasePoolingMisconfig', () => {
+  it('warns when the pooled DATABASE_URL has no connection_limit', () => {
+    process.env.VERCEL_ENV = 'production'
+    process.env.DATABASE_URL = 'postgresql://user:pass@pooler.supabase.com:5432/db'
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    warnOnDatabasePoolingMisconfig()
+
+    const events = spy.mock.calls.map((call) => String(call[0]))
+    expect(
+      events.some((e) => e.includes('database_url_no_connection_limit')),
+    ).toBe(true)
+    spy.mockRestore()
+  })
+
+  it('does not warn when DATABASE_URL carries a connection_limit', () => {
+    process.env.VERCEL_ENV = 'production'
+    process.env.DATABASE_URL =
+      'postgresql://user:pass@pooler.supabase.com:5432/db?connection_limit=10'
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    warnOnDatabasePoolingMisconfig()
+
+    const events = spy.mock.calls.map((call) => String(call[0]))
+    expect(
+      events.some((e) => e.includes('database_url_no_connection_limit')),
+    ).toBe(false)
+    spy.mockRestore()
+  })
+
+  it('warns when DIRECT_URL points at the transaction pooler (port 6543)', () => {
+    process.env.VERCEL_ENV = 'production'
+    process.env.DATABASE_URL = 'postgresql://u:p@h:5432/db?connection_limit=10'
+    process.env.DIRECT_URL = 'postgresql://u:p@pooler.supabase.com:6543/db'
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    warnOnDatabasePoolingMisconfig()
+
+    const events = spy.mock.calls.map((call) => String(call[0]))
+    expect(
+      events.some((e) => e.includes('direct_url_on_transaction_pooler')),
+    ).toBe(true)
+    spy.mockRestore()
+  })
+
+  it('does not warn when DIRECT_URL uses the direct/session endpoint (5432)', () => {
+    process.env.VERCEL_ENV = 'production'
+    process.env.DATABASE_URL = 'postgresql://u:p@h:5432/db?connection_limit=10'
+    process.env.DIRECT_URL = 'postgresql://u:p@db.ref.supabase.co:5432/db'
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    warnOnDatabasePoolingMisconfig()
+
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('does not warn outside production', () => {
+    process.env.VERCEL_ENV = 'preview'
+    process.env.DATABASE_URL = 'postgresql://u:p@h:5432/db'
+    process.env.DIRECT_URL = 'postgresql://u:p@pooler.supabase.com:6543/db'
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    warnOnDatabasePoolingMisconfig()
+
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
   })
