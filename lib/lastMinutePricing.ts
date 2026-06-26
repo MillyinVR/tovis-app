@@ -1,7 +1,7 @@
 // lib/lastMinutePricing.ts
 import { prisma } from '@/lib/prisma'
 import { moneyToNumber } from '@/lib/money'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { sanitizeTimeZone, weekdayInTimeZone } from '@/lib/timeZone'
 import { LastMinuteOfferType, Prisma } from '@prisma/client'
 
 /**
@@ -33,33 +33,6 @@ function clampPct(n: number): number {
 
 function isWithinBlockedRange(scheduledFor: Date, startAt: Date, endAt: Date): boolean {
   return scheduledFor >= startAt && scheduledFor < endAt
-}
-
-function weekdayIndexInTimeZone(d: Date, timeZone: string): number {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const wd = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    weekday: 'short',
-  }).format(d)
-
-  switch (wd) {
-    case 'Sun':
-      return 0
-    case 'Mon':
-      return 1
-    case 'Tue':
-      return 2
-    case 'Wed':
-      return 3
-    case 'Thu':
-      return 4
-    case 'Fri':
-      return 5
-    case 'Sat':
-      return 6
-    default:
-      return 0
-  }
 }
 
 function parseAmountOff(
@@ -145,7 +118,7 @@ export async function computeLastMinuteDiscount(args: {
     }
   }
 
-  const day = weekdayIndexInTimeZone(scheduledFor, timeZone)
+  const day = weekdayInTimeZone(scheduledFor, timeZone)
   const dayDisabled =
     (day === 1 && settings.disableMon) ||
     (day === 2 && settings.disableTue) ||

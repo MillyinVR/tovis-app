@@ -211,6 +211,21 @@ export function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZone: string) 
 }
 
 /**
+ * Day of week (0 = Sunday … 6 = Saturday) for a UTC instant as seen in
+ * `timeZone`. Derived from the timezone-resolved Y/M/D parts so it never drifts
+ * into the server's zone — the single source of truth for "which weekday is
+ * this appointment", replacing scattered `new Intl.DateTimeFormat(... weekday)`
+ * + string-switch lookups.
+ */
+export function weekdayInTimeZone(dateUtc: Date, timeZone: string): number {
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+  const p = getZonedParts(dateUtc, tz)
+  // Build the date at UTC midnight from the already-zoned parts; getUTCDay then
+  // yields the weekday without any further timezone interpretation.
+  return new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()
+}
+
+/**
  * Given a day Date (any instant) and minutes-from-midnight, interpret that day in `timeZone`
  * and return the UTC instant for that wall-clock time.
  */

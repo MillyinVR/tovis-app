@@ -13,10 +13,11 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { formatInTimeZone } from '@/lib/time'
+import { formatInTimeZone, formatRelativeTimeCompact } from '@/lib/time'
 import { initialsForName } from '@/lib/initials'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
+import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 
 export const dynamic = 'force-dynamic'
 
@@ -207,32 +208,6 @@ function formatPersonName(
   return [firstName, lastName].filter(isPresentString).join(' ').trim()
 }
 
-function formatRelativeTime(date: Date): string {
-  const diffMs = Math.max(0, Date.now() - date.getTime())
-  const diffMinutes = Math.floor(diffMs / 60000)
-
-  if (diffMinutes < 1) return 'now'
-  if (diffMinutes < 60) return `${diffMinutes}m`
-
-  const diffHours = Math.floor(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours}h`
-
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 7) return `${diffDays}d`
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-}
-
-function formatShortDate(date: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-}
-
 function formatBookingTime(
   date: Date | null | undefined,
   timeZone: string | null | undefined,
@@ -245,53 +220,6 @@ function formatBookingTime(
     hour: 'numeric',
     minute: '2-digit',
   })
-}
-
-function formatMinuteOfDay(value: number | null): string | null {
-  if (value === null) return null
-
-  const minutesInDay = 24 * 60
-  const safeValue = ((value % minutesInDay) + minutesInDay) % minutesInDay
-  const hour24 = Math.floor(safeValue / 60)
-  const minute = safeValue % 60
-  const hour12 = hour24 % 12 || 12
-  const suffix = hour24 < 12 ? 'AM' : 'PM'
-
-  return `${hour12}:${minute.toString().padStart(2, '0')} ${suffix}`
-}
-
-function formatWaitlistTimeOfDay(value: WaitlistTimeOfDay | null): string | null {
-  if (value === WaitlistTimeOfDay.MORNING) return 'Morning'
-  if (value === WaitlistTimeOfDay.AFTERNOON) return 'Afternoon'
-  if (value === WaitlistTimeOfDay.EVENING) return 'Evening'
-
-  return null
-}
-
-function formatWaitlistPreference(waitlist: WaitlistLookup): string | null {
-  if (waitlist.preferenceType === WaitlistPreferenceType.ANY_TIME) {
-    return 'Any time'
-  }
-
-  if (waitlist.preferenceType === WaitlistPreferenceType.TIME_OF_DAY) {
-    return formatWaitlistTimeOfDay(waitlist.timeOfDay)
-  }
-
-  if (
-    waitlist.preferenceType === WaitlistPreferenceType.SPECIFIC_DATE &&
-    waitlist.specificDate
-  ) {
-    return formatShortDate(waitlist.specificDate)
-  }
-
-  if (waitlist.preferenceType === WaitlistPreferenceType.TIME_RANGE) {
-    const start = formatMinuteOfDay(waitlist.windowStartMin)
-    const end = formatMinuteOfDay(waitlist.windowEndMin)
-
-    return [start, end].filter(isPresentString).join('–') || null
-  }
-
-  return null
 }
 
 function previewText(value: string | null): string {
@@ -345,7 +273,7 @@ function buildEyebrow(params: {
 
     const serviceName = waitlist.service?.name ?? null
     const status = labelForWaitlistStatus(waitlist.status)
-    const preference = formatWaitlistPreference(waitlist)
+    const preference = formatWaitlistPreferenceLabel(waitlist)
 
     return ['Waitlist', status, serviceName, preference]
       .filter(isPresentString)
@@ -426,7 +354,7 @@ function buildThreadPresentation(params: {
     initials: initialsForName(title, '?'),
     eyebrow,
     preview: previewText(thread.lastMessagePreview),
-    timeLabel: formatRelativeTime(lastActivityAt),
+    timeLabel: formatRelativeTimeCompact(lastActivityAt),
     isUnread: isThreadUnread(thread),
     isAccent:
       thread.contextType === MessageThreadContextType.BOOKING ||

@@ -587,7 +587,10 @@ function sortProductRecommendations(
   )
 }
 
-function toIntelBookings(rows: BookingRow[]): IntelBooking[] {
+function toIntelBookings(
+  rows: BookingRow[],
+  fallbackTimeZone: string,
+): IntelBooking[] {
   return rows.map((row) => ({
     status: row.status,
     scheduledFor: row.scheduledFor,
@@ -597,6 +600,11 @@ function toIntelBookings(rows: BookingRow[]): IntelBooking[] {
     amount:
       decimalToNumber(row.totalAmount) ??
       decimalToNumber(row.subtotalSnapshot),
+    // Bucket preferred day / time-of-day in the zone the visit happened in.
+    timeZone: resolveAppointmentDisplayTimeZone(
+      row.locationTimeZone,
+      fallbackTimeZone,
+    ),
   }))
 }
 
@@ -2090,7 +2098,7 @@ export default async function ClientDetailPage(props: {
   if (!client) redirect('/pro/clients')
 
   const intel = computeRelationshipIntelligence({
-    bookings: toIntelBookings(bookingRowsAll),
+    bookings: toIntelBookings(bookingRowsAll, scheduleTz),
     proId,
     now,
     reviewCount,

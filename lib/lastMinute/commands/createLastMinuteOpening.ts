@@ -15,9 +15,9 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import {
-  getZonedParts,
   isValidIanaTimeZone,
   utcFromDayAndMinutesInTimeZone,
+  weekdayInTimeZone,
 } from '@/lib/timeZone'
 import {
   LastMinuteOfferType,
@@ -316,27 +316,18 @@ function weekdayDisabled(args: {
 }): boolean {
   const { startAt, timeZone, settings } = args
 
-  const weekday = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    weekday: 'short',
-  }).format(startAt)
+  // Index 0=Sun … 6=Sat, matching weekdayInTimeZone's Sunday-start convention.
+  const disabledByWeekday = [
+    settings.disableSun,
+    settings.disableMon,
+    settings.disableTue,
+    settings.disableWed,
+    settings.disableThu,
+    settings.disableFri,
+    settings.disableSat,
+  ]
 
-  switch (weekday) {
-    case 'Mon':
-      return settings.disableMon
-    case 'Tue':
-      return settings.disableTue
-    case 'Wed':
-      return settings.disableWed
-    case 'Thu':
-      return settings.disableThu
-    case 'Fri':
-      return settings.disableFri
-    case 'Sat':
-      return settings.disableSat
-    default:
-      return settings.disableSun
-  }
+  return disabledByWeekday[weekdayInTimeZone(startAt, timeZone)] ?? false
 }
 
 function tierIndex(tier: LastMinuteTier): number {

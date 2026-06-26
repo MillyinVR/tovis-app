@@ -4,14 +4,13 @@ import { notFound, redirect } from 'next/navigation'
 import {
   MediaType,
   MessageThreadContextType,
-  WaitlistPreferenceType,
-  WaitlistTimeOfDay,
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
+import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 import ThreadClient from './ThreadClient'
 
 export const dynamic = 'force-dynamic'
@@ -62,66 +61,6 @@ function formatDayTime(date: Date): string {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date)
-}
-
-function formatShortDate(date: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-}
-
-function formatMinuteOfDay(value: number | null): string | null {
-  if (value === null) return null
-
-  const minutesInDay = 24 * 60
-  const safeValue = ((value % minutesInDay) + minutesInDay) % minutesInDay
-  const hour24 = Math.floor(safeValue / 60)
-  const minute = safeValue % 60
-  const hour12 = hour24 % 12 || 12
-  const suffix = hour24 < 12 ? 'AM' : 'PM'
-
-  return `${hour12}:${minute.toString().padStart(2, '0')} ${suffix}`
-}
-
-function formatWaitlistTimeOfDay(value: WaitlistTimeOfDay | null): string | null {
-  if (value === WaitlistTimeOfDay.MORNING) return 'Morning'
-  if (value === WaitlistTimeOfDay.AFTERNOON) return 'Afternoon'
-  if (value === WaitlistTimeOfDay.EVENING) return 'Evening'
-
-  return null
-}
-
-function formatWaitlistPreference(params: {
-  preferenceType: WaitlistPreferenceType
-  specificDate: Date | null
-  timeOfDay: WaitlistTimeOfDay | null
-  windowStartMin: number | null
-  windowEndMin: number | null
-}): string | null {
-  if (params.preferenceType === WaitlistPreferenceType.ANY_TIME) {
-    return 'Any time'
-  }
-
-  if (params.preferenceType === WaitlistPreferenceType.TIME_OF_DAY) {
-    return formatWaitlistTimeOfDay(params.timeOfDay)
-  }
-
-  if (
-    params.preferenceType === WaitlistPreferenceType.SPECIFIC_DATE &&
-    params.specificDate
-  ) {
-    return formatShortDate(params.specificDate)
-  }
-
-  if (params.preferenceType === WaitlistPreferenceType.TIME_RANGE) {
-    const start = formatMinuteOfDay(params.windowStartMin)
-    const end = formatMinuteOfDay(params.windowEndMin)
-
-    return joinParts([start, end])
-  }
-
-  return null
 }
 
 function toInitialMessageMediaType(mediaType: MediaType): InitialMessageAttachment['mediaType'] {
@@ -181,7 +120,7 @@ async function buildContextMeta(thread: {
     }
 
     const status = labelForWaitlistStatus(waitlist.status)
-    const preference = formatWaitlistPreference({
+    const preference = formatWaitlistPreferenceLabel({
       preferenceType: waitlist.preferenceType,
       specificDate: waitlist.specificDate,
       timeOfDay: waitlist.timeOfDay,

@@ -1,6 +1,7 @@
 // app/client/(gated)/_components/ClientHomeShell.tsx
 import type { ClientHomeData } from '../_data/getClientHomeData'
 
+import ClientGreeting from './ClientGreeting'
 import UpcomingAppointmentCard from './UpcomingAppointmentCard'
 import ClientActionCard from './ClientActionCard'
 import InboxBell from './InboxBell'
@@ -15,13 +16,6 @@ type ClientHomeShellProps = {
   displayName: string
   home: ClientHomeData
   removeProFavoriteAction: (formData: FormData) => Promise<void>
-}
-
-function greetingLabel() {
-  const hour = new Date().getHours()
-  if (hour < 12) return 'Good morning'
-  if (hour < 18) return 'Good afternoon'
-  return 'Good evening'
 }
 
 export default function ClientHomeShell({
@@ -71,7 +65,7 @@ export default function ClientHomeShell({
       <header className="relative mx-auto flex max-w-[1040px] items-start justify-between gap-4 px-4 pb-6 pt-[30px] md:px-8">
         <div>
           <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-textMuted">
-            {greetingLabel()}
+            <ClientGreeting />
           </p>
           <h1 className="mt-[7px] font-display text-[32px] font-semibold italic leading-none tracking-[-0.03em] text-textPrimary md:text-[40px]">
             {displayName}.

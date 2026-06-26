@@ -8,6 +8,8 @@
 // Nothing here adds data: it's pure aggregation over bookings/reviews/referrals
 // the page already loads (design doc PR2, "derived relationship intelligence").
 
+import { getZonedParts, weekdayInTimeZone } from '@/lib/time'
+
 const DAY_MS = 24 * 60 * 60 * 1000
 const WEEK_MS = 7 * DAY_MS
 
@@ -20,6 +22,12 @@ export type IntelBooking = {
   professionalId: string
   /** totalAmount ?? subtotalSnapshot, already coerced to a number (dollars). */
   amount: number | null
+  /**
+   * Display timezone for this visit (location snapshot → pro schedule zone).
+   * Required so preferred-day / time-of-day bucketing reflects the zone the
+   * appointment actually happened in, not the server zone (UTC on Vercel).
+   */
+  timeZone: string
 }
 
 export type RelationshipIntelligenceInput = {
@@ -169,11 +177,13 @@ export function computeRelationshipIntelligence(
 
   const preferredDay = mode(
     completed
-      .map((b) => WEEKDAYS[b.scheduledFor.getDay()])
+      .map((b) => WEEKDAYS[weekdayInTimeZone(b.scheduledFor, b.timeZone)])
       .filter((day): day is (typeof WEEKDAYS)[number] => Boolean(day)),
   )
   const preferredTimeOfDay = mode(
-    completed.map((b) => timeBand(b.scheduledFor.getHours())),
+    completed.map((b) =>
+      timeBand(getZonedParts(b.scheduledFor, b.timeZone).hour),
+    ),
   )
 
   const lastVisit = completed.at(-1) ?? null

@@ -19,6 +19,7 @@ import {
   getZonedParts,
   sanitizeTimeZone,
   startOfDayUtcInTimeZone,
+  weekdayInTimeZone,
   zonedTimeToUtc,
 } from '@/lib/timeZone'
 
@@ -37,16 +38,6 @@ type LocalDateParts = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const WEEKDAY_INDEX_SUNDAY_START: Record<string, number> = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-}
-
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function pad2(value: number): string {
@@ -62,15 +53,6 @@ function rangeFromStartAndDays(from: Date, dayCount: number): DateRange {
     from,
     to: new Date(from.getTime() + dayCount * MS_PER_DAY),
   }
-}
-
-function weekdayIndexInTimeZone(dateUtc: Date, timeZone: string): number {
-  const weekday = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    weekday: 'short',
-  }).format(dateUtc)
-
-  return WEEKDAY_INDEX_SUNDAY_START[weekday] ?? 0
 }
 
 function weekStartOffsetFromSundayIndex(sundayStartIndex: number): number {
@@ -110,7 +92,7 @@ function startOfWeekUtcInTimeZone(
   timeZone: string,
 ): Date {
   const focusParts = getZonedParts(focusUtc, timeZone)
-  const weekdayIndex = weekdayIndexInTimeZone(focusUtc, timeZone)
+  const weekdayIndex = weekdayInTimeZone(focusUtc, timeZone)
   const offsetDays = weekStartOffsetFromSundayIndex(weekdayIndex)
 
   return localMidnightUtc(
@@ -139,10 +121,7 @@ function startOfMonthGridUtcInTimeZone(
   )
 
   const firstOfMonthParts = getZonedParts(firstOfMonthNoonUtc, timeZone)
-  const firstWeekdayIndex = weekdayIndexInTimeZone(
-    firstOfMonthNoonUtc,
-    timeZone,
-  )
+  const firstWeekdayIndex = weekdayInTimeZone(firstOfMonthNoonUtc, timeZone)
   const offsetDays = weekStartOffsetFromSundayIndex(firstWeekdayIndex)
 
   return localMidnightUtc(
