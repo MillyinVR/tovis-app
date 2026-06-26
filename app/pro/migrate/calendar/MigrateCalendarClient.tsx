@@ -9,6 +9,11 @@
 
 import { useMemo, useRef, useState } from 'react'
 
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getViewerTimeZone,
+} from '@/lib/time'
 import type { MigrationCopy } from '@/lib/brand/defaultMigrationCopy'
 import type {
   CalendarCommitResult,
@@ -43,7 +48,7 @@ function chipVariant(
 function formatWhen(iso: string): string {
   const date = new Date(iso)
   if (!Number.isFinite(date.getTime())) return iso
-  return date.toLocaleString(undefined, {
+  return formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

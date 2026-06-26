@@ -11,6 +11,7 @@ import { redirect } from 'next/navigation'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { prisma } from '@/lib/prisma'
+import { formatInTimeZone } from '@/lib/time'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
@@ -190,7 +191,14 @@ export default async function AdminLicenseReviewPage() {
                         License #: {pro.licenseNumber || '—'}
                         {' · '}
                         {pro.licenseExpiry ? (
-                          <span>expires {pro.licenseExpiry.toLocaleDateString()}</span>
+                          <span>
+                            expires{' '}
+                            {formatInTimeZone(pro.licenseExpiry, 'UTC', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                            }, 'en-US')}
+                          </span>
                         ) : (
                           <span className="text-toneWarn">no expiry on file</span>
                         )}

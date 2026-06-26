@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react'
 import { Bell } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
 import type { ClientLookRemix } from '@/lib/creator/creatorProfileStats'
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import RemoteImage from '@/app/_components/media/RemoteImage'
@@ -105,42 +106,25 @@ function formatUpcomingDate(value: string, timeZone: string | null): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
 
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone: timeZone || undefined,
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    })
-      .format(date)
-      .toUpperCase()
-  } catch {
-    return new Intl.DateTimeFormat(undefined, {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    })
-      .format(date)
-      .toUpperCase()
-  }
+  // Appointment time: prefer the booking's timezone; otherwise preserve the
+  // prior viewer-zone behavior (client component, no-tz Intl rendered locally).
+  const tz = timeZone || getViewerTimeZone() || DEFAULT_TIME_ZONE
+  return formatInTimeZone(date, tz, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).toUpperCase()
 }
 
 function formatUpcomingTime(value: string, timeZone: string | null): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
 
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone: timeZone || undefined,
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(date)
-  } catch {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(date)
-  }
+  const tz = timeZone || getViewerTimeZone() || DEFAULT_TIME_ZONE
+  return formatInTimeZone(date, tz, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 function ProfileAvatar(props: {

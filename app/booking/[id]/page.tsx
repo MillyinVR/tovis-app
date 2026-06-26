@@ -11,7 +11,8 @@ import {
   formatProfessionalPublicDisplayName,
   professionalPublicDisplayNameSelect,
 } from '@/lib/privacy/professionalDisplayName'
-import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
@@ -97,16 +98,14 @@ type BookingReceiptRow = Prisma.BookingGetPayload<{
 type ServiceItemRow = BookingReceiptRow['serviceItems'][number]
 
 function fmtInTimeZone(dateUtc: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
+  return formatInTimeZone(dateUtc, timeZone, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(dateUtc)
+  })
 }
 
 function upper(v: unknown) {

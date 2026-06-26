@@ -4,22 +4,24 @@ import { AdminPermissionRole } from '@prisma/client'
 
 import AdminGuard from '../_components/AdminGuard'
 import { prisma } from '@/lib/prisma'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 
 export const dynamic = 'force-dynamic'
 
 function formatLogTimeUtc(date: Date): string {
-  const timeZone = sanitizeTimeZone('UTC', 'UTC')
-
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(date)
+  return formatInTimeZone(
+    date,
+    'UTC',
+    {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+    },
+    'en-US',
+  )
 }
 
 function formatNullableId(label: string, value: string | null): string | null {

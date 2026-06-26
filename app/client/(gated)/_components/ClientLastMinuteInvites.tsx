@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatInTimeZone } from '@/lib/time'
 
 import type { ClientHomeLastMinuteInvite } from '../_data/getClientHomeData'
 import { firstWord, gradientAvatar, money, professionalName } from './homeVisuals'
@@ -52,18 +53,17 @@ function relativeDay(date: Date): string {
 }
 
 function formatTime(date: Date, timeZone?: string | null): string {
-  try {
-    return new Intl.DateTimeFormat('en-US', {
+  // Opening (appointment) time: format in the opening's timezone. A null/invalid
+  // tz sanitizes to UTC, matching the prior no-tz fallback (server zone = UTC).
+  return formatInTimeZone(
+    date,
+    timeZone ?? 'UTC',
+    {
       hour: 'numeric',
       minute: '2-digit',
-      timeZone: timeZone || undefined,
-    }).format(date)
-  } catch {
-    return new Intl.DateTimeFormat('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(date)
-  }
+    },
+    'en-US',
+  )
 }
 
 function hasToday(invites: ClientHomeLastMinuteInvite[]): boolean {

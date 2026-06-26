@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { formatInTimeZone } from '@/lib/time'
 import { isoToYmdInTimeZone } from './aftercareDates'
 
 export type SelectedRebookSlot = {
@@ -46,11 +47,10 @@ function addMinutesIso(startIso: string, minutes: number): string {
 
 function slotTimeLabel(iso: string, timeZone: string): string {
   try {
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone,
+    return formatInTimeZone(iso, timeZone, {
       hour: 'numeric',
       minute: '2-digit',
-    }).format(new Date(iso))
+    })
   } catch {
     return iso
   }
@@ -58,12 +58,11 @@ function slotTimeLabel(iso: string, timeZone: string): string {
 
 function slotDateLabel(iso: string, timeZone: string): string {
   try {
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone,
+    return formatInTimeZone(iso, timeZone, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
-    }).format(new Date(iso))
+    })
   } catch {
     return iso
   }

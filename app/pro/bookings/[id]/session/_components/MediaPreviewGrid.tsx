@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import MediaFill from '@/app/_components/media/MediaFill'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
+import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
 import { cn } from '@/lib/utils'
 
 type Item = {
@@ -23,7 +24,13 @@ function fmtDate(v: unknown) {
   try {
     const d = v instanceof Date ? v : new Date(String(v))
     if (Number.isNaN(d.getTime())) return ''
-    return d.toLocaleString()
+    return formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
   } catch {
     return ''
   }

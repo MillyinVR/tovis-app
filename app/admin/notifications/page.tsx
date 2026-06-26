@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
 import { getCurrentUser } from '@/lib/currentUser'
+import { formatInTimeZone } from '@/lib/time'
 import {
   listAdminNotifications,
   markAllAdminNotificationsRead,
@@ -88,7 +89,12 @@ export default async function AdminNotificationsPage() {
                       <span className="text-[13px] font-black">{n.title}</span>
                     </div>
                     <div className="mt-1 text-[11px] text-textSecondary">
-                      {new Date(n.createdAt).toLocaleString()}
+                      {formatInTimeZone(
+                        n.createdAt,
+                        'UTC',
+                        { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+                        'en-US',
+                      )}
                     </div>
                   </div>
 

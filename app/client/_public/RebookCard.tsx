@@ -10,6 +10,7 @@ import {
   type DayPeriod,
 } from '@/lib/bookingTime'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 
 const PERIOD_LABEL: Record<DayPeriod, string> = {
   MORNING: 'Morning',
@@ -59,35 +60,37 @@ type SlotsState =
 
 function ymdInTimeZone(date: Date, timeZone: string): string {
   // en-CA renders YYYY-MM-DD.
-  return new Intl.DateTimeFormat('en-CA', {
+  return formatInTimeZone(
+    date,
     timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date)
+    {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    },
+    'en-CA',
+  )
 }
 
 function formatSlotTime(iso: string, timeZone: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
+  return formatInTimeZone(date, timeZone, {
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function formatSlotFull(iso: string, timeZone: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
+  return formatInTimeZone(date, timeZone, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function buildIdempotencyKey(token: string, slotIso: string): string {

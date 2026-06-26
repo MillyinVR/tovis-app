@@ -7,6 +7,11 @@ import Link from 'next/link'
 import { isRecord } from '@/lib/guards'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { Z } from '@/lib/zIndex'
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getViewerTimeZone,
+} from '@/lib/time'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 
@@ -286,7 +291,11 @@ function ReviewsPanelInner({
       ) : (
         localReviews.map((review) => {
           const name = review.clientName?.trim() || 'Client'
-          const date = new Date(review.createdAt).toLocaleDateString()
+          const date = formatInTimeZone(
+            review.createdAt,
+            getViewerTimeZone() ?? DEFAULT_TIME_ZONE,
+            { month: 'short', day: 'numeric', year: 'numeric' },
+          )
 
           const media = review.mediaAssets ?? []
           const primary = media[0] ?? null

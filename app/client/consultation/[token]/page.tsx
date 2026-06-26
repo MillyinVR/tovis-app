@@ -9,6 +9,7 @@ import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInvit
 import { isRecord } from '@/lib/guards'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 
 function readProNameDisplay(value: unknown): ProNameDisplay | null {
   return value === ProNameDisplay.BUSINESS_NAME ||
@@ -194,15 +195,14 @@ function formatWhen(value: unknown, timeZone: string | null | undefined): string
   const tz =
     typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : 'UTC'
 
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
+  return formatInTimeZone(date, tz, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function formatDateOnly(value: unknown, timeZone: string | null | undefined): string | null {
@@ -212,12 +212,11 @@ function formatDateOnly(value: unknown, timeZone: string | null | undefined): st
   const tz =
     typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : 'UTC'
 
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
+  return formatInTimeZone(date, tz, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-  }).format(date)
+  })
 }
 
 

@@ -6,6 +6,7 @@ import Link from 'next/link'
 
 import { isRecord } from '@/lib/guards'
 import { moneyToString } from '@/lib/money'
+import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
 import { usePresenceSignalsBatch } from '@/lib/presence/usePresenceSignalsBatch'
 import type {
   PresenceBatchItem,
@@ -64,20 +65,19 @@ function money(value: number): string {
 function formatWhen(iso: string, timeZone: string | null): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ''
-  try {
-    return new Intl.DateTimeFormat('en-US', {
+  // Opening (appointment) time: format in the opening's timezone when present;
+  // otherwise preserve the prior no-tz behavior (client → viewer's zone).
+  const tz = timeZone || getViewerTimeZone() || DEFAULT_TIME_ZONE
+  return formatInTimeZone(
+    date,
+    tz,
+    {
       weekday: 'short',
       hour: 'numeric',
       minute: '2-digit',
-      ...(timeZone ? { timeZone } : {}),
-    }).format(date)
-  } catch {
-    return new Intl.DateTimeFormat('en-US', {
-      weekday: 'short',
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(date)
-  }
+    },
+    'en-US',
+  )
 }
 
 function parseCard(notification: unknown): FeedCard | null {

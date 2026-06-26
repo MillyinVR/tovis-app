@@ -11,6 +11,7 @@ import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
+import { DEFAULT_TIME_ZONE, formatInTimeZone, pickTimeZoneOrNull } from '@/lib/time'
 import ThreadClient from './ThreadClient'
 
 export const dynamic = 'force-dynamic'
@@ -54,13 +55,13 @@ function formatPersonName(
   return [firstName, lastName].filter(isPresentString).join(' ').trim()
 }
 
-function formatDayTime(date: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
+function formatDayTime(date: Date, timeZone: string): string {
+  return formatInTimeZone(date, timeZone, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function toInitialMessageMediaType(mediaType: MediaType): InitialMessageAttachment['mediaType'] {
@@ -82,11 +83,17 @@ async function buildContextMeta(thread: {
       select: {
         id: true,
         scheduledFor: true,
+        locationTimeZone: true,
+        location: { select: { timeZone: true } },
         service: { select: { name: true } },
       },
     })
 
-    const when = booking?.scheduledFor ? formatDayTime(booking.scheduledFor) : null
+    const bookingTz =
+      pickTimeZoneOrNull(booking?.locationTimeZone) ??
+      pickTimeZoneOrNull(booking?.location?.timeZone) ??
+      DEFAULT_TIME_ZONE
+    const when = booking?.scheduledFor ? formatDayTime(booking.scheduledFor, bookingTz) : null
     const serviceName = booking?.service?.name ?? null
 
     return {

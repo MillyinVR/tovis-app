@@ -15,6 +15,11 @@ import BrandMark from '../footer/BrandMark'
 import { isActivePath } from '../navigation/activePath'
 import BadgeDot from '../ClientSessionFooter/BadgeDot'
 import { useUnreadBadge } from '@/app/_components/_hooks/useUnreadBadge'
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getViewerTimeZone,
+} from '@/lib/time'
 import { useProSession } from './useProSession'
 
 const ROUTES = {
@@ -44,7 +49,10 @@ function formatBookingPickerLine(args: {
   const date = new Date(args.scheduledFor)
   const time = Number.isNaN(date.getTime())
     ? ''
-    : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
+        hour: 'numeric',
+        minute: '2-digit',
+      })
 
   return time ? `${service} • ${client} • ${time}` : `${service} • ${client}`
 }

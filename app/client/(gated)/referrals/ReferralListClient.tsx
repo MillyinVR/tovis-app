@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { safeJson } from '@/lib/http'
+import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
 
 type Referral = {
   id: string
@@ -40,7 +41,9 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
+  // Referral "Tapped" date — not an appointment, so there's no booking tz.
+  // Preserve the prior no-tz behavior (client component → viewer's zone).
+  return formatInTimeZone(new Date(iso), getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

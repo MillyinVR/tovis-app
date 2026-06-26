@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 
 import { initialsForName } from '@/lib/initials'
+import { formatInTimeZone } from '@/lib/time'
 import { Avatar } from '@/app/_components/ui'
 
 import type { CalendarEvent, ManagementKey, ManagementLists } from '../_types'
@@ -293,16 +294,6 @@ function eventDisplayTimeZone(
   return viewportTimeZone
 }
 
-function buildTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
-
 function formatStartsAt(args: {
   startsAt: string
   timeZone: string
@@ -314,7 +305,12 @@ function formatStartsAt(args: {
     return args.fallback
   }
 
-  return buildTimeFormatter(args.timeZone).format(date)
+  return formatInTimeZone(date, args.timeZone, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 function startMs(event: CalendarEvent): number {

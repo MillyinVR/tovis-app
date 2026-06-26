@@ -4,6 +4,8 @@
 import { useMemo, useRef } from 'react'
 import type { CSSProperties, DragEvent, MutableRefObject } from 'react'
 
+import { formatInTimeZone } from '@/lib/time'
+
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType, WorkingHoursJson } from '../../_types'
 
@@ -285,7 +287,7 @@ function buildEventLayout(args: {
   dayYmd: string
   timeZone: string
   stepMinutes: number
-  timeFormatter: Intl.DateTimeFormat
+  timeFormatter: (date: Date) => string
 }): EventLayout | null {
   const { event, dayYmd, timeZone, stepMinutes, timeFormatter } = args
 
@@ -337,7 +339,7 @@ function buildEventLayout(args: {
     heightPx,
     compact: heightPx < COMPACT_EVENT_HEIGHT_PX,
     micro: heightPx < MICRO_EVENT_HEIGHT_PX,
-    timeLabel: timeFormatter.format(eventStart),
+    timeLabel: timeFormatter(eventStart),
   }
 }
 
@@ -417,12 +419,17 @@ function gridMarkPositionStyle(minute: number): CSSProperties {
   }
 }
 
-function eventTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+function eventTimeFormatter(timeZone: string): (date: Date) => string {
+  return (date: Date) =>
+    formatInTimeZone(
+      date,
+      timeZone,
+      {
+        hour: 'numeric',
+        minute: '2-digit',
+      },
+      'en-US',
+    )
 }
 
 function dayParity(dayIdx: number): 'even' | 'odd' {

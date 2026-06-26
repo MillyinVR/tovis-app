@@ -5,6 +5,7 @@
 // flips correctly between dark/light via the BrandProvider variable swap.
 import type { ProNameDisplay } from '@prisma/client'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { formatInTimeZone } from '@/lib/time'
 
 // Brand-token gradient pairs mirroring the design's avatar/portrait fills.
 // Each pair references per-brand CSS variables (overridden by BrandProvider per
@@ -82,14 +83,9 @@ export function formatDateTime(
     hour: 'numeric',
     minute: '2-digit',
   }
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      ...options,
-      timeZone: timeZone || undefined,
-    }).format(date)
-  } catch {
-    return new Intl.DateTimeFormat('en-US', options).format(date)
-  }
+  // Appointment time: format in the supplied zone. A null/invalid tz sanitizes
+  // to UTC, matching the prior no-tz fallback (server zone = UTC on Vercel).
+  return formatInTimeZone(date, timeZone ?? 'UTC', options, 'en-US')
 }
 
 /**

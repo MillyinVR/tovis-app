@@ -12,6 +12,11 @@ import {
   nextStepPrice,
 } from '@/lib/migration/priceRamp'
 import { formatRoundedDollars } from '@/lib/money'
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getViewerTimeZone,
+} from '@/lib/time'
 
 import type { PriceGrace } from '../_types'
 
@@ -51,7 +56,7 @@ export function formatMoney(n: number): string {
 }
 
 export function formatRampDate(d: Date): string {
-  return d.toLocaleDateString(undefined, {
+  return formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

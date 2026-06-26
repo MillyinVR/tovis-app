@@ -11,11 +11,12 @@ import {
 } from '@/lib/notifications/clientNotifications'
 import {
   DEFAULT_TIME_ZONE,
+  formatInTimeZone,
   getZonedParts,
   isValidIanaTimeZone,
   sanitizeTimeZone,
   zonedTimeToUtc,
-} from '@/lib/timeZone'
+} from '@/lib/time'
 
 export type AppointmentReminderKind = 'ONE_WEEK' | 'DAY_BEFORE'
 
@@ -179,25 +180,15 @@ function shiftLocalCalendarDate(args: {
 }
 
 function formatWhen(date: Date, timeZone: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone,
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(date)
-  } catch {
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone: DEFAULT_TIME_ZONE,
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(date)
-  }
+  // sanitizeTimeZone falls back to DEFAULT_TIME_ZONE for an invalid tz, matching
+  // the previous try/catch behavior; formatInTimeZone keeps the default locale.
+  return formatInTimeZone(date, sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE), {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 function makeAppointmentReminderDedupeKey(

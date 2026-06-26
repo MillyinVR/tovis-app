@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
 import { isRecord } from '@/lib/guards'
 
 type Attachment = {
@@ -135,10 +136,10 @@ function formatTime(value: string): string {
     return ''
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function classNames(values: (string | false | null | undefined)[]): string {

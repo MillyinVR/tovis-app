@@ -75,6 +75,19 @@ vi.mock('@/lib/timeZone', () => ({
 vi.mock('@/lib/formatInTimeZone', () => ({
   formatAppointmentWhen: mocks.formatAppointmentWhen,
   formatRangeInTimeZone: mocks.formatRangeInTimeZone,
+  // RebookCard formats slot labels via formatInTimeZone (through the @/lib/time
+  // barrel, which re-exports this module). Provide a faithful, self-contained
+  // impl so the rendered slot times/ymd are real without pulling in the mocked
+  // @/lib/timeZone internals.
+  formatInTimeZone: (
+    date: Date | string | number,
+    timeZone: string,
+    options: Intl.DateTimeFormatOptions,
+    locale?: string,
+  ) =>
+    new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(
+      date instanceof Date ? date : new Date(date),
+    ),
 }))
 
 vi.mock('@/lib/pick', () => ({

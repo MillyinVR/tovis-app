@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 
 import AvailabilityDrawer from '@/app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer'
 import { COPY } from '@/lib/copy'
+import { formatInTimeZone } from '@/lib/time'
 
 import type { DrawerContext } from '@/app/(main)/booking/AvailabilityDrawer/types'
 
@@ -30,12 +31,16 @@ type Props = {
 
 function ymdInTimeZone(date: Date, timeZone: string): string {
   // en-CA renders YYYY-MM-DD.
-  return new Intl.DateTimeFormat('en-CA', {
+  return formatInTimeZone(
+    date,
     timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date)
+    {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    },
+    'en-CA',
+  )
 }
 
 export default function AftercareRebookButton({

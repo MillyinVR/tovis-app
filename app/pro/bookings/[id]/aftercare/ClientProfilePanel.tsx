@@ -16,6 +16,11 @@ import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getViewerTimeZone,
+} from '@/lib/time'
 
 const SEVERITIES = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'] as const
 type Severity = (typeof SEVERITIES)[number]
@@ -43,11 +48,16 @@ function formatDate(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   try {
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }).format(d)
+    return formatInTimeZone(
+      d,
+      getViewerTimeZone() ?? DEFAULT_TIME_ZONE,
+      {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      },
+      'en-US',
+    )
   } catch {
     return ''
   }

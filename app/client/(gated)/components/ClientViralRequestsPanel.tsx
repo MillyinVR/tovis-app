@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ViralRequestDto } from '@/lib/viralRequests/contracts'
 import { isRecord } from '@/lib/guards'
 import { isAbortError, readErrorMessage, safeJsonRecord } from '@/lib/http'
+import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
 
 const VIRAL_REQUEST_STATUSES = [
   'REQUESTED',
@@ -151,7 +152,14 @@ function parseCreatedRequest(data: unknown): ViralRequestDto | null {
 function formatCreatedAt(iso: string): string {
   const date = new Date(iso)
   if (!Number.isFinite(date.getTime())) return 'Unknown date'
-  return date.toLocaleDateString()
+  // Request created date — not an appointment. Preserve the prior no-tz,
+  // no-options behavior (client component → viewer zone) with an explicit
+  // date-only shape close to the locale default.
+  return formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
 }
 
 function getStatusLabel(status: ViralRequestDto['status']): string {

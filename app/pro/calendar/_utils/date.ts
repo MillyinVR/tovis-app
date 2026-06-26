@@ -14,6 +14,8 @@ import {
   zonedTimeToUtc,
 } from '@/lib/timeZone'
 
+import { DEFAULT_TIME_ZONE, formatInTimeZone } from '@/lib/time'
+
 export const WEEK_START: 'MON' | 'SUN' = 'MON'
 
 export const DAY_KEYS: ReadonlyArray<WeekdayKey> = [
@@ -82,11 +84,9 @@ function validYmdParts(parts: YmdParts): boolean {
 function dateFormatter(
   targetTimeZone: string | undefined,
   options: Intl.DateTimeFormatOptions,
-): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat(undefined, {
-    ...options,
-    timeZone: targetTimeZone,
-  })
+): (date: Date) => string {
+  return (date: Date) =>
+    formatInTimeZone(date, targetTimeZone ?? DEFAULT_TIME_ZONE, options)
 }
 
 function addLocalDays(date: Date, days: number): Date {
@@ -157,7 +157,7 @@ export function isSameDay(first: Date, second: Date): boolean {
 }
 
 export function formatDayLabel(date: Date): string {
-  return safeDate(date).toLocaleDateString(undefined, {
+  return formatInTimeZone(safeDate(date), DEFAULT_TIME_ZONE, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -165,7 +165,7 @@ export function formatDayLabel(date: Date): string {
 }
 
 export function formatMonthRange(date: Date): string {
-  return safeDate(date).toLocaleDateString(undefined, {
+  return formatInTimeZone(safeDate(date), DEFAULT_TIME_ZONE, {
     month: 'long',
     year: 'numeric',
   })
@@ -175,12 +175,12 @@ export function formatWeekRange(date: Date): string {
   const weekStart = startOfWeek(date)
   const weekEnd = addDays(weekStart, 6)
 
-  const startLabel = weekStart.toLocaleDateString(undefined, {
+  const startLabel = formatInTimeZone(weekStart, DEFAULT_TIME_ZONE, {
     month: 'short',
     day: 'numeric',
   })
 
-  const endLabel = weekEnd.toLocaleDateString(undefined, {
+  const endLabel = formatInTimeZone(weekEnd, DEFAULT_TIME_ZONE, {
     month: 'short',
     day: 'numeric',
   })
@@ -258,7 +258,7 @@ export function formatDayLabelInTimeZone(
     weekday: 'short',
     month: 'short',
     day: 'numeric',
-  }).format(safeDate(date))
+  })(safeDate(date))
 }
 
 export function formatMonthRangeInTimeZone(
@@ -268,7 +268,7 @@ export function formatMonthRangeInTimeZone(
   return dateFormatter(targetTimeZone, {
     month: 'long',
     year: 'numeric',
-  }).format(safeDate(date))
+  })(safeDate(date))
 }
 
 /**
@@ -391,7 +391,7 @@ export function formatWeekRangeInTimeZone(
     day: 'numeric',
   })
 
-  return `${formatter.format(startUtc)} – ${formatter.format(endUtc)}`
+  return `${formatter(startUtc)} – ${formatter(endUtc)}`
 }
 
 // ─── Input / ISO helpers ──────────────────────────────────────────────────────

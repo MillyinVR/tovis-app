@@ -1,5 +1,7 @@
 // app/pro/calendar/_utils/monthGrid.ts
 
+import { formatInTimeZone } from '@/lib/time'
+
 import type { CalendarEvent } from '../_types'
 
 import { ymdInTimeZone } from './date'
@@ -95,18 +97,28 @@ export function buildMonthDayCells(args: {
 }): MonthDayCell[] {
   const { visibleDays, currentDate, events, timeZone } = args
 
-  const monthYearFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    month: 'numeric',
-    year: 'numeric',
-  })
+  const monthYearFormatter = (date: Date): string =>
+    formatInTimeZone(
+      date,
+      timeZone,
+      {
+        month: 'numeric',
+        year: 'numeric',
+      },
+      'en-US',
+    )
 
-  const dayNumberFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    day: 'numeric',
-  })
+  const dayNumberFormatter = (date: Date): string =>
+    formatInTimeZone(
+      date,
+      timeZone,
+      {
+        day: 'numeric',
+      },
+      'en-US',
+    )
 
-  const currentMonthKey = monthYearFormatter.format(currentDate)
+  const currentMonthKey = monthYearFormatter(currentDate)
   const todayYmd = ymdInTimeZone(new Date(), timeZone)
   const visibleDayKeys = visibleDays.map((day) => visibleDayKey(day, timeZone))
 
@@ -123,10 +135,10 @@ export function buildMonthDayCells(args: {
     return {
       day,
       dayYmd,
-      dayNumber: dayNumberFormatter.format(anchoredDay),
+      dayNumber: dayNumberFormatter(anchoredDay),
       isToday: dayYmd === todayYmd,
       isInCurrentMonth:
-        monthYearFormatter.format(anchoredDay) === currentMonthKey,
+        monthYearFormatter(anchoredDay) === currentMonthKey,
       events: eventsByVisibleDay.get(dayYmd) ?? [],
     }
   })

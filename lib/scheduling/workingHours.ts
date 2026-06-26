@@ -4,7 +4,8 @@ import { isRecord } from '@/lib/guards'
 import {
   getZonedParts,
   sanitizeTimeZone,
-} from '@/lib/timeZone'
+  weekdayInTimeZone,
+} from '@/lib/time'
 
 export type WeekdayKey =
   | 'sun'
@@ -32,16 +33,6 @@ export const WEEKDAY_KEYS: readonly WeekdayKey[] = [
   'fri',
   'sat',
 ] as const
-
-const WEEKDAY_SHORT_TO_KEY: Record<string, WeekdayKey> = {
-  Sun: 'sun',
-  Mon: 'mon',
-  Tue: 'tue',
-  Wed: 'wed',
-  Thu: 'thu',
-  Fri: 'fri',
-  Sat: 'sat',
-}
 
 export type ParsedHHMM = {
   hh: number
@@ -127,12 +118,10 @@ export function minutesToHHMM(minutes: number): string | null {
 function weekdayKeyForDate(day: Date, timeZone: string): WeekdayKey | null {
   const tz = sanitizeTimeZone(timeZone, 'UTC')
 
-  const short = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    weekday: 'short',
-  }).format(day)
+  // weekdayInTimeZone returns 0..6 (Sun..Sat), which matches WEEKDAY_KEYS order.
+  const index = weekdayInTimeZone(day, tz)
 
-  return WEEKDAY_SHORT_TO_KEY[short] ?? null
+  return WEEKDAY_KEYS[index] ?? null
 }
 
 function localMinutesSinceMidnight(date: Date, timeZone: string): number {

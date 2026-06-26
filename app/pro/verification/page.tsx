@@ -12,11 +12,12 @@ import DeleteDocButton from './DeleteDocButton'
 import LicenseEditForm from './LicenseEditForm'
 import { requiresLicense } from '@/lib/licensing/licenseRequirement'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatInTimeZone } from '@/lib/time'
 
 export const dynamic = 'force-dynamic'
 
 function fmtDate(d: Date) {
-  return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit' }).format(d)
+  return formatInTimeZone(d, 'UTC', { year: 'numeric', month: 'short', day: '2-digit' })
 }
 
 function toDateInputValue(d: Date | null): string {

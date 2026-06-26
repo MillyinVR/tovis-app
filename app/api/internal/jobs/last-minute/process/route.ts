@@ -3,6 +3,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import {
@@ -203,14 +204,13 @@ function buildNotificationContent(plan: DueTierPlanRow): {
     'your pro'
 
   const serviceLabel = serviceSummary(plan)
-  const when = new Intl.DateTimeFormat(undefined, {
-    timeZone: plan.opening.timeZone,
+  const when = formatInTimeZone(plan.opening.startAt, plan.opening.timeZone, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(plan.opening.startAt)
+  })
 
   const incentive = incentiveLabel(plan)
 

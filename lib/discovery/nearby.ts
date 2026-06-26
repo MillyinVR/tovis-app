@@ -4,6 +4,7 @@ import { Prisma, ProfessionType } from '@prisma/client'
 import { clampFloat } from '@/lib/queryParams'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import { asTrimmedString } from '@/lib/guards'
+import { minutesSinceMidnightInTimeZone } from '@/lib/time'
 
 export type DiscoveryLocationDto = {
   id: string
@@ -81,22 +82,7 @@ function localNowMinutes(timeZone: string, now: Date): number | null {
   const tz = timeZone.trim()
   if (!tz) return null
 
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(now)
-
-  const hour = parts.find((part) => part.type === 'hour')?.value
-  const minute = parts.find((part) => part.type === 'minute')?.value
-
-  const hh = hour ? Number(hour) : Number.NaN
-  const mm = minute ? Number(minute) : Number.NaN
-
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-
-  return hh * 60 + mm
+  return minutesSinceMidnightInTimeZone(now, tz)
 }
 
 export function haversineMiles(
