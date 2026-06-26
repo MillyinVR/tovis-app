@@ -345,6 +345,10 @@ export async function POST(request: Request) {
           email: clearedUser.email,
           role: clearedUser.role,
         },
+        // Native clients have no cookie jar — they persist this token in
+        // secure storage and replay it as `Authorization: Bearer`. Web ignores
+        // it and uses the httpOnly cookie set below.
+        token,
         nextUrl: consumed?.nextUrl ?? null,
         isPhoneVerified: Boolean(clearedUser.phoneVerifiedAt),
         isEmailVerified: Boolean(clearedUser.emailVerifiedAt),

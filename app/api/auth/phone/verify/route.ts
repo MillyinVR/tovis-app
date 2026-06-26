@@ -255,17 +255,6 @@ export async function POST(request: Request) {
       },
     })
 
-    const response = jsonOk(
-      {
-        ok: true,
-        isPhoneVerified: true,
-        isEmailVerified,
-        isFullyVerified,
-        requiresEmailVerification: !isEmailVerified,
-      },
-      200,
-    )
-
     const sessionToken = isFullyVerified
       ? createActiveToken({
           userId,
@@ -277,6 +266,20 @@ export async function POST(request: Request) {
           role: user.role,
           authVersion: user.authVersion,
         })
+
+    const response = jsonOk(
+      {
+        ok: true,
+        isPhoneVerified: true,
+        isEmailVerified,
+        isFullyVerified,
+        requiresEmailVerification: !isEmailVerified,
+        // Native replays this as a bearer; web uses the cookie set below. The
+        // session kind upgrades here, so native must swap to this token.
+        token: sessionToken,
+      },
+      200,
+    )
 
     setSessionCookie({
       response,

@@ -1061,6 +1061,7 @@ describe('app/api/auth/register/route', () => {
         email: 'client@example.com',
         role: Role.CLIENT,
       },
+      token: 'verification_token',
       nextUrl: null,
       requiresPhoneVerification: true,
       phoneVerificationSent: 'pending',

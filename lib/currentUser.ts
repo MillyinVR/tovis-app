@@ -11,9 +11,10 @@
 //   can be bypassed.
 
 import { Prisma, type Role } from '@prisma/client'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 
 import { type AuthSessionKind, type AuthRole, verifyToken } from './auth'
+import { parseBearerToken } from './auth/bearerToken'
 import { canActAs } from './auth/workspaces'
 import { prisma } from './prisma'
 
@@ -119,7 +120,16 @@ function toCurrentUser(
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
   const cookieStore = await cookies()
-  const token = cookieStore.get('tovis_token')?.value ?? null
+  // Web delivers the session as the httpOnly `tovis_token` cookie. Native
+  // clients have no cookie jar, so fall back to an `Authorization: Bearer`
+  // header. The token, verification, role and authVersion-revocation logic
+  // below is identical regardless of transport.
+  let token = cookieStore.get('tovis_token')?.value ?? null
+
+  if (!token) {
+    const headerStore = await headers()
+    token = parseBearerToken(headerStore.get('authorization'))
+  }
 
   if (!token) return null
 
