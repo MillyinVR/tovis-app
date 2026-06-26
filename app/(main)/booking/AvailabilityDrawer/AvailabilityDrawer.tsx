@@ -54,6 +54,12 @@ import { safeJson } from './utils/safeJson'
 import { dateTimeLocalToUtcIso } from '@/lib/bookingDateTimeClient'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
+import {
+  formatInTimeZone,
+  getViewerTimeZone,
+  getZonedParts,
+  ymdInTimeZone,
+} from '@/lib/time'
 
 const FALLBACK_TZ = 'UTC' as const
 const MOBILE_ADDRESS_REQUIRED_MESSAGE =
@@ -68,8 +74,6 @@ type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
 
-const dtfCache = new Map<string, Intl.DateTimeFormat>()
-
 function buildDaySwitchMetricKey(dayYMD: string) {
   return `day-switch:${dayYMD}`
 }
@@ -81,36 +85,6 @@ function buildClientMetricKey(prefix: string): string {
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
   return `${prefix}:${random}`
-}
-
-const DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
-  'timeZone',
-  'weekday',
-  'month',
-  'day',
-  'year',
-  'hour',
-  'minute',
-  'hour12',
-]
-
-function getDtf(
-  locale: string | undefined,
-  options: Intl.DateTimeFormatOptions,
-): Intl.DateTimeFormat {
-  const parts: string[] = [locale ?? '']
-  for (const prop of DTF_KEY_PROPS) {
-    parts.push(String(options[prop] ?? ''))
-  }
-  const key = parts.join('|')
-
-  let fmt = dtfCache.get(key)
-  if (!fmt) {
-    fmt = new Intl.DateTimeFormat(locale, options)
-    dtfCache.set(key, fmt)
-  }
-
-  return fmt
 }
 
 type DiscoveryContextIds = {
@@ -313,77 +287,45 @@ function periodOfHour(hour: number): Period {
 }
 
 function getViewerTimeZoneClient(): string {
-  try {
-    const raw = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-    return sanitizeTimeZone(raw, FALLBACK_TZ)
-  } catch {
-    return FALLBACK_TZ
-  }
+  return getViewerTimeZone() ?? FALLBACK_TZ
 }
 
 function fmtInTz(isoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
 
-  return getDtf(undefined, {
-    timeZone: tz,
+  return formatInTimeZone(d, sanitizeTimeZone(timeZone, FALLBACK_TZ), {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(d)
+  })
 }
 
 function fmtSelectedLine(isoUtc: string, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
 
-  return getDtf(undefined, {
-    timeZone: tz,
+  return formatInTimeZone(d, sanitizeTimeZone(timeZone, FALLBACK_TZ), {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(d)
+  })
 }
 
 function hourInTz(isoUtc: string, timeZone: string): number | null {
-  const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return null
 
-  const parts = getDtf('en-US', {
-    timeZone: tz,
-    hour: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-
-  const hh = parts.find((p) => p.type === 'hour')?.value
-  const n = hh ? Number(hh) : NaN
-  return Number.isFinite(n) ? n : null
+  return getZonedParts(d, sanitizeTimeZone(timeZone, FALLBACK_TZ)).hour
 }
 
 function ymdInTz(timeZone: string): string | null {
-  const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
-  const d = new Date()
-
-  const parts = getDtf('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(d)
-
-  const y = parts.find((p) => p.type === 'year')?.value
-  const m = parts.find((p) => p.type === 'month')?.value
-  const day = parts.find((p) => p.type === 'day')?.value
-  if (!y || !m || !day) return null
-  return `${y}-${m}-${day}`
+  return ymdInTimeZone(new Date(), sanitizeTimeZone(timeZone, FALLBACK_TZ))
 }
 
 type AvailabilityBootstrapOk = Extract<AvailabilityBootstrapResponse, { ok: true }>
@@ -432,15 +374,8 @@ function buildDayScrollerModel(
       // display-only fallback
     }
 
-    const top = getDtf(undefined, {
-      timeZone: appointmentTz,
-      weekday: 'short',
-    }).format(anchor)
-
-    const bottom = getDtf(undefined, {
-      timeZone: appointmentTz,
-      day: '2-digit',
-    }).format(anchor)
+    const top = formatInTimeZone(anchor, appointmentTz, { weekday: 'short' })
+    const bottom = formatInTimeZone(anchor, appointmentTz, { day: '2-digit' })
 
     return { ymd: day.date, labelTop: top, labelBottom: bottom }
   })
