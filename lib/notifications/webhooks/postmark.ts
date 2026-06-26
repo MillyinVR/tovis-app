@@ -2,6 +2,7 @@
 
 import { NotificationProvider, Prisma } from '@prisma/client'
 
+import { timingSafeEqualUtf8 } from '@/lib/auth/timingSafe'
 import { readOptionalEnv as readEnv } from '@/lib/env'
 
 export type PostmarkWebhookPayload = Prisma.InputJsonObject
@@ -113,20 +114,20 @@ export function validatePostmarkWebhookAuth(request: Request): PostmarkWebhookAu
     request.headers.get('x-postmark-webhook-secret'),
   )
 
-  if (secretHeader === secret) {
+  if (secretHeader && timingSafeEqualUtf8(secretHeader, secret)) {
     return { ok: true }
   }
 
   const authorization = readOptionalString(request.headers.get('authorization'))
 
-  if (authorization === `Bearer ${secret}`) {
+  if (authorization && timingSafeEqualUtf8(authorization, `Bearer ${secret}`)) {
     return { ok: true }
   }
 
   if (authorization) {
     const basic = decodePostmarkBasicAuth(authorization)
 
-    if (basic && basic.password === secret) {
+    if (basic && timingSafeEqualUtf8(basic.password, secret)) {
       return { ok: true }
     }
   }

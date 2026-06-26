@@ -351,26 +351,23 @@ describe('GET /api/public/consultation/[token]', () => {
     const response = await GET(new Request('http://localhost/test'), makeCtx('token_5'))
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({
+    const body = await response.json()
+
+    expect(body).toMatchObject({
       ok: true,
-      approval: {
-        proof: {
-          id: 'proof_1',
-          decision: 'APPROVED',
-          method: 'REMOTE_SECURE_LINK',
-          actedAt: '2026-04-12T18:00:00.000Z',
-          recordedByUserId: null,
-          clientActionTokenId: 'token_row_1',
-          contactMethod: 'EMAIL',
-          destinationSnapshot: 'client@example.com',
-          ipAddress: '203.0.113.5',
-          userAgent: 'Mozilla/5.0',
-        },
-      },
       actionState: {
         canApproveOrReject: false,
         hasProof: true,
       },
+    })
+
+    // The token bearer only sees what they need to confirm their own decision.
+    // Internal audit fields + counterparty contact must NOT be exposed.
+    expect(body.approval.proof).toEqual({
+      id: 'proof_1',
+      decision: 'APPROVED',
+      method: 'REMOTE_SECURE_LINK',
+      actedAt: '2026-04-12T18:00:00.000Z',
     })
   })
 })

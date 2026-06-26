@@ -217,18 +217,16 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
           rejectedAt: asIso(approval.rejectedAt),
           clientId: approval.clientId,
           proId: approval.proId,
+          // Return only what the token bearer needs to confirm their own
+          // decision. The internal audit fields (recordedByUserId, ipAddress,
+          // userAgent, clientActionTokenId) and counterparty contact
+          // (contactMethod, destinationSnapshot) are NOT exposed to the bearer.
           proof: approval.proof
             ? {
                 id: approval.proof.id,
                 decision: approval.proof.decision,
                 method: approval.proof.method,
                 actedAt: asIso(approval.proof.actedAt),
-                recordedByUserId: approval.proof.recordedByUserId,
-                clientActionTokenId: approval.proof.clientActionTokenId,
-                contactMethod: approval.proof.contactMethod,
-                destinationSnapshot: approval.proof.destinationSnapshot,
-                ipAddress: approval.proof.ipAddress,
-                userAgent: approval.proof.userAgent,
               }
             : null,
         },
