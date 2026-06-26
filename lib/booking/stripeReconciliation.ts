@@ -36,7 +36,10 @@ import {
   type ChargeRefundReconcileInput,
 } from '@/lib/booking/refunds'
 import { reconcileDepositChargeRefundInTransaction } from '@/lib/booking/writeBoundary'
-import { captureBookingException } from '@/lib/observability/bookingEvents'
+import {
+  captureBookingException,
+  captureStripeAmountMismatch,
+} from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
 
@@ -70,6 +73,13 @@ export type BookingReconcileResult = {
   outcome: ReconcileOutcome
   localRefundedCents: number
   stripeRefundedCents: number
+  /**
+   * Signed delta (Stripe captured − local stripeAmountTotal) when the cron found
+   * the captured amount drifting from what we recorded; null when in sync or the
+   * captured amount couldn't be compared. Logged + alerted, never auto-healed —
+   * a capture-amount mismatch is a money discrepancy for a human to investigate.
+   */
+  capturedAmountDriftCents: number | null
 }
 
 type Candidate = {
@@ -77,6 +87,7 @@ type Candidate = {
   stripePaymentIntentId: string
   stripeAmountTotal: number | null
   stripeAmountRefunded: number
+  stripeCurrency: string | null
   pendingRefundCount: number
 }
 
@@ -101,6 +112,12 @@ function getLatestCharge(paymentIntent: Stripe.PaymentIntent): Stripe.Charge | n
 type ChargeAmounts = {
   stripeRefundedCents: number
   chargeAmountCents: number
+  /**
+   * Amount Stripe actually captured from the customer (`charge.amount_captured`,
+   * falling back to `charge.amount`). Compared against our recorded
+   * `stripeAmountTotal` to catch capture drift the webhook missed (1B part 2).
+   */
+  capturedCents: number
 }
 
 type RetrievedCharge =
@@ -138,15 +155,21 @@ async function retrieveChargeAmounts(args: {
     return { kind: 'charge_missing' }
   }
 
+  const chargeAmountCents =
+    typeof charge.amount === 'number'
+      ? charge.amount
+      : args.fallbackChargeAmountCents
+
   return {
     kind: 'ok',
     amounts: {
       stripeRefundedCents:
         typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0,
-      chargeAmountCents:
-        typeof charge.amount === 'number'
-          ? charge.amount
-          : args.fallbackChargeAmountCents,
+      chargeAmountCents,
+      capturedCents:
+        typeof charge.amount_captured === 'number'
+          ? charge.amount_captured
+          : chargeAmountCents,
     },
   }
 }
@@ -156,6 +179,7 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
     bookingId: candidate.id,
     paymentIntentId: candidate.stripePaymentIntentId,
     localRefundedCents: candidate.stripeAmountRefunded,
+    capturedAmountDriftCents: null as number | null,
   }
 
   const retrieved = await retrieveChargeAmounts({
@@ -167,7 +191,27 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
     return { ...base, outcome: retrieved.kind, stripeRefundedCents: candidate.stripeAmountRefunded }
   }
 
-  const { stripeRefundedCents, chargeAmountCents } = retrieved.amounts
+  const { stripeRefundedCents, chargeAmountCents, capturedCents } = retrieved.amounts
+
+  // 1B part 2: assert the captured amount against what we recorded. The webhook
+  // alerts on this at capture time, but a lost webhook (orphan-recovery filled in
+  // the booking) or a post-capture adjustment can leave stripeAmountTotal wrong.
+  // This is a money discrepancy, so we LOG + alert (never auto-heal) and carry the
+  // delta on every post-retrieval result so the run summary surfaces it.
+  let capturedAmountDriftCents: number | null = null
+  if (
+    candidate.stripeAmountTotal != null &&
+    capturedCents !== candidate.stripeAmountTotal
+  ) {
+    capturedAmountDriftCents = capturedCents - candidate.stripeAmountTotal
+    captureStripeAmountMismatch({
+      bookingId: candidate.id,
+      expectedCents: candidate.stripeAmountTotal,
+      receivedCents: capturedCents,
+      currency: candidate.stripeCurrency,
+    })
+  }
+  const withDrift = { ...base, capturedAmountDriftCents }
 
   const amountDrift = stripeRefundedCents !== candidate.stripeAmountRefunded
   const hasPendingRows = candidate.pendingRefundCount > 0
@@ -175,7 +219,7 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
   // Stripe and our ledger agree and nothing is in flight: skip the extra Stripe
   // call and the write transaction entirely.
   if (!amountDrift && !hasPendingRows && stripeRefundedCents === 0) {
-    return { ...base, outcome: 'in_sync', stripeRefundedCents }
+    return { ...withDrift, outcome: 'in_sync', stripeRefundedCents }
   }
 
   // Pull the authoritative refund objects so BookingRefund rows can be settled
@@ -199,7 +243,7 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
       event: 'STRIPE_LOOKUP_FAILED',
       bookingId: candidate.id,
     })
-    return { ...base, outcome: 'stripe_lookup_failed', stripeRefundedCents }
+    return { ...withDrift, outcome: 'stripe_lookup_failed', stripeRefundedCents }
   }
 
   const input: ChargeRefundReconcileInput = {
@@ -217,7 +261,7 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
       reconcileChargeRefundInTransaction(tx, input),
     )
     if (!result.handled) {
-      return { ...base, outcome: 'booking_not_found', stripeRefundedCents }
+      return { ...withDrift, outcome: 'booking_not_found', stripeRefundedCents }
     }
   } catch (error: unknown) {
     captureBookingException({
@@ -226,11 +270,11 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
       event: 'RECONCILE_FAILED',
       bookingId: candidate.id,
     })
-    return { ...base, outcome: 'reconcile_failed', stripeRefundedCents }
+    return { ...withDrift, outcome: 'reconcile_failed', stripeRefundedCents }
   }
 
   return {
-    ...base,
+    ...withDrift,
     outcome: amountDrift ? 'refund_drift_healed' : 'refund_rows_synced',
     stripeRefundedCents,
   }
@@ -240,6 +284,10 @@ export type ReconcileRunResult = {
   candidatesScanned: number
   capped: boolean
   tally: Record<ReconcileOutcome, number>
+  // Count of candidates whose captured amount drifted from our recorded total
+  // (each one was logged + alerted via captureStripeAmountMismatch). Surfaced so
+  // the cron response makes capture drift visible without scanning every result.
+  capturedAmountDriftCount: number
   results: BookingReconcileResult[]
 }
 
@@ -255,10 +303,15 @@ function buildRunResult(
     { ...EMPTY_TALLY },
   )
 
+  const capturedAmountDriftCount = results.filter(
+    (result) => result.capturedAmountDriftCents != null,
+  ).length
+
   return {
     candidatesScanned,
     capped: candidatesScanned === MAX_BOOKINGS_PER_RUN,
     tally,
+    capturedAmountDriftCount,
     results,
   }
 }
@@ -288,6 +341,7 @@ export async function reconcileStripeRefunds(opts?: { now?: Date }): Promise<Rec
       stripePaymentIntentId: true,
       stripeAmountTotal: true,
       stripeAmountRefunded: true,
+      stripeCurrency: true,
       refunds: {
         where: { status: BookingRefundStatus.PENDING },
         select: { id: true },
@@ -307,6 +361,7 @@ export async function reconcileStripeRefunds(opts?: { now?: Date }): Promise<Rec
         stripePaymentIntentId: candidate.stripePaymentIntentId,
         stripeAmountTotal: candidate.stripeAmountTotal,
         stripeAmountRefunded: candidate.stripeAmountRefunded,
+        stripeCurrency: candidate.stripeCurrency,
         pendingRefundCount: candidate.refunds.length,
       }),
     )
@@ -349,6 +404,10 @@ async function reconcileDepositBooking(
     bookingId: candidate.id,
     paymentIntentId: candidate.depositStripePaymentIntentId,
     localRefundedCents: candidate.depositRefundedCents,
+    // Deposit captured-amount drift isn't asserted here (the deposit's expected
+    // amount lives across depositAmount + fee); the final-bill sweep owns the
+    // captured-vs-recorded check. Always null on this path.
+    capturedAmountDriftCents: null,
   }
 
   const retrieved = await retrieveChargeAmounts({

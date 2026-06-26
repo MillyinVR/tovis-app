@@ -53,6 +53,7 @@ async function runJob(req: Request): Promise<Response> {
       candidatesScanned: run.candidatesScanned,
       capped: run.capped,
       tally: run.tally,
+      capturedAmountDriftCount: run.capturedAmountDriftCount,
       sample: run.results.slice(0, 20),
     })
 

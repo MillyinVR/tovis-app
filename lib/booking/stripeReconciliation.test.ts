@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   reconcileChargeRefund: vi.fn(),
   reconcileDepositRefund: vi.fn(),
   captureException: vi.fn(),
+  captureAmountMismatch: vi.fn(),
 }))
 
 vi.mock('@/lib/stripe/server', () => ({
@@ -36,6 +37,7 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureException,
+  captureStripeAmountMismatch: mocks.captureAmountMismatch,
 }))
 
 import {
@@ -49,6 +51,7 @@ type CandidateOverrides = {
   stripePaymentIntentId?: string
   stripeAmountTotal?: number | null
   stripeAmountRefunded?: number
+  stripeCurrency?: string | null
   pendingRefundIds?: string[]
 }
 
@@ -58,17 +61,28 @@ function candidate(overrides: CandidateOverrides = {}) {
     stripePaymentIntentId: overrides.stripePaymentIntentId ?? 'pi_1',
     stripeAmountTotal: overrides.stripeAmountTotal ?? 10_000,
     stripeAmountRefunded: overrides.stripeAmountRefunded ?? 0,
+    stripeCurrency: overrides.stripeCurrency ?? 'usd',
     refunds: (overrides.pendingRefundIds ?? []).map((id) => ({ id })),
   }
 }
 
-function chargeIntent(opts: { amount?: number; amountRefunded?: number; charge?: unknown } = {}) {
+function chargeIntent(
+  opts: {
+    amount?: number
+    amountRefunded?: number
+    amountCaptured?: number
+    charge?: unknown
+  } = {},
+) {
   const charge =
     opts.charge === undefined
       ? {
           object: 'charge',
           amount: opts.amount ?? 10_000,
           amount_refunded: opts.amountRefunded ?? 0,
+          ...(opts.amountCaptured !== undefined
+            ? { amount_captured: opts.amountCaptured }
+            : {}),
         }
       : opts.charge
   return { id: 'pi_1', object: 'payment_intent', latest_charge: charge }
@@ -233,6 +247,55 @@ describe('reconcileStripeRefunds', () => {
       { stripePaidAt: { gte: new Date('2026-05-10T12:00:00Z') } },
       { paymentCollectedAt: { gte: new Date('2026-05-10T12:00:00Z') } },
     ])
+  })
+
+  // 1B part 2 — captured-amount assertion.
+  it('logs captured-amount drift when Stripe captured differs from our record', async () => {
+    mocks.findMany.mockResolvedValue([candidate({ stripeAmountTotal: 10_000 })])
+    // Stripe captured 9_000 but we recorded 10_000 (e.g. a lost webhook).
+    mocks.paymentIntentsRetrieve.mockResolvedValue(
+      chargeIntent({ amount: 10_000, amountCaptured: 9_000, amountRefunded: 0 }),
+    )
+
+    const run = await reconcileStripeRefunds()
+
+    expect(mocks.captureAmountMismatch).toHaveBeenCalledTimes(1)
+    expect(mocks.captureAmountMismatch).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      expectedCents: 10_000,
+      receivedCents: 9_000,
+      currency: 'usd',
+    })
+    expect(run.capturedAmountDriftCount).toBe(1)
+    expect(run.results[0]!.capturedAmountDriftCents).toBe(-1_000)
+    // It's a log-only signal: no auto-heal, booking still tallies in_sync.
+    expect(run.tally.in_sync).toBe(1)
+  })
+
+  it('does NOT log drift when captured matches the recorded total', async () => {
+    mocks.findMany.mockResolvedValue([candidate({ stripeAmountTotal: 10_000 })])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(
+      chargeIntent({ amount: 10_000, amountCaptured: 10_000 }),
+    )
+
+    const run = await reconcileStripeRefunds()
+
+    expect(mocks.captureAmountMismatch).not.toHaveBeenCalled()
+    expect(run.capturedAmountDriftCount).toBe(0)
+    expect(run.results[0]!.capturedAmountDriftCents).toBeNull()
+  })
+
+  it('falls back to charge.amount for captured when amount_captured is absent', async () => {
+    mocks.findMany.mockResolvedValue([candidate({ stripeAmountTotal: 8_000 })])
+    // No amount_captured on the charge; amount (10_000) is used, so it drifts.
+    mocks.paymentIntentsRetrieve.mockResolvedValue(chargeIntent({ amount: 10_000 }))
+
+    const run = await reconcileStripeRefunds()
+
+    expect(mocks.captureAmountMismatch).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedCents: 8_000, receivedCents: 10_000 }),
+    )
+    expect(run.results[0]!.capturedAmountDriftCents).toBe(2_000)
   })
 })
 
