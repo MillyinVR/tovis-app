@@ -9,6 +9,7 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { getZonedParts, minutesSinceMidnightInTimeZone } from '@/lib/time'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
@@ -119,9 +120,6 @@ type ResolvedWorkingWindow =
       meta?: Record<string, unknown>
     }
 
-const LOCAL_DATE_TIME_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
-const LOCAL_DATE_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
-
 function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
   return `${WORKING_HOURS_ERROR_PREFIX}${code}`
 }
@@ -177,59 +175,8 @@ function normalizeMaxDaysAhead(value: unknown): number {
   return clampInt(Math.trunc(parsed), 1, MAX_DAYS_AHEAD)
 }
 
-function getLocalDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-  const cached = LOCAL_DATE_TIME_FORMATTER_CACHE.get(timeZone)
-  if (cached) return cached
-
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-
-  LOCAL_DATE_TIME_FORMATTER_CACHE.set(timeZone, formatter)
-  return formatter
-}
-
-function getLocalDateFormatter(timeZone: string): Intl.DateTimeFormat {
-  const cached = LOCAL_DATE_FORMATTER_CACHE.get(timeZone)
-  if (cached) return cached
-
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-
-  LOCAL_DATE_FORMATTER_CACHE.set(timeZone, formatter)
-  return formatter
-}
-
-function readPartNumber(
-  parts: Intl.DateTimeFormatPart[],
-  type: Intl.DateTimeFormatPartTypes,
-): number {
-  return Number(parts.find((part) => part.type === type)?.value ?? '0')
-}
-
-function localMinutesSinceMidnight(date: Date, timeZone: string): number {
-  const parts = getLocalDateTimeFormatter(timeZone).formatToParts(date)
-  const hour = readPartNumber(parts, 'hour')
-  const minute = readPartNumber(parts, 'minute')
-
-  return hour * 60 + minute
-}
-
 function localDaySerial(date: Date, timeZone: string): number {
-  const parts = getLocalDateFormatter(timeZone).formatToParts(date)
-  const year = readPartNumber(parts, 'year')
-  const month = readPartNumber(parts, 'month')
-  const day = readPartNumber(parts, 'day')
+  const { year, month, day } = getZonedParts(date, timeZone)
 
   return Math.floor(
     Date.UTC(year, month - 1, day, 12, 0, 0, 0) / 86_400_000,
@@ -254,7 +201,7 @@ function offsetFromWindowStartDay(args: {
   const dayDelta =
     localDaySerial(targetUtc, timeZone) - localDaySerial(windowDayUtc, timeZone)
 
-  return dayDelta * 1440 + localMinutesSinceMidnight(targetUtc, timeZone)
+  return dayDelta * 1440 + minutesSinceMidnightInTimeZone(targetUtc, timeZone)
 }
 
 function resolveWorkingWindowForPreparedArgs(

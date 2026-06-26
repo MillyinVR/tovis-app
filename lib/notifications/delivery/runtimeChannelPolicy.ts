@@ -9,6 +9,7 @@ import {
 } from '../channelPolicy'
 import { getNotificationEventDefinition } from '../eventKeys'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
+import { getZonedParts } from '@/lib/time'
 
 type ZonedDateTimeParts = {
   year: number
@@ -84,8 +85,6 @@ const DEFAULT_QUIET_HOURS_END_MINUTES = 8 * 60
  * whenever it exists, so this only bites the genuinely zone-less tail.
  */
 const QUIET_HOURS_FALLBACK_TIME_ZONE = 'America/New_York'
-
-const zonedDateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>()
 
 function normalizeNow(value: Date): Date {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
@@ -167,70 +166,17 @@ function isWithinQuietHours(args: {
   )
 }
 
-function getZonedDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-  const cached = zonedDateTimeFormatterCache.get(timeZone)
-  if (cached) return cached
-
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-
-  zonedDateTimeFormatterCache.set(timeZone, formatter)
-  return formatter
-}
-
 function getZonedDateTimeParts(
   date: Date,
   timeZone: string,
 ): ZonedDateTimeParts | null {
   const normalizedDate = normalizeNow(date)
 
+  // getZonedParts returns the same {year..second} shape with a cached, per-zone
+  // formatter (and hardens the rare hour===24 → next-day case). Keep the
+  // null-on-failure contract callers rely on.
   try {
-    const parts = getZonedDateTimeFormatter(timeZone).formatToParts(
-      normalizedDate,
-    )
-
-    const getPart = (type: Intl.DateTimeFormatPartTypes): number | null => {
-      const raw = parts.find((part) => part.type === type)?.value ?? null
-      if (!raw) return null
-
-      const parsed = Number.parseInt(raw, 10)
-      return Number.isFinite(parsed) ? parsed : null
-    }
-
-    const year = getPart('year')
-    const month = getPart('month')
-    const day = getPart('day')
-    const hour = getPart('hour')
-    const minute = getPart('minute')
-    const second = getPart('second')
-
-    if (
-      year == null ||
-      month == null ||
-      day == null ||
-      hour == null ||
-      minute == null ||
-      second == null
-    ) {
-      return null
-    }
-
-    return {
-      year,
-      month,
-      day,
-      hour,
-      minute,
-      second,
-    }
+    return getZonedParts(normalizedDate, timeZone)
   } catch {
     return null
   }

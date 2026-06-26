@@ -82,8 +82,15 @@ function addDaysToYMD(year: number, month: number, day: number, daysToAdd: numbe
  * Some engines can return hour "24" at midnight (24:00).
  * When that happens, we treat it as 00:00 of the *next* day.
  */
-export function getZonedParts(dateUtc: Date, timeZone: string) {
-  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+// Intl.DateTimeFormat construction is relatively expensive, and getZonedParts
+// runs in hot paths (slot generation, quiet-hours checks). The formatter config
+// is fixed, so memoize one per sanitized timezone — this lets perf-sensitive
+// callers use getZonedParts directly instead of hand-rolling their own caches.
+const ZONED_PARTS_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
+
+function getZonedPartsFormatter(tz: string): Intl.DateTimeFormat {
+  const cached = ZONED_PARTS_FORMATTER_CACHE.get(tz)
+  if (cached) return cached
 
   // Force 24-hour cycle via locale extension.
   // This avoids some "24" weirdness, but we still harden below.
@@ -98,7 +105,14 @@ export function getZonedParts(dateUtc: Date, timeZone: string) {
     hour12: false,
   })
 
-  const parts = dtf.formatToParts(dateUtc)
+  ZONED_PARTS_FORMATTER_CACHE.set(tz, dtf)
+  return dtf
+}
+
+export function getZonedParts(dateUtc: Date, timeZone: string) {
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+
+  const parts = getZonedPartsFormatter(tz).formatToParts(dateUtc)
   const map: Record<string, string> = {}
   for (const p of parts) map[p.type] = p.value
 

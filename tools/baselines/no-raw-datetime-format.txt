@@ -1,24 +1,7 @@
 # Raw date/time formatting that pre-dates the lib/time single source of truth.
 # Migrate these to @/lib/time helpers and shrink the list; never add entries.
-app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|): Intl.DateTimeFormat {
-app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|const DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
-app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|const dtfCache = new Map<string, Intl.DateTimeFormat>()
-app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|const raw = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|fmt = new Intl.DateTimeFormat(locale, options)
-app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|options: Intl.DateTimeFormatOptions,
 app/client/(gated)/ClientMeDashboard.tsx|return new Date(then).toLocaleDateString(undefined, {
 app/client/(gated)/_components/ClientLastMinuteInvites.tsx|return new Intl.DateTimeFormat('en-US', {
 app/client/(gated)/_components/homeVisuals.ts|const options: Intl.DateTimeFormatOptions = {
 app/pro/calendar/_utils/date.ts|options: Intl.DateTimeFormatOptions,
 app/pro/calendar/_viewModel/proCalendarDisplay.ts|const format = (options: Intl.DateTimeFormatOptions): string =>
-lib/booking/slotReadiness.ts|const LOCAL_DATE_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
-lib/booking/slotReadiness.ts|const LOCAL_DATE_TIME_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
-lib/booking/slotReadiness.ts|const formatter = new Intl.DateTimeFormat('en-CA', {
-lib/booking/slotReadiness.ts|function getLocalDateFormatter(timeZone: string): Intl.DateTimeFormat {
-lib/booking/slotReadiness.ts|function getLocalDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-lib/booking/slotReadiness.ts|parts: Intl.DateTimeFormatPart[],
-lib/booking/slotReadiness.ts|type: Intl.DateTimeFormatPartTypes,
-lib/notifications/delivery/runtimeChannelPolicy.ts|const formatter = new Intl.DateTimeFormat('en-US', {
-lib/notifications/delivery/runtimeChannelPolicy.ts|const getPart = (type: Intl.DateTimeFormatPartTypes): number | null => {
-lib/notifications/delivery/runtimeChannelPolicy.ts|const zonedDateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>()
-lib/notifications/delivery/runtimeChannelPolicy.ts|function getZonedDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {

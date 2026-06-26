@@ -8,6 +8,36 @@ function toDate(v: DateLike): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
+// Intl.DateTimeFormat construction is comparatively expensive and these
+// formatters run per-slot/per-row in hot render and notification paths. The
+// option sets are drawn from a small fixed vocabulary, so memoize one formatter
+// per (locale, sanitized timeZone, options) — replacing the bespoke formatter
+// caches that callers used to keep. The key is built from sorted option entries
+// so it's independent of property insertion order.
+const FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
+
+function stableOptionsKey(options: Intl.DateTimeFormatOptions): string {
+  return JSON.stringify(
+    Object.entries(options)
+      .filter(([, value]) => value !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  )
+}
+
+function getDateTimeFormat(
+  tz: string,
+  options: Intl.DateTimeFormatOptions,
+  locale?: string,
+): Intl.DateTimeFormat {
+  const key = `${locale ?? ''}|${tz}|${stableOptionsKey(options)}`
+  const cached = FORMATTER_CACHE.get(key)
+  if (cached) return cached
+
+  const formatter = new Intl.DateTimeFormat(locale, { ...options, timeZone: tz })
+  FORMATTER_CACHE.set(key, formatter)
+  return formatter
+}
+
 export function formatInTimeZone(
   date: DateLike,
   timeZone: string,
@@ -18,7 +48,7 @@ export function formatInTimeZone(
   if (!d) return 'Invalid date'
 
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
-  return new Intl.DateTimeFormat(locale, { ...options, timeZone: tz }).format(d)
+  return getDateTimeFormat(tz, options, locale).format(d)
 }
 
 export function formatAppointmentWhen(date: DateLike, timeZone: string, locale?: string) {
@@ -43,19 +73,17 @@ export function formatRangeInTimeZone(start: DateLike, end: DateLike, timeZone: 
 
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
-  const left = new Intl.DateTimeFormat(locale, {
-    timeZone: tz,
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(s)
+  const left = getDateTimeFormat(
+    tz,
+    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+    locale,
+  ).format(s)
 
-  const right = new Intl.DateTimeFormat(locale, {
-    timeZone: tz,
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(e)
+  const right = getDateTimeFormat(
+    tz,
+    { hour: 'numeric', minute: '2-digit' },
+    locale,
+  ).format(e)
 
   return `${left} → ${right}`
 }
