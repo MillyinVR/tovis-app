@@ -59,6 +59,38 @@ export function bufferOrZero(buffer: unknown): number {
   return clampInt(Number(buffer ?? 0) || 0, 0, MAX_BUFFER_MINUTES)
 }
 
+/**
+ * The MINIMUM durable busy length (minutes) any active booking/hold occupies,
+ * mirroring the database EXCLUDE constraint exactly:
+ *
+ *   tovis_booking_overlap_range = GREATEST(1, COALESCE(dur,0) + COALESCE(buf,0))
+ *
+ * (see prisma/migrations/20260522000000_add_booking_overlap_exclusion).
+ *
+ * The JS builders intentionally reserve >= this (duration floored to 15 /
+ * defaulted to 60, buffer clamped) so availability never *under*-reserves
+ * relative to the DB. The contract that actually matters for correctness is:
+ * every JS/runtime busy window must be >= this SQL floor, or availability could
+ * clear a slot the database then rejects with a 23P01. The integration parity
+ * test (tests/integration/busy-window-sql-parity.test.ts) pins that invariant
+ * against the real Postgres function across the null/clamp/over-cap matrix.
+ */
+export function sqlBusyWindowMinutes(
+  durationMinutes: number | null | undefined,
+  bufferMinutes: number | null | undefined,
+): number {
+  return Math.max(
+    1,
+    coalesceWindowMinutes(durationMinutes) + coalesceWindowMinutes(bufferMinutes),
+  )
+}
+
+function coalesceWindowMinutes(value: number | null | undefined): number {
+  const parsed = Number(value ?? 0)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.trunc(parsed)
+}
+
 export function getConflictWindowStart(start: Date): Date {
   return addMinutes(start, -MAX_OTHER_OVERLAP_MINUTES)
 }

@@ -137,24 +137,27 @@ describe('calculateWindowEnd', () => {
     ).toBe(fallbackEndsAt)
   })
 
-  it('ignores null duration and buffer values', () => {
+  it('floors null duration and buffer to the SQL 1-minute minimum', () => {
+    // Matches the DB constraint floor GREATEST(1, COALESCE(dur,0)+COALESCE(buf,0))
+    // so the runtime window is never shorter (0-length) than the database treats
+    // the row as occupied.
     expect(
       calculateWindowEnd({
         startsAt: requestedStart,
         durationMinutes: null,
         bufferMinutes: null,
       }).toISOString(),
-    ).toBe('2026-06-01T17:00:00.000Z')
+    ).toBe('2026-06-01T17:01:00.000Z')
   })
 
-  it('ignores negative duration and buffer values', () => {
+  it('floors negative duration and buffer to the SQL 1-minute minimum', () => {
     expect(
       calculateWindowEnd({
         startsAt: requestedStart,
         durationMinutes: -20,
         bufferMinutes: -5,
       }).toISOString(),
-    ).toBe('2026-06-01T17:00:00.000Z')
+    ).toBe('2026-06-01T17:01:00.000Z')
   })
 })
 
