@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { formatCents } from '@/lib/money'
 
 type Props = {
   bookingId: string
@@ -50,9 +51,7 @@ function parseAmountToCents(raw: string): number | null | 'invalid' {
 }
 
 function formatMoney(cents: number, currency: string | null): string {
-  const amount = (cents / 100).toFixed(2)
-  const code = (currency ?? 'usd').toUpperCase()
-  return `${amount} ${code}`
+  return formatCents(cents, { currency, style: 'code' })
 }
 
 export default function RefundButton({

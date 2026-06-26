@@ -3,6 +3,7 @@
 
 import Link from 'next/link'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatRoundedDollars } from '@/lib/money'
 import type { ApiPro } from '../_lib/discoverProTypes'
 
 interface DiscoverActiveProCardProps {
@@ -17,9 +18,9 @@ function buildStatLine(pro: ApiPro): string | null {
   const parts: string[] = []
 
   if (typeof pro.distanceMiles === 'number') parts.push(`${pro.distanceMiles.toFixed(1)} mi`)
-  if (typeof pro.minPrice === 'number' && Number.isFinite(pro.minPrice)) {
-    parts.push(`FROM $${Math.round(pro.minPrice)}`)
-  }
+
+  const price = formatRoundedDollars(pro.minPrice)
+  if (price) parts.push(`FROM ${price}`)
 
   return parts.length ? parts.join(' · ') : null
 }

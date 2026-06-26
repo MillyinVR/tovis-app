@@ -3,6 +3,7 @@
 import { useState } from 'react'
 
 import { isRecord } from '@/lib/guards'
+import { formatCents } from '@/lib/money'
 
 type Props = {
   /** The AFTERCARE_ACCESS ClientActionToken from the page URL. */
@@ -21,14 +22,7 @@ function buildIdempotencyKey(token: string): string {
 }
 
 function formatAmount(amountCents: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency: currency.toUpperCase(),
-    }).format(amountCents / 100)
-  } catch {
-    return `${(amountCents / 100).toFixed(2)} ${currency.toUpperCase()}`
-  }
+  return formatCents(amountCents, { currency })
 }
 
 export function CompletePaymentCard({ token, amountCents, currency }: Props) {

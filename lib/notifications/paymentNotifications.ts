@@ -15,7 +15,7 @@
 
 import { NotificationEventKey, Prisma } from '@prisma/client'
 
-import { formatMoneyFromUnknown } from '@/lib/money'
+import { formatCents, formatMoneyFromUnknown } from '@/lib/money'
 
 import { upsertClientNotification } from './clientNotifications'
 import { createProNotification } from './proNotifications'
@@ -60,7 +60,7 @@ async function loadPaymentBookingContext(
 
 function centsToDisplay(amountCents: number): string | null {
   if (!Number.isFinite(amountCents) || amountCents <= 0) return null
-  return formatMoneyFromUnknown(amountCents / 100)
+  return formatCents(amountCents)
 }
 
 /**

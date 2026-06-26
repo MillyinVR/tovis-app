@@ -1,5 +1,6 @@
 // app/client/me/page.tsx
 import { isNonEmptyString } from '@/lib/guards'
+import { formatRoundedDollars } from '@/lib/money'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildWorkspaceOptions, type WorkspaceOption } from '@/lib/auth/workspaces'
@@ -43,10 +44,7 @@ function buildDisplayName(params: {
 function formatMoneyLabel(value: string | null | undefined): string | null {
   if (!value) return null
 
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) return null
-
-  return `$${Math.round(parsed)}`
+  return formatRoundedDollars(value)
 }
 
 function buildBoardHref(boardId: string): string {
