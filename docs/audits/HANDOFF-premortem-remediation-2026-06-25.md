@@ -54,12 +54,19 @@ false; backfill no-op) and rebuilds both EXCLUDE constraints with
 
 ## Operator follow-ups (need a human / console — I cannot do these)
 
+- [ ] **`AUTH_TRUSTED_IP_HEADER` in prod (NEW — blocks deploy).** PR-3B (#376)
+      added this to the production startup env contract. If it is NOT set in the
+      Vercel prod env, the next production deploy will **fail its boot** by design.
+      It should already be set (the request-time fatal-alert never fired) —
+      confirm in Vercel → Settings → Environment Variables before deploying, set
+      to the platform-trusted edge header (e.g. `x-vercel-forwarded-for`).
 - [ ] **Supabase PITR** — confirm it's enabled on prod (`tovis-dev`,
       `rqhhvuaoksuvbvlypztn`) + run a restore drill. Checklist in
       `docs/runbooks/db-restore.md`.
 - [ ] **Stripe Dashboard** — subscribe the webhook endpoint to `charge.dispute.*`
       events, or 0A's handler never fires.
-- [ ] Decide whether to **commit** the untracked audit/plan/handoff docs.
+- [x] ~~Decide whether to **commit** the untracked audit/plan/handoff docs.~~
+      DONE — committed in #369.
 
 ---
 
@@ -74,7 +81,7 @@ steps remain (documented in the #368 commit):
    idempotency, so a crash AFTER a send but BEFORE recording completion can still
    re-send on retry. Needs `providerMessageId` stamped pre-send + a dedupe check.
 
-### Phase 2 — correctness — DONE (2026-06-26, PRs #370–#373, all OPEN)
+### Phase 2 — correctness — DONE (2026-06-26, PRs #370–#373, all MERGED)
 - **2A** (#370 `fix/premortem-2a-utc-renders`) — pro reminders page + calendar
   move-confirm now render via `@/lib/time` in the appointment/schedule tz;
   shrank the `no-raw-datetime-format` baseline by 2.
@@ -105,16 +112,31 @@ steps remain (documented in the #368 commit):
   workflow runs `test:integration`) — they are manual/local validation, same as
   the existing `bookingConcurrency`/`tenant-isolation` suites.
 
-### Phase 3 — hardening (batchable)
-- **3A** webhook/proof: Postmark webhook secret → `timingSafeEqual`
-  (`lib/notifications/webhooks/postmark.ts:116,122,129`); consultation **decision**
-  route use `getTrustedClientIpFromRequest` for consent-proof IP; consultation
-  **GET** stop returning `proof.ipAddress`/`userAgent`/`recordedByUserId`/counterparty
-  contact.
-- **3B** rate-limit `account-invite` mint; treat unset `AUTH_TRUSTED_IP_HEADER` in
-  prod as a hard startup failure.
-- **3C** schedule `upload-sessions/cleanup` cron in `vercel.json` (+ GET export +
-  `maxDuration`) — currently built but never runs → orphaned signed PII media.
+### Phase 3 — hardening — security batch DONE (2026-06-26, PRs #375–#377, all MERGED)
+- **3A** (#375 `fix/premortem-3a-webhook-proof-hardening`) — MERGED. Postmark
+  internal webhook auth (`validatePostmarkWebhookAuth`) now compares the secret
+  via `timingSafeEqualUtf8` for all three header forms (x-postmark-webhook-secret,
+  Bearer, Basic password). Consultation **decision** route records the
+  consent-proof IP via `getTrustedClientIpFromRequest` (un-spoofable). Consultation
+  **GET** *and* **decision POST** responses no longer return internal audit fields
+  (`recordedByUserId`/`clientActionTokenId`/`ipAddress`/`userAgent`) or counterparty
+  contact (`contactMethod`/`destinationSnapshot`) to the token bearer — only
+  `id`/`decision`/`method`/`actedAt`. (I trimmed the decision POST too, not just
+  the GET the plan named — same leak, same bearer.)
+- **3B** (#376 `fix/premortem-3b-public-post-hardening`) — MERGED. Public
+  `account-invite` claim-link mint now rate-limited by IP + token-prefix BEFORE
+  any DB work (new `account-invite:mint` / `:token` policies, mirrors
+  consultation:decision). `AUTH_TRUSTED_IP_HEADER` is now a **required production
+  startup env** in `startupEnvValidation` — without it every IP limiter collapses
+  to one shared `ip:'unknown'` bucket. ⚠️ **See operator follow-up: prod MUST have
+  this var set or the next deploy fails its boot contract.**
+- **3C** (#377 `fix/premortem-3c-upload-cleanup-cron`) — MERGED. Scheduled
+  `/api/internal/jobs/upload-sessions/cleanup` in `vercel.json` (every 15 min) +
+  added a GET entrypoint (Vercel cron uses GET) sharing POST's auth/reap, plus
+  `maxDuration=60`. The reaper flips `UploadSession` PENDING→EXPIRED; actual
+  storage-object deletion is still a separate sweep (route header documents it).
+
+### Phase 3 — hardening — payments/infra REMAINING
 - **3D** refund/deposit edges: stamp `stripeRefundId` before the Stripe call (or
   settle null-id PENDING rows by `(bookingId,amount,createdAt)`); shared
   idempotency key for orphan-recovery vs live webhook; model partial deposit
@@ -173,5 +195,10 @@ steps remain (documented in the #368 commit):
 
 ---
 
-*Status as of 2026-06-25. All 7 PRs (#362–#368) MERGED — Phase 0 + Phase 1
-complete. Phases 2–4 (~9 PRs) remain — see the remediation-plan doc.*
+*Status as of 2026-06-26. MERGED: Phase 0+1 (#362–#368), Phase 2 (#370–#373),
+Phase 3 security batch 3A/3B/3C (#375–#377). Local `main` is level with
+`origin/main`. REMAINING: Phase 3 payments/infra (3D, 3E, 1B-part2) + Phase 4
+(4A/4B/4C) — see the remediation-plan doc — plus the operator follow-ups above
+(⚠️ confirm `AUTH_TRUSTED_IP_HEADER` is set in prod before the next deploy).
+Note: `docs/audits/weekly-audit-2026-06-22.md` is untracked in the primary
+checkout and belongs to a sibling session — left untouched.*
