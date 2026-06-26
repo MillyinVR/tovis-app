@@ -25,6 +25,7 @@ const MANAGED_ENV_KEYS = [
   'EMAIL_FROM',
   'PII_AEAD_KEYS_JSON',
   'DATABASE_URL',
+  'AUTH_TRUSTED_IP_HEADER',
 ] as const
 
 const originalEnv: Record<string, string | undefined> = {}
@@ -37,6 +38,7 @@ function setFullyConfiguredProductionEnv() {
   process.env.POSTMARK_NOTIFICATION_FROM_EMAIL = 'noreply@example.com'
   process.env.PII_AEAD_KEYS_JSON = VALID_AEAD_KEYRING
   process.env.DATABASE_URL = 'postgresql://user:pass@localhost:5432/db'
+  process.env.AUTH_TRUSTED_IP_HEADER = 'x-vercel-forwarded-for'
 }
 
 beforeEach(() => {
@@ -96,7 +98,7 @@ describe('validateProductionStartupEnv', () => {
     process.env.VERCEL_ENV = 'production'
 
     const missing = collectMissingProductionEnv()
-    expect(missing).toHaveLength(5)
+    expect(missing).toHaveLength(6)
     expect(missing.some((entry) => entry.startsWith('Sentry DSN'))).toBe(true)
     expect(
       missing.some((entry) => entry.startsWith('Internal job / cron secret')),
@@ -108,6 +110,9 @@ describe('validateProductionStartupEnv', () => {
       missing.some((entry) => entry.startsWith('PII encryption keyring')),
     ).toBe(true)
     expect(missing.some((entry) => entry.startsWith('Database URL'))).toBe(true)
+    expect(
+      missing.some((entry) => entry.startsWith('Trusted client IP header')),
+    ).toBe(true)
 
     expect(() => validateProductionStartupEnv()).toThrow(
       /Startup env validation failed in production/,
@@ -122,6 +127,18 @@ describe('validateProductionStartupEnv', () => {
       expect.stringContaining('PII encryption keyring'),
     ])
     expect(() => validateProductionStartupEnv()).toThrow(/PII encryption keyring/)
+  })
+
+  it('throws when only the trusted client IP header is missing', () => {
+    setFullyConfiguredProductionEnv()
+    delete process.env.AUTH_TRUSTED_IP_HEADER
+
+    expect(collectMissingProductionEnv()).toEqual([
+      expect.stringContaining('Trusted client IP header'),
+    ])
+    expect(() => validateProductionStartupEnv()).toThrow(
+      /Trusted client IP header/,
+    )
   })
 
   it('throws when only the Sentry DSN is missing', () => {
