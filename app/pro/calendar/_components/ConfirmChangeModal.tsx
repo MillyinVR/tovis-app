@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 
 import type { PendingChange } from '../_types'
 import { zClass } from '@/lib/zIndex'
+import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,20 +37,34 @@ const MAX_OVERRIDE_REASON_LENGTH = 280
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function formatLocalDateTime(iso: string) {
+function formatLocalDateTime(iso: string, timeZone: string) {
   const date = new Date(iso)
 
   if (!Number.isFinite(date.getTime())) {
     return 'Time unavailable'
   }
 
-  return date.toLocaleString(undefined, {
+  return formatInTimeZone(date, timeZone, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+/**
+ * Display a calendar change in the appointment's own timezone (a NY pro moving
+ * an LA booking sees the new time in Pacific), not the viewer/server zone which
+ * would render the wrong day. Blocks carry no appointment zone, so fall back to
+ * the viewer's zone — matching the pro's calendar viewport.
+ */
+function changeDisplayTimeZone(change: PendingChange): string {
+  if (change.original.kind === 'BOOKING' && change.original.timeZone) {
+    return change.original.timeZone
+  }
+
+  return getViewerTimeZone() ?? DEFAULT_TIME_ZONE
 }
 
 function buildChangeSummary(args: {
@@ -76,7 +91,10 @@ function buildChangeSummary(args: {
     actionLabel: 'move',
     nounLabel,
     primaryLabel: 'New start time',
-    primaryValue: formatLocalDateTime(change.nextStartIso),
+    primaryValue: formatLocalDateTime(
+      change.nextStartIso,
+      changeDisplayTimeZone(change),
+    ),
     confirmLabel:
       outsideWorkingHours && change.entityType !== 'block'
         ? 'Save anyway'
