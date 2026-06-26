@@ -6,6 +6,7 @@ import type { SchedulingConflict } from './overlapPolicy'
 import {
   bookingToBusyInterval,
   getConflictWindowStart,
+  sqlBusyWindowMinutes,
 } from '@/lib/booking/conflicts'
 import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 export type PrismaTransactionClient = Prisma.TransactionClient
@@ -57,22 +58,14 @@ export function calculateWindowEnd(args: {
     return args.fallbackEndsAt
   }
 
-  const durationMinutes =
-    typeof args.durationMinutes === 'number' &&
-    Number.isFinite(args.durationMinutes) &&
-    args.durationMinutes > 0
-      ? args.durationMinutes
-      : 0
-
-  const bufferMinutes =
-    typeof args.bufferMinutes === 'number' &&
-    Number.isFinite(args.bufferMinutes) &&
-    args.bufferMinutes > 0
-      ? args.bufferMinutes
-      : 0
-
+  // Mirror the durable SQL EXCLUDE constraint floor (GREATEST(1, dur+buf)) so a
+  // null/zero snapshot yields a 1-minute window, never a 0-length one that the
+  // database constraint would still treat as occupied. Keeps this runtime
+  // builder from ever reserving LESS than the DB (which would let availability
+  // clear a slot Postgres rejects with 23P01).
   return new Date(
-    args.startsAt.getTime() + (durationMinutes + bufferMinutes) * 60_000,
+    args.startsAt.getTime() +
+      sqlBusyWindowMinutes(args.durationMinutes, args.bufferMinutes) * 60_000,
   )
 }
 
