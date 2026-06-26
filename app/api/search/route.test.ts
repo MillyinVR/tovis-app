@@ -221,7 +221,11 @@ describe('app/api/search/route.ts', () => {
     expect(res.status).toBe(200)
 
     expect(mocks.parseSearchServicesParams).toHaveBeenCalledTimes(1)
-    expect(mocks.searchServices).toHaveBeenCalledWith(parsedServicesParams)
+    expect(mocks.resolveTenantContextForRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.searchServices).toHaveBeenCalledWith(parsedServicesParams, {
+      tenantId: 'tenant_test',
+      mode: 'tenant',
+    })
 
     const passedSearchParams =
       mocks.parseSearchServicesParams.mock.calls[0]?.[0] as URLSearchParams

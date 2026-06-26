@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
+import { bookingError } from '@/lib/booking/errors'
 
 export type LockedScheduleContext = {
   tx: Prisma.TransactionClient
@@ -47,12 +48,12 @@ export async function lockClientOwnedBookingSchedule(args: {
     },
   })
 
-  if (!bookingRef) {
-    throw new Error('BOOKING_NOT_FOUND')
-  }
-
-  if (bookingRef.clientId !== args.clientId) {
-    throw new Error('FORBIDDEN')
+  // A missing booking and a booking owned by someone else return the SAME
+  // uniform 404 — never a 403 — so a client cannot enumerate other clients'
+  // bookings by probing reschedule/cancel/checkout for a status difference.
+  // (Matches the ownership-leak fix applied to the pro/admin booking routes.)
+  if (!bookingRef || bookingRef.clientId !== args.clientId) {
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   await lockProfessionalSchedule(args.tx, bookingRef.professionalId)

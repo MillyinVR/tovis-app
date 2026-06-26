@@ -23,10 +23,12 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
     const tab = parseTab(searchParams.get('tab'))
+    const tenantContext = await resolveTenantContextForRequest(req)
 
     if (tab === 'SERVICES') {
       const result = await searchServices(
         parseSearchServicesParams(searchParams),
+        tenantContext,
       )
 
       return jsonOk({
@@ -38,7 +40,7 @@ export async function GET(req: Request) {
 
     const result = await searchPros(
       parseSearchProsParams(searchParams),
-      await resolveTenantContextForRequest(req),
+      tenantContext,
     )
 
     return jsonOk({
