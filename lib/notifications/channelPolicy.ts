@@ -7,6 +7,8 @@ import {
   type ProfessionalNotificationPreference,
 } from '@prisma/client'
 
+import { minutesSinceMidnightInTimeZone } from '@/lib/time'
+
 import {
   getDefaultChannelsForRecipient,
   getNotificationEventDefinition,
@@ -349,28 +351,7 @@ export function getRecipientLocalMinutes(args: {
   if (!timeZone) return null
 
   try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).formatToParts(args.at)
-
-    const hourPart = parts.find((part) => part.type === 'hour')?.value ?? ''
-    const minutePart = parts.find((part) => part.type === 'minute')?.value ?? ''
-
-    const hour = Number.parseInt(hourPart, 10)
-    const minute = Number.parseInt(minutePart, 10)
-
-    if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
-      return null
-    }
-
-    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-      return null
-    }
-
-    return hour * 60 + minute
+    return minutesSinceMidnightInTimeZone(args.at, timeZone)
   } catch {
     return null
   }

@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { formatInTimeZone } from '@/lib/time'
 import { getCurrentUser } from '@/lib/currentUser'
 import { SupportTicketStatus } from '@prisma/client'
 
@@ -100,7 +101,13 @@ export default async function AdminSupportTicketPage(req: Ctx) {
       <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="text-[16px] font-black">{ticket.subject}</div>
         <div className="mt-1 text-[11px] text-textSecondary">
-          {ticket.createdByRole ?? 'UNKNOWN'} • {new Date(ticket.createdAt).toLocaleString()}
+          {ticket.createdByRole ?? 'UNKNOWN'} •{' '}
+          {formatInTimeZone(
+            ticket.createdAt,
+            'UTC',
+            { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+            'en-US',
+          )}
           {ticket.createdByUserId ? ` • user:${ticket.createdByUserId}` : ''}
         </div>
 

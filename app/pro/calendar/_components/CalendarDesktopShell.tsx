@@ -18,6 +18,8 @@ import type {
 import type { CalendarData } from '../_hooks/useCalendarData'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 
+import { formatInTimeZone } from '@/lib/time'
+
 import { anchorNoonInTimeZone } from '../_utils/date'
 
 import {
@@ -805,21 +807,19 @@ function eventTimeRangeLabel(event: CalendarEvent, timeZone: string): string {
   const startsAt = new Date(event.startsAt)
   const endsAt = new Date(event.endsAt)
 
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    timeZone,
+  const startLabel = formatInTimeZone(startsAt, timeZone, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   })
 
-  const timeFormatter = new Intl.DateTimeFormat(undefined, {
-    timeZone,
+  const endLabel = formatInTimeZone(endsAt, timeZone, {
     hour: 'numeric',
     minute: '2-digit',
   })
 
-  return `${formatter.format(startsAt)} → ${timeFormatter.format(endsAt)}`
+  return `${startLabel} → ${endLabel}`
 }
 
 function bookingTotalLabel(event: BookingCalendarEvent): string | null {

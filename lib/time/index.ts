@@ -103,4 +103,7 @@ export {
 } from '@/lib/bookingDateTimeClient'
 
 // Relative ("5m", "3h", "2d") timestamps for social/feed surfaces
-export { formatRelativeTimeCompact } from '@/lib/time/relativeTime'
+export {
+  formatRelativeTimeCompact,
+  formatRelativeTimeAgo,
+} from '@/lib/time/relativeTime'

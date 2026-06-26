@@ -93,9 +93,10 @@ import {
 } from '@/lib/booking/snapshots'
 import {
   DEFAULT_TIME_ZONE,
+  formatInTimeZone,
   isValidIanaTimeZone,
   sanitizeTimeZone,
-} from '@/lib/timeZone'
+} from '@/lib/time'
 import { clampInt } from '@/lib/pick'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
@@ -2423,15 +2424,19 @@ function resolveAftercareTimeZone(args: {
 function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
   const tz = timeZone && isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
 
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
+  return formatInTimeZone(
+    date,
+    tz,
+    {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    },
+    'en-US',
+  )
 }
 
 function computeRebookReminderDueAt(args: {

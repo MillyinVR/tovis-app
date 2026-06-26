@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import { safeJson } from '@/lib/http'
+import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
 
 type Offer = {
   recipientId: string
@@ -42,18 +43,16 @@ function formatCountdown(ms: number): string {
 }
 
 function formatWhen(iso: string, timeZone: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone,
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(new Date(iso))
-  } catch {
-    return new Date(iso).toLocaleString()
-  }
+  // Offer (appointment) time: format in the offer's timezone; on a bad/missing
+  // tz, preserve the prior no-tz fallback by rendering in the viewer's zone.
+  const tz = timeZone || getViewerTimeZone() || DEFAULT_TIME_ZONE
+  return formatInTimeZone(new Date(iso), tz, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 export default function OffersListClient() {

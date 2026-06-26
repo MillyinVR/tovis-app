@@ -6,83 +6,11 @@ app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|const dtfCache = ne
 app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|const raw = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
 app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|fmt = new Intl.DateTimeFormat(locale, options)
 app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx|options: Intl.DateTimeFormatOptions,
-app/(main)/booking/AvailabilityDrawer/components/WaitlistPanel.tsx|const parts = new Intl.DateTimeFormat('en-CA', {
-app/(main)/booking/AvailabilityDrawer/components/WaitlistPanel.tsx|const weekday = new Intl.DateTimeFormat('en-US', {
-app/_components/ProSessionFooter/ProSessionFooter.tsx|: date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-app/admin/license-review/page.tsx|<span>expires {pro.licenseExpiry.toLocaleDateString()}</span>
-app/admin/logs/page.tsx|return new Intl.DateTimeFormat('en-US', {
-app/admin/notifications/page.tsx|{new Date(n.createdAt).toLocaleString()}
-app/admin/professionals/[id]/page.tsx|return new Intl.DateTimeFormat('en-US', {
-app/admin/professionals/page.tsx|{p.licenseExpiry ? <span> · Exp {new Date(p.licenseExpiry).toLocaleDateString()}</span> : null}
-app/admin/support/[id]/page.tsx|{ticket.createdByRole ?? 'UNKNOWN'} • {new Date(ticket.createdAt).toLocaleString()}
-app/admin/support/page.tsx|{t.createdByRole ?? 'UNKNOWN'} • {new Date(t.createdAt).toLocaleString()}
-app/api/internal/jobs/last-minute/process/route.ts|const when = new Intl.DateTimeFormat(undefined, {
-app/booking/[id]/page.tsx|return new Intl.DateTimeFormat(undefined, {
 app/client/(gated)/ClientMeDashboard.tsx|return new Date(then).toLocaleDateString(undefined, {
-app/client/(gated)/ClientMeDashboard.tsx|return new Intl.DateTimeFormat(undefined, {
 app/client/(gated)/_components/ClientLastMinuteInvites.tsx|return new Intl.DateTimeFormat('en-US', {
 app/client/(gated)/_components/homeVisuals.ts|const options: Intl.DateTimeFormatOptions = {
-app/client/(gated)/_components/homeVisuals.ts|return new Intl.DateTimeFormat('en-US', options).format(date)
-app/client/(gated)/_components/homeVisuals.ts|return new Intl.DateTimeFormat('en-US', {
-app/client/(gated)/activity/ClientActivityFrame.tsx|return new Date(then).toLocaleDateString(undefined, {
-app/client/(gated)/bookings/[id]/AftercareNextAppointmentCard.tsx|return new Intl.DateTimeFormat(undefined, {
-app/client/(gated)/bookings/[id]/AftercareRebookButton.tsx|return new Intl.DateTimeFormat('en-CA', {
-app/client/(gated)/bookings/[id]/_view/buildBookingViewModel.ts|return new Intl.DateTimeFormat(undefined, {
-app/client/(gated)/bookings/[id]/page.tsx|const formatter = new Intl.DateTimeFormat(undefined, {
-app/client/(gated)/bookings/[id]/page.tsx|return new Intl.DateTimeFormat(undefined, {
-app/client/(gated)/components/ClientViralRequestsPanel.tsx|return date.toLocaleDateString()
-app/client/(gated)/components/_helpers.tsx|return new Intl.DateTimeFormat(undefined, {
-app/client/(gated)/looks/share/[bookingId]/_data/loadShareLookPage.ts|return new Intl.DateTimeFormat('en-US', {
-app/client/(gated)/me/page.tsx|const month = date.toLocaleDateString('en-US', { month: 'short' })
-app/client/(gated)/offers/OffersListClient.tsx|return new Date(iso).toLocaleString()
-app/client/(gated)/offers/OffersListClient.tsx|return new Intl.DateTimeFormat(undefined, {
-app/client/(gated)/openings/OpeningsFeedClient.tsx|return new Intl.DateTimeFormat('en-US', {
-app/client/(gated)/referrals/ReferralListClient.tsx|return new Date(iso).toLocaleDateString(undefined, {
-app/client/_public/RebookCard.tsx|return new Intl.DateTimeFormat('en-CA', {
-app/client/_public/RebookCard.tsx|return new Intl.DateTimeFormat(undefined, {
-app/client/consultation/[token]/page.tsx|return new Intl.DateTimeFormat(undefined, {
-app/messages/thread/[id]/ThreadClient.tsx|return new Intl.DateTimeFormat(undefined, {
-app/messages/thread/[id]/page.tsx|return new Intl.DateTimeFormat(undefined, {
-app/pro/bookings/[id]/aftercare/AftercareForm.tsx|const get = (type: Intl.DateTimeFormatPartTypes) =>
-app/pro/bookings/[id]/aftercare/AftercareForm.tsx|const parts = new Intl.DateTimeFormat('en-US', {
-app/pro/bookings/[id]/aftercare/AvailabilityCalendarPopup.tsx|return new Intl.DateTimeFormat('en-US', {
-app/pro/bookings/[id]/aftercare/ClientProfilePanel.tsx|return new Intl.DateTimeFormat('en-US', {
-app/pro/bookings/[id]/aftercare/RebookSlotPicker.tsx|return new Intl.DateTimeFormat(undefined, {
-app/pro/calendar/_components/CalendarDesktopShell.tsx|const formatter = new Intl.DateTimeFormat(undefined, {
-app/pro/calendar/_components/CalendarDesktopShell.tsx|const timeFormatter = new Intl.DateTimeFormat(undefined, {
-app/pro/calendar/_components/ManagementModal.tsx|function buildTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-app/pro/calendar/_components/ManagementModal.tsx|return new Intl.DateTimeFormat(undefined, {
-app/pro/calendar/_components/_grid/DayColumn.tsx|function eventTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-app/pro/calendar/_components/_grid/DayColumn.tsx|return new Intl.DateTimeFormat('en-US', {
-app/pro/calendar/_components/_grid/DayColumn.tsx|timeFormatter: Intl.DateTimeFormat
-app/pro/calendar/_components/_grid/DayHeaderRow.tsx|day: new Intl.DateTimeFormat(undefined, {
-app/pro/calendar/_components/_grid/DayHeaderRow.tsx|dayFormatter: Intl.DateTimeFormat
-app/pro/calendar/_components/_grid/DayHeaderRow.tsx|weekday: new Intl.DateTimeFormat(undefined, {
-app/pro/calendar/_components/_grid/DayHeaderRow.tsx|weekdayFormatter: Intl.DateTimeFormat
-app/pro/calendar/_utils/date.ts|): Intl.DateTimeFormat {
-app/pro/calendar/_utils/date.ts|const endLabel = weekEnd.toLocaleDateString(undefined, {
-app/pro/calendar/_utils/date.ts|const startLabel = weekStart.toLocaleDateString(undefined, {
 app/pro/calendar/_utils/date.ts|options: Intl.DateTimeFormatOptions,
-app/pro/calendar/_utils/date.ts|return new Intl.DateTimeFormat(undefined, {
-app/pro/calendar/_utils/date.ts|return safeDate(date).toLocaleDateString(undefined, {
-app/pro/calendar/_utils/monthGrid.ts|const dayNumberFormatter = new Intl.DateTimeFormat('en-US', {
-app/pro/calendar/_utils/monthGrid.ts|const monthYearFormatter = new Intl.DateTimeFormat('en-US', {
 app/pro/calendar/_viewModel/proCalendarDisplay.ts|const format = (options: Intl.DateTimeFormatOptions): string =>
-app/pro/calendar/_viewModel/proCalendarDisplay.ts|new Intl.DateTimeFormat(undefined, { timeZone, ...options })
-app/pro/calendar/_viewModel/proCalendarDisplay.ts|return new Intl.DateTimeFormat(undefined, {
-app/pro/last-minute/OpeningsClient.tsx|const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-app/pro/last-minute/OpeningsClient.tsx|return new Intl.DateTimeFormat(undefined, {
-app/pro/last-minute/settingsClient.tsx|const left = new Intl.DateTimeFormat(undefined, {
-app/pro/last-minute/settingsClient.tsx|const right = new Intl.DateTimeFormat(undefined, {
-app/pro/membership/MembershipClient.tsx|: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-app/pro/migrate/_utils/raiseRamp.ts|return d.toLocaleDateString(undefined, {
-app/pro/migrate/calendar/MigrateCalendarClient.tsx|return date.toLocaleString(undefined, {
-app/pro/profile/ReviewsPanel.tsx|const date = new Date(review.createdAt).toLocaleDateString()
-app/pro/reviews/page.tsx|const date = new Date(rev.createdAt).toLocaleDateString()
-app/pro/verification/page.tsx|return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit' }).format(d)
-app/pro/waitlist/WaitlistOutreachClient.tsx|return new Intl.DateTimeFormat(undefined, {
-lib/analytics/proMonthlyAnalytics.ts|const parts = new Intl.DateTimeFormat('en-US', {
-lib/analytics/proMonthlyAnalytics.ts|return new Intl.DateTimeFormat('en-US', {
 lib/booking/slotReadiness.ts|const LOCAL_DATE_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
 lib/booking/slotReadiness.ts|const LOCAL_DATE_TIME_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>()
 lib/booking/slotReadiness.ts|const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -90,12 +18,7 @@ lib/booking/slotReadiness.ts|function getLocalDateFormatter(timeZone: string): I
 lib/booking/slotReadiness.ts|function getLocalDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
 lib/booking/slotReadiness.ts|parts: Intl.DateTimeFormatPart[],
 lib/booking/slotReadiness.ts|type: Intl.DateTimeFormatPartTypes,
-lib/booking/writeBoundary.ts|return new Intl.DateTimeFormat('en-US', {
-lib/discovery/nearby.ts|const parts = new Intl.DateTimeFormat('en-US', {
-lib/notifications/appointmentReminders.ts|return new Intl.DateTimeFormat(undefined, {
-lib/notifications/channelPolicy.ts|const parts = new Intl.DateTimeFormat('en-US', {
 lib/notifications/delivery/runtimeChannelPolicy.ts|const formatter = new Intl.DateTimeFormat('en-US', {
 lib/notifications/delivery/runtimeChannelPolicy.ts|const getPart = (type: Intl.DateTimeFormatPartTypes): number | null => {
 lib/notifications/delivery/runtimeChannelPolicy.ts|const zonedDateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>()
 lib/notifications/delivery/runtimeChannelPolicy.ts|function getZonedDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
-lib/scheduling/workingHours.ts|const short = new Intl.DateTimeFormat('en-US', {

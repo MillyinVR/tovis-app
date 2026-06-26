@@ -1,6 +1,7 @@
 // app/client/components/_helpers.tsx
 import React from 'react'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 import type { ClientBookingDTO } from '@/lib/dto/clientBooking'
 
 /**
@@ -63,14 +64,13 @@ export function prettyWhen(v: unknown, timeZone?: string | null): string {
 
   const tz = sanitizeTimeZone(timeZone, 'UTC')
 
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
+  return formatInTimeZone(d, tz, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(d)
+  })
 }
 
 export function bookingLocationLabel(b: BookingLike | null | undefined): string {

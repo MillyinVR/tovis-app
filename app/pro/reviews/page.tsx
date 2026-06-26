@@ -9,6 +9,7 @@ import { renderMediaUrls } from '@/lib/media/renderUrls'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { resolveClientProfileHref } from '@/lib/profiles/profileHrefs'
+import { formatInTimeZone } from '@/lib/time'
 
 function pickNonEmptyString(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
@@ -72,7 +73,11 @@ export default async function ProReviewsPage() {
             clientLinkViewer,
           )
         : null
-      const date = new Date(rev.createdAt).toLocaleDateString()
+      const date = formatInTimeZone(rev.createdAt, 'UTC', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
       const reviewAnchor = `review-${rev.id}`
 
       const mediaTiles = (

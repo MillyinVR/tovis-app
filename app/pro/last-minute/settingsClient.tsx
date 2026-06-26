@@ -12,6 +12,7 @@ import {
 } from '@/lib/timeZone'
 import {
   datetimeLocalToUtcIsoStrict,
+  formatRangeInTimeZone,
   WALL_TIME_ERROR_MESSAGE,
   type WallTimeToUtcResult,
 } from '@/lib/time'
@@ -123,25 +124,7 @@ function datetimeLocalToIso(value: string, timeZone: string): WallTimeToUtcResul
 
 function fmtRangeInTimeZone(startIsoUtc: string, endIsoUtc: string, timeZone: string) {
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
-  const s = new Date(startIsoUtc)
-  const e = new Date(endIsoUtc)
-  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 'Invalid range'
-
-  const left = new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(s)
-
-  const right = new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(e)
-
-  return `${left} → ${right}`
+  return formatRangeInTimeZone(startIsoUtc, endIsoUtc, tz)
 }
 
 function fmtMinutesAsTime(minutes: number) {

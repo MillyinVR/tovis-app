@@ -4,6 +4,8 @@
 import { useMemo } from 'react'
 import type { CSSProperties } from 'react'
 
+import { formatInTimeZone } from '@/lib/time'
+
 import { ymdInTimeZone } from '../../_utils/date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -42,15 +44,14 @@ function visibleDayKey(date: Date, timeZone: string): string {
 
 function buildDayHeaderParts(args: {
   date: Date
-  weekdayFormatter: Intl.DateTimeFormat
-  dayFormatter: Intl.DateTimeFormat
+  timeZone: string
 }): DayHeaderParts {
-  const { date, weekdayFormatter, dayFormatter } = args
+  const { date, timeZone } = args
   const anchoredDate = anchoredVisibleDay(date)
 
   return {
-    weekday: weekdayFormatter.format(anchoredDate),
-    dayNumber: dayFormatter.format(anchoredDate),
+    weekday: formatInTimeZone(anchoredDate, timeZone, { weekday: 'short' }),
+    dayNumber: formatInTimeZone(anchoredDate, timeZone, { day: 'numeric' }),
   }
 }
 
@@ -65,20 +66,6 @@ function rowStyle(gridCols: string): CSSProperties {
 export function DayHeaderRow(props: DayHeaderRowProps) {
   const { visibleDays, timeZone, todayYmd, gridCols } = props
 
-  const formatters = useMemo(
-    () => ({
-      weekday: new Intl.DateTimeFormat(undefined, {
-        timeZone,
-        weekday: 'short',
-      }),
-      day: new Intl.DateTimeFormat(undefined, {
-        timeZone,
-        day: 'numeric',
-      }),
-    }),
-    [timeZone],
-  )
-
   const dayHeaders = useMemo<DayHeader[]>(
     () =>
       visibleDays.map((date) => {
@@ -89,12 +76,11 @@ export function DayHeaderRow(props: DayHeaderRowProps) {
           isToday: dayYmd === todayYmd,
           parts: buildDayHeaderParts({
             date,
-            weekdayFormatter: formatters.weekday,
-            dayFormatter: formatters.day,
+            timeZone,
           }),
         }
       }),
-    [formatters, timeZone, todayYmd, visibleDays],
+    [timeZone, todayYmd, visibleDays],
   )
 
   return (

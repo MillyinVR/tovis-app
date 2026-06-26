@@ -8,6 +8,7 @@ import { useState } from 'react'
 import AftercareRebookButton from './AftercareRebookButton'
 import { COPY } from '@/lib/copy'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 import { safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
@@ -34,14 +35,13 @@ type Action = 'CONFIRM' | 'DECLINE'
 function formatWhen(iso: string, timeZone: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
+  return formatInTimeZone(date, timeZone, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function errorFrom(res: Response, data: unknown): string {

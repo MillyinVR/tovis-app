@@ -3,7 +3,7 @@ import AdminGuard from '../../_components/AdminGuard'
 import { prisma } from '@/lib/prisma'
 import { AdminPermissionRole, ProfessionalLocationType } from '@prisma/client'
 import AdminProActions from './AdminProActions'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 
 export const dynamic = 'force-dynamic'
@@ -13,26 +13,28 @@ type PageProps = {
 }
 
 function fmtUtcDate(d: Date) {
-  const tz = sanitizeTimeZone('UTC', 'UTC')
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  }).format(d)
+  return formatInTimeZone(
+    d,
+    'UTC',
+    { year: 'numeric', month: 'short', day: '2-digit' },
+    'en-US',
+  )
 }
 
 function fmtUtcDateTime(d: Date) {
-  const tz = sanitizeTimeZone('UTC', 'UTC')
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(d)
+  return formatInTimeZone(
+    d,
+    'UTC',
+    {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+    },
+    'en-US',
+  )
 }
 
 function formatLocationLabel(

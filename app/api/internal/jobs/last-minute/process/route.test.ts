@@ -63,9 +63,14 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-vi.mock('@/lib/timeZone', () => ({
-  isValidIanaTimeZone: mocks.isValidIanaTimeZone,
-}))
+vi.mock('@/lib/timeZone', async () => {
+  // Keep the real timezone helpers (sanitizeTimeZone/getZonedParts/etc.) so the
+  // route's formatInTimeZone(...) call works; only isValidIanaTimeZone is mocked
+  // (the route uses it as its skip gate).
+  const actual =
+    await vi.importActual<typeof import('@/lib/timeZone')>('@/lib/timeZone')
+  return { ...actual, isValidIanaTimeZone: mocks.isValidIanaTimeZone }
+})
 
 vi.mock('@/lib/notifications/clientNotifications', () => ({
   upsertClientNotification: mocks.upsertClientNotification,

@@ -8,6 +8,7 @@ import type { DrawerContext } from '../types'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
 import { isRecord, asTrimmedString, getRecordProp } from '@/lib/guards'
+import { getZonedParts, weekdayInTimeZone } from '@/lib/time'
 
 type WaitlistPreferenceType = 'ANY_TIME' | 'TIME_OF_DAY' | 'SPECIFIC_DATE'
 type WaitlistTimeOfDay = 'MORNING' | 'AFTERNOON' | 'EVENING'
@@ -160,30 +161,15 @@ function parseWaitlistOk(
 function nowPartsInTz(timeZone: string) {
   const d = new Date()
 
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(d)
-
-  const year = parts.find((p) => p.type === 'year')?.value
-  const month = parts.find((p) => p.type === 'month')?.value
-  const day = parts.find((p) => p.type === 'day')?.value
-
-  const weekday = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    weekday: 'short',
-  })
-    .format(d)
-    .toLowerCase()
+  const { year, month, day } = getZonedParts(d, timeZone)
+  const weekday = weekdayInTimeZone(d, timeZone)
 
   if (!year || !month || !day) return null
 
   return {
-    year: Number(year),
-    month: Number(month),
-    day: Number(day),
+    year,
+    month,
+    day,
     weekday,
   }
 }
@@ -213,16 +199,6 @@ function addDaysYmd(
   }
 }
 
-function weekdayIndex(shortLower: string): number {
-  if (shortLower.startsWith('sun')) return 0
-  if (shortLower.startsWith('mon')) return 1
-  if (shortLower.startsWith('tue')) return 2
-  if (shortLower.startsWith('wed')) return 3
-  if (shortLower.startsWith('thu')) return 4
-  if (shortLower.startsWith('fri')) return 5
-  return 6
-}
-
 function computeQuickPick(
   kind: QuickPickKind,
   appointmentTz: string,
@@ -248,7 +224,7 @@ function computeQuickPick(
     }
   }
 
-  const todayIdx = weekdayIndex(now.weekday)
+  const todayIdx = now.weekday
   const saturdayIdx = 6
   const delta = ((saturdayIdx - todayIdx) + 7) % 7 || 7
   const date = addDaysYmd(now, delta)

@@ -3,6 +3,7 @@ import { COPY } from '@/lib/copy'
 import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 
 import { loadClientBookingPage } from '../_data/loadClientBookingPage'
 
@@ -42,15 +43,14 @@ function toDate(value: unknown): Date | null {
 
 function formatWhen(date: Date, timeZone: string): string {
   const safeTimeZone = sanitizeTimeZone(timeZone, 'UTC')
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: safeTimeZone,
+  return formatInTimeZone(date, safeTimeZone, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function sumPricedItems(items: ClientBookingItem[]): {

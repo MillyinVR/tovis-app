@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { formatInTimeZone } from '@/lib/time'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import AdminGuard from '../_components/AdminGuard'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
@@ -186,7 +187,16 @@ export default async function AdminProfessionalsPage({
 
                         <div className="text-xs text-textSecondary">
                           License: {p.licenseState || '??'} {p.licenseNumber || '—'}
-                          {p.licenseExpiry ? <span> · Exp {new Date(p.licenseExpiry).toLocaleDateString()}</span> : null}
+                          {p.licenseExpiry ? (
+                            <span>
+                              {' '}· Exp{' '}
+                              {formatInTimeZone(p.licenseExpiry, 'UTC', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                              }, 'en-US')}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
 

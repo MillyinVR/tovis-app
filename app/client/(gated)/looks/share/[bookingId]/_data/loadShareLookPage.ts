@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { formatInTimeZone } from '@/lib/time'
 
 export type ShareLookPrefillPhoto = {
   // The visit's existing pro-shot session photo for this phase (if any), shown as
@@ -31,18 +32,17 @@ export type ShareLookPageData = {
 }
 
 function formatVisitDate(value: Date, timeZone: string | null): string {
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: timeZone || undefined,
+  // Visit (appointment) date: format in the booking's location timezone. A
+  // null/invalid tz sanitizes to UTC — matching the prior server-zone fallback.
+  return formatInTimeZone(
+    value,
+    timeZone ?? 'UTC',
+    {
       month: 'short',
       day: 'numeric',
-    }).format(value)
-  } catch {
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-    }).format(value)
-  }
+    },
+    'en-US',
+  )
 }
 
 /**

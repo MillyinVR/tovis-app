@@ -18,6 +18,9 @@ import {
 } from '@/lib/timeZone'
 import {
   datetimeLocalToUtcIsoStrict,
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getViewerTimeZone,
   WALL_TIME_ERROR_MESSAGE,
   type WallTimeToUtcResult,
 } from '@/lib/time'
@@ -273,14 +276,10 @@ const LastMinuteOpeningsContext =
   createContext<LastMinuteOpeningsContextValue | null>(null)
 
 function getBrowserTimeZone(): string {
-  try {
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const timeZone = getViewerTimeZone() ?? DEFAULT_TIME_ZONE
 
-    if (timeZone && isValidIanaTimeZone(timeZone)) {
-      return timeZone
-    }
-  } catch {
-    // Browser timezone detection is best-effort.
+  if (timeZone && isValidIanaTimeZone(timeZone)) {
+    return timeZone
   }
 
   return 'UTC'
@@ -328,14 +327,13 @@ function prettyWhenInTimeZone(isoUtc: string, timeZone: string): string {
 
   const safeTimeZone = sanitizeTimeZone(timeZone, 'UTC')
 
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: safeTimeZone,
+  return formatInTimeZone(date, safeTimeZone, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function buildInitialStartAtLocal(timeZone: string): string {

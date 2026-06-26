@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { getZonedParts } from '@/lib/time'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import {
@@ -230,6 +231,21 @@ function labelClass() {
   return 'mb-1 block text-xs font-black text-textSecondary'
 }
 
+const SHORT_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const
+
 function toDisplayDateTime(iso: string | null | undefined, timeZone: string) {
   if (!iso) return null
 
@@ -237,32 +253,17 @@ function toDisplayDateTime(iso: string | null | undefined, timeZone: string) {
   if (Number.isNaN(d.getTime())) return null
 
   try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: sanitizeTimeZone(timeZone, 'UTC') || 'UTC',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-      formatMatcher: 'basic',
-    }).formatToParts(d)
+    const tz = sanitizeTimeZone(timeZone, 'UTC') || 'UTC'
+    const p = getZonedParts(d, tz)
 
-    const get = (type: Intl.DateTimeFormatPartTypes) =>
-      parts.find((part) => part.type === type)?.value ?? ''
+    const month = SHORT_MONTHS[p.month - 1]
+    if (!month) return d.toISOString()
 
-    const month = get('month')
-    const day = get('day')
-    const year = get('year')
-    const hour = get('hour')
-    const minute = get('minute')
-    const dayPeriod = get('dayPeriod')
+    const dayPeriod = p.hour < 12 ? 'AM' : 'PM'
+    const hour12 = p.hour % 12 === 0 ? 12 : p.hour % 12
+    const minute = String(p.minute).padStart(2, '0')
 
-    if (!month || !day || !year || !hour || !minute || !dayPeriod) {
-      return d.toISOString()
-    }
-
-    return `${month} ${day}, ${year} at ${hour}:${minute} ${dayPeriod}`
+    return `${month} ${p.day}, ${p.year} at ${hour12}:${minute} ${dayPeriod}`
   } catch {
     return d.toISOString()
   }

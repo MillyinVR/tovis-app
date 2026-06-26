@@ -29,6 +29,8 @@ import {
   startOfDayUtcInTimeZone,
 } from '@/lib/timeZone'
 
+import { formatInTimeZone } from '@/lib/time'
+
 export { DEFAULT_CALENDAR_VIEW } from '../_constants'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -160,19 +162,16 @@ export function visibleDaysForCalendarView(
 }
 
 export function todayWeekdayLabel(timeZone: string, now = new Date()): string {
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
+  return formatInTimeZone(now, timeZone, {
     weekday: 'long',
-  }).format(now)
+  })
 }
 
 export function mobileCalendarSubtitleFor(args: MobileSubtitleArgs): string {
   const { date, timeZone, activeLocationLabel } = args
 
   const format = (options: Intl.DateTimeFormatOptions): string =>
-    new Intl.DateTimeFormat(undefined, { timeZone, ...options })
-      .format(date)
-      .toUpperCase()
+    formatInTimeZone(date, timeZone, options).toUpperCase()
 
   const parts = [
     format({ weekday: 'short' }),

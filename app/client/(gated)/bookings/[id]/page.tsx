@@ -10,6 +10,7 @@ import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
 import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
+import { formatInTimeZone } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
@@ -126,15 +127,14 @@ function toDate(value: unknown): Date | null {
 
 function formatWhenInTimeZone(date: Date, timeZone: string): string {
   const tz = sanitizeTimeZone(timeZone, 'UTC')
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
+  return formatInTimeZone(date, tz, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date)
+  })
 }
 
 function formatDateRangeInTimeZone(
@@ -143,14 +143,13 @@ function formatDateRangeInTimeZone(
   timeZone: string,
 ): string {
   const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
+  const opts = {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-  })
+  } as const
 
-  return `${formatter.format(start)} – ${formatter.format(end)}`
+  return `${formatInTimeZone(start, tz, opts)} – ${formatInTimeZone(end, tz, opts)}`
 }
 
 function friendlyLocationType(value: unknown): string | null {

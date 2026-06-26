@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { formatInTimeZone } from '@/lib/time'
 import { addMonthsToYmd, compareYmd, todayYmdInTimeZone } from './aftercareDates'
 import { zClass } from '@/lib/zIndex'
 
@@ -57,11 +58,15 @@ function monthLabel(monthYmd: string): string {
   const p = ymdParts(monthYmd)
   if (!p) return ''
   try {
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'long',
-      year: 'numeric',
-      timeZone: 'UTC',
-    }).format(new Date(Date.UTC(p.y, p.m - 1, 1)))
+    return formatInTimeZone(
+      new Date(Date.UTC(p.y, p.m - 1, 1)),
+      'UTC',
+      {
+        month: 'long',
+        year: 'numeric',
+      },
+      'en-US',
+    )
   } catch {
     return `${p.y}-${pad2(p.m)}`
   }

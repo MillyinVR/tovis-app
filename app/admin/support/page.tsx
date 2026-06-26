@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { formatInTimeZone } from '@/lib/time'
 import { Role, SupportTicketStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -99,7 +100,14 @@ export default async function AdminSupportPage(props: { searchParams?: SearchPar
                 <div className="min-w-0">
                   <div className="text-[13px] font-black">{t.subject}</div>
                   <div className="mt-1 text-[11px] text-textSecondary">
-                    {t.createdByRole ?? 'UNKNOWN'} • {new Date(t.createdAt).toLocaleString()}
+                    {t.createdByRole ?? 'UNKNOWN'} •{' '}
+                    {formatInTimeZone(t.createdAt, 'UTC', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
                     {t.createdByUserId ? ` • user:${t.createdByUserId}` : ''}
                   </div>
                 </div>

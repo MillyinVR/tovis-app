@@ -5,6 +5,11 @@ import Link from 'next/link'
 import type { SubscriptionStatus } from '@prisma/client'
 import type { Entitlement, PlanKey } from '@/lib/pro/entitlements'
 import { formatRoundedDollars } from '@/lib/money'
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getViewerTimeZone,
+} from '@/lib/time'
 
 type PlanPrice = {
   interval: 'month' | 'year'
@@ -50,7 +55,11 @@ function formatDate(iso: string | null): string | null {
   const d = new Date(iso)
   return Number.isNaN(d.getTime())
     ? null
-    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
 }
 
 export default function MembershipClient(props: Props) {

@@ -6,6 +6,11 @@ import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getViewerTimeZone,
+} from '@/lib/time'
 
 export type OutreachEntry = {
   rank: number
@@ -51,10 +56,10 @@ function avatarGradient(seed: string): string {
 function formatJoinedAt(iso: string): string | null {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return null
-  return new Intl.DateTimeFormat(undefined, {
+  return formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
     month: 'short',
     day: 'numeric',
-  }).format(date)
+  })
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

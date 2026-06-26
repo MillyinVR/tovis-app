@@ -7,9 +7,11 @@ import { moneyToCentsInt, moneyToFixed2String, moneyToString } from '@/lib/money
 import { prisma } from '@/lib/prisma'
 import {
   DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  getZonedParts,
   sanitizeTimeZone,
   startOfDayUtcInTimeZone,
-} from '@/lib/timeZone'
+} from '@/lib/time'
 
 export type ProOverviewSearchParams = {
   [key: string]: string | string[] | undefined
@@ -188,30 +190,24 @@ function monthLabel(parts: MonthParts, timeZone: string): string {
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const date = new Date(Date.UTC(parts.y, parts.m - 1, 1, 12, 0, 0))
 
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    month: 'short',
-    year: 'numeric',
-  }).format(date)
+  return formatInTimeZone(
+    date,
+    tz,
+    {
+      month: 'short',
+      year: 'numeric',
+    },
+    'en-US',
+  )
 }
 
 function currentYearMonthInTimeZone(now: Date, timeZone: string): MonthParts {
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
 
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-  }).formatToParts(now)
+  const parts = getZonedParts(now, tz)
 
-  const values: Record<string, string> = {}
-
-  for (const part of parts) {
-    values[part.type] = part.value
-  }
-
-  const y = Number(values.year)
-  const m = Number(values.month)
+  const y = parts.year
+  const m = parts.month
 
   if (
     Number.isInteger(y) &&

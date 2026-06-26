@@ -4,6 +4,7 @@ import { formatRoundedDollars } from '@/lib/money'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildWorkspaceOptions, type WorkspaceOption } from '@/lib/auth/workspaces'
+import { formatInTimeZone } from '@/lib/time'
 
 import ClientMeDashboard from '../ClientMeDashboard'
 import { loadClientMePage } from './_data/loadClientMePage'
@@ -16,8 +17,11 @@ function formatMemberSince(value: unknown): string | null {
   const date = value instanceof Date ? value : new Date(String(value))
   if (Number.isNaN(date.getTime())) return null
 
-  const month = date.toLocaleDateString('en-US', { month: 'short' })
-  const year = date.getFullYear().toString().slice(-2)
+  // Member-since label — not an appointment, so there's no booking tz. This is
+  // a server component, so the prior no-tz Intl rendered in the server's zone
+  // (UTC on Vercel); preserve that explicitly.
+  const month = formatInTimeZone(date, 'UTC', { month: 'short' }, 'en-US')
+  const year = formatInTimeZone(date, 'UTC', { year: '2-digit' }, 'en-US')
 
   return `${month} '${year}`
 }
