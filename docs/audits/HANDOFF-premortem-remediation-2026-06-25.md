@@ -74,23 +74,36 @@ steps remain (documented in the #368 commit):
    idempotency, so a crash AFTER a send but BEFORE recording completion can still
    re-send on retry. Needs `providerMessageId` stamped pre-send + a dedupe check.
 
-### Phase 2 — correctness (migration-free; good next batch)
-- **2A** UTC/wrong-tz appointment renders: `app/pro/reminders/page.tsx:42`
-  (server `toLocaleString` no `timeZone` → UTC on Vercel) + reschedule confirm
-  `app/pro/calendar/_components/ConfirmChangeModal.tsx:46` (viewer tz, not
-  `locationTimeZone`). Route both through `@/lib/time`
-  `formatInTimeZone(resolveAppointmentDisplayTimeZone(...))`; shrink the
-  `no-raw-datetime-format` baseline.
-- **2B** Unify the 3 busy-window definitions (SQL `tovis_booking_overlap_range`
-  vs JS `holdToBusyInterval` vs runtime `calculateWindowEnd`) on NULL/clamp
-  semantics; extend `occupancyInvariant.test.ts` to assert JS == SQL.
-- **2C** `lib/booking/scheduleTransaction.ts:~55` throw `BOOKING_NOT_FOUND` (not
-  `FORBIDDEN`) for non-owned → kills the reschedule enumeration oracle; add
-  `proDiscoveryVisibilityFilter` to `searchServices()`.
-- **2D** Quiet-hours null-tz fails SAFE: `channelPolicy.ts` `getRecipientLocalMinutes`
-  — fall back to booking-location tz instead of disabling quiet hours (TCPA);
-  give `APPOINTMENT_REMINDER` lead time so an early-morning reminder isn't deferred
-  past the appointment.
+### Phase 2 — correctness — DONE (2026-06-26, PRs #370–#373, all OPEN)
+- **2A** (#370 `fix/premortem-2a-utc-renders`) — pro reminders page + calendar
+  move-confirm now render via `@/lib/time` in the appointment/schedule tz;
+  shrank the `no-raw-datetime-format` baseline by 2.
+- **2C** (#371 `fix/premortem-2c-reschedule-404`) — `lockClientOwnedBookingSchedule`
+  now throws a structured `bookingError('BOOKING_NOT_FOUND')` for BOTH missing
+  and non-owned (was a plain `Error('FORBIDDEN')` that fell through to
+  INTERNAL_ERROR); `searchServices()` takes a `TenantContext` + scopes to the
+  tenant's own pros' active offerings. Integration test uses a real `$transaction`
+  tx (no type-escape).
+- **2D part 1** (#372 `fix/premortem-2d-quiet-hours`) — quiet hours fail SAFE for
+  missing/invalid recipient tz: fall back to `America/New_York` (conservative
+  business zone, NOT UTC — UTC-gating still fires 3am Pacific) to gate quiet
+  hours rather than SEND. **Follow-up (part 2):** give `APPOINTMENT_REMINDER`
+  lead time so a just-in-time reminder for an early appt isn't deferred past it —
+  needs `scheduledFor` threaded into the delivery-time policy
+  (`runtimeChannelPolicy` has no appointment time today). The current
+  ONE_WEEK/DAY_BEFORE kinds fire on prior days so the normal deferral stays
+  before the appt; the edge is a late-booking past-due reminder.
+- **2B** (#373 `fix/premortem-2b-busy-window`) — investigation showed the 3 (really
+  ~5) busy-window definitions only diverge in the SAFE direction (JS window ≥ SQL
+  floor) and the one unsafe case (>720/>180) is unreachable because writes clamp
+  first → NO active bug. Per product call (don't degrade the safe over-reservation),
+  shipped a **cross-test** instead of "match SQL": `sqlBusyWindowMinutes` helper
+  mirrors the SQL floor exactly, `calculateWindowEnd` now floors at 1 (no 0-length
+  windows), and `tests/integration/busy-window-sql-parity.test.ts` pins
+  builder ≥ SQL (== on storable domain) against real Postgres. **Integration
+  tests are NOT run by CI** (`vitest.config` excludes `tests/integration/**`, no
+  workflow runs `test:integration`) — they are manual/local validation, same as
+  the existing `bookingConcurrency`/`tenant-isolation` suites.
 
 ### Phase 3 — hardening (batchable)
 - **3A** webhook/proof: Postmark webhook secret → `timingSafeEqual`
