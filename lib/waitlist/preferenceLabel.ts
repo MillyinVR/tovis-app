@@ -9,6 +9,8 @@ import {
   WaitlistTimeOfDay,
 } from '@prisma/client'
 
+import { formatInTimeZone } from '@/lib/time'
+
 export type WaitlistPreferenceFields = {
   preferenceType: WaitlistPreferenceType
   specificDate: Date | null
@@ -22,10 +24,12 @@ function isPresentString(value: string | null | undefined): value is string {
 }
 
 function formatShortDate(date: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
+  // A SPECIFIC_DATE preference is a calendar date stored at UTC midnight; format
+  // it in UTC so it never drifts to the previous day in negative-offset zones.
+  return formatInTimeZone(date, 'UTC', {
     month: 'short',
     day: 'numeric',
-  }).format(date)
+  })
 }
 
 function formatMinuteOfDay(value: number | null): string | null {

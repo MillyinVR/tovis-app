@@ -12,7 +12,7 @@ import {
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { weekdayInTimeZone } from '@/lib/timeZone'
 import { pickPublicTierPlan as pickPublicTierPlanShared } from '@/lib/lastMinute/pickTierPlan'
 import {
   openingSelect,
@@ -113,29 +113,19 @@ type OpeningDto = {
   publicIncentive: PublicIncentiveDto | null
 }
 
-function weekdayDisableKeyInTimeZone(date: Date, timeZone: string): DisableKey {
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const weekday = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    weekday: 'short',
-  }).format(date)
+// Index 0=Sun … 6=Sat, matching weekdayInTimeZone's Sunday-start convention.
+const DISABLE_KEYS_BY_WEEKDAY: readonly DisableKey[] = [
+  'disableSun',
+  'disableMon',
+  'disableTue',
+  'disableWed',
+  'disableThu',
+  'disableFri',
+  'disableSat',
+]
 
-  switch (weekday) {
-    case 'Sun':
-      return 'disableSun'
-    case 'Mon':
-      return 'disableMon'
-    case 'Tue':
-      return 'disableTue'
-    case 'Wed':
-      return 'disableWed'
-    case 'Thu':
-      return 'disableThu'
-    case 'Fri':
-      return 'disableFri'
-    default:
-      return 'disableSat'
-  }
+function weekdayDisableKeyInTimeZone(date: Date, timeZone: string): DisableKey {
+  return DISABLE_KEYS_BY_WEEKDAY[weekdayInTimeZone(date, timeZone)] ?? 'disableSat'
 }
 
 function parseHours(args: { hoursParam: string | null; daysParam: string | null }) {

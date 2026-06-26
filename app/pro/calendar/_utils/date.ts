@@ -9,6 +9,7 @@ import {
   startOfDayUtcInTimeZone,
   timeZoneOffsetMinutes,
   utcFromDayAndMinutesInTimeZone,
+  weekdayInTimeZone,
   ymdInTimeZone,
   zonedTimeToUtc,
 } from '@/lib/timeZone'
@@ -54,16 +55,6 @@ const FALLBACK_YMD_PARTS: YmdParts = {
 
 const ROUND_UP_MINUTES = 15
 
-const WEEKDAY_INDEX_BY_SHORT_LABEL: Record<string, number> = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-}
-
 // ─── Basic helpers ────────────────────────────────────────────────────────────
 
 function isFiniteDate(date: Date): boolean {
@@ -98,16 +89,6 @@ function dateFormatter(
   })
 }
 
-function dateFormatterEnUs(
-  targetTimeZone: string | undefined,
-  options: Intl.DateTimeFormatOptions,
-): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat('en-US', {
-    ...options,
-    timeZone: targetTimeZone,
-  })
-}
-
 function addLocalDays(date: Date, days: number): Date {
   const next = safeDate(date)
 
@@ -120,11 +101,7 @@ function weekdayIndexInTimeZone(
   anchorUtc: Date,
   targetTimeZone: string,
 ): number {
-  const weekday = dateFormatterEnUs(targetTimeZone, {
-    weekday: 'short',
-  }).format(safeDate(anchorUtc))
-
-  return WEEKDAY_INDEX_BY_SHORT_LABEL[weekday] ?? 0
+  return weekdayInTimeZone(safeDate(anchorUtc), targetTimeZone)
 }
 
 function weekStartDiff(dayIndex: number): number {

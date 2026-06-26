@@ -26,6 +26,7 @@ function booking(overrides: Partial<IntelBooking>): IntelBooking {
     finishedAt: null,
     professionalId: 'pro1',
     amount: 100,
+    timeZone: 'UTC',
     ...overrides,
   }
 }
@@ -103,14 +104,29 @@ describe('computeRelationshipIntelligence — patterns', () => {
   it('reports the most common weekday and time band of completed visits', () => {
     const result = computeRelationshipIntelligence(
       input([
-        // 2026-06-06 and 2026-06-13 are Saturdays; morning hours.
-        booking({ scheduledFor: new Date(2026, 5, 6, 9, 0, 0) }),
-        booking({ scheduledFor: new Date(2026, 5, 13, 10, 0, 0) }),
-        booking({ scheduledFor: new Date(2026, 5, 10, 14, 0, 0) }),
+        // 2026-06-06 and 2026-06-13 are Saturdays; morning hours in UTC.
+        booking({ scheduledFor: new Date(Date.UTC(2026, 5, 6, 9, 0, 0)) }),
+        booking({ scheduledFor: new Date(Date.UTC(2026, 5, 13, 10, 0, 0)) }),
+        booking({ scheduledFor: new Date(Date.UTC(2026, 5, 10, 14, 0, 0)) }),
       ]),
     )
     expect(result.preferredDay).toBe('Saturday')
     expect(result.preferredTimeOfDay).toBe('Morning')
+  })
+
+  it('buckets weekday and time band in the visit timezone, not the server zone', () => {
+    // 2026-06-07 03:00 UTC is still Saturday 2026-06-06, 20:00 (evening) in
+    // America/Los_Angeles (UTC-7). Reading UTC parts would mislabel it as
+    // Sunday morning — this locks in the timezone-aware bucketing.
+    const scheduledFor = new Date(Date.UTC(2026, 5, 7, 3, 0, 0))
+    const result = computeRelationshipIntelligence(
+      input([
+        booking({ scheduledFor, timeZone: 'America/Los_Angeles' }),
+        booking({ scheduledFor, timeZone: 'America/Los_Angeles' }),
+      ]),
+    )
+    expect(result.preferredDay).toBe('Saturday')
+    expect(result.preferredTimeOfDay).toBe('Evening')
   })
 
   it('counts cancellations separately from value', () => {
