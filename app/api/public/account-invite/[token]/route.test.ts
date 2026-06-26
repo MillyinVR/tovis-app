@@ -12,13 +12,23 @@ const mocks = vi.hoisted(() => ({
   pickString: vi.fn(),
   prismaClientActionTokenFindUnique: vi.fn(),
   hashClientActionToken: vi.fn(),
+  clientActionTokenRateLimitPrefix: vi.fn(),
   issueClaimLinkForBooking: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  rateLimitIdentity: vi.fn(),
+  tokenRateLimitIdentity: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
   jsonOk: mocks.jsonOk,
   jsonFail: mocks.jsonFail,
   pickString: mocks.pickString,
+}))
+
+vi.mock('@/app/api/_utils/rateLimit', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
+  tokenRateLimitIdentity: mocks.tokenRateLimitIdentity,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -31,6 +41,7 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/consultation/clientActionTokens', () => ({
   hashClientActionToken: mocks.hashClientActionToken,
+  clientActionTokenRateLimitPrefix: mocks.clientActionTokenRateLimitPrefix,
 }))
 
 vi.mock('@/lib/clients/clientClaimLinks', () => ({
@@ -49,6 +60,11 @@ beforeEach(() => {
     typeof v === 'string' ? v : null,
   )
   mocks.hashClientActionToken.mockReturnValue('hash_1')
+  mocks.clientActionTokenRateLimitPrefix.mockReturnValue('prefix_1')
+  // Not rate-limited by default.
+  mocks.enforceRateLimit.mockResolvedValue(null)
+  mocks.rateLimitIdentity.mockResolvedValue({ kind: 'ip', id: '203.0.113.5' })
+  mocks.tokenRateLimitIdentity.mockReturnValue({ kind: 'token', id: 'prefix_1' })
 })
 
 describe('POST /api/public/account-invite/[token]', () => {
@@ -134,5 +150,40 @@ describe('POST /api/public/account-invite/[token]', () => {
     const res = await POST(new Request('http://localhost'), makeCtx())
 
     expect(res).toMatchObject({ ok: false, status: 409 })
+  })
+
+  it('returns the IP rate-limit response before any DB lookup or mint', async () => {
+    const limited = { ok: false, status: 429, error: 'Too many requests.' }
+    mocks.enforceRateLimit.mockResolvedValueOnce(limited)
+
+    const res = await POST(new Request('http://localhost'), makeCtx())
+
+    expect(res).toBe(limited)
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'account-invite:mint',
+      identity: { kind: 'ip', id: '203.0.113.5' },
+    })
+    expect(mocks.hashClientActionToken).not.toHaveBeenCalled()
+    expect(mocks.prismaClientActionTokenFindUnique).not.toHaveBeenCalled()
+    expect(mocks.issueClaimLinkForBooking).not.toHaveBeenCalled()
+  })
+
+  it('returns the token-prefix rate-limit response before any DB lookup or mint', async () => {
+    const limited = { ok: false, status: 429, error: 'Too many requests.' }
+    // IP bucket passes, token-prefix bucket blocks.
+    mocks.enforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(limited)
+
+    const res = await POST(new Request('http://localhost'), makeCtx())
+
+    expect(res).toBe(limited)
+    expect(mocks.clientActionTokenRateLimitPrefix).toHaveBeenCalledWith('token_1')
+    expect(mocks.enforceRateLimit).toHaveBeenLastCalledWith({
+      bucket: 'account-invite:mint:token',
+      identity: { kind: 'token', id: 'prefix_1' },
+    })
+    expect(mocks.hashClientActionToken).not.toHaveBeenCalled()
+    expect(mocks.prismaClientActionTokenFindUnique).not.toHaveBeenCalled()
   })
 })

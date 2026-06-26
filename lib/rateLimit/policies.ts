@@ -10,6 +10,8 @@ export type RateLimitBucket =
   | 'looks:comment'
   | 'consultation:decision'
   | 'consultation:decision:token'
+  | 'account-invite:mint'
+  | 'account-invite:mint:token'
   | 'client:rebook:token'
   | 'client:checkout:token'
   | 'pro:bookings:write'
@@ -96,6 +98,21 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 12,
     windowSeconds: 5 * 60,
     prefix: 'rl:consultation:decision:token',
+    mode: 'redis-only',
+  },
+  // Public account-invite (magic-link) claim-link mint. Keyed by IP and by
+  // token-prefix so a leaked partial token can't be brute-forced across many
+  // IPs. Mirrors the consultation:decision ceilings.
+  'account-invite:mint': {
+    limit: 8,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:account-invite:mint',
+    mode: 'redis-only',
+  },
+  'account-invite:mint:token': {
+    limit: 12,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:account-invite:mint:token',
     mode: 'redis-only',
   },
   'client:rebook:token': {

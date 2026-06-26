@@ -55,6 +55,16 @@ const REQUIRED_PRODUCTION_ENV: readonly RequiredEnvCheck[] = [
     isPresent: () => Boolean(readOptionalEnv('DATABASE_URL')),
     hint: 'set DATABASE_URL (pooled Postgres connection)',
   },
+  {
+    // Without it, getTrustedClientIpFromRequest returns null and every IP-keyed
+    // rate limiter silently collapses to one shared `ip:'unknown'` bucket —
+    // brute-force/enumeration guards (login, consultation/account-invite mint)
+    // stop discriminating between callers. Fail-closed at boot so the gap is
+    // never live in production.
+    name: 'Trusted client IP header',
+    isPresent: () => Boolean(readOptionalEnv('AUTH_TRUSTED_IP_HEADER')),
+    hint: 'set AUTH_TRUSTED_IP_HEADER to the platform-trusted edge header (e.g. x-vercel-forwarded-for)',
+  },
 ]
 
 /**

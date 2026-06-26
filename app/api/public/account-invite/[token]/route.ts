@@ -8,8 +8,16 @@
 
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
+import {
+  enforceRateLimit,
+  rateLimitIdentity,
+  tokenRateLimitIdentity,
+} from '@/app/api/_utils/rateLimit'
 import { issueClaimLinkForBooking } from '@/lib/clients/clientClaimLinks'
-import { hashClientActionToken } from '@/lib/consultation/clientActionTokens'
+import {
+  clientActionTokenRateLimitPrefix,
+  hashClientActionToken,
+} from '@/lib/consultation/clientActionTokens'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -26,6 +34,23 @@ export async function POST(
     if (!rawToken) {
       return jsonFail(404, 'Link not found.', { code: 'NOT_FOUND' })
     }
+
+    // Brute-force guard: rate-limit by IP and by token-prefix BEFORE any DB
+    // lookup or claim-link mint. The token-prefix bucket caps attempts against
+    // a leaked partial token across many IPs.
+    const ipLimited = await enforceRateLimit({
+      bucket: 'account-invite:mint',
+      identity: await rateLimitIdentity(),
+    })
+    if (ipLimited) return ipLimited
+
+    const tokenLimited = await enforceRateLimit({
+      bucket: 'account-invite:mint:token',
+      identity: tokenRateLimitIdentity(
+        clientActionTokenRateLimitPrefix(rawToken),
+      ),
+    })
+    if (tokenLimited) return tokenLimited
 
     const tokenHash = hashClientActionToken(rawToken)
 
