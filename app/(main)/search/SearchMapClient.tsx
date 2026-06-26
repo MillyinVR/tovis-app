@@ -1,12 +1,13 @@
 // app/(main)/search/SearchMapClient.tsx
 'use client'
 
-import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { Filter, Search } from 'lucide-react'
+import { ChevronDown, MapPin, Search, SlidersHorizontal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { directionsHrefFromLocation, mapsHrefFromLocation } from '@/lib/maps'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import { useMediaQuery } from '@/lib/ui/useMediaQuery'
+import { MEDIA } from '@/lib/ui/breakpoints'
 import type { Bounds, Pin } from './_components/MapView'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
@@ -16,38 +17,12 @@ import DiscoverGridView from './_components/DiscoverGridView'
 import DiscoverViewToggle from './_components/DiscoverViewToggle'
 import TrendingProRail from './_components/TrendingProRail'
 import LooksBookableGrid from './_components/LooksBookableGrid'
+import DiscoverProRows from './_components/DiscoverProRows'
+import DiscoverActiveProCard from './_components/DiscoverActiveProCard'
 import { fetchDiscoverCategories } from './_lib/discoverCategoryApi'
+import { preferredProLocation, type ApiLocationPreview, type ApiPro } from './_lib/discoverProTypes'
 import type { DiscoverViewMode } from './_lib/discoverViewTypes'
 import type { DiscoverCategoryOption } from '@/lib/discovery/categoryTypes'
-
-type ApiLocationPreview = {
-  id: string
-  formattedAddress: string | null
-  city: string | null
-  state: string | null
-  timeZone: string | null
-  placeId: string | null
-  lat: number | null
-  lng: number | null
-  isPrimary: boolean
-}
-
-type ApiPro = {
-  id: string
-  businessName: string | null
-  displayName: string
-  handle: string | null
-  professionType: string | null
-  avatarUrl: string | null
-  locationLabel: string | null
-  distanceMiles: number | null
-  ratingAvg: number | null
-  ratingCount: number
-  minPrice: number | null
-  supportsMobile: boolean
-  closestLocation: ApiLocationPreview | null
-  primaryLocation: ApiLocationPreview | null
-}
 
 type Coords = { lat: number; lng: number }
 
@@ -366,10 +341,6 @@ function sortPros(list: ApiPro[], mode: SortMode): ApiPro[] {
   return sorted
 }
 
-function preferredProLocation(pro: ApiPro): ApiLocationPreview | null {
-  return pro.closestLocation ?? pro.primaryLocation
-}
-
 export default function SearchMapClient() {
   const [q, setQ] = useState('')
   const [radiusMiles, setRadiusMiles] = useState(15)
@@ -378,6 +349,11 @@ export default function SearchMapClient() {
   const [categories, setCategories] = useState<DiscoverCategoryOption[]>([])
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<DiscoverViewMode>('MAP')
+
+  // On desktop (lg+) the toggle gives way to a permanent split — results list
+  // on the left, live map on the right — so the map must stay mounted there
+  // regardless of viewMode. SSR-safe; resolves to mobile-first then reconciles.
+  const isDesktop = useMediaQuery(MEDIA.desktop)
 
   const [me, setMe] = useState<Coords | null>(null)
   const [geoDenied, setGeoDenied] = useState(false)
@@ -966,12 +942,23 @@ export default function SearchMapClient() {
     return `${pros.length} pro${pros.length === 1 ? '' : 's'}`
   }, [loading, err, pros.length])
 
+  // Count of secondary filters diverging from their defaults (radius 15 mi,
+  // distance sort) — surfaced as a gold badge on the filter affordance.
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (radiusMiles !== 15) count += 1
+    if (sortMode !== 'DISTANCE') count += 1
+    return count
+  }, [radiusMiles, sortMode])
+
+  // The map is always live on desktop, so "Search this area" is relevant there
+  // even when the mobile toggle would be in GRID mode.
   const showSearchArea = useMemo(() => {
-    if (viewMode !== 'MAP') return false
+    if (viewMode !== 'MAP' && !isDesktop) return false
     if (!mapCenter || !origin) return false
 
     return haversineMiles(mapCenter, origin) >= 0.35
-  }, [viewMode, mapCenter, origin])
+  }, [viewMode, isDesktop, mapCenter, origin])
 
   const activeNavHref = useMemo(() => {
     if (!activePro) return null
@@ -1036,13 +1023,13 @@ export default function SearchMapClient() {
   )
 
   return (
-    <main className="mx-auto max-w-240 px-0 pb-0 pt-0">
+    <main className="mx-auto max-w-240 px-0 pb-0 pt-0 lg:max-w-310">
       <div
-        className="relative w-full overflow-hidden bg-bgPrimary"
+        className="relative w-full overflow-hidden bg-bgPrimary lg:grid lg:grid-cols-[minmax(360px,420px)_1fr]"
         style={{ height: `calc(100dvh - ${APP_BOTTOM_INSET})` }}
       >
-        {viewMode === 'MAP' ? (
-          <div className="absolute inset-0 z-0">
+        {viewMode === 'MAP' || isDesktop ? (
+          <div className="absolute inset-0 z-0 lg:static lg:z-0 lg:col-start-2 lg:row-start-1 lg:h-full">
             <MapView
               me={me}
               origin={origin}
@@ -1056,26 +1043,45 @@ export default function SearchMapClient() {
             />
           </div>
         ) : (
-          <div className="absolute inset-0 z-0 bg-bgPrimary" />
+          <div className="absolute inset-0 z-0 bg-bgPrimary lg:hidden" />
         )}
 
         <div
-          className={cn(
-            'pointer-events-none absolute left-0 right-0 top-0 z-10 h-[190px]',
-            'bg-gradient-to-b from-black/60 via-black/25 to-transparent',
-          )}
+          aria-hidden
+          className="pointer-events-none absolute left-0 right-0 top-0 z-10 h-47.5 bg-linear-to-b from-black/60 via-black/25 to-transparent lg:hidden"
         />
 
-        <div ref={headerRef} className="absolute left-0 right-0 top-0 z-20 px-3 pt-3">
+        {/* Left column: `contents` on mobile (the header floats over the map);
+            a bordered flex column on desktop holding the header + results list. */}
+        <div className="contents lg:col-start-1 lg:row-start-1 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden lg:border-r lg:border-white/10 lg:bg-bgPrimary">
+        <div ref={headerRef} className="absolute left-0 right-0 top-0 z-20 px-3 pt-3 lg:relative lg:z-20 lg:shrink-0 lg:px-4 lg:pt-4">
           <div
             ref={acRootRef}
             className={cn(
               'tovis-glass-strong rounded-card border border-white/12 bg-bgSecondary/80 p-3 backdrop-blur-xl',
-              'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
+              'shadow-[0_18px_60px_rgba(0,0,0,0.65)] lg:shadow-none',
             )}
           >
-            <div className="font-display text-[26px] font-semibold italic leading-none tracking-tight text-textPrimary">
-              Discover
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-display text-[26px] font-semibold italic leading-none tracking-tight text-textPrimary">
+                Discover
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  inputRef.current?.focus()
+                  inputRef.current?.select()
+                }}
+                className="flex shrink-0 items-center gap-1.5 text-textSecondary transition-colors hover:text-textPrimary"
+                aria-label="Change search location"
+              >
+                <MapPin size={14} aria-hidden className="text-accentPrimary" />
+                <span className="max-w-[42vw] truncate font-display text-[13px] font-semibold lg:max-w-40">
+                  {origin ? originLabel || 'Near you' : 'Set location'}
+                </span>
+                <ChevronDown size={12} aria-hidden className="text-textMuted" />
+              </button>
             </div>
 
             <div className="mt-3">
@@ -1085,9 +1091,9 @@ export default function SearchMapClient() {
                     'flex flex-1 items-center gap-2 rounded-2xl px-3 py-2',
                       'border border-white/12 bg-bgPrimary/20 backdrop-blur-xl',
                       'shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]',
-                      'transition-colors transition-shadow duration-200',
+                      'transition duration-200',
                       'focus-within:border-white/20',
-                      'focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),_0_0_0_3px_rgba(var(--accent-primary),0.25)]',
+                      'focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_0_3px_rgba(var(--accent-primary),0.25)]',
                     )}
                   >
                     <Search size={16} aria-hidden className="shrink-0 text-textMuted" />
@@ -1172,19 +1178,24 @@ export default function SearchMapClient() {
                   aria-pressed={filtersOpen}
                   aria-label="Filters"
                   className={cn(
-                    'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors',
+                    'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors',
                     filtersOpen
                       ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
                       : 'border-white/12 bg-bgPrimary/20 text-textPrimary hover:bg-white/10',
                   )}
                 >
-                  <Filter size={16} />
+                  <SlidersHorizontal size={16} />
+                  {activeFilterCount > 0 && !filtersOpen ? (
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold px-1 font-mono text-[9px] font-bold text-onAccent">
+                      {activeFilterCount}
+                    </span>
+                  ) : null}
                 </button>
               </div>
 
               <div className="mt-2 flex items-center justify-between gap-2">
                 <div className="text-[12px] font-semibold text-textSecondary">
-                  {origin ? `Searching near: ${originLabel}` : 'Pick a place to set origin.'}
+                  {origin ? `Searching near ${originLabel} · ${radiusMiles} mi` : 'Pick a place to set origin.'}
                 </div>
 
                   {geoDenied ? (
@@ -1289,8 +1300,10 @@ export default function SearchMapClient() {
               ) : null}
             </div>
 
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <DiscoverViewToggle value={viewMode} onChange={setViewMode} />
+            <div className="mt-3 flex items-center justify-between gap-3 lg:justify-end">
+              <div className="lg:hidden">
+                <DiscoverViewToggle value={viewMode} onChange={setViewMode} />
+              </div>
 
               <div className="shrink-0 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-textSecondary">
                 {headerHint}
@@ -1342,7 +1355,44 @@ export default function SearchMapClient() {
           </div>
         </div>
 
-        {viewMode === 'GRID' ? (
+        {isDesktop ? (
+          <div
+            ref={listRef}
+            className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 pt-3"
+          >
+            {err ? (
+              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-microAccent">
+                {err}
+              </div>
+            ) : loading ? (
+              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4">
+                <DiscoverLoadingRow />
+              </div>
+            ) : !displayPros.length ? (
+              <EmptyState
+                className="border-0 bg-transparent"
+                title="No pros found nearby"
+                description="Try increasing the distance or searching a different area."
+              />
+            ) : (
+              <>
+                {activePro ? (
+                  <DiscoverActiveProCard pro={activePro} openHref={activeOpenHref} navHref={activeNavHref} />
+                ) : null}
+
+                <DiscoverProRows
+                  pros={displayPros.slice(0, 30)}
+                  activeProId={activeProId}
+                  onSelect={handleSelectList}
+                  itemRefs={itemRefs}
+                />
+              </>
+            )}
+          </div>
+        ) : null}
+        </div>
+
+        {!isDesktop && viewMode === 'GRID' ? (
           <div
             className="absolute left-0 right-0 z-10 overflow-y-auto px-3 pb-4 pt-3"
             style={{
@@ -1382,7 +1432,7 @@ export default function SearchMapClient() {
           </div>
         ) : null}
 
-        {viewMode === 'MAP' ? (
+        {!isDesktop && viewMode === 'MAP' ? (
           <div className="absolute left-0 right-0 z-20 px-3" style={{ bottom: APP_BOTTOM_INSET, paddingBottom: 12 }}>
             <div className="tovis-glass-strong rounded-card border border-white/10 bg-bgSecondary p-3">
               {err ? (
@@ -1398,102 +1448,18 @@ export default function SearchMapClient() {
               ) : (
                 <>
                   {activePro ? (
-                    <div className="mb-3 rounded-card border border-white/10 bg-bgPrimary/25 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-[14px] font-black text-textPrimary">
-                            {activePro.displayName}
-                          </div>
-
-                          <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                            {(activePro.professionType || 'Professional') +
-                              (activePro.locationLabel ? ` - ${activePro.locationLabel}` : '')}
-                          </div>
-
-                          {typeof activePro.distanceMiles === 'number' ? (
-                            <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                              {activePro.distanceMiles.toFixed(1)} miles away
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={`/professionals/${encodeURIComponent(activePro.id)}`}
-                            className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
-                          >
-                            View
-                          </Link>
-
-                          {activeOpenHref ? (
-                            <a
-                              href={activeOpenHref}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
-                            >
-                              Open
-                            </a>
-                          ) : null}
-
-                          {activeNavHref ? (
-                            <a
-                              href={activeNavHref}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-                            >
-                              Navigate
-                            </a>
-                          ) : null}
-                        </div>
-                      </div>
+                    <div className="mb-3">
+                      <DiscoverActiveProCard pro={activePro} openHref={activeOpenHref} navHref={activeNavHref} />
                     </div>
                   ) : null}
 
                   <div ref={listRef} className="overlayScroll max-h-[34dvh] overflow-y-auto pr-1">
-                    <div className="grid gap-2">
-                      {displayPros.slice(0, 30).map((pro) => {
-                        const active = pro.id === activeProId
-                        const location = preferredProLocation(pro)
-                        const hasPin = location?.lat != null && location?.lng != null
-
-                        return (
-                          <button
-                            key={pro.id}
-                            ref={(element) => {
-                              itemRefs.current[pro.id] = element
-                            }}
-                            type="button"
-                            onClick={() => handleSelectList(pro)}
-                            className={cn(
-                              'w-full rounded-card border border-white/10 p-3 text-left transition',
-                              active ? 'bg-white/10' : 'bg-bgPrimary/25 hover:bg-white/10',
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="truncate text-[13px] font-black text-textPrimary">
-                                  {pro.displayName}
-                                </div>
-
-                                <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                                  {(pro.professionType || 'Professional') +
-                                    (pro.locationLabel ? ` - ${pro.locationLabel}` : '')}
-                                  {!hasPin ? <span className="ml-2 text-microAccent">- no pin</span> : null}
-                                </div>
-                              </div>
-
-                              {typeof pro.distanceMiles === 'number' ? (
-                                <div className="shrink-0 text-[12px] font-black text-textSecondary">
-                                  {pro.distanceMiles.toFixed(1)} mi
-                                </div>
-                              ) : null}
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
+                    <DiscoverProRows
+                      pros={displayPros.slice(0, 30)}
+                      activeProId={activeProId}
+                      onSelect={handleSelectList}
+                      itemRefs={itemRefs}
+                    />
                   </div>
                 </>
               )}

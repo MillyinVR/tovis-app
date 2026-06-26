@@ -11,6 +11,7 @@ export interface TrendingProRailItem {
   displayName: string
   avatarUrl: string | null
   locationLabel: string | null
+  professionType?: string | null
   ratingAvg?: number | null
   minPrice?: number | null
 }
@@ -64,6 +65,17 @@ export default function TrendingProRail({ pros, onSelectPro }: TrendingProRailPr
                   />
                 </>
               )}
+
+              <div
+                aria-hidden
+                className="absolute inset-0 bg-linear-to-b from-transparent via-transparent to-bgPrimary/70"
+              />
+
+              {pro.professionType ? (
+                <div className="absolute left-2 top-2 rounded-md bg-bgPrimary/55 px-2 py-1 font-mono text-[8.5px] font-black uppercase tracking-widest text-textPrimary backdrop-blur-md">
+                  {pro.professionType}
+                </div>
+              ) : null}
 
               {priceBadge ? (
                 <div className="absolute right-2 top-2 rounded-full bg-bgPrimary/70 px-2 py-1 font-mono text-[10px] font-black text-textPrimary backdrop-blur-md">
