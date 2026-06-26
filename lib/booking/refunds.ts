@@ -19,6 +19,7 @@
 //     derived from the reserved BookingRefund row id (safe to retry).
 
 import {
+  BookingDepositStatus,
   BookingRefundStatus,
   BookingRefundTrigger,
   PaymentProvider,
@@ -424,12 +425,68 @@ export async function refundDiscoveryDeposit(args: {
 }): Promise<DiscoveryDepositRefundResult> {
   if (args.refundAmountCents <= 0) return { outcome: 'NOT_ATTEMPTED' }
 
-  // Claim atomically so a re-cancel can't double-refund.
-  const claimed = await prisma.booking.updateMany({
-    where: { id: args.bookingId, depositStatus: 'PAID' },
-    data: { depositStatus: 'REFUNDED' },
+  // Reserve the cents atomically under the per-booking refund lock. The deposit
+  // rides one charge (deposit portion + the platform fee as the application
+  // fee), so `refundAmountCents` is the amount returned to the customer — exactly
+  // what increments Stripe's charge.amount_refunded, the same counter the
+  // charge.refunded webhook records. Two guards, cleanly separated (N5):
+  //   • over-refund: never return more than `chargeTotal − depositRefundedCents`.
+  //   • status flip: depositStatus -> REFUNDED only once the deposit PORTION
+  //     (charge − fee) is fully returned; a sub-deposit partial stays PAID and
+  //     just accumulates depositRefundedCents, so a later refund isn't blocked.
+  const claim = await prisma.$transaction(async (tx) => {
+    await lockBookingForRefund(tx, args.bookingId)
+
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: {
+        depositStatus: true,
+        depositAmount: true,
+        discoveryFeeAmount: true,
+        depositRefundedCents: true,
+      },
+    })
+
+    // A captured (PAID) deposit is the only refundable state. NONE/PENDING/FAILED
+    // never had funds; REFUNDED already returned the full deposit portion.
+    if (!booking || booking.depositStatus !== BookingDepositStatus.PAID) {
+      return { ok: false as const }
+    }
+
+    const depositCents = booking.depositAmount
+      ? Math.round(Number(booking.depositAmount) * 100)
+      : 0
+    const feeCents = booking.discoveryFeeAmount ?? 0
+    const chargeTotalCents = depositCents + feeCents
+    const alreadyRefunded = booking.depositRefundedCents
+    const remaining = chargeTotalCents - alreadyRefunded
+
+    // Nothing left to give back, or this refund would exceed the charge.
+    if (remaining <= 0 || args.refundAmountCents > remaining) {
+      return { ok: false as const }
+    }
+
+    const nextRefunded = alreadyRefunded + args.refundAmountCents
+    const depositPortionRefunded = depositCents > 0 && nextRefunded >= depositCents
+
+    await tx.booking.update({
+      where: { id: args.bookingId },
+      data: {
+        depositRefundedCents: nextRefunded,
+        ...(depositPortionRefunded
+          ? { depositStatus: BookingDepositStatus.REFUNDED }
+          : {}),
+      },
+    })
+
+    return {
+      ok: true as const,
+      alreadyRefunded,
+      depositPortionRefunded,
+    }
   })
-  if (claimed.count !== 1) return { outcome: 'NOT_ATTEMPTED' }
+
+  if (!claim.ok) return { outcome: 'NOT_ATTEMPTED' }
 
   try {
     const stripe = getStripe()
@@ -445,14 +502,22 @@ export async function refundDiscoveryDeposit(args: {
           trigger: args.trigger,
         },
       },
-      { idempotencyKey: `tovis:deposit-refund:${args.bookingId}` },
+      // Per-refund key (carries the pre-refund cumulative) so sequential partial
+      // deposit refunds don't collide on one booking-scoped key, while a retry of
+      // THIS refund stays idempotent.
+      {
+        idempotencyKey: `tovis:deposit-refund:${args.bookingId}:${claim.alreadyRefunded}`,
+      },
     )
 
-    await prisma.booking.update({
-      where: { id: args.bookingId },
-      // Refund-reset: only stamp the fee as refunded when we actually returned it.
-      data: { discoveryFeeRefundedAt: args.refundFee ? args.now ?? new Date() : null },
-    })
+    // Refund-reset: stamp the fee as refunded only when we actually returned it.
+    // Never clear an existing timestamp (a prior refund may have returned it).
+    if (args.refundFee) {
+      await prisma.booking.update({
+        where: { id: args.bookingId },
+        data: { discoveryFeeRefundedAt: args.now ?? new Date() },
+      })
+    }
 
     await prisma.bookingRefund.create({
       data: {
@@ -477,15 +542,21 @@ export async function refundDiscoveryDeposit(args: {
       feeRefunded: args.refundFee,
     }
   } catch (error) {
-    // Release the claim so the refund can be retried.
-    await prisma.booking
-      .updateMany({
-        where: {
-          id: args.bookingId,
-          depositStatus: 'REFUNDED',
-          discoveryFeeRefundedAt: null,
-        },
-        data: { depositStatus: 'PAID' },
+    // Release the reservation so the refund can be retried: roll back the cents
+    // and the REFUNDED flip (if this call set it). Under the lock so a concurrent
+    // refund sees a consistent counter.
+    await prisma
+      .$transaction(async (tx) => {
+        await lockBookingForRefund(tx, args.bookingId)
+        await tx.booking.update({
+          where: { id: args.bookingId },
+          data: {
+            depositRefundedCents: { decrement: args.refundAmountCents },
+            ...(claim.depositPortionRefunded
+              ? { depositStatus: BookingDepositStatus.PAID }
+              : {}),
+          },
+        })
       })
       .catch(() => {})
 
@@ -524,6 +595,14 @@ export type ChargeRefundReconcileInput = {
     id: string
     status: string | null
     amountCents: number
+    /**
+     * The BookingRefund id we stamped into the Stripe refund's metadata at
+     * creation (refundBookingPayment). Lets reconcile re-attach a refund to a row
+     * that was reserved but never settled — a crash between reserve→settle strands
+     * a PENDING row with a null stripeRefundId that otherwise reserves headroom
+     * forever (N3). Null for Dashboard/external refunds (no row to recover).
+     */
+    bookingRefundId?: string | null
   }>
 }
 
@@ -572,15 +651,35 @@ export async function reconcileChargeRefundInTransaction(
   }
 
   for (const refund of input.refunds) {
-    await tx.bookingRefund.updateMany({
+    const nextStatus = mapStripeRefundStatus(refund.status)
+
+    const matched = await tx.bookingRefund.updateMany({
       where: { bookingId: booking.id, stripeRefundId: refund.id },
-      data: { status: mapStripeRefundStatus(refund.status) },
+      data: { status: nextStatus },
     })
+
+    // N3 recovery: no row carries this Stripe refund id, but the refund's
+    // metadata points back at a BookingRefund we reserved. A crash between
+    // reserve→settle leaves that row PENDING with a null stripeRefundId,
+    // permanently reserving refund headroom. Adopt it here: stamp the real
+    // stripeRefundId and settle it. Guarded on `stripeRefundId: null` so we
+    // never overwrite a row already tied to a different refund, and scoped to
+    // this booking so a stale/foreign metadata id can't cross-claim.
+    if (matched.count === 0 && refund.bookingRefundId) {
+      await tx.bookingRefund.updateMany({
+        where: {
+          id: refund.bookingRefundId,
+          bookingId: booking.id,
+          stripeRefundId: null,
+        },
+        data: { stripeRefundId: refund.id, status: nextStatus },
+      })
+    }
 
     // One refund receipt per Stripe refund id. The dedupeKey carries the refund
     // id, so the cumulative refunds list a `charge.refunded` replay carries never
     // double-notifies.
-    if (mapStripeRefundStatus(refund.status) === BookingRefundStatus.SUCCEEDED) {
+    if (nextStatus === BookingRefundStatus.SUCCEEDED) {
       await emitPaymentRefundedNotifications({
         tx,
         bookingId: booking.id,

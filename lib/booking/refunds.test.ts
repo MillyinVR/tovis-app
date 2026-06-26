@@ -91,18 +91,27 @@ function makeTx() {
           where,
           data,
         }: {
-          where: { bookingId: string; stripeRefundId: string }
+          where: {
+            id?: string
+            bookingId: string
+            stripeRefundId?: string | null
+          }
           data: Record<string, unknown>
         }) => {
           let count = 0
           for (const row of mocks.refundRows) {
-            if (
-              row.bookingId === where.bookingId &&
-              row.stripeRefundId === where.stripeRefundId
-            ) {
-              Object.assign(row, data)
-              count += 1
+            if (where.bookingId !== undefined && row.bookingId !== where.bookingId) {
+              continue
             }
+            if (where.id !== undefined && row.id !== where.id) continue
+            if (
+              'stripeRefundId' in where &&
+              row.stripeRefundId !== where.stripeRefundId
+            ) {
+              continue
+            }
+            Object.assign(row, data)
+            count += 1
           }
           return { count }
         },
@@ -619,6 +628,67 @@ describe('reconcileChargeRefundInTransaction', () => {
     })
 
     expect(mockEmitPaymentRefunded).not.toHaveBeenCalled()
+  })
+
+  it('adopts a stranded reserved row (null stripeRefundId) via refund metadata (N3)', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+    // A row reserved by refundBookingPayment whose settle never ran (crash
+    // between reserve→settle): PENDING, no stripeRefundId, still reserving
+    // headroom. Its id was stamped into the Stripe refund's metadata.
+    mocks.refundRows.push({
+      id: 'refund_stranded',
+      bookingId: 'booking_1',
+      amountCents: 4000,
+      stripeRefundId: null,
+      status: BookingRefundStatus.PENDING,
+    })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 4000,
+      chargeAmountCents: 10000,
+      refunds: [
+        {
+          id: 're_recovered',
+          status: 'succeeded',
+          amountCents: 4000,
+          bookingRefundId: 'refund_stranded',
+        },
+      ],
+    })
+
+    expect(mocks.refundRows[0]).toMatchObject({
+      stripeRefundId: 're_recovered',
+      status: BookingRefundStatus.SUCCEEDED,
+    })
+  })
+
+  it('does not adopt a row already tied to a different stripeRefundId (N3 guard)', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+    mocks.refundRows.push({
+      id: 'refund_settled',
+      bookingId: 'booking_1',
+      amountCents: 4000,
+      stripeRefundId: 're_original',
+      status: BookingRefundStatus.SUCCEEDED,
+    })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 4000,
+      chargeAmountCents: 10000,
+      refunds: [
+        {
+          id: 're_different',
+          status: 'succeeded',
+          amountCents: 4000,
+          bookingRefundId: 'refund_settled',
+        },
+      ],
+    })
+
+    // The guard (stripeRefundId: null) prevents clobbering the existing id.
+    expect(mocks.refundRows[0]?.stripeRefundId).toBe('re_original')
   })
 
   it('does not re-update a booking already marked REFUNDED and synced', async () => {

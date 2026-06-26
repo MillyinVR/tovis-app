@@ -304,6 +304,10 @@ async function handleChargeRefunded(
     id: refund.id,
     status: refund.status,
     amountCents: typeof refund.amount === 'number' ? refund.amount : 0,
+    // We stamp the reserved BookingRefund id into the refund metadata at
+    // creation; reconcile uses it to recover a row that was reserved but never
+    // settled (N3). Absent for Dashboard/external refunds.
+    bookingRefundId: getMetadataString(refund.metadata, 'bookingRefundId'),
   }))
 
   const result = await reconcileChargeRefundInTransaction(tx, {

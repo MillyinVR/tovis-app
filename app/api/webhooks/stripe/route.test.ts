@@ -851,7 +851,14 @@ describe('POST /api/webhooks/stripe', () => {
         paymentIntentId: 'pi_test_123',
         amountRefundedCents: 10000,
         chargeAmountCents: 10000,
-        refunds: [{ id: 're_1', status: 'succeeded', amountCents: 10000 }],
+        refunds: [
+          {
+            id: 're_1',
+            status: 'succeeded',
+            amountCents: 10000,
+            bookingRefundId: null,
+          },
+        ],
       },
     )
 
