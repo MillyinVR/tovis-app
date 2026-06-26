@@ -52,7 +52,6 @@ app/pro/bookings/[id]/aftercare/ClientProfilePanel.tsx|return new Intl.DateTimeF
 app/pro/bookings/[id]/aftercare/RebookSlotPicker.tsx|return new Intl.DateTimeFormat(undefined, {
 app/pro/calendar/_components/CalendarDesktopShell.tsx|const formatter = new Intl.DateTimeFormat(undefined, {
 app/pro/calendar/_components/CalendarDesktopShell.tsx|const timeFormatter = new Intl.DateTimeFormat(undefined, {
-app/pro/calendar/_components/ConfirmChangeModal.tsx|return date.toLocaleString(undefined, {
 app/pro/calendar/_components/ManagementModal.tsx|function buildTimeFormatter(timeZone: string): Intl.DateTimeFormat {
 app/pro/calendar/_components/ManagementModal.tsx|return new Intl.DateTimeFormat(undefined, {
 app/pro/calendar/_components/_grid/DayColumn.tsx|function eventTimeFormatter(timeZone: string): Intl.DateTimeFormat {
@@ -83,7 +82,6 @@ app/pro/membership/MembershipClient.tsx|: d.toLocaleDateString(undefined, { mont
 app/pro/migrate/_utils/raiseRamp.ts|return d.toLocaleDateString(undefined, {
 app/pro/migrate/calendar/MigrateCalendarClient.tsx|return date.toLocaleString(undefined, {
 app/pro/profile/ReviewsPanel.tsx|const date = new Date(review.createdAt).toLocaleDateString()
-app/pro/reminders/page.tsx|return date.toLocaleString(undefined, {
 app/pro/reviews/page.tsx|const date = new Date(rev.createdAt).toLocaleDateString()
 app/pro/verification/page.tsx|return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit' }).format(d)
 app/pro/waitlist/WaitlistOutreachClient.tsx|return new Intl.DateTimeFormat(undefined, {

@@ -8,6 +8,9 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import { Button, Card, buttonClassName } from '@/app/_components/ui'
+import { formatInTimeZone } from '@/lib/time'
+import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
+import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,10 +39,10 @@ type ClientWithUser = Prisma.ClientProfileGetPayload<{
   include: typeof CLIENT_INCLUDE
 }>
 
-function formatDateTime(value: Date | string): string {
+function formatDateTime(value: Date | string, tz: string): string {
   const date = typeof value === 'string' ? new Date(value) : value
 
-  return date.toLocaleString(undefined, {
+  return formatInTimeZone(date, tz, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -84,6 +87,13 @@ export default async function ProRemindersPage() {
   }
 
   const proId = user.professionalProfile.id
+
+  // Render every date in the pro's business timezone, not the server zone (UTC
+  // on Vercel), which would land evening reminders/appointments on the wrong day.
+  const scheduleTz = await resolveProScheduleTimeZone(
+    proId,
+    user.professionalProfile.timeZone,
+  )
 
   // Single source of truth for chart linkability — same rule as the clients
   // list and the page gate (includes the 30-day RECENT_COMPLETED window).
@@ -282,7 +292,7 @@ export default async function ProRemindersPage() {
                       </div>
 
                       <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                        {formatDateTime(reminder.dueAt)}
+                        {formatDateTime(reminder.dueAt, scheduleTz)}
                       </div>
 
                       {reminder.client ? (
@@ -301,7 +311,13 @@ export default async function ProRemindersPage() {
                         <div className="mt-1 text-[12px] font-semibold text-textSecondary">
                           Booking:{' '}
                           {reminder.booking.service?.name || 'Service'} on{' '}
-                          {formatDateTime(reminder.booking.scheduledFor)}
+                          {formatDateTime(
+                            reminder.booking.scheduledFor,
+                            resolveAppointmentDisplayTimeZone(
+                              reminder.booking.locationTimeZone,
+                              scheduleTz,
+                            ),
+                          )}
                         </div>
                       ) : null}
 
@@ -372,12 +388,13 @@ export default async function ProRemindersPage() {
                     </div>
 
                     <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                      Due {formatDateTime(reminder.dueAt)}
+                      Due {formatDateTime(reminder.dueAt, scheduleTz)}
                     </div>
 
                     {reminder.completedAt ? (
                       <div className="mt-1 text-[11px] font-semibold text-textSecondary/80">
-                        Completed {formatDateTime(reminder.completedAt)}
+                        Completed{' '}
+                        {formatDateTime(reminder.completedAt, scheduleTz)}
                       </div>
                     ) : null}
                   </div>
