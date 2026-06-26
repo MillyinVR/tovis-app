@@ -138,6 +138,11 @@ export default function LooksBookableGrid({ categorySlug }: LooksBookableGridPro
                       loading="lazy"
                     />
 
+                    <div
+                      aria-hidden
+                      className="absolute inset-0 bg-linear-to-b from-transparent via-transparent to-bgPrimary/60"
+                    />
+
                     {tag ? (
                       <div className="absolute left-1.5 top-1.5 rounded-md bg-bgPrimary/70 px-1.5 py-1 font-mono text-[9px] font-black uppercase tracking-[0.1em] text-textPrimary backdrop-blur-md">
                         {tag}

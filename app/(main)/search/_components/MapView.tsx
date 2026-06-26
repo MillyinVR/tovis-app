@@ -340,19 +340,21 @@ export default function MapView({
 
   const circleCenter = hasOrigin ? origin! : hasMe ? me! : null
 
+  // Active pin: teal dot wrapped in a bg-colored ring then a gold ring, so the
+  // selected pro reads instantly against the map and the cluster of normal pins.
   const activeIcon = useMemo(() => {
     return L.divIcon({
       className: '',
       html: `
         <div style="
-          width: 14px; height: 14px;
+          width: 18px; height: 18px;
           border-radius: 999px;
           background: rgb(var(--accent-primary));
-          box-shadow: 0 8px 22px rgb(0 0 0 / 0.55), 0 0 0 3px rgb(255 255 255 / 0.16);
+          box-shadow: 0 0 0 4px rgb(var(--bg-primary)), 0 0 0 6px rgb(var(--gold)), 0 10px 26px rgb(0 0 0 / 0.55);
         "></div>
       `,
-      iconSize: [14, 14],
-      iconAnchor: [7, 7],
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
     })
   }, [])
 
@@ -361,14 +363,14 @@ export default function MapView({
       className: '',
       html: `
         <div style="
-          width: 10px; height: 10px;
+          width: 12px; height: 12px;
           border-radius: 999px;
-          background: rgb(255 255 255 / 0.88);
-          box-shadow: 0 10px 26px rgb(0 0 0 / 0.55), 0 0 0 2px rgb(255 255 255 / 0.10);
+          background: rgb(var(--accent-primary));
+          box-shadow: 0 0 0 3px rgb(var(--bg-primary)), 0 6px 16px rgb(0 0 0 / 0.45);
         "></div>
       `,
-      iconSize: [10, 10],
-      iconAnchor: [5, 5],
+      iconSize: [12, 12],
+      iconAnchor: [6, 6],
     })
   }, [])
 
