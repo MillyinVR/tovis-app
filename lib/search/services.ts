@@ -1,5 +1,9 @@
 // lib/search/services.ts
+import { Prisma } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
+import { proDiscoveryVisibilityFilter } from '@/lib/tenant'
+import type { TenantContext } from '@/lib/tenant'
 import {
   SearchRequestError,
   type SearchServicesResponseDto,
@@ -38,12 +42,36 @@ export function parseSearchServicesParams(
   }
 }
 
+/**
+ * White-label tenants must only see service types that one of THEIR pros
+ * actually offers — otherwise the global service taxonomy (and, by inference,
+ * other tenants' offerings) leaks through the typeahead. tovis-root is the
+ * marketplace and sees the full active catalog. Mirrors the asymmetric tenant
+ * rule every other discovery surface uses (proDiscoveryVisibilityFilter).
+ */
+function tenantServiceFilter(
+  tenantContext: TenantContext,
+): Prisma.ServiceWhereInput {
+  if (tenantContext.isRoot) return {}
+
+  return {
+    offerings: {
+      some: {
+        isActive: true,
+        professional: proDiscoveryVisibilityFilter(tenantContext),
+      },
+    },
+  }
+}
+
 export async function searchServices(
   params: SearchServicesParams,
+  tenantContext: TenantContext,
 ): Promise<SearchServicesResponseDto> {
   const rows = await prisma.service.findMany({
     where: {
       isActive: true,
+      ...tenantServiceFilter(tenantContext),
       ...(params.categoryId ? { categoryId: params.categoryId } : {}),
       ...(params.q
         ? {

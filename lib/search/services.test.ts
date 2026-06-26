@@ -2,6 +2,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SearchRequestError, encodeIdCursor } from './contracts'
+import { rootTenantContext, whiteLabelTenantContext } from '@/lib/tenant'
+
+const ROOT = rootTenantContext('tenant_root')
+const SALON_A = whiteLabelTenantContext({
+  tenantId: 'tenant_a',
+  slug: 'salon-a',
+})
 
 const mocks = vi.hoisted(() => {
   const prisma = {
@@ -99,7 +106,7 @@ describe('lib/search/services.ts', () => {
         categoryId: null,
         cursorId: null,
         limit: 40,
-      })
+      }, ROOT)
 
       expect(mocks.prisma.service.findMany).toHaveBeenCalledWith({
         where: {
@@ -141,7 +148,7 @@ describe('lib/search/services.ts', () => {
         categoryId: null,
         cursorId: null,
         limit: 40,
-      })
+      }, ROOT)
 
       expect(mocks.prisma.service.findMany).toHaveBeenCalledWith({
         where: {
@@ -184,7 +191,7 @@ describe('lib/search/services.ts', () => {
         categoryId: 'cat_hair',
         cursorId: null,
         limit: 40,
-      })
+      }, ROOT)
 
       expect(mocks.prisma.service.findMany).toHaveBeenCalledWith({
         where: {
@@ -224,7 +231,7 @@ describe('lib/search/services.ts', () => {
         categoryId: 'cat_hair',
         cursorId: null,
         limit: 40,
-      })
+      }, ROOT)
 
       expect(mocks.prisma.service.findMany).toHaveBeenCalledWith({
         where: {
@@ -311,7 +318,7 @@ describe('lib/search/services.ts', () => {
         categoryId: null,
         cursorId: null,
         limit: 2,
-      })
+      }, ROOT)
 
       expect(result).toEqual({
         items: [
@@ -370,7 +377,7 @@ describe('lib/search/services.ts', () => {
         categoryId: null,
         cursorId: 'svc_2',
         limit: 1,
-      })
+      }, ROOT)
 
       expect(result).toEqual({
         items: [
@@ -384,6 +391,48 @@ describe('lib/search/services.ts', () => {
         ],
         nextCursor: null,
       })
+    })
+
+    it('does not tenant-scope the catalog for the root tenant', async () => {
+      await searchServices(
+        {
+          q: null,
+          categoryId: null,
+          cursorId: null,
+          limit: 40,
+        },
+        ROOT,
+      )
+
+      const where = mocks.prisma.service.findMany.mock.calls[0]?.[0]?.where
+      expect(where).toEqual({ isActive: true })
+      expect(where).not.toHaveProperty('offerings')
+    })
+
+    it('confines a white-label tenant to services offered by its own pros', async () => {
+      await searchServices(
+        {
+          q: null,
+          categoryId: null,
+          cursorId: null,
+          limit: 40,
+        },
+        SALON_A,
+      )
+
+      expect(mocks.prisma.service.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            isActive: true,
+            offerings: {
+              some: {
+                isActive: true,
+                professional: { homeTenantId: 'tenant_a' },
+              },
+            },
+          },
+        }),
+      )
     })
   })
 })
