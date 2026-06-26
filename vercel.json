@@ -50,6 +50,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/internal/jobs/upload-sessions/cleanup",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/migration/ramp-step",
       "schedule": "0 8 * * *"
     },

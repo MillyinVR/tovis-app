@@ -25,11 +25,14 @@ vi.mock('@/lib/media/uploadSession', () => ({
 
 vi.mock('@/lib/security/logging', () => ({ safeError: (e: unknown) => e }))
 
-import { POST } from './route'
+import { GET, POST } from './route'
 
-function makeRequest(headers: Record<string, string> = {}): Request {
+function makeRequest(
+  headers: Record<string, string> = {},
+  method = 'POST',
+): Request {
   return new Request('http://localhost/api/internal/jobs/upload-sessions/cleanup', {
-    method: 'POST',
+    method,
     headers,
   })
 }
@@ -61,5 +64,22 @@ describe('POST /api/internal/jobs/upload-sessions/cleanup', () => {
   it('accepts the x-internal-job-secret header too', async () => {
     const res = await POST(makeRequest({ 'x-internal-job-secret': 'job-secret' }))
     expect(res.status).toBe(200)
+  })
+
+  // Vercel cron invokes scheduled jobs via GET, so the GET export must enforce
+  // the same auth and run the same reap.
+  it('rejects an unauthorized GET (Vercel cron entrypoint)', async () => {
+    const res = await GET(makeRequest({}, 'GET'))
+    expect(res.status).toBe(401)
+    expect(mocks.expireStaleUploadSessions).not.toHaveBeenCalled()
+  })
+
+  it('expires stale sessions on an authorized GET', async () => {
+    const res = await GET(
+      makeRequest({ authorization: 'Bearer job-secret' }, 'GET'),
+    )
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ ok: true, expired: 4 })
+    expect(mocks.expireStaleUploadSessions).toHaveBeenCalledTimes(1)
   })
 })
