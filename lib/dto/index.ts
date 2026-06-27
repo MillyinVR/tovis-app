@@ -91,6 +91,16 @@ export type {
   OpeningServiceDto,
 } from '@/lib/lastMinute/openingDto'
 
+// ── Availability (GET /api/v1/availability/{alternates,other-pros}) ───────────
+// day + bootstrap are deferred: their route payloads type offering prices as
+// `unknown` (implicitly-serialized Decimal) and need an explicit serializer to
+// be enforced — see lib/dto/availability.ts.
+export type {
+  AvailabilityAlternatesOk,
+  AvailabilityOtherProsRequestDTO,
+  AvailabilityOtherProsOk,
+} from '@/lib/dto/availability'
+
 // ── Search ───────────────────────────────────────────────────────────────────
 export type {
   SearchProLocationPreviewDto,

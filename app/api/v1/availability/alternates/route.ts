@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { ProNameDisplay, ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import type { AvailabilityAlternatesOk } from '@/lib/dto/availability'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import { stableHash } from '@/lib/availability/data/cache'
@@ -495,7 +496,7 @@ export async function GET(req: Request) {
         request,
         selectedDay: dateStr,
         alternates: [],
-      })
+      } satisfies AvailabilityAlternatesOk)
     }
 
     const tenantContext = await resolveTenantContextForRequest(req)
@@ -692,7 +693,7 @@ export async function GET(req: Request) {
             },
           }
         : {}),
-    })
+    } satisfies AvailabilityAlternatesOk)
   } catch (err: unknown) {
     console.error('GET /api/v1/availability/alternates error', err)
     return bookingJsonFail('INTERNAL_ERROR', {

@@ -121,6 +121,13 @@
       ],
       "type": "string"
     },
+    "$Enums.ServiceLocationType": {
+      "enum": [
+        "SALON",
+        "MOBILE"
+      ],
+      "type": "string"
+    },
     "$Enums.VerificationStatus": {
       "enum": [
         "PENDING",
@@ -130,6 +137,407 @@
         "PENDING_MANUAL_REVIEW"
       ],
       "type": "string"
+    },
+    "ApiOk<(def-alias-1643606088-2592-2984-1643606088-0-93002041664248&structure-1643606088-8670-8831-1643606088-8644-8831-1643606088-8637-8833-1643606088-8597-8833-1643606088-0-9300)>": {
+      "properties": {
+        "alternates": {
+          "items": {
+            "$ref": "#/definitions/AvailabilityAlternateSlots"
+          },
+          "type": "array"
+        },
+        "availabilityVersion": {
+          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
+          "type": "string"
+        },
+        "debug": {},
+        "generatedAt": {
+          "description": "ISO timestamp for when the payload was generated.",
+          "type": "string"
+        },
+        "mode": {
+          "const": "ALTERNATES",
+          "type": "string"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "request": {
+          "$ref": "#/definitions/AvailabilityAlternatesRequest"
+        },
+        "selectedDay": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alternates",
+        "availabilityVersion",
+        "generatedAt",
+        "mode",
+        "ok",
+        "request",
+        "selectedDay"
+      ],
+      "type": "object"
+    },
+    "AvailabilityAlternateSlots": {
+      "description": "--------------------------- Availability: ALTERNATES mode\n--------------------------",
+      "properties": {
+        "pro": {
+          "$ref": "#/definitions/AvailabilityOtherPro"
+        },
+        "slots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pro",
+        "slots"
+      ],
+      "type": "object"
+    },
+    "AvailabilityAlternatesOk": {
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-2592-2984-1643606088-0-93002041664248%26structure-1643606088-8670-8831-1643606088-8644-8831-1643606088-8637-8833-1643606088-8597-8833-1643606088-0-9300)%3E"
+    },
+    "AvailabilityAlternatesRequest": {
+      "properties": {
+        "addOnIds": {
+          "allOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            }
+          ]
+        },
+        "clientAddressId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationType": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            }
+          ]
+        },
+        "offeringId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "serviceId",
+        "offeringId",
+        "locationType",
+        "locationId",
+        "clientAddressId",
+        "addOnIds",
+        "durationMinutes",
+        "date"
+      ],
+      "type": "object"
+    },
+    "AvailabilityOtherPro": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "distanceMiles": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isCreator": {
+          "type": "boolean"
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nameDisplay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProNameDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offeringId": {
+          "description": "Optional on the generic UI card because primary vs alternate cards have slightly different guarantees. Use the specialized types below when availability context must guarantee bookability.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slots": {
+          "description": "UI convenience only. Do not treat these as globally authoritative without request/version validation.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "avatarUrl",
+        "businessName",
+        "id",
+        "location",
+        "locationId",
+        "offeringId",
+        "timeZone"
+      ],
+      "type": "object"
+    },
+    "AvailabilityOtherProsOk": {
+      "properties": {
+        "availabilityVersion": {
+          "type": "string"
+        },
+        "center": {
+          "anyOf": [
+            {
+              "properties": {
+                "lat": {
+                  "type": "number"
+                },
+                "lng": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "lat",
+                "lng"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generatedAt": {
+          "type": "string"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "mode": {
+          "const": "OTHER_PROS",
+          "type": "string"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "otherPros": {
+          "items": {
+            "$ref": "#/definitions/OtherProRow"
+          },
+          "type": "array"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "radiusMiles": {
+          "type": "number"
+        },
+        "request": {
+          "$ref": "#/definitions/AvailabilityOtherProsRequestDTO"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "timeZone": {
+          "type": "string"
+        },
+        "usedViewerCenter": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "mode",
+        "availabilityVersion",
+        "generatedAt",
+        "request",
+        "professionalId",
+        "serviceId",
+        "locationType",
+        "locationId",
+        "timeZone",
+        "radiusMiles",
+        "usedViewerCenter",
+        "center",
+        "otherPros"
+      ],
+      "type": "object"
+    },
+    "AvailabilityOtherProsRequestDTO": {
+      "properties": {
+        "clientAddressId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveLocationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "requestedLocationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestedLocationType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ServiceLocationType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "viewer": {
+          "anyOf": [
+            {
+              "properties": {
+                "lat": {
+                  "type": "number"
+                },
+                "lng": {
+                  "type": "number"
+                },
+                "placeId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "radiusMiles": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "lat",
+                "lng",
+                "radiusMiles",
+                "placeId"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "professionalId",
+        "serviceId",
+        "requestedLocationType",
+        "requestedLocationId",
+        "effectiveLocationType",
+        "locationId",
+        "clientAddressId",
+        "viewer",
+        "limit"
+      ],
+      "type": "object"
     },
     "BoardVisibility": {
       "$ref": "#/definitions/%24Enums.BoardVisibility"
@@ -4459,6 +4867,86 @@
       ],
       "type": "object"
     },
+    "OtherProRow": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "distanceMiles": {
+          "type": "number"
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "nameDisplay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProNameDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offeringId": {
+          "type": "string"
+        },
+        "timeZone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "businessName",
+        "firstName",
+        "lastName",
+        "handle",
+        "nameDisplay",
+        "avatarUrl",
+        "location",
+        "offeringId",
+        "timeZone",
+        "locationId",
+        "distanceMiles"
+      ],
+      "type": "object"
+    },
     "PickedPlace": {
       "properties": {
         "city": {
@@ -5737,6 +6225,9 @@
         "nextCursor"
       ],
       "type": "object"
+    },
+    "ServiceLocationType": {
+      "$ref": "#/definitions/%24Enums.ServiceLocationType"
     },
     "UserDeviceDTO": {
       "properties": {
