@@ -147,6 +147,15 @@ screens** rendered server-side with no JSON twin, plus structural items that pre
 being one stable contract.
 
 ### 2.1 — Build the missing aggregate read endpoints
+> **✅ STATUS: SHIPPED (2026-06-27).** All 5 endpoints added under `/api/v1`, each wrapping
+> the SAME loader its RSC page uses + a JSON-safe serializer at the edge (Decimal→string,
+> Date→ISO): `GET /client/home`, `GET /me`, `GET /u/[handle]`, `GET /offerings/[id]`,
+> `GET /professionals/[id]`. The two inline page loaders (offerings, pro profile) were
+> extracted to `_data/` modules the pages now import (web + native share one path).
+> `professionals/[id]` collapses not-found + not-viewable(pending) to a uniform 404 (no leak);
+> `offerings/[id]` returns 404 for non-claimable openings. New serializers `lib/dto/clientHome.ts`,
+> `lib/dto/clientMe.ts`; `u/[handle]` returns its already-JSON-safe loader output directly.
+> Validated: typecheck + lint + guards + vitest (4709) + production build.
 - **What:** Per-entity reads exist, but the dashboard/profile *aggregate* screens read Prisma
   directly in server components with no API a native client can call. Build JSON endpoints for them.
 - **Where the gaps are:**
