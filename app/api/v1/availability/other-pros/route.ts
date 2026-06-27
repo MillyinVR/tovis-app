@@ -11,6 +11,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { pickString } from '@/app/api/_utils/pick'
 import { loadOtherProsNearbyCached } from '@/lib/availability/data/otherPros'
 import { getScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import type { AvailabilityOtherProsOk } from '@/lib/dto/availability'
 import {
   normalizeLocationType,
   pickEffectiveLocationType,
@@ -575,7 +576,7 @@ export async function GET(req: Request) {
         usedViewerCenter: false,
         center: null,
         otherPros: [],
-      })
+      } satisfies AvailabilityOtherProsOk)
     }
 
     const otherPros = await loadOtherProsNearbyCached({
@@ -609,7 +610,7 @@ export async function GET(req: Request) {
         lng: centerLng,
       },
       otherPros,
-    })
+    } satisfies AvailabilityOtherProsOk)
   } catch (err: unknown) {
     console.error('GET /api/v1/availability/other-pros error', err)
     return jsonFail(500, 'Failed to load nearby professionals')
