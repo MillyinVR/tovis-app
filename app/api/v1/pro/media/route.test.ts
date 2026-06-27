@@ -140,6 +140,7 @@ type CreatedMediaServiceTestDto = {
 type CreatedMediaTestDto = {
   id: string
   professionalId: string
+  primaryServiceId: string
   caption: string | null
   mediaType: MediaType
   visibility: MediaVisibility
@@ -147,11 +148,36 @@ type CreatedMediaTestDto = {
   isEligibleForLooks: boolean
   url: string | null
   thumbUrl: string | null
+  createdAt: Date
   storageBucket: string
   storagePath: string
   thumbBucket: string | null
   thumbPath: string | null
   services: CreatedMediaServiceTestDto[]
+}
+
+const CREATED_AT = new Date('2026-04-21T00:00:00.000Z')
+
+// The picked `media` DTO the route now emits from a created row: storage
+// pointers dropped, createdAt serialized, service tags slimmed to id + name.
+function expectedMediaDTO(created: CreatedMediaTestDto) {
+  return {
+    id: created.id,
+    professionalId: created.professionalId,
+    primaryServiceId: created.primaryServiceId,
+    mediaType: created.mediaType,
+    visibility: created.visibility,
+    caption: created.caption,
+    isFeaturedInPortfolio: created.isFeaturedInPortfolio,
+    isEligibleForLooks: created.isEligibleForLooks,
+    url: created.url,
+    thumbUrl: created.thumbUrl,
+    createdAt: created.createdAt.toISOString(),
+    services: created.services.map((tag) => ({
+      serviceId: tag.serviceId,
+      name: tag.service.name,
+    })),
+  }
 }
 
 type LookPublicationResultStateTestDto = {
@@ -235,6 +261,7 @@ function makeCreatedMedia(
   return {
     id: 'media_1',
     professionalId: 'pro_1',
+    primaryServiceId: 'service_1',
     caption: 'Fresh set',
     mediaType: MediaType.IMAGE,
     visibility: MediaVisibility.PUBLIC,
@@ -242,6 +269,7 @@ function makeCreatedMedia(
     isEligibleForLooks: false,
     url: 'https://cdn.example.com/media_1.jpg',
     thumbUrl: null,
+    createdAt: CREATED_AT,
     storageBucket: BUCKETS.mediaPublic,
     storagePath: 'pros/pro_1/media_1.jpg',
     thumbBucket: null,
@@ -479,7 +507,7 @@ describe('app/api/v1/pro/media/route.ts', () => {
     expect(res.status).toBe(201)
     expect(body).toEqual({
       ok: true,
-      media: createdMedia,
+      media: expectedMediaDTO(createdMedia),
     })
   })
 
@@ -544,7 +572,7 @@ describe('app/api/v1/pro/media/route.ts', () => {
     expect(res.status).toBe(201)
     expect(body).toEqual({
       ok: true,
-      media: createdMedia,
+      media: expectedMediaDTO(createdMedia),
     })
   })
 
@@ -625,7 +653,7 @@ describe('app/api/v1/pro/media/route.ts', () => {
     expect(res.status).toBe(201)
     expect(body).toEqual({
       ok: true,
-      media: createdMedia,
+      media: expectedMediaDTO(createdMedia),
       lookPublication,
     })
   })

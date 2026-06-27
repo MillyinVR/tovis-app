@@ -57,6 +57,26 @@
       ],
       "type": "string"
     },
+    "$Enums.LooksSocialJobType": {
+      "enum": [
+        "RECOMPUTE_LOOK_COUNTS",
+        "RECOMPUTE_LOOK_SPOTLIGHT_SCORE",
+        "RECOMPUTE_LOOK_RANK_SCORE",
+        "FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS",
+        "INDEX_LOOK_POST_DOCUMENT",
+        "MODERATION_SCAN_LOOK_POST",
+        "MODERATION_SCAN_COMMENT"
+      ],
+      "type": "string"
+    },
+    "$Enums.MediaPhase": {
+      "enum": [
+        "BEFORE",
+        "AFTER",
+        "OTHER"
+      ],
+      "type": "string"
+    },
     "$Enums.MediaType": {
       "enum": [
         "IMAGE",
@@ -135,6 +155,19 @@
       "enum": [
         "SALON",
         "MOBILE"
+      ],
+      "type": "string"
+    },
+    "$Enums.SessionStep": {
+      "enum": [
+        "NONE",
+        "CONSULTATION",
+        "CONSULTATION_PENDING_CLIENT",
+        "BEFORE_PHOTOS",
+        "SERVICE_IN_PROGRESS",
+        "FINISH_REVIEW",
+        "AFTER_PHOTOS",
+        "DONE"
       ],
       "type": "string"
     },
@@ -4058,6 +4091,174 @@
       ],
       "type": "object"
     },
+    "ClientReviewMediaAssetSummaryDTO": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibility": {
+          "$ref": "#/definitions/MediaVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "visibility",
+        "createdAt",
+        "url",
+        "thumbUrl"
+      ],
+      "type": "object"
+    },
+    "ClientReviewMediaCreateResponseDTO": {
+      "properties": {
+        "created": {
+          "items": {
+            "$ref": "#/definitions/ClientReviewMediaCreatedDTO"
+          },
+          "type": "array"
+        },
+        "createdCount": {
+          "type": "number"
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientReviewMediaReviewDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "createdCount",
+        "created",
+        "review"
+      ],
+      "type": "object"
+    },
+    "ClientReviewMediaCreatedDTO": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "renderThumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "renderUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibility": {
+          "$ref": "#/definitions/MediaVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "visibility",
+        "createdAt",
+        "url",
+        "thumbUrl",
+        "renderUrl",
+        "renderThumbUrl"
+      ],
+      "type": "object"
+    },
+    "ClientReviewMediaReviewDTO": {
+      "properties": {
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bookingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "headline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaAssets": {
+          "items": {
+            "$ref": "#/definitions/ClientReviewMediaAssetSummaryDTO"
+          },
+          "type": "array"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "rating",
+        "headline",
+        "body",
+        "createdAt",
+        "professionalId",
+        "bookingId",
+        "mediaAssets"
+      ],
+      "type": "object"
+    },
     "CreateMessageResponseDTO": {
       "properties": {
         "message": {
@@ -4320,6 +4521,118 @@
     },
     "LookPostVisibility": {
       "$ref": "#/definitions/%24Enums.LookPostVisibility"
+    },
+    "LookPublicationAsyncEffectsDto": {
+      "properties": {
+        "enqueuedJobs": {
+          "items": {
+            "$ref": "#/definitions/LookPublicationEnqueuedJobDto"
+          },
+          "type": "array"
+        },
+        "gatedJobs": {
+          "items": {
+            "$ref": "#/definitions/LookPublicationGatedJobDto"
+          },
+          "type": "array"
+        },
+        "plannedJobs": {
+          "items": {
+            "$ref": "#/definitions/LookPublicationPlannedJobDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "plannedJobs",
+        "enqueuedJobs",
+        "gatedJobs"
+      ],
+      "type": "object"
+    },
+    "LookPublicationEnqueuedJobDto": {
+      "properties": {
+        "dedupeKey": {
+          "type": "string"
+        },
+        "disposition": {
+          "const": "ENQUEUED",
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "processorSupport": {
+          "enum": [
+            "SUPPORTED",
+            "DEFERRED"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/LooksSocialJobType"
+        }
+      },
+      "required": [
+        "type",
+        "disposition",
+        "processorSupport",
+        "jobId",
+        "dedupeKey"
+      ],
+      "type": "object"
+    },
+    "LookPublicationGatedJobDto": {
+      "properties": {
+        "disposition": {
+          "const": "GATED",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "processorSupport": {
+          "const": "DEFERRED",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/definitions/LookPublicationGatedJobReason"
+        },
+        "type": {
+          "$ref": "#/definitions/LooksSocialJobType"
+        }
+      },
+      "required": [
+        "type",
+        "disposition",
+        "processorSupport",
+        "reason",
+        "message"
+      ],
+      "type": "object"
+    },
+    "LookPublicationGatedJobReason": {
+      "const": "MODERATION_SCAN_LOOK_POST_DEFERRED",
+      "type": "string"
+    },
+    "LookPublicationPlannedJobDto": {
+      "properties": {
+        "processorSupport": {
+          "enum": [
+            "SUPPORTED",
+            "DEFERRED"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/LooksSocialJobType"
+        }
+      },
+      "required": [
+        "type",
+        "processorSupport"
+      ],
+      "type": "object"
     },
     "LooksBoardDeleteResponseDto": {
       "properties": {
@@ -5718,6 +6031,9 @@
       ],
       "type": "object"
     },
+    "LooksSocialJobType": {
+      "$ref": "#/definitions/%24Enums.LooksSocialJobType"
+    },
     "MediaAdminUploadFinalizeDTO": {
       "properties": {
         "defaultImageUrl": {
@@ -5755,6 +6071,9 @@
         "cacheBuster"
       ],
       "type": "object"
+    },
+    "MediaPhase": {
+      "$ref": "#/definitions/%24Enums.MediaPhase"
     },
     "MediaSignedUrlDTO": {
       "properties": {
@@ -6549,6 +6868,119 @@
       ],
       "type": "object"
     },
+    "ProBookingMediaCreateResponseDTO": {
+      "properties": {
+        "advancedTo": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionStep"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item": {
+          "$ref": "#/definitions/ProBookingMediaItemDTO"
+        }
+      },
+      "required": [
+        "item",
+        "advancedTo"
+      ],
+      "type": "object"
+    },
+    "ProBookingMediaItemDTO": {
+      "properties": {
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isEligibleForLooks": {
+          "type": "boolean"
+        },
+        "isFeaturedInPortfolio": {
+          "type": "boolean"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "phase": {
+          "$ref": "#/definitions/MediaPhase"
+        },
+        "renderThumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "renderUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibility": {
+          "$ref": "#/definitions/MediaVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "visibility",
+        "phase",
+        "caption",
+        "createdAt",
+        "reviewId",
+        "isEligibleForLooks",
+        "isFeaturedInPortfolio",
+        "url",
+        "thumbUrl",
+        "renderUrl",
+        "renderThumbUrl"
+      ],
+      "type": "object"
+    },
+    "ProBookingMediaListResponseDTO": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ProBookingMediaItemDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
     "ProBookingNewClientDTO": {
       "properties": {
         "avatarUrl": {
@@ -6923,6 +7355,289 @@
         "timeZone",
         "advanceNoticeMinutes",
         "createdAt"
+      ],
+      "type": "object"
+    },
+    "ProLookMutationAction": {
+      "enum": [
+        "create_draft",
+        "publish",
+        "update",
+        "archive",
+        "unpublish"
+      ],
+      "type": "string"
+    },
+    "ProLookPublicationResultDto": {
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/ProLookMutationAction"
+        },
+        "asyncEffects": {
+          "$ref": "#/definitions/LookPublicationAsyncEffectsDto"
+        },
+        "result": {
+          "$ref": "#/definitions/ProLookPublicationStateDto"
+        },
+        "target": {
+          "$ref": "#/definitions/ProLookPublicationTargetDto"
+        }
+      },
+      "required": [
+        "target",
+        "action",
+        "result",
+        "asyncEffects"
+      ],
+      "type": "object"
+    },
+    "ProLookPublicationStateDto": {
+      "properties": {
+        "adminNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "archivedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commentCount": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "likeCount": {
+          "type": "number"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "priceStartingAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "primaryMediaAssetId": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "publishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rankScore": {
+          "type": "number"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reportCount": {
+          "type": "number"
+        },
+        "reviewedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedByUserId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "saveCount": {
+          "type": "number"
+        },
+        "serviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shareCount": {
+          "type": "number"
+        },
+        "spotlightScore": {
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/definitions/LookPostStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/definitions/LookPostVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "professionalId",
+        "primaryMediaAssetId",
+        "serviceId",
+        "caption",
+        "priceStartingAt",
+        "status",
+        "visibility",
+        "moderationStatus",
+        "publishedAt",
+        "archivedAt",
+        "removedAt",
+        "reviewedAt",
+        "reviewedByUserId",
+        "adminNotes",
+        "reportCount",
+        "likeCount",
+        "commentCount",
+        "saveCount",
+        "shareCount",
+        "spotlightScore",
+        "rankScore",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ProLookPublicationTargetDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "LOOK_POST",
+          "type": "string"
+        },
+        "primaryMediaAssetId": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "professionalId",
+        "primaryMediaAssetId"
+      ],
+      "type": "object"
+    },
+    "ProMediaCreateResponseDTO": {
+      "properties": {
+        "lookPublication": {
+          "$ref": "#/definitions/ProLookPublicationResultDto"
+        },
+        "media": {
+          "$ref": "#/definitions/ProMediaCreatedDTO"
+        }
+      },
+      "required": [
+        "media"
+      ],
+      "type": "object"
+    },
+    "ProMediaCreatedDTO": {
+      "properties": {
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isEligibleForLooks": {
+          "type": "boolean"
+        },
+        "isFeaturedInPortfolio": {
+          "type": "boolean"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "primaryServiceId": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/definitions/ProMediaServiceTagDTO"
+          },
+          "type": "array"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibility": {
+          "$ref": "#/definitions/MediaVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "professionalId",
+        "primaryServiceId",
+        "mediaType",
+        "visibility",
+        "caption",
+        "isFeaturedInPortfolio",
+        "isEligibleForLooks",
+        "url",
+        "thumbUrl",
+        "createdAt",
+        "services"
+      ],
+      "type": "object"
+    },
+    "ProMediaServiceTagDTO": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "serviceId",
+        "name"
       ],
       "type": "object"
     },
@@ -7781,6 +8496,9 @@
     },
     "ServiceLocationType": {
       "$ref": "#/definitions/%24Enums.ServiceLocationType"
+    },
+    "SessionStep": {
+      "$ref": "#/definitions/%24Enums.SessionStep"
     },
     "UserDeviceDTO": {
       "properties": {

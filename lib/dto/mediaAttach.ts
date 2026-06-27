@@ -1,0 +1,141 @@
+// lib/dto/mediaAttach.ts
+//
+// Wire DTOs for the media *attach* endpoints — the three routes that persist a
+// MediaAsset (and, for portfolio uploads, a LookPost) once a signed upload has
+// landed in storage:
+//
+//   - POST /api/v1/pro/media                     (portfolio / looks upload)
+//   - GET  /api/v1/pro/bookings/[id]/media       (session media list)
+//   - POST /api/v1/pro/bookings/[id]/media       (session media upload)
+//   - POST /api/v1/client/reviews/[id]/media     (review media upload)
+//
+// Historically these returned entire Prisma rows (full MediaAsset / Review,
+// incl. internal columns like proTenantId / storageBucket / storagePath /
+// idempotencyKey). That is the raw-payload leakage #397 stripped from the wire
+// contract, so they were held out. These DTOs are the picked, JSON-safe shapes
+// the routes now build explicitly (`satisfies`-enforced at the return site):
+// internal storage pointers are dropped, Decimal/Date are serialized, and only
+// the fields a consumer could meaningfully read are carried. The `lookPublication`
+// field reuses the already-clean `ProLookPublicationResultDto` from the looks
+// publication contracts rather than re-declaring a parallel shape.
+
+import type {
+  MediaPhase,
+  MediaType,
+  MediaVisibility,
+  SessionStep,
+} from '@prisma/client'
+
+import type { ProLookPublicationResultDto } from '@/lib/looks/publication/contracts'
+
+// ── POST /api/v1/pro/media ───────────────────────────────────────────────────
+
+// One service tag on a created portfolio asset (the full Service row is NOT
+// exposed — only the id + display name).
+export type ProMediaServiceTagDTO = {
+  serviceId: string
+  name: string
+}
+
+// The created MediaAsset, picked. `url`/`thumbUrl` are the canonical public
+// pointers (null for private-bucket assets, which render via signed URLs
+// elsewhere). Internal storage columns are intentionally omitted.
+export type ProMediaCreatedDTO = {
+  id: string
+  professionalId: string
+  primaryServiceId: string
+  mediaType: MediaType
+  visibility: MediaVisibility
+  caption: string | null
+  isFeaturedInPortfolio: boolean
+  isEligibleForLooks: boolean
+  url: string | null
+  thumbUrl: string | null
+  createdAt: string // ISO-8601
+  services: ProMediaServiceTagDTO[]
+}
+
+export type ProMediaCreateResponseDTO = {
+  media: ProMediaCreatedDTO
+  // Present only when the upload was eligible for Looks and a LookPost was
+  // created/updated. Reuses the looks publication wire DTO.
+  lookPublication?: ProLookPublicationResultDto
+}
+
+// ── GET + POST /api/v1/pro/bookings/[id]/media ───────────────────────────────
+
+// A booking-session media item. `renderUrl`/`renderThumbUrl` are short-lived
+// signed URLs (private bucket, ~10-min TTL); `url`/`thumbUrl` mirror them so a
+// consumer reading either key gets a usable URL. Storage pointers are dropped.
+export type ProBookingMediaItemDTO = {
+  id: string
+  mediaType: MediaType
+  visibility: MediaVisibility
+  phase: MediaPhase
+  caption: string | null
+  createdAt: string // ISO-8601
+  reviewId: string | null
+  isEligibleForLooks: boolean
+  isFeaturedInPortfolio: boolean
+  url: string | null
+  thumbUrl: string | null
+  renderUrl: string | null
+  renderThumbUrl: string | null
+}
+
+// GET — the list for a booking (optionally filtered by phase).
+export type ProBookingMediaListResponseDTO = {
+  items: ProBookingMediaItemDTO[]
+}
+
+// POST — the freshly-attached item plus the session step it advanced to (null
+// when no advance happened).
+export type ProBookingMediaCreateResponseDTO = {
+  item: ProBookingMediaItemDTO
+  advancedTo: SessionStep | null
+}
+
+// ── POST /api/v1/client/reviews/[id]/media ───────────────────────────────────
+
+// A review media asset summary (no signed render URLs — these are the stored
+// public pointers from the review row).
+export type ClientReviewMediaAssetSummaryDTO = {
+  id: string
+  mediaType: MediaType
+  visibility: MediaVisibility
+  createdAt: string // ISO-8601
+  url: string | null
+  thumbUrl: string | null
+}
+
+// A freshly-created review media asset, carrying the signed render URLs the
+// client just resolved (private review media renders via these).
+export type ClientReviewMediaCreatedDTO = {
+  id: string
+  mediaType: MediaType
+  visibility: MediaVisibility
+  createdAt: string // ISO-8601
+  url: string | null
+  thumbUrl: string | null
+  renderUrl: string | null
+  renderThumbUrl: string | null
+}
+
+// The review the media was attached to, picked. Internal columns
+// (idempotencyKey / requestId / clientId / helpfulCount) are omitted.
+export type ClientReviewMediaReviewDTO = {
+  id: string
+  rating: number
+  headline: string | null
+  body: string | null
+  createdAt: string // ISO-8601
+  professionalId: string
+  bookingId: string | null
+  mediaAssets: ClientReviewMediaAssetSummaryDTO[]
+}
+
+export type ClientReviewMediaCreateResponseDTO = {
+  createdCount: number
+  created: ClientReviewMediaCreatedDTO[]
+  review: ClientReviewMediaReviewDTO | null
+}

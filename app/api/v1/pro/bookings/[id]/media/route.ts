@@ -1,6 +1,12 @@
 // app/api/v1/pro/bookings/[id]/media/route.ts
 
-import { MediaPhase, MediaType, Role, UploadSurface } from '@prisma/client'
+import {
+  MediaPhase,
+  MediaType,
+  MediaVisibility,
+  Role,
+  UploadSurface,
+} from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
@@ -35,6 +41,11 @@ import {
   listProBookingMedia,
   parseMediaPhase,
 } from '@/lib/proBookingMedia'
+import type {
+  ProBookingMediaCreateResponseDTO,
+  ProBookingMediaItemDTO,
+  ProBookingMediaListResponseDTO,
+} from '@/lib/dto/mediaAttach'
 import { safeError } from '@/lib/security/logging'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
@@ -126,6 +137,39 @@ async function objectExistsViaSignedUrl(
   }
 }
 
+// Picks a booking-session media row (list row or freshly-uploaded asset) into
+// the wire DTO: `createdAt` → ISO, storage pointers dropped, and `url`/`thumbUrl`
+// mirror the signed render URLs (matching listProBookingMedia's own override).
+function toProBookingMediaItemDTO(media: {
+  id: string
+  mediaType: MediaType
+  visibility: MediaVisibility
+  phase: MediaPhase
+  caption: string | null
+  createdAt: Date
+  reviewId: string | null
+  isEligibleForLooks: boolean
+  isFeaturedInPortfolio: boolean
+  renderUrl: string | null
+  renderThumbUrl: string | null
+}): ProBookingMediaItemDTO {
+  return {
+    id: media.id,
+    mediaType: media.mediaType,
+    visibility: media.visibility,
+    phase: media.phase,
+    caption: media.caption,
+    createdAt: media.createdAt.toISOString(),
+    reviewId: media.reviewId,
+    isEligibleForLooks: media.isEligibleForLooks,
+    isFeaturedInPortfolio: media.isFeaturedInPortfolio,
+    url: media.renderUrl,
+    thumbUrl: media.renderThumbUrl,
+    renderUrl: media.renderUrl,
+    renderThumbUrl: media.renderThumbUrl,
+  }
+}
+
 export async function GET(req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
@@ -160,7 +204,12 @@ export async function GET(req: Request, ctx: RouteContext) {
       return jsonFail(outcome.status, outcome.error)
     }
 
-    return jsonOk({ items: outcome.items }, 200)
+    const items = outcome.items.map(toProBookingMediaItemDTO)
+
+    return jsonOk(
+      { items } satisfies ProBookingMediaListResponseDTO,
+      200,
+    )
   } catch (error: unknown) {
     console.error('GET /api/v1/pro/bookings/[id]/media error', {
       error: safeError(error),
@@ -389,21 +438,15 @@ export async function POST(req: Request, ctx: RouteContext) {
       thumbUrl: result.created.thumbUrl,
     })
 
-    const responseBody = normalizeJsonObjectPayload({
-      item: {
-        ...result.created,
-        renderUrl,
-        renderThumbUrl,
-        url: renderUrl,
-        thumbUrl: renderThumbUrl,
-      },
+    const responseBody = {
+      item: toProBookingMediaItemDTO({ ...result.created, renderUrl, renderThumbUrl }),
       advancedTo: result.advancedTo,
-    })
+    } satisfies ProBookingMediaCreateResponseDTO
 
     await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
-      responseBody,
+      responseBody: normalizeJsonObjectPayload(responseBody),
     })
 
     return jsonOk(responseBody, 200)

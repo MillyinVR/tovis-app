@@ -22,6 +22,10 @@ import {
   validateUploadSession,
 } from '@/lib/media/uploadSession'
 import { createOrUpdateProLookFromMediaAsset } from '@/lib/looks/publication/service'
+import type {
+  ProMediaCreatedDTO,
+  ProMediaCreateResponseDTO,
+} from '@/lib/dto/mediaAttach'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { safeError } from '@/lib/security/logging'
 
@@ -365,13 +369,31 @@ export async function POST(req: Request) {
       }
     })
 
+    const media = {
+      id: result.media.id,
+      professionalId: result.media.professionalId,
+      primaryServiceId: result.media.primaryServiceId,
+      mediaType: result.media.mediaType,
+      visibility: result.media.visibility,
+      caption: result.media.caption,
+      isFeaturedInPortfolio: result.media.isFeaturedInPortfolio,
+      isEligibleForLooks: result.media.isEligibleForLooks,
+      url: result.media.url,
+      thumbUrl: result.media.thumbUrl,
+      createdAt: result.media.createdAt.toISOString(),
+      services: result.media.services.map((tag) => ({
+        serviceId: tag.serviceId,
+        name: tag.service.name,
+      })),
+    } satisfies ProMediaCreatedDTO
+
     return jsonOk(
       {
-        media: result.media,
+        media,
         ...(result.lookPublication
           ? { lookPublication: result.lookPublication }
           : {}),
-      },
+      } satisfies ProMediaCreateResponseDTO,
       201,
     )
   } catch (e: unknown) {
