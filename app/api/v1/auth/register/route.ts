@@ -57,6 +57,7 @@ import {
   buildUserContactLookupData,
 } from '@/lib/security/contactLookup'
 import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
+import { buildEmailEncryptionWriteData } from '@/lib/security/emailPrivacy'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 
 export const dynamic = 'force-dynamic'
@@ -1026,6 +1027,7 @@ export async function POST(request: Request) {
           email,
           phone,
           ...buildUserContactLookupData({ email, phone }),
+          ...buildEmailEncryptionWriteData({ email }),
           ...buildPhoneEncryptionWriteData({ phone }),
           phoneVerifiedAt: null,
           emailVerifiedAt: null,
@@ -1049,6 +1051,7 @@ export async function POST(request: Request) {
                     lastName,
                     phone,
                     ...buildClientProfileContactLookupData({ email, phone }),
+                    ...buildEmailEncryptionWriteData({ email }),
                     ...buildPhoneEncryptionWriteData({ phone }),
                     phoneVerifiedAt: null,
                   },

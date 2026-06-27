@@ -1196,6 +1196,11 @@ model User {
   email               String    @unique @db.VarChar(320)
   emailHashV2         String?   @unique @db.VarChar(128)
   emailHashKeyVersion Int?
+  // AEAD-encrypted envelope for the displayable email (expand→contract dual-write;
+  // mirrors phoneEncrypted). The plaintext `email` column above remains the source
+  // of truth during burn-in and is dropped in the contract migration; the lookup
+  // hash (emailHashV2) is the separate, untouched query anchor.
+  emailEncrypted      Json?
   phone               String?   @unique @db.VarChar(32)
   phoneHashV2         String?   @unique @db.VarChar(128)
   phoneHashKeyVersion Int?
@@ -1379,6 +1384,10 @@ model ClientProfile {
   email               String?   @unique @db.VarChar(320)
   emailHashV2         String?   @unique @db.VarChar(128)
   emailHashKeyVersion Int?
+  // AEAD-encrypted envelope for the displayable email (expand→contract dual-write;
+  // mirrors User.emailEncrypted). Plaintext `email` stays the source of truth during
+  // burn-in; lookup hash (emailHashV2) is the separate, untouched query anchor.
+  emailEncrypted      Json?
   phone               String?   @unique @db.VarChar(32)
   phoneHashV2         String?   @unique @db.VarChar(128)
   phoneHashKeyVersion Int?

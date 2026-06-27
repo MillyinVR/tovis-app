@@ -85,6 +85,7 @@
     "backfill:notes-encryption": "tsx prisma/scripts/backfillNotesEncryption.ts",
     "backfill:phone-encryption": "tsx prisma/scripts/backfillPhoneEncryption.ts",
     "backfill:contact-hash-v2": "tsx prisma/scripts/backfillContactHashV2.ts",
+    "backfill:email-encryption": "tsx prisma/scripts/backfillEmailEncryption.ts",
     "backfill:contact-hash-v2:test": "DATABASE_URL=postgresql://postgres:postgres@localhost:5433/tovis_test DIRECT_URL=postgresql://postgres:postgres@localhost:5433/tovis_test dotenv -e .env.local -- pnpm backfill:contact-hash-v2 -- --write",
     "backfill:contact-hash-v2:dev": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev dotenv -e .env.local -- pnpm backfill:contact-hash-v2 -- --write",
     "seed:booking-overrides": "tsx prisma/seeds/bookingOverridePermissions.ts",
