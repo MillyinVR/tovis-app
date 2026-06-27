@@ -5051,8 +5051,109 @@
       ],
       "type": "object"
     },
+    "MediaAdminUploadFinalizeDTO": {
+      "properties": {
+        "defaultImageUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "defaultImageUrl"
+      ],
+      "type": "object"
+    },
+    "MediaAdminUploadInitDTO": {
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "cacheBuster": {
+          "type": "number"
+        },
+        "path": {
+          "type": "string"
+        },
+        "publicUrl": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bucket",
+        "path",
+        "token",
+        "publicUrl",
+        "cacheBuster"
+      ],
+      "type": "object"
+    },
+    "MediaSignedUrlDTO": {
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "MediaType": {
       "$ref": "#/definitions/%24Enums.MediaType"
+    },
+    "MediaUploadInitDTO": {
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "cacheBuster": {
+          "type": "number"
+        },
+        "isPublic": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "publicUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signedUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token": {
+          "type": "string"
+        },
+        "uploadSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "bucket",
+        "path",
+        "token",
+        "signedUrl",
+        "publicUrl",
+        "isPublic",
+        "cacheBuster",
+        "uploadSessionId"
+      ],
+      "type": "object"
     },
     "MediaVisibility": {
       "$ref": "#/definitions/%24Enums.MediaVisibility"

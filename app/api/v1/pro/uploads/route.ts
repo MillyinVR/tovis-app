@@ -1,6 +1,7 @@
 // app/api/v1/pro/uploads/route.ts
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
+import type { MediaUploadInitDTO } from '@/lib/dto/media'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
@@ -245,7 +246,8 @@ export async function POST(req: Request) {
       })
     }
 
-    const signedUrl = typeof (data as Record<string, unknown>).signedUrl === 'string' ? (data as Record<string, unknown>).signedUrl : null
+    const signedUrlRaw = (data as Record<string, unknown>).signedUrl
+    const signedUrl = typeof signedUrlRaw === 'string' ? signedUrlRaw : null
     const publicUrl = isPublic ? `${base}/storage/v1/object/public/${bucket}/${path}` : null
 
     // For surfaces that produce a MediaAsset, bind this signed upload to a
@@ -275,13 +277,13 @@ export async function POST(req: Request) {
         kind,
         bucket,
         path,
-        token: data.token,
+        token: (data as { token: string }).token,
         signedUrl,
         publicUrl,
         isPublic,
         cacheBuster: Date.now(),
         uploadSessionId,
-      },
+      } satisfies MediaUploadInitDTO,
       200,
     )
   } catch (e) {

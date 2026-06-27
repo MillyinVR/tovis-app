@@ -33,6 +33,14 @@ export type {
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 
+// ── Media signing / URL resolution (GET /api/v1/media/url, POST */uploads) ───
+export type {
+  MediaSignedUrlDTO,
+  MediaUploadInitDTO,
+  MediaAdminUploadInitDTO,
+  MediaAdminUploadFinalizeDTO,
+} from '@/lib/dto/media'
+
 // ── Messaging (GET/POST /api/v1/messages/*) ──────────────────────────────────
 export type {
   MessageThreadClientPreviewDTO,
