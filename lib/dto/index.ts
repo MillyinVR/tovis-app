@@ -105,12 +105,15 @@ export type {
 } from '@/lib/contracts/proLocations'
 
 // ── Follows ───────────────────────────────────────────────────────────────────
+// NOTE: the internal pre-serialization types `FollowingListItem` /
+// `FollowerListItem` (and their `*ListPage` containers) are deliberately NOT
+// re-exported here — they embed raw `Prisma.*GetPayload` rows
+// (`FollowProfessionalPreviewRow` / `FollowClientPreviewRow`), which leaked
+// `DefaultSelection<Prisma.$…Payload, …>` gibberish into the generated JSON
+// Schema. The wire contract is the `*Dto` variants below; they carry the
+// JSON-safe `*PreviewDto` shapes instead.
 export type {
-  FollowingListItem,
-  FollowerListItem,
   FollowPagination,
-  FollowingListPage,
-  FollowersListPage,
   ProfessionalFollowState,
   ProFollowStateResponseDto,
   FollowClientPreviewDto,
