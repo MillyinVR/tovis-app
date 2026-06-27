@@ -614,6 +614,17 @@
       ],
       "type": "object"
     },
+    "AuthPhoneLoginSendResponseDTO": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
     "AuthPhoneVerifyResponseDTO": {
       "properties": {
         "alreadyVerified": {

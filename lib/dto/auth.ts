@@ -50,6 +50,13 @@ export type AuthRefreshResponseDTO = {
   token: string
 }
 
+// POST /api/v1/auth/phone-login/send — always generic (enumeration-safe).
+export type AuthPhoneLoginSendResponseDTO = {
+  message: string
+}
+
+// POST /api/v1/auth/phone-login/verify reuses AuthLoginResponseDTO.
+
 // POST /api/v1/auth/phone/verify — token is null until the session is fully
 // verified (and on the already-verified early return, which mints no new token).
 export type AuthPhoneVerifyResponseDTO = {
