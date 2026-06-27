@@ -1,14 +1,11 @@
 // app/professionals/[id]/page.tsx
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { BookingStatus, MediaVisibility, Role } from '@prisma/client'
 
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { getCurrentUser } from '@/lib/currentUser'
 import { messageStartHref } from '@/lib/messages'
-import type { ClientLinkViewer } from '@/lib/profiles/profileHrefs'
 import { prisma } from '@/lib/prisma'
-import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import {
   buildLoginHref,
   buildProfessionalProfileHref,
@@ -21,23 +18,15 @@ import {
   type PublicProfileSearchParams,
 } from '@/lib/profiles/publicProfileFormatting'
 import {
-  mapPublicOfferingsToDtos,
-  mapPublicPortfolioTilesToDtos,
-  mapPublicProfileHeaderToDto,
-  mapPublicProfileStatsToDto,
-  mapPublicReviewsToDtos,
-} from '@/lib/profiles/publicProfileMappers'
-import {
-  PUBLIC_PROFILE_LIMITS,
-  publicOfferingSelect,
-  publicPortfolioMediaAssetSelect,
-  publicProfessionalProfileSelect,
-  publicReviewSelect,
-} from '@/lib/profiles/publicProfileSelects'
-import {
   listPublicAcceptedMethods,
   publicPaymentMethodsSelect,
 } from '@/lib/payments/publicAcceptedMethods'
+
+import {
+  loadPortfolioTiles,
+  loadProPublicProfileBase,
+  loadReviewsForUi,
+} from './_data/loadProPublicProfile'
 
 import AcceptedPayments from './AcceptedPayments'
 import PortfolioGrid from './PortfolioGrid'
@@ -63,129 +52,60 @@ export default async function PublicProfessionalProfilePage({
 
   const viewer = await getCurrentUser().catch(() => null)
 
-  const profileRow = await prisma.professionalProfile.findUnique({
-    where: { id },
-    select: publicProfessionalProfileSelect,
+  const baseResult = await loadProPublicProfileBase({
+    professionalId: id,
+    viewer,
   })
 
-  if (!profileRow) notFound()
-
-  const canViewPublicSurface = canViewerSeeProPublicSurface({
-    viewerRole: viewer?.role ?? null,
-    viewerProfessionalId: viewer?.professionalProfile?.id ?? null,
-    professionalId: profileRow.id,
-    verificationStatus: profileRow.verificationStatus,
-  })
-
-  if (!canViewPublicSurface) {
+  if (baseResult.kind === 'not-found') notFound()
+  if (baseResult.kind === 'not-viewable') {
     return <PendingVerificationSurface />
   }
 
-  const viewerUserId = viewer?.role === Role.CLIENT ? viewer.id : null
+  const { header, stats, offerings, isFavoritedByMe, viewerUserId } =
+    baseResult.base
+  const professionalId = baseResult.base.professionalId
   const isClientViewer = viewerUserId !== null
 
-  const [
-    reviewStats,
-    favoritesCount,
-    completedBookingCount,
-    offeringRows,
-    favoriteRow,
-    paymentSettingsRow,
-  ] = await Promise.all([
-    prisma.review.aggregate({
-      where: { professionalId: profileRow.id },
-      _count: { _all: true },
-      _avg: { rating: true },
-    }),
-
-    prisma.professionalFavorite.count({
-      where: { professionalId: profileRow.id },
-    }),
-
-    prisma.booking.count({
-      where: {
-        professionalId: profileRow.id,
-        status: BookingStatus.COMPLETED,
-      },
-    }),
-
-    prisma.professionalServiceOffering.findMany({
-      where: {
-        professionalId: profileRow.id,
-        isActive: true,
-      },
-      orderBy: { createdAt: 'asc' },
-      take: PUBLIC_PROFILE_LIMITS.offerings,
-      select: publicOfferingSelect,
-    }),
-
-    viewerUserId
-      ? prisma.professionalFavorite.findUnique({
-          where: {
-            professionalId_userId: {
-              professionalId: profileRow.id,
-              userId: viewerUserId,
-            },
-          },
-          select: { id: true },
-        })
-      : Promise.resolve(null),
-
-    prisma.professionalPaymentSettings.findUnique({
-      where: { professionalId: profileRow.id },
-      select: publicPaymentMethodsSelect,
-    }),
-  ])
+  // Accepted-payments + message href stay in the page (UI-only / not part of the
+  // native profile DTO).
+  const paymentSettingsRow = await prisma.professionalPaymentSettings.findUnique({
+    where: { professionalId },
+    select: publicPaymentMethodsSelect,
+  })
 
   const acceptedPayments = listPublicAcceptedMethods(paymentSettingsRow)
 
-  const header = mapPublicProfileHeaderToDto(profileRow)
-  const offerings = mapPublicOfferingsToDtos(offeringRows)
-
-  const reviewCount = reviewStats._count._all
-  const averageRating = reviewStats._avg.rating ?? null
-
-  const stats = mapPublicProfileStatsToDto({
-    offerings: offeringRows,
-    completedBookingCount,
-    favoritesCount,
-    reviewCount,
-    averageRating,
-  })
-
   const portfolioTiles =
-    activeTab === 'portfolio'
-      ? await loadPortfolioTiles(profileRow.id)
-      : []
+    activeTab === 'portfolio' ? await loadPortfolioTiles(professionalId) : []
 
   const reviewsForUI =
     activeTab === 'reviews'
       ? await loadReviewsForUi({
-          professionalId: profileRow.id,
+          professionalId,
           viewerUserId,
           clientLinkViewer: await loadClientLinkViewer(viewer),
         })
       : []
 
   const fromPath = buildPublicProfileFromPath({
-    professionalId: profileRow.id,
+    professionalId,
     tab: activeTab,
   })
 
   const messageHref = viewer
     ? messageStartHref({
         kind: 'PRO_PROFILE',
-        professionalId: profileRow.id,
+        professionalId,
       })
     : buildLoginHref(fromPath)
 
   const servicesHref = buildProfessionalProfileHref({
-    professionalId: profileRow.id,
+    professionalId,
     tab: 'services',
   })
 
-  const tabs = buildPublicProfileTabs(profileRow.id)
-  const isFavoritedByMe = Boolean(favoriteRow)
+  const tabs = buildPublicProfileTabs(professionalId)
 
   return (
     <main className="brand-profile-page min-h-screen pb-28">
@@ -212,7 +132,7 @@ export default async function PublicProfessionalProfilePage({
 
         {activeTab === 'services' ? (
           <ServicesPanel
-            professionalId={profileRow.id}
+            professionalId={professionalId}
             offerings={offerings}
             emptyMessage={formatServicesEmptyMessage()}
           />
@@ -228,59 +148,6 @@ export default async function PublicProfessionalProfilePage({
       </div>
     </main>
   )
-}
-
-async function loadPortfolioTiles(professionalId: string) {
-  const portfolioRows = await prisma.mediaAsset.findMany({
-    where: {
-      professionalId,
-      visibility: MediaVisibility.PUBLIC,
-      isFeaturedInPortfolio: true,
-    },
-    orderBy: { createdAt: 'desc' },
-    take: PUBLIC_PROFILE_LIMITS.portfolioTiles,
-    select: publicPortfolioMediaAssetSelect,
-  })
-
-  return mapPublicPortfolioTilesToDtos(portfolioRows)
-}
-
-async function loadReviewsForUi(args: {
-  professionalId: string
-  viewerUserId: string | null
-  clientLinkViewer: ClientLinkViewer
-}) {
-  const reviews = await prisma.review.findMany({
-    where: { professionalId: args.professionalId },
-    orderBy: { createdAt: 'desc' },
-    take: PUBLIC_PROFILE_LIMITS.reviews,
-    select: publicReviewSelect,
-  })
-
-  if (!args.viewerUserId || reviews.length === 0) {
-    return mapPublicReviewsToDtos({
-      reviews,
-      clientLinkViewer: args.clientLinkViewer,
-    })
-  }
-
-  const helpfulRows = await prisma.reviewHelpful.findMany({
-    where: {
-      userId: args.viewerUserId,
-      reviewId: {
-        in: reviews.map((review) => review.id),
-      },
-    },
-    select: { reviewId: true },
-  })
-
-  return mapPublicReviewsToDtos({
-    reviews,
-    viewerHelpfulReviewIds: new Set(
-      helpfulRows.map((row) => row.reviewId),
-    ),
-    clientLinkViewer: args.clientLinkViewer,
-  })
 }
 
 function PendingVerificationSurface() {

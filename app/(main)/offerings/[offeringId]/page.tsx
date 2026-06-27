@@ -4,29 +4,13 @@
 // the last-minute notifications, and (later) the client openings feed. Loads + validates the
 // opening, shows it priced with its incentive, and hands off to ClaimClient (hold → finalize).
 import Link from 'next/link'
-import {
-  LastMinuteOfferType,
-  OpeningStatus,
-  ServiceLocationType,
-} from '@prisma/client'
 
-import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { openingSelect } from '@/lib/lastMinute/openingSelect'
-import {
-  pickPublicTierPlan,
-  pickRecipientTierPlan,
-} from '@/lib/lastMinute/pickTierPlan'
-import { moneyToString } from '@/lib/money'
-import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
-import {
-  buildLoginHref,
-  formatProfessionLabel,
-  formatPublicProfileDisplayName,
-} from '@/lib/profiles/publicProfileFormatting'
+import { buildLoginHref } from '@/lib/profiles/publicProfileFormatting'
 
 import ClaimClient from './ClaimClient'
 import PresenceSignals from './PresenceSignals'
+import { loadOfferingDetail } from './_data/loadOfferingDetail'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,12 +22,6 @@ type PageProps = {
 function firstParam(value: string | string[] | undefined): string | null {
   if (!value) return null
   return Array.isArray(value) ? (value[0] ?? null) : value
-}
-
-function minuteMs(date: Date): number {
-  const d = new Date(date)
-  d.setSeconds(0, 0)
-  return d.getTime()
 }
 
 const SECTION_CLASS =
@@ -95,104 +73,35 @@ export default async function ClaimOpeningPage(props: PageProps) {
   const user = await getCurrentUser().catch(() => null)
   const clientId = user?.clientProfile?.id ?? null
 
-  const opening = openingId
-    ? await prisma.lastMinuteOpening.findUnique({
-        where: { id: openingId },
-        select: openingSelect,
-      })
-    : null
+  const detail = await loadOfferingDetail({
+    offeringId,
+    openingId,
+    scheduledForRaw,
+    clientId,
+  })
 
-  const serviceRow = opening?.services.find((row) => row.offeringId === offeringId) ?? null
-  const scheduledFor = scheduledForRaw ? new Date(scheduledForRaw) : null
-
-  const claimable = Boolean(
-    opening &&
-      serviceRow &&
-      opening.status === OpeningStatus.ACTIVE &&
-      !opening.bookedAt &&
-      !opening.cancelledAt &&
-      scheduledFor &&
-      !Number.isNaN(scheduledFor.getTime()) &&
-      minuteMs(scheduledFor) === minuteMs(opening.startAt),
-  )
-
-  if (!opening || !serviceRow || !claimable) {
+  if (!detail.claimable) {
     return <UnavailableView />
   }
 
-  // Resolve the incentive the SAME way finalize charges it (recipient tier if notified, else
-  // public) so the displayed price matches what the client will pay.
-  const recipient = clientId
-    ? await prisma.lastMinuteRecipient.findUnique({
-        where: { openingId_clientId: { openingId: opening.id, clientId } },
-        select: { notifiedTier: true, firstMatchedTier: true },
-      })
-    : null
-
-  const tierPlan = recipient
-    ? pickRecipientTierPlan({
-        notifiedTier: recipient.notifiedTier,
-        firstMatchedTier: recipient.firstMatchedTier,
-        tierPlans: opening.tierPlans,
-      })
-    : pickPublicTierPlan(
-        { visibilityMode: opening.visibilityMode, tierPlans: opening.tierPlans },
-        new Date(),
-      )
-
-  const offering = serviceRow.offering
-  const isMobile = opening.locationType === ServiceLocationType.MOBILE
-
-  const baseStr =
-    (isMobile
-      ? moneyToString(offering.mobilePriceStartingAt)
-      : moneyToString(offering.salonPriceStartingAt)) ??
-    moneyToString(serviceRow.service.minPrice)
-  const baseNum = baseStr ? Number(baseStr) : null
-
-  let incentiveLabel: string | null = null
-  let discountedStr: string | null = null
-  if (tierPlan && baseNum != null && Number.isFinite(baseNum)) {
-    if (tierPlan.offerType === LastMinuteOfferType.PERCENT_OFF && tierPlan.percentOff) {
-      incentiveLabel = `${tierPlan.percentOff}% off`
-      discountedStr = moneyToString(Math.max(0, baseNum * (1 - tierPlan.percentOff / 100)))
-    } else if (tierPlan.offerType === LastMinuteOfferType.AMOUNT_OFF && tierPlan.amountOff) {
-      const amount = Number(tierPlan.amountOff.toString())
-      if (Number.isFinite(amount) && amount > 0) {
-        incentiveLabel = `$${moneyToString(amount) ?? amount} off`
-        discountedStr = moneyToString(Math.max(0, baseNum - amount))
-      }
-    } else if (
-      tierPlan.offerType === LastMinuteOfferType.FREE_SERVICE ||
-      tierPlan.offerType === LastMinuteOfferType.FREE_ADD_ON
-    ) {
-      // Not applied as a price discount in v1 — show a neutral marker, never a number we won't charge.
-      incentiveLabel = 'Special offer'
-    }
-  }
-
-  const serviceName = offering.title?.trim() || serviceRow.service.name
-  const proName = formatPublicProfileDisplayName({
-    businessName: opening.professional.businessName,
-    fallback: 'Your pro',
-  })
-  const profession = formatProfessionLabel(opening.professional.professionType)
-  const when = formatAppointmentWhen(opening.startAt, opening.timeZone)
-  const place = isMobile
-    ? 'Mobile'
-    : [opening.location?.city, opening.location?.state].filter(Boolean).join(', ') || null
-  const durationMin =
-    (isMobile ? offering.mobileDurationMinutes : offering.salonDurationMinutes) ??
-    serviceRow.service.defaultDurationMinutes
-
-  let defaultAddressId: string | null = null
-  if (clientId && isMobile) {
-    const addr = await prisma.clientAddress.findFirst({
-      where: { clientId, isDefault: true },
-      select: { id: true },
-    })
-    defaultAddressId = addr?.id ?? null
-  }
+  const {
+    serviceName,
+    proName,
+    profession,
+    when,
+    place,
+    durationMin,
+    baseStr,
+    discountedStr,
+    incentiveLabel,
+    isMobile,
+    defaultAddressId,
+    locationId,
+    scheduledForIso,
+    professionalId,
+    serviceId,
+    openingId: resolvedOpeningId,
+  } = detail
 
   return (
     <Shell>
@@ -247,19 +156,19 @@ export default async function ClaimOpeningPage(props: PageProps) {
 
         <PresenceSignals
           resourceType="opening"
-          resourceId={opening.id}
-          professionalId={opening.professionalId}
-          serviceId={serviceRow.serviceId}
+          resourceId={resolvedOpeningId}
+          professionalId={professionalId}
+          serviceId={serviceId}
         />
       </div>
 
       <div className="mt-6">
         <ClaimClient
           offeringId={offeringId}
-          openingId={opening.id}
-          scheduledFor={opening.startAt.toISOString()}
+          openingId={resolvedOpeningId}
+          scheduledFor={scheduledForIso}
           locationType={isMobile ? 'MOBILE' : 'SALON'}
-          locationId={opening.locationId}
+          locationId={locationId}
           defaultAddressId={defaultAddressId}
           isAuthed={Boolean(clientId)}
           loginHref={buildLoginHref(claimUrl)}
