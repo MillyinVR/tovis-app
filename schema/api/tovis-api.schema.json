@@ -564,6 +564,177 @@
       ],
       "type": "object"
     },
+    "BookingHoldCreateDTO": {
+      "properties": {
+        "clientAddressId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientAddressSnapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationTimeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "scheduledFor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "expiresAt",
+        "scheduledFor",
+        "locationType",
+        "locationId",
+        "locationTimeZone",
+        "clientAddressId",
+        "clientAddressSnapshot"
+      ],
+      "type": "object"
+    },
+    "BookingHoldCreateResponseDTO": {
+      "properties": {
+        "hold": {
+          "$ref": "#/definitions/BookingHoldCreateDTO"
+        },
+        "meta": {
+          "$ref": "#/definitions/MutationMetaDTO"
+        }
+      },
+      "required": [
+        "hold",
+        "meta"
+      ],
+      "type": "object"
+    },
+    "BookingHoldDTO": {
+      "properties": {
+        "expired": {
+          "type": "boolean"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "locationAddressSnapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationLatSnapshot": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "locationLngSnapshot": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "locationTimeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "offeringId": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "scheduledFor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "scheduledFor",
+        "expiresAt",
+        "expired",
+        "professionalId",
+        "offeringId",
+        "locationType",
+        "locationId",
+        "locationTimeZone",
+        "locationAddressSnapshot",
+        "locationLatSnapshot",
+        "locationLngSnapshot"
+      ],
+      "type": "object"
+    },
+    "BookingHoldDeleteResponseDTO": {
+      "properties": {
+        "deleted": {
+          "type": "boolean"
+        },
+        "holdId": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/definitions/MutationMetaDTO"
+        }
+      },
+      "required": [
+        "deleted",
+        "holdId",
+        "meta"
+      ],
+      "type": "object"
+    },
+    "BookingHoldGetResponseDTO": {
+      "properties": {
+        "hold": {
+          "$ref": "#/definitions/BookingHoldDTO"
+        }
+      },
+      "required": [
+        "hold"
+      ],
+      "type": "object"
+    },
     "BookingServiceItemType": {
       "$ref": "#/definitions/%24Enums.BookingServiceItemType"
     },
@@ -4598,6 +4769,21 @@
     },
     "ModerationStatus": {
       "$ref": "#/definitions/%24Enums.ModerationStatus"
+    },
+    "MutationMetaDTO": {
+      "properties": {
+        "mutated": {
+          "type": "boolean"
+        },
+        "noOp": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mutated",
+        "noOp"
+      ],
+      "type": "object"
     },
     "MyFollowingListResponseDto": {
       "properties": {

@@ -16,6 +16,7 @@ import {
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { createHold } from '@/lib/booking/writeBoundary'
+import type { BookingHoldCreateResponseDTO } from '@/lib/dto/holds'
 import {
   bookingEntryPointFromHoldContext,
   parseBookingEntryPointSource,
@@ -322,9 +323,18 @@ export async function POST(req: NextRequest) {
     return withServerTiming(
       jsonOk(
         {
-          hold: result.hold,
+          hold: {
+            id: result.hold.id,
+            expiresAt: result.hold.expiresAt.toISOString(),
+            scheduledFor: result.hold.scheduledFor.toISOString(),
+            locationType: result.hold.locationType,
+            locationId: result.hold.locationId,
+            locationTimeZone: result.hold.locationTimeZone,
+            clientAddressId: result.hold.clientAddressId,
+            clientAddressSnapshot: result.hold.clientAddressSnapshot,
+          },
           meta: result.meta,
-        },
+        } satisfies BookingHoldCreateResponseDTO,
         201,
       ),
       buildServerTimingMetrics(),

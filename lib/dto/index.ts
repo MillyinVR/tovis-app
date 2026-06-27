@@ -33,6 +33,16 @@ export type {
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 
+// ── Booking holds (POST /api/v1/holds, GET/DELETE /api/v1/holds/[id]) ─────────
+export type {
+  BookingHoldDTO,
+  BookingHoldCreateDTO,
+  MutationMetaDTO,
+  BookingHoldGetResponseDTO,
+  BookingHoldCreateResponseDTO,
+  BookingHoldDeleteResponseDTO,
+} from '@/lib/dto/holds'
+
 // ── Push device registration (POST/DELETE /api/v1/devices) ───────────────────
 export type { DeviceTokenDTO } from '@/lib/dto/deviceToken'
 
