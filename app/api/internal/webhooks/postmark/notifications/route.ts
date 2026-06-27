@@ -4,6 +4,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { NotificationProvider } from '@prisma/client'
 
 import { applyDeliveryWebhookUpdate } from '@/lib/notifications/webhooks/applyDeliveryWebhookUpdate'
+import { safeError } from '@/lib/security/logging'
 import { readPostmarkDeliveryWebhookFromRequest } from '@/lib/notifications/webhooks/postmark'
 
 export const dynamic = 'force-dynamic'
@@ -55,7 +56,7 @@ export async function POST(request: Request) {
   } catch (error: unknown) {
     console.error(
       'POST /api/internal/webhooks/postmark/notifications error',
-      error,
+      { error: safeError(error) },
     )
 
     return jsonFail(500, 'Internal server error', {

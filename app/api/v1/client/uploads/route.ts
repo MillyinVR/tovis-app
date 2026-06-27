@@ -1,6 +1,7 @@
 // app/api/v1/client/uploads/route.ts
 import { MediaPhase } from '@prisma/client'
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { safeError } from '@/lib/security/logging'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { prisma } from '@/lib/prisma'
 import { extensionForContentType } from '@/lib/media/contentType'
@@ -132,7 +133,7 @@ export async function POST(req: Request) {
       uploadSessionId,
     })
   } catch (e: unknown) {
-    console.error('POST /api/v1/client/uploads error', e)
+    console.error('POST /api/v1/client/uploads error', { error: safeError(e) })
     const msg = e instanceof Error ? e.message : 'Internal server error'
     return jsonFail(500, msg)
   }

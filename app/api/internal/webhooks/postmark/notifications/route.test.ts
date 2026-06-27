@@ -621,7 +621,7 @@ describe('app/api/internal/webhooks/postmark/notifications/route', () => {
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'POST /api/internal/webhooks/postmark/notifications error',
-        expect.any(Error),
+        { error: { name: 'Error', message: expect.any(String) } },
       )
     } finally {
       consoleErrorSpy.mockRestore()

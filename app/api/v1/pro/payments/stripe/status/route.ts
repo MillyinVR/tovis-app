@@ -2,6 +2,7 @@ import { Prisma, StripeAccountStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
+import { safeError } from '@/lib/security/logging'
 import { getStripe } from '@/lib/stripe/server'
 
 export const dynamic = 'force-dynamic'
@@ -166,7 +167,9 @@ export async function GET() {
       200,
     )
   } catch (error: unknown) {
-    console.error('GET /api/v1/pro/payments/stripe/status error', error)
+    console.error('GET /api/v1/pro/payments/stripe/status error', {
+      error: safeError(error),
+    })
 
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       return jsonFail(400, 'Database rejected the Stripe status update.', {

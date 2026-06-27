@@ -13,6 +13,7 @@ import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
+import { safeError } from '@/lib/security/logging'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
@@ -307,7 +308,7 @@ export async function POST(req: NextRequest, props: RouteContext) {
       })
     }
 
-    console.error(`${ROUTE_OPERATION} error`, error)
+    console.error(`${ROUTE_OPERATION} error`, { error: safeError(error) })
 
     captureBookingException({
       error,

@@ -2,6 +2,7 @@ import { Prisma, StripeAccountStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
+import { safeError } from '@/lib/security/logging'
 import { getStripe } from '@/lib/stripe/server'
 
 export const dynamic = 'force-dynamic'
@@ -165,7 +166,9 @@ export async function POST() {
       201,
     )
   } catch (error: unknown) {
-    console.error('POST /api/v1/pro/payments/stripe/connect-account error', error)
+    console.error('POST /api/v1/pro/payments/stripe/connect-account error', {
+      error: safeError(error),
+    })
 
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       return jsonFail(400, 'Database rejected the Stripe account update.', {

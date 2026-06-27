@@ -178,8 +178,8 @@ describe('app/api/webhooks/postmark/route.ts', () => {
     expect(mocks.safeLogMeta).toHaveBeenCalledWith({
       recordType: 'Delivery',
       messageId: 'postmark_message_1',
-      recipient: 'client@example.com',
-      email: 'client@example.com',
+      recipient: 'c***@example.com',
+      email: 'c***@example.com',
     })
 
     expect(infoSpy).toHaveBeenCalledWith(
@@ -215,7 +215,7 @@ describe('app/api/webhooks/postmark/route.ts', () => {
     expect(mocks.safeLogMeta).toHaveBeenCalledWith({
       recordType: 'Bounce',
       messageId: 'postmark_message_fallback_1',
-      recipient: 'client@example.com',
+      recipient: 'c***@example.com',
       email: null,
     })
 
@@ -224,7 +224,7 @@ describe('app/api/webhooks/postmark/route.ts', () => {
       {
         recordType: 'Bounce',
         messageId: 'postmark_message_fallback_1',
-        recipient: 'client@example.com',
+        recipient: 'c***@example.com',
         email: null,
       },
     )

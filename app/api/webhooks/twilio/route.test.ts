@@ -180,8 +180,8 @@ describe('app/api/webhooks/twilio/route.ts', () => {
     expect(mocks.safeLogMeta).toHaveBeenCalledWith({
       messageSid: 'SM_message_1',
       messageStatus: 'delivered',
-      to: '+15550001111',
-      from: '+15550002222',
+      to: '***1111',
+      from: '***2222',
     })
 
     expect(infoSpy).toHaveBeenCalledWith('Twilio webhook received', safeMeta)
@@ -223,8 +223,8 @@ describe('app/api/webhooks/twilio/route.ts', () => {
     expect(mocks.safeLogMeta).toHaveBeenCalledWith({
       messageSid: 'SM_sms_1',
       messageStatus: 'sent',
-      to: '+15550001111',
-      from: '+15550002222',
+      to: '***1111',
+      from: '***2222',
     })
 
     expect(infoSpy).toHaveBeenCalledWith('Twilio webhook received', safeMeta)
