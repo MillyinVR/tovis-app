@@ -86,7 +86,7 @@ export default function ClientBookingActionsCard({
     }
 
     const res = await fetch(
-      `/api/bookings/${encodeURIComponent(bookingId)}/reschedule`,
+      `/api/v1/bookings/${encodeURIComponent(bookingId)}/reschedule`,
       {
         method: 'POST',
         headers: {

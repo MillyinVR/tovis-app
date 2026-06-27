@@ -150,7 +150,7 @@ export function useMobileAddresses(args: {
       setLoadingMobileAddresses(true)
       setMobileAddressesError(null)
 
-      const res = await fetch('/api/client/addresses', {
+      const res = await fetch('/api/v1/client/addresses', {
         method: 'GET',
         cache: 'no-store',
         headers: { Accept: 'application/json' },

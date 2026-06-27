@@ -217,7 +217,7 @@ export default function LooksFeed() {
 
   const loadCategories = useCallback(async () => {
     try {
-      const res = await fetch('/api/looks/categories', {
+      const res = await fetch('/api/v1/looks/categories', {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
       })
@@ -481,7 +481,7 @@ export default function LooksFeed() {
       })
 
       try {
-        const res = await fetch(`/api/looks/${lookPostId}/like`, {
+        const res = await fetch(`/api/v1/looks/${lookPostId}/like`, {
           method: beforeLiked ? 'DELETE' : 'POST',
         })
         const raw = await safeJson(res)
@@ -617,7 +617,7 @@ export default function LooksFeed() {
         applyFollow(before, (count) => count + (before ? 1 : -1))
 
       try {
-        const res = await fetch(`/api/pros/${professionalId}/follow`, {
+        const res = await fetch(`/api/v1/pros/${professionalId}/follow`, {
           method: 'POST',
         })
         const raw = await safeJson(res)

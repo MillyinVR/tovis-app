@@ -63,7 +63,7 @@ export default function MarkPaidButton({ bookingId, methods }: Props) {
       })
 
       const res = await fetch(
-        `/api/pro/bookings/${encodeURIComponent(bookingId)}/checkout/mark-paid`,
+        `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}/checkout/mark-paid`,
         {
           method: 'POST',
           headers: {

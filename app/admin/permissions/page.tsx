@@ -213,7 +213,7 @@ export default async function AdminPermissionsPage() {
         </div>
 
         <form
-          action="/api/admin/permissions"
+          action="/api/v1/admin/permissions"
           method="post"
           className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3"
         >
@@ -320,7 +320,7 @@ export default async function AdminPermissionsPage() {
                     </div>
                   </div>
 
-                  <form className="mt-3" action={`/api/admin/permissions/${encodeURIComponent(p.id)}`} method="post">
+                  <form className="mt-3" action={`/api/v1/admin/permissions/${encodeURIComponent(p.id)}`} method="post">
                     <input type="hidden" name="_method" value="DELETE" />
                     <DangerButton type="submit">Remove</DangerButton>
                   </form>

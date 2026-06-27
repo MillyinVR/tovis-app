@@ -160,7 +160,7 @@ export default async function ProRemindersPage() {
             </div>
           </div>
 
-          <form method="post" action="/api/pro/reminders" className="grid gap-3">
+          <form method="post" action="/api/v1/pro/reminders" className="grid gap-3">
             <div className="grid gap-1">
               <label
                 className="text-[12px] font-black text-textSecondary"
@@ -335,7 +335,7 @@ export default async function ProRemindersPage() {
 
                       <form
                         method="post"
-                        action={`/api/pro/reminders/${encodeURIComponent(
+                        action={`/api/v1/pro/reminders/${encodeURIComponent(
                           reminder.id,
                         )}/complete`}
                         className="mt-2"

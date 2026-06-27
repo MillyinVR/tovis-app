@@ -96,7 +96,7 @@ export function MigrateClientsClient({ copy }: { copy: MigrationCopy['clients'] 
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/pro/migrate/clients/preview', {
+      const res = await fetch('/api/v1/pro/migrate/clients/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows: rawRows, mapping }),
@@ -120,7 +120,7 @@ export function MigrateClientsClient({ copy }: { copy: MigrationCopy['clients'] 
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/pro/migrate/clients/commit', {
+      const res = await fetch('/api/v1/pro/migrate/clients/commit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows: rawRows, mapping, excludeIndices: [...excluded] }),

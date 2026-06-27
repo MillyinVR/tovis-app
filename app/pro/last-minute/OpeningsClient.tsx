@@ -211,8 +211,8 @@ type LastMinuteOpeningsProviderProps = {
   children: ReactNode
 }
 
-const OPENINGS_LIST_ENDPOINT = '/api/pro/openings?hours=48&take=100'
-const OPENINGS_MUTATION_ENDPOINT = '/api/pro/openings'
+const OPENINGS_LIST_ENDPOINT = '/api/v1/pro/openings?hours=48&take=100'
+const OPENINGS_MUTATION_ENDPOINT = '/api/v1/pro/openings'
 
 const DEFAULT_VISIBILITY_MODE: VisibilityMode = 'PUBLIC_AT_DISCOVERY'
 const DEFAULT_LOCATION_TYPE: LocationType = 'SALON'

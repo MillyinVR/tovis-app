@@ -5,8 +5,8 @@
 // (allergies + professional notes), embedded on the aftercare page so the pro
 // can record allergies/feedback at closeout without leaving. Reuses the same
 // backend the full /pro/clients/[id] page uses:
-//   POST /api/pro/clients/[id]/allergies
-//   POST /api/pro/clients/[id]/notes
+//   POST /api/v1/pro/clients/[id]/allergies
+//   POST /api/v1/pro/clients/[id]/notes
 // Both are gated server-side by assertProCanViewClient, which this booking
 // already satisfies. A successful add calls router.refresh() so the
 // server-rendered lists below pick up the new row.
@@ -108,7 +108,7 @@ function AllergyForm({ clientId }: { clientId: string }) {
     setLoading(true)
     try {
       const res = await fetch(
-        `/api/pro/clients/${encodeURIComponent(clientId)}/allergies`,
+        `/api/v1/pro/clients/${encodeURIComponent(clientId)}/allergies`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -222,7 +222,7 @@ function NoteForm({ clientId }: { clientId: string }) {
     setLoading(true)
     try {
       const res = await fetch(
-        `/api/pro/clients/${encodeURIComponent(clientId)}/notes`,
+        `/api/v1/pro/clients/${encodeURIComponent(clientId)}/notes`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

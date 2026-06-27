@@ -60,13 +60,13 @@ function installFetchQueue(queue: FetchResponseQueue) {
     const url = requestUrl(input)
     const method = requestMethod(init)
 
-    if (url === '/api/pro/session' && method === 'GET') {
+    if (url === '/api/v1/pro/session' && method === 'GET') {
       const next = queue.session?.shift()
       return next ?? jsonResponse(idlePayload)
     }
 
     const startMatch = url.match(
-      /^\/api\/pro\/bookings\/([^/]+)\/session\/start$/,
+      /^\/api\/v1\/pro\/bookings\/([^/]+)\/session\/start$/,
     )
     if (method === 'POST' && startMatch) {
       const bookingId = decodeURIComponent(startMatch[1] ?? '')
@@ -81,7 +81,7 @@ function installFetchQueue(queue: FetchResponseQueue) {
     }
 
     const finishMatch = url.match(
-      /^\/api\/pro\/bookings\/([^/]+)\/session\/finish$/,
+      /^\/api\/v1\/pro\/bookings\/([^/]+)\/session\/finish$/,
     )
     if (method === 'POST' && finishMatch) {
       const bookingId = decodeURIComponent(finishMatch[1] ?? '')
@@ -259,7 +259,7 @@ describe('useProSession', () => {
     })
     expect(result.current.centerDisabled).toBe(true)
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/pro/session', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/pro/session', {
       method: 'GET',
       cache: 'no-store',
       signal: expect.any(AbortSignal),
@@ -366,7 +366,7 @@ describe('useProSession', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/pro/bookings/booking_b/session/start',
+      '/api/v1/pro/bookings/booking_b/session/start',
       {
         method: 'POST',
         headers: {
@@ -418,7 +418,7 @@ describe('useProSession', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/pro/bookings/booking_1/session/start',
+      '/api/v1/pro/bookings/booking_1/session/start',
       {
         method: 'POST',
         headers: {
@@ -470,7 +470,7 @@ describe('useProSession', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/pro/bookings/booking_1/session/finish',
+      '/api/v1/pro/bookings/booking_1/session/finish',
       {
         method: 'POST',
         headers: {
@@ -563,7 +563,7 @@ describe('useProSession', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/pro/bookings/booking_1/session/start',
+      '/api/v1/pro/bookings/booking_1/session/start',
       expect.objectContaining({
         method: 'POST',
       }),
@@ -615,7 +615,7 @@ describe('useProSession', () => {
       expect(result.current.mode).toBe('UPCOMING')
     })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/pro/session', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/pro/session', {
       method: 'GET',
       cache: 'no-store',
       signal: expect.any(AbortSignal),

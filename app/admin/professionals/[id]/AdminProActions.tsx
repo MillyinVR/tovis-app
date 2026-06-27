@@ -43,7 +43,7 @@ export default function AdminProActions({ professionalId, currentStatus, license
     setErr(null)
 
     try {
-      const res = await fetch(`/api/admin/professionals/${encodeURIComponent(professionalId)}`, {
+      const res = await fetch(`/api/v1/admin/professionals/${encodeURIComponent(professionalId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

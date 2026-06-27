@@ -213,7 +213,7 @@ export default function OfferingManager({
     clearMessages(offeringId)
 
     try {
-      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}`, {
+      const res = await fetch(`/api/v1/pro/offerings/${encodeURIComponent(offeringId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
@@ -240,7 +240,7 @@ export default function OfferingManager({
     clearMessages(offeringId)
 
     try {
-      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}`, { method: 'DELETE' })
+      const res = await fetch(`/api/v1/pro/offerings/${encodeURIComponent(offeringId)}`, { method: 'DELETE' })
       const data = await safeJson(res)
 
       if (!res.ok || !isOkTrue(data)) {
@@ -264,7 +264,7 @@ export default function OfferingManager({
     try {
       const uploadFile = await compressImageForUpload(file)
 
-      const initRes = await fetch('/api/pro/uploads', {
+      const initRes = await fetch('/api/v1/pro/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -928,7 +928,7 @@ function AddOnsManager(props: {
   async function load() {
     setLoading(true)
     try {
-      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, { cache: 'no-store' })
+      const res = await fetch(`/api/v1/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, { cache: 'no-store' })
       const data = await safeJson(res)
 
       if (!res.ok || !isOkTrue(data)) {
@@ -995,7 +995,7 @@ function AddOnsManager(props: {
         durationOverrideMinutes: null,
       }))
 
-      const res = await fetch(`/api/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, {
+      const res = await fetch(`/api/v1/pro/offerings/${encodeURIComponent(offeringId)}/add-ons`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items }),

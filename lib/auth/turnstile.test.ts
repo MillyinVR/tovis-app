@@ -15,7 +15,7 @@ import {
 
 
 function makeRequest(): Request {
-  return new Request('https://app.test/api/auth/register', {
+  return new Request('https://app.test/api/v1/auth/register', {
     method: 'POST',
   })
 }

@@ -298,7 +298,7 @@ export default function ReviewSection({
     async function load() {
       if (!bookingId || hasReview) return
       try {
-        const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}/review-media-options`, {
+        const res = await fetch(`/api/v1/client/bookings/${encodeURIComponent(bookingId)}/review-media-options`, {
           method: 'GET',
         })
         if (!res.ok) return
@@ -434,7 +434,7 @@ export default function ReviewSection({
   }
 
   async function initSignedUpload(file: File) {
-    const res = await fetch('/api/client/uploads', {
+    const res = await fetch('/api/v1/client/uploads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind: 'REVIEW_PUBLIC', contentType: file.type, size: file.size }),
@@ -573,7 +573,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
         action: 'create',
       })
       const result = await requestOrRedirect(
-        `/api/client/bookings/${encodeURIComponent(bookingId)}/review`,
+        `/api/v1/client/bookings/${encodeURIComponent(bookingId)}/review`,
         {
           method: 'POST',
           headers: {
@@ -624,7 +624,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
 
     try {
       const result = await requestOrRedirect(
-        `/api/client/reviews/${encodeURIComponent(existingReview.id)}`,
+        `/api/v1/client/reviews/${encodeURIComponent(existingReview.id)}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -669,7 +669,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
     setLoading(true)
     try {
       const result = await requestOrRedirect(
-        `/api/client/reviews/${encodeURIComponent(existingReview.id)}/media`,
+        `/api/v1/client/reviews/${encodeURIComponent(existingReview.id)}/media`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -719,7 +719,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
     setLoading(true)
     try {
       const result = await requestOrRedirect(
-        `/api/client/reviews/${encodeURIComponent(existingReview.id)}`,
+        `/api/v1/client/reviews/${encodeURIComponent(existingReview.id)}`,
         { method: 'DELETE' },
         'login_required_review_delete',
       )

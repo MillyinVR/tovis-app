@@ -25,7 +25,7 @@ export default function EditPhotoReleaseForm({ clientId, initialStatus }: Props)
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/photo-release`, {
+      const res = await fetch(`/api/v1/pro/clients/${clientId}/photo-release`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: next }),

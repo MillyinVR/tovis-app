@@ -74,7 +74,7 @@ function FollowBackButton({ handle }: { handle: string }) {
     setFollowing(next)
     try {
       const response = await fetch(
-        `/api/client/follow/${encodeURIComponent(handle)}`,
+        `/api/v1/client/follow/${encodeURIComponent(handle)}`,
         { method: 'POST', headers: { Accept: 'application/json' } },
       )
       const payload = await readJsonSafely(response)
@@ -183,7 +183,7 @@ export default function ClientActivityFrame({
     setUnread(0)
     setRows((current) => current.map((row) => ({ ...row, unread: false })))
     try {
-      const response = await fetch('/api/client/notifications/read', {
+      const response = await fetch('/api/v1/client/notifications/read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ eventKeys: markReadEventKeys }),

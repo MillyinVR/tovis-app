@@ -56,7 +56,7 @@ describe('MarkPaidButton', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(String(url)).toBe(
-      '/api/pro/bookings/booking_1/checkout/mark-paid',
+      '/api/v1/pro/bookings/booking_1/checkout/mark-paid',
     )
     expect(JSON.parse(String(init?.body))).toEqual({
       selectedPaymentMethod: 'CASH',

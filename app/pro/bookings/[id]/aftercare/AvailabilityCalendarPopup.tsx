@@ -2,7 +2,7 @@
 'use client'
 
 // A month-calendar popup that overlays the pro's own schedule (booked + blocked
-// days, from /api/pro/availability/busy-days) so the pro can pick a recommended
+// days, from /api/v1/pro/availability/busy-days) so the pro can pick a recommended
 // next-visit / window date around their existing commitments. Returns the
 // chosen day as a "YYYY-MM-DD" string via onPick.
 
@@ -116,7 +116,7 @@ export default function AvailabilityCalendarPopup({
     setLoading(true)
 
     const params = new URLSearchParams({ from, to, tz })
-    fetch(`/api/pro/availability/busy-days?${params.toString()}`, {
+    fetch(`/api/v1/pro/availability/busy-days?${params.toString()}`, {
       signal: controller.signal,
       cache: 'no-store',
     })

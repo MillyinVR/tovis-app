@@ -208,7 +208,7 @@ export default function PlacesAutocomplete(props: {
 
       try {
         const url =
-          `/api/google/places/autocomplete` +
+          `/api/v1/google/places/autocomplete` +
           `?input=${encodeURIComponent(query)}` +
           `&sessionToken=${encodeURIComponent(sessionTokenRef.current)}` +
           `&kind=${encodeURIComponent(kind)}`
@@ -267,7 +267,7 @@ export default function PlacesAutocomplete(props: {
     try {
       const st = sessionTokenRef.current
       const res = await fetch(
-        `/api/google/places/details?placeId=${encodeURIComponent(placeId)}&sessionToken=${encodeURIComponent(st)}`,
+        `/api/v1/google/places/details?placeId=${encodeURIComponent(placeId)}&sessionToken=${encodeURIComponent(st)}`,
         { cache: 'no-store' },
       )
 

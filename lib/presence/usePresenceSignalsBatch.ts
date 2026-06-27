@@ -53,7 +53,7 @@ export function usePresenceSignalsBatch(
 
     async function poll() {
       try {
-        const res = await fetch('/api/presence/signals/batch', {
+        const res = await fetch('/api/v1/presence/signals/batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items: itemsRef.current }),

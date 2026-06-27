@@ -104,7 +104,7 @@ export function useSessionState({
       inFlight = true
       try {
         const res = await fetch(
-          `/api/pro/bookings/${encodeURIComponent(bookingId)}/session/state`,
+          `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}/session/state`,
           {
             method: 'GET',
             cache: 'no-store',

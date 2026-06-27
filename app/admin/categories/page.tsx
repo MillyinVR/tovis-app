@@ -117,7 +117,7 @@ export default async function AdminCategoriesPage() {
         </div>
 
         <form
-          action="/api/admin/categories"
+          action="/api/v1/admin/categories"
           method="post"
           className="mt-3 grid gap-3 border-t border-surfaceGlass/10 pt-3"
         >
@@ -158,7 +158,7 @@ export default async function AdminCategoriesPage() {
                     </div>
                   </div>
 
-                  <form action={`/api/admin/categories/${encodeURIComponent(c.id)}`} method="post">
+                  <form action={`/api/v1/admin/categories/${encodeURIComponent(c.id)}`} method="post">
                     <input type="hidden" name="_method" value="PATCH" />
                     <input type="hidden" name="isActive" value={String(!c.isActive)} />
                     <GhostPillButton type="submit">
@@ -176,7 +176,7 @@ export default async function AdminCategoriesPage() {
                           <span className="text-xs font-black text-textSecondary">({k.slug})</span>
                         </div>
 
-                        <form action={`/api/admin/categories/${encodeURIComponent(k.id)}`} method="post">
+                        <form action={`/api/v1/admin/categories/${encodeURIComponent(k.id)}`} method="post">
                           <input type="hidden" name="_method" value="PATCH" />
                           <input type="hidden" name="isActive" value={String(!k.isActive)} />
                           <GhostPillButton type="submit">

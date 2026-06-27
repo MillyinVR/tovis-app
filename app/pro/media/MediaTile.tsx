@@ -69,7 +69,7 @@ export default function MediaTile({
     setError(null)
 
     const nextFeatured = !featured
-    const endpoint = `/api/pro/media/${encodeURIComponent(id)}/portfolio`
+    const endpoint = `/api/v1/pro/media/${encodeURIComponent(id)}/portfolio`
 
     try {
       const res = await fetch(endpoint, { method: nextFeatured ? 'POST' : 'DELETE' })
@@ -96,7 +96,7 @@ export default function MediaTile({
 
     setSaving(true)
     try {
-      const res = await fetch(`/api/pro/media/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const res = await fetch(`/api/v1/pro/media/${encodeURIComponent(id)}`, { method: 'DELETE' })
       const body = await safeJson(res)
 
       if (!res.ok) throw new Error(errorFromResponse(res, body))

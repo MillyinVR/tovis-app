@@ -285,7 +285,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
       handleCheckAbortRef.current = controller
       try {
         const res = await fetch(
-          `/api/pro/profile/handle-available?handle=${encodeURIComponent(candidate)}`,
+          `/api/v1/pro/profile/handle-available?handle=${encodeURIComponent(candidate)}`,
           { signal: controller.signal, headers: { Accept: 'application/json' } },
         )
         const data = await safeJson(res)
@@ -341,7 +341,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
     try {
       const uploadFile = await compressImageForUpload(avatarFile)
 
-      const signedRes = await fetch('/api/pro/uploads', {
+      const signedRes = await fetch('/api/v1/pro/uploads', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -416,7 +416,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
 
       const nextAvatarUrl = await uploadAvatarIfNeeded()
 
-      const response = await fetch('/api/pro/profile', {
+      const response = await fetch('/api/v1/pro/profile', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

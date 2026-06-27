@@ -40,7 +40,7 @@ function isGuestBlocked(status: number): boolean {
 }
 
 /**
- * Single-pro follow toggle backed by `/api/pros/[id]/follow` — the same
+ * Single-pro follow toggle backed by `/api/v1/pros/[id]/follow` — the same
  * endpoint the Looks feed uses. The feed reconciles many slides at once from
  * its own item array; this hook owns the per-pro case (the look-detail rail),
  * hydrating state via GET on mount and toggling with the same optimistic
@@ -69,7 +69,7 @@ export function useProFollow({
     void (async () => {
       try {
         const res = await fetch(
-          `/api/pros/${encodeURIComponent(professionalId)}/follow`,
+          `/api/v1/pros/${encodeURIComponent(professionalId)}/follow`,
           { method: 'GET', cache: 'no-store' },
         )
         const raw = await safeJson(res)
@@ -115,7 +115,7 @@ export function useProFollow({
     void (async () => {
       try {
         const res = await fetch(
-          `/api/pros/${encodeURIComponent(professionalId)}/follow`,
+          `/api/v1/pros/${encodeURIComponent(professionalId)}/follow`,
           { method: 'POST' },
         )
         const raw = await safeJson(res)

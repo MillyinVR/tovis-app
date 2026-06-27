@@ -301,7 +301,7 @@ export default function VerifyPhonePage() {
   }, [phoneCooldownSeconds, emailCooldownSeconds])
 
   async function refreshStatus() {
-    const res = await fetch('/api/auth/verification/status', {
+    const res = await fetch('/api/v1/auth/verification/status', {
       method: 'GET',
       cache: 'no-store',
       credentials: 'include',
@@ -389,7 +389,7 @@ export default function VerifyPhonePage() {
     const timeoutId = window.setTimeout(() => {
       void (async () => {
         try {
-          const res = await fetch('/api/auth/session/next-url', {
+          const res = await fetch('/api/v1/auth/session/next-url', {
             method: 'GET',
             cache: 'no-store',
             credentials: 'include',
@@ -429,7 +429,7 @@ export default function VerifyPhonePage() {
     setSendingPhone(true)
 
     try {
-      const res = await fetch('/api/auth/phone/send', {
+      const res = await fetch('/api/v1/auth/phone/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -475,7 +475,7 @@ export default function VerifyPhonePage() {
     setSendingEmail(true)
 
     try {
-      const res = await fetch('/api/auth/email/send', {
+      const res = await fetch('/api/v1/auth/email/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -532,7 +532,7 @@ export default function VerifyPhonePage() {
     setCorrectingPhone(true)
 
     try {
-      const res = await fetch('/api/auth/phone/correct', {
+      const res = await fetch('/api/v1/auth/phone/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -588,7 +588,7 @@ export default function VerifyPhonePage() {
 
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/phone/verify', {
+      const res = await fetch('/api/v1/auth/phone/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

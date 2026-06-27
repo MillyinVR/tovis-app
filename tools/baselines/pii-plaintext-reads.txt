@@ -107,160 +107,160 @@ app/admin/professionals/[id]/page.tsx:optional direct property read:const email 
 app/admin/professionals/page.tsx:direct property read:<span className="text-xs font-bold text-textSecondary">({p.user.email})</span>
 app/admin/runtime-flags/page.tsx:direct property read:Signed in as {info.email ?? 'admin user'}
 app/api/_utils/auth/verificationThrottle.ts:direct property read:const phone = args.phone?.trim()
-app/api/admin/permissions/route.ts:Prisma select/include plaintext field:email: true,
-app/api/auth/email/verify/route.ts:Prisma select/include plaintext field:email: true,
-app/api/auth/email/verify/route.ts:direct property read:emailForLog = record.email
-app/api/auth/login/route.ts:Prisma select/include plaintext field:email: true,
-app/api/auth/login/route.ts:direct property read:const email = normalizeEmail(body.email)
-app/api/auth/password-reset/request/route.ts:Prisma select/include plaintext field:email: true,
-app/api/auth/password-reset/request/route.ts:direct property read:const email = normalizeEmail(body.email)
-app/api/auth/password-reset/request/route.ts:direct property read:const userEmail = normalizeEmail(user.email)
-app/api/auth/phone/correct/route.ts:direct property read:...buildClientProfileContactLookupData({ phone: args.phone }),
-app/api/auth/phone/correct/route.ts:direct property read:...buildUserContactLookupData({ phone: args.phone }),
-app/api/auth/phone/correct/route.ts:direct property read:const normalizedPhone = smsCountry.phone
-app/api/auth/phone/correct/route.ts:direct property read:const rawPhone = pickString(body.phone)?.trim() ?? null
-app/api/auth/phone/correct/route.ts:direct property read:phoneForLog = user.phone?.trim() ?? null
-app/api/auth/phone/send/route.ts:direct property read:const normalizedPhone = smsCountry.phone
-app/api/auth/phone/send/route.ts:direct property read:const phone = user.phone?.trim() ?? ''
-app/api/auth/phone/verify/route.ts:direct property read:const phone = user.phone?.trim() ?? ''
-app/api/auth/register/route.ts:Prisma select/include plaintext field:email: true,
-app/api/auth/register/route.ts:Prisma select/include plaintext field:phone: true,
-app/api/auth/register/route.ts:direct property read:? signupLocation.postalCode
-app/api/auth/register/route.ts:direct property read:const email = normalizeEmail(body.email)
-app/api/auth/register/route.ts:direct property read:const firstName = pickString(body.firstName)
-app/api/auth/register/route.ts:direct property read:const lastName = pickString(body.lastName)
-app/api/auth/register/route.ts:direct property read:const rawPhone = pickString(body.phone)
-app/api/auth/register/route.ts:direct property read:const verificationEmail = normalizeEmail(user.email)
-app/api/auth/register/route.ts:direct property read:if (user.phone) {
-app/api/auth/register/route.ts:direct property read:res.cookies.set('tovis_client_zip', signupLocation.postalCode, {
-app/api/auth/register/route.ts:direct property read:typeof v.postalCode === 'string' &&
-app/api/availability/other-pros/route.ts:Prisma select/include plaintext field:lat: true,
-app/api/availability/other-pros/route.ts:Prisma select/include plaintext field:lng: true,
-app/api/calendar/route.ts:Prisma select/include plaintext field:email: true,
-app/api/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/calendar/route.ts:direct property read:const clientEmail = normalizeEmail(args.booking.client?.user?.email)
-app/api/calendar/route.ts:direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
-app/api/calendar/route.ts:direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
-app/api/calendar/route.ts:direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
-app/api/calendar/route.ts:optional direct property read:const clientEmail = normalizeEmail(args.booking.client?.user?.email)
-app/api/calendar/route.ts:optional direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
-app/api/calendar/route.ts:optional direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
-app/api/calendar/route.ts:optional direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
-app/api/client/addresses/[id]/route.ts:direct property read:body.addressLine1 !== undefined ||
-app/api/client/addresses/[id]/route.ts:direct property read:body.addressLine2 !== undefined ||
-app/api/client/addresses/[id]/route.ts:direct property read:body.postalCode !== undefined ||
-app/api/client/bookings/route.ts:Prisma select/include plaintext field:
-app/api/client/bookings/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/client/bookings/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/client/openings/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/client/openings/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/client/openings/route.ts:Prisma select/include plaintext field:lat: true,
-app/api/client/openings/route.ts:Prisma select/include plaintext field:lng: true,
-app/api/client/priority-offer/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/client/priority-offer/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/client/referrals/[id]/confirm/route.ts:direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
-app/api/client/referrals/[id]/confirm/route.ts:optional direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
-app/api/client/referrals/route.ts:direct property read:? [r.professional.firstName, r.professional.lastName]
-app/api/client/saved-services/providers/route.ts:Prisma select/include plaintext field:lat: true,
-app/api/client/saved-services/providers/route.ts:Prisma select/include plaintext field:lng: true,
-app/api/client/saved-services/providers/route.ts:Prisma where/order plaintext field:lat: {
-app/api/client/saved-services/providers/route.ts:Prisma where/order plaintext field:lng: {
-app/api/client/settings/route.ts:Prisma select/include plaintext field:dateOfBirth: true,
-app/api/client/settings/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/client/settings/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/client/settings/route.ts:Prisma select/include plaintext field:phone: true,
-app/api/client/settings/route.ts:direct property read:...(body.dateOfBirth !== undefined ? { dateOfBirth } : {}),
-app/api/client/settings/route.ts:direct property read:body.dateOfBirth !== undefined
-app/api/client/settings/route.ts:direct property read:const current = await loadSettings(auth.clientId, auth.user.email ?? null)
-app/api/client/settings/route.ts:direct property read:const data = await loadSettings(auth.clientId, auth.user.email ?? null)
-app/api/client/settings/route.ts:direct property read:const dateOfBirth = parseDateOnlyToUtcNoon(body.dateOfBirth)
-app/api/client/settings/route.ts:direct property read:const firstName = normalizeRequiredishName(body.firstName)
-app/api/client/settings/route.ts:direct property read:const lastName = normalizeRequiredishName(body.lastName)
-app/api/client/settings/route.ts:direct property read:const updated = await loadSettings(auth.clientId, auth.user.email ?? null)
 app/api/internal/cron/retry-verification-emails/route.ts:Prisma select/include plaintext field:email: true,
 app/api/internal/cron/retry-verification-emails/route.ts:direct property read:const email = normalizeEmail(candidate.email)
 app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:lastName: true,
 app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:lat: true,
 app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:lng: true,
-app/api/pro-license/verify/route.ts:direct property read:? nameBlock.firstName
-app/api/pro-license/verify/route.ts:direct property read:? nameBlock.lastName
-app/api/pro-license/verify/route.ts:direct property read:typeof nameBlock.firstName === 'string'
-app/api/pro-license/verify/route.ts:direct property read:typeof nameBlock.lastName === 'string'
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:Prisma select/include plaintext field:email: true,
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:Prisma select/include plaintext field:phone: true,
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:booking.client.email,
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:booking.client.phone,
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:booking.client.user?.email ?? null,
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:booking.client.user?.phone ?? null,
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:if (args.email && !args.phone) return ContactMethod.EMAIL
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:if (args.phone && !args.email) return ContactMethod.SMS
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:optional direct property read:booking.client.user?.email ?? null,
-app/api/pro/bookings/[id]/consultation-proposal/route.ts:optional direct property read:booking.client.user?.phone ?? null,
-app/api/pro/bookings/[id]/invite/route.ts:direct property read:if (!input.email && !input.phone) {
-app/api/pro/bookings/[id]/invite/route.ts:direct property read:if (input.preferredContactMethod === ContactMethod.EMAIL && !input.email) {
-app/api/pro/bookings/[id]/invite/route.ts:direct property read:if (input.preferredContactMethod === ContactMethod.SMS && !input.phone) {
-app/api/pro/bookings/[id]/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/pro/bookings/[id]/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/pro/bookings/[id]/route.ts:Prisma select/include plaintext field:phone: true,
-app/api/pro/bookings/[id]/route.ts:direct property read:: booking.client?.user?.email || 'Client'
-app/api/pro/bookings/[id]/route.ts:direct property read:const firstName = booking.client?.firstName?.trim() || ''
-app/api/pro/bookings/[id]/route.ts:direct property read:const lastName = booking.client?.lastName?.trim() || ''
-app/api/pro/bookings/[id]/route.ts:optional direct property read:: booking.client?.user?.email || 'Client'
-app/api/pro/bookings/[id]/route.ts:optional direct property read:const firstName = booking.client?.firstName?.trim() || ''
-app/api/pro/bookings/[id]/route.ts:optional direct property read:const lastName = booking.client?.lastName?.trim() || ''
-app/api/pro/calendar/route.ts:Prisma select/include plaintext field:email: true,
-app/api/pro/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/pro/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/pro/calendar/route.ts:direct property read:const email = booking.client?.user?.email?.trim() ?? ''
-app/api/pro/calendar/route.ts:direct property read:const email = entry.client?.user?.email?.trim() ?? ''
-app/api/pro/calendar/route.ts:direct property read:const firstName = booking.client?.firstName?.trim() ?? ''
-app/api/pro/calendar/route.ts:direct property read:const firstName = entry.client?.firstName?.trim() ?? ''
-app/api/pro/calendar/route.ts:direct property read:const lastName = booking.client?.lastName?.trim() ?? ''
-app/api/pro/calendar/route.ts:direct property read:const lastName = entry.client?.lastName?.trim() ?? ''
-app/api/pro/calendar/route.ts:optional direct property read:const email = booking.client?.user?.email?.trim() ?? ''
-app/api/pro/calendar/route.ts:optional direct property read:const email = entry.client?.user?.email?.trim() ?? ''
-app/api/pro/calendar/route.ts:optional direct property read:const firstName = booking.client?.firstName?.trim() ?? ''
-app/api/pro/calendar/route.ts:optional direct property read:const firstName = entry.client?.firstName?.trim() ?? ''
-app/api/pro/calendar/route.ts:optional direct property read:const lastName = booking.client?.lastName?.trim() ?? ''
-app/api/pro/calendar/route.ts:optional direct property read:const lastName = entry.client?.lastName?.trim() ?? ''
-app/api/pro/clients/search/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/pro/clients/search/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/pro/clients/search/route.ts:Prisma select/include plaintext field:phone: true,
-app/api/pro/clients/search/route.ts:direct property read:`${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() ||
-app/api/pro/clients/search/route.ts:direct property read:c.user?.email ||
-app/api/pro/clients/search/route.ts:optional direct property read:c.user?.email ||
-app/api/pro/membership/portal/route.ts:direct property read:if (!sub?.stripeCustomerId) {
-app/api/pro/membership/portal/route.ts:optional direct property read:if (!sub?.stripeCustomerId) {
-app/api/pro/onboarding/location/route.ts:direct property read:const effectivePostalCode = geo.postalCode || postalCode
-app/api/pro/onboarding/location/route.ts:direct property read:const postalCode = pickString(body.postalCode)
-app/api/pro/openings/route.ts:Prisma select/include plaintext field:lat: true,
-app/api/pro/openings/route.ts:Prisma select/include plaintext field:lng: true,
-app/api/pro/payments/stripe/connect-account/route.ts:Prisma select/include plaintext field:stripeAccountId: true,
-app/api/pro/payments/stripe/connect-account/route.ts:direct property read:const email = typeof user.email === 'string' ? user.email.trim() : ''
-app/api/pro/payments/stripe/connect-account/route.ts:direct property read:if (existingSettings?.stripeAccountId) {
-app/api/pro/payments/stripe/connect-account/route.ts:optional direct property read:if (existingSettings?.stripeAccountId) {
-app/api/pro/payments/stripe/onboarding-link/route.ts:Prisma select/include plaintext field:stripeAccountId: true,
-app/api/pro/payments/stripe/onboarding-link/route.ts:direct property read:if (!settings?.stripeAccountId) {
-app/api/pro/payments/stripe/onboarding-link/route.ts:optional direct property read:if (!settings?.stripeAccountId) {
-app/api/pro/payments/stripe/status/route.ts:Prisma select/include plaintext field:
-app/api/pro/payments/stripe/status/route.ts:direct property read:const account = await stripe.accounts.retrieve(settings.stripeAccountId)
-app/api/pro/payments/stripe/status/route.ts:direct property read:if (!settings?.stripeAccountId) {
-app/api/pro/payments/stripe/status/route.ts:optional direct property read:if (!settings?.stripeAccountId) {
-app/api/pro/session/route.ts:Prisma select/include plaintext field:email: true,
-app/api/pro/session/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/pro/session/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/pro/session/route.ts:direct property read:booking.client?.user?.email ||
-app/api/pro/session/route.ts:direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
-app/api/pro/session/route.ts:optional direct property read:booking.client?.user?.email ||
-app/api/pro/session/route.ts:optional direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
-app/api/pro/waitlist/route.ts:direct property read:row.client?.firstName ?? null,
-app/api/pro/waitlist/route.ts:direct property read:row.client?.lastName ?? null,
-app/api/pro/waitlist/route.ts:optional direct property read:row.client?.firstName ?? null,
-app/api/pro/waitlist/route.ts:optional direct property read:row.client?.lastName ?? null,
-app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/admin/permissions/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/auth/email/verify/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/auth/email/verify/route.ts:direct property read:emailForLog = record.email
+app/api/v1/auth/login/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/auth/login/route.ts:direct property read:const email = normalizeEmail(body.email)
+app/api/v1/auth/password-reset/request/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/auth/password-reset/request/route.ts:direct property read:const email = normalizeEmail(body.email)
+app/api/v1/auth/password-reset/request/route.ts:direct property read:const userEmail = normalizeEmail(user.email)
+app/api/v1/auth/phone/correct/route.ts:direct property read:...buildClientProfileContactLookupData({ phone: args.phone }),
+app/api/v1/auth/phone/correct/route.ts:direct property read:...buildUserContactLookupData({ phone: args.phone }),
+app/api/v1/auth/phone/correct/route.ts:direct property read:const normalizedPhone = smsCountry.phone
+app/api/v1/auth/phone/correct/route.ts:direct property read:const rawPhone = pickString(body.phone)?.trim() ?? null
+app/api/v1/auth/phone/correct/route.ts:direct property read:phoneForLog = user.phone?.trim() ?? null
+app/api/v1/auth/phone/send/route.ts:direct property read:const normalizedPhone = smsCountry.phone
+app/api/v1/auth/phone/send/route.ts:direct property read:const phone = user.phone?.trim() ?? ''
+app/api/v1/auth/phone/verify/route.ts:direct property read:const phone = user.phone?.trim() ?? ''
+app/api/v1/auth/register/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/auth/register/route.ts:Prisma select/include plaintext field:phone: true,
+app/api/v1/auth/register/route.ts:direct property read:? signupLocation.postalCode
+app/api/v1/auth/register/route.ts:direct property read:const email = normalizeEmail(body.email)
+app/api/v1/auth/register/route.ts:direct property read:const firstName = pickString(body.firstName)
+app/api/v1/auth/register/route.ts:direct property read:const lastName = pickString(body.lastName)
+app/api/v1/auth/register/route.ts:direct property read:const rawPhone = pickString(body.phone)
+app/api/v1/auth/register/route.ts:direct property read:const verificationEmail = normalizeEmail(user.email)
+app/api/v1/auth/register/route.ts:direct property read:if (user.phone) {
+app/api/v1/auth/register/route.ts:direct property read:res.cookies.set('tovis_client_zip', signupLocation.postalCode, {
+app/api/v1/auth/register/route.ts:direct property read:typeof v.postalCode === 'string' &&
+app/api/v1/availability/other-pros/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/v1/availability/other-pros/route.ts:Prisma select/include plaintext field:lng: true,
+app/api/v1/calendar/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/calendar/route.ts:direct property read:const clientEmail = normalizeEmail(args.booking.client?.user?.email)
+app/api/v1/calendar/route.ts:direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
+app/api/v1/calendar/route.ts:direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
+app/api/v1/calendar/route.ts:direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
+app/api/v1/calendar/route.ts:optional direct property read:const clientEmail = normalizeEmail(args.booking.client?.user?.email)
+app/api/v1/calendar/route.ts:optional direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
+app/api/v1/calendar/route.ts:optional direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
+app/api/v1/calendar/route.ts:optional direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
+app/api/v1/client/addresses/[id]/route.ts:direct property read:body.addressLine1 !== undefined ||
+app/api/v1/client/addresses/[id]/route.ts:direct property read:body.addressLine2 !== undefined ||
+app/api/v1/client/addresses/[id]/route.ts:direct property read:body.postalCode !== undefined ||
+app/api/v1/client/bookings/route.ts:Prisma select/include plaintext field:
+app/api/v1/client/bookings/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/client/bookings/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/client/openings/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/client/openings/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/client/openings/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/v1/client/openings/route.ts:Prisma select/include plaintext field:lng: true,
+app/api/v1/client/priority-offer/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/client/priority-offer/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/client/referrals/[id]/confirm/route.ts:direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
+app/api/v1/client/referrals/[id]/confirm/route.ts:optional direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
+app/api/v1/client/referrals/route.ts:direct property read:? [r.professional.firstName, r.professional.lastName]
+app/api/v1/client/saved-services/providers/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/v1/client/saved-services/providers/route.ts:Prisma select/include plaintext field:lng: true,
+app/api/v1/client/saved-services/providers/route.ts:Prisma where/order plaintext field:lat: {
+app/api/v1/client/saved-services/providers/route.ts:Prisma where/order plaintext field:lng: {
+app/api/v1/client/settings/route.ts:Prisma select/include plaintext field:dateOfBirth: true,
+app/api/v1/client/settings/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/client/settings/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/client/settings/route.ts:Prisma select/include plaintext field:phone: true,
+app/api/v1/client/settings/route.ts:direct property read:...(body.dateOfBirth !== undefined ? { dateOfBirth } : {}),
+app/api/v1/client/settings/route.ts:direct property read:body.dateOfBirth !== undefined
+app/api/v1/client/settings/route.ts:direct property read:const current = await loadSettings(auth.clientId, auth.user.email ?? null)
+app/api/v1/client/settings/route.ts:direct property read:const data = await loadSettings(auth.clientId, auth.user.email ?? null)
+app/api/v1/client/settings/route.ts:direct property read:const dateOfBirth = parseDateOnlyToUtcNoon(body.dateOfBirth)
+app/api/v1/client/settings/route.ts:direct property read:const firstName = normalizeRequiredishName(body.firstName)
+app/api/v1/client/settings/route.ts:direct property read:const lastName = normalizeRequiredishName(body.lastName)
+app/api/v1/client/settings/route.ts:direct property read:const updated = await loadSettings(auth.clientId, auth.user.email ?? null)
+app/api/v1/pro-license/verify/route.ts:direct property read:? nameBlock.firstName
+app/api/v1/pro-license/verify/route.ts:direct property read:? nameBlock.lastName
+app/api/v1/pro-license/verify/route.ts:direct property read:typeof nameBlock.firstName === 'string'
+app/api/v1/pro-license/verify/route.ts:direct property read:typeof nameBlock.lastName === 'string'
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:Prisma select/include plaintext field:phone: true,
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:booking.client.email,
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:booking.client.phone,
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:booking.client.user?.email ?? null,
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:booking.client.user?.phone ?? null,
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:if (args.email && !args.phone) return ContactMethod.EMAIL
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:direct property read:if (args.phone && !args.email) return ContactMethod.SMS
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:optional direct property read:booking.client.user?.email ?? null,
+app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts:optional direct property read:booking.client.user?.phone ?? null,
+app/api/v1/pro/bookings/[id]/invite/route.ts:direct property read:if (!input.email && !input.phone) {
+app/api/v1/pro/bookings/[id]/invite/route.ts:direct property read:if (input.preferredContactMethod === ContactMethod.EMAIL && !input.email) {
+app/api/v1/pro/bookings/[id]/invite/route.ts:direct property read:if (input.preferredContactMethod === ContactMethod.SMS && !input.phone) {
+app/api/v1/pro/bookings/[id]/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/pro/bookings/[id]/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/pro/bookings/[id]/route.ts:Prisma select/include plaintext field:phone: true,
+app/api/v1/pro/bookings/[id]/route.ts:direct property read:: booking.client?.user?.email || 'Client'
+app/api/v1/pro/bookings/[id]/route.ts:direct property read:const firstName = booking.client?.firstName?.trim() || ''
+app/api/v1/pro/bookings/[id]/route.ts:direct property read:const lastName = booking.client?.lastName?.trim() || ''
+app/api/v1/pro/bookings/[id]/route.ts:optional direct property read:: booking.client?.user?.email || 'Client'
+app/api/v1/pro/bookings/[id]/route.ts:optional direct property read:const firstName = booking.client?.firstName?.trim() || ''
+app/api/v1/pro/bookings/[id]/route.ts:optional direct property read:const lastName = booking.client?.lastName?.trim() || ''
+app/api/v1/pro/calendar/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/pro/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/pro/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/pro/calendar/route.ts:direct property read:const email = booking.client?.user?.email?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:direct property read:const email = entry.client?.user?.email?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:direct property read:const firstName = booking.client?.firstName?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:direct property read:const firstName = entry.client?.firstName?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:direct property read:const lastName = booking.client?.lastName?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:direct property read:const lastName = entry.client?.lastName?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:optional direct property read:const email = booking.client?.user?.email?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:optional direct property read:const email = entry.client?.user?.email?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:optional direct property read:const firstName = booking.client?.firstName?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:optional direct property read:const firstName = entry.client?.firstName?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:optional direct property read:const lastName = booking.client?.lastName?.trim() ?? ''
+app/api/v1/pro/calendar/route.ts:optional direct property read:const lastName = entry.client?.lastName?.trim() ?? ''
+app/api/v1/pro/clients/search/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/pro/clients/search/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/pro/clients/search/route.ts:Prisma select/include plaintext field:phone: true,
+app/api/v1/pro/clients/search/route.ts:direct property read:`${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() ||
+app/api/v1/pro/clients/search/route.ts:direct property read:c.user?.email ||
+app/api/v1/pro/clients/search/route.ts:optional direct property read:c.user?.email ||
+app/api/v1/pro/membership/portal/route.ts:direct property read:if (!sub?.stripeCustomerId) {
+app/api/v1/pro/membership/portal/route.ts:optional direct property read:if (!sub?.stripeCustomerId) {
+app/api/v1/pro/onboarding/location/route.ts:direct property read:const effectivePostalCode = geo.postalCode || postalCode
+app/api/v1/pro/onboarding/location/route.ts:direct property read:const postalCode = pickString(body.postalCode)
+app/api/v1/pro/openings/route.ts:Prisma select/include plaintext field:lat: true,
+app/api/v1/pro/openings/route.ts:Prisma select/include plaintext field:lng: true,
+app/api/v1/pro/payments/stripe/connect-account/route.ts:Prisma select/include plaintext field:stripeAccountId: true,
+app/api/v1/pro/payments/stripe/connect-account/route.ts:direct property read:const email = typeof user.email === 'string' ? user.email.trim() : ''
+app/api/v1/pro/payments/stripe/connect-account/route.ts:direct property read:if (existingSettings?.stripeAccountId) {
+app/api/v1/pro/payments/stripe/connect-account/route.ts:optional direct property read:if (existingSettings?.stripeAccountId) {
+app/api/v1/pro/payments/stripe/onboarding-link/route.ts:Prisma select/include plaintext field:stripeAccountId: true,
+app/api/v1/pro/payments/stripe/onboarding-link/route.ts:direct property read:if (!settings?.stripeAccountId) {
+app/api/v1/pro/payments/stripe/onboarding-link/route.ts:optional direct property read:if (!settings?.stripeAccountId) {
+app/api/v1/pro/payments/stripe/status/route.ts:Prisma select/include plaintext field:
+app/api/v1/pro/payments/stripe/status/route.ts:direct property read:const account = await stripe.accounts.retrieve(settings.stripeAccountId)
+app/api/v1/pro/payments/stripe/status/route.ts:direct property read:if (!settings?.stripeAccountId) {
+app/api/v1/pro/payments/stripe/status/route.ts:optional direct property read:if (!settings?.stripeAccountId) {
+app/api/v1/pro/session/route.ts:Prisma select/include plaintext field:email: true,
+app/api/v1/pro/session/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/pro/session/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/v1/pro/session/route.ts:direct property read:booking.client?.user?.email ||
+app/api/v1/pro/session/route.ts:direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
+app/api/v1/pro/session/route.ts:optional direct property read:booking.client?.user?.email ||
+app/api/v1/pro/session/route.ts:optional direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
+app/api/v1/pro/waitlist/route.ts:direct property read:row.client?.firstName ?? null,
+app/api/v1/pro/waitlist/route.ts:direct property read:row.client?.lastName ?? null,
+app/api/v1/pro/waitlist/route.ts:optional direct property read:row.client?.firstName ?? null,
+app/api/v1/pro/waitlist/route.ts:optional direct property read:row.client?.lastName ?? null,
+app/api/v1/public/consultation/[token]/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/v1/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
 app/booking/[id]/page.tsx:Prisma select/include plaintext field:lat: true,
 app/booking/[id]/page.tsx:Prisma select/include plaintext field:lng: true,
 app/client/(gated)/_data/getClientHomeData.ts:Prisma select/include plaintext field:

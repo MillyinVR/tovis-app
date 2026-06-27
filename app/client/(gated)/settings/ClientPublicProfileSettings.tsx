@@ -50,7 +50,7 @@ export default function ClientPublicProfileSettings() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/client/profile', {
+      const res = await fetch('/api/v1/client/profile', {
         headers: { Accept: 'application/json' },
       })
       const raw = await safeJson(res)
@@ -90,7 +90,7 @@ export default function ClientPublicProfileSettings() {
     setError(null)
     setSuccess(null)
     try {
-      const res = await fetch('/api/client/profile', {
+      const res = await fetch('/api/v1/client/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ handle, isPublicProfile: isPublic, publicBio: bio }),

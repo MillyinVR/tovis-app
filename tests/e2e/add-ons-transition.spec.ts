@@ -75,7 +75,7 @@ async function createHoldAndAssertSuccess(
   const [holdResponse] = await Promise.all([
     page.waitForResponse(
       (resp) =>
-        resp.url().includes('/api/holds') &&
+        resp.url().includes('/api/v1/holds') &&
         resp.request().method() === 'POST',
       { timeout: 30_000 },
     ),
@@ -89,7 +89,7 @@ async function createHoldAndAssertSuccess(
 
   expect(
     holdResponse.status(),
-    `POST /api/holds failed: ${holdBody}`,
+    `POST /api/v1/holds failed: ${holdBody}`,
   ).toBe(201)
 
   await expectContinueEnabled(page)

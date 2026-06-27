@@ -122,7 +122,7 @@ export default function WorkspaceMismatchProvider() {
     setError(null)
 
     try {
-      const res = await fetch('/api/workspace/switch', {
+      const res = await fetch('/api/v1/workspace/switch', {
         method: 'POST',
         credentials: 'include',
         cache: 'no-store',

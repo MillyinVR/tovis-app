@@ -163,14 +163,14 @@ export default async function ProVerificationPage() {
                   </div>
 
                   <a
-                    href={`/api/pro/verification-docs/${encodeURIComponent(d.id)}`}
+                    href={`/api/v1/pro/verification-docs/${encodeURIComponent(d.id)}`}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-2 block w-fit"
                     title="Open full size"
                   >
                     <RemoteImage
-                      src={`/api/pro/verification-docs/${encodeURIComponent(d.id)}`}
+                      src={`/api/v1/pro/verification-docs/${encodeURIComponent(d.id)}`}
                       alt="Uploaded document preview"
                       className="h-28 w-44 rounded-lg border border-white/10 bg-bgPrimary/30 object-cover"
                       width={176}

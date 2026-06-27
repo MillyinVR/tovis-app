@@ -59,7 +59,7 @@ describe('parseWorkspaceMismatch', () => {
 describe('canReplayRequest', () => {
   it('replays a string URL with a JSON-string body (the common mutation)', () => {
     expect(
-      canReplayRequest('/api/looks/1/save', {
+      canReplayRequest('/api/v1/looks/1/save', {
         method: 'POST',
         body: JSON.stringify({ boardId: 'b1' }),
       }),
@@ -67,14 +67,14 @@ describe('canReplayRequest', () => {
   })
 
   it('replays a bodyless request (e.g. GET / DELETE)', () => {
-    expect(canReplayRequest('/api/boards', { method: 'GET' })).toBe(true)
-    expect(canReplayRequest('/api/looks/1/save')).toBe(true)
-    expect(new URL('https://x.test/api/boards')).toBeTruthy()
-    expect(canReplayRequest(new URL('https://x.test/api/boards'))).toBe(true)
+    expect(canReplayRequest('/api/v1/boards', { method: 'GET' })).toBe(true)
+    expect(canReplayRequest('/api/v1/looks/1/save')).toBe(true)
+    expect(new URL('https://x.test/api/v1/boards')).toBeTruthy()
+    expect(canReplayRequest(new URL('https://x.test/api/v1/boards'))).toBe(true)
   })
 
   it('refuses to replay a Request object (its body stream is single-use)', () => {
-    expect(canReplayRequest(new Request('https://x.test/api/boards'))).toBe(
+    expect(canReplayRequest(new Request('https://x.test/api/v1/boards'))).toBe(
       false,
     )
   })

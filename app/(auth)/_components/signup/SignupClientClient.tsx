@@ -112,7 +112,7 @@ type ConfirmedZip = {
 }
 
 async function fetchGeocodeByPostal(args: { postalCode: string }) {
-  const url = new URL('/api/google/geocode', 'http://localhost')
+  const url = new URL('/api/v1/google/geocode', 'http://localhost')
   url.searchParams.set('postalCode', args.postalCode)
   url.searchParams.set('components', 'country:us')
 
@@ -144,7 +144,7 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
 }
 
 async function fetchTimeZoneId(args: { lat: number; lng: number }) {
-  const url = new URL('/api/google/timezone', 'http://localhost')
+  const url = new URL('/api/v1/google/timezone', 'http://localhost')
   url.searchParams.set('lat', String(args.lat))
   url.searchParams.set('lng', String(args.lng))
 
@@ -344,7 +344,7 @@ export default function SignupClientClient() {
       })
       setCaptchaChallengeActive(false)
 
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

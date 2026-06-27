@@ -2,7 +2,7 @@
 //
 // Single source for persisting a ProfessionalServiceOffering: ensures the pro
 // has the location types the offering needs, then creates the offering row.
-// Used by POST /api/pro/offerings and by the migration service import (which
+// Used by POST /api/v1/pro/offerings and by the migration service import (which
 // additionally attaches price-grace ramps for below-minimum prices). Validation
 // (price floor, durations) stays with each caller — this is the write itself.
 

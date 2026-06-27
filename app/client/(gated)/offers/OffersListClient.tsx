@@ -68,7 +68,7 @@ export default function OffersListClient() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/client/priority-offer')
+      const res = await fetch('/api/v1/client/priority-offer')
       const data = await safeJson(res)
       if (res.ok && data && typeof data === 'object' && 'offers' in data) {
         setOffers((data as { offers: Offer[] }).offers)
@@ -89,7 +89,7 @@ export default function OffersListClient() {
     setErr(null)
     try {
       const res = await fetch(
-        `/api/client/priority-offer/${offer.recipientId}/accept`,
+        `/api/v1/client/priority-offer/${offer.recipientId}/accept`,
         { method: 'POST' },
       )
       if (!res.ok) {
@@ -115,7 +115,7 @@ export default function OffersListClient() {
     setErr(null)
     try {
       const res = await fetch(
-        `/api/client/priority-offer/${offer.recipientId}/decline`,
+        `/api/v1/client/priority-offer/${offer.recipientId}/decline`,
         { method: 'POST' },
       )
       if (!res.ok) {

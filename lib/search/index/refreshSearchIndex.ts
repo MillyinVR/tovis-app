@@ -13,7 +13,7 @@
 // runtime: Prisma omits `geom` from the input type and Postgres rejects
 // the NOT NULL constraint.
 //
-// Until P2.4b lands, the routes (`/api/search/pros`, `/api/pros/nearby`)
+// Until P2.4b lands, the routes (`/api/v1/search/pros`, `/api/v1/pros/nearby`)
 // still query source tables. Stale or missing rows here have no
 // observable production effect. P2.4b makes this table the read source.
 

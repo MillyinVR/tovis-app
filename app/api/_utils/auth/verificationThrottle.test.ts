@@ -222,7 +222,7 @@ describe('app/api/_utils/auth/verificationThrottle', () => {
 
   it('returns null when the phone verification attempt limiter allows the request', async () => {
     const result = await enforceVerificationVerifyThrottle({
-      request: makeRequest('/api/auth/phone/verify'),
+      request: makeRequest('/api/v1/auth/phone/verify'),
       scope: 'phone-verify',
       subjectKey: 'user_1',
     })
@@ -250,7 +250,7 @@ describe('app/api/_utils/auth/verificationThrottle', () => {
     mockGetTrustedClientIpFromRequest.mockReturnValue('198.51.100.20')
 
     const result = await enforceVerificationVerifyThrottle({
-      request: makeRequest('/api/auth/email/verify', '198.51.100.20'),
+      request: makeRequest('/api/v1/auth/email/verify', '198.51.100.20'),
       scope: 'email-verify',
       subjectKey: 'evt_1',
     })
@@ -274,7 +274,7 @@ describe('app/api/_utils/auth/verificationThrottle', () => {
     mockGetTrustedClientIpFromRequest.mockReturnValue(null)
 
     const result = await enforceVerificationVerifyThrottle({
-      request: makeRequest('/api/auth/phone/verify'),
+      request: makeRequest('/api/v1/auth/phone/verify'),
       scope: 'phone-verify',
       subjectKey: 'user_1',
     })
@@ -299,7 +299,7 @@ describe('app/api/_utils/auth/verificationThrottle', () => {
     mockEnforceRateLimit.mockResolvedValue(blockedResponse)
 
     const result = await enforceVerificationVerifyThrottle({
-      request: makeRequest('/api/auth/phone/verify'),
+      request: makeRequest('/api/v1/auth/phone/verify'),
       scope: 'phone-verify',
       subjectKey: 'user_1',
     })
@@ -310,7 +310,7 @@ describe('app/api/_utils/auth/verificationThrottle', () => {
   it('throws when verification subjectKey is blank', async () => {
     await expect(
       enforceVerificationVerifyThrottle({
-        request: makeRequest('/api/auth/phone/verify'),
+        request: makeRequest('/api/v1/auth/phone/verify'),
         scope: 'phone-verify',
         subjectKey: '   ',
       }),

@@ -249,7 +249,7 @@ export default function LocationsClient({
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/pro/locations', { cache: 'no-store', headers: { Accept: 'application/json' } })
+      const res = await fetch('/api/v1/pro/locations', { cache: 'no-store', headers: { Accept: 'application/json' } })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(readErrorMessage(data) ?? `Failed to refresh (${res.status}).`)
       setLocations(parseProLocationsPayload(data))
@@ -272,7 +272,7 @@ export default function LocationsClient({
     setLocations((prev) => prev.map((l) => ({ ...l, isPrimary: l.id === id })))
 
     try {
-      const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}`, {
+      const res = await fetch(`/api/v1/pro/locations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ isPrimary: true }),
@@ -312,7 +312,7 @@ async function updateAdvanceNotice(
   )
 
   try {
-    const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}`, {
+    const res = await fetch(`/api/v1/pro/locations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ advanceNoticeMinutes: nextAdvanceNoticeMinutes }),
@@ -344,7 +344,7 @@ async function updateAdvanceNotice(
     setError(null)
 
     try {
-      const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}`, {
+      const res = await fetch(`/api/v1/pro/locations/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: { Accept: 'application/json' },
       })
@@ -380,7 +380,7 @@ async function updateAdvanceNotice(
       const prevPrimary = locations.find((l) => l.isPrimary)?.id ?? null
       const mode: 'SALON' | 'SUITE' = type === 'SUITE' ? 'SUITE' : 'SALON'
 
-      const res = await fetch('/api/pro/onboarding/location', {
+      const res = await fetch('/api/v1/pro/onboarding/location', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -396,7 +396,7 @@ async function updateAdvanceNotice(
       if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to create location.')
 
       if (!makePrimary && prevPrimary) {
-        const res2 = await fetch(`/api/pro/locations/${encodeURIComponent(prevPrimary)}`, {
+        const res2 = await fetch(`/api/v1/pro/locations/${encodeURIComponent(prevPrimary)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ isPrimary: true }),
@@ -444,7 +444,7 @@ async function updateAdvanceNotice(
       const radius = clampInt(Number(mobileRadiusKm), 1, 200)
       const prevPrimary = locations.find((l) => l.isPrimary)?.id ?? null
 
-      const res = await fetch('/api/pro/onboarding/location', {
+      const res = await fetch('/api/v1/pro/onboarding/location', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -460,7 +460,7 @@ async function updateAdvanceNotice(
       if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to create mobile base.')
 
       if (!makePrimary && prevPrimary) {
-        const res2 = await fetch(`/api/pro/locations/${encodeURIComponent(prevPrimary)}`, {
+        const res2 = await fetch(`/api/v1/pro/locations/${encodeURIComponent(prevPrimary)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ isPrimary: true }),
@@ -508,7 +508,7 @@ async function updateAdvanceNotice(
       const zip = editBaseZip.trim()
       if (!isValidUsZip(zip)) throw new Error('Enter a valid US ZIP code (e.g. 92024).')
 
-      const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}/mobile-base`, {
+      const res = await fetch(`/api/v1/pro/locations/${encodeURIComponent(id)}/mobile-base`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -547,7 +547,7 @@ async function updateAdvanceNotice(
     setError(null)
 
     try {
-      const res = await fetch('/api/pro/schedule/publish', {
+      const res = await fetch('/api/v1/pro/schedule/publish', {
         method: 'POST',
         headers: { Accept: 'application/json' },
       })

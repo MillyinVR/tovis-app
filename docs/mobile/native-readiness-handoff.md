@@ -168,7 +168,15 @@ being one stable contract.
 - **Size:** Medium (~5-6 endpoints).
 
 ### 2.2 — Freeze a `/v1` API surface + version it
-- **What:** There is NO API versioning — flat `/api/*` paths, no `/v1/`, no version header.
+> **✅ STATUS: SHIPPED (2026-06-27).** Physical move (hard cutover, no back-compat alias):
+> 221 route files (28 groups) relocated to `app/api/v1/`; all client call-sites, the proxy
+> verification allowlist, co-located tests, observability `route:` tags and doc comments
+> rewritten to `/api/v1`. **Excluded (stay at `/api`, externally-configured URLs):**
+> `webhooks/` (Stripe/Postmark/Twilio), `health/` (uptime), `internal/` (16 `vercel.json`
+> cron paths + privacy export/delete). Versioning policy going forward: `/api/v1` is
+> additive-only; breaking changes land as a new `/api/v2/<route>`. Validated: typecheck +
+> lint + static guards + full vitest (4691) + production build (route tree shows `/api/v1/*`).
+- **What:** ~~There is NO API versioning — flat `/api/*` paths, no `/v1/`, no version header.~~ Done.
 - **Why:** Fine for a web client shipped lockstep. For independently-released native apps it's a
   churn risk: any breaking change silently breaks old installs. Freeze a `/v1` contract before
   native ships.

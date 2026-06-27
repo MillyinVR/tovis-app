@@ -76,7 +76,7 @@ describe('lib/auth/passwordReset', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://app.tovis.app///'
 
     const request = new Request(
-      'http://localhost/api/auth/password-reset/request',
+      'http://localhost/api/v1/auth/password-reset/request',
       {
         headers: {
           host: 'localhost:3000',
@@ -94,7 +94,7 @@ describe('lib/auth/passwordReset', () => {
     delete process.env.NEXT_PUBLIC_APP_URL
 
     const request = new Request(
-      'http://localhost/api/auth/password-reset/request',
+      'http://localhost/api/v1/auth/password-reset/request',
       {
         headers: {
           host: 'localhost:3000',
@@ -144,7 +144,7 @@ describe('lib/auth/passwordReset', () => {
 
   it('extracts the first forwarded IP for password reset requests', () => {
     const request = new Request(
-      'http://localhost/api/auth/password-reset/request',
+      'http://localhost/api/v1/auth/password-reset/request',
       {
         headers: {
           'x-forwarded-for': '198.51.100.20, 10.0.0.2',
@@ -157,7 +157,7 @@ describe('lib/auth/passwordReset', () => {
 
   it('returns null when no forwarded IP is present', () => {
     const request = new Request(
-      'http://localhost/api/auth/password-reset/request',
+      'http://localhost/api/v1/auth/password-reset/request',
     )
 
     expect(getPasswordResetRequestIp(request)).toBeNull()

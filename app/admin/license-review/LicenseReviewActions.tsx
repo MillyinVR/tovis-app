@@ -55,7 +55,7 @@ export default function LicenseReviewActions({
     setErr(null)
     try {
       const res = await fetch(
-        `/api/admin/professionals/${encodeURIComponent(professionalId)}`,
+        `/api/v1/admin/professionals/${encodeURIComponent(professionalId)}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },

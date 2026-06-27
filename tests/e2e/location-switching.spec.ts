@@ -95,7 +95,7 @@ async function createHoldFromFirstEnabledSlot(
   const [holdResponse] = await Promise.all([
     page.waitForResponse(
       (resp) =>
-        resp.url().includes('/api/holds') &&
+        resp.url().includes('/api/v1/holds') &&
         resp.request().method() === 'POST',
       { timeout: 30_000 },
     ),

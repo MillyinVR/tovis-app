@@ -130,7 +130,7 @@ describe('app/pro/profile/public-profile/EditProfileButton', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/pro/profile',
+        '/api/v1/pro/profile',
         expect.objectContaining({
           method: 'PATCH',
           headers: {
@@ -176,7 +176,7 @@ describe('app/pro/profile/public-profile/EditProfileButton', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/pro/profile',
+        '/api/v1/pro/profile',
         expect.objectContaining({
           method: 'PATCH',
         }),

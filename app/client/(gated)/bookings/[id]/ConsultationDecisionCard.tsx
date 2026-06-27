@@ -124,7 +124,7 @@ export default function ConsultationDecisionCard(props: {
       })
 
       const res = await fetch(
-        `/api/client/bookings/${encodeURIComponent(bookingId)}/consultation`,
+        `/api/v1/client/bookings/${encodeURIComponent(bookingId)}/consultation`,
         {
           method: 'POST',
           headers: {

@@ -18,7 +18,7 @@
 // cancels and the fee is refunded, the pair reverts to "new" and the fee is charged
 // again on the next discovery booking. Callers MUST therefore compute
 // `establishedBookingCount` so that it EXCLUDES cancelled bookings whose discovery fee
-// was refunded. See app/api/bookings/finalize for the query.
+// was refunded. See app/api/v1/bookings/finalize for the query.
 
 import { BookingDiscoveryProvenance } from '@prisma/client'
 

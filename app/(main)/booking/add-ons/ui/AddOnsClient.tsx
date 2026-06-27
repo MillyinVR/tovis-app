@@ -190,7 +190,7 @@ export default function AddOnsClient({
 
     void (async () => {
       try {
-        const response = await fetch(`/api/holds/${encodeURIComponent(holdId)}`, {
+        const response = await fetch(`/api/v1/holds/${encodeURIComponent(holdId)}`, {
           cache: 'no-store',
         })
 
@@ -360,7 +360,7 @@ export default function AddOnsClient({
         action: 'complete',
       })
 
-      const response = await fetch('/api/bookings/finalize', {
+      const response = await fetch('/api/v1/bookings/finalize', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

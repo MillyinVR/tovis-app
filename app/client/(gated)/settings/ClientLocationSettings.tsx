@@ -115,7 +115,7 @@ export default function ClientLocationSettings() {
         qs.set('kind', 'AREA')
         qs.set('components', 'country:us')
 
-        const res = await fetch(`/api/google/places/autocomplete?${qs.toString()}`, {
+        const res = await fetch(`/api/v1/google/places/autocomplete?${qs.toString()}`, {
           cache: 'no-store',
           headers: { Accept: 'application/json' },
           signal: ac.signal,
@@ -165,7 +165,7 @@ export default function ClientLocationSettings() {
         qs.set('placeId', p.placeId)
         qs.set('sessionToken', sessionTokenRef.current)
 
-        const res = await fetch(`/api/google/places/details?${qs.toString()}`, {
+        const res = await fetch(`/api/v1/google/places/details?${qs.toString()}`, {
           cache: 'no-store',
           headers: { Accept: 'application/json' },
         })

@@ -390,7 +390,7 @@ export default function WaitlistPanel({
     setMessage(false, null)
 
     try {
-      const res = await fetch('/api/waitlist', {
+      const res = await fetch('/api/v1/waitlist', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

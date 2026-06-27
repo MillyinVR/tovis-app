@@ -1,7 +1,7 @@
 // lib/proBookingMedia.ts
 //
 // Single listing path for pro booking session media. The HTTP route
-// (app/api/pro/bookings/[id]/media) and the session server pages
+// (app/api/v1/pro/bookings/[id]/media) and the session server pages
 // (before-photos / after-photos) both go through listProBookingMedia, so the
 // booking ownership check and signed-URL rendering never fork into separate
 // implementations.

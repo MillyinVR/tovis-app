@@ -42,7 +42,7 @@ function parseDiscoverCategoriesResponse(value: unknown): DiscoverCategoriesResp
 }
 
 export async function fetchDiscoverCategories(signal?: AbortSignal): Promise<DiscoverCategoryOption[]> {
-  const response = await fetch('/api/discover/categories', {
+  const response = await fetch('/api/v1/discover/categories', {
     cache: 'no-store',
     signal,
   })

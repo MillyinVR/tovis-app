@@ -216,7 +216,7 @@ export default function OpeningsFeedClient() {
     let cancelled = false
     void (async () => {
       try {
-        const res = await fetch('/api/client/openings', { cache: 'no-store' })
+        const res = await fetch('/api/v1/client/openings', { cache: 'no-store' })
         const raw: unknown = await res.json().catch(() => null)
         if (cancelled) return
         if (!res.ok || !isRecord(raw) || !Array.isArray(raw.notifications)) {

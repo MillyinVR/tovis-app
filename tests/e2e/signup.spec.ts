@@ -53,15 +53,15 @@ const GEO = {
 }
 
 async function interceptGoogleProxies(page: Page) {
-  await page.route('**/api/google/geocode*', (route) =>
+  await page.route('**/api/v1/google/geocode*', (route) =>
     route.fulfill({ json: { geo: GEO } }),
   )
 
-  await page.route('**/api/google/timezone*', (route) =>
+  await page.route('**/api/v1/google/timezone*', (route) =>
     route.fulfill({ json: { timeZoneId: 'America/Los_Angeles' } }),
   )
 
-  await page.route('**/api/google/places/autocomplete*', (route) =>
+  await page.route('**/api/v1/google/places/autocomplete*', (route) =>
     route.fulfill({
       json: {
         predictions: [
@@ -76,7 +76,7 @@ async function interceptGoogleProxies(page: Page) {
     }),
   )
 
-  await page.route('**/api/google/places/details*', (route) =>
+  await page.route('**/api/v1/google/places/details*', (route) =>
     route.fulfill({
       json: {
         place: {

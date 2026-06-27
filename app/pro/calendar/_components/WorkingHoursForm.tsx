@@ -440,7 +440,7 @@ function workingHoursEndpoint(
 
   if (locationId) params.set('locationId', locationId)
 
-  return `/api/pro/working-hours?${params.toString()}`
+  return `/api/v1/pro/working-hours?${params.toString()}`
 }
 
 function errorFromResponse(args: {

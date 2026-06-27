@@ -55,7 +55,7 @@ describe('MarkAllReadButton', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        '/api/pro/notifications/mark-read',
+        '/api/v1/pro/notifications/mark-read',
         {
           method: 'POST',
           headers: {

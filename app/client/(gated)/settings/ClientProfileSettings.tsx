@@ -105,7 +105,7 @@ export default function ClientProfileSettings() {
       setError(null)
       setSuccess(null)
 
-      const res = await fetch('/api/client/settings', {
+      const res = await fetch('/api/v1/client/settings', {
         method: 'GET',
         cache: 'no-store',
         headers: { Accept: 'application/json' },
@@ -169,7 +169,7 @@ export default function ClientProfileSettings() {
         dateOfBirth: dateOfBirth.trim() ? dateOfBirth.trim() : null,
       }
 
-      const res = await fetch('/api/client/settings', {
+      const res = await fetch('/api/v1/client/settings', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

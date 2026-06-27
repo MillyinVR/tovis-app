@@ -236,7 +236,7 @@ export default function NewMediaPostForm() {
       setServicesLoadError(null)
 
       try {
-        const res = await fetch('/api/pro/services', { cache: 'no-store' })
+        const res = await fetch('/api/v1/pro/services', { cache: 'no-store' })
         const data = await safeJsonRecord(res)
 
         if (!res.ok) {
@@ -498,7 +498,7 @@ export default function NewMediaPostForm() {
         ? 'LOOKS_PUBLIC'
         : 'PORTFOLIO_PUBLIC'
 
-    const res = await fetch('/api/pro/uploads', {
+    const res = await fetch('/api/v1/pro/uploads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -562,7 +562,7 @@ export default function NewMediaPostForm() {
 
       const uploaded = await uploadSelectedFile()
 
-      const res = await fetch('/api/pro/media', {
+      const res = await fetch('/api/v1/pro/media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -148,7 +148,7 @@ export default function FavoriteButton({
 
     try {
       const response = await fetch(
-        `/api/professionals/${encodeURIComponent(professionalId)}/favorite`,
+        `/api/v1/professionals/${encodeURIComponent(professionalId)}/favorite`,
         {
           method: nextFavorited ? 'POST' : 'DELETE',
           headers: { Accept: 'application/json' },

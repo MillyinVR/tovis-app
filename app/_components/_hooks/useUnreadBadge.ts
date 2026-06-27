@@ -69,7 +69,7 @@ export function useUnreadBadge(opts?: { initialBadge?: string | null }) {
     const timeoutId = window.setTimeout(() => controller.abort(), 8_000)
 
     try {
-      const res = await fetch('/api/messages/unread-count', {
+      const res = await fetch('/api/v1/messages/unread-count', {
         method: 'GET',
         cache: 'no-store',
         headers: { Accept: 'application/json' },

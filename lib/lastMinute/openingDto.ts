@@ -1,7 +1,7 @@
 // lib/lastMinute/openingDto.ts
 //
 // Shared opening → DTO mapping units for the last-minute opening feeds. The
-// public feed (app/api/openings) and the recipient feed (app/api/client/
+// public feed (app/api/openings) and the recipient feed (app/api/v1/client/
 // openings) emit slightly different envelopes (the public feed always returns a
 // location object and omits per-row timezones; the recipient feed makes
 // location nullable and carries timezones), but the customer-facing PRICING

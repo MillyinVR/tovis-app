@@ -212,7 +212,7 @@ function appendOptionalParam(
 }
 
 function buildUrl(baseUrl: string, config: AvailabilityBootstrapConfig): string {
-  const url = new URL('/api/availability/bootstrap', baseUrl)
+  const url = new URL('/api/v1/availability/bootstrap', baseUrl)
 
   url.searchParams.set('professionalId', config.professionalId)
   url.searchParams.set('serviceId', config.serviceId)
@@ -504,7 +504,7 @@ function buildSummary(args: {
     commit: readCommitSha(),
     environment: readEnvironmentName(),
     baseUrl: args.baseUrl,
-    route: 'GET /api/availability/bootstrap',
+    route: 'GET /api/v1/availability/bootstrap',
     config: {
       professionalId: args.config.professionalId,
       serviceId: args.config.serviceId,
@@ -618,7 +618,7 @@ async function main(): Promise<void> {
         commit: readCommitSha(),
         environment: readEnvironmentName(),
         baseUrl,
-        route: 'GET /api/availability/bootstrap',
+        route: 'GET /api/v1/availability/bootstrap',
         profile,
         config,
         trafficPlan: stages,

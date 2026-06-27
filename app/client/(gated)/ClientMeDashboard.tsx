@@ -543,7 +543,7 @@ function MyLookCard(props: { look: MyLook }) {
     setError(false)
     setIsPublic(next) // optimistic
     try {
-      const res = await fetch(`/api/client/looks/${encodeURIComponent(look.id)}`, {
+      const res = await fetch(`/api/v1/client/looks/${encodeURIComponent(look.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isPublic: next }),

@@ -484,7 +484,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
         copy,
       })
 
-      const response = await fetch('/api/pro/calendar/blocked', {
+      const response = await fetch('/api/v1/pro/calendar/blocked', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

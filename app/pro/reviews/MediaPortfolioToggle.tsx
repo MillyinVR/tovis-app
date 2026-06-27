@@ -21,7 +21,7 @@ export default function MediaPortfolioToggle({
       setError(null)
 
       const next = !featured
-      const res = await fetch(`/api/pro/media/${mediaId}/portfolio`, {
+      const res = await fetch(`/api/v1/pro/media/${mediaId}/portfolio`, {
         method: next ? 'POST' : 'DELETE',
       })
       const data = await res.json().catch(() => ({}))

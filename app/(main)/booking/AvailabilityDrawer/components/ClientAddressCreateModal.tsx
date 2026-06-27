@@ -127,7 +127,7 @@ export default function ClientAddressCreateModal(props: Props) {
           sessionToken,
         })
 
-        const res = await fetch(`/api/google/places/autocomplete?${qs.toString()}`, {
+        const res = await fetch(`/api/v1/google/places/autocomplete?${qs.toString()}`, {
           method: 'GET',
           cache: 'no-store',
           signal: controller.signal,
@@ -171,7 +171,7 @@ export default function ClientAddressCreateModal(props: Props) {
         sessionToken,
       })
 
-      const res = await fetch(`/api/google/places/details?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/google/places/details?${qs.toString()}`, {
         method: 'GET',
         cache: 'no-store',
         headers: { Accept: 'application/json' },
@@ -224,7 +224,7 @@ export default function ClientAddressCreateModal(props: Props) {
         isDefault,
       }
 
-      const res = await fetch('/api/client/addresses', {
+      const res = await fetch('/api/v1/client/addresses', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

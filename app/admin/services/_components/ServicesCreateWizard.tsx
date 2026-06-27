@@ -214,7 +214,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
     if (defaultDurationMinutes.trim()) form.set('defaultDurationMinutes', defaultDurationMinutes.trim())
     if (allowMobile) form.set('allowMobile', 'true')
 
-    const res = await fetch('/api/admin/services?format=json', {
+    const res = await fetch('/api/v1/admin/services?format=json', {
       method: 'POST',
       body: form,
       headers: { Accept: 'application/json' },
@@ -235,7 +235,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
   async function uploadDefaultImageToSupabase(serviceId: string, file: File) {
     const uploadFile = await compressImageForUpload(file)
 
-    const initRes = await fetch('/api/admin/uploads', {
+    const initRes = await fetch('/api/v1/admin/uploads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
@@ -273,7 +273,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
     patch.set('_method', 'PATCH')
     patch.set('defaultImageUrl', finalUrl)
 
-    const res = await fetch(`/api/admin/services/${encodeURIComponent(serviceId)}`, {
+    const res = await fetch(`/api/v1/admin/services/${encodeURIComponent(serviceId)}`, {
       method: 'POST',
       body: patch,
       headers: { Accept: 'application/json' },

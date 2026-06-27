@@ -105,7 +105,7 @@ export default function NewNoteForm({ clientId }: Props) {
     setLoading(true)
 
     try {
-      const res = await fetch(`/api/pro/clients/${encodeURIComponent(clientId)}/notes`, {
+      const res = await fetch(`/api/v1/pro/clients/${encodeURIComponent(clientId)}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,

@@ -51,9 +51,9 @@ const SAFE_DB_BACKED_MARKERS = [
 ] as const
 
 const ALLOWLIST = new Set<string>([
-  'app/api/auth/login/route.ts',
-  'app/api/auth/register/route.ts',
-  'app/api/auth/logout/route.ts',
+  'app/api/v1/auth/login/route.ts',
+  'app/api/v1/auth/register/route.ts',
+  'app/api/v1/auth/logout/route.ts',
 ])
 
 type Offender = {

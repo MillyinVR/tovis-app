@@ -43,7 +43,7 @@ export function CreateAccountInviteCard({ actionToken, context }: Props) {
 
     try {
       const response = await fetch(
-        `/api/public/account-invite/${encodeURIComponent(actionToken)}`,
+        `/api/v1/public/account-invite/${encodeURIComponent(actionToken)}`,
         { method: 'POST' },
       )
 

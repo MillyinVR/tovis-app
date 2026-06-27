@@ -207,7 +207,7 @@ export async function googlePlaceDetails(
   sessionToken?: string | null,
 ): Promise<GooglePlaceDetails> {
   // Legacy maps/api/place/details is rejected for newer API keys; this
-  // uses Places API (New), same as the /api/google/places proxy routes.
+  // uses Places API (New), same as the /api/v1/google/places proxy routes.
   const trimmed = placeId.trim()
   const name = trimmed.startsWith('places/') ? trimmed : `places/${trimmed}`
   const url = `https://places.googleapis.com/v1/${encodeURI(name)}`

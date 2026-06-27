@@ -48,7 +48,7 @@ export async function deleteHoldById(holdId: string) {
   const id = (holdId || '').trim()
   if (!id) return
   try {
-    await fetch(`/api/holds/${encodeURIComponent(id)}`, {
+    await fetch(`/api/v1/holds/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       cache: 'no-store',
     })

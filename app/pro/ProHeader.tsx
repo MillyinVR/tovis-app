@@ -114,7 +114,7 @@ export default function ProHeader({
 
     async function loadNotificationSummary() {
       try {
-        const response = await fetch('/api/pro/notifications/summary', {
+        const response = await fetch('/api/v1/pro/notifications/summary', {
           cache: 'no-store',
         })
 

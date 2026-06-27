@@ -642,7 +642,7 @@ async function main(): Promise<void> {
     proCookie: requireEnv('LOAD_TEST_PRO_COOKIE'),
     mediaRouteTemplate:
       optionalEnv('LOAD_TEST_MEDIA_ROUTE_TEMPLATE') ??
-      '/api/pro/bookings/:bookingId/media',
+      '/api/v1/pro/bookings/:bookingId/media',
     mediaType: optionalEnv('LOAD_TEST_MEDIA_TYPE') ?? 'IMAGE',
     phase: mediaPhase,
     visibility: optionalEnv('LOAD_TEST_MEDIA_VISIBILITY') ?? 'PRO_CLIENT',

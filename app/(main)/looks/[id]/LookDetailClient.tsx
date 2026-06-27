@@ -148,7 +148,7 @@ export default function LookDetailClient({
 
     try {
       const res = await fetch(
-        `/api/looks/${encodeURIComponent(lookPostId)}/like`,
+        `/api/v1/looks/${encodeURIComponent(lookPostId)}/like`,
         {
           method: beforeLiked ? 'DELETE' : 'POST',
         },

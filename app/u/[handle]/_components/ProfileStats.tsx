@@ -112,7 +112,7 @@ export default function ProfileStats({
 
     try {
       const response = await fetch(
-        `/api/client/follow/${encodeURIComponent(handle)}`,
+        `/api/v1/client/follow/${encodeURIComponent(handle)}`,
         { method: 'POST', headers: { Accept: 'application/json' } },
       )
       const payload = await readJsonSafely(response)

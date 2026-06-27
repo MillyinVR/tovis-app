@@ -210,7 +210,7 @@ function buildLocationLabel(args: {
 }
 
 /**
- * This is the booking shape you SELECT in /api/client/bookings.
+ * This is the booking shape you SELECT in /api/v1/client/bookings.
  * Keep this in sync with bookingSelect in that route.
  */
 export type ClientBookingRow = Prisma.BookingGetPayload<{

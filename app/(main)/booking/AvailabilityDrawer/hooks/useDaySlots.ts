@@ -271,7 +271,7 @@ async function fetchDaySlotsDetailed(
     qs.set('debug', '1')
   }
 
-  const res = await fetch(`/api/availability/day?${qs.toString()}`, {
+  const res = await fetch(`/api/v1/availability/day?${qs.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal: params.signal,

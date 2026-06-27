@@ -86,7 +86,7 @@ describe('app/(main)/looks/[id]/page.tsx', () => {
     })
   })
 
-  it('fetches canonical post detail from /api/looks/[id]', async () => {
+  it('fetches canonical post detail from /api/v1/looks/[id]', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -102,7 +102,7 @@ describe('app/(main)/looks/[id]/page.tsx', () => {
     })
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://app.test/api/looks/look_1',
+      'https://app.test/api/v1/looks/look_1',
       expect.objectContaining({
         cache: 'no-store',
         headers: { Accept: 'application/json' },

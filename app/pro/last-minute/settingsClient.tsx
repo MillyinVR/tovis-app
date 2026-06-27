@@ -314,7 +314,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     setErr(null)
 
     try {
-      const res = await fetch('/api/pro/last-minute/settings', {
+      const res = await fetch('/api/v1/pro/last-minute/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
@@ -334,7 +334,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     setErr(null)
 
     try {
-      const res = await fetch('/api/pro/last-minute/rules', {
+      const res = await fetch('/api/v1/pro/last-minute/rules', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serviceId, ...patch }),
@@ -369,7 +369,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
         throw new Error('Block end must be after start.')
       }
 
-      const res = await fetch('/api/pro/last-minute/blocks', {
+      const res = await fetch('/api/v1/pro/last-minute/blocks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -404,7 +404,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     setErr(null)
 
     try {
-      const res = await fetch(`/api/pro/last-minute/blocks?id=${encodeURIComponent(id)}`, {
+      const res = await fetch(`/api/v1/pro/last-minute/blocks?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
       })
       const data = await safeJson(res)

@@ -185,7 +185,7 @@ export function RebookCard({
 
       try {
         const res = await fetch(
-          `/api/availability/day?${params.toString()}`,
+          `/api/v1/availability/day?${params.toString()}`,
           { cache: 'no-store' },
         )
         const payload: unknown = await res.json().catch(() => null)
@@ -244,7 +244,7 @@ export function RebookCard({
     try {
       const idempotencyKey = buildIdempotencyKey(token, slotIso)
       const res = await fetch(
-        `/api/client/rebook/${encodeURIComponent(token)}`,
+        `/api/v1/client/rebook/${encodeURIComponent(token)}`,
         {
           method: 'POST',
           headers: {

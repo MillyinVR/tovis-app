@@ -222,14 +222,14 @@ export default async function AdminLicenseReviewPage() {
 
                       {latestDoc ? (
                         <a
-                          href={`/api/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
+                          href={`/api/v1/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
                           target="_blank"
                           rel="noreferrer"
                           className="block text-right"
                           title="Open full size"
                         >
                           <RemoteImage
-                            src={`/api/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
+                            src={`/api/v1/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
                             alt="License document"
                             className="h-20 w-32 rounded-lg border border-surfaceGlass/14 bg-bgPrimary/30 object-cover"
                             width={128}

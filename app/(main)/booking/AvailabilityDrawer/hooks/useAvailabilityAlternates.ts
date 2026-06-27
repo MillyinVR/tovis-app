@@ -247,7 +247,7 @@ export function useAvailabilityAlternates(args: {
           qs.set('debug', '1')
         }
 
-        const res = await fetch(`/api/availability/alternates?${qs.toString()}`, {
+        const res = await fetch(`/api/v1/availability/alternates?${qs.toString()}`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
           signal: controller.signal,

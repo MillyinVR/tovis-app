@@ -71,7 +71,7 @@ export default function ReferralListClient() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/client/referrals')
+      const res = await fetch('/api/v1/client/referrals')
       const data = await safeJson(res)
       if (res.ok && data && typeof data === 'object' && 'referrals' in data) {
         setReferrals((data as { referrals: Referral[] }).referrals)
@@ -89,7 +89,7 @@ export default function ReferralListClient() {
     setBusy(id)
     setErr(null)
     try {
-      const res = await fetch(`/api/client/referrals/${id}/${action}`, {
+      const res = await fetch(`/api/v1/client/referrals/${id}/${action}`, {
         method: 'POST',
       })
       if (!res.ok) {

@@ -100,7 +100,7 @@ export default function NotificationCard(props: NotificationCardProps) {
 
     try {
       const res = await fetch(
-        `/api/pro/notifications/${encodeURIComponent(props.id)}/mark-read`,
+        `/api/v1/pro/notifications/${encodeURIComponent(props.id)}/mark-read`,
         {
           method: 'POST',
           headers: {

@@ -30,7 +30,7 @@ export default function NewFormulaForm({ clientId }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/formula`, {
+      const res = await fetch(`/api/v1/pro/clients/${clientId}/formula`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

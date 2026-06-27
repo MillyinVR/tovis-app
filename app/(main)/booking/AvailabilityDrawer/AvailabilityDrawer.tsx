@@ -1416,7 +1416,7 @@ export default function AvailabilityDrawer(props: {
     setHolding(true)
 
     try {
-      const res = await fetch('/api/holds', {
+      const res = await fetch('/api/v1/holds', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

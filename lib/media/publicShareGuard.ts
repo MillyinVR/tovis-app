@@ -6,7 +6,7 @@
 // safety-critical): a client's private BEFORE/AFTER session photos must NEVER
 // become public unless the CLIENT authorizes it. The authorization act is the
 // client attaching the photo to a review, which stamps `reviewId` and flips the
-// row to PUBLIC (app/api/client/bookings/[id]/review/route.ts).
+// row to PUBLIC (app/api/v1/client/bookings/[id]/review/route.ts).
 //
 // Therefore a pro may flip a media asset to public (feature in portfolio, mark
 // eligible for Looks, or back a published Look) ONLY when the asset is either:

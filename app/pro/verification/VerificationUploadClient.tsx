@@ -43,7 +43,7 @@ export default function VerificationUploadClient({
     const uploadFile = await compressImageForUpload(file)
 
     // 1) signed upload init
-    const metaRes = await fetch('/api/pro/uploads', {
+    const metaRes = await fetch('/api/v1/pro/uploads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -88,7 +88,7 @@ export default function VerificationUploadClient({
     // 3) create VerificationDocument row
     const ref = `supabase://${bucket}/${path}`
 
-    const createRes = await fetch('/api/pro/verification-docs', {
+    const createRes = await fetch('/api/v1/pro/verification-docs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

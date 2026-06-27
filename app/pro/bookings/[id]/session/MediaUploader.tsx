@@ -22,7 +22,7 @@ type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
 type UploadState = 'IDLE' | 'COMPRESSING' | 'UPLOADING' | 'SAVING'
 
-// The signing route (app/api/pro/uploads) hard-caps any single upload at 30MB.
+// The signing route (app/api/v1/pro/uploads) hard-caps any single upload at 30MB.
 // Videos upload as-is, so their source ceiling must match the server. Images
 // are downscaled + compressed below COMPRESS_MAX_BYTES before upload, so we
 // accept a generous source file and let compression bring it under the cap.
@@ -302,7 +302,7 @@ export default function MediaUploader({
       setStatus('UPLOADING')
       setUploadPercent(0)
 
-      const signRes = await fetch('/api/pro/uploads', {
+      const signRes = await fetch('/api/v1/pro/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -364,7 +364,7 @@ export default function MediaUploader({
       })
 
       const res = await fetch(
-        `/api/pro/bookings/${encodeURIComponent(bookingId)}/media`,
+        `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}/media`,
         {
           method: 'POST',
           headers: {

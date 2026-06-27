@@ -137,7 +137,7 @@ function ReviewsPanelInner({
 
     try {
       const res = await fetch(
-        `/api/pro/media/${encodeURIComponent(mediaId)}/portfolio`,
+        `/api/v1/pro/media/${encodeURIComponent(mediaId)}/portfolio`,
         {
           method: value ? 'POST' : 'DELETE',
         },
@@ -203,7 +203,7 @@ function ReviewsPanelInner({
 
     try {
       const res = await fetch(
-        `/api/reviews/${encodeURIComponent(reviewId)}/helpful`,
+        `/api/v1/reviews/${encodeURIComponent(reviewId)}/helpful`,
         {
           method: beforeHelpful ? 'DELETE' : 'POST',
           headers: { Accept: 'application/json' },

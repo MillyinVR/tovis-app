@@ -342,7 +342,7 @@ function buildPatchPayload(args: BuildPatchPayloadArgs): PatchBlockPayload {
 }
 
 function blockEndpoint(blockId: string): string {
-  return `/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`
+  return `/api/v1/pro/calendar/blocked/${encodeURIComponent(blockId)}`
 }
 
 function readResponseError(data: unknown, fallback: string): string {

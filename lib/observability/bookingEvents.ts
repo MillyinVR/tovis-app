@@ -27,7 +27,7 @@ type CaptureBookingExceptionInput = {
  *     bookingId: args.bookingId,
  *     professionalId: args.professionalId,
  *     clientId: args.clientId,
- *     route: 'POST /api/bookings/finalize',
+ *     route: 'POST /api/v1/bookings/finalize',
  *   })
  */
 export function captureBookingException(

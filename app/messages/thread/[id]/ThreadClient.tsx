@@ -210,7 +210,7 @@ export default function ThreadClient(props: ThreadClientProps) {
 
   const markRead = useCallback(async () => {
     try {
-      await fetch(`/api/messages/threads/${encodeURIComponent(threadId)}/read`, {
+      await fetch(`/api/v1/messages/threads/${encodeURIComponent(threadId)}/read`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
       })
@@ -228,7 +228,7 @@ export default function ThreadClient(props: ThreadClientProps) {
 
     try {
       const res = await fetch(
-        `/api/messages/threads/${encodeURIComponent(threadId)}`,
+        `/api/v1/messages/threads/${encodeURIComponent(threadId)}`,
         {
           method: 'GET',
           cache: 'no-store',
@@ -268,7 +268,7 @@ export default function ThreadClient(props: ThreadClientProps) {
 
     try {
       const res = await fetch(
-        `/api/messages/threads/${encodeURIComponent(threadId)}`,
+        `/api/v1/messages/threads/${encodeURIComponent(threadId)}`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

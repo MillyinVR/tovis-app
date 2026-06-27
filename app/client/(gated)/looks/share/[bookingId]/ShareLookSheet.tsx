@@ -76,7 +76,7 @@ export default function ShareLookSheet({ data }: { data: ShareLookPageData }) {
     try {
       const uploadFile = await compressImageForUpload(file)
 
-      const res = await fetch('/api/client/uploads', {
+      const res = await fetch('/api/v1/client/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -142,7 +142,7 @@ export default function ShareLookSheet({ data }: { data: ShareLookPageData }) {
     setSubmitting(true)
     try {
       const res = await fetch(
-        `/api/client/bookings/${encodeURIComponent(data.bookingId)}/share-look`,
+        `/api/v1/client/bookings/${encodeURIComponent(data.bookingId)}/share-look`,
         {
           method: 'POST',
           headers: {

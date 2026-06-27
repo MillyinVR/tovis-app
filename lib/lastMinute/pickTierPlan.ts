@@ -1,7 +1,7 @@
 // lib/lastMinute/pickTierPlan.ts
 //
 // Single source of truth for "which tier plan's incentive applies" to a last-minute opening.
-// Used by BOTH the read paths that DISPLAY the incentive (app/api/client/openings,
+// Used by BOTH the read paths that DISPLAY the incentive (app/api/v1/client/openings,
 // app/api/openings) AND the write path that CHARGES it (lib/booking/writeBoundary at finalize).
 // Keeping one implementation guarantees the discount charged matches the discount advertised.
 //
@@ -12,7 +12,7 @@ import { LastMinuteTier, LastMinuteVisibilityMode } from '@prisma/client'
 
 /**
  * The plan that was offered to a notified recipient: the plan for their matched tier
- * (notifiedTier, falling back to firstMatchedTier). Mirrors app/api/client/openings.
+ * (notifiedTier, falling back to firstMatchedTier). Mirrors app/api/v1/client/openings.
  */
 export function pickRecipientTierPlan<P extends { tier: LastMinuteTier }>(args: {
   notifiedTier: LastMinuteTier | null
@@ -24,7 +24,7 @@ export function pickRecipientTierPlan<P extends { tier: LastMinuteTier }>(args: 
 }
 
 /**
- * The plan a public/discovery viewer (no recipient row) would see. Mirrors app/api/openings:
+ * The plan a public/discovery viewer (no recipient row) would see. Mirrors app/api/v1/openings:
  * DISCOVERY tier for PUBLIC_AT_DISCOVERY; for PUBLIC_IMMEDIATE the latest plan already started
  * by `now` (else the first). Returns null for TARGETED_ONLY (no public incentive).
  */

@@ -14852,7 +14852,7 @@ export async function applyStripeCheckoutSessionStatus(
 /**
  * Deletes all expired BookingHold rows in a single sweep and bumps the
  * scheduleConfigVersion for every affected professional so cached availability
- * surfaces (`/api/availability/*`, openings, search) re-render the freed slots.
+ * surfaces (`/api/v1/availability/*`, openings, search) re-render the freed slots.
  *
  * Used by the `/api/internal/jobs/hold-cleanup` cron. Routing the deleteMany
  * through the write-boundary keeps the BookingHold mutation tripwire green

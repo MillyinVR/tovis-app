@@ -1,6 +1,6 @@
 // tests/integration/register-signup.test.ts
 //
-// Integration coverage for POST /api/auth/register against the docker test
+// Integration coverage for POST /api/v1/auth/register against the docker test
 // database:
 //   pnpm test:integration
 //
@@ -57,7 +57,7 @@ vi.mock('next/headers', () => ({
 
 import { PrismaClient } from '@prisma/client'
 
-import { POST } from '@/app/api/auth/register/route'
+import { POST } from '@/app/api/v1/auth/register/route'
 import { verifyToken } from '@/lib/auth'
 import { clearInMemoryRateLimitCountersForTests } from '@/lib/rateLimit/enforce'
 import { emailLookupHashV2, phoneLookupHashV2 } from '@/lib/security/crypto/hashLookup'
@@ -157,7 +157,7 @@ function makeDcaHandler(licenseSearch: () => Response): FetchHandler {
 }
 
 function makeRequest(body: unknown) {
-  return new Request('http://localhost/api/auth/register', {
+  return new Request('http://localhost/api/v1/auth/register', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -275,7 +275,7 @@ async function cleanupSeededRows() {
   await db.user.deleteMany({ where: { id: { in: userIds } } })
 }
 
-describe('POST /api/auth/register (integration)', () => {
+describe('POST /api/v1/auth/register (integration)', () => {
   beforeAll(async () => {
     // Background email tail resolves tenant context by host; make sure the
     // root tenant row exists like production data does.

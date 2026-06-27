@@ -3,7 +3,7 @@
 // Single source of truth for constructing a MediaAsset row's scalar `data`.
 //
 // Before this existed, four call sites hand-maintained their own MediaAsset
-// create payloads (the booking write boundary, POST /api/pro/media, the two
+// create payloads (the booking write boundary, POST /api/v1/pro/media, the two
 // client review media routes). That spread the field defaults — and, more
 // dangerously, the bucket/visibility safety invariants — across the codebase.
 //

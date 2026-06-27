@@ -75,7 +75,7 @@ describe('RebookSlotPicker', () => {
     // It queried the pro's availability with the source booking's offering/location.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     const url = String(fetchMock.mock.calls[0]?.[0])
-    expect(url).toContain('/api/availability/day?')
+    expect(url).toContain('/api/v1/availability/day?')
     expect(url).toContain('professionalId=pro_1')
     expect(url).toContain('serviceId=svc_1')
     expect(url).toContain('locationType=SALON')

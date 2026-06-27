@@ -548,7 +548,7 @@ export default function NewBookingForm({
         qs.set('components', 'country:us')
 
         const res = await fetch(
-          `/api/google/places/autocomplete?${qs.toString()}`,
+          `/api/v1/google/places/autocomplete?${qs.toString()}`,
           {
             cache: 'no-store',
             headers: { Accept: 'application/json' },
@@ -577,7 +577,7 @@ export default function NewBookingForm({
       qs.set('placeId', prediction.placeId)
       qs.set('sessionToken', serviceSessionTokenRef.current)
 
-      const res = await fetch(`/api/google/places/details?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/google/places/details?${qs.toString()}`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
       })
@@ -669,7 +669,7 @@ export default function NewBookingForm({
         setClientSearchLoading(true)
 
         const res = await fetch(
-          `/api/pro/clients/search?q=${encodeURIComponent(query)}`,
+          `/api/v1/pro/clients/search?q=${encodeURIComponent(query)}`,
           {
             method: 'GET',
             signal: controller.signal,
@@ -728,7 +728,7 @@ export default function NewBookingForm({
         setClientAddressesLoading(true)
 
         const res = await fetch(
-          `/api/pro/clients/${encodeURIComponent(clientId)}/service-addresses`,
+          `/api/v1/pro/clients/${encodeURIComponent(clientId)}/service-addresses`,
           {
             method: 'GET',
             signal: controller.signal,
@@ -1092,7 +1092,7 @@ export default function NewBookingForm({
 
       submitIdempotencyKeyRef.current = idempotencyKey
 
-  const res = await fetch('/api/pro/bookings', {
+  const res = await fetch('/api/v1/pro/bookings', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

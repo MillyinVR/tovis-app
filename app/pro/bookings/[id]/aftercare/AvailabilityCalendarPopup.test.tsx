@@ -47,7 +47,7 @@ describe('AvailabilityCalendarPopup', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
 
     const url = String(fetchMock.mock.calls[0]?.[0] ?? '')
-    expect(url).toContain('/api/pro/availability/busy-days')
+    expect(url).toContain('/api/v1/pro/availability/busy-days')
     expect(url).toContain('from=2099-09-01')
     expect(url).toContain('to=2099-09-30')
 

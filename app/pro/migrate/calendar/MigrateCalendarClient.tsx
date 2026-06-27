@@ -78,7 +78,7 @@ export function MigrateCalendarClient({ copy }: Props) {
       setError('That calendar looks empty. Check the export and try again.')
       return
     }
-    const res = await fetch('/api/pro/migrate/calendar/preview', {
+    const res = await fetch('/api/v1/pro/migrate/calendar/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ics: text }),
@@ -116,7 +116,7 @@ export function MigrateCalendarClient({ copy }: Props) {
     setError(null)
     setBusy(true)
     try {
-      const res = await fetch('/api/pro/migrate/calendar/fetch', {
+      const res = await fetch('/api/v1/pro/migrate/calendar/fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: feedUrl }),
@@ -150,7 +150,7 @@ export function MigrateCalendarClient({ copy }: Props) {
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/pro/migrate/calendar/commit', {
+      const res = await fetch('/api/v1/pro/migrate/calendar/commit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ics: icsText, excludeUids: [...excluded] }),
@@ -166,7 +166,7 @@ export function MigrateCalendarClient({ copy }: Props) {
 
       // If the source was a feed URL and the pro opted in, keep it synced.
       if (syncUrl && keepSynced) {
-        const subRes = await fetch('/api/pro/migrate/calendar/subscription', {
+        const subRes = await fetch('/api/v1/pro/migrate/calendar/subscription', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: syncUrl }),

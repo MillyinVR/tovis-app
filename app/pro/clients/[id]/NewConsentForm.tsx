@@ -54,7 +54,7 @@ export default function NewConsentForm({ clientId }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/consent`, {
+      const res = await fetch(`/api/v1/pro/clients/${clientId}/consent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

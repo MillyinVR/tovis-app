@@ -33,7 +33,7 @@ export function usePresenceSignals(args: {
 
   const sendHeartbeat = useCallback(async () => {
     try {
-      await fetch('/api/client/presence/heartbeat', {
+      await fetch('/api/v1/client/presence/heartbeat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resourceType, resourceId }),
@@ -52,7 +52,7 @@ export function usePresenceSignals(args: {
       })
       if (serviceId) params.set('serviceId', serviceId)
 
-      const res = await fetch(`/api/presence/signals?${params}`)
+      const res = await fetch(`/api/v1/presence/signals?${params}`)
       if (!res.ok) return
 
       const data = await res.json()

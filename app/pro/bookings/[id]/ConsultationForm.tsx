@@ -354,7 +354,7 @@ export default function ConsultationForm({
 
       try {
         const response = await fetch(
-          `/api/pro/bookings/${encodeURIComponent(
+          `/api/v1/pro/bookings/${encodeURIComponent(
             bookingId,
           )}/consultation-services`,
           { cache: 'no-store' },
@@ -578,7 +578,7 @@ export default function ConsultationForm({
         })
 
         const response = await fetch(
-          `/api/pro/bookings/${encodeURIComponent(
+          `/api/v1/pro/bookings/${encodeURIComponent(
             bookingId,
           )}/consultation-proposal`,
           {
