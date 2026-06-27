@@ -21,6 +21,11 @@ import {
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
+import type {
+  ClientReviewMediaCreatedDTO,
+  ClientReviewMediaCreateResponseDTO,
+  ClientReviewMediaReviewDTO,
+} from '@/lib/dto/mediaAttach'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { safeError } from '@/lib/security/logging'
@@ -367,7 +372,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     })
 
     const createdForUI = await Promise.all(
-      created.rows.map(async (media) => {
+      created.rows.map(async (media): Promise<ClientReviewMediaCreatedDTO> => {
         const { renderUrl, renderThumbUrl } = await renderMediaUrls({
           storageBucket: media.storageBucket,
           storagePath: media.storagePath,
@@ -378,21 +383,44 @@ export async function POST(req: NextRequest, context: RouteContext) {
         })
 
         return {
-          ...media,
-          renderUrl,
-          renderThumbUrl,
+          id: media.id,
+          mediaType: media.mediaType,
+          visibility: media.visibility,
+          createdAt: media.createdAt.toISOString(),
           url: renderUrl,
           thumbUrl: renderThumbUrl,
+          renderUrl,
+          renderThumbUrl,
         }
       }),
     )
+
+    const reviewDto: ClientReviewMediaReviewDTO | null = created.updated
+      ? {
+          id: created.updated.id,
+          rating: created.updated.rating,
+          headline: created.updated.headline,
+          body: created.updated.body,
+          createdAt: created.updated.createdAt.toISOString(),
+          professionalId: created.updated.professionalId,
+          bookingId: created.updated.bookingId,
+          mediaAssets: created.updated.mediaAssets.map((asset) => ({
+            id: asset.id,
+            mediaType: asset.mediaType,
+            visibility: asset.visibility,
+            createdAt: asset.createdAt.toISOString(),
+            url: asset.url,
+            thumbUrl: asset.thumbUrl,
+          })),
+        }
+      : null
 
     return jsonOk(
       {
         createdCount: createdForUI.length,
         created: createdForUI,
-        review: created.updated,
-      },
+        review: reviewDto,
+      } satisfies ClientReviewMediaCreateResponseDTO,
       201,
     )
   } catch (error: unknown) {

@@ -252,6 +252,10 @@ describe('app/api/v1/client/reviews/[id]/media/route.ts', () => {
     mocks.txMediaAssetCreate.mockResolvedValue(createdMedia)
     mocks.txReviewFindUnique.mockResolvedValue({
       ...review,
+      rating: 5,
+      headline: 'Loved it',
+      body: 'Great work',
+      createdAt,
       mediaAssets: [createdMedia],
     })
 

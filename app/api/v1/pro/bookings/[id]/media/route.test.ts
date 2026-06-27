@@ -33,15 +33,27 @@ const renderedUrls = {
   renderThumbUrl: 'https://signed.example/thumb.jpg',
 }
 
+// The picked wire item: storage pointers (storageBucket/storagePath/thumb*) and
+// bookingId are dropped; createdAt is ISO; url/thumbUrl mirror the signed render
+// URLs. Shared by the GET-list and POST-create assertions.
+const expectedItem = {
+  id: mediaItemFromUpload.id,
+  mediaType: mediaItemFromUpload.mediaType,
+  visibility: mediaItemFromUpload.visibility,
+  phase: mediaItemFromUpload.phase,
+  caption: mediaItemFromUpload.caption,
+  createdAt: createdAtIso,
+  reviewId: mediaItemFromUpload.reviewId,
+  isEligibleForLooks: mediaItemFromUpload.isEligibleForLooks,
+  isFeaturedInPortfolio: mediaItemFromUpload.isFeaturedInPortfolio,
+  url: renderedUrls.renderUrl,
+  thumbUrl: renderedUrls.renderThumbUrl,
+  renderUrl: renderedUrls.renderUrl,
+  renderThumbUrl: renderedUrls.renderThumbUrl,
+}
+
 const expectedPostResponseBody = {
-  item: {
-    ...mediaItemFromUpload,
-    createdAt: createdAtIso,
-    renderUrl: renderedUrls.renderUrl,
-    renderThumbUrl: renderedUrls.renderThumbUrl,
-    url: renderedUrls.renderUrl,
-    thumbUrl: renderedUrls.renderThumbUrl,
-  },
+  item: expectedItem,
   advancedTo: 'BEFORE_PHOTOS',
 }
 
@@ -491,16 +503,7 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
-      items: [
-        {
-          ...mediaItemFromUpload,
-          createdAt: createdAtIso,
-          renderUrl: renderedUrls.renderUrl,
-          renderThumbUrl: renderedUrls.renderThumbUrl,
-          url: renderedUrls.renderUrl,
-          thumbUrl: renderedUrls.renderThumbUrl,
-        },
-      ],
+      items: [expectedItem],
     })
   })
 

@@ -41,6 +41,24 @@ export type {
   MediaAdminUploadFinalizeDTO,
 } from '@/lib/dto/media'
 
+// ── Media attach (POST /api/v1/pro/media, GET/POST pro/bookings/[id]/media, ──
+//    POST client/reviews/[id]/media) — picked shapes, not raw Prisma rows.
+export type {
+  ProMediaServiceTagDTO,
+  ProMediaCreatedDTO,
+  ProMediaCreateResponseDTO,
+  ProBookingMediaItemDTO,
+  ProBookingMediaListResponseDTO,
+  ProBookingMediaCreateResponseDTO,
+  ClientReviewMediaAssetSummaryDTO,
+  ClientReviewMediaCreatedDTO,
+  ClientReviewMediaReviewDTO,
+  ClientReviewMediaCreateResponseDTO,
+} from '@/lib/dto/mediaAttach'
+
+// `lookPublication` on the pro/media response — already a JSON-safe DTO.
+export type { ProLookPublicationResultDto } from '@/lib/looks/publication/contracts'
+
 // ── Messaging (GET/POST /api/v1/messages/*) ──────────────────────────────────
 export type {
   MessageThreadClientPreviewDTO,
