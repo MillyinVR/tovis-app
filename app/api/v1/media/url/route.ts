@@ -69,7 +69,7 @@ export async function GET(req: Request) {
     })
 
     if (!renderUrl) return jsonFail(500, 'Media is missing renderable URL.')
-    return jsonOk({ url: renderUrl })
+    return jsonOk({ url: renderUrl } satisfies MediaSignedUrlDTO)
   } catch (e) {
     console.error('GET /api/v1/media/url error', e)
     return jsonFail(500, 'Internal server error')

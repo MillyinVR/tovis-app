@@ -251,6 +251,8 @@ describe('app/api/v1/auth/phone/verify/route', () => {
       isEmailVerified: false,
       isFullyVerified: false,
       requiresEmailVerification: true,
+      // No new token is minted on the already-verified path.
+      token: null,
     })
 
     expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
