@@ -27,6 +27,7 @@ export type RateLimitBucket =
   | 'nfc:code'
   | 'auth:login'
   | 'auth:login:identity'
+  | 'auth:apple'
   | 'auth:register'
   | 'auth:register:verified'
   | 'auth:password-reset-request'
@@ -224,6 +225,15 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 8,
     windowSeconds: 15 * 60,
     prefix: 'rl:auth:login:id',
+    mode: 'auth-critical',
+  },
+  // Sign in with Apple. Keyed per-IP; generous enough for shared NAT but bounds
+  // token-replay abuse. Auth-critical so a Redis outage degrades to in-memory,
+  // not unlimited.
+  'auth:apple': {
+    limit: 20,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:apple',
     mode: 'auth-critical',
   },
   'auth:register': {
