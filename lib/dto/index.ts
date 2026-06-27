@@ -98,6 +98,14 @@ export type {
   BookingHoldDeleteResponseDTO,
 } from '@/lib/dto/holds'
 
+// ── Checkout / payment step (POST /api/v1/client/bookings/[id]/* checkout) ────
+export type {
+  StripeCheckoutSessionDTO,
+  DepositStripeSessionResponseDTO,
+  CheckoutStripeSessionResponseDTO,
+  ClientCheckoutConfirmResponseDTO,
+} from '@/lib/dto/checkout'
+
 // ── Push device registration (POST/DELETE /api/v1/devices) ───────────────────
 export type { DeviceTokenDTO } from '@/lib/dto/deviceToken'
 

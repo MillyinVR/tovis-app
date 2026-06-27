@@ -147,7 +147,10 @@ export async function POST(request: Request) {
           isEmailVerified: user.isEmailVerified,
           isFullyVerified: user.isFullyVerified,
           requiresEmailVerification: !user.isEmailVerified,
-        },
+          // No new token is minted on the already-verified path; native keeps
+          // its current bearer.
+          token: null,
+        } satisfies AuthPhoneVerifyResponseDTO,
         200,
       )
     }

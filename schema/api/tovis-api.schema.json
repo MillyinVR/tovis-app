@@ -8,6 +8,16 @@
       ],
       "type": "string"
     },
+    "$Enums.BookingCheckoutStatus": {
+      "enum": [
+        "NOT_READY",
+        "READY",
+        "PARTIALLY_PAID",
+        "PAID",
+        "WAIVED"
+      ],
+      "type": "string"
+    },
     "$Enums.BookingServiceItemType": {
       "enum": [
         "BASE",
@@ -111,6 +121,27 @@
       ],
       "type": "string"
     },
+    "$Enums.PaymentMethod": {
+      "enum": [
+        "CASH",
+        "CARD_ON_FILE",
+        "TAP_TO_PAY",
+        "VENMO",
+        "ZELLE",
+        "APPLE_CASH",
+        "PAYPAL",
+        "APPLE_PAY",
+        "STRIPE_CARD"
+      ],
+      "type": "string"
+    },
+    "$Enums.PaymentProvider": {
+      "enum": [
+        "MANUAL",
+        "STRIPE"
+      ],
+      "type": "string"
+    },
     "$Enums.ProNameDisplay": {
       "enum": [
         "BUSINESS_NAME",
@@ -168,6 +199,29 @@
         "FINISH_REVIEW",
         "AFTER_PHOTOS",
         "DONE"
+      ],
+      "type": "string"
+    },
+    "$Enums.StripeCheckoutSessionStatus": {
+      "enum": [
+        "OPEN",
+        "COMPLETE",
+        "EXPIRED"
+      ],
+      "type": "string"
+    },
+    "$Enums.StripePaymentStatus": {
+      "enum": [
+        "NOT_STARTED",
+        "REQUIRES_PAYMENT_METHOD",
+        "REQUIRES_CONFIRMATION",
+        "REQUIRES_ACTION",
+        "PROCESSING",
+        "SUCCEEDED",
+        "FAILED",
+        "CANCELED",
+        "REFUNDED",
+        "DISPUTED"
       ],
       "type": "string"
     },
@@ -562,6 +616,9 @@
     },
     "AuthPhoneVerifyResponseDTO": {
       "properties": {
+        "alreadyVerified": {
+          "type": "boolean"
+        },
         "isEmailVerified": {
           "type": "boolean"
         },
@@ -1517,6 +1574,9 @@
       ],
       "type": "object"
     },
+    "BookingCheckoutStatus": {
+      "$ref": "#/definitions/%24Enums.BookingCheckoutStatus"
+    },
     "BookingHoldCreateDTO": {
       "properties": {
         "clientAddressId": {
@@ -1690,6 +1750,112 @@
     },
     "BookingServiceItemType": {
       "$ref": "#/definitions/%24Enums.BookingServiceItemType"
+    },
+    "CheckoutStripeSessionResponseDTO": {
+      "properties": {
+        "booking": {
+          "properties": {
+            "checkoutStatus": {
+              "$ref": "#/definitions/BookingCheckoutStatus"
+            },
+            "id": {
+              "type": "string"
+            },
+            "paymentProvider": {
+              "$ref": "#/definitions/PaymentProvider"
+            },
+            "selectedPaymentMethod": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PaymentMethod"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stripeAmountTotal": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "stripeCheckoutSessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stripeCheckoutSessionStatus": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StripeCheckoutSessionStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stripeCurrency": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stripePaymentIntentId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stripePaymentStatus": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StripePaymentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tipAmount": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "totalAmount": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "checkoutStatus",
+            "selectedPaymentMethod",
+            "paymentProvider",
+            "stripeCheckoutSessionId",
+            "stripePaymentIntentId",
+            "stripeCheckoutSessionStatus",
+            "stripePaymentStatus",
+            "stripeAmountTotal",
+            "stripeCurrency",
+            "tipAmount",
+            "totalAmount"
+          ],
+          "type": "object"
+        },
+        "stripeCheckout": {
+          "$ref": "#/definitions/StripeCheckoutSessionDTO"
+        }
+      },
+      "required": [
+        "booking",
+        "stripeCheckout"
+      ],
+      "type": "object"
     },
     "ClientBookingCheckoutDTO": {
       "properties": {
@@ -2206,6 +2372,107 @@
         "FALLBACK"
       ],
       "type": "string"
+    },
+    "ClientCheckoutConfirmResponseDTO": {
+      "properties": {
+        "booking": {
+          "properties": {
+            "checkoutStatus": {
+              "$ref": "#/definitions/BookingCheckoutStatus"
+            },
+            "discountAmount": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "paymentAuthorizedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "paymentCollectedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "productSubtotalSnapshot": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "selectedPaymentMethod": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PaymentMethod"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "serviceSubtotalSnapshot": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subtotalSnapshot": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "taxAmount": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tipAmount": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "totalAmount": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "checkoutStatus",
+            "selectedPaymentMethod",
+            "serviceSubtotalSnapshot",
+            "productSubtotalSnapshot",
+            "subtotalSnapshot",
+            "tipAmount",
+            "taxAmount",
+            "discountAmount",
+            "totalAmount",
+            "paymentAuthorizedAt",
+            "paymentCollectedAt"
+          ],
+          "type": "object"
+        },
+        "meta": {
+          "$ref": "#/definitions/MutationMetaDTO"
+        }
+      },
+      "required": [
+        "booking",
+        "meta"
+      ],
+      "type": "object"
     },
     "ClientHomeActionDTO": {
       "anyOf": [
@@ -4293,6 +4560,53 @@
         "body",
         "createdAt",
         "senderUserId"
+      ],
+      "type": "object"
+    },
+    "DepositStripeSessionResponseDTO": {
+      "properties": {
+        "booking": {
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "deposit": {
+          "properties": {
+            "currency": {
+              "type": "string"
+            },
+            "depositCents": {
+              "type": "number"
+            },
+            "feeCents": {
+              "type": "number"
+            },
+            "totalCents": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "depositCents",
+            "feeCents",
+            "totalCents",
+            "currency"
+          ],
+          "type": "object"
+        },
+        "stripeCheckout": {
+          "$ref": "#/definitions/StripeCheckoutSessionDTO"
+        }
+      },
+      "required": [
+        "booking",
+        "deposit",
+        "stripeCheckout"
       ],
       "type": "object"
     },
@@ -6793,6 +7107,12 @@
       ],
       "type": "object"
     },
+    "PaymentMethod": {
+      "$ref": "#/definitions/%24Enums.PaymentMethod"
+    },
+    "PaymentProvider": {
+      "$ref": "#/definitions/%24Enums.PaymentProvider"
+    },
     "PickedPlace": {
       "properties": {
         "city": {
@@ -8499,6 +8819,30 @@
     },
     "SessionStep": {
       "$ref": "#/definitions/%24Enums.SessionStep"
+    },
+    "StripeCheckoutSessionDTO": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "url"
+      ],
+      "type": "object"
+    },
+    "StripeCheckoutSessionStatus": {
+      "$ref": "#/definitions/%24Enums.StripeCheckoutSessionStatus"
+    },
+    "StripePaymentStatus": {
+      "$ref": "#/definitions/%24Enums.StripePaymentStatus"
     },
     "UserDeviceDTO": {
       "properties": {

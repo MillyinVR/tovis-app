@@ -16,6 +16,170 @@
 
 ---
 
+## ✅ SESSION 5 (2026-06-27) — session-4's 2 small items + cleanup DONE
+
+**Read this first — it closes out the session-4 "NEXT SESSION" list below.**
+`npm run typecheck` ✅, `npm run lint` ✅ (0 errors), `npm run check:static-guards` ✅
+(incl. schema-drift guard), and the touched vitest suites ✅ (checkout route 18, checkout
+stripe-session 11, phone/verify 12, workspace mismatch 9) all pass.
+
+### What got done
+1. ✅ **`phone/verify` DTO drift fixed.** The already-verified early-return
+   (`app/api/v1/auth/phone/verify/route.ts:141-155`) now emits `token: null` and is
+   annotated `satisfies AuthPhoneVerifyResponseDTO`. `AuthPhoneVerifyResponseDTO`
+   (`lib/dto/auth.ts`) gained `alreadyVerified?: boolean`. Test updated to expect
+   `token: null`. Schema regenerated — `token` is no longer silently omitted.
+2. ✅ **Stripe checkout-session responses are now DTO-covered.** New `lib/dto/checkout.ts`:
+   `StripeCheckoutSessionDTO` (`{ sessionId, url }`), plus three response wrappers each
+   `satisfies`-checked at the route return —
+   `DepositStripeSessionResponseDTO` (deposit/stripe-session),
+   `CheckoutStripeSessionResponseDTO` (checkout/stripe-session), and
+   `ClientCheckoutConfirmResponseDTO` (the non-card `/checkout` confirm path, which is a
+   different `{ booking, meta }` shape — NOT a stripe session — reusing `MutationMetaDTO`).
+   All four exported via `lib/dto/index.ts`; schema grew to cover them. Booking field types
+   derive from the writeBoundary result types (Prisma enums + Decimal→string + Date→ISO).
+3. ✅ **Cleanup.** `media/url/route.ts:72` second (authed-owner) return now
+   `satisfies MediaSignedUrlDTO`; the last stale test-fixture path
+   (`lib/workspace/mismatch.test.ts:85`) is `/api/v1/uploads`.
+
+**No migrations, no type escapes, additive DTOs only.** Same low-risk class as #404–#411.
+
+### What remains (unchanged from session 4)
+Operator config (push creds in Vercel · re-verify `AUTH_TRUSTED_IP_HEADER` · email AEAD key +
+backfill) · app-coupled work needing the native project to exist (deep links, attestation, IAP
+policy review) · deferred-by-design items (email read-swap/contract, token rotation). The
+backend is ready for native client development to begin.
+
+---
+
+## ✅✅✅ AUDIT PASS 4 (session 4, 2026-06-27) — prior findings RESOLVED + 2 small items left
+
+> ⚠️ **The "🟡 NEXT SESSION" 2-item list below is now DONE — see the session-5 block above.**
+
+**Read this block first — it supersedes the session-3 block below.** A 4th adversarial
+re-audit confirmed the team fixed BOTH session-3 findings, and verified the new work holds up.
+`npm run typecheck` ✅ and `npm run check:static-guards` ✅ (incl. schema-drift guard) both pass.
+
+### What got fixed since session 3 (verified)
+- ✅ **Calendar href regression → fixed (#403).** Both `app/booking/[id]/page.tsx:277` and
+  `app/client/(gated)/bookings/[id]/page.tsx:1389` now point at `/api/v1/calendar`. Full
+  stray-old-path sweep is now **fully clean** (no non-v1 `/api` refs in fetch/href/redirect/lib/proxy).
+- ✅ **Wire-schema coverage gap → closed (#404–#411).** Schema grew **133 → 217 definitions**;
+  all five previously-missing groups now have response DTOs and each is verified actually-returned
+  by its route (via `satisfies`): **auth** (login/register/verify/refresh + workspace-switch),
+  **holds**, **availability** (day/bootstrap/alternates/other-pros), **messages**, **media**
+  (signing/URL + upload/attach). The two "date-serialization fixes" (#405/#407) are wire-identical
+  (no web breakage). The media-attach **reshape** (#410/#411) — highest breaking-change risk —
+  is loss-free: only internal storage columns dropped, every web consumer reads `res.ok` only.
+
+### 🟡 NEXT SESSION — fix these 2 small items (both ~minutes, same class as #405–#408)
+1. **`phone/verify` DTO drift.** The "already verified" early-return at
+   `app/api/v1/auth/phone/verify/route.ts:141-153` omits the schema-**required** `token` and emits
+   an undocumented `alreadyVerified` field. It slipped through because that single return lacks a
+   `satisfies` annotation (the main return at ~:273 has it). A native client codegen'ing `token` as
+   required could fail to decode this response. **Fix:** add `token: null`, extend
+   `AuthPhoneVerifyResponseDTO` with `alreadyVerified?: boolean`, and annotate the return
+   `satisfies AuthPhoneVerifyResponseDTO`. Then `npm run gen:api-schema`.
+2. **Stripe checkout-session response is not DTO-covered** (the literal *payment* step — the one
+   model a native dev still hand-writes in booking→pay). These return a bare
+   `{ booking, deposit?, stripeCheckout: { sessionId, url } }`:
+   - `app/api/v1/client/bookings/[id]/deposit/stripe-session/route.ts:183-195`
+   - `app/api/v1/client/bookings/[id]/checkout/stripe-session/route.ts:282-283`
+   - `app/api/v1/client/bookings/[id]/checkout/route.ts` (`buildCheckoutResponseBody()` ~:114,130)
+   **Fix:** add a small DTO `{ sessionId: string; url: string | null }` (+ booking/deposit wrapper),
+   `satisfies` it at each return, export via `lib/dto/index.ts`, regen schema. (Note:
+   `ClientBookingCheckoutDTO` already exists but is the embedded `.checkout` field of
+   `ClientBookingDTO` — NOT this response — so don't reuse it.)
+
+### 🧹 Cosmetic / cleanup (optional, low priority)
+- Add `satisfies MediaSignedUrlDTO` to the second (authed-owner) return in
+  `app/api/v1/media/url/route.ts:72` — shape is correct today, just unguarded against future drift.
+- Last stale test-fixture path: `lib/workspace/mismatch.test.ts:85` (`/api/uploads`) — inert
+  (tests FormData-replay, path isn't routed), but tidy it. The search/looks test stragglers from
+  session 3 are already fixed.
+
+### Per-flow readiness (re-confirmed pass 4)
+| Native flow | Status | Remaining blocker |
+|---|---|---|
+| Authenticated API calls | ✅ Done & schema-covered | None |
+| Register a device | ✅ Done & schema-covered | None (document same-`deviceId` contract) |
+| Receive a push | 🟡 Built, dormant | **OPERATOR only** — APNs/FCM creds in Vercel |
+| Booking + payment | ✅ Server-complete | Small: add checkout-session DTO (item 2 above); app-coupled: Tier 3.2 deep links |
+
+**Bottom line (session 4): the backend is ready for native client development to begin in earnest.**
+The 9-PR batch (#403–#411) introduced no new code risk (additive DTOs only, zero migrations, no type
+escapes). What remains is: the 2 small DTO items above · operator config (push creds, IP-header
+re-verify, email-key+backfill) · app-coupled work that needs the native project to exist (deep links,
+attestation, IAP policy review) · the deferred-by-design items (email read-swap/contract, token rotation).
+
+---
+
+## VERIFICATION RE-AUDIT (session 3, 2026-06-27) — all session-2 work verified
+> ⚠️ **Superseded by the session-4 block above.** The two findings below (🔴 calendar regression,
+> 🟡 ~65% schema gap) are now RESOLVED by #403 and #404–#411 respectively. Kept for history.
+
+A full adversarial re-audit verified every shipped PR against the actual code (not commit
+messages). `npm run typecheck` ✅ and `npm run check:static-guards` ✅ both pass clean.
+**Verdict: everything #387–#402 is genuinely done and SAFE.** Specifics:
+
+| PR | Re-audit result |
+|----|-----------------|
+| #387 Tier 0 bearer auth | ✅ Secure — bearer reuses same JWT verify + authVersion; CSRF carve-out can't be tricked by cookie+fake-bearer; refresh is expiry/revocation-safe |
+| #388–#390 Tier 2 (/v1, aggregates, schema) | ✅ True single-source (endpoints wrap the same loaders the pages use); crons intact |
+| #391–#393 Tier 1.1 push | ✅ Built & verified **inert** until creds (zero device-token queries / zero PUSH rows / no throw with no creds) |
+| #394 push runbook | ✅ Env var names match code exactly (no silent half-config) |
+| #395 fix /v1 404s | ✅ Confirmed fixed — all 4 fetches now `/api/v1/`, no stray non-v1 client fetches remain |
+| #396 proxy CSRF tests | ✅ Real-logic tests; the critical cookie+attacker-bearer→403 case is guarded |
+| #397 schema cleanup | ✅ Prisma leakage gone (152→133 defs); removed only pre-serialization types — response DTOs still in contract |
+| #398 NAT rate limits (4.4) | ✅ login 10→60/15min + **normalized** IP+email per-account guard (case-bypass closed), runs pre-bcrypt, fail-closed under Redis outage |
+| #399 per-device revocation (4.2) | ✅ Enforced via 1 indexed lookup for device-bound tokens only; ownership-scoped; web tokens byte-unchanged |
+| #400 email-at-rest expand (4.5) | ✅ Additive; dual-write covers every email write path (no user-facing email-change endpoint exists); fail-soft = no signup-break / no email-loss with key absent |
+| #402 log-redaction (4.5) | ✅ Webhook PII redacted + raw errors wrapped in `safeError`; audit doc + stale threat-model doc corrected |
+
+### 🔴 NEW production regression found — fix first (same class as #395, but `href` not `fetch`)
+The `/v1` cutover (#388) also missed two **`href` strings** (a `fetch()`-only scan can't catch these),
+so the "Add to Calendar" `.ics` link **404s in production right now**:
+- `app/booking/[id]/page.tsx:277` — `/api/calendar?bookingId=...` → must be `/api/v1/calendar`
+- `app/client/(gated)/bookings/[id]/page.tsx:1389` — same broken `/api/calendar` href
+Fix = change both to `/api/v1/calendar` (route now lives only at `app/api/v1/calendar/route.ts`).
+
+### 🧹 Cleanup (harmless, but do it) — stale test-fixture paths left by the half-done /v1 find/replace
+Functionally inert (these tests call route handlers directly; path strings are cosmetic), but
+misleading: `app/api/v1/search/route.test.ts:165,217,254,283` (`/api/search`),
+`app/api/v1/looks/route.test.ts` (8 lines still `/api/looks` — line 304 was updated, the rest missed),
+`lib/workspace/mismatch.test.ts:85` (`/api/uploads`).
+
+### 🟡 NEW quantified gap — wire schema only covers ~65% of the API
+`schema/api/tovis-api.schema.json` is in sync (drift-guarded in CI) and covers the read/profile
+surface: all 5 aggregates, `ClientBookingDTO`, search, devices, Looks/follows. **But the response
+shapes a native app needs MOST are absent** (returned inline, so native must hand-write them):
+**auth** (login/register/verify/refresh `{user,token}`), **holds** (`POST /v1/holds`), **availability**
+(`/day`,`/bootstrap`,`/alternates`), **messages** (threads + messages), **media** (`/media/url`, upload).
+Closing it ≈ 6 small DTO files + barrel export + `npm run gen:api-schema`. Not a blocker (native can
+hand-write), but it's exactly the booking/auth path, so worth doing before native dev starts. *Small-Med.*
+
+### 📝 Contract note for the native client (no code, document it)
+Per-device revocation only works if the native app sends the **same `deviceId` string** to both
+`/api/v1/auth/login` (body) and `/api/v1/devices`. Nothing server-side enforces the linkage — add one
+line to the push runbook so native devs don't generate two different ids. Also note: the **edge layer**
+(`lib/auth/middlewareToken.ts`) does signature/role/expiry only — authoritative `authVersion` +
+device-revocation checks run route-handler-side in `getCurrentUser` (by design; no Prisma on edge).
+
+### Per-flow readiness (verified end-to-end)
+| Native flow | Status | Remaining blocker |
+|---|---|---|
+| Authenticated API calls | ✅ Done today | None (optional: add `AuthResponse` DTO to schema) |
+| Register a device | ✅ Done today | None (document the same-`deviceId` contract) |
+| Receive a push | 🟡 Built, dormant | **OPERATOR only** — set APNs/FCM creds in Vercel |
+| Booking + payment | ✅ Server-complete | App-coupled — Tier 3.2 deep links (needs the app's bundle/team ids to exist) + hand-write Hold/Availability models until schema gap closed |
+
+**Bottom line (session 3):** the only thing actually broken in prod is the two `/api/calendar`
+hrefs (trivial). The backend is native-ready; remaining items are the schema-coverage gap (small,
+do-before-native-dev), operator config (push creds), and app-coupled work (deep links) that can't
+start until the native project exists.
+
+---
+
 ## Current status (updated 2026-06-27, session 2) — backend hardening pass DONE
 
 The backend is native-ready AND the optional pre-app hardening is now essentially

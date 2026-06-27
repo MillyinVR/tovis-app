@@ -24,6 +24,7 @@ import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { getStripe } from '@/lib/stripe/server'
 import { parseTipAmount } from '@/lib/money'
+import type { CheckoutStripeSessionResponseDTO } from '@/lib/dto/checkout'
 
 export const dynamic = 'force-dynamic'
 
@@ -282,7 +283,7 @@ export async function POST(req: NextRequest, props: RouteContext) {
             sessionId: session.id,
             url: nullableString(session.url),
           },
-        }
+        } satisfies CheckoutStripeSessionResponseDTO
 
         return { status: 200, body: responseBody }
       },

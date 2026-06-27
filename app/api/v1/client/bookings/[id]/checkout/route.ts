@@ -35,6 +35,7 @@ import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { parseTipAmount } from '@/lib/money'
+import type { ClientCheckoutConfirmResponseDTO } from '@/lib/dto/checkout'
 
 export const dynamic = 'force-dynamic'
 
@@ -130,7 +131,7 @@ function buildCheckoutResponseBody(args: {
 }): JsonObjectPayload {
   const booking = args.result.booking
 
-  return normalizeJsonObjectPayload({
+  const body = {
     booking: {
       id: booking.id,
       checkoutStatus: booking.checkoutStatus,
@@ -150,7 +151,9 @@ function buildCheckoutResponseBody(args: {
         booking.paymentCollectedAt?.toISOString() ?? null,
     },
     meta: args.result.meta,
-  })
+  } satisfies ClientCheckoutConfirmResponseDTO
+
+  return normalizeJsonObjectPayload(body)
 }
 
 async function failCheckoutIdempotency(

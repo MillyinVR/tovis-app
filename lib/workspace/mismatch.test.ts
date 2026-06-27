@@ -82,7 +82,7 @@ describe('canReplayRequest', () => {
   it('refuses to replay non-string bodies (FormData / streams)', () => {
     const form = new FormData()
     form.append('file', 'x')
-    expect(canReplayRequest('/api/uploads', { method: 'POST', body: form })).toBe(
+    expect(canReplayRequest('/api/v1/uploads', { method: 'POST', body: form })).toBe(
       false,
     )
   })

@@ -50,9 +50,11 @@ export type AuthRefreshResponseDTO = {
   token: string
 }
 
-// POST /api/v1/auth/phone/verify — token is null until the session is fully verified.
+// POST /api/v1/auth/phone/verify — token is null until the session is fully
+// verified (and on the already-verified early return, which mints no new token).
 export type AuthPhoneVerifyResponseDTO = {
   ok: true
+  alreadyVerified?: boolean
   isPhoneVerified: boolean
   isEmailVerified: boolean
   isFullyVerified: boolean
