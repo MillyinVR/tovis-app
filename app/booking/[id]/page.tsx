@@ -274,7 +274,7 @@ export default async function BookingReceiptPage(props: PageProps) {
   const locationLabel = buildBookedLocationLabel(booking)
   const mapsHref = buildMapsHref(booking)
 
-  const calendarHref = `/api/calendar?bookingId=${encodeURIComponent(booking.id)}`
+  const calendarHref = `/api/v1/calendar?bookingId=${encodeURIComponent(booking.id)}`
   const proProfileHref = professional?.id ? `/professionals/${encodeURIComponent(professional.id)}` : null
   const messageHref =
     isClientViewer || isProViewer
