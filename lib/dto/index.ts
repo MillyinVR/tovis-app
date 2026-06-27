@@ -33,6 +33,22 @@ export type {
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 
+// ── Messaging (GET/POST /api/v1/messages/*) ──────────────────────────────────
+export type {
+  MessageThreadClientPreviewDTO,
+  MessageThreadProfessionalPreviewDTO,
+  MessageThreadParticipantReadDTO,
+  MessageThreadListItemDTO,
+  MessagesThreadsListResponseDTO,
+  MessageAttachmentDTO,
+  MessageDTO,
+  MessageThreadMessagesResponseDTO,
+  CreatedMessageDTO,
+  CreateMessageResponseDTO,
+  ResolveThreadResponseDTO,
+  MessagesUnreadCountResponseDTO,
+} from '@/lib/dto/messaging'
+
 // ── Auth + workspace switch (POST /api/v1/auth/*, /api/v1/workspace/switch) ──
 export type {
   AuthUserDTO,

@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import type { MessagesThreadsListResponseDTO } from '@/lib/dto/messaging'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +37,25 @@ export async function GET() {
       },
     })
 
-    return jsonOk({ threads })
+    return jsonOk({
+      threads: threads.map((t) => ({
+        id: t.id,
+        contextType: t.contextType,
+        contextId: t.contextId,
+        bookingId: t.bookingId,
+        serviceId: t.serviceId,
+        offeringId: t.offeringId,
+        lastMessageAt: t.lastMessageAt?.toISOString() ?? null,
+        lastMessagePreview: t.lastMessagePreview,
+        updatedAt: t.updatedAt.toISOString(),
+        client: t.client,
+        professional: t.professional,
+        participants: t.participants.map((p) => ({
+          lastReadAt: p.lastReadAt?.toISOString() ?? null,
+        })),
+        _count: t._count,
+      })),
+    } satisfies MessagesThreadsListResponseDTO)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Internal error'
     console.error('GET /api/v1/messages/threads', msg)
