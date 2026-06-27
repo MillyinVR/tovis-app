@@ -55,10 +55,15 @@ registers a token — both happen at/after the app exists, by design.
   Full rollout in `docs/security/ticket-encrypt-email-at-rest.md`.
 
 ### What's left — backend (small, self-contained)
-- **4.5 remainder — log-redaction audit + stale doc.** Finish
-  `docs/security/log-redaction-audit.md` (still all "Pending"; only the auth-event
-  sanitizer is test-proven); fix the stale `contact-lookup-hash-threat-model.md`
-  (describes SHA-256, but code is keyed HMAC-SHA256 v2 with legacy columns dropped). *Low.*
+- ~~**4.5 remainder — log-redaction audit + stale doc.**~~ ✅ **DONE (PR #402, 2026-06-27).**
+  Finished `docs/security/log-redaction-audit.md` via a 5-scope sweep; fixed the genuine
+  leaks (Twilio/Postmark webhooks logged raw `to`/`from`/`recipient` → redacted at call
+  site; storage-upload + Stripe payment/membership + internal-webhook raw errors →
+  wrapped in `safeError`). ~200 generic non-provider `console.error(msg, error)` sites
+  documented as a follow-up with a recommended baseline-tracked `check:no-raw-error-log`
+  guard. Rewrote the stale `contact-lookup-hash-threat-model.md` to RESOLVED (keyed
+  HMAC-SHA256 v2 shipped; legacy SHA-256 columns dropped in `20260601000000`) + synced
+  the sprint-1 checklist row. **Optional follow-up:** implement that lint guard.
 - **4.5 email follow-ups (deferred from #400).** Phase 2 READ-SWAP: point display/send
   paths at `readEncryptedEmailOrFallback`. Phase 3 CONTRACT: drop the plaintext `email`
   columns + fail-hard — but FIRST move the `@unique` login guarantee off plaintext onto
@@ -87,13 +92,12 @@ registers a token — both happen at/after the app exists, by design.
 > team/bundle ids + signing fingerprints to exist).
 
 ### Suggested order for a fresh session
-1. **Merge #400** if not already (email-at-rest expand) — it was green at handoff.
-2. **4.5 remainder** — log-redaction audit + stale `contact-lookup-hash-threat-model.md`
-   fix. Small, self-contained, no app needed.
-3. Hand the two 🔴 operator steps to whoever owns Vercel (IP-header verify; email key +
+1. ~~**Merge #400**~~ ✅ merged (#400/#401). ~~**4.5 remainder**~~ ✅ done (#402).
+2. Hand the two 🔴 operator steps to whoever owns Vercel (IP-header verify; email key +
    backfill).
-4. Then the app-coupled tier (3.2 deep links, 4.1 attestation, 3.1 IAP) once the native
+3. Then the app-coupled tier (3.2 deep links, 4.1 attestation, 3.1 IAP) once the native
    project exists, and the deferred follow-ups (email read-swap/contract, token rotation).
+   Optional small backend item: the `check:no-raw-error-log` guard noted under 4.5.
 
 ---
 
