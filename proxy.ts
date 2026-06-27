@@ -1,6 +1,7 @@
 // proxy.ts
 import { NextResponse, type NextRequest } from 'next/server'
 
+import { parseBearerToken } from '@/lib/auth/bearerToken'
 import { verifyMiddlewareToken } from '@/lib/auth/middlewareToken'
 
 const ALLOWED_VERIFICATION_PAGE_PATHS = new Set([
@@ -258,7 +259,19 @@ export async function proxy(req: NextRequest) {
   requestHeaders.set('x-request-id', requestId)
   requestHeaders.set('x-pathname', pathname)
 
-  if (shouldCheckOrigin(req, pathname)) {
+  const cookieToken = req.cookies.get('tovis_token')?.value ?? null
+  const bearerToken = parseBearerToken(req.headers.get('authorization'))
+
+  // The Origin/Referer check IS the CSRF defense, and CSRF only exists because
+  // the session rides in a cookie the browser attaches automatically. A request
+  // authenticated purely via a bearer header (no auth cookie) cannot be forged
+  // cross-site — the attacker has no way to set the header — so the check is
+  // both unnecessary and fatal (native sends no Origin/Referer) for it. If a
+  // cookie is present we keep the check: the browser is in play regardless of
+  // any bearer header the caller may also have attached.
+  const usesBearerAuth = cookieToken === null && bearerToken !== null
+
+  if (!usesBearerAuth && shouldCheckOrigin(req, pathname)) {
     const originOrReferer = getRequestOriginOrReferer(req)
 
     if (!originOrReferer || !isSameSiteOrigin(req, originOrReferer)) {
@@ -266,7 +279,7 @@ export async function proxy(req: NextRequest) {
     }
   }
 
-  const rawToken = req.cookies.get('tovis_token')?.value ?? null
+  const rawToken = cookieToken ?? bearerToken
   const tokenPayload = await verifyMiddlewareToken(rawToken)
 
   if (tokenPayload?.sessionKind === 'VERIFICATION') {

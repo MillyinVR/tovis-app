@@ -1294,6 +1294,9 @@ export async function POST(request: Request) {
     const res = jsonOk(
       {
         user: { id: user.id, email: user.email, role: user.role },
+        // Native clients persist this in secure storage and replay it as
+        // `Authorization: Bearer`. Web uses the httpOnly cookie set below.
+        token,
         nextUrl: nextForVerification ?? null,
         requiresPhoneVerification: true,
         phoneVerificationSent: 'pending',

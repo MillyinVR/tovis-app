@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 const mockCookies = vi.hoisted(() => vi.fn())
+const mockHeaders = vi.hoisted(() => vi.fn())
 const mockVerifyToken = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
@@ -12,6 +13,7 @@ const mockPrisma = vi.hoisted(() => ({
 
 vi.mock('next/headers', () => ({
   cookies: mockCookies,
+  headers: mockHeaders,
 }))
 
 vi.mock('./auth', () => ({
@@ -77,21 +79,70 @@ function makeDbUser(args?: {
 describe('lib/currentUser', () => {
   beforeEach(() => {
     mockCookies.mockReset()
+    mockHeaders.mockReset()
     mockVerifyToken.mockReset()
     mockPrisma.user.findUnique.mockReset()
 
     mockCookies.mockResolvedValue({
       get: vi.fn(() => undefined),
     })
+    // Default: no Authorization header (web cookie path).
+    mockHeaders.mockResolvedValue({
+      get: vi.fn(() => null),
+    })
     mockVerifyToken.mockReturnValue(null)
   })
 
-  it('returns null when the auth cookie is missing', async () => {
+  it('returns null when the auth cookie and bearer header are both missing', async () => {
     const result = await getCurrentUser()
 
     expect(result).toBeNull()
     expect(mockVerifyToken).not.toHaveBeenCalled()
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the Authorization: Bearer header when no cookie is present', async () => {
+    mockHeaders.mockResolvedValue({
+      get: vi.fn((name: string) =>
+        name.toLowerCase() === 'authorization' ? 'Bearer header_token' : null,
+      ),
+    })
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.CLIENT,
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(makeDbUser())
+
+    const result = await getCurrentUser()
+
+    expect(mockVerifyToken).toHaveBeenCalledWith('header_token')
+    expect(result?.id).toBe('user_1')
+  })
+
+  it('prefers the cookie over the bearer header when both are present', async () => {
+    mockCookies.mockResolvedValue({
+      get: vi.fn((name: string) =>
+        name === 'tovis_token' ? { value: 'cookie_token' } : undefined,
+      ),
+    })
+    mockHeaders.mockResolvedValue({
+      get: vi.fn((name: string) =>
+        name.toLowerCase() === 'authorization' ? 'Bearer header_token' : null,
+      ),
+    })
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.CLIENT,
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(makeDbUser())
+
+    await getCurrentUser()
+
+    expect(mockVerifyToken).toHaveBeenCalledWith('cookie_token')
   })
 
   it('returns null when token verification fails', async () => {

@@ -476,6 +476,7 @@ describe('app/api/auth/email/verify/route', () => {
       isEmailVerified: true,
       isFullyVerified: false,
       requiresPhoneVerification: true,
+      token: null,
     })
 
     expect(mockEnforceVerificationVerifyThrottle).toHaveBeenCalledWith({
@@ -587,6 +588,7 @@ describe('app/api/auth/email/verify/route', () => {
       isEmailVerified: true,
       isFullyVerified: true,
       requiresPhoneVerification: false,
+      token: 'active_token',
     })
 
     expect(mockCreateActiveToken).toHaveBeenCalledWith({
@@ -667,6 +669,7 @@ describe('app/api/auth/email/verify/route', () => {
       isEmailVerified: true,
       isFullyVerified: false,
       requiresPhoneVerification: true,
+      token: 'verification_token',
     })
 
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
@@ -745,6 +748,7 @@ describe('app/api/auth/email/verify/route', () => {
       isEmailVerified: true,
       isFullyVerified: true,
       requiresPhoneVerification: false,
+      token: null,
     })
 
     expect(mockCreateActiveToken).not.toHaveBeenCalled()

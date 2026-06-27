@@ -112,7 +112,13 @@ export async function POST(request: Request) {
     authVersion: user.authVersion,
   })
 
-  const response = jsonOk({ workspace: target, href: WORKSPACE_HOME[target] })
+  // Native replays `token` as a bearer; web uses the cookie. The re-minted
+  // token carries the new acting role, so native must swap to this one.
+  const response = jsonOk({
+    workspace: target,
+    href: WORKSPACE_HOME[target],
+    token,
+  })
   setSessionCookie({ response, request, token })
   return response
 }

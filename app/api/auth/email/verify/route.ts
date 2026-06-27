@@ -254,6 +254,25 @@ export async function POST(request: Request) {
       },
     })
 
+    // Only re-mint a session when the verifying caller IS the account owner
+    // (email verify can be driven from a magic link by an unauthenticated
+    // browser). When it is, native needs the upgraded token in the body.
+    const currentUser = await getOptionalUser()
+    const sessionToken =
+      currentUser?.id === result.id
+        ? isFullyVerified
+          ? createActiveToken({
+              userId: result.id,
+              role: result.role,
+              authVersion: result.authVersion,
+            })
+          : createVerificationToken({
+              userId: result.id,
+              role: result.role,
+              authVersion: result.authVersion,
+            })
+        : null
+
     const res = jsonOk(
       {
         ok: true,
@@ -262,24 +281,14 @@ export async function POST(request: Request) {
         isEmailVerified,
         isFullyVerified,
         requiresPhoneVerification: !isPhoneVerified,
+        // Native replays this as a bearer; web uses the cookie set below.
+        // Null when the caller is not the verified account owner.
+        token: sessionToken,
       },
       200,
     )
 
-    const currentUser = await getOptionalUser()
-    if (currentUser?.id === result.id) {
-      const sessionToken = isFullyVerified
-        ? createActiveToken({
-            userId: result.id,
-            role: result.role,
-            authVersion: result.authVersion,
-          })
-        : createVerificationToken({
-            userId: result.id,
-            role: result.role,
-            authVersion: result.authVersion,
-          })
-
+    if (sessionToken) {
       const hostname = getRequestHostname(request)
       const cookieDomain = resolveCookieDomain(hostname)
       const isHttps = resolveIsHttps(request)
