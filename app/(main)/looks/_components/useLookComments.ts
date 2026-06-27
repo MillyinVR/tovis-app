@@ -94,7 +94,7 @@ export function useLookComments(args: {
 
     void (async () => {
       try {
-        const res = await fetch(`/api/looks/${lookPostId}/comments`, {
+        const res = await fetch(`/api/v1/looks/${lookPostId}/comments`, {
           cache: 'no-store',
           headers: { Accept: 'application/json' },
           signal: controller.signal,
@@ -159,7 +159,7 @@ export function useLookComments(args: {
 
       try {
         const res = await fetch(
-          `/api/looks/${lookPostId}/comments/${parentId}/replies`,
+          `/api/v1/looks/${lookPostId}/comments/${parentId}/replies`,
           { cache: 'no-store', headers: { Accept: 'application/json' } },
         )
         const raw = await safeJson(res)
@@ -208,7 +208,7 @@ export function useLookComments(args: {
     setError(null)
 
     try {
-      const res = await fetch(`/api/looks/${lookPostId}/comments`, {
+      const res = await fetch(`/api/v1/looks/${lookPostId}/comments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -312,7 +312,7 @@ export function useLookComments(args: {
 
       try {
         const res = await fetch(
-          `/api/looks/${lookPostId}/comments/${comment.id}/like`,
+          `/api/v1/looks/${lookPostId}/comments/${comment.id}/like`,
           { method: wasLiked ? 'DELETE' : 'POST' },
         )
         const raw = await safeJson(res)
@@ -383,7 +383,7 @@ export function useLookComments(args: {
 
       try {
         const res = await fetch(
-          `/api/looks/${lookPostId}/comments/${comment.id}`,
+          `/api/v1/looks/${lookPostId}/comments/${comment.id}`,
           { method: 'DELETE', headers: { Accept: 'application/json' } },
         )
         const raw = await safeJson(res)
@@ -420,7 +420,7 @@ export function useLookComments(args: {
       if (!lookPostId) return 'error'
       try {
         const res = await fetch(
-          `/api/looks/${lookPostId}/comments/${comment.id}/report`,
+          `/api/v1/looks/${lookPostId}/comments/${comment.id}/report`,
           { method: 'POST', headers: { Accept: 'application/json' } },
         )
         if (isGuestBlocked(res.status)) {

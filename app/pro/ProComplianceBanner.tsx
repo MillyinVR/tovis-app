@@ -121,7 +121,7 @@ export default function ProComplianceBanner() {
 
     async function loadSummary(): Promise<void> {
       try {
-        const res = await fetch('/api/pro/compliance/summary', {
+        const res = await fetch('/api/v1/pro/compliance/summary', {
           cache: 'no-store',
         })
 

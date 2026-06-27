@@ -91,7 +91,7 @@ describe('useManagementPanel', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
 
     const retryCall = fetchMock.mock.calls[1]
-    expect(String(retryCall?.[0])).toContain('/api/pro/bookings/booking_1')
+    expect(String(retryCall?.[0])).toContain('/api/v1/pro/bookings/booking_1')
     expect(retryCall?.[1]?.method).toBe('PATCH')
 
     const retryBody = JSON.parse(String(retryCall?.[1]?.body))

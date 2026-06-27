@@ -24,7 +24,7 @@ beforeEach(() => {
 
 describe('resolveTenantContextForRequest', () => {
   it('resolves root for a request without a matching custom domain', async () => {
-    const request = new Request('http://localhost/api/search', {
+    const request = new Request('http://localhost/api/v1/search', {
       headers: { host: 'app.tovis.example' },
     })
 
@@ -36,7 +36,7 @@ describe('resolveTenantContextForRequest', () => {
   it('resolves a white-label tenant from the request host', async () => {
     mocks.tenantFindFirst.mockResolvedValue({ id: 'tenant_a', slug: 'salon-a' })
 
-    const request = new Request('http://localhost/api/search', {
+    const request = new Request('http://localhost/api/v1/search', {
       headers: { host: 'booking.salon-a.com' },
     })
 

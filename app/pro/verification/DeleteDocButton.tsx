@@ -29,7 +29,7 @@ export default function DeleteDocButton({ docId }: DeleteDocButtonProps) {
           setError(null)
           setDeleting(true)
           try {
-            const res = await fetch(`/api/pro/verification-docs/${docId}`, {
+            const res = await fetch(`/api/v1/pro/verification-docs/${docId}`, {
               method: 'DELETE',
             })
 

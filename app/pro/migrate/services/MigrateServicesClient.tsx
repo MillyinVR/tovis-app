@@ -169,7 +169,7 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/pro/migrate/services/preview', {
+      const res = await fetch('/api/v1/pro/migrate/services/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows: menuRows }),
@@ -261,7 +261,7 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/pro/migrate/services/commit', {
+      const res = await fetch('/api/v1/pro/migrate/services/commit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decisions }),

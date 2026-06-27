@@ -130,8 +130,8 @@ test.describe('availability retry and failure browser flow', () => {
   let seed: SeedBookingFlowResult | null = null
 
   test.afterEach(async ({ page }) => {
-    await page.unroute('**/api/availability/**')
-    await page.unroute('**/api/holds')
+    await page.unroute('**/api/v1/availability/**')
+    await page.unroute('**/api/v1/holds')
 
     await teardownBookingFlow({
       prisma,
@@ -155,7 +155,7 @@ test.describe('availability retry and failure browser flow', () => {
 
     let failedOnce = false
 
-    await page.route('**/api/availability/**', async (route) => {
+    await page.route('**/api/v1/availability/**', async (route) => {
       const request = route.request()
 
       if (request.method() !== 'GET') {
@@ -207,7 +207,7 @@ test.describe('availability retry and failure browser flow', () => {
 
     let failedHoldOnce = false
 
-    await page.route('**/api/holds', async (route) => {
+    await page.route('**/api/v1/holds', async (route) => {
       const request = route.request()
 
       if (request.method() !== 'POST') {
@@ -242,7 +242,7 @@ test.describe('availability retry and failure browser flow', () => {
 
     const failedHoldResponsePromise = page.waitForResponse(
       (resp) =>
-        resp.url().includes('/api/holds') &&
+        resp.url().includes('/api/v1/holds') &&
         resp.request().method() === 'POST',
       { timeout: 30_000 },
     )
@@ -268,7 +268,7 @@ test.describe('availability retry and failure browser flow', () => {
 
     const retryHoldResponsePromise = page.waitForResponse(
       (resp) =>
-        resp.url().includes('/api/holds') &&
+        resp.url().includes('/api/v1/holds') &&
         resp.request().method() === 'POST',
       { timeout: 30_000 },
     )

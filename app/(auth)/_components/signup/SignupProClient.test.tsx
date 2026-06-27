@@ -397,7 +397,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      '/api/auth/register',
+      '/api/v1/auth/register',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

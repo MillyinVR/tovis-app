@@ -57,7 +57,7 @@ export default function SwitchAccountSheet({
     setSwitchingTo(option.role)
 
     try {
-      const res = await fetch('/api/workspace/switch', {
+      const res = await fetch('/api/v1/workspace/switch', {
         method: 'POST',
         credentials: 'include',
         cache: 'no-store',
@@ -85,7 +85,7 @@ export default function SwitchAccountSheet({
     if (busy) return
     setSigningOut(true)
 
-    await fetch('/api/auth/logout', {
+    await fetch('/api/v1/auth/logout', {
       method: 'POST',
       credentials: 'include',
       cache: 'no-store',

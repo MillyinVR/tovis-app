@@ -370,7 +370,7 @@ function installFetchMock(args?: {
 
       const method = init?.method ?? 'GET'
 
-      if (url === '/api/looks/categories') {
+      if (url === '/api/v1/looks/categories') {
         return jsonResponse({
           categories,
         })
@@ -389,7 +389,7 @@ function installFetchMock(args?: {
         })
       }
 
-      const likeMatch = url.match(/^\/api\/looks\/([^/]+)\/like$/)
+      const likeMatch = url.match(/^\/api\/v1\/looks\/([^/]+)\/like$/)
       if (likeMatch) {
         const lookPostId = decodeURIComponent(likeMatch[1] ?? '')
         const current = likeState.get(lookPostId) ?? {
@@ -426,7 +426,7 @@ function installFetchMock(args?: {
         }
       }
 
-      const commentsMatch = url.match(/^\/api\/looks\/([^/]+)\/comments$/)
+      const commentsMatch = url.match(/^\/api\/v1\/looks\/([^/]+)\/comments$/)
       if (commentsMatch) {
         const lookPostId = decodeURIComponent(commentsMatch[1] ?? '')
 
@@ -533,7 +533,7 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     )
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/looks/look_like_1/like', {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/looks/look_like_1/like', {
         method: 'POST',
       })
     })

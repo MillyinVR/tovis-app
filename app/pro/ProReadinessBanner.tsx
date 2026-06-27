@@ -68,7 +68,7 @@ export default function ProReadinessBanner() {
 
     async function loadReadiness(): Promise<void> {
       try {
-        const response = await fetch('/api/pro/readiness', {
+        const response = await fetch('/api/v1/pro/readiness', {
           cache: 'no-store',
         })
 

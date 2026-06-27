@@ -519,8 +519,8 @@ async function main(): Promise<void> {
   const action = checkoutActionEnv('LOAD_TEST_CHECKOUT_ACTION', 'mark-paid')
   const defaultRouteTemplate =
     action === 'waive'
-      ? '/api/pro/bookings/:bookingId/checkout/waive'
-      : '/api/pro/bookings/:bookingId/checkout/mark-paid'
+      ? '/api/v1/pro/bookings/:bookingId/checkout/waive'
+      : '/api/v1/pro/bookings/:bookingId/checkout/mark-paid'
 
   const config: CheckoutLoadConfig = {
     bookingId: requireEnv('LOAD_TEST_BOOKING_ID'),

@@ -138,8 +138,8 @@ export function parseSearchProsParams(
   }
 }
 
-// `/api/search/pros` is unauthenticated, so the location preview must be redacted
-// to neighborhood precision — same posture as `/api/pros/nearby`. The exact
+// `/api/v1/search/pros` is unauthenticated, so the location preview must be redacted
+// to neighborhood precision — same posture as `/api/v1/pros/nearby`. The exact
 // street address (formattedAddress/placeId) is stripped and coordinates coarsened;
 // distanceMiles is computed in SQL from exact coords before this mapping, so the
 // displayed distance stays accurate while the map pin is approximate.

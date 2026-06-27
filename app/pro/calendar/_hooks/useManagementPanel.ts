@@ -113,7 +113,7 @@ function isNoChangesMessage(message: string): boolean {
 }
 
 function bookingPatchEndpoint(bookingId: string): string {
-  return `/api/pro/bookings/${encodeURIComponent(bookingId)}`
+  return `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}`
 }
 
 async function patchBookingStatus(args: {

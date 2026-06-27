@@ -280,7 +280,7 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
         {/* Categories */}
         <CardShell title="Categories" subtitle={`${categories.length} total`}>
           <form
-            action="/api/admin/categories"
+            action="/api/v1/admin/categories"
             method="post"
             className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/30 p-3"
           >
@@ -320,7 +320,7 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
                       {c.name} <span className="text-xs font-bold text-textSecondary">({c.slug})</span>
                     </div>
 
-                    <form action={`/api/admin/categories/${encodeURIComponent(c.id)}`} method="post">
+                    <form action={`/api/v1/admin/categories/${encodeURIComponent(c.id)}`} method="post">
                       <input type="hidden" name="_method" value="PATCH" />
                       <input type="hidden" name="isActive" value={String(!c.isActive)} />
                       <button
@@ -344,7 +344,7 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
                             <span className="text-xs text-textSecondary">({k.slug})</span>
                           </div>
 
-                          <form action={`/api/admin/categories/${encodeURIComponent(k.id)}`} method="post">
+                          <form action={`/api/v1/admin/categories/${encodeURIComponent(k.id)}`} method="post">
                             <input type="hidden" name="_method" value="PATCH" />
                             <input type="hidden" name="isActive" value={String(!k.isActive)} />
                             <button

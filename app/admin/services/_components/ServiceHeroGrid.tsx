@@ -513,7 +513,7 @@ export default function ServiceHeroGrid(props: {
           form.set(key, value)
         }
 
-        const res = await fetch(`/api/admin/services/${encodeURIComponent(id)}`, {
+        const res = await fetch(`/api/v1/admin/services/${encodeURIComponent(id)}`, {
           method: 'POST',
           body: form,
         })
@@ -973,7 +973,7 @@ const ServiceEditForm = forwardRef<
 
         const uploadFile = await compressImageForUpload(file)
 
-        const initRes = await fetch('/api/admin/uploads', {
+        const initRes = await fetch('/api/v1/admin/uploads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

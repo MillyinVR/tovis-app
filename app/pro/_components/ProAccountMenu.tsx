@@ -94,7 +94,7 @@ function useOnClickOutside<T extends HTMLElement>(
 }
 
 async function logout(): Promise<void> {
-  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null)
+  await fetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => null)
 }
 
 const ROW_BASE =

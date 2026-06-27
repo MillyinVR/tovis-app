@@ -1,7 +1,7 @@
 // lib/messagesResolve.ts
 //
 // Single thread-resolution path for messaging. The HTTP route
-// (app/api/messages/resolve) and server pages (app/messages/start) both go
+// (app/api/v1/messages/resolve) and server pages (app/messages/start) both go
 // through resolveMessageThread, so context auth checks and thread creation
 // never fork into separate implementations.
 

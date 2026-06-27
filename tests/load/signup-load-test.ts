@@ -302,7 +302,7 @@ async function sendRequest(args: {
   const startedAt = performance.now()
 
   try {
-    const response = await fetch(`${args.baseUrl}/api/auth/register`, {
+    const response = await fetch(`${args.baseUrl}/api/v1/auth/register`, {
       method: 'POST',
       headers: buildHeaders({
         seq: args.seq,
@@ -485,7 +485,7 @@ function buildSummary(args: {
     commit: readCommitSha(),
     environment: readEnvironmentName(),
     baseUrl: args.baseUrl,
-    route: 'POST /api/auth/register',
+    route: 'POST /api/v1/auth/register',
     roleUnderTest: 'CLIENT',
     phoneSource: args.phoneSource,
     profile: args.profile,
@@ -585,7 +585,7 @@ async function main(): Promise<void> {
         commit: readCommitSha(),
         environment: readEnvironmentName(),
         baseUrl,
-        route: 'POST /api/auth/register',
+        route: 'POST /api/v1/auth/register',
         roleUnderTest: 'CLIENT',
         phoneSource: phonePoolFile ? `pool:${phonePoolFile}` : 'generated',
         profile,

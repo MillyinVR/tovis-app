@@ -109,7 +109,7 @@ export default function RefundButton({
 
     try {
       const res = await fetch(
-        `/api/bookings/${encodeURIComponent(bookingId)}/refund`,
+        `/api/v1/bookings/${encodeURIComponent(bookingId)}/refund`,
         {
           method: 'POST',
           headers: {

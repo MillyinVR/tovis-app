@@ -150,7 +150,7 @@ function buildBackgroundRefreshMetricMeta(
 
 /**
  * Bootstrap hook:
- * - loads advisory bootstrap data from /api/availability/bootstrap
+ * - loads advisory bootstrap data from /api/v1/availability/bootstrap
  * - manages bootstrap window pagination
  * - optionally upgrades from primary-only bootstrap to full bootstrap with other pros
  *

@@ -6,12 +6,12 @@ import type { ClientBookingDTO } from '@/lib/dto/clientBooking'
 
 /**
  * Single source of truth:
- * Client UI booking shape = ClientBookingDTO returned by GET /api/client/bookings
+ * Client UI booking shape = ClientBookingDTO returned by GET /api/v1/client/bookings
  */
 export type BookingLike = ClientBookingDTO
 
 /**
- * Waitlist shape returned by GET /api/client/bookings (buckets.waitlist)
+ * Waitlist shape returned by GET /api/v1/client/bookings (buckets.waitlist)
  * Keep it minimal and aligned with the Prisma/API contract.
  */
 export type WaitlistLike = {

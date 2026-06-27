@@ -246,7 +246,7 @@ export default function VerifyEmailPage() {
   const hasValidParams = Boolean(verificationId && token)
 
   async function refreshVerificationStatus(): Promise<VerificationStatus> {
-    const res = await fetch('/api/auth/verification/status', {
+    const res = await fetch('/api/v1/auth/verification/status', {
       method: 'GET',
       credentials: 'include',
       cache: 'no-store',
@@ -280,7 +280,7 @@ export default function VerifyEmailPage() {
     setError(null)
 
     try {
-      const res = await fetch('/api/auth/email/verify', {
+      const res = await fetch('/api/v1/auth/email/verify', {
         method: 'POST',
         cache: 'no-store',
         credentials: 'include',

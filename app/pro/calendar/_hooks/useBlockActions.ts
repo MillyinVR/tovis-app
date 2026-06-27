@@ -62,7 +62,7 @@ function errorFromUnknown(error: unknown) {
 }
 
 function blockEndpoint() {
-  return '/api/pro/calendar/blocked'
+  return '/api/v1/pro/calendar/blocked'
 }
 
 function blockRowFromResponse(args: {

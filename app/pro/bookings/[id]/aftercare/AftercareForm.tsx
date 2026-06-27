@@ -763,7 +763,7 @@ export default function AftercareForm({
         nonce: JSON.stringify(payload),
       })
       const res = await fetch(
-        `/api/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`,
+        `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`,
         {
           method: 'POST',
           headers: {

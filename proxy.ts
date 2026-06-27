@@ -10,12 +10,12 @@ const ALLOWED_VERIFICATION_PAGE_PATHS = new Set([
 ])
 
 const ALLOWED_VERIFICATION_API_PATHS = new Set([
-  '/api/auth/phone/send',
-  '/api/auth/phone/verify',
-  '/api/auth/email/send',
-  '/api/auth/email/verify',
-  '/api/auth/verification/status',
-  '/api/auth/logout',
+  '/api/v1/auth/phone/send',
+  '/api/v1/auth/phone/verify',
+  '/api/v1/auth/email/send',
+  '/api/v1/auth/email/verify',
+  '/api/v1/auth/verification/status',
+  '/api/v1/auth/logout',
 ])
 
 const STATE_CHANGING_METHODS = new Set([
@@ -32,7 +32,7 @@ const ORIGIN_CHECK_EXEMPT_PATH_PREFIXES = [
 ] as const
 
 const ORIGIN_CHECK_EXEMPT_PATHS = new Set([
-  '/api/auth/logout',
+  '/api/v1/auth/logout',
 ])
 
 function normalizePathname(pathname: string): string {

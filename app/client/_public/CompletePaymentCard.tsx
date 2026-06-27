@@ -40,7 +40,7 @@ export function CompletePaymentCard({ token, amountCents, currency }: Props) {
       const idempotencyKey = buildIdempotencyKey(token)
 
       const response = await fetch(
-        `/api/client/rebook/${encodeURIComponent(token)}/checkout`,
+        `/api/v1/client/rebook/${encodeURIComponent(token)}/checkout`,
         {
           method: 'POST',
           headers: {

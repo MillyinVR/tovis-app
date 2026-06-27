@@ -63,7 +63,7 @@ function mockUploadFlowFetch() {
     .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString()
 
-      if (url === '/api/pro/uploads') {
+      if (url === '/api/v1/pro/uploads') {
         return Promise.resolve(
           jsonResponse({
             ok: true,
@@ -74,7 +74,7 @@ function mockUploadFlowFetch() {
         )
       }
 
-      if (url === '/api/pro/verification-docs') {
+      if (url === '/api/v1/pro/verification-docs') {
         return Promise.resolve(jsonResponse({ ok: true, id: 'doc_1' }))
       }
 
@@ -119,7 +119,7 @@ describe('VerificationUploadClient', () => {
     })
 
     const createCall = fetchMock.mock.calls.find(
-      ([url]) => url === '/api/pro/verification-docs',
+      ([url]) => url === '/api/v1/pro/verification-docs',
     )
     expect(createCall).toBeDefined()
 
@@ -155,7 +155,7 @@ describe('VerificationUploadClient', () => {
     })
 
     const createCall = fetchMock.mock.calls.find(
-      ([url]) => url === '/api/pro/verification-docs',
+      ([url]) => url === '/api/v1/pro/verification-docs',
     )
     const body = JSON.parse(String(createCall?.[1]?.body)) as Record<
       string,

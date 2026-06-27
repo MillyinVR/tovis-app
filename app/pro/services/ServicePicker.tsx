@@ -170,7 +170,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
     try {
       const uploadFile = await compressImageForUpload(file)
 
-      const initRes = await fetch('/api/pro/uploads', {
+      const initRes = await fetch('/api/v1/pro/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -278,7 +278,7 @@ export default function ServicePicker({ categories, offerings }: Props) {
 
     setLoading(true)
     try {
-      const res = await fetch('/api/pro/offerings', {
+      const res = await fetch('/api/v1/pro/offerings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -6,8 +6,8 @@ import path from 'node:path'
 const REPO_ROOT = process.cwd()
 
 const ACTIVE_SOURCE_FILES = [
-  'app/api/pro/bookings/[id]/aftercare/route.ts',
-  'app/api/client/rebook/[token]/route.ts',
+  'app/api/v1/pro/bookings/[id]/aftercare/route.ts',
+  'app/api/v1/client/rebook/[token]/route.ts',
   'app/client/rebook/[token]/page.tsx',
   'app/client/(gated)/bookings/[id]/page.tsx',
   'lib/booking/writeBoundary.ts',
@@ -56,7 +56,7 @@ describe('aftercare publicToken deprecation guard', () => {
     const delivery = readRepoFile(
       'lib/clientActions/createAftercareAccessDelivery.ts',
     )
-    const rebookRoute = readRepoFile('app/api/client/rebook/[token]/route.ts')
+    const rebookRoute = readRepoFile('app/api/v1/client/rebook/[token]/route.ts')
 
     expect(accessTokens).toContain('ClientActionTokenKind.AFTERCARE_ACCESS')
     expect(accessTokens).toContain('resolveAftercareAccessTokenForRead')

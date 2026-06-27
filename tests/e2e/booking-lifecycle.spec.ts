@@ -671,7 +671,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await patchJson({
         request: proRequest,
-        path: `/api/pro/bookings/${bookingId}`,
+        path: `/api/v1/pro/bookings/${bookingId}`,
         idempotencyKey: makeIdempotencyKey('accept'),
         requestId: makeIdempotencyKey('req_accept'),
         baseURL: resolvedBaseUrl,
@@ -690,7 +690,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await postJson({
         request: proRequest,
-        path: `/api/pro/bookings/${bookingId}/session/start`,
+        path: `/api/v1/pro/bookings/${bookingId}/session/start`,
         idempotencyKey: makeIdempotencyKey('start'),
         requestId: makeIdempotencyKey('req_start'),
         baseURL: resolvedBaseUrl,
@@ -704,7 +704,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await postJson({
         request: proRequest,
-        path: `/api/pro/bookings/${bookingId}/consultation-proposal`,
+        path: `/api/v1/pro/bookings/${bookingId}/consultation-proposal`,
         idempotencyKey: makeIdempotencyKey('consultation_proposal'),
         requestId: makeIdempotencyKey('req_consultation_proposal'),
         baseURL: resolvedBaseUrl,
@@ -719,7 +719,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await postJson({
         request: clientRequest,
-        path: `/api/client/bookings/${bookingId}/consultation`,
+        path: `/api/v1/client/bookings/${bookingId}/consultation`,
         idempotencyKey: makeIdempotencyKey('client_consultation_approve'),
         requestId: makeIdempotencyKey('req_client_consultation_approve'),
         baseURL: resolvedBaseUrl,
@@ -744,7 +744,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await postJson({
         request: proRequest,
-        path: `/api/pro/bookings/${bookingId}/session/step`,
+        path: `/api/v1/pro/bookings/${bookingId}/session/step`,
         idempotencyKey: makeIdempotencyKey('service_in_progress'),
         requestId: makeIdempotencyKey('req_service_in_progress'),
         baseURL: resolvedBaseUrl,
@@ -761,7 +761,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await postJson({
         request: proRequest,
-        path: `/api/pro/bookings/${bookingId}/session/finish`,
+        path: `/api/v1/pro/bookings/${bookingId}/session/finish`,
         idempotencyKey: makeIdempotencyKey('finish_session'),
         requestId: makeIdempotencyKey('req_finish_session'),
         baseURL: resolvedBaseUrl,
@@ -778,7 +778,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await postJson({
         request: proRequest,
-        path: `/api/pro/bookings/${bookingId}/final-review`,
+        path: `/api/v1/pro/bookings/${bookingId}/final-review`,
         idempotencyKey: makeIdempotencyKey('final_review'),
         requestId: makeIdempotencyKey('req_final_review'),
         baseURL: resolvedBaseUrl,
@@ -803,7 +803,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await postJson({
         request: proRequest,
-        path: `/api/pro/bookings/${bookingId}/aftercare`,
+        path: `/api/v1/pro/bookings/${bookingId}/aftercare`,
         idempotencyKey: makeIdempotencyKey('aftercare_send'),
         requestId: makeIdempotencyKey('req_aftercare_send'),
         baseURL: resolvedBaseUrl,
@@ -836,7 +836,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
       await postJson({
         request: proRequest,
-        path: `/api/pro/bookings/${bookingId}/checkout/waive`,
+        path: `/api/v1/pro/bookings/${bookingId}/checkout/waive`,
         idempotencyKey: makeIdempotencyKey('checkout_waive'),
         requestId: makeIdempotencyKey('req_checkout_waive'),
         baseURL: resolvedBaseUrl,

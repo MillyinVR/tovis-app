@@ -130,7 +130,7 @@ async function fetchAddOns(args: { offeringId: string; locationType: ServiceLoca
   const qs = new URLSearchParams({ offeringId: args.offeringId, locationType: args.locationType })
 
   const origin = await getRequestOrigin()
-  const url = origin ? `${origin}/api/offerings/add-ons?${qs.toString()}` : `/api/offerings/add-ons?${qs.toString()}`
+  const url = origin ? `${origin}/api/v1/offerings/add-ons?${qs.toString()}` : `/api/v1/offerings/add-ons?${qs.toString()}`
 
   const h = await headers()
   const cookie = h.get('cookie') ?? ''

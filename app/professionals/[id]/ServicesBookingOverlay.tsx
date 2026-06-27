@@ -170,7 +170,7 @@ export default function ServicesBookingOverlay({
 
       try {
         const response = await fetch(
-          `/api/services/${encodeURIComponent(serviceId)}/favorite`,
+          `/api/v1/services/${encodeURIComponent(serviceId)}/favorite`,
           {
             method: wasFavorited ? 'DELETE' : 'POST',
             headers: { Accept: 'application/json' },

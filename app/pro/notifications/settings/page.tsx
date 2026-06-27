@@ -43,7 +43,7 @@ export default async function ProNotificationSettingsPage() {
         </Link>
       </div>
 
-      <NotificationPreferencesForm endpoint="/api/pro/notification-preferences" />
+      <NotificationPreferencesForm endpoint="/api/v1/pro/notification-preferences" />
     </main>
   )
 }

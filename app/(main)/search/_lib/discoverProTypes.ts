@@ -1,7 +1,7 @@
 // app/(main)/search/_lib/discoverProTypes.ts
 //
 // Shared DTO shapes for the discover/search pro results. These describe the
-// `/api/search/pros` response (validated by the type guards in
+// `/api/v1/search/pros` response (validated by the type guards in
 // SearchMapClient) and are reused by the presentational row/card components so
 // the pro shape has a single source.
 

@@ -58,7 +58,7 @@ describe('useSessionState', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/pro/bookings/booking_1/session/state',
+      '/api/v1/pro/bookings/booking_1/session/state',
       expect.objectContaining({ method: 'GET', cache: 'no-store' }),
     )
     expect(onChange).not.toHaveBeenCalled()

@@ -342,7 +342,7 @@ describe('app/(auth)/verify-phone/page', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/auth/session/next-url',
+      '/api/v1/auth/session/next-url',
       expect.objectContaining({
         method: 'GET',
         cache: 'no-store',
@@ -464,7 +464,7 @@ describe('app/(auth)/verify-phone/page', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4)
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      '/api/auth/email/send',
+      '/api/v1/auth/email/send',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -532,7 +532,7 @@ describe('app/(auth)/verify-phone/page', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/auth/phone/verify',
+      '/api/v1/auth/phone/verify',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -637,7 +637,7 @@ describe('app/(auth)/verify-phone/page', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/auth/email/send',
+      '/api/v1/auth/email/send',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -714,7 +714,7 @@ describe('app/(auth)/verify-phone/page', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/auth/phone/send',
+      '/api/v1/auth/phone/send',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -850,7 +850,7 @@ describe('app/(auth)/verify-phone/page', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/auth/phone/correct',
+      '/api/v1/auth/phone/correct',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

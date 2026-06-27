@@ -24,7 +24,7 @@ export default function EditAlertBannerForm({
     setError(null)
 
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/alert`, {
+      const res = await fetch(`/api/v1/pro/clients/${clientId}/alert`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

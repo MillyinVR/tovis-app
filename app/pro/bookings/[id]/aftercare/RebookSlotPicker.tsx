@@ -124,7 +124,7 @@ export default function RebookSlotPicker({
           params.set('clientAddressId', clientAddressId)
         }
 
-        const res = await fetch(`/api/availability/day?${params.toString()}`, {
+        const res = await fetch(`/api/v1/availability/day?${params.toString()}`, {
           signal: controller.signal,
         })
         const data = await safeJson(res)

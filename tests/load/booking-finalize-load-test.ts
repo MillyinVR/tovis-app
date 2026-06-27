@@ -252,7 +252,7 @@ function buildBootstrapUrl(
   baseUrl: string,
   config: BookingFinalizeLoadConfig,
 ): string {
-  const url = new URL('/api/availability/bootstrap', baseUrl)
+  const url = new URL('/api/v1/availability/bootstrap', baseUrl)
 
   url.searchParams.set('professionalId', config.professionalId)
   url.searchParams.set('serviceId', config.serviceId)
@@ -294,7 +294,7 @@ function buildHoldPayload(args: {
  * Adjust here if your finalize route expects a different body shape.
  *
  * Current assumption:
- * POST /api/bookings/finalize
+ * POST /api/v1/bookings/finalize
  * body: { holdId }
  */
 function buildFinalizePayload(args: {
@@ -961,9 +961,9 @@ async function main(): Promise<void> {
     )
   }
 
-  const holdRoute = optionalEnv('LOAD_TEST_HOLD_ROUTE') ?? '/api/holds'
+  const holdRoute = optionalEnv('LOAD_TEST_HOLD_ROUTE') ?? '/api/v1/holds'
   const finalizeRoute =
-    optionalEnv('LOAD_TEST_FINALIZE_ROUTE') ?? '/api/bookings/finalize'
+    optionalEnv('LOAD_TEST_FINALIZE_ROUTE') ?? '/api/v1/bookings/finalize'
   const requestTimeoutMs = intEnv('LOAD_TEST_REQUEST_TIMEOUT_MS', 15000)
   const maxInFlight = intEnv('LOAD_TEST_MAX_IN_FLIGHT', 2000)
 

@@ -213,11 +213,11 @@ export default function SaveToBoardModal({
       setErrorMessage(null)
 
       const [boardsResponse, saveStateResponse] = await Promise.all([
-        fetch('/api/boards', {
+        fetch('/api/v1/boards', {
           method: 'GET',
           cache: 'no-store',
         }),
-        fetch(`/api/looks/${encodeURIComponent(lookPostId)}/save`, {
+        fetch(`/api/v1/looks/${encodeURIComponent(lookPostId)}/save`, {
           method: 'GET',
           cache: 'no-store',
         }),
@@ -268,7 +268,7 @@ export default function SaveToBoardModal({
         setErrorMessage(null)
 
         const response = await fetch(
-          `/api/looks/${encodeURIComponent(lookPostId)}/save`,
+          `/api/v1/looks/${encodeURIComponent(lookPostId)}/save`,
           {
             method: inBoard ? 'DELETE' : 'POST',
             headers: {
@@ -314,7 +314,7 @@ export default function SaveToBoardModal({
         setCreating(true)
         setCreateError(null)
 
-        const response = await fetch('/api/boards', {
+        const response = await fetch('/api/v1/boards', {
           method: 'POST',
           headers: {
             'content-type': 'application/json',

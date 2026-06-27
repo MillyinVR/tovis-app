@@ -11,7 +11,7 @@
 //
 // This forward-geocodes the typed address so every saved service address is
 // bookable regardless of how it was entered. Used by BOTH the client-facing
-// address routes (app/api/client/addresses) and the pro create-booking flow
+// address routes (app/api/v1/client/addresses) and the pro create-booking flow
 // (lib/booking/resolveProBookingClient). Autocomplete picks already carry
 // formattedAddress + coordinates, so they short-circuit without a Google call.
 

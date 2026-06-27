@@ -82,7 +82,7 @@ export default function AftercareNextAppointmentCard({
       })
 
       const res = await fetch(
-        `/api/client/bookings/${encodeURIComponent(bookingId)}/aftercare-rebook`,
+        `/api/v1/client/bookings/${encodeURIComponent(bookingId)}/aftercare-rebook`,
         {
           method: 'POST',
           headers: {

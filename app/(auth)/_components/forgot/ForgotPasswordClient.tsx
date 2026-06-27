@@ -20,7 +20,7 @@ export default function ForgotPasswordClient() {
     setError(null)
 
     try {
-      const res = await fetch('/api/auth/password-reset/request', {
+      const res = await fetch('/api/v1/auth/password-reset/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),

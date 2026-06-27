@@ -168,7 +168,7 @@ describe('app/(auth)/verify-email/page', () => {
 
     expect(mockFetch).toHaveBeenNthCalledWith(
       1,
-      '/api/auth/email/verify',
+      '/api/v1/auth/email/verify',
       expect.objectContaining({
         method: 'POST',
         cache: 'no-store',
@@ -185,7 +185,7 @@ describe('app/(auth)/verify-email/page', () => {
 
     expect(mockFetch).toHaveBeenNthCalledWith(
       2,
-      '/api/auth/verification/status',
+      '/api/v1/auth/verification/status',
       expect.objectContaining({
         method: 'GET',
         credentials: 'include',

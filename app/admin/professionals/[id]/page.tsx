@@ -284,7 +284,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
                   const created = fmtUtcDateTime(new Date(doc.createdAt))
                   const hasFile = Boolean(doc.url || doc.imageUrl)
                   const openHref = hasFile
-                    ? `/api/admin/verification-docs/open?id=${encodeURIComponent(doc.id)}`
+                    ? `/api/v1/admin/verification-docs/open?id=${encodeURIComponent(doc.id)}`
                     : null
 
                   return (

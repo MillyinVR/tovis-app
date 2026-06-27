@@ -128,7 +128,7 @@ describe('useConfirmChange', () => {
     return fetchMock.mock.calls.filter(
       (call) =>
         typeof call[0] === 'string' &&
-        call[0].includes('/api/pro/bookings/booking_1') &&
+        call[0].includes('/api/v1/pro/bookings/booking_1') &&
         call[1]?.method === 'PATCH',
     )
   }

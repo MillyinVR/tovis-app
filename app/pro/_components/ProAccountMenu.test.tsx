@@ -138,7 +138,7 @@ describe('app/pro/_components/ProAccountMenu', () => {
     await user.click(await screen.findByRole('button', { name: /sign out/i }))
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/logout', {
         method: 'POST',
       })
     })

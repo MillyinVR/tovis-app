@@ -69,7 +69,7 @@ export default function MembershipClient(props: Props) {
   async function startUpgrade(planKey: PlanKey, interval: 'month' | 'year') {
     setError(null)
     try {
-      const res = await fetch('/api/pro/membership/checkout', {
+      const res = await fetch('/api/v1/pro/membership/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ planKey, interval }),
@@ -87,7 +87,7 @@ export default function MembershipClient(props: Props) {
   async function openPortal() {
     setError(null)
     try {
-      const res = await fetch('/api/pro/membership/portal', { method: 'POST' })
+      const res = await fetch('/api/v1/pro/membership/portal', { method: 'POST' })
       const data = await res.json().catch(() => null)
       if (!res.ok || !data?.url) {
         throw new Error(data?.message || data?.error || 'Could not open billing portal.')

@@ -336,7 +336,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
           </CardShell>
 
           <CardShell title="Edit service" subtitle="Update name, category, pricing, add-on settings, and description.">
-            <form action={`/api/admin/services/${encodeURIComponent(service.id)}`} method="post" className="grid gap-3">
+            <form action={`/api/v1/admin/services/${encodeURIComponent(service.id)}`} method="post" className="grid gap-3">
               <input type="hidden" name="_method" value="PATCH" />
 
               <label className="grid gap-2">
@@ -440,7 +440,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
           }
         >
           <form
-            action={`/api/admin/services/${encodeURIComponent(service.id)}/permissions`}
+            action={`/api/v1/admin/services/${encodeURIComponent(service.id)}/permissions`}
             method="post"
             className="grid gap-3"
           >

@@ -230,7 +230,7 @@ async function submitRecommendedProducts(args: {
   })
 
   const response = await fetch(
-    `/api/client/bookings/${encodeURIComponent(args.bookingId)}/checkout/products`,
+    `/api/v1/client/bookings/${encodeURIComponent(args.bookingId)}/checkout/products`,
     {
       method: 'POST',
       headers: {

@@ -209,7 +209,7 @@ describe('useBookingModal', () => {
     const patchCall = fetchMock.mock.calls.find(
       (call) =>
         typeof call[0] === 'string' &&
-        call[0].includes('/api/pro/bookings/booking_1') &&
+        call[0].includes('/api/v1/pro/bookings/booking_1') &&
         call[1]?.method === 'PATCH',
     )
 
@@ -294,7 +294,7 @@ describe('useBookingModal', () => {
     const patchCall = fetchMock.mock.calls.find(
       (call) =>
         typeof call[0] === 'string' &&
-        call[0].includes('/api/pro/bookings/booking_1') &&
+        call[0].includes('/api/v1/pro/bookings/booking_1') &&
         call[1]?.method === 'PATCH',
     )
 
@@ -390,7 +390,7 @@ describe('useBookingModal', () => {
     const patchCalls = fetchMock.mock.calls.filter(
       (call) =>
         typeof call[0] === 'string' &&
-        call[0].includes('/api/pro/bookings/booking_1') &&
+        call[0].includes('/api/v1/pro/bookings/booking_1') &&
         call[1]?.method === 'PATCH',
     )
 
@@ -562,7 +562,7 @@ describe('useBookingModal', () => {
     const patchCalls = fetchMock.mock.calls.filter(
       (call) =>
         typeof call[0] === 'string' &&
-        call[0].includes('/api/pro/bookings/booking_1') &&
+        call[0].includes('/api/v1/pro/bookings/booking_1') &&
         call[1]?.method === 'PATCH',
     )
 
@@ -636,7 +636,7 @@ describe('useBookingModal', () => {
     const postCalls = fetchMock.mock.calls.filter(
       (call) =>
         typeof call[0] === 'string' &&
-        call[0].includes('/api/pro/bookings/booking_1/session/start') &&
+        call[0].includes('/api/v1/pro/bookings/booking_1/session/start') &&
         call[1]?.method === 'POST',
     )
 

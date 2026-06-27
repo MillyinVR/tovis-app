@@ -289,7 +289,7 @@ export async function fetchAvailabilitySummaryWindow(
     }
 
     promise = (async (): Promise<BootstrapOk> => {
-      const res = await fetch(`/api/availability/bootstrap?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/availability/bootstrap?${qs.toString()}`, {
         method: 'GET',
         headers: { Accept: 'application/json' },
         signal: args.signal,

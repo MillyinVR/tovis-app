@@ -64,7 +64,7 @@ describe('authEvents', () => {
     logAuthEvent({
       level: 'info',
       event: 'auth.login_failed',
-      route: 'POST /api/auth/login',
+      route: 'POST /api/v1/auth/login',
       provider: 'credentials',
       code: 'INVALID_CREDENTIALS',
       userId: 'user_123',
@@ -85,7 +85,7 @@ describe('authEvents', () => {
       namespace: 'auth',
       level: 'info',
       event: 'auth.login_failed',
-      route: 'POST /api/auth/login',
+      route: 'POST /api/v1/auth/login',
       provider: 'credentials',
       code: 'INVALID_CREDENTIALS',
     })
@@ -116,7 +116,7 @@ describe('authEvents', () => {
     logAuthEvent({
       level: 'info',
       event: 'auth.malformed_contact',
-      route: 'POST /api/auth/test',
+      route: 'POST /api/v1/auth/test',
       email: 'not-an-email',
       phone: '123',
       message: 'Malformed contact input rejected',
@@ -139,7 +139,7 @@ describe('authEvents', () => {
     logAuthEvent({
       level: 'warn',
       event: 'auth.verification_failed',
-      route: 'POST /api/auth/email/verify',
+      route: 'POST /api/v1/auth/email/verify',
       meta: {
         token: 'raw_token_123',
         password: 'secret-password',
@@ -222,7 +222,7 @@ describe('authEvents', () => {
     captureAuthException({
       error,
       event: 'auth.register_failed',
-      route: 'POST /api/auth/register',
+      route: 'POST /api/v1/auth/register',
       provider: 'credentials',
       code: 'REGISTER_FAILED',
       userId: 'user_456',
@@ -263,7 +263,7 @@ describe('authEvents', () => {
 
     expect(setTag).toHaveBeenCalledWith('area', 'auth')
     expect(setTag).toHaveBeenCalledWith('auth.event', 'auth.register_failed')
-    expect(setTag).toHaveBeenCalledWith('auth.route', 'POST /api/auth/register')
+    expect(setTag).toHaveBeenCalledWith('auth.route', 'POST /api/v1/auth/register')
     expect(setTag).toHaveBeenCalledWith('auth.provider', 'credentials')
     expect(setTag).toHaveBeenCalledWith('auth.code', 'REGISTER_FAILED')
 
@@ -334,7 +334,7 @@ describe('authEvents', () => {
     logAuthEvent({
       level: 'warn',
       event: 'auth.otp_failed',
-      route: 'POST /api/auth/verify',
+      route: 'POST /api/v1/auth/verify',
       code: '123456',
     })
 
@@ -349,7 +349,7 @@ describe('authEvents', () => {
     logAuthEvent({
       level: 'warn',
       event: 'auth.login_failed',
-      route: 'POST /api/auth/login',
+      route: 'POST /api/v1/auth/login',
       code: 'INVALID_CREDENTIALS',
     })
 
@@ -365,7 +365,7 @@ describe('authEvents', () => {
       logAuthEvent({
         level: 'info',
         event: 'auth.meta_shape_test',
-        route: 'POST /api/auth/test',
+        route: 'POST /api/v1/auth/test',
         meta: {
           at: new Date('2026-05-22T12:00:00.000Z'),
           errors: [new Error('Nested error for user@example.com')],

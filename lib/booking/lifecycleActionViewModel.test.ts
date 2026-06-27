@@ -53,7 +53,7 @@ describe('buildLifecycleActionViewModel — pro role', () => {
     )
     expect(verbs(vm)).toEqual(['START_SESSION', 'CANCEL'])
     expect(requireDefined(vm.actions[0]).href).toBe(
-      `/api/pro/bookings/${BOOKING_ID}/session/start`,
+      `/api/v1/pro/bookings/${BOOKING_ID}/session/start`,
     )
     expect(requireDefined(vm.actions[0]).method).toBe('POST')
     expect(requireDefined(vm.actions[0]).payload).toEqual({
@@ -154,7 +154,7 @@ describe('buildLifecycleActionViewModel — client role', () => {
       input({ status: BookingStatus.PENDING, role: 'CLIENT' }),
     )
     expect(verbs(vm)).toEqual(['CLIENT_RESCHEDULE', 'CLIENT_CANCEL'])
-    expect(requireDefined(vm.actions[1]).href).toBe(`/api/bookings/${BOOKING_ID}/cancel`)
+    expect(requireDefined(vm.actions[1]).href).toBe(`/api/v1/bookings/${BOOKING_ID}/cancel`)
   })
 
   it('ACCEPTED → Reschedule + Cancel booking', () => {

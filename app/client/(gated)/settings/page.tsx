@@ -109,7 +109,7 @@ export default function ClientSettingsPage() {
         />
 
         <NotificationPreferencesForm
-          endpoint="/api/client/notification-preferences"
+          endpoint="/api/v1/client/notification-preferences"
           showChannelPreference
         />
       </section>

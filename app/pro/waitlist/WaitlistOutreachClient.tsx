@@ -202,7 +202,7 @@ export default function WaitlistOutreachClient() {
 
     async function load(): Promise<void> {
       try {
-        const res = await fetch('/api/pro/waitlist', {
+        const res = await fetch('/api/v1/pro/waitlist', {
           headers: { Accept: 'application/json' },
         })
         const raw: unknown = await res.json().catch(() => null)

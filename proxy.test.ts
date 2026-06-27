@@ -105,7 +105,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://app.tovis.app/api/pro/profile', {
+    const req = makeRequest('https://app.tovis.app/api/v1/pro/profile', {
       cookie: 'tovis_token=test_verification_token',
     })
 
@@ -150,7 +150,7 @@ describe('proxy', () => {
     })
 
     const req = makeRequest(
-      'https://app.tovis.app/api/auth/verification/status',
+      'https://app.tovis.app/api/v1/auth/verification/status',
       {
         cookie: 'tovis_token=test_verification_token',
       },
@@ -242,7 +242,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://tori.tovis.me/api/pro/profile', {
+    const req = makeRequest('https://tori.tovis.me/api/v1/pro/profile', {
       headers: {
         host: 'tori.tovis.me',
       },
@@ -324,7 +324,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
       headers: {
         origin: 'https://app.tovis.app',
       },
@@ -353,7 +353,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://app.tovis.app/api/admin/services', {
+    const req = makeRequest('https://app.tovis.app/api/v1/admin/services', {
       headers: {
         origin: 'https://admin.tovis.app',
       },
@@ -380,7 +380,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://tori.tovis.me/api/pro/profile', {
+    const req = makeRequest('https://tori.tovis.me/api/v1/pro/profile', {
       headers: {
         host: 'tori.tovis.me',
         origin: 'https://app.tovis.app',
@@ -408,7 +408,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
       headers: {
         origin: 'https://evil.example',
       },
@@ -439,7 +439,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
       cookie: 'tovis_token=test_active_token',
     })
 
@@ -499,7 +499,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
       headers: {
         referer: 'https://app.tovis.app/client/settings',
       },
@@ -524,7 +524,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
       headers: {
         origin: 'https://evil.example',
       },

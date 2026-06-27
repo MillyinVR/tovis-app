@@ -74,7 +74,7 @@ export default function MediaFill(props: Props) {
     async function resolveMediaUrl(): Promise<void> {
       try {
         const qs = new URLSearchParams({ id })
-        const res = await fetch(`/api/media/url?${qs.toString()}`, {
+        const res = await fetch(`/api/v1/media/url?${qs.toString()}`, {
           method: 'GET',
           cache: 'no-store',
         })

@@ -19,7 +19,7 @@ type Props = {
 
 // Pro self-edit of license number / state / expiration. Saving sends the
 // profile back for admin re-review (it does NOT change verification status or
-// cut access — see /api/pro/license).
+// cut access — see /api/v1/pro/license).
 export default function LicenseEditForm({
   initialState,
   initialNumber,
@@ -44,7 +44,7 @@ export default function LicenseEditForm({
     setErr(null)
     setSaved(false)
     try {
-      const res = await fetch('/api/pro/license', {
+      const res = await fetch('/api/v1/pro/license', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

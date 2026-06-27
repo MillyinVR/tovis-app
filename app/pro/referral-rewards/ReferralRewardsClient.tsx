@@ -49,7 +49,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
     setErr(null)
     setSaved(false)
     try {
-      const res = await fetch('/api/pro/settings/referral-rewards', {
+      const res = await fetch('/api/v1/pro/settings/referral-rewards', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),

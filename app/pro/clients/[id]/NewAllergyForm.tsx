@@ -99,7 +99,7 @@ export default function NewAllergyForm({ clientId }: Props) {
     setLoading(true)
 
     try {
-      const res = await fetch(`/api/pro/clients/${encodeURIComponent(clientId)}/allergies`, {
+      const res = await fetch(`/api/v1/pro/clients/${encodeURIComponent(clientId)}/allergies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,

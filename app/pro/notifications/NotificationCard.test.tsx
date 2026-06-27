@@ -88,7 +88,7 @@ describe('NotificationCard', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        '/api/pro/notifications/notif_123/mark-read',
+        '/api/v1/pro/notifications/notif_123/mark-read',
         {
           method: 'POST',
           headers: {

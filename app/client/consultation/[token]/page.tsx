@@ -611,7 +611,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
 
       try {
         const response = await fetch(
-          `/api/public/consultation/${encodeURIComponent(token)}`,
+          `/api/v1/public/consultation/${encodeURIComponent(token)}`,
           {
             method: 'GET',
             cache: 'no-store',
@@ -704,7 +704,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
       })
 
       const response = await fetch(
-        `/api/public/consultation/${encodeURIComponent(token)}/decision`,
+        `/api/v1/public/consultation/${encodeURIComponent(token)}/decision`,
         {
           method: 'POST',
           headers: {

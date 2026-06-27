@@ -170,7 +170,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     setSaving(true)
 
     try {
-      const res = await fetch(`/api/pro/media/${encodeURIComponent(mediaId)}`, {
+      const res = await fetch(`/api/v1/pro/media/${encodeURIComponent(mediaId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -211,7 +211,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
 
     setSaving(true)
     try {
-      const res = await fetch(`/api/pro/media/${encodeURIComponent(mediaId)}`, { method: 'DELETE' })
+      const res = await fetch(`/api/v1/pro/media/${encodeURIComponent(mediaId)}`, { method: 'DELETE' })
       const data = await safeJsonObject(res)
       if (!res.ok) {
         throw new Error(pickErrorMessage(data, `Request failed (${res.status})`))

@@ -56,7 +56,7 @@ export default function ClientDepositCard({
 
     try {
       const res = await fetch(
-        `/api/client/bookings/${encodeURIComponent(bookingId)}/deposit/stripe-session`,
+        `/api/v1/client/bookings/${encodeURIComponent(bookingId)}/deposit/stripe-session`,
         {
           method: 'POST',
           headers: {

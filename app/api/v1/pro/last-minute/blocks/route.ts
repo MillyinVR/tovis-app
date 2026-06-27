@@ -1,0 +1,139 @@
+// app/api/v1/pro/last-minute/blocks/route.ts
+import { prisma } from '@/lib/prisma'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+
+export const dynamic = 'force-dynamic'
+
+const MAX_REASON_LENGTH = 200
+
+function toDateOrNull(v: unknown): Date | null {
+  const s = pickString(v)
+  if (!s) return null
+  const d = new Date(s)
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
+function cleanReason(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const trimmed = v.trim()
+  if (!trimmed) return null
+  return trimmed.slice(0, MAX_REASON_LENGTH)
+}
+
+export async function POST(req: Request) {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+
+    const professionalId = auth.professionalId
+    const body = await readJsonRecord(req)
+
+    const startAt = toDateOrNull(body.startAt)
+    const endAt = toDateOrNull(body.endAt)
+    const reason = cleanReason(body.reason)
+
+    if (!startAt || !endAt) {
+      return jsonFail(400, 'Invalid startAt or endAt.')
+    }
+
+    if (startAt.getTime() >= endAt.getTime()) {
+      return jsonFail(400, 'Block end must be after start.')
+    }
+
+    const settings = await prisma.lastMinuteSettings.upsert({
+      where: { professionalId },
+      update: {},
+      create: { professionalId },
+      select: { id: true },
+    })
+
+    const overlap = await prisma.lastMinuteBlock.findFirst({
+      where: {
+        settingsId: settings.id,
+        startAt: { lt: endAt },
+        endAt: { gt: startAt },
+      },
+      select: { id: true },
+    })
+
+    if (overlap) {
+      return jsonFail(409, 'That block overlaps an existing block. Remove the overlap first.')
+    }
+
+    const block = await prisma.lastMinuteBlock.create({
+      data: {
+        settingsId: settings.id,
+        startAt,
+        endAt,
+        reason,
+      },
+      select: {
+        id: true,
+        startAt: true,
+        endAt: true,
+        reason: true,
+      },
+    })
+
+    return jsonOk(
+      {
+        block: {
+          id: block.id,
+          startAt: block.startAt.toISOString(),
+          endAt: block.endAt.toISOString(),
+          reason: block.reason ?? null,
+        },
+      },
+      201,
+    )
+  } catch (e) {
+    console.error('POST /api/v1/pro/last-minute/blocks error', e)
+    return jsonFail(500, 'Failed to create block.')
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+
+    const professionalId = auth.professionalId
+    const { searchParams } = new URL(req.url)
+    const id = pickString(searchParams.get('id'))
+
+    if (!id) {
+      return jsonFail(400, 'Missing id.')
+    }
+
+    const settings = await prisma.lastMinuteSettings.findUnique({
+      where: { professionalId },
+      select: { id: true },
+    })
+
+    if (!settings) {
+      return jsonFail(404, 'Last-minute settings not found.')
+    }
+
+    const existing = await prisma.lastMinuteBlock.findFirst({
+      where: {
+        id,
+        settingsId: settings.id,
+      },
+      select: { id: true },
+    })
+
+    if (!existing) {
+      return jsonFail(404, 'Block not found.')
+    }
+
+    await prisma.lastMinuteBlock.delete({
+      where: { id: existing.id },
+    })
+
+    return jsonOk({ ok: true, deleted: 1, id: existing.id }, 200)
+  } catch (e) {
+    console.error('DELETE /api/v1/pro/last-minute/blocks error', e)
+    return jsonFail(500, 'Failed to delete block.')
+  }
+}

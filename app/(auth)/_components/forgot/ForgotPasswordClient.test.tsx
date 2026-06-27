@@ -67,7 +67,7 @@ describe('app/(auth)/_components/forgot/ForgotPasswordClient', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/auth/password-reset/request',
+      '/api/v1/auth/password-reset/request',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

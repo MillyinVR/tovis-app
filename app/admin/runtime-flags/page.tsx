@@ -35,7 +35,7 @@ const FLAG_META: Record<RuntimeFlagName, FlagMeta> = {
     name: 'nearby_search_index_enabled',
     title: 'Nearby via search index',
     description:
-      'Serves /api/pros/nearby from the ProfessionalSearchIndex (GIST) path instead of the legacy bounding-box query. Off = legacy. Enable after staging EXPLAIN + parity checks; revert instantly if results drift.',
+      'Serves /api/v1/pros/nearby from the ProfessionalSearchIndex (GIST) path instead of the legacy bounding-box query. Off = legacy. Enable after staging EXPLAIN + parity checks; revert instantly if results drift.',
   },
 }
 

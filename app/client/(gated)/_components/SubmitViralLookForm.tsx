@@ -33,7 +33,7 @@ export default function SubmitViralLookForm() {
     try {
       setSubmitting(true)
 
-      const res = await fetch('/api/viral-service-requests', {
+      const res = await fetch('/api/v1/viral-service-requests', {
         method: 'POST',
         headers: {
           Accept: 'application/json',

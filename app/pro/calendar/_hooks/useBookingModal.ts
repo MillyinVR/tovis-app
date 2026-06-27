@@ -169,12 +169,12 @@ function parseTimeParts(value: string): TimeParts | null {
 }
 
 function bookingEndpoint(bookingId: string) {
-  return `/api/pro/bookings/${encodeURIComponent(bookingId)}`
+  return `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}`
 }
 
 function servicesEndpoint(locationType: LocationType) {
   const params = new URLSearchParams({ locationType })
-  return `/api/pro/services?${params.toString()}`
+  return `/api/v1/pro/services?${params.toString()}`
 }
 
 function bookingLocationTypeFromDetails(booking: BookingDetails): LocationType {
@@ -891,7 +891,7 @@ export function useBookingModal(deps: BookingModalDeps) {
               .slice(2)}`
 
       const response = await fetch(
-        `/api/pro/bookings/${encodeURIComponent(booking.id)}/session/start`,
+        `/api/v1/pro/bookings/${encodeURIComponent(booking.id)}/session/start`,
         {
           method: 'POST',
           headers: {

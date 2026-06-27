@@ -6,8 +6,8 @@
 // parsing + session token so the forms don't each re-implement it.
 //
 // These are pure functions (no React) and safe to import from client components.
-// They parse the responses from `/api/google/places/autocomplete` and
-// `/api/google/places/details`.
+// They parse the responses from `/api/v1/google/places/autocomplete` and
+// `/api/v1/google/places/details`.
 
 import { isRecord } from '@/lib/guards'
 
@@ -47,7 +47,7 @@ export function makePlacesSessionToken(): string {
   return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`
 }
 
-/** Parse the `/api/google/places/autocomplete` response into predictions. */
+/** Parse the `/api/v1/google/places/autocomplete` response into predictions. */
 export function parsePlacePredictions(raw: unknown): PlacePrediction[] {
   if (!isRecord(raw) || !Array.isArray(raw.predictions)) return []
 
@@ -69,7 +69,7 @@ export function parsePlacePredictions(raw: unknown): PlacePrediction[] {
   }, [])
 }
 
-/** Parse the `/api/google/places/details` response into normalized place data. */
+/** Parse the `/api/v1/google/places/details` response into normalized place data. */
 export function parsePlaceDetails(raw: unknown): PlaceDetails | null {
   if (!isRecord(raw) || !isRecord(raw.place)) return null
   const place = raw.place

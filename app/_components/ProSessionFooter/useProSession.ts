@@ -350,7 +350,7 @@ export function useProSession() {
       }, FETCH_TIMEOUT_MS)
 
       try {
-        const res = await fetch('/api/pro/session', {
+        const res = await fetch('/api/v1/pro/session', {
           method: 'GET',
           cache: 'no-store',
           signal: controller.signal,
@@ -517,7 +517,7 @@ export function useProSession() {
         })
 
         const res = await fetch(
-          `/api/pro/bookings/${encodeURIComponent(cleanId)}/session/start`,
+          `/api/v1/pro/bookings/${encodeURIComponent(cleanId)}/session/start`,
           {
             method: 'POST',
             headers: {
@@ -587,7 +587,7 @@ export function useProSession() {
         })
 
         const res = await fetch(
-          `/api/pro/bookings/${encodeURIComponent(bookingId)}/session/start`,
+          `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}/session/start`,
           {
             method: 'POST',
             headers: {
@@ -636,7 +636,7 @@ export function useProSession() {
         })
 
         const res = await fetch(
-          `/api/pro/bookings/${encodeURIComponent(bookingId)}/session/finish`,
+          `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}/session/finish`,
           {
             method: 'POST',
             headers: {

@@ -270,7 +270,7 @@ function buildBlockPatchPayload(args: {
 }
 
 function bookingEndpoint(bookingId: string) {
-  return `/api/pro/bookings/${encodeURIComponent(bookingId)}`
+  return `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}`
 }
 
 function buildProBookingPatchIdempotencyKey(bookingId: string): string {
@@ -282,7 +282,7 @@ function buildProBookingPatchIdempotencyKey(bookingId: string): string {
 }
 
 function blockEndpoint(blockId: string) {
-  return `/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`
+  return `/api/v1/pro/calendar/blocked/${encodeURIComponent(blockId)}`
 }
 
 async function patchJson(args: {

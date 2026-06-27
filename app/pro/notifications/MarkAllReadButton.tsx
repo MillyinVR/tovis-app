@@ -23,7 +23,7 @@ export default function MarkAllReadButton(
     setIsSubmitting(true)
 
     try {
-      const res = await fetch('/api/pro/notifications/mark-read', {
+      const res = await fetch('/api/v1/pro/notifications/mark-read', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

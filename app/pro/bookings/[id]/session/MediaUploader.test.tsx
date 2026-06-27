@@ -34,8 +34,8 @@ vi.mock('@/lib/media/uploadWithProgress', () => ({
 
 import MediaUploader from './MediaUploader'
 
-const SIGN_URL = '/api/pro/uploads'
-const MEDIA_URL = '/api/pro/bookings/booking_1/media'
+const SIGN_URL = '/api/v1/pro/uploads'
+const MEDIA_URL = '/api/v1/pro/bookings/booking_1/media'
 
 function jsonResponse(payload: unknown, ok = true): Response {
   return new Response(JSON.stringify(payload), {

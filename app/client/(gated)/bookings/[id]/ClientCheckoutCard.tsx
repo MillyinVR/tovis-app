@@ -216,7 +216,7 @@ async function submitCheckout(args: {
   })
 
   const response = await fetch(
-    `/api/client/bookings/${encodeURIComponent(args.bookingId)}/checkout`,
+    `/api/v1/client/bookings/${encodeURIComponent(args.bookingId)}/checkout`,
     {
       method: 'POST',
       headers: {
@@ -262,7 +262,7 @@ async function createStripeCheckoutSession(args: {
   })
 
   const response = await fetch(
-    `/api/client/bookings/${encodeURIComponent(args.bookingId)}/checkout/stripe-session`,
+    `/api/v1/client/bookings/${encodeURIComponent(args.bookingId)}/checkout/stripe-session`,
     {
       method: 'POST',
       headers: {

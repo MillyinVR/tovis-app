@@ -2,7 +2,7 @@
 //
 // Single source for "which catalog services may this pro offer" — active
 // services, optionally filtered by the pro's profession/license when the
-// service-permission feature flag is on. Used by GET /api/pro/allowed-services
+// service-permission feature flag is on. Used by GET /api/v1/pro/allowed-services
 // and by the migration service-menu import.
 
 import { Prisma, type ProfessionType } from '@prisma/client'

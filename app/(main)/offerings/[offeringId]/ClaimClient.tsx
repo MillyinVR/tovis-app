@@ -58,7 +58,7 @@ export default function ClaimClient(props: Props) {
 
     try {
       // 1) Hold the fixed opening slot.
-      const holdRes = await fetch('/api/holds', {
+      const holdRes = await fetch('/api/v1/holds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -93,7 +93,7 @@ export default function ClaimClient(props: Props) {
         entityId: holdId,
         action: 'complete',
       })
-      const finRes = await fetch('/api/bookings/finalize', {
+      const finRes = await fetch('/api/v1/bookings/finalize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...idempotencyHeaders(idem) },
         body: JSON.stringify({

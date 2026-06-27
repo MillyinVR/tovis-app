@@ -1,7 +1,7 @@
 // lib/handles/reservationExpiry.ts
 //
 // Reserve-with-expiry for pro vanity handles. A not-yet-premium pro can reserve a
-// handle (PATCH /api/pro/profile stamps handleReservedAt). If they never upgrade, the
+// handle (PATCH /api/v1/pro/profile stamps handleReservedAt). If they never upgrade, the
 // handle is reclaimed so it doesn't sit locked forever. Flow:
 //   1. WARN  at (grace - warn) days: one heads-up notification (deduped per reservation).
 //   2. RELEASE at grace days: clear handle/handleNormalized/handleReservedAt.

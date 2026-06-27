@@ -68,7 +68,7 @@ describe('lib/auth/emailVerification', () => {
   it('prefers NEXT_PUBLIC_APP_URL when resolving the app URL', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://app.tovis.app///'
 
-    const request = new Request('http://localhost/api/auth/email/send', {
+    const request = new Request('http://localhost/api/v1/auth/email/send', {
       headers: {
         host: 'localhost:3000',
         'x-forwarded-proto': 'http',
@@ -81,7 +81,7 @@ describe('lib/auth/emailVerification', () => {
   it('falls back to forwarded host/proto when NEXT_PUBLIC_APP_URL is missing', () => {
     delete process.env.NEXT_PUBLIC_APP_URL
 
-    const request = new Request('http://localhost/api/auth/email/send', {
+    const request = new Request('http://localhost/api/v1/auth/email/send', {
       headers: {
         host: 'localhost:3000',
         'x-forwarded-host': 'app.tovis.app',

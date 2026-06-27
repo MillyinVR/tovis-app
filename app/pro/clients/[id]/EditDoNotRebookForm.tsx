@@ -28,7 +28,7 @@ export default function EditDoNotRebookForm({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/do-not-rebook`, {
+      const res = await fetch(`/api/v1/pro/clients/${clientId}/do-not-rebook`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: reason.trim() || null }),
@@ -53,7 +53,7 @@ export default function EditDoNotRebookForm({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/do-not-rebook`, {
+      const res = await fetch(`/api/v1/pro/clients/${clientId}/do-not-rebook`, {
         method: 'DELETE',
       })
       const data = await res.json().catch(() => ({}))

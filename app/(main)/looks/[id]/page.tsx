@@ -46,7 +46,7 @@ async function fetchLookDetail(lookPostId: string) {
   const baseUrl = await getBaseUrl()
 
   const res = await fetch(
-    `${baseUrl}/api/looks/${encodeURIComponent(lookPostId)}`,
+    `${baseUrl}/api/v1/looks/${encodeURIComponent(lookPostId)}`,
     {
       cache: 'no-store',
       headers: {

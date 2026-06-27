@@ -69,7 +69,7 @@ function emptyManagementLists(): ManagementLists {
 function workingHoursEndpoint(locationType: LocationType): string {
   const params = new URLSearchParams({ locationType })
 
-  return `/api/pro/working-hours?${params.toString()}`
+  return `/api/v1/pro/working-hours?${params.toString()}`
 }
 
 function calendarEndpoint(args: {
@@ -86,7 +86,7 @@ function calendarEndpoint(args: {
     params.set('locationId', args.locationId)
   }
 
-  return `/api/pro/calendar?${params.toString()}`
+  return `/api/v1/pro/calendar?${params.toString()}`
 }
 
 function eventStartMs(event: CalendarEvent): number {
@@ -246,7 +246,7 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
       setSavingAutoAccept(true)
 
       try {
-        const response = await fetch('/api/pro/settings', {
+        const response = await fetch('/api/v1/pro/settings', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ autoAcceptBookings: next }),

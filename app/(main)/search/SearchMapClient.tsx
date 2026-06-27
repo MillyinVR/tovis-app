@@ -479,7 +479,7 @@ export default function SearchMapClient() {
         qs.set('lng', String(args.origin.lng))
       }
 
-      const res = await fetch(`/api/search/pros?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/search/pros?${qs.toString()}`, {
         cache: 'no-store',
         signal: controller.signal,
       })
@@ -658,7 +658,7 @@ export default function SearchMapClient() {
         autocompleteParams.set('radiusMeters', '50000')
       }
 
-      const autocompleteRes = await fetch(`/api/google/places/autocomplete?${autocompleteParams.toString()}`, {
+      const autocompleteRes = await fetch(`/api/v1/google/places/autocomplete?${autocompleteParams.toString()}`, {
         cache: 'no-store',
       })
 
@@ -679,7 +679,7 @@ export default function SearchMapClient() {
         sessionToken,
       })
 
-      const detailsRes = await fetch(`/api/google/places/details?${detailsParams.toString()}`, {
+      const detailsRes = await fetch(`/api/v1/google/places/details?${detailsParams.toString()}`, {
         cache: 'no-store',
       })
 
@@ -742,7 +742,7 @@ export default function SearchMapClient() {
           params.set('radiusMeters', '50000')
         }
 
-        const res = await fetch(`/api/google/places/autocomplete?${params.toString()}`, {
+        const res = await fetch(`/api/v1/google/places/autocomplete?${params.toString()}`, {
           cache: 'no-store',
           signal: controller.signal,
         })
@@ -789,7 +789,7 @@ export default function SearchMapClient() {
         sessionToken,
       })
 
-      const detailsRes = await fetch(`/api/google/places/details?${detailsParams.toString()}`, {
+      const detailsRes = await fetch(`/api/v1/google/places/details?${detailsParams.toString()}`, {
         cache: 'no-store',
       })
 

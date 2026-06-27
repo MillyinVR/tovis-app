@@ -261,7 +261,7 @@ describe('useAvailabilityAlternates', () => {
 
     const url = getFetchUrl()
 
-    expect(url.pathname).toBe('/api/availability/alternates')
+    expect(url.pathname).toBe('/api/v1/availability/alternates')
     expect(url.searchParams.get('professionalId')).toBe('pro_primary')
     expect(url.searchParams.get('serviceId')).toBe('service_1')
     expect(url.searchParams.get('offeringId')).toBe('offering_1')

@@ -231,7 +231,7 @@ export type RouteIdempotencyRunResult<
 }
 
 export type WithRouteIdempotencyArgs = BeginRouteIdempotencyArgs & {
-  /** Label used in the failure-update error log, e.g. "POST /api/bookings/finalize". */
+  /** Label used in the failure-update error log, e.g. "POST /api/v1/bookings/finalize". */
   operation: string
 }
 

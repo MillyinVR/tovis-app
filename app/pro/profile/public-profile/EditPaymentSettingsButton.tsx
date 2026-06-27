@@ -330,7 +330,7 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
         paymentNote: paymentNote.trim(),
       }
 
-      const res = await fetch('/api/pro/payment-settings', {
+      const res = await fetch('/api/v1/pro/payment-settings', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

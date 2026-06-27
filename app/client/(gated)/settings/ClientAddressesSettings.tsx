@@ -333,7 +333,7 @@ export default function ClientAddressesSettings() {
       setLoading(true)
       setErr(null)
 
-      const res = await fetch('/api/client/addresses', {
+      const res = await fetch('/api/v1/client/addresses', {
         method: 'GET',
         cache: 'no-store',
         headers: { Accept: 'application/json' },
@@ -379,7 +379,7 @@ export default function ClientAddressesSettings() {
         qs.set('components', 'country:us')
 
         const res = await fetch(
-          `/api/google/places/autocomplete?${qs.toString()}`,
+          `/api/v1/google/places/autocomplete?${qs.toString()}`,
           {
             cache: 'no-store',
             headers: { Accept: 'application/json' },
@@ -432,7 +432,7 @@ export default function ClientAddressesSettings() {
         qs.set('components', 'country:us')
 
         const res = await fetch(
-          `/api/google/places/autocomplete?${qs.toString()}`,
+          `/api/v1/google/places/autocomplete?${qs.toString()}`,
           {
             cache: 'no-store',
             headers: { Accept: 'application/json' },
@@ -493,7 +493,7 @@ export default function ClientAddressesSettings() {
       qs.set('placeId', prediction.placeId)
       qs.set('sessionToken', searchSessionTokenRef.current)
 
-      const res = await fetch(`/api/google/places/details?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/google/places/details?${qs.toString()}`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
       })
@@ -553,7 +553,7 @@ export default function ClientAddressesSettings() {
       qs.set('postalCode', postalCode)
       qs.set('components', 'country:us')
 
-      const res = await fetch(`/api/google/geocode?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/google/geocode?${qs.toString()}`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
       })
@@ -609,7 +609,7 @@ export default function ClientAddressesSettings() {
       qs.set('placeId', prediction.placeId)
       qs.set('sessionToken', serviceSessionTokenRef.current)
 
-      const res = await fetch(`/api/google/places/details?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/google/places/details?${qs.toString()}`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
       })
@@ -712,8 +712,8 @@ export default function ClientAddressesSettings() {
 
       const isEdit = Boolean(editingId)
       const url = isEdit
-        ? `/api/client/addresses/${encodeURIComponent(editingId!)}`
-        : '/api/client/addresses'
+        ? `/api/v1/client/addresses/${encodeURIComponent(editingId!)}`
+        : '/api/v1/client/addresses'
 
       const res = await fetch(url, {
         method: isEdit ? 'PATCH' : 'POST',
@@ -736,7 +736,7 @@ export default function ClientAddressesSettings() {
       if (updatedAddress?.isDefault) {
         applyDefaultSearchAreaToViewer(updatedAddress)
       } else if (!updatedAddress && searchDraft.isDefault) {
-        const refreshed = await fetch('/api/client/addresses', {
+        const refreshed = await fetch('/api/v1/client/addresses', {
           method: 'GET',
           cache: 'no-store',
           headers: { Accept: 'application/json' },
@@ -784,8 +784,8 @@ export default function ClientAddressesSettings() {
 
       const isEdit = Boolean(editingId)
       const url = isEdit
-        ? `/api/client/addresses/${encodeURIComponent(editingId!)}`
-        : '/api/client/addresses'
+        ? `/api/v1/client/addresses/${encodeURIComponent(editingId!)}`
+        : '/api/v1/client/addresses'
 
       const res = await fetch(url, {
         method: isEdit ? 'PATCH' : 'POST',
@@ -846,7 +846,7 @@ export default function ClientAddressesSettings() {
       setErr(null)
 
       const res = await fetch(
-        `/api/client/addresses/${encodeURIComponent(address.id)}`,
+        `/api/v1/client/addresses/${encodeURIComponent(address.id)}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -880,7 +880,7 @@ export default function ClientAddressesSettings() {
       setErr(null)
 
       const res = await fetch(
-        `/api/client/addresses/${encodeURIComponent(address.id)}`,
+        `/api/v1/client/addresses/${encodeURIComponent(address.id)}`,
         {
           method: 'DELETE',
           headers: { Accept: 'application/json' },

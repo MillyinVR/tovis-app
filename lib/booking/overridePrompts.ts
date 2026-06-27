@@ -1,7 +1,7 @@
 // lib/booking/overridePrompts.ts
 //
 // Client-safe mapping from override-gated booking error codes to the
-// PATCH /api/pro/bookings/[id] flags that authorize a retry, plus the
+// PATCH /api/v1/pro/bookings/[id] flags that authorize a retry, plus the
 // copy the confirm dialog shows. The backend writes a BookingOverrideAuditLog
 // entry for every applied override; the overrideReason is optional and, when
 // provided, is also surfaced on the client's appointment detail.

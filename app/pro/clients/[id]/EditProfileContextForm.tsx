@@ -28,7 +28,7 @@ export default function EditProfileContextForm({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/profile-context`, {
+      const res = await fetch(`/api/v1/pro/clients/${clientId}/profile-context`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

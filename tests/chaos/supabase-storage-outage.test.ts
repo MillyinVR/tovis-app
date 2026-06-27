@@ -86,7 +86,7 @@ vi.mock('@/lib/security/logging', () => ({
   })),
 }))
 
-import { POST } from '@/app/api/pro/bookings/[id]/media/route'
+import { POST } from '@/app/api/v1/pro/bookings/[id]/media/route'
 
 function makeJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -96,7 +96,7 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 }
 
 function makeRequest(body?: Record<string, unknown>): Request {
-  return new Request('http://localhost/api/pro/bookings/booking_1/media', {
+  return new Request('http://localhost/api/v1/pro/bookings/booking_1/media', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -200,7 +200,7 @@ describe('chaos: Supabase storage outage', () => {
 
     expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
-      operation: 'POST /api/pro/bookings/[id]/media',
+      operation: 'POST /api/v1/pro/bookings/[id]/media',
     })
 
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
@@ -247,7 +247,7 @@ describe('chaos: Supabase storage outage', () => {
 
     expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
-      operation: 'POST /api/pro/bookings/[id]/media',
+      operation: 'POST /api/v1/pro/bookings/[id]/media',
     })
 
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()

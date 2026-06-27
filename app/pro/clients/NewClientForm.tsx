@@ -98,7 +98,7 @@ export default function NewClientForm() {
     setLoading(true)
 
     try {
-      const res = await fetch('/api/pro/clients', {
+      const res = await fetch('/api/v1/pro/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,

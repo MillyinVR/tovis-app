@@ -92,7 +92,7 @@ function selectedLocationIsBookable(args: {
 }
 
 async function fetchLocations(signal: AbortSignal): Promise<ProLocation[]> {
-  const response = await fetch('/api/pro/locations', {
+  const response = await fetch('/api/v1/pro/locations', {
     cache: 'no-store',
     signal,
   })

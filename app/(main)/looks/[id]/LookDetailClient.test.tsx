@@ -348,7 +348,7 @@ function installFetchMock(args?: {
 
       const method = init?.method ?? 'GET'
 
-      if (url === '/api/looks/look_1/like') {
+      if (url === '/api/v1/looks/look_1/like') {
         if (method === 'POST') {
           liked = true
           likeCount += 1
@@ -370,7 +370,7 @@ function installFetchMock(args?: {
         }
       }
 
-      if (url === '/api/pros/pro_1/follow') {
+      if (url === '/api/v1/pros/pro_1/follow') {
         if (method === 'POST') {
           following = !following
           followerCount = Math.max(0, followerCount + (following ? 1 : -1))
@@ -383,7 +383,7 @@ function installFetchMock(args?: {
         })
       }
 
-      if (url === '/api/looks/look_1/comments') {
+      if (url === '/api/v1/looks/look_1/comments') {
         if (method === 'GET') {
           const comments = commentsByLookId.look_1 ?? []
           return jsonResponse({
@@ -467,7 +467,7 @@ describe('app/(main)/looks/[id]/LookDetailClient', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Toggle like' }))
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/looks/look_1/like', {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/looks/look_1/like', {
         method: 'POST',
       })
     })
@@ -486,13 +486,13 @@ describe('app/(main)/looks/[id]/LookDetailClient', () => {
 
     render(<LookDetailClient initialItem={makeDetailItem()} />)
 
-    // Hydrates from GET /api/pros/pro_1/follow on mount.
+    // Hydrates from GET /api/v1/pros/pro_1/follow on mount.
     const followButton = await screen.findByRole('button', { name: 'Follow TOVIS Studio' })
 
     fireEvent.click(followButton)
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/pros/pro_1/follow', {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/pros/pro_1/follow', {
         method: 'POST',
       })
     })
