@@ -10,6 +10,10 @@ import { hasAdminPermission } from '@/lib/adminPermissions'
 import { isRecord } from '@/lib/guards'
 import { errorMessageFromUnknown } from '@/lib/http'
 import { safeError } from '@/lib/security/logging'
+import type {
+  MediaAdminUploadFinalizeDTO,
+  MediaAdminUploadInitDTO,
+} from '@/lib/dto/media'
 import { safeUrl } from '@/lib/media'
 import { pickNumber, pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
@@ -248,7 +252,9 @@ export async function POST(req: NextRequest) {
         },
       }).catch(() => null)
 
-      return jsonOk({ defaultImageUrl: finalUrl })
+      return jsonOk({
+        defaultImageUrl: finalUrl,
+      } satisfies MediaAdminUploadFinalizeDTO)
     }
 
     const init = parseInitBody(rawJson)
@@ -308,7 +314,7 @@ export async function POST(req: NextRequest) {
       token,
       publicUrl,
       cacheBuster,
-    })
+    } satisfies MediaAdminUploadInitDTO)
   } catch (error: unknown) {
     console.error('POST /api/v1/admin/uploads error', { error: safeError(error) })
 

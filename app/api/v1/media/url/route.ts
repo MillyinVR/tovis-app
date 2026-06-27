@@ -5,6 +5,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { pickString } from '@/lib/pick'
 import { MediaVisibility } from '@prisma/client'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import type { MediaSignedUrlDTO } from '@/lib/dto/media'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
       })
 
       if (!renderUrl) return jsonFail(500, 'Media is missing renderable URL.')
-      return jsonOk({ url: renderUrl })
+      return jsonOk({ url: renderUrl } satisfies MediaSignedUrlDTO)
     }
 
     // ✅ Anything non-public requires auth
