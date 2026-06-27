@@ -192,6 +192,15 @@ being one stable contract.
 - **Size:** Medium. Cheapest to do now, most expensive to retrofit later — do it early.
 
 ### 2.3 — Consolidate DTOs + add schema/codegen export (single source of truth for types)
+> **✅ STATUS: SHIPPED (2026-06-27).** Approach: keep the Prisma-derived TS DTOs (no zod),
+> add a barrel + generate JSON Schema. `lib/dto/index.ts` re-exports the wire response DTOs
+> from across `lib/dto`, `lib/looks/types`, `lib/profiles`, `lib/search`, `lib/follows`,
+> `lib/lastMinute`, `lib/contracts`, and the 2.1 loaders (excludes raw `*Row`/`*Plan`/`*Args`
+> input types + internal admin/job contracts). `npm run gen:api-schema` →
+> `ts-json-schema-generator` → `schema/api/tovis-api.schema.json` (151 definitions) — native
+> codegens from this. A `check:api-schema` guard (wired into `check:static-guards`) fails CI if
+> the committed schema drifts from the DTOs (output is deterministic). Validated: typecheck +
+> lint + guards + vitest (4709) + build.
 - **What:** DTO helpers exist but scattered (`lib/dto/clientBooking.ts`, `lib/dto/proBookingNew.ts`,
   `lib/contracts/*`, `lib/search/contracts.ts`, `lib/lastMinute/openingDto.ts`, `lib/typed/`). No
   single barrel, no OpenAPI/zod schema export.

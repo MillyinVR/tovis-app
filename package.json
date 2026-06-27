@@ -2,6 +2,9 @@
   "name": "tovis-app",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "postinstall": "prisma generate && (git config core.hooksPath .githooks 2>/dev/null || true)",
     "dev": "prisma generate && next dev",
@@ -58,12 +61,14 @@
     "check:no-hardcoded-brand-strings": "node tools/check-no-hardcoded-brand-strings.mjs",
     "check:no-raw-datetime-format": "node tools/check-no-raw-datetime-format.mjs",
     "check:notification-kick": "node tools/check-notification-kick.mjs",
+    "check:api-schema": "node tools/check-api-schema.mjs",
+    "gen:api-schema": "ts-json-schema-generator --path lib/dto/index.ts --type '*' --tsconfig tsconfig.json --additional-properties --out schema/api/tovis-api.schema.json",
     "proof:storage-policy": "node --env-file=.env.production.local scripts/proof-storage-policy.mjs",
     "test:chaos": "dotenv -e .env.local -- vitest run --config vitest.config.mts tests/chaos",
     "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch",
     "loadproof:fixtures": "tsx prisma/scripts/loadTestFixtures.ts",
     "check:privacy-guards": "pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads",
-    "check:static-guards": "pnpm check:booking-boundary && pnpm check:media-render-boundary && pnpm check:consultation-canonical && pnpm check:lifecycle-field-writes && pnpm check:no-type-escape && pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads && pnpm check:tenant-aware-discovery && pnpm check:no-hardcoded-brand-strings && pnpm check:no-raw-datetime-format && pnpm check:notification-kick",
+    "check:static-guards": "pnpm check:booking-boundary && pnpm check:media-render-boundary && pnpm check:consultation-canonical && pnpm check:lifecycle-field-writes && pnpm check:no-type-escape && pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads && pnpm check:tenant-aware-discovery && pnpm check:no-hardcoded-brand-strings && pnpm check:no-raw-datetime-format && pnpm check:notification-kick && pnpm check:api-schema",
     "test:load:availability": "dotenv -e .env.local -- tsx tests/load/availability-bootstrap-load-test.ts",
     "test:load:holds": "dotenv -e .env.local -- tsx tests/load/hold-create-load-test.ts",
     "test:load:booking-finalize": "dotenv -e .env.local -- tsx tests/load/booking-finalize-load-test.ts",
@@ -142,6 +147,7 @@
     "stylelint": "^16.26.1",
     "stylelint-config-tailwindcss": "^1.0.0",
     "tailwindcss": "^4.1.18",
+    "ts-json-schema-generator": "^2.9.0",
     "ts-morph": "^27.0.2",
     "ts-node": "^10.9.2",
     "ts-prune": "^0.10.3",

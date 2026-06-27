@@ -1,0 +1,6415 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "$Enums.BoardVisibility": {
+      "enum": [
+        "PRIVATE",
+        "SHARED"
+      ],
+      "type": "string"
+    },
+    "$Enums.BookingServiceItemType": {
+      "enum": [
+        "BASE",
+        "ADD_ON"
+      ],
+      "type": "string"
+    },
+    "$Enums.LastMinuteOfferType": {
+      "enum": [
+        "NONE",
+        "PERCENT_OFF",
+        "AMOUNT_OFF",
+        "FREE_SERVICE",
+        "FREE_ADD_ON"
+      ],
+      "type": "string"
+    },
+    "$Enums.LastMinuteTier": {
+      "enum": [
+        "WAITLIST",
+        "REACTIVATION",
+        "DISCOVERY"
+      ],
+      "type": "string"
+    },
+    "$Enums.LookPostStatus": {
+      "enum": [
+        "DRAFT",
+        "PUBLISHED",
+        "ARCHIVED",
+        "REMOVED"
+      ],
+      "type": "string"
+    },
+    "$Enums.LookPostVisibility": {
+      "enum": [
+        "PUBLIC",
+        "FOLLOWERS_ONLY",
+        "UNLISTED"
+      ],
+      "type": "string"
+    },
+    "$Enums.MediaType": {
+      "enum": [
+        "IMAGE",
+        "VIDEO"
+      ],
+      "type": "string"
+    },
+    "$Enums.MediaVisibility": {
+      "enum": [
+        "PUBLIC",
+        "PRO_CLIENT"
+      ],
+      "type": "string"
+    },
+    "$Enums.ModerationStatus": {
+      "enum": [
+        "PENDING_REVIEW",
+        "APPROVED",
+        "REJECTED",
+        "REMOVED",
+        "AUTO_FLAGGED"
+      ],
+      "type": "string"
+    },
+    "$Enums.ProNameDisplay": {
+      "enum": [
+        "BUSINESS_NAME",
+        "REAL_NAME",
+        "HANDLE"
+      ],
+      "type": "string"
+    },
+    "$Enums.ProfessionType": {
+      "enum": [
+        "COSMETOLOGIST",
+        "BARBER",
+        "ESTHETICIAN",
+        "MANICURIST",
+        "HAIRSTYLIST",
+        "ELECTROLOGIST",
+        "MASSAGE_THERAPIST",
+        "MAKEUP_ARTIST",
+        "LASH_TECHNICIAN",
+        "HAIR_BRAIDER",
+        "PERMANENT_MAKEUP_ARTIST"
+      ],
+      "type": "string"
+    },
+    "$Enums.ProfessionalLocationType": {
+      "enum": [
+        "SALON",
+        "SUITE",
+        "MOBILE_BASE"
+      ],
+      "type": "string"
+    },
+    "$Enums.Role": {
+      "enum": [
+        "CLIENT",
+        "PRO",
+        "ADMIN"
+      ],
+      "type": "string"
+    },
+    "$Enums.VerificationStatus": {
+      "enum": [
+        "PENDING",
+        "APPROVED",
+        "REJECTED",
+        "NEEDS_INFO",
+        "PENDING_MANUAL_REVIEW"
+      ],
+      "type": "string"
+    },
+    "ApplyOmit<(((alias-1474508258-74484-74632-1474508258-0-218439<structure-1408742279-1406299-1407294-1408742279-1406269-1407331-1408742279-1406256-1407331-1408742279-1404246-1407354-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,def-alias-2037075113-52539-52703-2037075113-0-129753<any>>&def-alias-2037075113-52703-52940-2037075113-0-129753<any>)&def-alias-2037075113-126644-126990-2037075113-0-129753<structure-1408742279-1407347-1407350-1408742279-1407331-1407350-1408742279-1404246-1407354-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379>)|Select<Prisma.$ClientProfilePayload,null>),ExtractGlobalOmit<structure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753<def-alias-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,structure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114>,alias-1474508258-75746-75867-1474508258-0-218439<\"ClientProfile\">>>": {
+      "$ref": "#/definitions/Compute%3Cindexed-type-2037075113-2900-2984-2037075113-2891-2985-2037075113-2841-2986-2037075113-0-129753%3C(((alias-1474508258-74484-74632-1474508258-0-218439%3Cstructure-1408742279-1406299-1407294-1408742279-1406269-1407331-1408742279-1406256-1407331-1408742279-1404246-1407354-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cdef-alias-2037075113-52539-52703-2037075113-0-129753%3Cany%3E%3E%26def-alias-2037075113-52703-52940-2037075113-0-129753%3Cany%3E)%26def-alias-2037075113-126644-126990-2037075113-0-129753%3Cstructure-1408742279-1407347-1407350-1408742279-1407331-1407350-1408742279-1404246-1407354-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%3E)%7Cdef-never)%2Cdef-alias-2037075113-45335-45519-2037075113-0-129753%3Cstructure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753%3Cdef-alias-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cstructure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114%3E%2Calias-1474508258-75746-75867-1474508258-0-218439%3C%22ClientProfile%22%3E%3E%3E%3E"
+    },
+    "ApplyOmit<(((alias-1474508258-74484-74632-1474508258-0-218439<structure-1408742279-1550656-1551736-1408742279-1550626-1551779-1408742279-1550613-1551779-1408742279-1547608-1551802-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,def-alias-2037075113-52539-52703-2037075113-0-129753<any>>&def-alias-2037075113-52703-52940-2037075113-0-129753<any>)&def-alias-2037075113-126644-126990-2037075113-0-129753<structure-1408742279-1551795-1551798-1408742279-1551779-1551798-1408742279-1547608-1551802-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379>)|Select<Prisma.$ProfessionalProfilePayload,null>),ExtractGlobalOmit<structure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753<def-alias-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,structure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656>,alias-1474508258-75746-75867-1474508258-0-218439<\"ProfessionalProfile\">>>": {
+      "$ref": "#/definitions/Compute%3Cindexed-type-2037075113-2900-2984-2037075113-2891-2985-2037075113-2841-2986-2037075113-0-129753%3C(((alias-1474508258-74484-74632-1474508258-0-218439%3Cstructure-1408742279-1550656-1551736-1408742279-1550626-1551779-1408742279-1550613-1551779-1408742279-1547608-1551802-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cdef-alias-2037075113-52539-52703-2037075113-0-129753%3Cany%3E%3E%26def-alias-2037075113-52703-52940-2037075113-0-129753%3Cany%3E)%26def-alias-2037075113-126644-126990-2037075113-0-129753%3Cstructure-1408742279-1551795-1551798-1408742279-1551779-1551798-1408742279-1547608-1551802-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%3E)%7Cdef-never)%2Cdef-alias-2037075113-45335-45519-2037075113-0-129753%3Cstructure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753%3Cdef-alias-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cstructure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656%3E%2Calias-1474508258-75746-75867-1474508258-0-218439%3C%22ProfessionalProfile%22%3E%3E%3E%3E"
+    },
+    "BoardVisibility": {
+      "$ref": "#/definitions/%24Enums.BoardVisibility"
+    },
+    "BookingBeforeAfterThumbs": {
+      "description": "The primary \"before\" and \"after\" photo for a booking, already resolved to renderable URLs (signed for the private session bucket, public otherwise).\n\nThis is the single source of truth for the before/after pair shown anywhere that links to a client's aftercare summary (home action card, aftercare inbox, …) — so those surfaces don't each re-implement the media select + phase pick + URL rendering.",
+      "properties": {
+        "afterUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "beforeUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "beforeUrl",
+        "afterUrl"
+      ],
+      "type": "object"
+    },
+    "BookingServiceItemType": {
+      "$ref": "#/definitions/%24Enums.BookingServiceItemType"
+    },
+    "ClientBookingCheckoutDTO": {
+      "properties": {
+        "checkoutStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "discountAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paymentAuthorizedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paymentCollectedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "productSubtotalSnapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectedPaymentMethod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceSubtotalSnapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subtotalSnapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "taxAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tipAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totalAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "subtotalSnapshot",
+        "serviceSubtotalSnapshot",
+        "productSubtotalSnapshot",
+        "tipAmount",
+        "taxAmount",
+        "discountAmount",
+        "totalAmount",
+        "checkoutStatus",
+        "selectedPaymentMethod",
+        "paymentAuthorizedAt",
+        "paymentCollectedAt"
+      ],
+      "type": "object"
+    },
+    "ClientBookingConsultationDTO": {
+      "properties": {
+        "approvalNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approvalStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consultationConfirmedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consultationNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consultationPrice": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proposedServicesJson": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposedTotal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rejectedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "consultationNotes",
+        "consultationPrice",
+        "consultationConfirmedAt",
+        "approvalStatus",
+        "approvalNotes",
+        "proposedTotal",
+        "proposedServicesJson",
+        "approvedAt",
+        "rejectedAt"
+      ],
+      "type": "object"
+    },
+    "ClientBookingDTO": {
+      "properties": {
+        "bookedLocation": {
+          "anyOf": [
+            {
+              "properties": {
+                "city": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "formattedAddress": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "state": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timeZone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "formattedAddress",
+                "city",
+                "state",
+                "timeZone"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bufferMinutes": {
+          "type": "number"
+        },
+        "checkout": {
+          "$ref": "#/definitions/ClientBookingCheckoutDTO"
+        },
+        "consultation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientBookingConsultationDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display": {
+          "properties": {
+            "addOnCount": {
+              "type": "number"
+            },
+            "addOnNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "baseName": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "baseName",
+            "addOnNames",
+            "addOnCount"
+          ],
+          "type": "object"
+        },
+        "hasPendingConsultationApproval": {
+          "type": "boolean"
+        },
+        "hasUnreadAftercare": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ClientBookingItemDTO"
+          },
+          "type": "array"
+        },
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "productSales": {
+          "items": {
+            "$ref": "#/definitions/ClientBookingProductSaleDTO"
+          },
+          "type": "array"
+        },
+        "professional": {
+          "anyOf": [
+            {
+              "properties": {
+                "businessName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "firstName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "handle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "nameDisplay": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/ProNameDisplay"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "timeZone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "businessName",
+                "firstName",
+                "lastName",
+                "handle",
+                "nameDisplay",
+                "location",
+                "timeZone"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scheduledFor": {
+          "type": "string"
+        },
+        "sessionStep": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subtotalSnapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZoneSource": {
+          "$ref": "#/definitions/ClientBookingTimeZoneSource"
+        },
+        "totalDurationMinutes": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "source",
+        "sessionStep",
+        "scheduledFor",
+        "totalDurationMinutes",
+        "bufferMinutes",
+        "subtotalSnapshot",
+        "checkout",
+        "locationType",
+        "locationId",
+        "timeZone",
+        "locationLabel",
+        "professional",
+        "bookedLocation",
+        "display",
+        "items",
+        "productSales",
+        "hasUnreadAftercare",
+        "hasPendingConsultationApproval",
+        "consultation"
+      ],
+      "type": "object"
+    },
+    "ClientBookingItemDTO": {
+      "properties": {
+        "durationMinutes": {
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentItemId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "price": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "sortOrder": {
+          "type": "number"
+        },
+        "type": {
+          "$ref": "#/definitions/BookingServiceItemType"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "serviceId",
+        "name",
+        "price",
+        "durationMinutes",
+        "parentItemId",
+        "sortOrder"
+      ],
+      "type": "object"
+    },
+    "ClientBookingProductSaleDTO": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "lineTotal": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "productId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "unitPrice": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "productId",
+        "name",
+        "unitPrice",
+        "quantity",
+        "lineTotal"
+      ],
+      "type": "object"
+    },
+    "ClientBookingTimeZoneSource": {
+      "enum": [
+        "BOOKING",
+        "HOLD",
+        "LOCATION",
+        "PRO",
+        "FALLBACK"
+      ],
+      "type": "string"
+    },
+    "ClientHomeActionDTO": {
+      "anyOf": [
+        {
+          "properties": {
+            "booking": {
+              "$ref": "#/definitions/ClientHomeBookingDTO"
+            },
+            "kind": {
+              "const": "PENDING_CONSULTATION",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "booking"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "aftercare": {
+              "$ref": "#/definitions/ClientHomeAftercareDTO"
+            },
+            "beforeAfter": {
+              "$ref": "#/definitions/BookingBeforeAfterThumbs"
+            },
+            "booking": {
+              "$ref": "#/definitions/ClientHomeBookingDTO"
+            },
+            "kind": {
+              "const": "AFTERCARE_PAYMENT_DUE",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "aftercare",
+            "booking",
+            "beforeAfter"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ClientHomeAftercareDTO": {
+      "properties": {
+        "draftSavedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastEditedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rebookMode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rebookWindowEnd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rebookWindowStart": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rebookedFor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recommendedProducts": {
+          "items": {
+            "properties": {
+              "externalName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "externalUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "product": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "brand": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "retailPrice": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "brand",
+                      "retailPrice"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "productId",
+              "note",
+              "externalName",
+              "externalUrl",
+              "product"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "sentToClientAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "notes",
+        "rebookMode",
+        "rebookedFor",
+        "rebookWindowStart",
+        "rebookWindowEnd",
+        "draftSavedAt",
+        "sentToClientAt",
+        "lastEditedAt",
+        "version",
+        "recommendedProducts"
+      ],
+      "type": "object"
+    },
+    "ClientHomeBookingDTO": {
+      "properties": {
+        "bufferMinutes": {
+          "type": "number"
+        },
+        "checkoutStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consultationApproval": {
+          "anyOf": [
+            {
+              "properties": {
+                "approvedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "notes": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "proposedServicesJson": {
+                  "$ref": "#/definitions/JsonValue"
+                },
+                "proposedTotal": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rejectedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "proposedServicesJson",
+                "proposedTotal",
+                "notes",
+                "approvedAt",
+                "rejectedAt"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consultationConfirmedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consultationNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consultationPrice": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "discountAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "properties": {
+                "city": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "formattedAddress": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "state": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timeZone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "formattedAddress",
+                "city",
+                "state",
+                "timeZone"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locationAddressSnapshot": {},
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationTimeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paymentAuthorizedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paymentCollectedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "productSales": {
+          "items": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "product": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "quantity": {
+                "type": "number"
+              },
+              "unitPrice": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "productId",
+              "quantity",
+              "unitPrice",
+              "product"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "productSubtotalSnapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "professional": {
+          "anyOf": [
+            {
+              "properties": {
+                "avatarUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "businessName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "handle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timeZone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "businessName",
+                "handle",
+                "avatarUrl",
+                "location",
+                "timeZone"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scheduledFor": {
+          "type": "string"
+        },
+        "selectedPaymentMethod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "anyOf": [
+            {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serviceItems": {
+          "items": {
+            "properties": {
+              "durationMinutesSnapshot": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "itemType": {
+                "type": "string"
+              },
+              "parentItemId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "priceSnapshot": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "service": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "serviceId": {
+                "type": "string"
+              },
+              "sortOrder": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "itemType",
+              "parentItemId",
+              "sortOrder",
+              "durationMinutesSnapshot",
+              "priceSnapshot",
+              "serviceId",
+              "service"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "serviceSubtotalSnapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionStep": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "subtotalSnapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "taxAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tipAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totalAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totalDurationMinutes": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "source",
+        "sessionStep",
+        "scheduledFor",
+        "finishedAt",
+        "subtotalSnapshot",
+        "serviceSubtotalSnapshot",
+        "productSubtotalSnapshot",
+        "totalAmount",
+        "tipAmount",
+        "taxAmount",
+        "discountAmount",
+        "checkoutStatus",
+        "selectedPaymentMethod",
+        "paymentAuthorizedAt",
+        "paymentCollectedAt",
+        "totalDurationMinutes",
+        "bufferMinutes",
+        "locationType",
+        "locationId",
+        "locationTimeZone",
+        "locationAddressSnapshot",
+        "service",
+        "professional",
+        "location",
+        "serviceItems",
+        "productSales",
+        "consultationNotes",
+        "consultationPrice",
+        "consultationConfirmedAt",
+        "consultationApproval"
+      ],
+      "type": "object"
+    },
+    "ClientHomeDTO": {
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/ClientHomeActionDTO"
+        },
+        "favoritePros": {
+          "items": {
+            "$ref": "#/definitions/ClientHomeFavoriteProDTO"
+          },
+          "type": "array"
+        },
+        "favoriteServices": {
+          "items": {
+            "$ref": "#/definitions/ClientHomeFavoriteServiceDTO"
+          },
+          "type": "array"
+        },
+        "invites": {
+          "items": {
+            "$ref": "#/definitions/ClientHomeLastMinuteInviteDTO"
+          },
+          "type": "array"
+        },
+        "upcoming": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientHomeBookingDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "upcomingCount": {
+          "type": "number"
+        },
+        "viralLive": {
+          "items": {
+            "$ref": "#/definitions/ClientHomeViralLiveDTO"
+          },
+          "type": "array"
+        },
+        "viralPending": {
+          "items": {
+            "$ref": "#/definitions/ClientHomeViralPendingDTO"
+          },
+          "type": "array"
+        },
+        "waitlists": {
+          "items": {
+            "$ref": "#/definitions/ClientHomeWaitlistEntryDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "upcoming",
+        "upcomingCount",
+        "action",
+        "invites",
+        "waitlists",
+        "favoritePros",
+        "favoriteServices",
+        "viralLive",
+        "viralPending"
+      ],
+      "type": "object"
+    },
+    "ClientHomeFavoriteProDTO": {
+      "properties": {
+        "professional": {
+          "anyOf": [
+            {
+              "properties": {
+                "avatarUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "businessName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "handle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "professionType": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "businessName",
+                "handle",
+                "avatarUrl",
+                "professionType",
+                "location"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "professional"
+      ],
+      "type": "object"
+    },
+    "ClientHomeFavoriteServiceDTO": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "service": {
+          "anyOf": [
+            {
+              "properties": {
+                "category": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "defaultDurationMinutes": {
+                  "type": "number"
+                },
+                "defaultImageUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "minPrice": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "minPrice",
+                "defaultDurationMinutes",
+                "defaultImageUrl",
+                "category"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "service"
+      ],
+      "type": "object"
+    },
+    "ClientHomeLastMinuteInviteDTO": {
+      "properties": {
+        "bookedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clickedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "firstMatchedTier": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "notifiedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notifiedTier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "openedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "opening": {
+          "properties": {
+            "endAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "location": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "city": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "formattedAddress": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "lat": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "lng": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "state": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "timeZone": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "timeZone",
+                    "city",
+                    "state",
+                    "formattedAddress",
+                    "lat",
+                    "lng"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "locationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "locationType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "professional": {
+              "properties": {
+                "avatarUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "businessName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "handle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "professionType": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timeZone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "businessName",
+                "handle",
+                "avatarUrl",
+                "professionType",
+                "location",
+                "timeZone"
+              ],
+              "type": "object"
+            },
+            "professionalId": {
+              "type": "string"
+            },
+            "publicVisibleFrom": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "publicVisibleUntil": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "services": {
+              "items": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "offering": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "mobileDurationMinutes": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "mobilePriceStartingAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "offersInSalon": {
+                        "type": "boolean"
+                      },
+                      "offersMobile": {
+                        "type": "boolean"
+                      },
+                      "salonDurationMinutes": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "salonPriceStartingAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "title": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "title",
+                      "salonPriceStartingAt",
+                      "mobilePriceStartingAt",
+                      "salonDurationMinutes",
+                      "mobileDurationMinutes",
+                      "offersInSalon",
+                      "offersMobile"
+                    ],
+                    "type": "object"
+                  },
+                  "offeringId": {
+                    "type": "string"
+                  },
+                  "openingId": {
+                    "type": "string"
+                  },
+                  "service": {
+                    "properties": {
+                      "defaultDurationMinutes": {
+                        "type": "number"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "minPrice": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "minPrice",
+                      "defaultDurationMinutes"
+                    ],
+                    "type": "object"
+                  },
+                  "serviceId": {
+                    "type": "string"
+                  },
+                  "sortOrder": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "openingId",
+                  "serviceId",
+                  "offeringId",
+                  "sortOrder",
+                  "service",
+                  "offering"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "startAt": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "tierPlans": {
+              "items": {
+                "properties": {
+                  "amountOff": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "freeAddOnService": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "freeAddOnServiceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "offerType": {
+                    "type": "string"
+                  },
+                  "percentOff": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "scheduledFor": {
+                    "type": "string"
+                  },
+                  "tier": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "tier",
+                  "scheduledFor",
+                  "offerType",
+                  "percentOff",
+                  "amountOff",
+                  "freeAddOnServiceId",
+                  "freeAddOnService"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "timeZone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "visibilityMode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "professionalId",
+            "startAt",
+            "endAt",
+            "note",
+            "status",
+            "visibilityMode",
+            "publicVisibleFrom",
+            "publicVisibleUntil",
+            "timeZone",
+            "locationType",
+            "locationId",
+            "professional",
+            "location",
+            "services",
+            "tierPlans"
+          ],
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "firstMatchedTier",
+        "notifiedTier",
+        "status",
+        "notifiedAt",
+        "openedAt",
+        "clickedAt",
+        "bookedAt",
+        "createdAt",
+        "opening"
+      ],
+      "type": "object"
+    },
+    "ClientHomeViralLiveDTO": {
+      "properties": {
+        "_count": {
+          "properties": {
+            "approvalFanOuts": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "approvalFanOuts"
+          ],
+          "type": "object"
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sourceUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "sourceUrl",
+        "approvedAt",
+        "_count"
+      ],
+      "type": "object"
+    },
+    "ClientHomeViralPendingDTO": {
+      "properties": {
+        "_count": {
+          "properties": {
+            "approvalFanOuts": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "approvalFanOuts"
+          ],
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sourceUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "sourceUrl",
+        "status",
+        "createdAt",
+        "_count"
+      ],
+      "type": "object"
+    },
+    "ClientHomeWaitlistEntryDTO": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preferenceType": {
+          "type": "string"
+        },
+        "professional": {
+          "anyOf": [
+            {
+              "properties": {
+                "avatarUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "businessName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "handle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timeZone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "businessName",
+                "handle",
+                "avatarUrl",
+                "location",
+                "timeZone"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "service": {
+          "anyOf": [
+            {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "specificDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "timeOfDay": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "windowEndMin": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "windowStartMin": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "notes",
+        "mediaId",
+        "status",
+        "preferenceType",
+        "specificDate",
+        "timeOfDay",
+        "windowStartMin",
+        "windowEndMin",
+        "service",
+        "professional"
+      ],
+      "type": "object"
+    },
+    "ClientLookRemix": {
+      "properties": {
+        "bookedAt": {
+          "type": "string"
+        },
+        "id": {
+          "description": "The booking id.",
+          "type": "string"
+        },
+        "lookName": {
+          "description": "The author's look that inspired the booking.",
+          "type": "string"
+        },
+        "proName": {
+          "description": "The pro the remix was booked with.",
+          "type": "string"
+        },
+        "who": {
+          "description": "Booker, PII-safe: `@handle` for a public client, else a generic label.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "who",
+        "lookName",
+        "proName",
+        "bookedAt"
+      ],
+      "type": "object"
+    },
+    "ClientMeHistoryItemDTO": {
+      "properties": {
+        "booking": {
+          "$ref": "#/definitions/ClientBookingDTO"
+        },
+        "heroImageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "completed",
+            "upcoming"
+          ],
+          "type": "string"
+        },
+        "label": {
+          "enum": [
+            "BOOKED",
+            "UPCOMING"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "booking",
+        "heroImageUrl"
+      ],
+      "type": "object"
+    },
+    "ClientMeLook": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "imageUrl",
+        "visibility",
+        "serviceId"
+      ],
+      "type": "object"
+    },
+    "ClientMePageDTO": {
+      "properties": {
+        "activityUnreadCount": {
+          "type": "number"
+        },
+        "boards": {
+          "description": "Failed to correctly infer type"
+        },
+        "counts": {
+          "properties": {
+            "boards": {
+              "type": "number"
+            },
+            "booked": {
+              "type": "number"
+            },
+            "followers": {
+              "type": "number"
+            },
+            "following": {
+              "type": "number"
+            },
+            "saved": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "boards",
+            "saved",
+            "booked",
+            "following",
+            "followers"
+          ],
+          "type": "object"
+        },
+        "creator": {
+          "description": "Real-data creator metrics + remixes. `isCreator` gates the whole creator UI: false until the client has published at least one authored look.",
+          "properties": {
+            "bookedFromYou": {
+              "type": "number"
+            },
+            "isCreator": {
+              "type": "boolean"
+            },
+            "remixes": {
+              "items": {
+                "$ref": "#/definitions/ClientLookRemix"
+              },
+              "type": "array"
+            },
+            "savesOnYourLooks": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "isCreator",
+            "savesOnYourLooks",
+            "bookedFromYou",
+            "remixes"
+          ],
+          "type": "object"
+        },
+        "following": {
+          "description": "Failed to correctly infer type"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/definitions/ClientMeHistoryItemDTO"
+          },
+          "type": "array"
+        },
+        "myLooks": {
+          "items": {
+            "$ref": "#/definitions/ClientMeLook"
+          },
+          "type": "array"
+        },
+        "profile": {
+          "$ref": "#/definitions/ClientMeProfileDTO"
+        },
+        "upcomingNotificationBooking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientBookingDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user": {
+          "$ref": "#/definitions/ClientMeUserDTO"
+        }
+      },
+      "required": [
+        "user",
+        "profile",
+        "boards",
+        "following",
+        "counts",
+        "upcomingNotificationBooking",
+        "history",
+        "myLooks",
+        "activityUnreadCount",
+        "creator"
+      ],
+      "type": "object"
+    },
+    "ClientMeProfileDTO": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "claimStatus": {
+          "type": "string"
+        },
+        "claimedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isPublicProfile": {
+          "type": "boolean"
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "email",
+        "avatarUrl",
+        "claimStatus",
+        "claimedAt",
+        "handle",
+        "isPublicProfile"
+      ],
+      "type": "object"
+    },
+    "ClientMeUserDTO": {
+      "properties": {
+        "clientProfile": {
+          "anyOf": [
+            {
+              "properties": {
+                "avatarUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "firstName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "phoneVerifiedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "firstName",
+                "lastName",
+                "avatarUrl",
+                "phoneVerifiedAt"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "emailVerifiedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "phone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phoneVerifiedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "email",
+        "phone",
+        "role",
+        "createdAt",
+        "phoneVerifiedAt",
+        "emailVerifiedAt",
+        "clientProfile"
+      ],
+      "type": "object"
+    },
+    "Compute<indexed-type-2037075113-2900-2984-2037075113-2891-2985-2037075113-2841-2986-2037075113-0-129753<(((alias-1474508258-74484-74632-1474508258-0-218439<structure-1408742279-1406299-1407294-1408742279-1406269-1407331-1408742279-1406256-1407331-1408742279-1404246-1407354-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,def-alias-2037075113-52539-52703-2037075113-0-129753<any>>&def-alias-2037075113-52703-52940-2037075113-0-129753<any>)&def-alias-2037075113-126644-126990-2037075113-0-129753<structure-1408742279-1407347-1407350-1408742279-1407331-1407350-1408742279-1404246-1407354-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379>)|def-never),def-alias-2037075113-45335-45519-2037075113-0-129753<structure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753<def-alias-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,structure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114>,alias-1474508258-75746-75867-1474508258-0-218439<\"ClientProfile\">>>>": {
+      "properties": {
+        "alertBanner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "claimStatus": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            }
+          ]
+        },
+        "claimedAt": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dateOfBirth": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "emailHashKeyVersion": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "emailHashV2": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": "string"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handleNormalized": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "homeTenantId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isPublicProfile": {
+          "type": "boolean"
+        },
+        "lastName": {
+          "type": "string"
+        },
+        "occupationEncrypted": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": {
+                "$ref": "#/definitions/JsonValue"
+              },
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {
+                "length": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "length"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phoneEncrypted": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": {
+                "$ref": "#/definitions/JsonValue"
+              },
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {
+                "length": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "length"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phoneHashKeyVersion": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "phoneHashV2": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phoneVerifiedAt": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "photoReleaseAt": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "photoReleaseByProfessionalId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "photoReleaseStatus": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            }
+          ]
+        },
+        "preferredContactMethod": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proCapturedSocialHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publicBio": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "alertBanner",
+        "avatarUrl",
+        "claimStatus",
+        "claimedAt",
+        "dateOfBirth",
+        "email",
+        "emailHashKeyVersion",
+        "emailHashV2",
+        "firstName",
+        "handle",
+        "handleNormalized",
+        "homeTenantId",
+        "id",
+        "isPublicProfile",
+        "lastName",
+        "occupationEncrypted",
+        "phone",
+        "phoneEncrypted",
+        "phoneHashKeyVersion",
+        "phoneHashV2",
+        "phoneVerifiedAt",
+        "photoReleaseAt",
+        "photoReleaseByProfessionalId",
+        "photoReleaseStatus",
+        "preferredContactMethod",
+        "proCapturedSocialHandle",
+        "publicBio",
+        "userId"
+      ],
+      "type": "object"
+    },
+    "Compute<indexed-type-2037075113-2900-2984-2037075113-2891-2985-2037075113-2841-2986-2037075113-0-129753<(((alias-1474508258-74484-74632-1474508258-0-218439<structure-1408742279-1550656-1551736-1408742279-1550626-1551779-1408742279-1550613-1551779-1408742279-1547608-1551802-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,def-alias-2037075113-52539-52703-2037075113-0-129753<any>>&def-alias-2037075113-52703-52940-2037075113-0-129753<any>)&def-alias-2037075113-126644-126990-2037075113-0-129753<structure-1408742279-1551795-1551798-1408742279-1551779-1551798-1408742279-1547608-1551802-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379>)|def-never),def-alias-2037075113-45335-45519-2037075113-0-129753<structure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753<def-alias-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,structure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656>,alias-1474508258-75746-75867-1474508258-0-218439<\"ProfessionalProfile\">>>>": {
+      "properties": {
+        "autoAcceptBookings": {
+          "type": "boolean"
+        },
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bio": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": "string"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handleNormalized": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handleReservedAt": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "homeTenantId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isPremium": {
+          "type": "boolean"
+        },
+        "lastName": {
+          "type": "string"
+        },
+        "licenseExpiry": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "licenseNumber": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "licenseRawJson": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": {
+                "$ref": "#/definitions/JsonValue"
+              },
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {
+                "length": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "length"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "licenseReviewPending": {
+          "type": "boolean"
+        },
+        "licenseState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "licenseStatusCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "licenseVerified": {
+          "type": "boolean"
+        },
+        "licenseVerifiedAt": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "licenseVerifiedSource": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location": {
+          "type": "string"
+        },
+        "mobileBasePostalCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mobileRadiusMiles": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "nameDisplay": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            }
+          ]
+        },
+        "phone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phoneVerifiedAt": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "professionType": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scheduleConfigVersion": {
+          "type": "number"
+        },
+        "timeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userId": {
+          "type": "string"
+        },
+        "verificationStatus": {
+          "anyOf": [
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            },
+            {
+              "properties": {},
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "autoAcceptBookings",
+        "avatarUrl",
+        "bio",
+        "businessName",
+        "firstName",
+        "handle",
+        "handleNormalized",
+        "handleReservedAt",
+        "homeTenantId",
+        "id",
+        "isPremium",
+        "lastName",
+        "licenseExpiry",
+        "licenseNumber",
+        "licenseRawJson",
+        "licenseReviewPending",
+        "licenseState",
+        "licenseStatusCode",
+        "licenseVerified",
+        "licenseVerifiedAt",
+        "licenseVerifiedSource",
+        "location",
+        "mobileBasePostalCode",
+        "mobileRadiusMiles",
+        "nameDisplay",
+        "phone",
+        "phoneVerifiedAt",
+        "professionType",
+        "scheduleConfigVersion",
+        "timeZone",
+        "userId",
+        "verificationStatus"
+      ],
+      "type": "object"
+    },
+    "DefaultSelection<Prisma.$ClientProfilePayload,structure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114,structure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753<def-alias-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,structure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114>>": {
+      "$ref": "#/definitions/ApplyOmit%3C(((alias-1474508258-74484-74632-1474508258-0-218439%3Cstructure-1408742279-1406299-1407294-1408742279-1406269-1407331-1408742279-1406256-1407331-1408742279-1404246-1407354-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cdef-alias-2037075113-52539-52703-2037075113-0-129753%3Cany%3E%3E%26def-alias-2037075113-52703-52940-2037075113-0-129753%3Cany%3E)%26def-alias-2037075113-126644-126990-2037075113-0-129753%3Cstructure-1408742279-1407347-1407350-1408742279-1407331-1407350-1408742279-1404246-1407354-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%3E)%7CSelect%3CPrisma.%24ClientProfilePayload%2Cnull%3E)%2CExtractGlobalOmit%3Cstructure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753%3Cdef-alias-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cstructure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114%3E%2Calias-1474508258-75746-75867-1474508258-0-218439%3C%22ClientProfile%22%3E%3E%3E"
+    },
+    "DefaultSelection<Prisma.$ProfessionalProfilePayload,structure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656,structure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753<def-alias-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,structure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656>>": {
+      "$ref": "#/definitions/ApplyOmit%3C(((alias-1474508258-74484-74632-1474508258-0-218439%3Cstructure-1408742279-1550656-1551736-1408742279-1550626-1551779-1408742279-1550613-1551779-1408742279-1547608-1551802-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cdef-alias-2037075113-52539-52703-2037075113-0-129753%3Cany%3E%3E%26def-alias-2037075113-52703-52940-2037075113-0-129753%3Cany%3E)%26def-alias-2037075113-126644-126990-2037075113-0-129753%3Cstructure-1408742279-1551795-1551798-1408742279-1551779-1551798-1408742279-1547608-1551802-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%3E)%7CSelect%3CPrisma.%24ProfessionalProfilePayload%2Cnull%3E)%2CExtractGlobalOmit%3Cstructure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753%3Cdef-alias-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cstructure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656%3E%2Calias-1474508258-75746-75867-1474508258-0-218439%3C%22ProfessionalProfile%22%3E%3E%3E"
+    },
+    "FollowClientPreviewDto": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "avatarUrl"
+      ],
+      "type": "object"
+    },
+    "FollowClientPreviewRow": {
+      "$ref": "#/definitions/Prisma.ClientProfileGetPayload%3Cstructure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114%3E"
+    },
+    "FollowErrorMeta": {
+      "properties": {
+        "code": {
+          "enum": [
+            "PRO_NOT_FOUND",
+            "FOLLOWERS_FORBIDDEN",
+            "FOLLOWING_FORBIDDEN"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            403,
+            404
+          ],
+          "type": "number"
+        }
+      },
+      "required": [
+        "status",
+        "message",
+        "code"
+      ],
+      "type": "object"
+    },
+    "FollowPagination": {
+      "properties": {
+        "hasMore": {
+          "type": "boolean"
+        },
+        "skip": {
+          "type": "number"
+        },
+        "take": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "take",
+        "skip",
+        "hasMore"
+      ],
+      "type": "object"
+    },
+    "FollowProfessionalPreviewRow": {
+      "$ref": "#/definitions/LooksProProfilePreviewRow"
+    },
+    "FollowerListItem": {
+      "properties": {
+        "client": {
+          "$ref": "#/definitions/FollowClientPreviewRow"
+        },
+        "followedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "followedAt",
+        "client"
+      ],
+      "type": "object"
+    },
+    "FollowerListItemDto": {
+      "properties": {
+        "client": {
+          "$ref": "#/definitions/FollowClientPreviewDto"
+        },
+        "followedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "followedAt",
+        "client"
+      ],
+      "type": "object"
+    },
+    "FollowersListPage": {
+      "properties": {
+        "followerCount": {
+          "type": "number"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/FollowerListItem"
+          },
+          "type": "array"
+        },
+        "pagination": {
+          "$ref": "#/definitions/FollowPagination"
+        }
+      },
+      "required": [
+        "followerCount",
+        "items",
+        "pagination"
+      ],
+      "type": "object"
+    },
+    "FollowersListResponseDto": {
+      "properties": {
+        "followerCount": {
+          "type": "number"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/FollowerListItemDto"
+          },
+          "type": "array"
+        },
+        "pagination": {
+          "$ref": "#/definitions/FollowPagination"
+        },
+        "professionalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "professionalId",
+        "followerCount",
+        "items",
+        "pagination"
+      ],
+      "type": "object"
+    },
+    "FollowingListItem": {
+      "properties": {
+        "followedAt": {
+          "type": "string"
+        },
+        "professional": {
+          "$ref": "#/definitions/FollowProfessionalPreviewRow"
+        }
+      },
+      "required": [
+        "followedAt",
+        "professional"
+      ],
+      "type": "object"
+    },
+    "FollowingListItemDto": {
+      "properties": {
+        "followedAt": {
+          "type": "string"
+        },
+        "professional": {
+          "$ref": "#/definitions/LooksProProfilePreviewDto"
+        }
+      },
+      "required": [
+        "followedAt",
+        "professional"
+      ],
+      "type": "object"
+    },
+    "FollowingListPage": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/FollowingListItem"
+          },
+          "type": "array"
+        },
+        "pagination": {
+          "$ref": "#/definitions/FollowPagination"
+        }
+      },
+      "required": [
+        "items",
+        "pagination"
+      ],
+      "type": "object"
+    },
+    "GetFindResult<Prisma.$ClientProfilePayload,structure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114,structure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753<def-alias-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,structure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114>>": {
+      "$ref": "#/definitions/DefaultSelection%3CPrisma.%24ClientProfilePayload%2Cstructure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114%2Cstructure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753%3Cdef-alias-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cstructure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114%3E%3E"
+    },
+    "GetFindResult<Prisma.$ProfessionalProfilePayload,structure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656,structure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753<def-alias-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379,structure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656>>": {
+      "$ref": "#/definitions/DefaultSelection%3CPrisma.%24ProfessionalProfilePayload%2Cstructure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656%2Cstructure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753%3Cdef-alias-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cstructure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656%3E%3E"
+    },
+    "GetResult<Prisma.$ClientProfilePayload,structure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114>": {
+      "$ref": "#/definitions/GetFindResult%3CPrisma.%24ClientProfilePayload%2Cstructure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114%2Cstructure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753%3Cdef-alias-1408742279-1404139-1407354-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cstructure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114%3E%3E"
+    },
+    "GetResult<Prisma.$ProfessionalProfilePayload,structure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656>": {
+      "$ref": "#/definitions/GetFindResult%3CPrisma.%24ProfessionalProfilePayload%2Cstructure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656%2Cstructure-2037075113-61689-61692-2037075113-61669-61692-2037075113-61541-62939-2037075113-0-129753%3Cdef-alias-1408742279-1547495-1551802-1408742279-91409-14392379-1408742279-91384-14392379-1408742279-0-14392379%2Cstructure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656%3E%3E"
+    },
+    "JsonArray": {
+      "description": "From https://github.com/sindresorhus/type-fest/ Matches a JSON array.",
+      "properties": {
+        "length": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "length"
+      ],
+      "type": "object"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/definitions/JsonValue"
+      },
+      "description": "From https://github.com/sindresorhus/type-fest/ Matches a JSON object. This type can be useful to enforce some input to be JSON-compatible or as a super-type to be extended from.",
+      "type": "object"
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/JsonObject"
+        },
+        {
+          "$ref": "#/definitions/JsonArray"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "From https://github.com/sindresorhus/type-fest/ Matches any valid JSON value."
+    },
+    "LastMinuteOfferType": {
+      "$ref": "#/definitions/%24Enums.LastMinuteOfferType"
+    },
+    "LastMinuteTier": {
+      "$ref": "#/definitions/%24Enums.LastMinuteTier"
+    },
+    "LocationType": {
+      "$ref": "#/definitions/ProfessionalLocationType"
+    },
+    "LookPostStatus": {
+      "$ref": "#/definitions/%24Enums.LookPostStatus"
+    },
+    "LookPostVisibility": {
+      "$ref": "#/definitions/%24Enums.LookPostVisibility"
+    },
+    "LooksBoardDeleteResponseDto": {
+      "properties": {
+        "deleted": {
+          "const": true,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deleted",
+        "id"
+      ],
+      "type": "object"
+    },
+    "LooksBoardDetailDto": {
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "itemCount": {
+          "type": "number"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/LooksBoardDetailItemDto"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/definitions/BoardVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "clientId",
+        "name",
+        "visibility",
+        "createdAt",
+        "updatedAt",
+        "itemCount",
+        "items"
+      ],
+      "type": "object"
+    },
+    "LooksBoardDetailItemDto": {
+      "$ref": "#/definitions/LooksBoardPreviewItemDto"
+    },
+    "LooksBoardDetailLookPostDto": {
+      "$ref": "#/definitions/LooksBoardPreviewLookPostDto"
+    },
+    "LooksBoardDetailResponseDto": {
+      "properties": {
+        "board": {
+          "$ref": "#/definitions/LooksBoardDetailDto"
+        }
+      },
+      "required": [
+        "board"
+      ],
+      "type": "object"
+    },
+    "LooksBoardItemMutationResponseDto": {
+      "properties": {
+        "boardId": {
+          "type": "string"
+        },
+        "boardIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "boards": {
+          "items": {
+            "$ref": "#/definitions/LooksSavedBoardStateDto"
+          },
+          "type": "array"
+        },
+        "inBoard": {
+          "type": "boolean"
+        },
+        "isSaved": {
+          "type": "boolean"
+        },
+        "lookPostId": {
+          "type": "string"
+        },
+        "saveCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "boardId",
+        "lookPostId",
+        "inBoard",
+        "isSaved",
+        "saveCount",
+        "boardIds",
+        "boards"
+      ],
+      "type": "object"
+    },
+    "LooksBoardPreviewDto": {
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "itemCount": {
+          "type": "number"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/LooksBoardPreviewItemDto"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/definitions/BoardVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "clientId",
+        "name",
+        "visibility",
+        "createdAt",
+        "updatedAt",
+        "itemCount",
+        "items"
+      ],
+      "type": "object"
+    },
+    "LooksBoardPreviewItemDto": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lookPost": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LooksBoardPreviewLookPostDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "lookPostId",
+        "lookPost"
+      ],
+      "type": "object"
+    },
+    "LooksBoardPreviewLookPostDto": {
+      "properties": {
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "primaryMedia": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LooksBoardPreviewPrimaryMediaDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/LookPostStatus"
+        },
+        "visibility": {
+          "$ref": "#/definitions/LookPostVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "caption",
+        "status",
+        "visibility",
+        "moderationStatus",
+        "publishedAt",
+        "primaryMedia"
+      ],
+      "type": "object"
+    },
+    "LooksBoardPreviewPrimaryMediaDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "thumbUrl",
+        "mediaType"
+      ],
+      "type": "object"
+    },
+    "LooksBoardsListResponseDto": {
+      "properties": {
+        "boards": {
+          "items": {
+            "$ref": "#/definitions/LooksBoardPreviewDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "boards"
+      ],
+      "type": "object"
+    },
+    "LooksCategoryDto": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "slug"
+      ],
+      "type": "object"
+    },
+    "LooksClientAuthorDto": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handle": {
+          "type": "string"
+        },
+        "profileHref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "handle",
+        "avatarUrl",
+        "profileHref"
+      ],
+      "type": "object"
+    },
+    "LooksCommentCreateResponseDto": {
+      "properties": {
+        "comment": {
+          "$ref": "#/definitions/LooksCommentDto"
+        },
+        "commentsCount": {
+          "type": "number"
+        },
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "comment",
+        "commentsCount"
+      ],
+      "type": "object"
+    },
+    "LooksCommentDeleteResponseDto": {
+      "properties": {
+        "commentId": {
+          "type": "string"
+        },
+        "commentsCount": {
+          "type": "number"
+        },
+        "deleted": {
+          "const": true,
+          "type": "boolean"
+        },
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "commentId",
+        "deleted",
+        "commentsCount"
+      ],
+      "type": "object"
+    },
+    "LooksCommentDto": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "likeCount": {
+          "type": "number"
+        },
+        "parentCommentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replyCount": {
+          "type": "number"
+        },
+        "user": {
+          "$ref": "#/definitions/LooksCommentUserDto"
+        },
+        "viewerCanDelete": {
+          "type": "boolean"
+        },
+        "viewerLiked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "createdAt",
+        "user",
+        "parentCommentId",
+        "likeCount",
+        "replyCount",
+        "viewerLiked",
+        "viewerCanDelete"
+      ],
+      "type": "object"
+    },
+    "LooksCommentLikeResponseDto": {
+      "properties": {
+        "commentId": {
+          "type": "string"
+        },
+        "likeCount": {
+          "type": "number"
+        },
+        "liked": {
+          "type": "boolean"
+        },
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "commentId",
+        "liked",
+        "likeCount"
+      ],
+      "type": "object"
+    },
+    "LooksCommentRepliesListResponseDto": {
+      "properties": {
+        "lookPostId": {
+          "type": "string"
+        },
+        "parentCommentId": {
+          "type": "string"
+        },
+        "replies": {
+          "items": {
+            "$ref": "#/definitions/LooksCommentDto"
+          },
+          "type": "array"
+        },
+        "replyCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "parentCommentId",
+        "replies",
+        "replyCount"
+      ],
+      "type": "object"
+    },
+    "LooksCommentReportResponseDto": {
+      "properties": {
+        "commentId": {
+          "type": "string"
+        },
+        "lookPostId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/LooksReportStatusDto"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "commentId",
+        "status"
+      ],
+      "type": "object"
+    },
+    "LooksCommentUserDto": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "profileHref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "avatarUrl",
+        "profileHref"
+      ],
+      "type": "object"
+    },
+    "LooksCommentsListResponseDto": {
+      "properties": {
+        "comments": {
+          "items": {
+            "$ref": "#/definitions/LooksCommentDto"
+          },
+          "type": "array"
+        },
+        "commentsCount": {
+          "type": "number"
+        },
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "comments",
+        "commentsCount"
+      ],
+      "type": "object"
+    },
+    "LooksCountsDto": {
+      "properties": {
+        "comments": {
+          "type": "number"
+        },
+        "likes": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "likes",
+        "comments"
+      ],
+      "type": "object"
+    },
+    "LooksDetailAdminDto": {
+      "properties": {
+        "archivedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "canModerate": {
+          "const": true,
+          "type": "boolean"
+        },
+        "primaryMedia": {
+          "$ref": "#/definitions/LooksDetailAdminMediaDto"
+        },
+        "primaryMediaAssetId": {
+          "type": "string"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "canModerate",
+        "archivedAt",
+        "removedAt",
+        "primaryMediaAssetId",
+        "primaryMedia"
+      ],
+      "type": "object"
+    },
+    "LooksDetailAdminMediaDto": {
+      "properties": {
+        "isEligibleForLooks": {
+          "type": "boolean"
+        },
+        "isFeaturedInPortfolio": {
+          "type": "boolean"
+        },
+        "reviewBody": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibility": {
+          "$ref": "#/definitions/MediaVisibility"
+        }
+      },
+      "required": [
+        "visibility",
+        "isEligibleForLooks",
+        "isFeaturedInPortfolio",
+        "reviewBody"
+      ],
+      "type": "object"
+    },
+    "LooksDetailAssetDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "media": {
+          "$ref": "#/definitions/LooksDetailMediaDto"
+        },
+        "mediaAssetId": {
+          "type": "string"
+        },
+        "sortOrder": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "sortOrder",
+        "mediaAssetId",
+        "media"
+      ],
+      "type": "object"
+    },
+    "LooksDetailCountsDto": {
+      "properties": {
+        "comments": {
+          "type": "number"
+        },
+        "likes": {
+          "type": "number"
+        },
+        "saves": {
+          "type": "number"
+        },
+        "shares": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "comments",
+        "likes",
+        "saves",
+        "shares"
+      ],
+      "type": "object"
+    },
+    "LooksDetailItemDto": {
+      "properties": {
+        "_count": {
+          "$ref": "#/definitions/LooksDetailCountsDto"
+        },
+        "admin": {
+          "$ref": "#/definitions/LooksDetailAdminDto"
+        },
+        "assets": {
+          "items": {
+            "$ref": "#/definitions/LooksDetailAssetDto"
+          },
+          "type": "array"
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientAuthor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LooksClientAuthorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "primaryMedia": {
+          "$ref": "#/definitions/LooksDetailMediaDto"
+        },
+        "professional": {
+          "$ref": "#/definitions/LooksProProfilePreviewDto"
+        },
+        "publishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LooksDetailServiceDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/LookPostStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "viewerContext": {
+          "$ref": "#/definitions/LooksDetailViewerContextDto"
+        },
+        "visibility": {
+          "$ref": "#/definitions/LookPostVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "caption",
+        "status",
+        "visibility",
+        "moderationStatus",
+        "publishedAt",
+        "createdAt",
+        "updatedAt",
+        "professional",
+        "clientAuthor",
+        "service",
+        "primaryMedia",
+        "assets",
+        "_count",
+        "viewerContext"
+      ],
+      "type": "object"
+    },
+    "LooksDetailMediaDto": {
+      "properties": {
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LooksDetailReviewDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "thumbUrl",
+        "mediaType",
+        "caption",
+        "createdAt",
+        "review"
+      ],
+      "type": "object"
+    },
+    "LooksDetailResponseDto": {
+      "properties": {
+        "item": {
+          "$ref": "#/definitions/LooksDetailItemDto"
+        }
+      },
+      "required": [
+        "item"
+      ],
+      "type": "object"
+    },
+    "LooksDetailReviewDto": {
+      "properties": {
+        "headline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "helpfulCount": {
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "rating",
+        "headline",
+        "helpfulCount"
+      ],
+      "type": "object"
+    },
+    "LooksDetailServiceDto": {
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LooksCategoryDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "category"
+      ],
+      "type": "object"
+    },
+    "LooksDetailViewerContextDto": {
+      "properties": {
+        "canComment": {
+          "type": "boolean"
+        },
+        "canSave": {
+          "type": "boolean"
+        },
+        "isAuthenticated": {
+          "type": "boolean"
+        },
+        "isOwner": {
+          "type": "boolean"
+        },
+        "viewerLiked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "isAuthenticated",
+        "viewerLiked",
+        "canComment",
+        "canSave",
+        "isOwner"
+      ],
+      "type": "object"
+    },
+    "LooksFeedItemDto": {
+      "properties": {
+        "_count": {
+          "$ref": "#/definitions/LooksCountsDto"
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientAuthor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LooksClientAuthorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "priceStartingAt": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "professional": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LooksProfessionalDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewHeadline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewHelpfulCount": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "reviewId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewRating": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "serviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uploadedByRole": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Role"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "viewerFollows": {
+          "type": "boolean"
+        },
+        "viewerLiked": {
+          "type": "boolean"
+        },
+        "viewerSaved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "thumbUrl",
+        "mediaType",
+        "caption",
+        "createdAt",
+        "professional",
+        "clientAuthor",
+        "_count",
+        "viewerLiked",
+        "viewerSaved",
+        "viewerFollows",
+        "serviceId",
+        "serviceName",
+        "category",
+        "serviceIds",
+        "priceStartingAt",
+        "uploadedByRole",
+        "reviewId",
+        "reviewHelpfulCount",
+        "reviewRating",
+        "reviewHeadline"
+      ],
+      "type": "object"
+    },
+    "LooksFeedResponseDto": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/LooksFeedItemDto"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "viewerContext": {
+          "$ref": "#/definitions/LooksFeedViewerContextDto"
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "LooksFeedViewerContextDto": {
+      "properties": {
+        "isAuthenticated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "isAuthenticated"
+      ],
+      "type": "object"
+    },
+    "LooksLikeResponseDto": {
+      "properties": {
+        "likeCount": {
+          "type": "number"
+        },
+        "liked": {
+          "type": "boolean"
+        },
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "liked",
+        "likeCount"
+      ],
+      "type": "object"
+    },
+    "LooksLookReportResponseDto": {
+      "properties": {
+        "lookPostId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/LooksReportStatusDto"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "status"
+      ],
+      "type": "object"
+    },
+    "LooksPortfolioTileDto": {
+      "properties": {
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isEligibleForLooks": {
+          "type": "boolean"
+        },
+        "isFeaturedInPortfolio": {
+          "type": "boolean"
+        },
+        "isVideo": {
+          "type": "boolean"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "serviceIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "src": {
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/definitions/MediaVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "caption",
+        "visibility",
+        "isEligibleForLooks",
+        "isFeaturedInPortfolio",
+        "src",
+        "serviceIds",
+        "isVideo",
+        "mediaType"
+      ],
+      "type": "object"
+    },
+    "LooksProProfilePreviewDto": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isPremium": {
+          "type": "boolean"
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nameDisplay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProNameDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "professionType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProfessionType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verificationStatus": {
+          "$ref": "#/definitions/VerificationStatus"
+        }
+      },
+      "required": [
+        "id",
+        "businessName",
+        "firstName",
+        "lastName",
+        "handle",
+        "nameDisplay",
+        "avatarUrl",
+        "professionType",
+        "location",
+        "verificationStatus",
+        "isPremium"
+      ],
+      "type": "object"
+    },
+    "LooksProProfilePreviewRow": {
+      "$ref": "#/definitions/Prisma.ProfessionalProfileGetPayload%3Cstructure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656%3E"
+    },
+    "LooksProfessionalDto": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "followerCount": {
+          "type": "number"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nameDisplay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProNameDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "professionType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProfessionType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "businessName",
+        "firstName",
+        "lastName",
+        "handle",
+        "nameDisplay",
+        "professionType",
+        "avatarUrl",
+        "location",
+        "followerCount"
+      ],
+      "type": "object"
+    },
+    "LooksRenderedMediaDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "isFeaturedInPortfolio": {
+          "type": "boolean"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "thumbUrl",
+        "mediaType",
+        "isFeaturedInPortfolio"
+      ],
+      "type": "object"
+    },
+    "LooksReportStatusDto": {
+      "enum": [
+        "accepted",
+        "already_reported"
+      ],
+      "type": "string"
+    },
+    "LooksSaveStateResponseDto": {
+      "properties": {
+        "boardIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "boards": {
+          "items": {
+            "$ref": "#/definitions/LooksSavedBoardStateDto"
+          },
+          "type": "array"
+        },
+        "isSaved": {
+          "type": "boolean"
+        },
+        "lookPostId": {
+          "type": "string"
+        },
+        "saveCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "isSaved",
+        "saveCount",
+        "boardIds",
+        "boards"
+      ],
+      "type": "object"
+    },
+    "LooksSavedBoardStateDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/definitions/BoardVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "MediaType": {
+      "$ref": "#/definitions/%24Enums.MediaType"
+    },
+    "MediaVisibility": {
+      "$ref": "#/definitions/%24Enums.MediaVisibility"
+    },
+    "ModerationStatus": {
+      "$ref": "#/definitions/%24Enums.ModerationStatus"
+    },
+    "MyFollowingListResponseDto": {
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/FollowingListItemDto"
+          },
+          "type": "array"
+        },
+        "pagination": {
+          "$ref": "#/definitions/FollowPagination"
+        }
+      },
+      "required": [
+        "clientId",
+        "items",
+        "pagination"
+      ],
+      "type": "object"
+    },
+    "OfferingDetailLoaded": {
+      "properties": {
+        "baseStr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "claimable": {
+          "const": true,
+          "type": "boolean"
+        },
+        "defaultAddressId": {
+          "description": "Default client mobile address (only resolved for an authed mobile claim).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "discountedStr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durationMin": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "incentiveLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isMobile": {
+          "type": "boolean"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "offeringId": {
+          "type": "string"
+        },
+        "openingId": {
+          "type": "string"
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proName": {
+          "type": "string"
+        },
+        "profession": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "publicIncentive": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PublicIncentiveDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scheduledForIso": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "services": {
+          "description": "JSON-safe (Decimal -> string) services + incentive blocks for native clients.",
+          "items": {
+            "$ref": "#/definitions/OpeningServiceDto"
+          },
+          "type": "array"
+        },
+        "when": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "claimable",
+        "offeringId",
+        "openingId",
+        "professionalId",
+        "serviceId",
+        "scheduledForIso",
+        "locationId",
+        "isMobile",
+        "serviceName",
+        "proName",
+        "profession",
+        "when",
+        "place",
+        "durationMin",
+        "baseStr",
+        "discountedStr",
+        "incentiveLabel",
+        "services",
+        "publicIncentive",
+        "defaultAddressId"
+      ],
+      "type": "object"
+    },
+    "OfferingDetailResult": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/OfferingDetailUnavailable"
+        },
+        {
+          "$ref": "#/definitions/OfferingDetailLoaded"
+        }
+      ]
+    },
+    "OfferingDetailUnavailable": {
+      "properties": {
+        "claimable": {
+          "const": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "claimable"
+      ],
+      "type": "object"
+    },
+    "OpeningServiceDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "offering": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "mobileDurationMinutes": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "mobilePriceStartingAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "offersInSalon": {
+              "type": "boolean"
+            },
+            "offersMobile": {
+              "type": "boolean"
+            },
+            "salonDurationMinutes": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "salonPriceStartingAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "salonPriceStartingAt",
+            "mobilePriceStartingAt",
+            "salonDurationMinutes",
+            "mobileDurationMinutes",
+            "offersInSalon",
+            "offersMobile"
+          ],
+          "type": "object"
+        },
+        "offeringId": {
+          "type": "string"
+        },
+        "openingId": {
+          "type": "string"
+        },
+        "service": {
+          "properties": {
+            "defaultDurationMinutes": {
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "minPrice": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "minPrice",
+            "defaultDurationMinutes"
+          ],
+          "type": "object"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "sortOrder": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "openingId",
+        "serviceId",
+        "offeringId",
+        "sortOrder",
+        "service",
+        "offering"
+      ],
+      "type": "object"
+    },
+    "PickedPlace": {
+      "properties": {
+        "city": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "countryCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "formattedAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lat": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lng": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "postalCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionToken": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "placeId",
+        "formattedAddress",
+        "city",
+        "state",
+        "postalCode",
+        "countryCode",
+        "lat",
+        "lng"
+      ],
+      "type": "object"
+    },
+    "Prisma.ClientProfileGetPayload<structure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114>": {
+      "$ref": "#/definitions/GetResult%3CPrisma.%24ClientProfilePayload%2Cstructure-1452316754-1058-1104-1452316754-1026-1105-1452316754-988-1105-1452316754-0-13114%3E"
+    },
+    "Prisma.ProfessionalProfileGetPayload<structure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656>": {
+      "$ref": "#/definitions/GetResult%3CPrisma.%24ProfessionalProfilePayload%2Cstructure-1420444347-913-966-1420444347-873-967-1420444347-832-967-1420444347-0-6656%3E"
+    },
+    "ProBookingNewClientDTO": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dateOfBirth": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": "string"
+        },
+        "phone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "anyOf": [
+            {
+              "properties": {
+                "email": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "phone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "phoneVerifiedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "role": {
+                  "$ref": "#/definitions/Role"
+                }
+              },
+              "required": [
+                "id",
+                "email",
+                "role",
+                "phone",
+                "phoneVerifiedAt"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "phone",
+        "avatarUrl",
+        "dateOfBirth",
+        "user"
+      ],
+      "type": "object"
+    },
+    "ProBookingNewOfferingDTO": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "customImageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "mobileDurationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mobilePriceStartingAt": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "offersInSalon": {
+          "type": "boolean"
+        },
+        "offersMobile": {
+          "type": "boolean"
+        },
+        "salonDurationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "salonPriceStartingAt": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "service": {
+          "properties": {
+            "addOnGroup": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "allowMobile": {
+              "type": "boolean"
+            },
+            "category": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "categoryId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "defaultDurationMinutes": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "defaultImageUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "isActive": {
+              "type": "boolean"
+            },
+            "isAddOnEligible": {
+              "type": "boolean"
+            },
+            "minPrice": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "categoryId",
+            "description",
+            "defaultDurationMinutes",
+            "minPrice",
+            "defaultImageUrl",
+            "allowMobile",
+            "isActive",
+            "isAddOnEligible",
+            "addOnGroup",
+            "category"
+          ],
+          "type": "object"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "description",
+        "salonPriceStartingAt",
+        "salonDurationMinutes",
+        "mobilePriceStartingAt",
+        "mobileDurationMinutes",
+        "offersInSalon",
+        "offersMobile",
+        "customImageUrl",
+        "isActive",
+        "createdAt",
+        "updatedAt",
+        "service"
+      ],
+      "type": "object"
+    },
+    "ProFollowStateResponseDto": {
+      "properties": {
+        "followerCount": {
+          "type": "number"
+        },
+        "following": {
+          "type": "boolean"
+        },
+        "professionalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "professionalId",
+        "following",
+        "followerCount"
+      ],
+      "type": "object"
+    },
+    "ProLocation": {
+      "properties": {
+        "advanceNoticeMinutes": {
+          "type": "number"
+        },
+        "city": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "countryCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "formattedAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isBookable": {
+          "type": "boolean"
+        },
+        "isPrimary": {
+          "type": "boolean"
+        },
+        "lat": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lng": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "postalCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "$ref": "#/definitions/LocationType"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "name",
+        "isPrimary",
+        "isBookable",
+        "formattedAddress",
+        "city",
+        "state",
+        "postalCode",
+        "countryCode",
+        "placeId",
+        "lat",
+        "lng",
+        "timeZone",
+        "advanceNoticeMinutes",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ProNameDisplay": {
+      "$ref": "#/definitions/%24Enums.ProNameDisplay"
+    },
+    "ProPublicProfileDto": {
+      "properties": {
+        "header": {
+          "$ref": "#/definitions/PublicProfileHeaderDto"
+        },
+        "isFavoritedByMe": {
+          "type": "boolean"
+        },
+        "offerings": {
+          "items": {
+            "$ref": "#/definitions/PublicOfferingDto"
+          },
+          "type": "array"
+        },
+        "portfolioTiles": {
+          "items": {
+            "$ref": "#/definitions/PublicPortfolioTileDto"
+          },
+          "type": "array"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "reviews": {
+          "items": {
+            "$ref": "#/definitions/PublicReviewDto"
+          },
+          "type": "array"
+        },
+        "stats": {
+          "$ref": "#/definitions/PublicProfileStatsDto"
+        }
+      },
+      "required": [
+        "professionalId",
+        "header",
+        "stats",
+        "offerings",
+        "portfolioTiles",
+        "reviews",
+        "isFavoritedByMe"
+      ],
+      "type": "object"
+    },
+    "ProfessionType": {
+      "$ref": "#/definitions/%24Enums.ProfessionType"
+    },
+    "ProfessionalFollowState": {
+      "properties": {
+        "followerCount": {
+          "type": "number"
+        },
+        "following": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "following",
+        "followerCount"
+      ],
+      "type": "object"
+    },
+    "ProfessionalLocationType": {
+      "$ref": "#/definitions/%24Enums.ProfessionalLocationType"
+    },
+    "PublicClientLook": {
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "saveCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "imageUrl",
+        "saveCount",
+        "href"
+      ],
+      "type": "object"
+    },
+    "PublicClientProfileData": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bio": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "counts": {
+          "properties": {
+            "followers": {
+              "type": "number"
+            },
+            "following": {
+              "type": "number"
+            },
+            "looks": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "followers",
+            "following",
+            "looks"
+          ],
+          "type": "object"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        },
+        "looks": {
+          "items": {
+            "$ref": "#/definitions/PublicClientLook"
+          },
+          "type": "array"
+        },
+        "viewer": {
+          "$ref": "#/definitions/PublicClientProfileViewer"
+        }
+      },
+      "required": [
+        "handle",
+        "displayName",
+        "avatarUrl",
+        "bio",
+        "counts",
+        "looks",
+        "viewer"
+      ],
+      "type": "object"
+    },
+    "PublicClientProfileViewer": {
+      "properties": {
+        "following": {
+          "description": "The signed-in client already follows this profile.",
+          "type": "boolean"
+        },
+        "isOwn": {
+          "description": "The signed-in client is looking at their OWN profile.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "isOwn",
+        "following"
+      ],
+      "type": "object"
+    },
+    "PublicIncentiveDto": {
+      "properties": {
+        "amountOff": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "freeAddOnService": {
+          "anyOf": [
+            {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "offerType": {
+          "$ref": "#/definitions/LastMinuteOfferType"
+        },
+        "percentOff": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tier": {
+          "$ref": "#/definitions/LastMinuteTier"
+        }
+      },
+      "required": [
+        "tier",
+        "offerType",
+        "label",
+        "percentOff",
+        "amountOff",
+        "freeAddOnService"
+      ],
+      "type": "object"
+    },
+    "PublicOfferingDto": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "offersInSalon": {
+          "type": "boolean"
+        },
+        "offersMobile": {
+          "type": "boolean"
+        },
+        "priceFromLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priceFromNumber": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pricingLines": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "professionalId",
+        "serviceId",
+        "name",
+        "description",
+        "imageUrl",
+        "pricingLines",
+        "priceFromLabel",
+        "priceFromNumber",
+        "durationMinutes",
+        "offersInSalon",
+        "offersMobile"
+      ],
+      "type": "object"
+    },
+    "PublicPortfolioTileDto": {
+      "properties": {
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isEligibleForLooks": {
+          "type": "boolean"
+        },
+        "isFeaturedInPortfolio": {
+          "type": "boolean"
+        },
+        "isVideo": {
+          "type": "boolean"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "serviceIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "src": {
+          "type": "string"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibility": {
+          "$ref": "#/definitions/MediaVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "caption",
+        "src",
+        "thumbUrl",
+        "mediaType",
+        "isVideo",
+        "visibility",
+        "isEligibleForLooks",
+        "isFeaturedInPortfolio",
+        "serviceIds"
+      ],
+      "type": "object"
+    },
+    "PublicProfileHeaderDto": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bio": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isLicenseVerified": {
+          "type": "boolean"
+        },
+        "isPremium": {
+          "type": "boolean"
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "professionLabel": {
+          "type": "string"
+        },
+        "professionType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProfessionType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userId": {
+          "type": "string"
+        },
+        "verificationStatus": {
+          "$ref": "#/definitions/VerificationStatus"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "verificationStatus",
+        "handle",
+        "displayHandle",
+        "isPremium",
+        "isLicenseVerified",
+        "displayName",
+        "businessName",
+        "bio",
+        "avatarUrl",
+        "professionType",
+        "professionLabel",
+        "location",
+        "timeZone"
+      ],
+      "type": "object"
+    },
+    "PublicProfileStatsDto": {
+      "properties": {
+        "averageRatingLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "completedBookingsLabel": {
+          "type": "string"
+        },
+        "favoritesLabel": {
+          "type": "string"
+        },
+        "priceFromLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewCountLabel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "priceFromLabel",
+        "completedBookingsLabel",
+        "favoritesLabel",
+        "reviewCountLabel",
+        "averageRatingLabel"
+      ],
+      "type": "object"
+    },
+    "PublicReviewDto": {
+      "properties": {
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientHref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "headline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "helpfulCount": {
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaAssets": {
+          "items": {
+            "$ref": "#/definitions/PublicReviewMediaDto"
+          },
+          "type": "array"
+        },
+        "rating": {
+          "type": "number"
+        },
+        "viewerHelpful": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "rating",
+        "headline",
+        "body",
+        "createdAt",
+        "clientName",
+        "clientHref",
+        "helpfulCount",
+        "viewerHelpful",
+        "mediaAssets"
+      ],
+      "type": "object"
+    },
+    "PublicReviewMediaDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "isFeaturedInPortfolio": {
+          "type": "boolean"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "thumbUrl",
+        "mediaType",
+        "isFeaturedInPortfolio"
+      ],
+      "type": "object"
+    },
+    "Role": {
+      "$ref": "#/definitions/%24Enums.Role"
+    },
+    "SearchProItemDto": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "closestLocation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchProLocationPreviewDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "distanceMiles": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "locationLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "minPrice": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "primaryLocation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchProLocationPreviewDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "professionType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProfessionType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ratingAvg": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ratingCount": {
+          "type": "number"
+        },
+        "supportsMobile": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "businessName",
+        "displayName",
+        "handle",
+        "professionType",
+        "avatarUrl",
+        "locationLabel",
+        "distanceMiles",
+        "ratingAvg",
+        "ratingCount",
+        "minPrice",
+        "supportsMobile",
+        "closestLocation",
+        "primaryLocation"
+      ],
+      "type": "object"
+    },
+    "SearchProLocationPreviewDto": {
+      "properties": {
+        "city": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "formattedAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isPrimary": {
+          "type": "boolean"
+        },
+        "lat": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lng": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "placeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "formattedAddress",
+        "city",
+        "state",
+        "timeZone",
+        "placeId",
+        "lat",
+        "lng",
+        "isPrimary"
+      ],
+      "type": "object"
+    },
+    "SearchProsResponseDto": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/SearchProItemDto"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "SearchServiceItemDto": {
+      "properties": {
+        "categoryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "categoryName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "categorySlug": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "categoryId",
+        "categoryName",
+        "categorySlug"
+      ],
+      "type": "object"
+    },
+    "SearchServicesResponseDto": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/SearchServiceItemDto"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "VerificationStatus": {
+      "$ref": "#/definitions/%24Enums.VerificationStatus"
+    }
+  }
+}
