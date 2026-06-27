@@ -66,3 +66,25 @@ export async function deactivateDeviceToken(
 
   return result.count > 0
 }
+
+export type InvalidateDeviceTokenArgs = {
+  platform: DevicePlatform
+  token: string
+}
+
+// Deactivate a token the PROVIDER reported as dead (APNs Unregistered/
+// BadDeviceToken, FCM UNREGISTERED/INVALID_ARGUMENT, etc.). Unlike
+// deactivateDeviceToken this is NOT scoped to a user: the provider has told us
+// this exact (platform, token) install can no longer receive pushes, so it must
+// be deactivated regardless of which user it is currently bound to.
+export async function invalidateDeviceToken(
+  args: InvalidateDeviceTokenArgs,
+): Promise<void> {
+  await prisma.deviceToken.updateMany({
+    where: {
+      platform: args.platform,
+      token: args.token,
+    },
+    data: { isActive: false },
+  })
+}

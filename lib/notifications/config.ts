@@ -7,6 +7,8 @@ import { readOptionalEnv as readEnv } from '@/lib/env'
 export type NotificationProviderConfigErrorCode =
   | 'TWILIO_SMS_NOT_CONFIGURED'
   | 'POSTMARK_EMAIL_NOT_CONFIGURED'
+  | 'APNS_PUSH_NOT_CONFIGURED'
+  | 'FCM_PUSH_NOT_CONFIGURED'
   | 'NOTIFICATION_CHANNEL_UNSUPPORTED'
 
 export class NotificationProviderConfigError extends Error {
@@ -33,6 +35,30 @@ export type PostmarkEmailConfig = {
   serverToken: string
   fromEmail: string
   messageStream: string | null
+}
+
+export type ApnsConfig = {
+  provider: typeof NotificationProvider.APNS
+  channel: typeof NotificationChannel.PUSH
+  // The .p8 auth key PEM contents (NOT a file path).
+  authKey: string
+  keyId: string
+  teamId: string
+  bundleId: string
+  // True => api.push.apple.com; false => api.sandbox.push.apple.com.
+  production: boolean
+}
+
+// A Google service-account JSON, parsed. We only need to hand the whole object
+// to google-auth-library as `credentials`, so it's kept as an opaque record
+// rather than re-declaring Google's schema here.
+export type FcmServiceAccount = Record<string, unknown>
+
+export type FcmConfig = {
+  provider: typeof NotificationProvider.FCM
+  channel: typeof NotificationChannel.PUSH
+  serviceAccount: FcmServiceAccount
+  projectId: string
 }
 
 export type NotificationProviderConfig =
@@ -127,6 +153,99 @@ export function isPushProviderConfigured(): boolean {
   )
 
   return apnsConfigured || fcmConfigured
+}
+
+export function readApnsConfig(): ApnsConfig | null {
+  const authKey = readEnv('APNS_AUTH_KEY')
+  const keyId = readEnv('APNS_KEY_ID')
+  const teamId = readEnv('APNS_TEAM_ID')
+  const bundleId = readEnv('APNS_BUNDLE_ID')
+
+  if (!authKey || !keyId || !teamId || !bundleId) {
+    return null
+  }
+
+  // Default to the production APNs host; only the explicit "sandbox" opt-in
+  // routes to the development gateway.
+  const production = readEnv('APNS_ENV')?.toLowerCase() !== 'sandbox'
+
+  return {
+    provider: NotificationProvider.APNS,
+    channel: NotificationChannel.PUSH,
+    authKey,
+    keyId,
+    teamId,
+    bundleId,
+    production,
+  }
+}
+
+export function requireApnsConfig(): ApnsConfig {
+  const config = readApnsConfig()
+
+  if (!config) {
+    throw new NotificationProviderConfigError(
+      'APNS_PUSH_NOT_CONFIGURED',
+      'APNs push notifications are not configured.',
+    )
+  }
+
+  return config
+}
+
+function parseFcmServiceAccount(raw: string): FcmServiceAccount | null {
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    // A malformed JSON blob is treated as unconfigured rather than throwing, so
+    // a bad value degrades to "no FCM provider" instead of crashing the worker.
+    return null
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return null
+  }
+
+  return parsed as FcmServiceAccount
+}
+
+export function readFcmConfig(): FcmConfig | null {
+  const rawServiceAccount = readFirstEnv([
+    'FCM_SERVICE_ACCOUNT_JSON',
+    'FCM_SERVICE_ACCOUNT',
+  ])
+  const projectId = readFirstEnv(['FCM_PROJECT_ID', 'FIREBASE_PROJECT_ID'])
+
+  if (!rawServiceAccount || !projectId) {
+    return null
+  }
+
+  const serviceAccount = parseFcmServiceAccount(rawServiceAccount)
+  if (!serviceAccount) {
+    return null
+  }
+
+  return {
+    provider: NotificationProvider.FCM,
+    channel: NotificationChannel.PUSH,
+    serviceAccount,
+    projectId,
+  }
+}
+
+export function requireFcmConfig(): FcmConfig {
+  const config = readFcmConfig()
+
+  if (!config) {
+    throw new NotificationProviderConfigError(
+      'FCM_PUSH_NOT_CONFIGURED',
+      'FCM push notifications are not configured.',
+    )
+  }
+
+  return config
 }
 
 export function readPostmarkEmailConfig(): PostmarkEmailConfig | null {
