@@ -502,7 +502,7 @@ describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'POST /api/internal/webhooks/twilio/notifications/status error',
-        expect.any(Error),
+        { error: { name: 'Error', message: expect.any(String) } },
       )
     } finally {
       consoleErrorSpy.mockRestore()

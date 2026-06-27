@@ -5,6 +5,7 @@
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { getProSubscription } from '@/lib/membership/subscription'
+import { safeError } from '@/lib/security/logging'
 import { getStripe } from '@/lib/stripe/server'
 import { membershipPortalReturnUrl } from '@/lib/membership/urls'
 
@@ -28,7 +29,9 @@ export async function POST() {
 
     return jsonOk({ ok: true, url: session.url }, 200)
   } catch (e: unknown) {
-    console.error('POST /api/v1/pro/membership/portal error', e)
+    console.error('POST /api/v1/pro/membership/portal error', {
+      error: safeError(e),
+    })
     return jsonFail(500, 'Failed to open the billing portal.', {
       message: e instanceof Error ? e.message : String(e),
     })

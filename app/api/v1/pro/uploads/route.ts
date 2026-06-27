@@ -1,5 +1,6 @@
 // app/api/v1/pro/uploads/route.ts
 import { prisma } from '@/lib/prisma'
+import { safeError } from '@/lib/security/logging'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
@@ -284,7 +285,7 @@ export async function POST(req: Request) {
       200,
     )
   } catch (e) {
-    console.error('POST /api/v1/pro/uploads error', e)
+    console.error('POST /api/v1/pro/uploads error', { error: safeError(e) })
     const msg = e instanceof Error ? e.message : 'Internal server error'
     return jsonFail(500, msg)
   }

@@ -9,6 +9,7 @@ import {
   resolveEntitlements,
 } from '@/lib/pro/entitlements'
 import { getProSubscription } from '@/lib/membership/subscription'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,7 +39,9 @@ export async function GET() {
       200,
     )
   } catch (e: unknown) {
-    console.error('GET /api/v1/pro/membership/status error', e)
+    console.error('GET /api/v1/pro/membership/status error', {
+      error: safeError(e),
+    })
     return jsonFail(500, 'Failed to load membership status.', {
       message: e instanceof Error ? e.message : String(e),
     })

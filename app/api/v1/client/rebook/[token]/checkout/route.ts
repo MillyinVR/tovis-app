@@ -18,6 +18,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { resolveAftercareAccessTokenForMutation } from '@/lib/aftercare/aftercareAccessTokens'
 import { isBookingError } from '@/lib/booking/errors'
+import { safeError } from '@/lib/security/logging'
 import {
   prepareClientStripeCheckoutSession,
   recordStripeCheckoutSessionAttached,
@@ -277,7 +278,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
       })
     }
 
-    console.error(`${ROUTE_OPERATION} error`, error)
+    console.error(`${ROUTE_OPERATION} error`, { error: safeError(error) })
 
     captureBookingException({
       error,

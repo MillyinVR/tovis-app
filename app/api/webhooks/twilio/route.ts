@@ -4,6 +4,7 @@ import { validateRequest } from 'twilio'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
+import { redactPhone } from '@/lib/security/redaction'
 import { getTwilioAuthToken } from '@/lib/twilio'
 
 export const dynamic = 'force-dynamic'
@@ -54,8 +55,8 @@ export async function POST(req: Request) {
       safeLogMeta({
         messageSid,
         messageStatus,
-        to,
-        from,
+        to: to ? redactPhone(to) : null,
+        from: from ? redactPhone(from) : null,
       }),
     )
 

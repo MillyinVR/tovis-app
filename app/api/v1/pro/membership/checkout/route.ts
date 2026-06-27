@@ -8,6 +8,7 @@ import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { getPurchasablePrice } from '@/lib/membership/plans'
 import { ensureBillingCustomer } from '@/lib/membership/subscription'
+import { safeError } from '@/lib/security/logging'
 import { getStripe } from '@/lib/stripe/server'
 import { membershipReturnUrl } from '@/lib/membership/urls'
 
@@ -60,7 +61,9 @@ export async function POST(req: Request) {
 
     return jsonOk({ ok: true, url: session.url, sessionId: session.id }, 200)
   } catch (e: unknown) {
-    console.error('POST /api/v1/pro/membership/checkout error', e)
+    console.error('POST /api/v1/pro/membership/checkout error', {
+      error: safeError(e),
+    })
     return jsonFail(500, 'Failed to start membership checkout.', {
       message: e instanceof Error ? e.message : String(e),
     })

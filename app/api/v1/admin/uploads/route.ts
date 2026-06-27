@@ -9,6 +9,7 @@ import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { isRecord } from '@/lib/guards'
 import { errorMessageFromUnknown } from '@/lib/http'
+import { safeError } from '@/lib/security/logging'
 import { safeUrl } from '@/lib/media'
 import { pickNumber, pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
@@ -309,7 +310,7 @@ export async function POST(req: NextRequest) {
       cacheBuster,
     })
   } catch (error: unknown) {
-    console.error('POST /api/v1/admin/uploads error', error)
+    console.error('POST /api/v1/admin/uploads error', { error: safeError(error) })
 
     return jsonFail(
       500,

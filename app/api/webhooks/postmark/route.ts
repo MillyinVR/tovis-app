@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
+import { redactEmail } from '@/lib/security/redaction'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,8 +89,8 @@ export async function POST(req: Request) {
       safeLogMeta({
         recordType,
         messageId,
-        recipient,
-        email,
+        recipient: recipient ? redactEmail(recipient) : null,
+        email: email ? redactEmail(email) : null,
       }),
     )
 
