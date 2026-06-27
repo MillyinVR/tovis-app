@@ -652,4 +652,46 @@ describe('proxy', () => {
     })
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
   })
+
+  // The login bootstrap: a native client has no cookie AND no token yet (login
+  // is how it GETS one), and sends no Origin/Referer. This must pass the CSRF
+  // gate — otherwise native can never sign in.
+  it('allows cookieless state-changing requests with no token and no Origin/Referer (native login bootstrap)', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue(null)
+
+    const req = makeRequest('https://app.tovis.app/api/v1/auth/login')
+
+    Object.defineProperty(req, 'method', { value: 'POST' })
+
+    const res = await proxy(req)
+
+    // No 403 — the request reaches the route handler.
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  // A browser, even with no auth cookie, is forced to attach an Origin on a
+  // cross-site POST — so a cookieless request that DOES carry a foreign Origin
+  // (a login-CSRF attempt) is still rejected.
+  it('still rejects cookieless state-changing requests that carry a foreign Origin', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue(null)
+
+    const req = makeRequest('https://app.tovis.app/api/v1/auth/login', {
+      headers: {
+        origin: 'https://evil.example',
+      },
+    })
+
+    Object.defineProperty(req, 'method', { value: 'POST' })
+
+    const res = await proxy(req)
+    const body = await res.json()
+
+    expect(res.status).toBe(403)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid request origin.',
+      code: 'INVALID_ORIGIN',
+    })
+  })
 })

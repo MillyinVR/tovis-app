@@ -262,16 +262,24 @@ export async function proxy(req: NextRequest) {
   const cookieToken = req.cookies.get('tovis_token')?.value ?? null
   const bearerToken = parseBearerToken(req.headers.get('authorization'))
 
-  // The Origin/Referer check IS the CSRF defense, and CSRF only exists because
-  // the session rides in a cookie the browser attaches automatically. A request
-  // authenticated purely via a bearer header (no auth cookie) cannot be forged
-  // cross-site — the attacker has no way to set the header — so the check is
-  // both unnecessary and fatal (native sends no Origin/Referer) for it. If a
-  // cookie is present we keep the check: the browser is in play regardless of
-  // any bearer header the caller may also have attached.
-  const usesBearerAuth = cookieToken === null && bearerToken !== null
+  // The Origin/Referer check IS the CSRF defense, and CSRF only works because a
+  // browser attaches the session cookie automatically. With NO auth cookie on
+  // the request there is no ambient session to ride, so two cookieless shapes
+  // are exempt (forcing the check on them is fatal for native, which never
+  // sends Origin/Referer):
+  //   1. A bearer token is present — a native authenticated call. An attacker
+  //      can't set an Authorization header cross-site, so the Origin is moot.
+  //   2. No Origin/Referer at all — a non-browser (native) client, e.g. the
+  //      LOGIN bootstrap before any token exists. A browser is forced to attach
+  //      an Origin on a cross-site state-changing request, so a cookieless
+  //      request with no origin signal cannot be a browser CSRF.
+  // Anything with a cookie — or a cookieless request that DOES carry an Origin
+  // (a browser revealing itself, incl. login-CSRF attempts) — is still enforced.
+  const exemptFromOriginCheck =
+    cookieToken === null &&
+    (bearerToken !== null || getRequestOriginOrReferer(req) === null)
 
-  if (!usesBearerAuth && shouldCheckOrigin(req, pathname)) {
+  if (!exemptFromOriginCheck && shouldCheckOrigin(req, pathname)) {
     const originOrReferer = getRequestOriginOrReferer(req)
 
     if (!originOrReferer || !isSameSiteOrigin(req, originOrReferer)) {
