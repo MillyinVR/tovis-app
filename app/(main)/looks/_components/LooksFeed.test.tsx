@@ -376,7 +376,7 @@ function installFetchMock(args?: {
         })
       }
 
-      if (url.startsWith('/api/looks?')) {
+      if (url.startsWith('/api/v1/looks?')) {
         const parsed = new URL(url, 'http://localhost')
         const following = parsed.searchParams.get('following') === 'true'
         const key = following
@@ -595,7 +595,7 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/looks?limit=24&category=hair',
+        '/api/v1/looks?limit=24&category=hair',
         expect.objectContaining({
           cache: 'no-store',
           headers: { Accept: 'application/json' },
@@ -624,7 +624,7 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/looks?limit=24&following=true',
+        '/api/v1/looks?limit=24&following=true',
         expect.objectContaining({
           cache: 'no-store',
           headers: { Accept: 'application/json' },

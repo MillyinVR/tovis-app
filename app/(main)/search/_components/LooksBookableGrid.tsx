@@ -48,7 +48,7 @@ export default function LooksBookableGrid({ categorySlug }: LooksBookableGridPro
         qs.set('sort', 'ranked')
         if (categorySlug) qs.set('category', categorySlug)
 
-        const res = await fetch(`/api/looks?${qs.toString()}`, {
+        const res = await fetch(`/api/v1/looks?${qs.toString()}`, {
           cache: 'no-store',
           headers: { Accept: 'application/json' },
           signal: controller.signal,

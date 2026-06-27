@@ -205,7 +205,7 @@ export default function ClientViralRequestsPanel() {
       setLoading(true)
       setError(null)
 
-      const res = await fetch('/api/viral-service-requests?take=20', {
+      const res = await fetch('/api/v1/viral-service-requests?take=20', {
         cache: 'no-store',
         headers: {
           Accept: 'application/json',
