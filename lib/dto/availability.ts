@@ -2,28 +2,26 @@
 //
 // Wire DTOs for the availability endpoints (GET /api/v1/availability/*).
 //
-// `alternates` already has a maintained response type in the booking drawer's
-// `types.ts` (the web client decodes that exact shape) and the route now
-// enforces it via `satisfies`, so we re-export it here for native codegen.
+// day / bootstrap / alternates have maintained response types in the booking
+// drawer's `types.ts` (the web client decodes those exact shapes); each route
+// now enforces its `*Ok` type via `satisfies`, so we re-export them here for
+// native codegen. day/bootstrap serialize their `offering` to string prices via
+// `toAvailabilityOfferingDto` so they satisfy the string-typed contract.
 // `other-pros` was the one endpoint returning an inline literal with no named
 // type; its DTO is defined here and enforced at the route via `satisfies`.
 //
-// NOT yet here: `day` / `bootstrap`. Their route payloads embed an `offering`
-// whose price fields are typed `unknown` (raw Prisma.Decimal, serialized to a
-// string only implicitly by NextResponse.json), so they cannot `satisfies` the
-// drawer's `AvailabilityDayOk` / `AvailabilityBootstrapOk` (which declare
-// `string | null`). Publishing them accurately requires serializing the offering
-// explicitly at the route — a focused follow-up that touches the shared
-// `offeringContext` builder, tracked separately.
-//
 // All shapes here are JSON-safe (`OtherProRow` is plain primitives + a Prisma
-// enum; the alternates shape carries no Decimal/Date).
+// enum; offering prices are stringified; no Decimal/Date reaches the wire type).
 
 import type { ServiceLocationType } from '@prisma/client'
 
 import type { OtherProRow } from '@/lib/availability/data/otherPros'
 
-export type { AvailabilityAlternatesOk } from '@/app/(main)/booking/AvailabilityDrawer/types'
+export type {
+  AvailabilityDayOk,
+  AvailabilityBootstrapOk,
+  AvailabilityAlternatesOk,
+} from '@/app/(main)/booking/AvailabilityDrawer/types'
 
 // Echoed-back request descriptor on the other-pros response.
 export type AvailabilityOtherProsRequestDTO = {

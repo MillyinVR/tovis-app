@@ -17,6 +17,7 @@ import {
 } from '@/lib/availability/core/placement'
 import { type BookingErrorCode } from '@/lib/booking/errors'
 import { prisma } from '@/lib/prisma'
+import type { AvailabilityOffering } from '@/app/(main)/booking/AvailabilityDrawer/types'
 
 type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
 
@@ -31,6 +32,33 @@ export type AvailabilityOfferingPayload = {
   mobileDurationMinutes: number | null
   salonPriceStartingAt: unknown
   mobilePriceStartingAt: unknown
+}
+
+/**
+ * Serialize the cached offering payload into the wire `AvailabilityOffering`
+ * shape. The payload keeps prices as `unknown` (a Prisma.Decimal that can't be
+ * structured-cloned into the placement cache); this stringifies them so the
+ * day/bootstrap responses carry `MoneyString | null` and can be `satisfies`-
+ * checked against the published contract.
+ */
+export function toAvailabilityOfferingDto(
+  payload: AvailabilityOfferingPayload,
+): AvailabilityOffering {
+  return {
+    id: payload.id,
+    offersInSalon: payload.offersInSalon,
+    offersMobile: payload.offersMobile,
+    salonDurationMinutes: payload.salonDurationMinutes,
+    mobileDurationMinutes: payload.mobileDurationMinutes,
+    salonPriceStartingAt:
+      payload.salonPriceStartingAt != null
+        ? String(payload.salonPriceStartingAt)
+        : null,
+    mobilePriceStartingAt:
+      payload.mobilePriceStartingAt != null
+        ? String(payload.mobilePriceStartingAt)
+        : null,
+  }
 }
 
 export type AvailabilityOfferingContext = {

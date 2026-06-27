@@ -55,9 +55,17 @@ vi.mock('@/lib/availability/data/busyIntervals', () => ({
   loadBusyIntervals: mocks.loadBusyIntervals,
 }))
 
-vi.mock('@/lib/availability/data/offeringContext', () => ({
-  loadAvailabilityOfferingContext: mocks.loadAvailabilityOfferingContext,
-}))
+vi.mock('@/lib/availability/data/offeringContext', async () => {
+  const actual =
+    await vi.importActual<
+      typeof import('@/lib/availability/data/offeringContext')
+    >('@/lib/availability/data/offeringContext')
+
+  return {
+    ...actual,
+    loadAvailabilityOfferingContext: mocks.loadAvailabilityOfferingContext,
+  }
+})
 
 vi.mock('@/lib/availability/data/otherPros', () => ({
   loadOtherProsNearbyCached: mocks.loadOtherProsNearbyCached,

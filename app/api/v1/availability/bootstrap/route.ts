@@ -5,11 +5,15 @@ import { createHash } from 'node:crypto'
 import { ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import type { AvailabilityBootstrapOk } from '@/app/(main)/booking/AvailabilityDrawer/types'
 import { toRecord } from '@/lib/typed'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import { buildSummaryCacheKey } from '@/lib/availability/data/cache'
-import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
+import {
+  loadAvailabilityOfferingContext,
+  toAvailabilityOfferingDto,
+} from '@/lib/availability/data/offeringContext'
 import {
   loadOtherProsNearbyCached,
   type OtherProRow,
@@ -895,7 +899,7 @@ export async function GET(req: Request) {
         otherPros,
         locationOptions,
         waitlistSupported: true,
-        offering: offeringPayload,
+        offering: toAvailabilityOfferingDto(offeringPayload),
 
         ...(debug
           ? {
@@ -947,13 +951,16 @@ export async function GET(req: Request) {
 
     const finalPayload = {
       ...cachedPayload,
+      // The cache round-trip widens `ok` to boolean; it is always a success
+      // payload here, so pin it back to the literal the contract requires.
+      ok: true as const,
       mediaId: mediaId || null,
       availableDays: refreshedAvailableDays,
       selectedDay: refreshedSelectedDay,
     }
 
     markTimer(timers, 'total:end')
-    return withServerTiming(jsonOk(finalPayload), timers)
+    return withServerTiming(jsonOk(finalPayload satisfies AvailabilityBootstrapOk), timers)
   } catch (err: unknown) {
     console.error('GET /api/v1/availability/bootstrap error', err)
 
