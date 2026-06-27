@@ -18,6 +18,7 @@ import {
   type EmailProviderSendRequest,
   type InAppProviderSendRequest,
   type NotificationDeliveryProvider,
+  type PushProviderSendRequest,
   type SmsProviderSendRequest,
 } from '@/lib/notifications/delivery/providerTypes'
 import { createEmailDeliveryProvider } from '@/lib/notifications/delivery/sendEmail'
@@ -163,14 +164,30 @@ function buildEmailProvider(): NotificationDeliveryProvider<EmailProviderSendReq
   }
 }
 
+function buildApnsProvider(): NotificationDeliveryProvider<PushProviderSendRequest> | null {
+  // PR2a: no APNs client yet. The push capability gate (isPushProviderConfigured)
+  // keeps PUSH rows from ever being enqueued, so this null provider is just the
+  // belt-and-suspenders safety net — any stray PUSH/APNS row stays claimable
+  // instead of crashing the worker. PR2b returns a real ApnsDeliveryProvider here.
+  return null
+}
+
+function buildFcmProvider(): NotificationDeliveryProvider<PushProviderSendRequest> | null {
+  // PR2a: no FCM client yet. See buildApnsProvider — PR2b returns the real
+  // FcmDeliveryProvider here.
+  return null
+}
+
 export function buildNotificationProviderRegistry(): DeliveryProviderRegistry {
-  // In-app needs no external provider and must always be available. SMS and email
-  // are included only when configured; when absent their deliveries stay claimable
-  // (see processDueDeliveries) rather than taking down the whole worker.
+  // In-app needs no external provider and must always be available. SMS, email and
+  // push are included only when configured; when absent their deliveries stay
+  // claimable (see processDueDeliveries) rather than taking down the whole worker.
   return {
     inApp: buildInAppProvider(),
     sms: buildSmsProvider(),
     email: buildEmailProvider(),
+    apns: buildApnsProvider(),
+    fcm: buildFcmProvider(),
   }
 }
 

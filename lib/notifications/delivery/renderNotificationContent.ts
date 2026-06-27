@@ -42,10 +42,21 @@ export type RenderedEmailNotificationContent = {
   html: string
 }
 
+export type RenderedPushNotificationContent = {
+  channel: typeof NotificationChannel.PUSH
+  templateKey: NotificationTemplateKey
+  templateVersion: number
+  title: string
+  body: string
+  // Optional deep link into the app (internal path, same as in-app href).
+  href?: string
+}
+
 export type RenderedNotificationContent =
   | RenderedInAppNotificationContent
   | RenderedSmsNotificationContent
   | RenderedEmailNotificationContent
+  | RenderedPushNotificationContent
 
 export type RenderNotificationContentArgs = {
   channel: NotificationChannel
@@ -68,6 +79,10 @@ type TemplateRendererSet = {
     dispatch: NotificationRenderDispatchLike,
     brandName: string,
   ) => Omit<RenderedEmailNotificationContent, 'templateKey' | 'templateVersion'>
+  push: (
+    dispatch: NotificationRenderDispatchLike,
+    brandName: string,
+  ) => Omit<RenderedPushNotificationContent, 'templateKey' | 'templateVersion'>
 }
 
 function normalizeTemplateVersion(value: number | null | undefined): number {
@@ -266,6 +281,20 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
         }),
       }
     },
+
+    push(dispatch) {
+      // Push payload mirrors the in-app notification: a short title + body, plus
+      // an internal deep-link path the native app resolves on tap. The OS chrome
+      // already shows the app/brand, so we don't prefix the title with the brand.
+      const href = sanitizeInternalHref(dispatch.href)
+
+      return {
+        channel: NotificationChannel.PUSH,
+        title: normalizeText(dispatch.title),
+        body: normalizeText(dispatch.body),
+        ...(href ? { href } : {}),
+      }
+    },
   }
 }
 
@@ -417,6 +446,14 @@ export function renderNotificationContent(
   if (args.channel === NotificationChannel.SMS) {
     return {
       ...renderer.sms(args.dispatch, brandName),
+      templateKey: args.templateKey,
+      templateVersion,
+    }
+  }
+
+  if (args.channel === NotificationChannel.PUSH) {
+    return {
+      ...renderer.push(args.dispatch, brandName),
       templateKey: args.templateKey,
       templateVersion,
     }

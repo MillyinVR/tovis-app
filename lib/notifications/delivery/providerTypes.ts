@@ -8,6 +8,7 @@ import {
   type RenderedEmailNotificationContent,
   type RenderedInAppNotificationContent,
   type RenderedNotificationContent,
+  type RenderedPushNotificationContent,
   type RenderedSmsNotificationContent,
 } from './renderNotificationContent'
 
@@ -45,10 +46,21 @@ export type EmailProviderSendRequest = ProviderSendRequestBase & {
   content: RenderedEmailNotificationContent
 }
 
+// PUSH is unique among channels: its provider is per-device, not channel-fixed.
+// A delivery row targeting an iOS token routes via APNS; an Android token via
+// FCM. So the provider is one of APNS | FCM, resolved from the device platform
+// at enqueue time (see enqueueDispatch) and carried on the delivery row.
+export type PushProviderSendRequest = ProviderSendRequestBase & {
+  provider: typeof NotificationProvider.APNS | typeof NotificationProvider.FCM
+  channel: typeof NotificationChannel.PUSH
+  content: RenderedPushNotificationContent
+}
+
 export type ProviderSendRequest =
   | InAppProviderSendRequest
   | SmsProviderSendRequest
   | EmailProviderSendRequest
+  | PushProviderSendRequest
 
 export type ProviderSuccessResult = {
   ok: true
@@ -105,6 +117,16 @@ export function isEmailProviderSendRequest(
   )
 }
 
+export function isPushProviderSendRequest(
+  request: ProviderSendRequest,
+): request is PushProviderSendRequest {
+  return (
+    (request.provider === NotificationProvider.APNS ||
+      request.provider === NotificationProvider.FCM) &&
+    request.channel === NotificationChannel.PUSH
+  )
+}
+
 export function assertProviderMatchesRenderedContent(args: {
   provider: NotificationProvider
   channel: NotificationChannel
@@ -135,5 +157,13 @@ export function assertProviderMatchesRenderedContent(args: {
     args.channel !== NotificationChannel.EMAIL
   ) {
     throw new Error('providerTypes: POSTMARK must use EMAIL channel')
+  }
+
+  if (
+    (args.provider === NotificationProvider.APNS ||
+      args.provider === NotificationProvider.FCM) &&
+    args.channel !== NotificationChannel.PUSH
+  ) {
+    throw new Error('providerTypes: APNS/FCM must use PUSH channel')
   }
 }

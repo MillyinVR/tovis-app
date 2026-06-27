@@ -14,6 +14,9 @@ const mockPrisma = vi.hoisted(() => ({
     findUnique: vi.fn(),
     create: vi.fn(),
   },
+  deviceToken: {
+    findMany: vi.fn(),
+  },
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -191,6 +194,9 @@ function makeDispatchRecord(
 describe('lib/notifications/dispatch/enqueueDispatch', () => {
   beforeEach(() => {
     resetMockGroup(mockPrisma.notificationDispatch)
+    resetMockGroup(mockPrisma.deviceToken)
+    // Default: no active device tokens (push fan-out only runs when configured).
+    mockPrisma.deviceToken.findMany.mockResolvedValue([])
 
     // SMS dispatch is gated on a configured Twilio provider. Configure one so the
     // existing default-channel assertions (which include SMS) hold; the dedicated
@@ -832,6 +838,211 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         },
       }),
       select: expect.any(Object),
+    })
+  })
+
+  describe('PUSH per-device fan-out', () => {
+    const APNS_ENV = {
+      APNS_AUTH_KEY: 'p8_key',
+      APNS_KEY_ID: 'key_id',
+      APNS_TEAM_ID: 'team_id',
+      APNS_BUNDLE_ID: 'me.tovis.app',
+    } as const
+
+    function configureApns() {
+      for (const [name, value] of Object.entries(APNS_ENV)) {
+        process.env[name] = value
+      }
+    }
+
+    function clearApns() {
+      for (const name of Object.keys(APNS_ENV)) {
+        delete process.env[name]
+      }
+    }
+
+    afterEach(() => {
+      clearApns()
+    })
+
+    it('does NOT create any PUSH rows or query device tokens when no push provider is configured (inert)', async () => {
+      // No APNS/FCM env configured → push capability gate is off.
+      const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+
+      mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+      mockPrisma.notificationDispatch.create.mockResolvedValue(
+        makeDispatchRecord({ scheduledFor }),
+      )
+
+      const result = await enqueueDispatch({
+        key: NotificationEventKey.BOOKING_CONFIRMED,
+        sourceKey: 'client-notification:push_inert',
+        recipient: {
+          kind: NotificationRecipientKind.CLIENT,
+          clientId: 'client_1',
+          userId: 'user_1',
+          inAppTargetId: 'client_1',
+          email: 'client@example.com',
+          emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
+          timeZone: 'America/Los_Angeles',
+          preference: null,
+        },
+        title: 'Booking confirmed',
+        scheduledFor,
+      })
+
+      // Push must never even hit the DB when no provider is configured.
+      expect(mockPrisma.deviceToken.findMany).not.toHaveBeenCalled()
+      // BOOKING_CONFIRMED default channels for a client are in-app + email + push,
+      // but with no provider configured PUSH is suppressed (not selected).
+      expect(result.selectedChannels).not.toContain(NotificationChannel.PUSH)
+
+      const createArg = mockPrisma.notificationDispatch.create.mock.calls[0]?.[0]
+      const createdDeliveries =
+        createArg?.data?.deliveries?.create ?? []
+      const pushRows = createdDeliveries.filter(
+        (row: { channel: NotificationChannel }) =>
+          row.channel === NotificationChannel.PUSH,
+      )
+      // A single suppressed PUSH row (null destination) is fine; what matters is
+      // there is NO sendable (PENDING) PUSH row.
+      const pendingPushRows = pushRows.filter(
+        (row: { status: NotificationDeliveryStatus }) =>
+          row.status === NotificationDeliveryStatus.PENDING,
+      )
+      expect(pendingPushRows).toHaveLength(0)
+    })
+
+    it('fans PUSH out to one row per active device token with the per-device provider', async () => {
+      configureApns()
+
+      const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+
+      mockPrisma.deviceToken.findMany.mockResolvedValue([
+        { platform: 'IOS', token: 'apns_token_a' },
+        { platform: 'ANDROID', token: 'fcm_token_b' },
+        { platform: 'IOS', token: 'apns_token_c' },
+      ])
+
+      mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+      mockPrisma.notificationDispatch.create.mockResolvedValue(
+        makeDispatchRecord({ scheduledFor }),
+      )
+
+      const result = await enqueueDispatch({
+        key: NotificationEventKey.BOOKING_CONFIRMED,
+        sourceKey: 'client-notification:push_fanout',
+        recipient: {
+          kind: NotificationRecipientKind.CLIENT,
+          clientId: 'client_1',
+          userId: 'user_1',
+          inAppTargetId: 'client_1',
+          email: 'client@example.com',
+          emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
+          timeZone: 'America/Los_Angeles',
+          preference: null,
+        },
+        title: 'Booking confirmed',
+        href: '/client/bookings/booking_1',
+        scheduledFor,
+      })
+
+      // Device tokens are queried for the recipient user, active only.
+      expect(mockPrisma.deviceToken.findMany).toHaveBeenCalledWith({
+        where: { userId: 'user_1', isActive: true },
+        select: { platform: true, token: true },
+      })
+
+      expect(result.selectedChannels).toContain(NotificationChannel.PUSH)
+
+      const createArg = mockPrisma.notificationDispatch.create.mock.calls[0]?.[0]
+      const createdDeliveries: Array<{
+        channel: NotificationChannel
+        provider: NotificationProvider
+        destination: string | null
+        status: NotificationDeliveryStatus
+        maxAttempts: number
+      }> = createArg?.data?.deliveries?.create ?? []
+
+      const pushRows = createdDeliveries.filter(
+        (row) => row.channel === NotificationChannel.PUSH,
+      )
+
+      // One PUSH row per active token, each PENDING with the token as destination.
+      expect(pushRows).toHaveLength(3)
+      expect(
+        pushRows.map((row) => ({
+          destination: row.destination,
+          provider: row.provider,
+          status: row.status,
+          maxAttempts: row.maxAttempts,
+        })),
+      ).toEqual([
+        {
+          destination: 'apns_token_a',
+          provider: NotificationProvider.APNS,
+          status: NotificationDeliveryStatus.PENDING,
+          maxAttempts: 4,
+        },
+        {
+          destination: 'fcm_token_b',
+          provider: NotificationProvider.FCM,
+          status: NotificationDeliveryStatus.PENDING,
+          maxAttempts: 4,
+        },
+        {
+          destination: 'apns_token_c',
+          provider: NotificationProvider.APNS,
+          status: NotificationDeliveryStatus.PENDING,
+          maxAttempts: 4,
+        },
+      ])
+    })
+
+    it('suppresses PUSH (no PENDING rows) when the provider is configured but the user has no active tokens', async () => {
+      configureApns()
+
+      const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+
+      mockPrisma.deviceToken.findMany.mockResolvedValue([])
+      mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+      mockPrisma.notificationDispatch.create.mockResolvedValue(
+        makeDispatchRecord({ scheduledFor }),
+      )
+
+      const result = await enqueueDispatch({
+        key: NotificationEventKey.BOOKING_CONFIRMED,
+        sourceKey: 'client-notification:push_no_tokens',
+        recipient: {
+          kind: NotificationRecipientKind.CLIENT,
+          clientId: 'client_1',
+          userId: 'user_1',
+          inAppTargetId: 'client_1',
+          email: 'client@example.com',
+          emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
+          timeZone: 'America/Los_Angeles',
+          preference: null,
+        },
+        title: 'Booking confirmed',
+        scheduledFor,
+      })
+
+      expect(mockPrisma.deviceToken.findMany).toHaveBeenCalledTimes(1)
+      expect(result.selectedChannels).not.toContain(NotificationChannel.PUSH)
+
+      const createArg = mockPrisma.notificationDispatch.create.mock.calls[0]?.[0]
+      const createdDeliveries: Array<{
+        channel: NotificationChannel
+        status: NotificationDeliveryStatus
+        destination: string | null
+      }> = createArg?.data?.deliveries?.create ?? []
+
+      const pendingPushRows = createdDeliveries.filter(
+        (row) =>
+          row.channel === NotificationChannel.PUSH &&
+          row.status === NotificationDeliveryStatus.PENDING,
+      )
+      expect(pendingPushRows).toHaveLength(0)
     })
   })
 })

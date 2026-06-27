@@ -9,10 +9,12 @@ import { prisma } from '@/lib/prisma'
 import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
+  DevicePlatform,
   NotificationChannel,
   NotificationDeliveryEventType,
   NotificationDeliveryStatus,
   NotificationPriority,
+  NotificationProvider,
   NotificationRecipientKind,
   Prisma,
   type NotificationEventKey,
@@ -29,7 +31,7 @@ import {
   getMaxAttemptsForChannel,
   getProviderForChannel,
 } from '../delivery/providerPolicy'
-import { isTwilioSmsConfigured } from '../config'
+import { isPushProviderConfigured, isTwilioSmsConfigured } from '../config'
 import { getNotificationEventDefinition } from '../eventKeys'
 
 const RECIPIENT_KIND = {
@@ -216,6 +218,10 @@ type NormalizedEnqueueDispatchArgs = {
 
 type DeliveryCreateRow = {
   channel: NotificationChannel
+  // The persisted provider for this row. For most channels it is the fixed
+  // channel→provider binding; for PUSH it is per-device (APNS for iOS, FCM for
+  // Android), so the fan-out sets it explicitly per token.
+  provider: NotificationProvider
   status: NotificationDeliveryStatus
   destination: string | null
   templateKey: string
@@ -224,6 +230,20 @@ type DeliveryCreateRow = {
   nextAttemptAt: Date
   suppressedAt: Date | null
   events: Prisma.NotificationDeliveryEventCreateWithoutDeliveryInput[]
+}
+
+// Minimal active-device-token shape used for PUSH fan-out (one delivery per token).
+type ActiveDeviceToken = {
+  platform: DevicePlatform
+  token: string
+}
+
+function pushProviderForPlatform(
+  platform: DevicePlatform,
+): NotificationProvider {
+  return platform === DevicePlatform.IOS
+    ? NotificationProvider.APNS
+    : NotificationProvider.FCM
 }
 
 function getDb(tx?: Prisma.TransactionClient): DispatchDbClient {
@@ -291,6 +311,13 @@ function getDestinationForChannel(args: {
     return args.capabilities.hasSmsDestination ? args.phone : null
   }
 
+  // PUSH destinations are per-device tokens, materialized one-per-token in the
+  // fan-out path (buildPushDeliveryRows). A non-fanned PUSH row (no usable push
+  // destination) carries a null destination and is suppressed.
+  if (args.channel === NotificationChannel.PUSH) {
+    return null
+  }
+
   return args.capabilities.hasEmailDestination ? args.email : null
 }
 
@@ -349,6 +376,10 @@ function inferSuppressionReasonFromPersistedDelivery(args: {
     return 'MISSING_SMS_DESTINATION'
   }
 
+  if (args.channel === NotificationChannel.PUSH) {
+    return 'MISSING_PUSH_TOKENS'
+  }
+
   return 'MISSING_EMAIL_DESTINATION'
 }
 
@@ -386,6 +417,7 @@ function buildCapabilities(args: {
   transactionalSmsConsentAt: Date | null
   email: string | null
   emailVerifiedAt: Date | null
+  hasPushDestination: boolean
 }) {
   const capabilities = getRecipientChannelCapabilities({
     recipientKind: args.recipientKind,
@@ -395,6 +427,7 @@ function buildCapabilities(args: {
     transactionalSmsConsentAt: args.transactionalSmsConsentAt,
     email: args.email,
     emailVerifiedAt: args.emailVerifiedAt,
+    hasPushDestination: args.hasPushDestination,
   })
 
   // Launch gate: never select SMS while no Twilio provider is configured.
@@ -409,15 +442,61 @@ function buildCapabilities(args: {
   return capabilities
 }
 
+// PUSH fans out to ONE delivery row per active device token (destination = the
+// token, provider = APNS for iOS / FCM for Android). An enabled PUSH evaluation
+// is only ever produced when the push capability is present, which already
+// requires at least one active token, so this returns ≥1 row in that case.
+function buildPushDeliveryRows(args: {
+  templateKey: string
+  scheduledFor: Date
+  activeDeviceTokens: readonly ActiveDeviceToken[]
+}): DeliveryCreateRow[] {
+  const maxAttempts = getMaxAttemptsForChannel(NotificationChannel.PUSH)
+
+  return args.activeDeviceTokens.map((deviceToken) => ({
+    channel: NotificationChannel.PUSH,
+    provider: pushProviderForPlatform(deviceToken.platform),
+    status: NotificationDeliveryStatus.PENDING,
+    destination: deviceToken.token,
+    templateKey: args.templateKey,
+    templateVersion: DEFAULT_TEMPLATE_VERSION,
+    maxAttempts,
+    nextAttemptAt: args.scheduledFor,
+    suppressedAt: null,
+    events: buildDeliveryEvents({
+      status: NotificationDeliveryStatus.PENDING,
+      suppressionReason: null,
+    }),
+  }))
+}
+
 function buildDeliveryRows(args: {
   normalized: NormalizedEnqueueDispatchArgs
   evaluations: ChannelEvaluation[]
   capabilities: ReturnType<typeof getRecipientChannelCapabilities>
+  activeDeviceTokens: readonly ActiveDeviceToken[]
 }): DeliveryCreateRow[] {
   const eventDefinition = getNotificationEventDefinition(args.normalized.key)
   const templateKey = eventDefinition.templateKey
 
-  return args.evaluations.map((evaluation) => {
+  const rows: DeliveryCreateRow[] = []
+
+  for (const evaluation of args.evaluations) {
+    // PUSH (enabled) fans out to one row per active device token.
+    if (
+      evaluation.channel === NotificationChannel.PUSH &&
+      evaluation.enabled
+    ) {
+      rows.push(
+        ...buildPushDeliveryRows({
+          templateKey,
+          scheduledFor: args.normalized.scheduledFor,
+          activeDeviceTokens: args.activeDeviceTokens,
+        }),
+      )
+      continue
+    }
+
     const destination = getDestinationForChannel({
       channel: evaluation.channel,
       capabilities: args.capabilities,
@@ -433,8 +512,9 @@ function buildDeliveryRows(args: {
     const suppressedAt =
       status === NotificationDeliveryStatus.SUPPRESSED ? new Date() : null
 
-    return {
+    rows.push({
       channel: evaluation.channel,
+      provider: getProviderForChannel(evaluation.channel),
       status,
       destination,
       templateKey,
@@ -446,8 +526,10 @@ function buildDeliveryRows(args: {
         status,
         suppressionReason: evaluation.reason,
       }),
-    }
-  })
+    })
+  }
+
+  return rows
 }
 
 function buildDispatchCreateData(args: {
@@ -525,7 +607,7 @@ function buildDispatchCreateData(args: {
     deliveries: {
       create: deliveryRows.map((row) => ({
         channel: row.channel,
-        provider: getProviderForChannel(row.channel),
+        provider: row.provider,
         status: row.status,
         destination: row.destination,
         templateKey: row.templateKey,
@@ -721,6 +803,30 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
   }
 }
 
+// Resolve the recipient user's active push tokens for PUSH fan-out. Returns []
+// when there is no resolvable user (some pro/client recipients have no linked
+// User) or no PUSH provider is configured — both keep PUSH fully inert. Querying
+// is gated on isPushProviderConfigured() FIRST so PR2a never even hits the DB for
+// push (and never creates un-sendable PUSH rows that would retry forever).
+async function loadActiveDeviceTokensForRecipient(args: {
+  userId: string | null
+  db: DispatchDbClient
+}): Promise<ActiveDeviceToken[]> {
+  if (!isPushProviderConfigured()) return []
+  if (!args.userId) return []
+
+  return args.db.deviceToken.findMany({
+    where: {
+      userId: args.userId,
+      isActive: true,
+    },
+    select: {
+      platform: true,
+      token: true,
+    },
+  })
+}
+
 async function findDispatchBySourceKey(args: {
   sourceKey: string
   tx?: Prisma.TransactionClient
@@ -770,6 +876,18 @@ export async function enqueueDispatch(
   const db = getDb(args.tx)
   const normalized = normalizeArgs(args)
 
+  // PUSH fan-out targets the recipient user's active device tokens. A push
+  // destination only "exists" when a provider is configured AND there is at least
+  // one active token; in PR2a no provider is configured, so this resolves to []
+  // and the PUSH capability is false → zero PUSH rows are ever created.
+  const activeDeviceTokens = await loadActiveDeviceTokensForRecipient({
+    userId: normalized.userId,
+    db,
+  })
+
+  const hasPushDestination =
+    isPushProviderConfigured() && activeDeviceTokens.length > 0
+
   const capabilities = buildCapabilities({
     recipientKind: normalized.recipientKind,
     inAppTargetId: normalized.inAppTargetId,
@@ -778,6 +896,7 @@ export async function enqueueDispatch(
     transactionalSmsConsentAt: normalized.transactionalSmsConsentAt,
     email: normalized.email,
     emailVerifiedAt: normalized.emailVerifiedAt,
+    hasPushDestination,
   })
 
   const policy = resolveChannelPolicy({
@@ -795,6 +914,7 @@ export async function enqueueDispatch(
     normalized,
     evaluations: policy.evaluations,
     capabilities,
+    activeDeviceTokens,
   })
 
   const existing = await findDispatchBySourceKey({

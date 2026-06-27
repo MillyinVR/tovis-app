@@ -102,9 +102,20 @@ both live in the same two files. Ship them as **one focused PR** before any clie
 > echoed) in the barrel. NOTE: notification-engine enums (`NotificationChannel.PUSH`,
 > `NotificationProvider.APNS/FCM`) are deliberately deferred to PR2 — adding `PUSH` now would
 > break the exhaustive `Record<NotificationChannel>` typecheck before the engine arms exist.
-> **PR2 (next):** 4th PUSH arm across the ~9 `IN_APP/SMS/EMAIL` branches + fan-out + APNs/FCM
-> client (env-gated, inert without creds). **PR3/operator:** provision APNs .p8 + FCM
-> service-account JSON → Vercel env; on-device smoke. Full map: scratchpad tier1.1-push-plan.md.
+> **PR2a (shipped — engine wiring, still inert):** `NotificationChannel.PUSH` +
+> `NotificationProvider.APNS/FCM` enums; `NotificationDelivery` unique →
+> `[dispatchId, channel, destination]` (migration `20260627010000`); 4th PUSH arm across the
+> channel branches; per-device fan-out in enqueueDispatch (one delivery row per active token,
+> provider = APNS/iOS|FCM/Android set per-row); push render; `sendWithProvider` APNS/FCM cases
+> routing to null providers; `isPushProviderConfigured()` gate (DB not even queried until a
+> provider exists) ⇒ zero PUSH rows in prod. PUSH added to "push later" event defaults.
+> **PR2b (next):** real APNs HTTP/2 (.p8 JWT) + FCM HTTP v1 clients in `sendPush.ts` +
+> `requireApnsConfig`/`requireFcmConfig` + token invalidation on 410/UNREGISTERED + deps.
+> ⚠️ PR2b must also ensure the dispatch's `userId` is populated for pro/client recipients
+> (push targets User.deviceTokens). **PR3/operator:** provision APNs .p8 + FCM service-account
+> JSON → Vercel env; on-device smoke. Plans: scratchpad tier1.1-push-plan.md + tier1.1-pr2-scope.md.
+> NOTE: the generated api schema has pre-existing Prisma-internal type leakage (from #390) that
+> churns on enum changes — worth tightening the barrel later so codegen output is clean.
 - **What:** There is NO push infrastructure today (no APNs/FCM, no device-token model, no
   web-push, no service worker). Build it.
 - **Why:** Push is the core value of a native app. None of it exists.

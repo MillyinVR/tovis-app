@@ -20,6 +20,7 @@ export type NotificationPreferenceLike =
       | 'inAppEnabled'
       | 'smsEnabled'
       | 'emailEnabled'
+      | 'pushEnabled'
       | 'quietHoursStartMinutes'
       | 'quietHoursEndMinutes'
     >
@@ -28,6 +29,7 @@ export type NotificationPreferenceLike =
       | 'inAppEnabled'
       | 'smsEnabled'
       | 'emailEnabled'
+      | 'pushEnabled'
       | 'quietHoursStartMinutes'
       | 'quietHoursEndMinutes'
     >
@@ -36,6 +38,7 @@ export type RecipientChannelCapabilities = {
   hasInAppTarget: boolean
   hasSmsDestination: boolean
   hasEmailDestination: boolean
+  hasPushDestination: boolean
 }
 
 export type ChannelSuppressionReason =
@@ -45,6 +48,7 @@ export type ChannelSuppressionReason =
   | 'MISSING_IN_APP_TARGET'
   | 'MISSING_SMS_DESTINATION'
   | 'MISSING_EMAIL_DESTINATION'
+  | 'MISSING_PUSH_TOKENS'
   | 'QUIET_HOURS'
 
 export type ChannelEvaluation = {
@@ -108,6 +112,7 @@ const ALL_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.IN_APP,
   NotificationChannel.SMS,
   NotificationChannel.EMAIL,
+  NotificationChannel.PUSH,
 ]
 
 function normalizeMinuteOfDay(value: number | null | undefined): number | null {
@@ -139,6 +144,10 @@ function getCapabilityForChannel(
     return capabilities.hasSmsDestination
   }
 
+  if (channel === NotificationChannel.PUSH) {
+    return capabilities.hasPushDestination
+  }
+
   return capabilities.hasEmailDestination
 }
 
@@ -151,6 +160,10 @@ function getMissingCapabilityReason(
 
   if (channel === NotificationChannel.SMS) {
     return 'MISSING_SMS_DESTINATION'
+  }
+
+  if (channel === NotificationChannel.PUSH) {
+    return 'MISSING_PUSH_TOKENS'
   }
 
   return 'MISSING_EMAIL_DESTINATION'
@@ -170,11 +183,19 @@ function isPreferenceEnabledForChannel(
     return preference.smsEnabled
   }
 
+  if (channel === NotificationChannel.PUSH) {
+    return preference.pushEnabled
+  }
+
   return preference.emailEnabled
 }
 
 function channelUsesQuietHours(channel: NotificationChannel): boolean {
-  return channel === NotificationChannel.SMS || channel === NotificationChannel.EMAIL
+  return (
+    channel === NotificationChannel.SMS ||
+    channel === NotificationChannel.EMAIL ||
+    channel === NotificationChannel.PUSH
+  )
 }
 
 function isWithinQuietHours(args: {
@@ -311,6 +332,17 @@ export function getRecipientChannelCapabilities(args: {
   transactionalSmsConsentAt?: Date | null
   email?: string | null
   emailVerifiedAt?: Date | null
+  /**
+   * Whether the recipient has a usable PUSH destination. Computed by the caller
+   * (the enqueue path) as: a PUSH provider is configured AND the recipient's user
+   * has at least one active DeviceToken. We take it as an input rather than
+   * querying here so this helper stays pure/synchronous like the other capability
+   * checks; the caller already resolves the recipient's user + devices.
+   *
+   * In PR2a no PUSH provider is configured, so callers pass false and PUSH
+   * deliveries are never created.
+   */
+  hasPushDestination?: boolean
 }): RecipientChannelCapabilities {
   const inAppTargetId =
     typeof args.inAppTargetId === 'string' ? args.inAppTargetId.trim() : ''
@@ -332,6 +364,7 @@ export function getRecipientChannelCapabilities(args: {
     hasEmailDestination:
       email.length > 0 &&
       (!emailRequiresVerification || Boolean(args.emailVerifiedAt)),
+    hasPushDestination: args.hasPushDestination === true,
   }
 }
 

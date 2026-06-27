@@ -167,6 +167,8 @@ describe('chaos: Redis outage', () => {
         inApp: createRedisOutageInAppProvider(),
         sms: createUnusedSmsProvider(),
         email: createUnusedEmailProvider(),
+        apns: null,
+        fcm: null,
       },
       claim: {
         now: NOW,

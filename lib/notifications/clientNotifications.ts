@@ -52,6 +52,7 @@ const clientNotificationPreferenceSelect = {
   inAppEnabled: true,
   smsEnabled: true,
   emailEnabled: true,
+  pushEnabled: true,
   quietHoursStartMinutes: true,
   quietHoursEndMinutes: true,
 } satisfies Prisma.ClientNotificationPreferenceSelect

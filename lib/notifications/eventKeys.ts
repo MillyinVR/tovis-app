@@ -83,6 +83,33 @@ const CLIENT_IN_APP_ONLY_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.IN_APP,
 ]
 
+// "Push later" channel sets — the same audiences as the *_EMAIL / *_ONLY sets
+// above, now WITH the PUSH channel. PUSH stays fully inert until a provider is
+// configured and the recipient has registered device tokens (the capability gate
+// in channelPolicy/enqueueDispatch suppresses it otherwise), so adding it to the
+// default channel list is safe and is what makes PUSH fan out once it's live.
+const CLIENT_IN_APP_EMAIL_PUSH_CHANNELS: readonly NotificationChannel[] = [
+  NotificationChannel.IN_APP,
+  NotificationChannel.EMAIL,
+  NotificationChannel.PUSH,
+]
+
+const CLIENT_IN_APP_PUSH_CHANNELS: readonly NotificationChannel[] = [
+  NotificationChannel.IN_APP,
+  NotificationChannel.PUSH,
+]
+
+const PRO_IN_APP_EMAIL_PUSH_CHANNELS: readonly NotificationChannel[] = [
+  NotificationChannel.IN_APP,
+  NotificationChannel.EMAIL,
+  NotificationChannel.PUSH,
+]
+
+const PRO_IN_APP_PUSH_CHANNELS: readonly NotificationChannel[] = [
+  NotificationChannel.IN_APP,
+  NotificationChannel.PUSH,
+]
+
 const CLIENT_EMAIL_SMS_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.SMS,
   NotificationChannel.EMAIL,
@@ -160,8 +187,8 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
-      // Tier B confirmation: in-app + email (push later). No SMS for app users.
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
+      // Tier B confirmation: in-app + email + push. No SMS for app users.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -173,9 +200,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'booking_started',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
-      // In-app only now (push later) — booking-started is a low-urgency nudge,
-      // not worth SMS or email.
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+      // In-app + push — booking-started is a low-urgency nudge, not worth SMS or
+      // email, but a good fit for a push tap.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
   },
 
@@ -290,8 +317,8 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
-      // Tier B confirmation: in-app + email (push later). No SMS for app users.
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
+      // Tier B confirmation: in-app + email + push. No SMS for app users.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -307,8 +334,8 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
-      // Tier B confirmation: in-app + email (push later). No SMS for app users.
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
+      // Tier B confirmation: in-app + email + push. No SMS for app users.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -320,9 +347,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'review_received',
     supportedRecipients: [NotificationRecipientKind.PRO],
     defaultChannelsByRecipient: {
-      // Tier C social: in-app only (push later). No email — reviews are not a
-      // durable-record event worth an inbox message.
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+      // Tier C social: in-app + push. No email — reviews are not a durable-record
+      // event worth an inbox message, but a push tap fits.
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
     },
   },
 
@@ -431,9 +458,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       NotificationRecipientKind.CLIENT,
     ],
     defaultChannelsByRecipient: {
-      // Tier B receipt: in-app + email (push later). No SMS.
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
+      // Tier B receipt: in-app + email + push. No SMS.
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_PUSH_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 

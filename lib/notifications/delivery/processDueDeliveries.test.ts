@@ -164,6 +164,8 @@ function makeProviders() {
       inApp,
       sms,
       email,
+      apns: null,
+      fcm: null,
     },
     inAppSend,
     smsSend,

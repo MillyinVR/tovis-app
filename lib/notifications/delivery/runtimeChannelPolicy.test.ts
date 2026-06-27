@@ -12,11 +12,13 @@ function buildPreference(args?: {
   inAppEnabled?: boolean
   smsEnabled?: boolean
   emailEnabled?: boolean
+  pushEnabled?: boolean
 }) {
   return {
     inAppEnabled: args?.inAppEnabled ?? true,
     smsEnabled: args?.smsEnabled ?? true,
     emailEnabled: args?.emailEnabled ?? true,
+    pushEnabled: args?.pushEnabled ?? true,
     quietHoursStartMinutes: args?.quietHoursStartMinutes ?? null,
     quietHoursEndMinutes: args?.quietHoursEndMinutes ?? null,
   }
