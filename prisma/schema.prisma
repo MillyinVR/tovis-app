@@ -924,6 +924,7 @@ model ProfessionalNotificationPreference {
   inAppEnabled Boolean @default(true)
   smsEnabled   Boolean @default(false)
   emailEnabled Boolean @default(true)
+  pushEnabled  Boolean @default(true)
 
   quietHoursStartMinutes Int?
   quietHoursEndMinutes   Int?
@@ -945,6 +946,7 @@ model ClientNotificationPreference {
   inAppEnabled Boolean @default(true)
   smsEnabled   Boolean @default(true)
   emailEnabled Boolean @default(true)
+  pushEnabled  Boolean @default(true)
 
   quietHoursStartMinutes Int?
   quietHoursEndMinutes   Int?
@@ -956,6 +958,38 @@ model ClientNotificationPreference {
 
   @@unique([clientId, eventKey])
   @@index([clientId, updatedAt])
+}
+
+// A registered push-notification target for one user's device/install. Native
+// apps register their APNs/FCM token here on launch (and after refresh); the
+// notification engine fans a PUSH delivery out to all of a user's active tokens
+// (wired in a later phase). A token is globally unique to one install, so it is
+// reassigned to the current user on re-login rather than duplicated.
+model DeviceToken {
+  id     String @id @default(cuid())
+  userId String
+
+  platform DevicePlatform
+  token    String         @db.VarChar(512)
+
+  // Optional stable per-install id from the client (survives token refresh).
+  deviceId String? @db.VarChar(128)
+
+  isActive   Boolean   @default(true)
+  lastSeenAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation("UserDeviceTokens", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([platform, token])
+  @@index([userId, isActive])
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
 }
 
 model ConsultationApproval {
@@ -1185,6 +1219,7 @@ model User {
   notificationActor                  Notification[]              @relation("NotificationActor")
   adminNotifications                 AdminNotification[]         @relation("AdminNotifications")
   notificationDispatches             NotificationDispatch[]      @relation("UserNotificationDispatches")
+  deviceTokens                       DeviceToken[]               @relation("UserDeviceTokens")
   issuedClientActionTokens           ClientActionToken[]         @relation("IssuedClientActionTokens")
   recordedConsultationApprovalProofs ConsultationApprovalProof[] @relation("RecordedConsultationApprovalProofs")
   bookingOverrideAuditLogs           BookingOverrideAuditLog[]   @relation("BookingOverrideActor")

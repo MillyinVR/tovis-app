@@ -92,6 +92,19 @@ both live in the same two files. Ship them as **one focused PR** before any clie
 ## TIER 1 — Net-new builds (big, but additive; plan real time for these)
 
 ### 1.1 — Push notifications (APNs + FCM) — essentially greenfield
+> **🟡 IN PROGRESS — PR1 foundation shipped (2026-06-27).** Decisions: per-device delivery
+> rows (fan-out at enqueue), token-based auth (APNs .p8 + FCM HTTP v1), separate `APNS`/`FCM`
+> providers. **PR1 (this, inert):** new `DeviceToken` model + `DevicePlatform{IOS,ANDROID}`
+> enum + `pushEnabled` column on both pref tables (additive migration
+> `20260627000000_add_device_token_and_push_pref`); `POST`/`DELETE /api/v1/devices`
+> (bearer-auth, token globally unique → reassigned to current user on re-login, soft-deactivate
+> scoped to owner); `lib/notifications/devices/deviceTokens.ts`; `DeviceTokenDTO` (token NOT
+> echoed) in the barrel. NOTE: notification-engine enums (`NotificationChannel.PUSH`,
+> `NotificationProvider.APNS/FCM`) are deliberately deferred to PR2 — adding `PUSH` now would
+> break the exhaustive `Record<NotificationChannel>` typecheck before the engine arms exist.
+> **PR2 (next):** 4th PUSH arm across the ~9 `IN_APP/SMS/EMAIL` branches + fan-out + APNs/FCM
+> client (env-gated, inert without creds). **PR3/operator:** provision APNs .p8 + FCM
+> service-account JSON → Vercel env; on-device smoke. Full map: scratchpad tier1.1-push-plan.md.
 - **What:** There is NO push infrastructure today (no APNs/FCM, no device-token model, no
   web-push, no service worker). Build it.
 - **Why:** Push is the core value of a native app. None of it exists.
