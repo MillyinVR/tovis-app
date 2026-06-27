@@ -995,6 +995,33 @@ enum DevicePlatform {
   ANDROID
 }
 
+/// Per-device session revocation. The auth session is a stateless JWT keyed only
+/// by the per-user `authVersion` (bumping it kills EVERY session). To revoke a
+/// single lost/stolen device without signing the user out everywhere, a native
+/// session token also carries a stable `deviceId` claim; revoking sets
+/// `revokedAt` here and `getCurrentUser` rejects any token for that
+/// `(userId, deviceId)` whose issued-at (`iat`) is at or before `revokedAt`. A
+/// later re-login mints a fresher token that passes again, so one row per device
+/// (upserted) is enough — no per-token bookkeeping.
+model DeviceSessionRevocation {
+  id     String @id @default(cuid())
+  userId String
+
+  // Matches DeviceToken.deviceId (the stable per-install id the client sends).
+  deviceId String @db.VarChar(128)
+
+  // Tokens for this device issued at or before this instant are rejected.
+  revokedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation("UserDeviceSessionRevocations", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+}
+
 model ConsultationApproval {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -1223,6 +1250,7 @@ model User {
   adminNotifications                 AdminNotification[]         @relation("AdminNotifications")
   notificationDispatches             NotificationDispatch[]      @relation("UserNotificationDispatches")
   deviceTokens                       DeviceToken[]               @relation("UserDeviceTokens")
+  deviceSessionRevocations           DeviceSessionRevocation[]   @relation("UserDeviceSessionRevocations")
   issuedClientActionTokens           ClientActionToken[]         @relation("IssuedClientActionTokens")
   recordedConsultationApprovalProofs ConsultationApprovalProof[] @relation("RecordedConsultationApprovalProofs")
   bookingOverrideAuditLogs           BookingOverrideAuditLog[]   @relation("BookingOverrideActor")

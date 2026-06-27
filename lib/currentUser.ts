@@ -15,6 +15,7 @@ import { cookies, headers } from 'next/headers'
 
 import { type AuthSessionKind, type AuthRole, verifyToken } from './auth'
 import { parseBearerToken } from './auth/bearerToken'
+import { isDeviceSessionRevoked } from './auth/deviceSessions'
 import { canActAs } from './auth/workspaces'
 import { prisma } from './prisma'
 
@@ -73,6 +74,13 @@ export type CurrentUser = CurrentUserRecord & {
   isPhoneVerified: boolean
   isEmailVerified: boolean
   isFullyVerified: boolean
+  /**
+   * Stable per-install device id carried by a native session token, or null for
+   * web/cookie sessions. Re-mint endpoints (refresh, workspace switch, the
+   * verification→active transition) thread this back through so the device
+   * binding — and thus per-device revocation — survives.
+   */
+  deviceId: string | null
 }
 
 /**
@@ -103,6 +111,7 @@ function toCurrentUser(
   user: CurrentUserRecord,
   sessionKind: AuthSessionKind,
   actingRole: Role,
+  deviceId: string | null,
 ): CurrentUser {
   const isPhoneVerified = Boolean(user.phoneVerifiedAt)
   const isEmailVerified = Boolean(user.emailVerifiedAt)
@@ -115,6 +124,7 @@ function toCurrentUser(
     isPhoneVerified,
     isEmailVerified,
     isFullyVerified: isPhoneVerified && isEmailVerified,
+    deviceId,
   }
 }
 
@@ -144,6 +154,23 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (!user) return null
   if (user.authVersion !== payload.authVersion) return null
 
+  // Per-device revocation: a device-bound (native) token is rejected if its
+  // device was signed out after the token was issued. Web/cookie tokens carry
+  // no deviceId, so they skip the lookup entirely.
+  if (payload.deviceId) {
+    const revoked = await isDeviceSessionRevoked({
+      userId: payload.userId,
+      deviceId: payload.deviceId,
+      issuedAtSeconds: payload.issuedAtSeconds ?? null,
+    })
+    if (revoked) return null
+  }
+
   const actingRole = resolveActingRole(user, payload.role)
-  return toCurrentUser(user, payload.sessionKind, actingRole)
+  return toCurrentUser(
+    user,
+    payload.sessionKind,
+    actingRole,
+    payload.deviceId ?? null,
+  )
 }

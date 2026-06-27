@@ -29,6 +29,23 @@ type TokenSubject = {
 
 export type AuthTokenPayload = TokenSubject & {
   sessionKind: AuthSessionKind
+  /**
+   * Stable per-install device id, present only on tokens minted for a native
+   * client that supplied one. Enables per-device revocation (see
+   * `lib/auth/deviceSessions.ts`); web/cookie sessions omit it.
+   */
+  deviceId?: string
+  /**
+   * JWT `iat` (seconds since epoch), read back on verify. Used to decide whether
+   * a per-device revocation (which stamps a `revokedAt`) predates this token.
+   */
+  issuedAtSeconds?: number
+}
+
+/** What a caller provides when minting a token (the signable claims). */
+type CreateTokenInput = TokenSubject & {
+  sessionKind: AuthSessionKind
+  deviceId?: string | null
 }
 
 function isAuthRole(value: unknown): value is AuthRole {
@@ -52,6 +69,8 @@ function normalizeDecodedToken(
   const role = decoded.role
   const sessionKind = decoded.sessionKind
   const authVersion = decoded.authVersion
+  const deviceId = decoded.deviceId
+  const iat = decoded.iat
 
   if (!isNonEmptyString(userId)) return null
   if (!isAuthRole(role)) return null
@@ -63,6 +82,10 @@ function normalizeDecodedToken(
     role,
     sessionKind,
     authVersion,
+    ...(isNonEmptyString(deviceId) ? { deviceId } : {}),
+    ...(typeof iat === 'number' && Number.isFinite(iat)
+      ? { issuedAtSeconds: iat }
+      : {}),
   }
 }
 
@@ -77,27 +100,50 @@ export async function verifyPassword(
   return bcrypt.compare(password, hash)
 }
 
-export function createToken(payload: AuthTokenPayload): string {
-  return jwt.sign(payload, JWT_SECRET as string, {
-    expiresIn: TOKEN_EXPIRES_IN,
-  })
+function createToken(input: CreateTokenInput): string {
+  const deviceId =
+    typeof input.deviceId === 'string' && input.deviceId.trim()
+      ? input.deviceId.trim()
+      : null
+
+  return jwt.sign(
+    {
+      userId: input.userId,
+      role: input.role,
+      sessionKind: input.sessionKind,
+      authVersion: input.authVersion,
+      // Only embed the claim when a device id is actually present so web tokens
+      // stay byte-for-byte unchanged.
+      ...(deviceId ? { deviceId } : {}),
+    },
+    JWT_SECRET as string,
+    {
+      expiresIn: TOKEN_EXPIRES_IN,
+    },
+  )
 }
 
-export function createActiveToken(payload: TokenSubject): string {
+export function createActiveToken(
+  payload: TokenSubject & { deviceId?: string | null },
+): string {
   return createToken({
     userId: payload.userId,
     role: payload.role,
     sessionKind: 'ACTIVE',
     authVersion: payload.authVersion,
+    deviceId: payload.deviceId ?? null,
   })
 }
 
-export function createVerificationToken(payload: TokenSubject): string {
+export function createVerificationToken(
+  payload: TokenSubject & { deviceId?: string | null },
+): string {
   return createToken({
     userId: payload.userId,
     role: payload.role,
     sessionKind: 'VERIFICATION',
     authVersion: payload.authVersion,
+    deviceId: payload.deviceId ?? null,
   })
 }
 

@@ -863,6 +863,7 @@ describe('app/api/v1/auth/login/route', () => {
       userId: 'user_1',
       role: Role.CLIENT,
       authVersion: 1,
+      deviceId: null,
     })
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
 
@@ -935,6 +936,7 @@ describe('app/api/v1/auth/login/route', () => {
       userId: 'user_1',
       role: Role.PRO,
       authVersion: 1,
+      deviceId: null,
     })
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
 
@@ -943,6 +945,40 @@ describe('app/api/v1/auth/login/route', () => {
     expect(setCookie).toContain('Domain=.tovis.app')
     expect(setCookie).toContain('Secure')
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('binds the session to a native deviceId supplied in the body', async () => {
+    mockUserLookupByWhere([
+      makeUser({
+        role: Role.PRO,
+        phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
+        emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
+      }),
+    ])
+    mockVerifyPassword.mockResolvedValue(true)
+    mockPrisma.user.update.mockResolvedValue({
+      id: 'user_1',
+      email: 'user@example.com',
+      role: Role.PRO,
+      authVersion: 1,
+      phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
+      emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
+    })
+
+    await POST(
+      makeRequest({
+        email: 'user@example.com',
+        password: 'Secret123!',
+        deviceId: 'device_abc',
+      }),
+    )
+
+    expect(mockCreateActiveToken).toHaveBeenCalledWith({
+      userId: 'user_1',
+      role: Role.PRO,
+      authVersion: 1,
+      deviceId: 'device_abc',
+    })
   })
 
   it('auto-unlocks an expired lock and clears state on successful login', async () => {

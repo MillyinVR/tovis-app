@@ -265,11 +265,13 @@ export async function POST(request: Request) {
               userId: result.id,
               role: result.role,
               authVersion: result.authVersion,
+              deviceId: currentUser.deviceId, // preserve device binding
             })
           : createVerificationToken({
               userId: result.id,
               role: result.role,
               authVersion: result.authVersion,
+              deviceId: currentUser.deviceId,
             })
         : null
 

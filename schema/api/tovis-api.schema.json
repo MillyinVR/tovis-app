@@ -15,6 +15,13 @@
       ],
       "type": "string"
     },
+    "$Enums.DevicePlatform": {
+      "enum": [
+        "IOS",
+        "ANDROID"
+      ],
+      "type": "string"
+    },
     "$Enums.LastMinuteOfferType": {
       "enum": [
         "NONE",
@@ -2551,6 +2558,9 @@
         "clientProfile"
       ],
       "type": "object"
+    },
+    "DevicePlatform": {
+      "$ref": "#/definitions/%24Enums.DevicePlatform"
     },
     "DeviceTokenDTO": {
       "properties": {
@@ -5725,6 +5735,50 @@
       "required": [
         "items",
         "nextCursor"
+      ],
+      "type": "object"
+    },
+    "UserDeviceDTO": {
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        },
+        "lastSeenAt": {
+          "description": "Most recent push-token activity for this device (ISO), or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platforms": {
+          "items": {
+            "$ref": "#/definitions/DevicePlatform"
+          },
+          "type": "array"
+        },
+        "pushActive": {
+          "description": "At least one push token for this device is still active.",
+          "type": "boolean"
+        },
+        "revoked": {
+          "description": "This device's session has been revoked.",
+          "type": "boolean"
+        },
+        "revokedAt": {
+          "description": "When the device session was revoked (ISO), or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "deviceId",
+        "platforms",
+        "pushActive",
+        "lastSeenAt",
+        "revoked",
+        "revokedAt"
       ],
       "type": "object"
     },

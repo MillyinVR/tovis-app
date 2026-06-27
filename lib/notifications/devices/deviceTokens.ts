@@ -67,6 +67,74 @@ export async function deactivateDeviceToken(
   return result.count > 0
 }
 
+// Soft-deactivate every push token this user holds for a given device, scoped
+// to the owner. Used when revoking a device's session so it also stops receiving
+// pushes. Returns how many rows were affected.
+export async function deactivateDeviceTokensByDeviceId(args: {
+  userId: string
+  deviceId: string
+}): Promise<number> {
+  const deviceId = args.deviceId.trim()
+  if (!deviceId) return 0
+
+  const result = await prisma.deviceToken.updateMany({
+    where: { userId: args.userId, deviceId },
+    data: { isActive: false },
+  })
+
+  return result.count
+}
+
+export type UserDeviceSummary = {
+  deviceId: string
+  platforms: DevicePlatform[]
+  pushActive: boolean
+  lastSeenAt: Date | null
+}
+
+// One entry per known device (grouped by deviceId) for the manage-devices /
+// revoke surface. Only devices that registered a push token with a stable
+// deviceId are listed — that is the server's device registry today.
+export async function listUserDevices(
+  userId: string,
+): Promise<UserDeviceSummary[]> {
+  const rows = await prisma.deviceToken.findMany({
+    where: { userId, deviceId: { not: null } },
+    select: { deviceId: true, platform: true, isActive: true, lastSeenAt: true },
+    orderBy: { lastSeenAt: 'desc' },
+  })
+
+  const byDevice = new Map<string, UserDeviceSummary>()
+
+  for (const row of rows) {
+    if (!row.deviceId) continue
+
+    const existing = byDevice.get(row.deviceId)
+    if (!existing) {
+      byDevice.set(row.deviceId, {
+        deviceId: row.deviceId,
+        platforms: [row.platform],
+        pushActive: row.isActive,
+        lastSeenAt: row.lastSeenAt,
+      })
+      continue
+    }
+
+    if (!existing.platforms.includes(row.platform)) {
+      existing.platforms.push(row.platform)
+    }
+    existing.pushActive = existing.pushActive || row.isActive
+    if (
+      row.lastSeenAt &&
+      (!existing.lastSeenAt || row.lastSeenAt > existing.lastSeenAt)
+    ) {
+      existing.lastSeenAt = row.lastSeenAt
+    }
+  }
+
+  return [...byDevice.values()]
+}
+
 export type InvalidateDeviceTokenArgs = {
   platform: DevicePlatform
   token: string

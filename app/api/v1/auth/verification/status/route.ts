@@ -58,6 +58,7 @@ export async function GET(request: Request) {
         userId: user.id,
         role: user.role,
         authVersion: user.authVersion,
+        deviceId: user.deviceId, // preserve device binding through verification
       }),
     })
 

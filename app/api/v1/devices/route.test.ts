@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   registerDeviceToken: vi.fn(),
   deactivateDeviceToken: vi.fn(),
+  listUserDevices: vi.fn(),
+  listDeviceSessionRevocations: vi.fn(),
   serializeDeviceToken: vi.fn(),
+  serializeUserDevice: vi.fn(),
   safeError: vi.fn(),
 }))
 
@@ -22,17 +25,26 @@ vi.mock('@/app/api/_utils/responses', () => ({
 vi.mock('@/lib/notifications/devices/deviceTokens', () => ({
   registerDeviceToken: mocks.registerDeviceToken,
   deactivateDeviceToken: mocks.deactivateDeviceToken,
+  listUserDevices: mocks.listUserDevices,
+}))
+
+vi.mock('@/lib/auth/deviceSessions', () => ({
+  listDeviceSessionRevocations: mocks.listDeviceSessionRevocations,
 }))
 
 vi.mock('@/lib/dto/deviceToken', () => ({
   serializeDeviceToken: mocks.serializeDeviceToken,
 }))
 
+vi.mock('@/lib/dto/device', () => ({
+  serializeUserDevice: mocks.serializeUserDevice,
+}))
+
 vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
 }))
 
-import { DELETE, POST } from './route'
+import { DELETE, GET, POST } from './route'
 
 function makeJsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -137,6 +149,55 @@ describe('/api/v1/devices', () => {
       const res = await DELETE(makeRequest({ platform: 'IOS' }))
       expect(res.status).toBe(400)
       expect((await res.json()).code).toBe('MISSING_TOKEN')
+    })
+  })
+
+  describe('GET (manage-devices list)', () => {
+    it('lists the user devices joined with their revocation state', async () => {
+      mocks.listUserDevices.mockResolvedValue([
+        { deviceId: 'device_abc', platforms: ['IOS'], pushActive: true, lastSeenAt: null },
+        { deviceId: 'device_xyz', platforms: ['ANDROID'], pushActive: false, lastSeenAt: null },
+      ])
+      mocks.listDeviceSessionRevocations.mockResolvedValue([
+        { deviceId: 'device_xyz', revokedAt: new Date('2026-06-27T00:00:00.000Z') },
+      ])
+      mocks.serializeUserDevice.mockImplementation(
+        (device: { deviceId: string }, revokedAt: Date | null) => ({
+          deviceId: device.deviceId,
+          revoked: revokedAt !== null,
+        }),
+      )
+
+      const res = await GET()
+      const body = await res.json()
+
+      expect(res.status).toBe(200)
+      expect(body.devices).toEqual([
+        { deviceId: 'device_abc', revoked: false },
+        { deviceId: 'device_xyz', revoked: true },
+      ])
+      // The revoked instant is matched per device by deviceId, not positionally.
+      expect(mocks.serializeUserDevice).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ deviceId: 'device_abc' }),
+        null,
+      )
+      expect(mocks.serializeUserDevice).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ deviceId: 'device_xyz' }),
+        new Date('2026-06-27T00:00:00.000Z'),
+      )
+    })
+
+    it('401s when unauthenticated', async () => {
+      mocks.requireUser.mockResolvedValue({
+        ok: false,
+        res: makeJsonResponse(401, { ok: false }),
+      })
+
+      const res = await GET()
+      expect(res.status).toBe(401)
+      expect(mocks.listUserDevices).not.toHaveBeenCalled()
     })
   })
 })

@@ -4,6 +4,7 @@ import { Role } from '@prisma/client'
 const mockCookies = vi.hoisted(() => vi.fn())
 const mockHeaders = vi.hoisted(() => vi.fn())
 const mockVerifyToken = vi.hoisted(() => vi.fn())
+const mockIsDeviceSessionRevoked = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   user: {
@@ -18,6 +19,10 @@ vi.mock('next/headers', () => ({
 
 vi.mock('./auth', () => ({
   verifyToken: mockVerifyToken,
+}))
+
+vi.mock('./auth/deviceSessions', () => ({
+  isDeviceSessionRevoked: mockIsDeviceSessionRevoked,
 }))
 
 vi.mock('./prisma', () => ({
@@ -82,6 +87,8 @@ describe('lib/currentUser', () => {
     mockHeaders.mockReset()
     mockVerifyToken.mockReset()
     mockPrisma.user.findUnique.mockReset()
+    mockIsDeviceSessionRevoked.mockReset()
+    mockIsDeviceSessionRevoked.mockResolvedValue(false)
 
     mockCookies.mockResolvedValue({
       get: vi.fn(() => undefined),
@@ -210,6 +217,77 @@ describe('lib/currentUser', () => {
     })
   })
 
+  it('rejects a device-bound token whose device session has been revoked', async () => {
+    mockCookies.mockResolvedValue({
+      get: vi.fn((name: string) =>
+        name === 'tovis_token' ? { value: 'device_token' } : undefined,
+      ),
+    })
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.CLIENT,
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+      deviceId: 'device_abc',
+      issuedAtSeconds: 1000,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(makeDbUser())
+    mockIsDeviceSessionRevoked.mockResolvedValue(true)
+
+    const result = await getCurrentUser()
+
+    expect(result).toBeNull()
+    expect(mockIsDeviceSessionRevoked).toHaveBeenCalledWith({
+      userId: 'user_1',
+      deviceId: 'device_abc',
+      issuedAtSeconds: 1000,
+    })
+  })
+
+  it('allows a device-bound token whose device session is not revoked, exposing deviceId', async () => {
+    mockCookies.mockResolvedValue({
+      get: vi.fn((name: string) =>
+        name === 'tovis_token' ? { value: 'device_token' } : undefined,
+      ),
+    })
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.CLIENT,
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+      deviceId: 'device_abc',
+      issuedAtSeconds: 1000,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(makeDbUser())
+    mockIsDeviceSessionRevoked.mockResolvedValue(false)
+
+    const result = await getCurrentUser()
+
+    expect(result?.id).toBe('user_1')
+    expect(result?.deviceId).toBe('device_abc')
+  })
+
+  it('skips the device-revocation lookup entirely for a web (deviceless) token', async () => {
+    mockCookies.mockResolvedValue({
+      get: vi.fn((name: string) =>
+        name === 'tovis_token' ? { value: 'web_token' } : undefined,
+      ),
+    })
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.CLIENT,
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(makeDbUser())
+
+    const result = await getCurrentUser()
+
+    expect(result?.id).toBe('user_1')
+    expect(result?.deviceId).toBeNull()
+    expect(mockIsDeviceSessionRevoked).not.toHaveBeenCalled()
+  })
+
   it('returns the current user with derived verification booleans when the token matches the database user', async () => {
     mockCookies.mockResolvedValue({
       get: vi.fn((name: string) =>
@@ -246,6 +324,7 @@ describe('lib/currentUser', () => {
       isPhoneVerified: true,
       isEmailVerified: false,
       isFullyVerified: false,
+      deviceId: null,
       clientProfile: {
         id: 'client_1',
         firstName: 'Tori',
@@ -291,6 +370,7 @@ describe('lib/currentUser', () => {
       isPhoneVerified: true,
       isEmailVerified: true,
       isFullyVerified: true,
+      deviceId: null,
       clientProfile: null,
       professionalProfile: {
         id: 'pro_1',
