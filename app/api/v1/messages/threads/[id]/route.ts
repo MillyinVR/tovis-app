@@ -9,6 +9,10 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import type { Prisma } from '@prisma/client'
+import type {
+  CreateMessageResponseDTO,
+  MessageThreadMessagesResponseDTO,
+} from '@/lib/dto/messaging'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,7 +101,19 @@ export async function GET(req: Request, ctx: RouteContext) {
     const nextCursor = pageDesc.length === take ? pageDesc[pageDesc.length - 1]?.id ?? null : null
     const hasMore = Boolean(nextCursor)
 
-    return jsonOk({ thread: { id: threadId }, messages, nextCursor, hasMore, take })
+    return jsonOk({
+      thread: { id: threadId },
+      messages: messages.map((m) => ({
+        id: m.id,
+        body: m.body,
+        createdAt: m.createdAt.toISOString(),
+        senderUserId: m.senderUserId,
+        attachments: m.attachments,
+      })),
+      nextCursor,
+      hasMore,
+      take,
+    } satisfies MessageThreadMessagesResponseDTO)
   } catch (e: unknown) {
     console.error('GET /api/v1/messages/threads/[id]', e)
     const msg = e instanceof Error ? e.message : 'Internal error'
@@ -168,7 +184,14 @@ export async function POST(req: Request, ctx: RouteContext) {
       return jsonFail(result.status, result.error)
     }
 
-    return jsonOk({ message: result.msg })
+    return jsonOk({
+      message: {
+        id: result.msg.id,
+        body: result.msg.body,
+        createdAt: result.msg.createdAt.toISOString(),
+        senderUserId: result.msg.senderUserId,
+      },
+    } satisfies CreateMessageResponseDTO)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Internal error'
     console.error('POST /api/v1/messages/threads/[id]', { debugId, err: msg })

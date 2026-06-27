@@ -71,6 +71,16 @@
       ],
       "type": "string"
     },
+    "$Enums.MessageThreadContextType": {
+      "enum": [
+        "BOOKING",
+        "SERVICE",
+        "OFFERING",
+        "PRO_PROFILE",
+        "WAITLIST"
+      ],
+      "type": "string"
+    },
     "$Enums.ModerationStatus": {
       "enum": [
         "PENDING_REVIEW",
@@ -3381,6 +3391,43 @@
       ],
       "type": "object"
     },
+    "CreateMessageResponseDTO": {
+      "properties": {
+        "message": {
+          "$ref": "#/definitions/CreatedMessageDTO"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "CreatedMessageDTO": {
+      "properties": {
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "senderUserId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "createdAt",
+        "senderUserId"
+      ],
+      "type": "object"
+    },
     "DevicePlatform": {
       "$ref": "#/definitions/%24Enums.DevicePlatform"
     },
@@ -5010,6 +5057,286 @@
     "MediaVisibility": {
       "$ref": "#/definitions/%24Enums.MediaVisibility"
     },
+    "MessageAttachmentDTO": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "mediaType"
+      ],
+      "type": "object"
+    },
+    "MessageDTO": {
+      "properties": {
+        "attachments": {
+          "items": {
+            "$ref": "#/definitions/MessageAttachmentDTO"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "senderUserId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "createdAt",
+        "senderUserId",
+        "attachments"
+      ],
+      "type": "object"
+    },
+    "MessageThreadClientPreviewDTO": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "avatarUrl"
+      ],
+      "type": "object"
+    },
+    "MessageThreadContextType": {
+      "$ref": "#/definitions/%24Enums.MessageThreadContextType"
+    },
+    "MessageThreadListItemDTO": {
+      "properties": {
+        "_count": {
+          "properties": {
+            "messages": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "messages"
+          ],
+          "type": "object"
+        },
+        "bookingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client": {
+          "$ref": "#/definitions/MessageThreadClientPreviewDTO"
+        },
+        "contextId": {
+          "type": "string"
+        },
+        "contextType": {
+          "$ref": "#/definitions/MessageThreadContextType"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastMessageAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastMessagePreview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offeringId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participants": {
+          "items": {
+            "$ref": "#/definitions/MessageThreadParticipantReadDTO"
+          },
+          "type": "array"
+        },
+        "professional": {
+          "$ref": "#/definitions/MessageThreadProfessionalPreviewDTO"
+        },
+        "serviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "contextType",
+        "contextId",
+        "bookingId",
+        "serviceId",
+        "offeringId",
+        "lastMessageAt",
+        "lastMessagePreview",
+        "updatedAt",
+        "client",
+        "professional",
+        "participants",
+        "_count"
+      ],
+      "type": "object"
+    },
+    "MessageThreadMessagesResponseDTO": {
+      "properties": {
+        "hasMore": {
+          "type": "boolean"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/MessageDTO"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "take": {
+          "type": "number"
+        },
+        "thread": {
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "thread",
+        "messages",
+        "nextCursor",
+        "hasMore",
+        "take"
+      ],
+      "type": "object"
+    },
+    "MessageThreadParticipantReadDTO": {
+      "properties": {
+        "lastReadAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lastReadAt"
+      ],
+      "type": "object"
+    },
+    "MessageThreadProfessionalPreviewDTO": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "businessName",
+        "avatarUrl"
+      ],
+      "type": "object"
+    },
+    "MessagesThreadsListResponseDTO": {
+      "properties": {
+        "threads": {
+          "items": {
+            "$ref": "#/definitions/MessageThreadListItemDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "threads"
+      ],
+      "type": "object"
+    },
+    "MessagesUnreadCountResponseDTO": {
+      "properties": {
+        "badge": {
+          "type": "string"
+        },
+        "count": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "type": "object"
+    },
     "ModerationStatus": {
       "$ref": "#/definitions/%24Enums.ModerationStatus"
     },
@@ -6402,6 +6729,32 @@
         "thumbUrl",
         "mediaType",
         "isFeaturedInPortfolio"
+      ],
+      "type": "object"
+    },
+    "ResolveThreadResponseDTO": {
+      "properties": {
+        "thread": {
+          "anyOf": [
+            {
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "thread"
       ],
       "type": "object"
     },

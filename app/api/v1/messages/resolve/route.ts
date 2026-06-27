@@ -4,6 +4,7 @@ import { jsonFail, jsonOk, pickString, upper } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { resolveMessageThread } from '@/lib/messagesResolve'
 import { MessageThreadContextType } from '@prisma/client'
+import type { ResolveThreadResponseDTO } from '@/lib/dto/messaging'
 
 export const dynamic = 'force-dynamic'
 
@@ -91,10 +92,12 @@ export async function POST(req: Request) {
     }
 
     if (!outcome.thread) {
-      return jsonOk({ thread: null })
+      return jsonOk({ thread: null } satisfies ResolveThreadResponseDTO)
     }
 
-    return jsonOk({ thread: { id: outcome.thread.id } })
+    return jsonOk({
+      thread: { id: outcome.thread.id },
+    } satisfies ResolveThreadResponseDTO)
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal error'
 
