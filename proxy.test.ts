@@ -536,4 +536,120 @@ describe('proxy', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
   })
+
+  // --- Native bearer-token CSRF carve-out (proxy.ts:262-283) ---
+  // The Origin/Referer check is the CSRF defense and only matters for the
+  // cookie session. A request authenticated purely by bearer header (no auth
+  // cookie) is not CSRF-able and sends no Origin/Referer, so the check is
+  // skipped for it. These guard that the carve-out (a) lets native through and
+  // (b) cannot be tricked into disabling the check whenever a cookie is present.
+
+  it('allows bearer-only state-changing requests with no Origin/Referer (native carve-out)', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
+      headers: {
+        authorization: 'Bearer native_bearer_token',
+      },
+    })
+
+    Object.defineProperty(req, 'method', { value: 'POST' })
+
+    const res = await proxy(req)
+
+    // Origin check is skipped, and the bearer token is what gets verified.
+    expect(mockVerifyMiddlewareToken).toHaveBeenCalledWith('native_bearer_token')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('allows bearer-only state-changing requests even with a foreign Origin', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
+      headers: {
+        authorization: 'Bearer native_bearer_token',
+        origin: 'https://evil.example',
+      },
+    })
+
+    Object.defineProperty(req, 'method', { value: 'POST' })
+
+    const res = await proxy(req)
+
+    // No cookie ⇒ not CSRF-able ⇒ the foreign Origin is irrelevant.
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('still origin-checks when a cookie rides along with a bearer header (cookie wins)', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
+      headers: {
+        authorization: 'Bearer attacker_supplied_token',
+        origin: 'https://evil.example',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    Object.defineProperty(req, 'method', { value: 'POST' })
+
+    const res = await proxy(req)
+    const body = await res.json()
+
+    // A cookie is present, so the browser is in play and the check still runs —
+    // attaching a bearer header cannot disable CSRF protection.
+    expect(res.status).toBe(403)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid request origin.',
+      code: 'INVALID_ORIGIN',
+    })
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('rejects cookie+bearer state-changing requests with no Origin/Referer', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/v1/client/settings', {
+      headers: {
+        authorization: 'Bearer attacker_supplied_token',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    Object.defineProperty(req, 'method', { value: 'POST' })
+
+    const res = await proxy(req)
+    const body = await res.json()
+
+    expect(res.status).toBe(403)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid request origin.',
+      code: 'INVALID_ORIGIN',
+    })
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
 })
