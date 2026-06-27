@@ -294,7 +294,7 @@ export default function LooksFeed() {
         qs.set('q', query.trim())
       }
 
-      const res = await fetch(`/api/looks?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/looks?${qs.toString()}`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
         signal: abortController.signal,
@@ -353,7 +353,7 @@ export default function LooksFeed() {
         qs.set('q', query.trim())
       }
 
-      const res = await fetch(`/api/looks?${qs.toString()}`, {
+      const res = await fetch(`/api/v1/looks?${qs.toString()}`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
         signal: abortController.signal,
