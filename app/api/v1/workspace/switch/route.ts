@@ -19,6 +19,7 @@ import { prisma } from '@/lib/prisma'
 import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
 import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
+import { buildEmailEncryptionWriteData } from '@/lib/security/emailPrivacy'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 
 const VALID_WORKSPACES: readonly Role[] = [Role.CLIENT, Role.PRO, Role.ADMIN]
@@ -59,8 +60,9 @@ async function ensureClientProfile(
         phone,
         claimStatus: 'CLAIMED',
         claimedAt: new Date(),
-        // email read feeds the lib/security contact-hash helper on the next line; not stored or logged
+        // email read feeds the lib/security contact-hash + encryption helpers on the next lines; not stored or logged
         ...buildClientProfileContactLookupData({ email: user.email, phone }), // pii-plaintext-read-ok: contact-hash helper input
+        ...buildEmailEncryptionWriteData({ email: user.email }), // pii-plaintext-read-ok: email-encryption helper input
         ...buildPhoneEncryptionWriteData({ phone }),
       },
     })

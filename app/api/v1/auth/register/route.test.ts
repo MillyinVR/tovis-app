@@ -145,6 +145,13 @@ vi.mock('@/lib/security/phonePrivacy', () => ({
       : { phoneEncrypted: { encrypted: input.phone } },
 }))
 
+vi.mock('@/lib/security/emailPrivacy', () => ({
+  buildEmailEncryptionWriteData: (input: { email?: unknown }) =>
+    input.email === undefined
+      ? {}
+      : { emailEncrypted: { encrypted: input.email } },
+}))
+
 import { POST } from './route'
 
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
@@ -343,6 +350,10 @@ function expectedPhoneLookupData(phone: string) {
 
 function expectedPhoneEncryption(phone: string) {
   return { phoneEncrypted: { encrypted: phone } }
+}
+
+function expectedEmailEncryption(email: string) {
+  return { emailEncrypted: { encrypted: email } }
 }
 
 function makeCompleteDcaLicenseTypesResponse() {
@@ -701,6 +712,7 @@ describe('app/api/v1/auth/register/route', () => {
         data: expect.objectContaining({
           email: 'client@example.com',
           ...expectedEmailLookupData('client@example.com'),
+          ...expectedEmailEncryption('client@example.com'),
           phone: '+15551234567',
           ...expectedPhoneLookupData('+15551234567'),
           ...expectedPhoneEncryption('+15551234567'),
@@ -711,6 +723,7 @@ describe('app/api/v1/auth/register/route', () => {
               lastName: 'Morales',
               phone: '+15551234567',
               ...expectedEmailLookupData('client@example.com'),
+              ...expectedEmailEncryption('client@example.com'),
               ...expectedPhoneLookupData('+15551234567'),
               ...expectedPhoneEncryption('+15551234567'),
               phoneVerifiedAt: null,
@@ -1122,6 +1135,7 @@ describe('app/api/v1/auth/register/route', () => {
       data: expect.objectContaining({
         email: 'client@example.com',
         ...expectedEmailLookupData('client@example.com'),
+        ...expectedEmailEncryption('client@example.com'),
         phone: '+15551234567',
         ...expectedPhoneLookupData('+15551234567'),
         ...expectedPhoneEncryption('+15551234567'),
@@ -1143,6 +1157,7 @@ describe('app/api/v1/auth/register/route', () => {
             lastName: 'Morales',
             phone: '+15551234567',
             ...expectedEmailLookupData('client@example.com'),
+            ...expectedEmailEncryption('client@example.com'),
             ...expectedPhoneLookupData('+15551234567'),
             ...expectedPhoneEncryption('+15551234567'),
             phoneVerifiedAt: null,
