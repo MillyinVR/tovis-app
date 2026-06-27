@@ -122,7 +122,7 @@ both live in the same two files. Ship them as **one focused PR** before any clie
 > + FCM_SERVICE_ACCOUNT_JSON/FCM_PROJECT_ID in Vercel env (Sensitive) → isPushProviderConfigured()
 > flips true → push live for PUSH-default events; then on-device smoke (register via
 > POST /api/v1/devices, trigger event, confirm receipt + token invalidation on uninstall).
-> Plans: scratchpad tier1.1-push-plan.md / -pr2-scope.md / -pr2b-scope.md.
+> Operator go-live steps + how to obtain every credential: **docs/mobile/push-go-live-runbook.md**.
 > NOTE: the generated api schema has pre-existing Prisma-internal type leakage (from #390) that
 > churns on enum changes — worth tightening the barrel later so codegen output is clean.
 - **What:** There is NO push infrastructure today (no APNs/FCM, no device-token model, no
