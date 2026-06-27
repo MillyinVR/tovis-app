@@ -1386,7 +1386,7 @@ export default async function ClientBookingPage(props: {
 
               <div className="flex flex-wrap gap-2">
                 <a
-                  href={`/api/calendar?bookingId=${encodeURIComponent(booking.id)}`}
+                  href={`/api/v1/calendar?bookingId=${encodeURIComponent(booking.id)}`}
                   className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
                 >
                   {COPY.bookings.addToCalendar}
