@@ -1,5 +1,7 @@
 // app/api/_utils/rateLimit.ts
 
+import { createHash } from 'node:crypto'
+
 import type { NextResponse } from 'next/server'
 
 import { jsonFail } from './responses'
@@ -141,6 +143,20 @@ function logRateLimitDecision(args: {
       ...identityFields.meta,
     },
   })
+}
+
+/**
+ * Build a rate-limit `keySuffix` from an email, for composing a per-account
+ * dimension onto an IP-keyed bucket (e.g. `auth:login:identity`). The email is
+ * hashed so raw PII never lands in a Redis key or in rate-limit log lines; the
+ * caller is responsible for passing an already-normalized (lowercased) email so
+ * the hash is stable across attempts.
+ */
+export function emailRateLimitKeySuffix(normalizedEmail: string): string {
+  return createHash('sha256')
+    .update(normalizeIdentityPart(normalizedEmail))
+    .digest('hex')
+    .slice(0, 32)
 }
 
 export function phoneRateLimitIdentity(phone: string): RateLimitIdentity {

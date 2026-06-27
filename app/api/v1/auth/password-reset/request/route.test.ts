@@ -70,6 +70,7 @@ vi.mock('@/app/api/_utils', () => ({
 
   enforceRateLimit: mockEnforceRateLimit,
   rateLimitIdentity: mockRateLimitIdentity,
+  emailRateLimitKeySuffix: (email: string) => `emailhash:${email}`,
 }))
 
 import { POST } from './route'
@@ -193,6 +194,31 @@ describe('app/api/v1/auth/password-reset/request/route', () => {
 
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('enforces the per-account IP+email bucket and short-circuits before lookup', async () => {
+    const identityRateLimitRes = new Response(null, { status: 429 })
+    // Coarse IP bucket allows; the composite per-account bucket blocks.
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(identityRateLimitRes)
+
+    const result = await POST(makeRequest({ email: 'user@example.com' }))
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth:password-reset-request',
+      identity: { kind: 'ip', id: '203.0.113.10' },
+    })
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'auth:password-reset-request:identity',
+      identity: { kind: 'ip', id: '203.0.113.10' },
+      keySuffix: 'emailhash:user@example.com',
+    })
+    expect(result).toBe(identityRateLimitRes)
+    expect(result.status).toBe(429)
+    // Fires before the account lookup, so it leaks nothing about existence.
+    expect(mockPrisma.user.findMany).not.toHaveBeenCalled()
+    expect(mockIssueAndSendPasswordReset).not.toHaveBeenCalled()
   })
 
   it('returns ok and skips lookup when email is missing', async () => {

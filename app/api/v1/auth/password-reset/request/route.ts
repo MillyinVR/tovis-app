@@ -3,6 +3,7 @@
 import { Prisma } from '@prisma/client'
 
 import {
+  emailRateLimitKeySuffix,
   enforceRateLimit,
   jsonOk,
   rateLimitIdentity,
@@ -101,6 +102,18 @@ export async function POST(req: Request) {
     if (!email) {
       return jsonOk({ ok: true }, 200)
     }
+
+    // Tight per-account guard (IP+email composite) so one address can't be
+    // flooded with reset mail from a single origin. Triggers on attempt count
+    // only — a 429 is identical for existing and non-existing accounts, so the
+    // enumeration-safe contract above is preserved.
+    const identityRateLimitResponse = await enforceRateLimit({
+      bucket: 'auth:password-reset-request:identity',
+      identity,
+      keySuffix: emailRateLimitKeySuffix(email),
+    })
+
+    if (identityRateLimitResponse) return identityRateLimitResponse
 
     const user = await findPasswordResetUserByEmail(email)
 

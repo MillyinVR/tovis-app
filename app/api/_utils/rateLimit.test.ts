@@ -225,6 +225,26 @@ describe('app/api/_utils/rateLimit', () => {
     )
   })
 
+  it('hashes an email into a stable, PII-free key suffix', async () => {
+    const { emailRateLimitKeySuffix } = await loadSubject()
+
+    const suffix = emailRateLimitKeySuffix('user@example.com')
+
+    // 32-char hex slice of a sha256 digest — deterministic and not the raw email.
+    expect(suffix).toMatch(/^[0-9a-f]{32}$/)
+    expect(suffix).not.toContain('user@example.com')
+    expect(emailRateLimitKeySuffix('user@example.com')).toBe(suffix)
+    expect(emailRateLimitKeySuffix('other@example.com')).not.toBe(suffix)
+  })
+
+  it('throws when hashing a blank email key suffix', async () => {
+    const { emailRateLimitKeySuffix } = await loadSubject()
+
+    expect(() => emailRateLimitKeySuffix('   ')).toThrow(
+      'Rate limit identity value must be non-empty.',
+    )
+  })
+
   it('returns null when the canonical limiter allows the request', async () => {
     mockEnforceRateLimitDecision.mockResolvedValue(
       allowedDecision({

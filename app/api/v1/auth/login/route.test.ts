@@ -126,6 +126,7 @@ vi.mock('@/app/api/_utils', () => {
 
     enforceRateLimit: mockEnforceRateLimit,
     rateLimitIdentity: mockRateLimitIdentity,
+    emailRateLimitKeySuffix: (email: string) => `emailhash:${email}`,
   }
 })
 
@@ -309,6 +310,36 @@ describe('app/api/v1/auth/login/route', () => {
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockConsumeTapIntent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('enforces the per-account IP+email bucket and short-circuits before password work', async () => {
+    const identityRateLimitRes = new Response(null, { status: 429 })
+    // Coarse IP bucket allows; the composite per-account bucket blocks.
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(identityRateLimitRes)
+
+    const result = await POST(
+      makeRequest({
+        email: 'user@example.com',
+        password: 'Secret123!',
+      }),
+    )
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth:login',
+      identity: { kind: 'ip', id: '198.51.100.10' },
+    })
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'auth:login:identity',
+      identity: { kind: 'ip', id: '198.51.100.10' },
+      keySuffix: 'emailhash:user@example.com',
+    })
+    expect(result).toBe(identityRateLimitRes)
+    expect(result.status).toBe(429)
+    // The composite guard fires before any credential lookup / bcrypt work.
+    expect(mockPrisma.user.findMany).not.toHaveBeenCalled()
+    expect(mockVerifyPassword).not.toHaveBeenCalled()
   })
 
   it('returns 400 when credentials are missing', async () => {

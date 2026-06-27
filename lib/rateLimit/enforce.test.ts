@@ -133,7 +133,7 @@ describe('enforceRateLimit', () => {
 
     for (let index = 0; index < 10; index += 1) {
       const decision = await enforceRateLimit({
-        bucket: 'auth:login',
+        bucket: 'auth:password-reset-confirm',
         key: 'ip_123',
         now,
       })
@@ -145,14 +145,14 @@ describe('enforceRateLimit', () => {
     }
 
     const blocked = await enforceRateLimit({
-      bucket: 'auth:login',
+      bucket: 'auth:password-reset-confirm',
       key: 'ip_123',
       now,
     })
 
     expect(blocked).toMatchObject({
       allowed: false,
-      bucket: 'auth:login',
+      bucket: 'auth:password-reset-confirm',
       key: 'ip_123',
       limit: 10,
       remaining: 0,
@@ -168,14 +168,14 @@ describe('enforceRateLimit', () => {
 
     for (let index = 0; index < 10; index += 1) {
       await enforceRateLimit({
-        bucket: 'auth:login',
+        bucket: 'auth:password-reset-confirm',
         key: 'ip_123',
         now: firstWindow,
       })
     }
 
     const blocked = await enforceRateLimit({
-      bucket: 'auth:login',
+      bucket: 'auth:password-reset-confirm',
       key: 'ip_123',
       now: firstWindow,
     })
@@ -185,7 +185,7 @@ describe('enforceRateLimit', () => {
     const nextWindow = new Date('2026-05-15T12:15:01.000Z')
 
     const allowedAgain = await enforceRateLimit({
-      bucket: 'auth:login',
+      bucket: 'auth:password-reset-confirm',
       key: 'ip_123',
       now: nextWindow,
     })
@@ -203,7 +203,7 @@ describe('enforceRateLimit', () => {
     const now = new Date('2026-05-15T12:00:00.000Z')
 
     const first = await enforceRateLimit({
-      bucket: 'auth:login',
+      bucket: 'auth:password-reset-confirm',
       key: 'ip_123',
       now,
     })
@@ -215,14 +215,14 @@ describe('enforceRateLimit', () => {
     })
 
     const third = await enforceRateLimit({
-      bucket: 'auth:login',
+      bucket: 'auth:password-reset-confirm',
       key: 'ip_456',
       now,
     })
 
     expect(first).toMatchObject({
       allowed: true,
-      bucket: 'auth:login',
+      bucket: 'auth:password-reset-confirm',
       remaining: 9,
       source: 'memory',
     })
@@ -230,13 +230,13 @@ describe('enforceRateLimit', () => {
     expect(second).toMatchObject({
       allowed: true,
       bucket: 'auth:password-reset-request',
-      remaining: 4,
+      remaining: 19,
       source: 'memory',
     })
 
     expect(third).toMatchObject({
       allowed: true,
-      bucket: 'auth:login',
+      bucket: 'auth:password-reset-confirm',
       remaining: 9,
       source: 'memory',
     })
