@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import type { AuthPhoneVerifyResponseDTO } from '@/lib/dto/auth'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
@@ -279,7 +280,7 @@ export async function POST(request: Request) {
         // Native replays this as a bearer; web uses the cookie set below. The
         // session kind upgrades here, so native must swap to this token.
         token: sessionToken,
-      },
+      } satisfies AuthPhoneVerifyResponseDTO,
       200,
     )
 

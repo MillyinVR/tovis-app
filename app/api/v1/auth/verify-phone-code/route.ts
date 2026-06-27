@@ -1,4 +1,5 @@
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import type { AuthVerifyPhoneCodeResponseDTO } from '@/lib/dto/auth'
 import { checkPhoneVerificationCode } from '@/lib/auth/phoneVerification'
 import {
   isRecord,
@@ -44,7 +45,7 @@ export async function POST(req: Request) {
       ok: true,
       phone: result.maskedTo,
       status: result.status,
-    })
+    } satisfies AuthVerifyPhoneCodeResponseDTO)
   } catch (err: unknown) {
     console.error('POST /api/v1/auth/verify-phone-code error', err)
     return jsonFail(500, 'Failed to verify phone code.')

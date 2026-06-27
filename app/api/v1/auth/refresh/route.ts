@@ -18,6 +18,7 @@
 // model (Tier 1.1 / 4.2) — it needs that device record to be meaningful.
 
 import { jsonOk } from '@/app/api/_utils'
+import type { AuthRefreshResponseDTO } from '@/lib/dto/auth'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { setSessionCookie } from '@/app/api/_utils/auth/sessionCookie'
 import { createActiveToken } from '@/lib/auth'
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
   })
 
   // Native replays `token` as a bearer; web keeps using the refreshed cookie.
-  const response = jsonOk({ token }, 200)
+  const response = jsonOk({ token } satisfies AuthRefreshResponseDTO, 200)
   setSessionCookie({ response, request, token })
   return response
 }

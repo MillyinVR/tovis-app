@@ -10,6 +10,7 @@ import {
   pickString,
   rateLimitIdentity,
 } from '@/app/api/_utils'
+import type { AuthLoginResponseDTO } from '@/lib/dto/auth'
 import { normalizeEmail } from '@/lib/security/contactNormalization'
 import {
   createActiveToken,
@@ -371,7 +372,7 @@ export async function POST(request: Request) {
         isPhoneVerified: Boolean(clearedUser.phoneVerifiedAt),
         isEmailVerified: Boolean(clearedUser.emailVerifiedAt),
         isFullyVerified,
-      },
+      } satisfies AuthLoginResponseDTO,
       200,
     )
 

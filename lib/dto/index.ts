@@ -33,6 +33,19 @@ export type {
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 
+// ── Auth + workspace switch (POST /api/v1/auth/*, /api/v1/workspace/switch) ──
+export type {
+  AuthUserDTO,
+  AuthLoginResponseDTO,
+  AuthRegisterResponseDTO,
+  AuthRefreshResponseDTO,
+  AuthPhoneVerifyResponseDTO,
+  AuthEmailVerifyResponseDTO,
+  AuthResendPhoneCodeResponseDTO,
+  AuthVerifyPhoneCodeResponseDTO,
+  WorkspaceSwitchResponseDTO,
+} from '@/lib/dto/auth'
+
 // ── Booking holds (POST /api/v1/holds, GET/DELETE /api/v1/holds/[id]) ─────────
 export type {
   BookingHoldDTO,

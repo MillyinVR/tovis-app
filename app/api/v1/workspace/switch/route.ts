@@ -11,6 +11,7 @@
 import { Role } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import type { WorkspaceSwitchResponseDTO } from '@/lib/dto/auth'
 import { setSessionCookie } from '@/app/api/_utils/auth/sessionCookie'
 import { createActiveToken } from '@/lib/auth'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
     workspace: target,
     href: WORKSPACE_HOME[target],
     token,
-  })
+  } satisfies WorkspaceSwitchResponseDTO)
   setSessionCookie({ response, request, token })
   return response
 }
