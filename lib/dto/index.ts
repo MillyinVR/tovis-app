@@ -33,6 +33,9 @@ export type {
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 
+// ── Push device registration (POST/DELETE /api/v1/devices) ───────────────────
+export type { DeviceTokenDTO } from '@/lib/dto/deviceToken'
+
 // ── Client home dashboard (GET /api/v1/client/home) ──────────────────────────
 export type {
   ClientHomeBookingDTO,
