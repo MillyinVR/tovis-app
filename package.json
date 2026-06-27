@@ -2,6 +2,9 @@
   "name": "tovis-app",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "postinstall": "prisma generate && (git config core.hooksPath .githooks 2>/dev/null || true)",
     "dev": "prisma generate && next dev",
