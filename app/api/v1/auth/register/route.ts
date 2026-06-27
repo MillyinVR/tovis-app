@@ -21,6 +21,7 @@ import {
   rateLimitIdentity,
   phoneRateLimitIdentity,
 } from '@/app/api/_utils'
+import type { AuthRegisterResponseDTO } from '@/lib/dto/auth'
 import {
   normalizeEmail,
   normalizePhone,
@@ -1320,7 +1321,7 @@ export async function POST(request: Request) {
           role === 'PRO' ? needsManualLicenseUpload : false,
         manualLicensePendingReview:
           role === 'PRO' ? manualLicensePendingReview : false,
-      },
+      } satisfies AuthRegisterResponseDTO,
       201,
     )
 

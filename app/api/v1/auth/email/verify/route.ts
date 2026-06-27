@@ -3,6 +3,7 @@ import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import type { AuthEmailVerifyResponseDTO } from '@/lib/dto/auth'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
@@ -286,7 +287,7 @@ export async function POST(request: Request) {
         // Native replays this as a bearer; web uses the cookie set below.
         // Null when the caller is not the verified account owner.
         token: sessionToken,
-      },
+      } satisfies AuthEmailVerifyResponseDTO,
       200,
     )
 

@@ -181,6 +181,249 @@
       ],
       "type": "object"
     },
+    "AuthEmailVerifyResponseDTO": {
+      "properties": {
+        "alreadyVerified": {
+          "type": "boolean"
+        },
+        "isEmailVerified": {
+          "type": "boolean"
+        },
+        "isFullyVerified": {
+          "type": "boolean"
+        },
+        "isPhoneVerified": {
+          "type": "boolean"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "requiresPhoneVerification": {
+          "type": "boolean"
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ok",
+        "alreadyVerified",
+        "isPhoneVerified",
+        "isEmailVerified",
+        "isFullyVerified",
+        "requiresPhoneVerification",
+        "token"
+      ],
+      "type": "object"
+    },
+    "AuthLoginResponseDTO": {
+      "properties": {
+        "isEmailVerified": {
+          "type": "boolean"
+        },
+        "isFullyVerified": {
+          "type": "boolean"
+        },
+        "isPhoneVerified": {
+          "type": "boolean"
+        },
+        "nextUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token": {
+          "type": "string"
+        },
+        "user": {
+          "$ref": "#/definitions/AuthUserDTO"
+        }
+      },
+      "required": [
+        "user",
+        "token",
+        "nextUrl",
+        "isPhoneVerified",
+        "isEmailVerified",
+        "isFullyVerified"
+      ],
+      "type": "object"
+    },
+    "AuthPhoneVerifyResponseDTO": {
+      "properties": {
+        "isEmailVerified": {
+          "type": "boolean"
+        },
+        "isFullyVerified": {
+          "type": "boolean"
+        },
+        "isPhoneVerified": {
+          "type": "boolean"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "requiresEmailVerification": {
+          "type": "boolean"
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ok",
+        "isPhoneVerified",
+        "isEmailVerified",
+        "isFullyVerified",
+        "requiresEmailVerification",
+        "token"
+      ],
+      "type": "object"
+    },
+    "AuthRefreshResponseDTO": {
+      "properties": {
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "type": "object"
+    },
+    "AuthRegisterResponseDTO": {
+      "properties": {
+        "emailVerificationSent": {
+          "type": "string"
+        },
+        "isEmailVerified": {
+          "type": "boolean"
+        },
+        "isFullyVerified": {
+          "type": "boolean"
+        },
+        "isPhoneVerified": {
+          "type": "boolean"
+        },
+        "manualLicensePendingReview": {
+          "type": "boolean"
+        },
+        "needsManualLicenseUpload": {
+          "type": "boolean"
+        },
+        "nextUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phoneVerificationErrorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phoneVerificationSent": {
+          "type": "string"
+        },
+        "requiresEmailVerification": {
+          "type": "boolean"
+        },
+        "requiresPhoneVerification": {
+          "type": "boolean"
+        },
+        "token": {
+          "type": "string"
+        },
+        "user": {
+          "$ref": "#/definitions/AuthUserDTO"
+        }
+      },
+      "required": [
+        "user",
+        "token",
+        "nextUrl",
+        "requiresPhoneVerification",
+        "phoneVerificationSent",
+        "phoneVerificationErrorCode",
+        "requiresEmailVerification",
+        "isPhoneVerified",
+        "isEmailVerified",
+        "isFullyVerified",
+        "emailVerificationSent",
+        "needsManualLicenseUpload",
+        "manualLicensePendingReview"
+      ],
+      "type": "object"
+    },
+    "AuthResendPhoneCodeResponseDTO": {
+      "properties": {
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "to",
+        "status"
+      ],
+      "type": "object"
+    },
+    "AuthUserDTO": {
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/Role"
+        }
+      },
+      "required": [
+        "id",
+        "email",
+        "role"
+      ],
+      "type": "object"
+    },
+    "AuthVerifyPhoneCodeResponseDTO": {
+      "properties": {
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "phone",
+        "status"
+      ],
+      "type": "object"
+    },
     "AvailabilityAlternateSlots": {
       "description": "--------------------------- Availability: ALTERNATES mode\n--------------------------",
       "properties": {
@@ -6461,6 +6704,25 @@
     },
     "VerificationStatus": {
       "$ref": "#/definitions/%24Enums.VerificationStatus"
+    },
+    "WorkspaceSwitchResponseDTO": {
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "workspace": {
+          "$ref": "#/definitions/Role"
+        }
+      },
+      "required": [
+        "workspace",
+        "href",
+        "token"
+      ],
+      "type": "object"
     }
   }
 }
