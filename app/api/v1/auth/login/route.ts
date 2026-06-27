@@ -3,6 +3,7 @@
 import { Prisma, Role } from '@prisma/client'
 
 import {
+  emailRateLimitKeySuffix,
   enforceRateLimit,
   jsonFail,
   jsonOk,
@@ -267,6 +268,17 @@ export async function POST(request: Request) {
         code: 'MISSING_CREDENTIALS',
       })
     }
+
+    // Tight per-account brute-force guard, keyed by IP+email (composite, so a
+    // remote attacker can't lock the account out — see policies.ts). Enforced
+    // only once we have a well-formed email, before any password verification.
+    const identityRateLimitResponse = await enforceRateLimit({
+      bucket: 'auth:login:identity',
+      identity,
+      keySuffix: emailRateLimitKeySuffix(email),
+    })
+
+    if (identityRateLimitResponse) return identityRateLimitResponse
 
     const user = await findLoginUserByEmail(email)
     const passwordHash = user?.password ?? DUMMY_PASSWORD_HASH

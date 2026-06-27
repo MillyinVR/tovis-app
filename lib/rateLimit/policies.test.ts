@@ -18,8 +18,10 @@ const EXPECTED_LAUNCH_BUCKETS = [
   'pro:locations:write',
   'pro:working-hours:write',
   'auth:login',
+  'auth:login:identity',
   'auth:register',
   'auth:password-reset-request',
+  'auth:password-reset-request:identity',
   'auth:password-reset-confirm',
   'auth:phone:verify',
   'auth:email:send',
@@ -30,9 +32,11 @@ const EXPECTED_LAUNCH_BUCKETS = [
 
 const AUTH_CRITICAL_BUCKETS = [
   'auth:login',
+  'auth:login:identity',
   'auth:register',
   'auth:register:verified',
   'auth:password-reset-request',
+  'auth:password-reset-request:identity',
   'auth:password-reset-confirm',
   'auth:phone:verify',
   'auth:email:send',

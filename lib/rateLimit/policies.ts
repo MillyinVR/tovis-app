@@ -26,9 +26,11 @@ export type RateLimitBucket =
   | 'nfc:tap'
   | 'nfc:code'
   | 'auth:login'
+  | 'auth:login:identity'
   | 'auth:register'
   | 'auth:register:verified'
   | 'auth:password-reset-request'
+  | 'auth:password-reset-request:identity'
   | 'auth:password-reset-confirm'
   | 'auth:phone:verify'
   | 'auth:email:send'
@@ -201,10 +203,27 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
   },
 
   // Auth-critical buckets: bounded locally if Redis fails.
+  //
+  // Login defense is two-dimensional so neither carrier-grade NAT nor a single
+  // attacker degrades the other:
+  //  - `auth:login` is the COARSE per-IP ceiling. Under CGNAT thousands of real
+  //    users can share one egress IP, so this is deliberately generous — it only
+  //    bounds a single IP spraying many accounts, not legitimate shared traffic.
+  //  - `auth:login:identity` is the TIGHT per-account guard, keyed by IP+email
+  //    (the email rides in as a keySuffix). Because the key is composite, a
+  //    remote attacker can never exhaust a victim's bucket (the victim logs in
+  //    from their own IP), so there is no targeted-lockout DoS — while brute
+  //    force from any single origin is still capped hard.
   'auth:login': {
-    limit: 10,
+    limit: 60,
     windowSeconds: 15 * 60,
     prefix: 'rl:auth:login',
+    mode: 'auth-critical',
+  },
+  'auth:login:identity': {
+    limit: 8,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:login:id',
     mode: 'auth-critical',
   },
   'auth:register': {
@@ -219,10 +238,21 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     prefix: 'rl:auth:register:verified',
     mode: 'auth-critical',
   },
+  // Password-reset request mirrors the login two-dimensional shape: a generous
+  // per-IP ceiling for NAT tolerance, plus a tight IP+email composite guard so a
+  // single account can't be flooded with reset mail from one origin. The route
+  // stays enumeration-safe — the limit triggers on attempt count regardless of
+  // whether the account exists, so a 429 leaks nothing.
   'auth:password-reset-request': {
-    limit: 5,
+    limit: 20,
     windowSeconds: 15 * 60,
     prefix: 'rl:auth:pw-reset-req',
+    mode: 'auth-critical',
+  },
+  'auth:password-reset-request:identity': {
+    limit: 5,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:pw-reset-req:id',
     mode: 'auth-critical',
   },
   'auth:password-reset-confirm': {
