@@ -28,6 +28,7 @@ export type RateLimitBucket =
   | 'auth:login'
   | 'auth:login:identity'
   | 'auth:apple'
+  | 'auth:phone-login'
   | 'auth:register'
   | 'auth:register:verified'
   | 'auth:password-reset-request'
@@ -234,6 +235,15 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 20,
     windowSeconds: 15 * 60,
     prefix: 'rl:auth:apple',
+    mode: 'auth-critical',
+  },
+  // Phone-OTP login verify attempts, per IP. (Per-phone SMS volume is bounded
+  // separately by the sms-phone buckets on the send path, and Twilio Verify caps
+  // code-check attempts.) Auth-critical so a Redis outage degrades to in-memory.
+  'auth:phone-login': {
+    limit: 15,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:phone-login',
     mode: 'auth-critical',
   },
   'auth:register': {

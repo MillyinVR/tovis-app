@@ -34,6 +34,7 @@ const AUTH_CRITICAL_BUCKETS = [
   'auth:login',
   'auth:login:identity',
   'auth:apple',
+  'auth:phone-login',
   'auth:register',
   'auth:register:verified',
   'auth:password-reset-request',
