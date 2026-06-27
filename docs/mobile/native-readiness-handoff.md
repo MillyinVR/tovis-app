@@ -109,11 +109,20 @@ both live in the same two files. Ship them as **one focused PR** before any clie
 > provider = APNS/iOS|FCM/Android set per-row); push render; `sendWithProvider` APNS/FCM cases
 > routing to null providers; `isPushProviderConfigured()` gate (DB not even queried until a
 > provider exists) ⇒ zero PUSH rows in prod. PUSH added to "push later" event defaults.
-> **PR2b (next):** real APNs HTTP/2 (.p8 JWT) + FCM HTTP v1 clients in `sendPush.ts` +
-> `requireApnsConfig`/`requireFcmConfig` + token invalidation on 410/UNREGISTERED + deps.
-> ⚠️ PR2b must also ensure the dispatch's `userId` is populated for pro/client recipients
-> (push targets User.deviceTokens). **PR3/operator:** provision APNs .p8 + FCM service-account
-> JSON → Vercel env; on-device smoke. Plans: scratchpad tier1.1-push-plan.md + tier1.1-pr2-scope.md.
+> **PR2b (shipped — real provider clients):** `sendPush.ts` with `ApnsDeliveryProvider`
+> (apns2: HTTP/2 + .p8 ES256 JWT, `apns-topic`=bundleId) + `FcmDeliveryProvider`
+> (google-auth-library OAuth → FCM HTTP v1). `requireApnsConfig`/`requireFcmConfig` (env names
+> match the gate). Dead-token → `invalidateDeviceToken({platform,token})` (unscoped) + FAILED_FINAL:
+> APNs BadDeviceToken/Unregistered/DeviceTokenNotForTopic/MissingDeviceToken; FCM
+> UNREGISTERED/INVALID_ARGUMENT/NOT_FOUND/SENDER_ID_MISMATCH. Retryable: APNs 429/503/500/idle/
+> expired-token; FCM UNAVAILABLE/INTERNAL/QUOTA + HTTP 429/5xx. `buildApnsProvider`/`buildFcmProvider`
+> now return real clients (null when unconfigured). Deps: apns2 + google-auth-library (Node-22 ok).
+> The `userId`-population concern was already handled (pro/client builders pass it). Still inert
+> until creds. **PR3/operator (all that remains):** set APNs_AUTH_KEY/KEY_ID/TEAM_ID/BUNDLE_ID
+> + FCM_SERVICE_ACCOUNT_JSON/FCM_PROJECT_ID in Vercel env (Sensitive) → isPushProviderConfigured()
+> flips true → push live for PUSH-default events; then on-device smoke (register via
+> POST /api/v1/devices, trigger event, confirm receipt + token invalidation on uninstall).
+> Plans: scratchpad tier1.1-push-plan.md / -pr2-scope.md / -pr2b-scope.md.
 > NOTE: the generated api schema has pre-existing Prisma-internal type leakage (from #390) that
 > churns on enum changes — worth tightening the barrel later so codegen output is clean.
 - **What:** There is NO push infrastructure today (no APNs/FCM, no device-token model, no

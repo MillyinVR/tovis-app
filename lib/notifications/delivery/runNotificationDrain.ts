@@ -23,8 +23,13 @@ import {
 } from '@/lib/notifications/delivery/providerTypes'
 import { createEmailDeliveryProvider } from '@/lib/notifications/delivery/sendEmail'
 import { createInAppDeliveryProvider } from '@/lib/notifications/delivery/sendInApp'
+import {
+  createApnsDeliveryProvider,
+  createFcmDeliveryProvider,
+} from '@/lib/notifications/delivery/sendPush'
 import { createSmsDeliveryProvider } from '@/lib/notifications/delivery/sendSms'
 import {
+  isNotificationProviderConfigError,
   readPostmarkEmailConfig,
   readTwilioSmsConfig,
 } from '@/lib/notifications/config'
@@ -165,17 +170,28 @@ function buildEmailProvider(): NotificationDeliveryProvider<EmailProviderSendReq
 }
 
 function buildApnsProvider(): NotificationDeliveryProvider<PushProviderSendRequest> | null {
-  // PR2a: no APNs client yet. The push capability gate (isPushProviderConfigured)
-  // keeps PUSH rows from ever being enqueued, so this null provider is just the
-  // belt-and-suspenders safety net — any stray PUSH/APNS row stays claimable
-  // instead of crashing the worker. PR2b returns a real ApnsDeliveryProvider here.
-  return null
+  // Only stand up the APNs provider when credentials are configured. Mirror
+  // buildSmsProvider: createApnsDeliveryProvider throws a config error when
+  // unconfigured, which we swallow to a null provider so a missing var degrades
+  // to "no APNs provider" instead of crashing the worker and taking down the
+  // other channels. (isPushProviderConfigured still gates enqueue, so absent
+  // creds means no PUSH rows are ever created anyway.)
+  try {
+    return createApnsDeliveryProvider()
+  } catch (error) {
+    if (isNotificationProviderConfigError(error)) return null
+    throw error
+  }
 }
 
 function buildFcmProvider(): NotificationDeliveryProvider<PushProviderSendRequest> | null {
-  // PR2a: no FCM client yet. See buildApnsProvider — PR2b returns the real
-  // FcmDeliveryProvider here.
-  return null
+  // See buildApnsProvider — same configured-or-null contract for FCM.
+  try {
+    return createFcmDeliveryProvider()
+  } catch (error) {
+    if (isNotificationProviderConfigError(error)) return null
+    throw error
+  }
 }
 
 export function buildNotificationProviderRegistry(): DeliveryProviderRegistry {

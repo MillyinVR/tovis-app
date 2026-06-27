@@ -9,7 +9,11 @@ const mockPrisma = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({ prisma: mockPrisma }))
 
-import { deactivateDeviceToken, registerDeviceToken } from './deviceTokens'
+import {
+  deactivateDeviceToken,
+  invalidateDeviceToken,
+  registerDeviceToken,
+} from './deviceTokens'
 
 describe('registerDeviceToken', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -82,5 +86,24 @@ describe('deactivateDeviceToken', () => {
     })
 
     expect(removed).toBe(false)
+  })
+})
+
+describe('invalidateDeviceToken', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('deactivates by (platform, token) WITHOUT scoping to a user', async () => {
+    mockPrisma.deviceToken.updateMany.mockResolvedValue({ count: 1 })
+
+    await invalidateDeviceToken({ platform: 'IOS', token: 'apns-dead' })
+
+    expect(mockPrisma.deviceToken.updateMany).toHaveBeenCalledWith({
+      where: { platform: 'IOS', token: 'apns-dead' },
+      data: { isActive: false },
+    })
+
+    // No userId in the where clause — the provider reported the token dead.
+    const arg = mockPrisma.deviceToken.updateMany.mock.calls[0]?.[0]
+    expect(arg.where).not.toHaveProperty('userId')
   })
 })
