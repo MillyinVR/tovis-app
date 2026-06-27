@@ -16,6 +16,62 @@
 
 ---
 
+## Current status (updated 2026-06-27) — the backend-side work is DONE
+
+The backend is now native-ready. Everything that had to happen *before* an iOS/Android
+client could be built is shipped and merged:
+
+| Tier | What | Status |
+|------|------|--------|
+| 0 | Bearer-token auth path (+ refresh, Origin carve-out, token in body) | ✅ #387 |
+| 2.2 | Freeze the API surface under `/api/v1` (hard cutover, 221 routes) | ✅ #388 |
+| 2.1 | Aggregate read endpoints (`/client/home`, `/me`, `/u/[handle]`, `/offerings/[id]`, `/professionals/[id]`) | ✅ #389 |
+| 2.3 | `lib/dto` barrel + generated JSON Schema wire contract (`schema/api/…`) | ✅ #390 |
+| 1.1 | Push backend: `DeviceToken` + `/api/v1/devices`, PUSH channel + per-device fan-out, APNs/FCM clients + token invalidation | ✅ #391 / #392 / #393 |
+| 1.1 | Push go-live runbook + `.env.example` keys | ✅ #394 |
+
+**A native client can be built against this today.** Push is fully built but dormant
+until APNs/FCM creds are set (`docs/mobile/push-go-live-runbook.md`) AND a device
+registers a token — both happen at/after the app exists, by design.
+
+### What's left — backend, optional hardening you CAN do before the app
+None of these block starting the Xcode app; they're pre-scale / pre-submission polish.
+- **4.4 — Abuse controls at native scale.** Re-verify `AUTH_TRUSTED_IP_HEADER` is the
+  real ingress header for the native path; add per-phone/email rate-limit keying and
+  raise IP ceilings (carrier NAT puts many users behind one IP). *Low–Med.*
+- **4.3 (backend half) — Hash `ProClientInvite.token` at rest** (it's still stored raw;
+  the deep-link-validation half is app-side). *Low–Med.*
+- **2.3 cleanup — Tighten the DTO barrel.** A barrel type transitively pulls raw Prisma
+  payload internals into the generated JSON Schema (gibberish `DefaultSelection<…>`
+  defs that churn on every enum change). Tighten so native codegen output is clean. *Low–Med.*
+- **4.5 — Pre-existing security debt.** Finish the log-redaction audit
+  (`docs/security/log-redaction-audit.md` is all "Pending"); encrypt raw email at rest
+  (expand→backfill→contract — the big one); fix the stale
+  `contact-lookup-hash-threat-model.md`. *Mixed.*
+- **4.2 (now unblocked) — Per-device revocation + token rotation.** With `DeviceToken`
+  shipped, add per-device session revocation and revisit the deferred Tier 0
+  short-access/long-refresh rotation. *Med.*
+
+### What's left — app-coupled (do WITH or AFTER the native client)
+- **PR3 / operator — push go-live.** Set APNs/FCM creds in Vercel + on-device smoke
+  (`docs/mobile/push-go-live-runbook.md`).
+- **3.2 — Deep links / Universal Links.** Host `apple-app-site-association` +
+  `assetlinks.json` (need the app's team/bundle ids + signing fingerprints) and point
+  Stripe `success/cancel/return` URLs at the UL-claimed domain. Reused by auth verify +
+  notifications too.
+- **4.1 — Native attestation.** Replace the browser Turnstile captcha with App Attest
+  (iOS) / Play Integrity (Android) — attestation tokens originate on the device.
+- **3.1 — Pro-membership IAP policy review.** Decision/legal before App Store submission
+  (recurring digital subscription → Apple/Google IAP unless the B2B exemption holds).
+- **Tier 5 — Native UI rebuilds.** Maps, geolocation, media-upload shims — pure client;
+  the data APIs are already clean & reusable.
+
+> **Bottom line for the next phase:** start the native client now. The backend won't be
+> the bottleneck. Tackle the app-coupled items inline as you build, and pick off the
+> optional backend hardening above as time allows.
+
+---
+
 ## Guardrails for whoever picks this up
 
 - Follow `CLAUDE.md` house rules: no `as any`/type escapes, no duplicate logic (search for an
