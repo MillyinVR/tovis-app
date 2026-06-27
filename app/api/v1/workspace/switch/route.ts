@@ -110,6 +110,7 @@ export async function POST(request: Request) {
     userId: user.id,
     role: target,
     authVersion: user.authVersion,
+    deviceId: user.deviceId, // keep the device binding across the switch
   })
 
   // Native replays `token` as a bearer; web uses the cookie. The re-minted

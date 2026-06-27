@@ -596,6 +596,7 @@ describe('app/api/v1/auth/register/route', () => {
       userId: 'user_pro_salon',
       role: Role.PRO,
       authVersion: 1,
+      deviceId: null,
     })
   })
 
@@ -670,6 +671,7 @@ describe('app/api/v1/auth/register/route', () => {
       userId: 'user_pro_mobile',
       role: Role.PRO,
       authVersion: 1,
+      deviceId: null,
     })
   })
 
@@ -1113,6 +1115,7 @@ describe('app/api/v1/auth/register/route', () => {
       userId: 'user_1',
       role: Role.CLIENT,
       authVersion: 1,
+      deviceId: null,
     })
 
     expect(tx.user.create).toHaveBeenCalledWith({
@@ -1255,6 +1258,7 @@ describe('app/api/v1/auth/register/route', () => {
       userId: 'user_2',
       role: Role.CLIENT,
       authVersion: 1,
+      deviceId: null,
     })
 
     await flushWaitUntilTasks()
@@ -1316,6 +1320,7 @@ describe('app/api/v1/auth/register/route', () => {
       userId: 'user_3',
       role: Role.CLIENT,
       authVersion: 1,
+      deviceId: null,
     })
 
     await flushWaitUntilTasks()

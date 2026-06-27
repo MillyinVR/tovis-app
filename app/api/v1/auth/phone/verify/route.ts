@@ -260,11 +260,13 @@ export async function POST(request: Request) {
           userId,
           role: user.role,
           authVersion: user.authVersion,
+          deviceId: user.deviceId, // preserve device binding through verification
         })
       : createVerificationToken({
           userId,
           role: user.role,
           authVersion: user.authVersion,
+          deviceId: user.deviceId,
         })
 
     const response = jsonOk(

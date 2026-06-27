@@ -32,6 +32,7 @@ export async function POST(request: Request) {
     userId: user.id,
     role: user.role, // acting role — preserves an active workspace switch
     authVersion: user.authVersion,
+    deviceId: user.deviceId, // keep the device binding across rotation
   })
 
   // Native replays `token` as a bearer; web keeps using the refreshed cookie.

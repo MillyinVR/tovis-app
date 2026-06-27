@@ -28,6 +28,7 @@ type LoginBody = {
   password?: unknown
   tapIntentId?: unknown
   expectedRole?: unknown
+  deviceId?: unknown
 }
 
 const LOGIN_LOCK_THRESHOLD = 10
@@ -259,6 +260,9 @@ export async function POST(request: Request) {
     const password = pickString(body.password)
     const tapIntentId = pickString(body.tapIntentId)
     const expectedRole = normalizeExpectedRole(body.expectedRole)
+    // Native clients send a stable per-install id so the session can be revoked
+    // per-device; web omits it.
+    const deviceId = pickString(body.deviceId)
 
     emailForLog = email
 
@@ -326,11 +330,13 @@ export async function POST(request: Request) {
           userId: clearedUser.id,
           role: clearedUser.role,
           authVersion: clearedUser.authVersion,
+          deviceId,
         })
       : createVerificationToken({
           userId: clearedUser.id,
           role: clearedUser.role,
           authVersion: clearedUser.authVersion,
+          deviceId,
         })
 
     const consumed = await consumeTapIntent({

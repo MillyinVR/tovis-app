@@ -114,6 +114,7 @@ type RegisterBody = {
   next?: unknown
   intent?: unknown
   inviteToken?: unknown
+  deviceId?: unknown
 
   // pro fields
   businessName?: unknown
@@ -646,6 +647,9 @@ export async function POST(request: Request) {
     const turnstileToken = pickString(body.turnstileToken)
 
     const tapIntentId = pickString(body.tapIntentId)
+    // Native clients send a stable per-install id so the session can be revoked
+    // per-device; it rides the verification token through to the active one.
+    const deviceId = pickString(body.deviceId)
     const signupLocation = isLocationPayload(body.signupLocation)
       ? body.signupLocation
       : null
@@ -1289,6 +1293,7 @@ export async function POST(request: Request) {
       userId: user.id,
       role: user.role,
       authVersion: user.authVersion,
+      deviceId,
     })
 
     const res = jsonOk(

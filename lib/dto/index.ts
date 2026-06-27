@@ -36,6 +36,9 @@ export type {
 // ── Push device registration (POST/DELETE /api/v1/devices) ───────────────────
 export type { DeviceTokenDTO } from '@/lib/dto/deviceToken'
 
+// ── Manage devices / per-device revocation (GET /api/v1/devices) ─────────────
+export type { UserDeviceDTO } from '@/lib/dto/device'
+
 // ── Client home dashboard (GET /api/v1/client/home) ──────────────────────────
 export type {
   ClientHomeBookingDTO,
