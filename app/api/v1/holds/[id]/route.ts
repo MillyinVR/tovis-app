@@ -8,6 +8,11 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { releaseHold } from '@/lib/booking/writeBoundary'
+import type {
+  BookingHoldDTO,
+  BookingHoldDeleteResponseDTO,
+  BookingHoldGetResponseDTO,
+} from '@/lib/dto/holds'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +44,7 @@ async function getHoldId(ctx: RouteContext): Promise<string | null> {
   return pickString(params?.id)
 }
 
-function toHoldDto(hold: HoldRouteRecord) {
+function toHoldDto(hold: HoldRouteRecord): BookingHoldDTO {
   return {
     id: hold.id,
     scheduledFor: hold.scheduledFor.toISOString(),
@@ -89,7 +94,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
     return jsonOk(
       {
         hold: toHoldDto(hold),
-      },
+      } satisfies BookingHoldGetResponseDTO,
       200,
     )
   } catch (error: unknown) {
@@ -120,7 +125,7 @@ export async function DELETE(_req: Request, ctx: RouteContext) {
         deleted: result.meta.mutated,
         holdId: result.holdId,
         meta: result.meta,
-      },
+      } satisfies BookingHoldDeleteResponseDTO,
       200,
     )
   } catch (error: unknown) {
