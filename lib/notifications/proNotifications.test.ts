@@ -172,6 +172,7 @@ describe('lib/notifications/proNotifications', () => {
         inAppEnabled: true,
         smsEnabled: true,
         emailEnabled: true,
+        pushEnabled: true,
         quietHoursStartMinutes: true,
         quietHoursEndMinutes: true,
       },

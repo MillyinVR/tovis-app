@@ -97,6 +97,38 @@ export function isTwilioSmsConfigured(): boolean {
   return readTwilioSmsConfig() !== null
 }
 
+/**
+ * Whether a PUSH provider (APNs and/or FCM) is configured for notification
+ * dispatch.
+ *
+ * PR2a engine-wiring launch gate: PUSH must stay fully inert in production until
+ * a later PR (PR2b/PR3) provisions the APNs/FCM credentials and ships the real
+ * provider clients. While this returns false, PUSH capability is forced off at
+ * enqueue (see lib/notifications/channelPolicy + enqueueDispatch) so NO PUSH
+ * delivery rows are ever created — there is nothing that could send them and they
+ * would otherwise retry forever.
+ *
+ * It checks for any push credentials so it flips to true automatically the
+ * instant they are set (alongside the provider-client PR) — no code change here.
+ * APNs needs an auth key (.p8), key id, team id and bundle id; FCM needs a
+ * service-account JSON / project id.
+ */
+export function isPushProviderConfigured(): boolean {
+  const apnsConfigured = Boolean(
+    readEnv('APNS_AUTH_KEY') &&
+      readEnv('APNS_KEY_ID') &&
+      readEnv('APNS_TEAM_ID') &&
+      readEnv('APNS_BUNDLE_ID'),
+  )
+
+  const fcmConfigured = Boolean(
+    readFirstEnv(['FCM_SERVICE_ACCOUNT_JSON', 'FCM_SERVICE_ACCOUNT']) &&
+      readFirstEnv(['FCM_PROJECT_ID', 'FIREBASE_PROJECT_ID']),
+  )
+
+  return apnsConfigured || fcmConfigured
+}
+
 export function readPostmarkEmailConfig(): PostmarkEmailConfig | null {
   const serverToken = readFirstEnv([
     'POSTMARK_SERVER_TOKEN',

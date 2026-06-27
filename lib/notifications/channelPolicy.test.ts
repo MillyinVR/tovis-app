@@ -23,6 +23,7 @@ function makeCapabilities(
     hasInAppTarget: true,
     hasSmsDestination: true,
     hasEmailDestination: true,
+    hasPushDestination: true,
     ...overrides,
   }
 }
@@ -34,6 +35,7 @@ function makePreference(
     inAppEnabled: true,
     smsEnabled: true,
     emailEnabled: true,
+    pushEnabled: true,
     quietHoursStartMinutes: null,
     quietHoursEndMinutes: null,
     ...overrides,
@@ -57,6 +59,7 @@ describe('lib/notifications/channelPolicy', () => {
         hasInAppTarget: true,
         hasSmsDestination: true,
         hasEmailDestination: true,
+        hasPushDestination: false,
       })
     })
 
@@ -75,6 +78,7 @@ describe('lib/notifications/channelPolicy', () => {
         hasInAppTarget: true,
         hasSmsDestination: false,
         hasEmailDestination: true,
+        hasPushDestination: false,
       })
     })
 
@@ -93,6 +97,7 @@ describe('lib/notifications/channelPolicy', () => {
         hasInAppTarget: true,
         hasSmsDestination: false,
         hasEmailDestination: true,
+        hasPushDestination: false,
       })
     })
 
@@ -111,6 +116,7 @@ describe('lib/notifications/channelPolicy', () => {
         hasInAppTarget: true,
         hasSmsDestination: true,
         hasEmailDestination: false,
+        hasPushDestination: false,
       })
     })
 
@@ -128,6 +134,7 @@ describe('lib/notifications/channelPolicy', () => {
         hasInAppTarget: false,
         hasSmsDestination: false,
         hasEmailDestination: false,
+        hasPushDestination: false,
       })
     })
   })
@@ -186,6 +193,11 @@ describe('lib/notifications/channelPolicy', () => {
           enabled: false,
           reason: 'RECIPIENT_UNSUPPORTED',
         },
+        {
+          channel: NotificationChannel.PUSH,
+          enabled: false,
+          reason: 'RECIPIENT_UNSUPPORTED',
+        },
       ])
     })
 
@@ -213,15 +225,21 @@ describe('lib/notifications/channelPolicy', () => {
         capabilities: makeCapabilities(),
       })
 
-      // BOOKING_CONFIRMED is Tier B: in-app + email only (push later), never SMS
-      // for app users. SMS is not even in the default channel set, so it is not
-      // evaluated.
+      // BOOKING_CONFIRMED is Tier B: in-app + email + push, never SMS for app
+      // users. SMS is not even in the default channel set, so it is not evaluated.
+      // PUSH is in the default set and selected here because makeCapabilities()
+      // reports a push destination.
       expect(result.selectedChannels).toEqual([
         NotificationChannel.IN_APP,
         NotificationChannel.EMAIL,
+        NotificationChannel.PUSH,
       ])
       expect(result.evaluations.map((evaluation) => evaluation.channel)).toEqual(
-        [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
+        [
+          NotificationChannel.IN_APP,
+          NotificationChannel.EMAIL,
+          NotificationChannel.PUSH,
+        ],
       )
     })
 
@@ -255,10 +273,12 @@ describe('lib/notifications/channelPolicy', () => {
       expect(result.selectedChannels).toEqual([
         NotificationChannel.IN_APP,
         NotificationChannel.EMAIL,
+        NotificationChannel.PUSH,
       ])
       expect(result.evaluations).toEqual([
         { channel: NotificationChannel.IN_APP, enabled: true, reason: null },
         { channel: NotificationChannel.EMAIL, enabled: true, reason: null },
+        { channel: NotificationChannel.PUSH, enabled: true, reason: null },
       ])
     })
 
@@ -583,6 +603,117 @@ describe('lib/notifications/channelPolicy', () => {
           capabilities: makeCapabilities(),
         }),
       ).toBe(false)
+    })
+  })
+
+  describe('PUSH channel', () => {
+    it('reflects the hasPushDestination input on getRecipientChannelCapabilities', () => {
+      expect(
+        getRecipientChannelCapabilities({
+          recipientKind: NotificationRecipientKind.CLIENT,
+          inAppTargetId: 'client_1',
+          hasPushDestination: true,
+        }).hasPushDestination,
+      ).toBe(true)
+
+      // Defaults to false when the caller does not supply it (PR2a inert default).
+      expect(
+        getRecipientChannelCapabilities({
+          recipientKind: NotificationRecipientKind.CLIENT,
+          inAppTargetId: 'client_1',
+        }).hasPushDestination,
+      ).toBe(false)
+    })
+
+    it('selects PUSH when the event allows it and a push destination exists', () => {
+      // BOOKING_CONFIRMED for a client includes PUSH in its default channels.
+      expect(
+        isChannelSelected({
+          key: NotificationEventKey.BOOKING_CONFIRMED,
+          recipientKind: NotificationRecipientKind.CLIENT,
+          channel: NotificationChannel.PUSH,
+          capabilities: makeCapabilities(),
+        }),
+      ).toBe(true)
+    })
+
+    it('suppresses PUSH with MISSING_PUSH_TOKENS when there is no push destination', () => {
+      const policy = resolveChannelPolicy({
+        key: NotificationEventKey.BOOKING_CONFIRMED,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities({ hasPushDestination: false }),
+      })
+
+      const pushEvaluation = policy.evaluations.find(
+        (evaluation) => evaluation.channel === NotificationChannel.PUSH,
+      )
+
+      expect(pushEvaluation).toEqual({
+        channel: NotificationChannel.PUSH,
+        enabled: false,
+        reason: 'MISSING_PUSH_TOKENS',
+      })
+      expect(policy.selectedChannels).not.toContain(NotificationChannel.PUSH)
+    })
+
+    it('suppresses PUSH with PREFERENCE_DISABLED when pushEnabled is false', () => {
+      const policy = resolveChannelPolicy({
+        key: NotificationEventKey.BOOKING_CONFIRMED,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities(),
+        preference: makePreference({ pushEnabled: false }),
+      })
+
+      const pushEvaluation = policy.evaluations.find(
+        (evaluation) => evaluation.channel === NotificationChannel.PUSH,
+      )
+
+      expect(pushEvaluation).toEqual({
+        channel: NotificationChannel.PUSH,
+        enabled: false,
+        reason: 'PREFERENCE_DISABLED',
+      })
+    })
+
+    it('applies quiet hours to PUSH (deferred when within the window, sent when bypassed)', () => {
+      const withinQuietHours = 23 * 60 // 11pm, inside a 22:00–08:00 window
+
+      // BOOKING_CONFIRMED allows quiet-hours bypass; without bypassing, PUSH is
+      // suppressed for quiet hours just like SMS/EMAIL.
+      const deferred = resolveChannelPolicy({
+        key: NotificationEventKey.BOOKING_CONFIRMED,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities(),
+        preference: makePreference({
+          quietHoursStartMinutes: 22 * 60,
+          quietHoursEndMinutes: 8 * 60,
+        }),
+        recipientLocalMinutes: withinQuietHours,
+      })
+
+      expect(
+        deferred.evaluations.find(
+          (evaluation) => evaluation.channel === NotificationChannel.PUSH,
+        ),
+      ).toEqual({
+        channel: NotificationChannel.PUSH,
+        enabled: false,
+        reason: 'QUIET_HOURS',
+      })
+
+      const bypassed = resolveChannelPolicy({
+        key: NotificationEventKey.BOOKING_CONFIRMED,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities(),
+        preference: makePreference({
+          quietHoursStartMinutes: 22 * 60,
+          quietHoursEndMinutes: 8 * 60,
+        }),
+        recipientLocalMinutes: withinQuietHours,
+        bypassQuietHours: true,
+      })
+
+      expect(bypassed.selectedChannels).toContain(NotificationChannel.PUSH)
     })
   })
 })

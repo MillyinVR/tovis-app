@@ -50,6 +50,17 @@ const EMAIL_BINDING: DeliveryProviderBinding = {
   maxAttempts: 6,
 }
 
+// PUSH is the one channel whose provider is NOT fixed by the channel: a delivery
+// row routes via APNS (iOS) or FCM (Android) depending on the target device. The
+// `provider` here is only a placeholder so the channel→binding map stays total;
+// the real provider is set PER ROW at enqueue (from the device platform) and read
+// back from the row at send time. Only `maxAttempts` is authoritative here.
+const PUSH_BINDING: DeliveryProviderBinding = {
+  channel: NotificationChannel.PUSH,
+  provider: NotificationProvider.APNS,
+  maxAttempts: 4,
+}
+
 export const DELIVERY_PROVIDER_BINDINGS: Record<
   NotificationChannel,
   DeliveryProviderBinding
@@ -57,12 +68,14 @@ export const DELIVERY_PROVIDER_BINDINGS: Record<
   [NotificationChannel.IN_APP]: IN_APP_BINDING,
   [NotificationChannel.SMS]: SMS_BINDING,
   [NotificationChannel.EMAIL]: EMAIL_BINDING,
+  [NotificationChannel.PUSH]: PUSH_BINDING,
 }
 
 export const DELIVERY_PROVIDER_BINDING_LIST: readonly DeliveryProviderBinding[] = [
   IN_APP_BINDING,
   SMS_BINDING,
   EMAIL_BINDING,
+  PUSH_BINDING,
 ]
 
 
@@ -113,12 +126,34 @@ export function isProviderAllowedForChannel(args: {
   return getProviderForChannel(args.channel) === args.provider
 }
 
+function resolvePushProvider(
+  provider: NotificationProvider | null | undefined,
+): typeof NotificationProvider.APNS | typeof NotificationProvider.FCM {
+  // PUSH provider is per-device, so it must be supplied from the delivery row.
+  if (
+    provider !== NotificationProvider.APNS &&
+    provider !== NotificationProvider.FCM
+  ) {
+    throw new Error(
+      'providerPolicy: PUSH delivery requires an APNS or FCM provider from the delivery row',
+    )
+  }
+
+  return provider
+}
+
 export function buildProviderSendRequest(args: {
   deliveryId: string
   dispatchId: string
   destination: string
   attemptCount: number
   content: RenderedNotificationContent
+  /**
+   * The delivery row's persisted provider. Required for PUSH (APNS|FCM is chosen
+   * per device, not by channel); ignored for channels whose provider is fixed by
+   * the channel binding.
+   */
+  provider?: NotificationProvider | null
   metadata?: Prisma.InputJsonValue | null
 }): ProviderSendRequest {
   const deliveryId = normalizeRequiredString(args.deliveryId, 'deliveryId')
@@ -128,8 +163,15 @@ export function buildProviderSendRequest(args: {
 
   const binding = getDeliveryProviderBinding(args.content.channel)
 
+  // PUSH's provider is per-device, so resolve it from the row; every other channel
+  // uses its fixed channel→provider binding.
+  const provider =
+    args.content.channel === NotificationChannel.PUSH
+      ? resolvePushProvider(args.provider)
+      : binding.provider
+
   assertProviderMatchesRenderedContent({
-    provider: binding.provider,
+    provider,
     channel: binding.channel,
     content: args.content,
   })
@@ -161,6 +203,15 @@ export function buildProviderSendRequest(args: {
       ...base,
       provider: NotificationProvider.TWILIO,
       channel: NotificationChannel.SMS,
+      content: args.content,
+    }
+  }
+
+  if (args.content.channel === NotificationChannel.PUSH) {
+    return {
+      ...base,
+      provider: resolvePushProvider(args.provider),
+      channel: NotificationChannel.PUSH,
       content: args.content,
     }
   }

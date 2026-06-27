@@ -192,6 +192,9 @@ describe('lib/notifications/delivery/runNotificationDrain', () => {
           channel: NotificationChannel.EMAIL,
           send: expect.any(Function),
         },
+        // PR2a: no APNs/FCM clients yet, so the push providers are null.
+        apns: null,
+        fcm: null,
       },
       claim: {
         now: NOW,
@@ -349,6 +352,8 @@ describe('lib/notifications/delivery/runNotificationDrain', () => {
           },
           sms: null,
           email: null,
+          apns: null,
+          fcm: null,
         },
       }),
     )

@@ -33,6 +33,13 @@ describe('lib/notifications/delivery/providerPolicy', () => {
           provider: NotificationProvider.POSTMARK,
           maxAttempts: 6,
         },
+        [NotificationChannel.PUSH]: {
+          channel: NotificationChannel.PUSH,
+          // Placeholder provider — PUSH rows get their real APNS|FCM provider
+          // per-device at enqueue. Only maxAttempts is authoritative here.
+          provider: NotificationProvider.APNS,
+          maxAttempts: 4,
+        },
       })
     })
 
@@ -52,6 +59,11 @@ describe('lib/notifications/delivery/providerPolicy', () => {
           channel: NotificationChannel.EMAIL,
           provider: NotificationProvider.POSTMARK,
           maxAttempts: 6,
+        },
+        {
+          channel: NotificationChannel.PUSH,
+          provider: NotificationProvider.APNS,
+          maxAttempts: 4,
         },
       ])
     })
@@ -276,6 +288,85 @@ describe('lib/notifications/delivery/providerPolicy', () => {
           html: '<p>Your aftercare is ready.</p>',
         },
       })
+    })
+
+    it('builds a push request using the APNS provider from the row (iOS device)', () => {
+      const result = buildProviderSendRequest({
+        deliveryId: 'delivery_push_ios',
+        dispatchId: 'dispatch_1',
+        destination: 'apns_device_token',
+        attemptCount: 0,
+        provider: NotificationProvider.APNS,
+        content: {
+          channel: NotificationChannel.PUSH,
+          templateKey: 'booking_confirmed',
+          templateVersion: 1,
+          title: 'Appointment confirmed',
+          body: 'Your appointment is confirmed.',
+          href: '/client/bookings/booking_1',
+        },
+      })
+
+      expect(result).toEqual({
+        deliveryId: 'delivery_push_ios',
+        dispatchId: 'dispatch_1',
+        destination: 'apns_device_token',
+        attemptCount: 0,
+        maxAttempts: 4,
+        idempotencyKey: 'delivery:delivery_push_ios:attempt:1',
+        metadata: null,
+        provider: NotificationProvider.APNS,
+        channel: NotificationChannel.PUSH,
+        content: {
+          channel: NotificationChannel.PUSH,
+          templateKey: 'booking_confirmed',
+          templateVersion: 1,
+          title: 'Appointment confirmed',
+          body: 'Your appointment is confirmed.',
+          href: '/client/bookings/booking_1',
+        },
+      })
+    })
+
+    it('builds a push request using the FCM provider from the row (Android device)', () => {
+      const result = buildProviderSendRequest({
+        deliveryId: 'delivery_push_android',
+        dispatchId: 'dispatch_1',
+        destination: 'fcm_device_token',
+        attemptCount: 0,
+        provider: NotificationProvider.FCM,
+        content: {
+          channel: NotificationChannel.PUSH,
+          templateKey: 'booking_confirmed',
+          templateVersion: 1,
+          title: 'Appointment confirmed',
+          body: 'Your appointment is confirmed.',
+        },
+      })
+
+      expect(result.provider).toBe(NotificationProvider.FCM)
+      expect(result.channel).toBe(NotificationChannel.PUSH)
+    })
+
+    it('throws when a push request has no per-device provider', () => {
+      expect(() =>
+        buildProviderSendRequest({
+          deliveryId: 'delivery_push_1',
+          dispatchId: 'dispatch_1',
+          destination: 'device_token',
+          attemptCount: 0,
+          // No provider supplied → cannot resolve APNS vs FCM.
+          content: {
+            channel: NotificationChannel.PUSH,
+            templateKey: 'booking_confirmed',
+            templateVersion: 1,
+            title: 'Appointment confirmed',
+            body: 'Your appointment is confirmed.',
+          },
+        }),
+      ).toThrow(
+        'providerPolicy: PUSH delivery requires an APNS or FCM provider from the delivery row',
+      )
     })
 
     it('throws when deliveryId is blank', () => {

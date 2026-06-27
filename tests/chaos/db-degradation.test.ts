@@ -166,6 +166,9 @@ describe('chaos: DB degradation', () => {
           provider: NotificationProvider.POSTMARK,
           channel: NotificationChannel.EMAIL,
         }),
+        // PUSH providers are null until the APNs/FCM clients ship (PR2b).
+        apns: null,
+        fcm: null,
       },
       claim: {
         now: expect.any(Date),

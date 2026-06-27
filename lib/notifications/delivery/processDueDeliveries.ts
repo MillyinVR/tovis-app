@@ -28,6 +28,7 @@ import {
   type NotificationDeliveryProvider,
   type ProviderSendRequest,
   type ProviderSendResult,
+  type PushProviderSendRequest,
   type SmsProviderSendRequest,
 } from './providerTypes'
 
@@ -81,6 +82,13 @@ export type DeliveryProviderRegistry = {
   // always exists, so in-app delivery never depends on SMS/email config.
   sms: NotificationDeliveryProvider<SmsProviderSendRequest> | null
   email: NotificationDeliveryProvider<EmailProviderSendRequest> | null
+  // PUSH providers, present only when their upstream credentials are configured.
+  // A single PushProviderSendRequest carries APNS|FCM, so each provider here only
+  // handles the requests for its own provider value (routed in sendWithProvider).
+  // Null until PR2b ships the real APNs/FCM clients → all PUSH rows stay claimable
+  // (and in PR2a none are ever created, since the push capability gate is off).
+  apns: NotificationDeliveryProvider<PushProviderSendRequest> | null
+  fcm: NotificationDeliveryProvider<PushProviderSendRequest> | null
 }
 
 function normalizeNow(value: Date | undefined): Date {
@@ -160,6 +168,10 @@ function buildProviderRequest(
     destination: delivery.destination ?? '',
     attemptCount: delivery.attemptCount,
     content,
+    // PUSH rows carry their per-device provider (APNS|FCM) on the row; pass it
+    // through so the request routes to the right provider. Ignored for other
+    // channels whose provider is fixed by the channel binding.
+    provider: delivery.provider,
     metadata: {
       source: 'processDueDeliveries',
       sourceKey: delivery.dispatch.sourceKey,
@@ -211,7 +223,7 @@ async function sendWithProvider(args: {
   providers: DeliveryProviderRegistry
 }): Promise<ProviderSendResult> {
   const { provider, channel } = args.request
-  const { inApp, sms, email } = args.providers
+  const { inApp, sms, email, apns, fcm } = args.providers
 
   switch (provider) {
     case NotificationProvider.INTERNAL_REALTIME:
@@ -225,6 +237,16 @@ async function sendWithProvider(args: {
     case NotificationProvider.POSTMARK:
       return email
         ? email.send(args.request)
+        : buildProviderUnavailableResult({ provider, channel })
+
+    case NotificationProvider.APNS:
+      return apns
+        ? apns.send(args.request)
+        : buildProviderUnavailableResult({ provider, channel })
+
+    case NotificationProvider.FCM:
+      return fcm
+        ? fcm.send(args.request)
         : buildProviderUnavailableResult({ provider, channel })
   }
 

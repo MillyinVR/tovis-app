@@ -583,12 +583,15 @@ enum NotificationChannel {
   IN_APP
   SMS
   EMAIL
+  PUSH
 }
 
 enum NotificationProvider {
   INTERNAL_REALTIME
   TWILIO
   POSTMARK
+  APNS
+  FCM
 }
 
 enum NotificationDeliveryStatus {
@@ -883,7 +886,7 @@ model NotificationDelivery {
   dispatch NotificationDispatch        @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
   events   NotificationDeliveryEvent[]
 
-  @@unique([dispatchId, channel])
+  @@unique([dispatchId, channel, destination])
   @@index([status, nextAttemptAt])
   @@index([leaseExpiresAt])
   @@index([provider, providerMessageId])

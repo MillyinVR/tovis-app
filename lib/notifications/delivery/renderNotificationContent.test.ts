@@ -65,6 +65,37 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     })
   })
 
+  it('renders push content (title/body + internal href, no brand prefix)', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.PUSH,
+      templateKey: 'booking_confirmed',
+      templateVersion: 1,
+      dispatch: makeDispatch(),
+    })
+
+    expect(result).toEqual({
+      channel: NotificationChannel.PUSH,
+      templateKey: 'booking_confirmed',
+      templateVersion: 1,
+      title: 'Appointment confirmed',
+      body: 'Your appointment has been confirmed.',
+      href: '/client/bookings/booking_1',
+    })
+  })
+
+  it('omits the push href when the dispatch has no internal link', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.PUSH,
+      templateKey: 'booking_confirmed',
+      templateVersion: 1,
+      dispatch: makeDispatch({ href: '' }),
+    })
+
+    expect(result).not.toHaveProperty('href')
+  })
+
   it('renders branded SMS content with absolute app href appended', () => {
     const result = renderNotificationContent({
       tenantContext: rootTenantContext('tenant_root'),
