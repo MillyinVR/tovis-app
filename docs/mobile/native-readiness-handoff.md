@@ -16,10 +16,11 @@
 
 ---
 
-## Current status (updated 2026-06-27) — the backend-side work is DONE
+## Current status (updated 2026-06-27, session 2) — backend hardening pass DONE
 
-The backend is now native-ready. Everything that had to happen *before* an iOS/Android
-client could be built is shipped and merged:
+The backend is native-ready AND the optional pre-app hardening is now essentially
+done. Everything that had to happen *before* an iOS/Android client could be built is
+shipped and merged:
 
 | Tier | What | Status |
 |------|------|--------|
@@ -29,28 +30,41 @@ client could be built is shipped and merged:
 | 2.3 | `lib/dto` barrel + generated JSON Schema wire contract (`schema/api/…`) | ✅ #390 |
 | 1.1 | Push backend: `DeviceToken` + `/api/v1/devices`, PUSH channel + per-device fan-out, APNs/FCM clients + token invalidation | ✅ #391 / #392 / #393 |
 | 1.1 | Push go-live runbook + `.env.example` keys | ✅ #394 |
+| — | Fix live `/v1` 404s (Looks feed + viral-requests) | ✅ #395 |
+| 0 | Proxy bearer-token CSRF carve-out regression tests | ✅ #396 |
+| 2.3 | DTO barrel cleanup — strip Prisma-payload leakage from the schema (152→133 defs) | ✅ #397 |
+| 4.4 | NAT-tolerant login/password-reset rate limits + per-account IP+email guard | ✅ #398 |
+| 4.2 | Per-device session revocation (`deviceId` claim + `DeviceSessionRevocation` + `DELETE /api/v1/devices/[deviceId]`) | ✅ #399 |
+| 4.5 | Encrypt email at rest — EXPAND phase (`emailEncrypted` + dual-write + backfill) | 🟡 #400 (open at handoff time) |
 
 **A native client can be built against this today.** Push is fully built but dormant
 until APNs/FCM creds are set (`docs/mobile/push-go-live-runbook.md`) AND a device
 registers a token — both happen at/after the app exists, by design.
 
-### What's left — backend, optional hardening you CAN do before the app
-None of these block starting the Xcode app; they're pre-scale / pre-submission polish.
-- **4.4 — Abuse controls at native scale.** Re-verify `AUTH_TRUSTED_IP_HEADER` is the
-  real ingress header for the native path; add per-phone/email rate-limit keying and
-  raise IP ceilings (carrier NAT puts many users behind one IP). *Low–Med.*
-- **4.3 (backend half) — Hash `ProClientInvite.token` at rest** (it's still stored raw;
-  the deep-link-validation half is app-side). *Low–Med.*
-- **2.3 cleanup — Tighten the DTO barrel.** A barrel type transitively pulls raw Prisma
-  payload internals into the generated JSON Schema (gibberish `DefaultSelection<…>`
-  defs that churn on every enum change). Tighten so native codegen output is clean. *Low–Med.*
-- **4.5 — Pre-existing security debt.** Finish the log-redaction audit
-  (`docs/security/log-redaction-audit.md` is all "Pending"); encrypt raw email at rest
-  (expand→backfill→contract — the big one); fix the stale
-  `contact-lookup-hash-threat-model.md`. *Mixed.*
-- **4.2 (now unblocked) — Per-device revocation + token rotation.** With `DeviceToken`
-  shipped, add per-device session revocation and revisit the deferred Tier 0
-  short-access/long-refresh rotation. *Med.*
+### Session 2 (2026-06-27) — exactly where we left off
+- **#395–#399 merged.** #400 (email-at-rest expand) was **open, green, awaiting merge**.
+- **4.3 was already done** — `ProClientInvite.tokenHash` exists; raw `token` is `@deprecated`.
+  (The old "hash the invite token" item is closed; no work needed.)
+
+### 🔴 PENDING OPERATOR STEPS (not code — set in Vercel / run scripts)
+- **4.4 ops half** — re-verify `AUTH_TRUSTED_IP_HEADER` is the real native ingress
+  header (`lib/trustedClientIp.ts`). The code is done; this is a config check.
+- **4.5 email go-live** — add an `email-aead-v1` key to `PII_AEAD_KEYS_JSON` (Vercel,
+  Sensitive), THEN run `pnpm backfill:email-encryption -- --write`. Until the key is
+  set, email writes are fail-soft (plaintext retained), so nothing breaks.
+  Full rollout in `docs/security/ticket-encrypt-email-at-rest.md`.
+
+### What's left — backend (small, self-contained)
+- **4.5 remainder — log-redaction audit + stale doc.** Finish
+  `docs/security/log-redaction-audit.md` (still all "Pending"; only the auth-event
+  sanitizer is test-proven); fix the stale `contact-lookup-hash-threat-model.md`
+  (describes SHA-256, but code is keyed HMAC-SHA256 v2 with legacy columns dropped). *Low.*
+- **4.5 email follow-ups (deferred from #400).** Phase 2 READ-SWAP: point display/send
+  paths at `readEncryptedEmailOrFallback`. Phase 3 CONTRACT: drop the plaintext `email`
+  columns + fail-hard — but FIRST move the `@unique` login guarantee off plaintext onto
+  `emailHashV2`. See the ticket doc. *Med.*
+- **4.2 follow-up — token rotation.** Short-access + long-refresh rotation was DEFERRED
+  from #399 (it touches every client + TTL). Per-device revocation itself is done. *Med.*
 
 ### What's left — app-coupled (do WITH or AFTER the native client)
 - **PR3 / operator — push go-live.** Set APNs/FCM creds in Vercel + on-device smoke
@@ -66,9 +80,20 @@ None of these block starting the Xcode app; they're pre-scale / pre-submission p
 - **Tier 5 — Native UI rebuilds.** Maps, geolocation, media-upload shims — pure client;
   the data APIs are already clean & reusable.
 
-> **Bottom line for the next phase:** start the native client now. The backend won't be
-> the bottleneck. Tackle the app-coupled items inline as you build, and pick off the
-> optional backend hardening above as time allows.
+> **Bottom line for the next phase:** start the native client now — the backend won't be
+> the bottleneck. The remaining backend items are small (log-redaction audit + a stale
+> doc) or deferred-by-design (email read-swap/contract, token rotation). Everything
+> blocking is either an OPERATOR step (the two 🔴 above) or app-coupled (needs the app's
+> team/bundle ids + signing fingerprints to exist).
+
+### Suggested order for a fresh session
+1. **Merge #400** if not already (email-at-rest expand) — it was green at handoff.
+2. **4.5 remainder** — log-redaction audit + stale `contact-lookup-hash-threat-model.md`
+   fix. Small, self-contained, no app needed.
+3. Hand the two 🔴 operator steps to whoever owns Vercel (IP-header verify; email key +
+   backfill).
+4. Then the app-coupled tier (3.2 deep links, 4.1 attestation, 3.1 IAP) once the native
+   project exists, and the deferred follow-ups (email read-swap/contract, token rotation).
 
 ---
 
