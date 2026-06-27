@@ -5,10 +5,14 @@ import { createHash } from 'node:crypto'
 import { ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import type { AvailabilityDayOk, AvailabilityOffering } from '@/app/(main)/booking/AvailabilityDrawer/types'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import { buildDayCacheKey } from '@/lib/availability/data/cache'
-import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
+import {
+  loadAvailabilityOfferingContext,
+  toAvailabilityOfferingDto,
+} from '@/lib/availability/data/offeringContext'
 import {
   computeDayBoundsUtc,
   computeDaySlotsFast,
@@ -337,7 +341,7 @@ export async function GET(req: Request) {
       dayStartUtc: string
       dayEndExclusiveUtc: string
       slots: string[]
-      offering: typeof offeringPayload
+      offering: AvailabilityOffering
       debug?: unknown
     }
 
@@ -441,7 +445,7 @@ export async function GET(req: Request) {
           dayEndExclusiveUtc: result.dayEndExclusiveUtc.toISOString(),
           slots: result.slots,
 
-          offering: offeringPayload,
+          offering: toAvailabilityOfferingDto(offeringPayload),
           ...(debug ? { debug: result.debug } : {}),
         },
       }
@@ -477,7 +481,7 @@ export async function GET(req: Request) {
       })
     }
 
-    return jsonOk(loaderResult.payload)
+    return jsonOk(loaderResult.payload satisfies AvailabilityDayOk)
   } catch (err: unknown) {
     console.error('GET /api/v1/availability/day error', err)
 

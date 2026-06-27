@@ -148,6 +148,269 @@
       ],
       "type": "string"
     },
+    "ApiOk<(def-alias-1643606088-2592-2984-1643606088-0-93002041664248&structure-1643606088-5702-6857-1643606088-5676-6857-1643606088-5669-6859-1643606088-5630-6859-1643606088-0-9300)>": {
+      "properties": {
+        "adjacencyBufferMinutes": {
+          "type": "number"
+        },
+        "availabilityVersion": {
+          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
+          "type": "string"
+        },
+        "availableDays": {
+          "items": {
+            "$ref": "#/definitions/AvailabilityDaySummary"
+          },
+          "type": "array"
+        },
+        "debug": {
+          "$ref": "#/definitions/AvailabilitySummaryDebug"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "generatedAt": {
+          "description": "ISO timestamp for when the payload was generated.",
+          "type": "string"
+        },
+        "hasMoreDays": {
+          "type": "boolean"
+        },
+        "leadTimeMinutes": {
+          "type": "number"
+        },
+        "locationBufferMinutes": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationOptions": {
+          "items": {
+            "$ref": "#/definitions/AvailabilityLocationOption"
+          },
+          "type": "array"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "maxDaysAhead": {
+          "type": "number"
+        },
+        "mediaId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "const": "BOOTSTRAP",
+          "type": "string"
+        },
+        "nextStartDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offering": {
+          "$ref": "#/definitions/AvailabilityOffering"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "otherPros": {
+          "items": {
+            "$ref": "#/definitions/AvailabilityOtherPro"
+          },
+          "type": "array"
+        },
+        "primaryPro": {
+          "$ref": "#/definitions/AvailabilityPrimaryPro"
+        },
+        "professionalId": {
+          "description": "Transitional duplicate fields. Prefer `request.*` in all new code.",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/definitions/AvailabilityRequestBase"
+        },
+        "selectedDay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AvailabilitySelectedDay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Canonical enterprise field. Authoritative for first paint because it belongs to the current bootstrap response."
+        },
+        "serviceCategoryName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stepMinutes": {
+          "type": "number"
+        },
+        "timeZone": {
+          "type": "string"
+        },
+        "waitlistSupported": {
+          "type": "boolean"
+        },
+        "windowEndDate": {
+          "type": "string"
+        },
+        "windowStartDate": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "adjacencyBufferMinutes",
+        "availabilityVersion",
+        "availableDays",
+        "durationMinutes",
+        "generatedAt",
+        "hasMoreDays",
+        "leadTimeMinutes",
+        "locationBufferMinutes",
+        "locationId",
+        "locationOptions",
+        "locationType",
+        "maxDaysAhead",
+        "mediaId",
+        "mode",
+        "nextStartDate",
+        "offering",
+        "ok",
+        "otherPros",
+        "primaryPro",
+        "professionalId",
+        "request",
+        "selectedDay",
+        "serviceCategoryName",
+        "serviceId",
+        "serviceName",
+        "stepMinutes",
+        "timeZone",
+        "waitlistSupported",
+        "windowEndDate",
+        "windowStartDate"
+      ],
+      "type": "object"
+    },
+    "ApiOk<(def-alias-1643606088-2592-2984-1643606088-0-93002041664248&structure-1643606088-7525-8137-1643606088-7499-8137-1643606088-7492-8139-1643606088-7367-8139-1643606088-0-9300)>": {
+      "properties": {
+        "adjacencyBufferMinutes": {
+          "type": "number"
+        },
+        "availabilityVersion": {
+          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "dayEndExclusiveUtc": {
+          "type": "string"
+        },
+        "dayStartUtc": {
+          "type": "string"
+        },
+        "debug": {},
+        "durationMinutes": {
+          "type": "number"
+        },
+        "generatedAt": {
+          "description": "ISO timestamp for when the payload was generated.",
+          "type": "string"
+        },
+        "leadTimeMinutes": {
+          "type": "number"
+        },
+        "locationBufferMinutes": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "maxDaysAhead": {
+          "type": "number"
+        },
+        "mode": {
+          "const": "DAY",
+          "type": "string"
+        },
+        "offering": {
+          "$ref": "#/definitions/AvailabilityOffering"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "professionalId": {
+          "description": "Transitional duplicate fields. Prefer `request.*` in all new code.",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/definitions/AvailabilityDayRequest"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "slots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stepMinutes": {
+          "type": "number"
+        },
+        "timeZone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "adjacencyBufferMinutes",
+        "availabilityVersion",
+        "date",
+        "dayEndExclusiveUtc",
+        "dayStartUtc",
+        "durationMinutes",
+        "generatedAt",
+        "leadTimeMinutes",
+        "locationBufferMinutes",
+        "locationId",
+        "locationType",
+        "maxDaysAhead",
+        "mode",
+        "ok",
+        "professionalId",
+        "request",
+        "serviceId",
+        "slots",
+        "stepMinutes",
+        "timeZone"
+      ],
+      "type": "object"
+    },
     "ApiOk<(def-alias-1643606088-2592-2984-1643606088-0-93002041664248&structure-1643606088-8670-8831-1643606088-8644-8831-1643606088-8637-8833-1643606088-8597-8833-1643606088-0-9300)>": {
       "properties": {
         "alternates": {
@@ -521,6 +784,183 @@
       ],
       "type": "object"
     },
+    "AvailabilityBootstrapOk": {
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-2592-2984-1643606088-0-93002041664248%26structure-1643606088-5702-6857-1643606088-5676-6857-1643606088-5669-6859-1643606088-5630-6859-1643606088-0-9300)%3E"
+    },
+    "AvailabilityDayOk": {
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-2592-2984-1643606088-0-93002041664248%26structure-1643606088-7525-8137-1643606088-7499-8137-1643606088-7492-8139-1643606088-7367-8139-1643606088-0-9300)%3E",
+      "description": "--------------------------- Availability: DAY mode\n--------------------------"
+    },
+    "AvailabilityDayRequest": {
+      "properties": {
+        "addOnIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "clientAddressId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "offeringId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "addOnIds",
+        "clientAddressId",
+        "date",
+        "durationMinutes",
+        "locationId",
+        "locationType",
+        "offeringId",
+        "professionalId",
+        "serviceId"
+      ],
+      "type": "object"
+    },
+    "AvailabilityDaySummary": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "slotCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "date",
+        "slotCount"
+      ],
+      "type": "object"
+    },
+    "AvailabilityLocationOption": {
+      "description": "One bookable salon/suite option for the primary pro. Present so the client can choose which location to visit when the pro has several. Empty for mobile mode.",
+      "properties": {
+        "city": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "formattedAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isPrimary": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "name",
+        "city",
+        "state",
+        "formattedAddress",
+        "isPrimary"
+      ],
+      "type": "object"
+    },
+    "AvailabilityOffering": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mobileDurationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mobilePriceStartingAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MoneyString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offersInSalon": {
+          "type": "boolean"
+        },
+        "offersMobile": {
+          "type": "boolean"
+        },
+        "salonDurationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "salonPriceStartingAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MoneyString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "offersInSalon",
+        "offersMobile",
+        "salonDurationMinutes",
+        "mobileDurationMinutes",
+        "salonPriceStartingAt",
+        "mobilePriceStartingAt"
+      ],
+      "type": "object"
+    },
     "AvailabilityOtherPro": {
       "properties": {
         "avatarUrl": {
@@ -790,6 +1230,233 @@
         "viewer",
         "limit"
       ],
+      "type": "object"
+    },
+    "AvailabilityPrimaryPro": {
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "distanceMiles": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isCreator": {
+          "const": true,
+          "type": "boolean"
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nameDisplay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProNameDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offeringId": {
+          "description": "Optional on the generic UI card because primary vs alternate cards have slightly different guarantees. Use the specialized types below when availability context must guarantee bookability.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slots": {
+          "description": "UI convenience only. Do not treat these as globally authoritative without request/version validation.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "avatarUrl",
+        "businessName",
+        "id",
+        "isCreator",
+        "location",
+        "locationId",
+        "offeringId",
+        "timeZone"
+      ],
+      "type": "object"
+    },
+    "AvailabilityRequestBase": {
+      "properties": {
+        "addOnIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "clientAddressId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "offeringId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "professionalId",
+        "serviceId",
+        "offeringId",
+        "locationType",
+        "locationId",
+        "clientAddressId",
+        "addOnIds",
+        "durationMinutes"
+      ],
+      "type": "object"
+    },
+    "AvailabilitySelectedDay": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "slots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "date",
+        "slots"
+      ],
+      "type": "object"
+    },
+    "AvailabilitySummaryDebug": {
+      "properties": {
+        "addOnIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "center": {
+          "anyOf": [
+            {
+              "properties": {
+                "lat": {
+                  "type": "number"
+                },
+                "lng": {
+                  "type": "number"
+                },
+                "radiusMiles": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "lat",
+                "lng",
+                "radiusMiles"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clientAddressId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "emptyReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "includeOtherPros": {
+          "type": "boolean"
+        },
+        "otherProsCount": {
+          "type": "number"
+        },
+        "requestedSummaryDays": {
+          "type": "number"
+        },
+        "usedViewerCenter": {
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "BoardVisibility": {
@@ -5440,6 +6107,9 @@
     },
     "ModerationStatus": {
       "$ref": "#/definitions/%24Enums.ModerationStatus"
+    },
+    "MoneyString": {
+      "type": "string"
     },
     "MutationMetaDTO": {
       "properties": {
