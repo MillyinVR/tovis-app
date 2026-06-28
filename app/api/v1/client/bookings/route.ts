@@ -71,6 +71,8 @@ const bookingSelect = {
   selectedPaymentMethod: true,
   paymentAuthorizedAt: true,
   paymentCollectedAt: true,
+  depositStatus: true,
+  depositAmount: true,
 
   totalDurationMinutes: true,
   bufferMinutes: true,

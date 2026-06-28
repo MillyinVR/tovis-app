@@ -1938,6 +1938,20 @@
             "null"
           ]
         },
+        "depositAmount": {
+          "description": "Formatted deposit amount (e.g. \"$25\"), or null when no deposit applies.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "depositStatus": {
+          "description": "Discovery deposit lifecycle (BookingDepositStatus): NONE · PENDING · PAID · REFUNDED · FAILED. A deposit is OWED-and-unpaid exactly when this is \"PENDING\" — that's the gate for a \"Pay deposit\" CTA. Populated only where the source query selects the deposit columns (the client bookings list route); null elsewhere.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "discountAmount": {
           "type": [
             "string",
@@ -2010,7 +2024,9 @@
         "checkoutStatus",
         "selectedPaymentMethod",
         "paymentAuthorizedAt",
-        "paymentCollectedAt"
+        "paymentCollectedAt",
+        "depositStatus",
+        "depositAmount"
       ],
       "type": "object"
     },
