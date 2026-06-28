@@ -20,6 +20,11 @@ import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import {
+  broadcastLive,
+  liveChannelForPro,
+  liveChannelForUser,
+} from '@/lib/live/broadcast'
+import {
   BookingCloseoutAuditAction,
   ConsultationApprovalStatus,
   NotificationEventKey,
@@ -345,6 +350,12 @@ const idempotencyRequest = new Request(
       // Client approved the consultation — notify the pro now.
       kickNotificationDrain()
 
+      // Live-sync: pro's + client's open screens refetch immediately.
+      await broadcastLive(
+        [liveChannelForPro(booking.professionalId), liveChannelForUser(user.id)],
+        'consultation',
+      )
+
       return jsonOk(responseBody, 200)
     }
 
@@ -473,6 +484,12 @@ const idempotencyRequest = new Request(
 
     // Client rejected the consultation — notify the pro now.
     kickNotificationDrain()
+
+    // Live-sync: pro's + client's open screens refetch immediately.
+    await broadcastLive(
+      [liveChannelForPro(booking.professionalId), liveChannelForUser(user.id)],
+      'consultation',
+    )
 
     return jsonOk(responseBody, 200)
   } catch (e: unknown) {
