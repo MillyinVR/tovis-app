@@ -121,6 +121,48 @@
       ],
       "type": "string"
     },
+    "$Enums.NotificationChannel": {
+      "enum": [
+        "IN_APP",
+        "SMS",
+        "EMAIL",
+        "PUSH"
+      ],
+      "type": "string"
+    },
+    "$Enums.NotificationEventKey": {
+      "enum": [
+        "BOOKING_REQUEST_CREATED",
+        "BOOKING_CONFIRMED",
+        "BOOKING_STARTED",
+        "BOOKING_RESCHEDULED",
+        "BOOKING_CANCELLED_BY_CLIENT",
+        "BOOKING_CANCELLED_BY_PRO",
+        "BOOKING_CANCELLED_BY_ADMIN",
+        "CLIENT_CLAIM_INVITE",
+        "CONSULTATION_PROPOSAL_SENT",
+        "CONSULTATION_APPROVED",
+        "CONSULTATION_REJECTED",
+        "REVIEW_RECEIVED",
+        "APPOINTMENT_REMINDER",
+        "AFTERCARE_READY",
+        "LAST_MINUTE_OPENING_AVAILABLE",
+        "VIRAL_REQUEST_APPROVED",
+        "PAYMENT_COLLECTED",
+        "PAYMENT_ACTION_REQUIRED",
+        "PAYMENT_REFUNDED",
+        "LOOK_FOLLOWER_NEW",
+        "CLIENT_FOLLOW",
+        "REFERRAL_TAP_RECEIVED",
+        "REFERRAL_CONFIRMED",
+        "REFERRAL_CONVERTED",
+        "PRO_HANDLE_RESERVATION_EXPIRING",
+        "ADMIN_VERIFICATION_REVIEW_NEEDED",
+        "ADMIN_SUPPORT_TICKET_CREATED",
+        "ADMIN_VIRAL_REQUEST_PENDING"
+      ],
+      "type": "string"
+    },
     "$Enums.PaymentMethod": {
       "enum": [
         "CASH",
@@ -1761,6 +1803,26 @@
     },
     "BookingServiceItemType": {
       "$ref": "#/definitions/%24Enums.BookingServiceItemType"
+    },
+    "ChannelPreferenceState": {
+      "description": "Read/write surface for the *NotificationPreference tables. The delivery engine already consumes these rows (see channelPolicy.ts); this module only lets a user view and edit their own rows. It changes no policy default.\n\nQuiet hours are stored per-eventKey on every preference row, so a single user-facing window is written uniformly across all of an owner's rows.\n\nTo tell \"never configured\" apart from \"explicitly turned off\", we use a sentinel the engine already treats as no-quiet-hours: equal start/end minutes (channelPolicy.isWithinQuietHours returns false when start === end). So:   - both null               → never configured → UI default ON (22:00–08:00)   - start === end (e.g. 0)  → explicitly OFF   - start !== end           → explicitly ON with that window",
+      "properties": {
+        "emailEnabled": {
+          "type": "boolean"
+        },
+        "inAppEnabled": {
+          "type": "boolean"
+        },
+        "smsEnabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "inAppEnabled",
+        "smsEnabled",
+        "emailEnabled"
+      ],
+      "type": "object"
     },
     "CheckoutStripeSessionResponseDTO": {
       "properties": {
@@ -4369,6 +4431,162 @@
       ],
       "type": "object"
     },
+    "ClientNotificationDTO": {
+      "properties": {
+        "aftercareId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bookingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Structured, event-specific metadata. Non-object payloads serialize to null."
+        },
+        "eventKey": {
+          "$ref": "#/definitions/NotificationEventKey"
+        },
+        "href": {
+          "description": "Internal deep-link path (e.g. \"/client/bookings/bk_1\"); \"\" when none.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "readAt": {
+          "description": "ISO timestamp when the client read it, or null while unread.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "eventKey",
+        "title",
+        "body",
+        "href",
+        "data",
+        "createdAt",
+        "updatedAt",
+        "readAt",
+        "bookingId",
+        "aftercareId"
+      ],
+      "type": "object"
+    },
+    "ClientNotificationFiltersDTO": {
+      "properties": {
+        "eventKey": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NotificationEventKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unreadOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "unreadOnly",
+        "eventKey"
+      ],
+      "type": "object"
+    },
+    "ClientNotificationListDTO": {
+      "properties": {
+        "filters": {
+          "$ref": "#/definitions/ClientNotificationFiltersDTO"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ClientNotificationDTO"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "description": "Opaque cursor for the next page, or null when the feed is exhausted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "filters"
+      ],
+      "type": "object"
+    },
+    "ClientNotificationSummaryDTO": {
+      "properties": {
+        "aftercareUnreadCount": {
+          "type": "number"
+        },
+        "hasAnyUnreadUpdates": {
+          "type": "boolean"
+        },
+        "pendingUnreadCount": {
+          "type": "number"
+        },
+        "upcomingUnreadCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "pendingUnreadCount",
+        "aftercareUnreadCount",
+        "upcomingUnreadCount",
+        "hasAnyUnreadUpdates"
+      ],
+      "type": "object"
+    },
+    "ClientNotificationsReadResponseDTO": {
+      "properties": {
+        "count": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "type": "object"
+    },
     "ClientReviewMediaAssetSummaryDTO": {
       "properties": {
         "createdAt": {
@@ -6792,6 +7010,101 @@
       ],
       "type": "object"
     },
+    "NotificationCategoryEventMeta": {
+      "properties": {
+        "emailLocked": {
+          "description": "When true, the EMAIL toggle is locked on — this is a critical event (e.g. a payment receipt) whose email can never be turned off. The engine enforces this regardless of the saved preference; the UI just reflects it.",
+          "type": "boolean"
+        },
+        "eventKey": {
+          "$ref": "#/definitions/NotificationEventKey"
+        },
+        "label": {
+          "type": "string"
+        },
+        "supportedChannels": {
+          "description": "Channels this event can use for this audience (the only toggles shown).",
+          "items": {
+            "$ref": "#/definitions/NotificationChannel"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "eventKey",
+        "label",
+        "supportedChannels",
+        "emailLocked"
+      ],
+      "type": "object"
+    },
+    "NotificationCategoryKey": {
+      "enum": [
+        "BOOKINGS",
+        "REMINDERS",
+        "PAYMENTS",
+        "LAST_MINUTE",
+        "SOCIAL"
+      ],
+      "type": "string"
+    },
+    "NotificationCategoryMeta": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/definitions/NotificationCategoryEventMeta"
+          },
+          "type": "array"
+        },
+        "key": {
+          "$ref": "#/definitions/NotificationCategoryKey"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "description",
+        "events"
+      ],
+      "type": "object"
+    },
+    "NotificationChannel": {
+      "$ref": "#/definitions/%24Enums.NotificationChannel"
+    },
+    "NotificationEventKey": {
+      "$ref": "#/definitions/%24Enums.NotificationEventKey"
+    },
+    "NotificationPreferencesPayload": {
+      "properties": {
+        "categories": {
+          "items": {
+            "$ref": "#/definitions/NotificationCategoryMeta"
+          },
+          "type": "array"
+        },
+        "events": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ChannelPreferenceState"
+          },
+          "type": "object"
+        },
+        "quietHours": {
+          "$ref": "#/definitions/QuietHoursState"
+        }
+      },
+      "required": [
+        "categories",
+        "events",
+        "quietHours"
+      ],
+      "type": "object"
+    },
     "OfferingDetailLoaded": {
       "properties": {
         "baseStr": {
@@ -8546,6 +8859,25 @@
         "thumbUrl",
         "mediaType",
         "isFeaturedInPortfolio"
+      ],
+      "type": "object"
+    },
+    "QuietHoursState": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "endMinutes": {
+          "type": "number"
+        },
+        "startMinutes": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "enabled",
+        "startMinutes",
+        "endMinutes"
       ],
       "type": "object"
     },

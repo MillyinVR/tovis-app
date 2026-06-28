@@ -2,6 +2,11 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
+import { isRecord } from '@/lib/guards'
+import type {
+  ClientNotificationDTO,
+  ClientNotificationListDTO,
+} from '@/lib/dto/clientNotifications'
 import {
   NotificationEventKey,
   type Prisma,
@@ -65,6 +70,23 @@ type NotificationRow = Prisma.ClientNotificationGetPayload<{
   select: typeof notificationSelect
 }>
 
+/** Row → JSON-safe wire DTO (Date columns → ISO strings; non-object data → null). */
+function toNotificationDTO(row: NotificationRow): ClientNotificationDTO {
+  return {
+    id: row.id,
+    eventKey: row.eventKey,
+    title: row.title,
+    body: row.body,
+    href: row.href,
+    data: isRecord(row.data) ? row.data : null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    readAt: row.readAt ? row.readAt.toISOString() : null,
+    bookingId: row.bookingId,
+    aftercareId: row.aftercareId,
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const auth = await requireClient()
@@ -106,20 +128,21 @@ export async function GET(req: Request) {
     })
 
     const hasMore = rows.length > take
-    const items = hasMore ? rows.slice(0, take) : rows
-    const nextCursor = hasMore ? items[items.length - 1]?.id ?? null : null
+    const pageRows = hasMore ? rows.slice(0, take) : rows
+    const nextCursor = hasMore
+      ? pageRows[pageRows.length - 1]?.id ?? null
+      : null
 
-    return jsonOk(
-      {
-        items,
-        nextCursor,
-        filters: {
-          unreadOnly,
-          eventKey,
-        },
+    const payload: ClientNotificationListDTO = {
+      items: pageRows.map(toNotificationDTO),
+      nextCursor,
+      filters: {
+        unreadOnly,
+        eventKey,
       },
-      200,
-    )
+    }
+
+    return jsonOk(payload, 200)
   } catch (err: unknown) {
     console.error('GET /api/v1/client/notifications error', err)
     const message =

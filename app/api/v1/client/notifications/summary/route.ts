@@ -2,6 +2,7 @@
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { prisma } from '@/lib/prisma'
+import type { ClientNotificationSummaryDTO } from '@/lib/dto/clientNotifications'
 import { NotificationEventKey } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -52,7 +53,7 @@ export async function GET() {
       }),
     ])
 
-    return jsonOk({
+    const payload: ClientNotificationSummaryDTO = {
       pendingUnreadCount,
       aftercareUnreadCount,
       upcomingUnreadCount,
@@ -60,7 +61,9 @@ export async function GET() {
         pendingUnreadCount > 0 ||
         aftercareUnreadCount > 0 ||
         upcomingUnreadCount > 0,
-    })
+    }
+
+    return jsonOk(payload)
   } catch (err: unknown) {
     console.error('GET /api/v1/client/notifications/summary error', err)
     const message = err instanceof Error ? err.message : 'Internal server error'
