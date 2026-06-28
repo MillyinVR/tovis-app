@@ -48,7 +48,10 @@ describe('broadcastLive', () => {
 
     expect(ok).toBe(true)
     expect(fetchSpy).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchSpy.mock.calls[0]
+    const call = fetchSpy.mock.calls.at(0)
+    expect(call).toBeDefined()
+    const url = call?.[0]
+    const init = call?.[1]
     expect(url).toBe('https://proj.supabase.co/realtime/v1/api/broadcast')
     const body = JSON.parse(init.body)
     expect(body.messages).toHaveLength(2)
