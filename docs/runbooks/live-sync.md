@@ -39,8 +39,8 @@ Reuses existing env (nothing new):
 | Side | Vars |
 |------|------|
 | Server (broadcast) | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` |
-| Web (subscribe) | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
-| iOS (subscribe) | `TovisConfig.supabaseURL` + `supabaseAnonKey` (set per env in `tovis-ios`; same public URL + anon key) |
+| Web (subscribe) | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (falls back to `…_ANON_KEY`) |
+| iOS (subscribe) | `TovisConfig.supabaseURL` + `supabaseAnonKey` (set per env in `tovis-ios`; same public URL + publishable/anon key) |
 
 ### Security note (v1)
 

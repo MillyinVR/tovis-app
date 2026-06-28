@@ -21,7 +21,11 @@ export function LiveRefresh({ channels }: { channels: string[] }) {
 
   useEffect(() => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    // Match the rest of the client (uploadWithProgress): prefer the new
+    // publishable key, fall back to the legacy anon key.
+    const key =
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     const names = channelsKey.split(',').filter(Boolean)
     if (!url || !key || names.length === 0) return
 
