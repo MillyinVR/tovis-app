@@ -2,6 +2,7 @@
 import {
   Prisma,
   type BookingServiceItemType,
+  type BookingDepositStatus,
   type ProNameDisplay,
 } from '@prisma/client'
 import { moneyToString } from '@/lib/money'
@@ -64,6 +65,19 @@ export type ClientBookingCheckoutDTO = {
   selectedPaymentMethod: string | null
   paymentAuthorizedAt: string | null
   paymentCollectedAt: string | null
+  /**
+   * Discovery deposit lifecycle (BookingDepositStatus):
+   * NONE · PENDING · PAID · REFUNDED · FAILED. A deposit is OWED-and-unpaid
+   * exactly when this is "PENDING" — that's the gate for a "Pay deposit" CTA.
+   * Populated only where the source query selects the deposit columns (the
+   * client bookings list route); null elsewhere.
+   */
+  depositStatus: string | null
+  /**
+   * Decimal deposit amount string (e.g. "25.00"), formatted client-side like the
+   * other checkout amounts. Null when no deposit applies.
+   */
+  depositAmount: string | null
 }
 
 export type ClientBookingDTO = {
@@ -309,8 +323,17 @@ export type ClientBookingRow = Prisma.BookingGetPayload<{
   }
 }>
 
+// Deposit columns live on the Booking row but aren't part of the canonical
+// ClientBookingRow select, so callers that don't surface a deposit (most do not)
+// keep compiling unchanged. The list route additionally selects these, and they
+// flow through to the DTO when present.
+type ClientBookingDepositFields = {
+  depositStatus?: BookingDepositStatus | null
+  depositAmount?: Prisma.Decimal | null
+}
+
 export async function buildClientBookingDTO(input: {
-  booking: ClientBookingRow
+  booking: ClientBookingRow & ClientBookingDepositFields
   unreadAftercare: boolean
   hasPendingConsultationApproval: boolean
 }): Promise<ClientBookingDTO> {
@@ -446,6 +469,8 @@ export async function buildClientBookingDTO(input: {
       paymentCollectedAt: b.paymentCollectedAt
         ? b.paymentCollectedAt.toISOString()
         : null,
+      depositStatus: b.depositStatus != null ? String(b.depositStatus) : null,
+      depositAmount: decimalToString(b.depositAmount ?? null),
     },
 
     locationType: b.locationType != null ? String(b.locationType) : null,
