@@ -7105,6 +7105,144 @@
       ],
       "type": "object"
     },
+    "OfferingAddOnItemDTO": {
+      "properties": {
+        "group": {
+          "description": "Add-on grouping label (e.g. \"Color\"), or null when ungrouped.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "OfferingAddOn link id — the value to send back in finalize's `addOnIds`.",
+          "type": "string"
+        },
+        "isRecommended": {
+          "type": "boolean"
+        },
+        "minutes": {
+          "type": "number"
+        },
+        "price": {
+          "description": "Formatted money string (e.g. \"25.00\").",
+          "type": "string"
+        },
+        "serviceId": {
+          "description": "The underlying add-on service id (not what finalize wants — use `id`).",
+          "type": "string"
+        },
+        "sortOrder": {
+          "type": "number"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "serviceId",
+        "title",
+        "group",
+        "price",
+        "minutes",
+        "sortOrder",
+        "isRecommended"
+      ],
+      "type": "object"
+    },
+    "OfferingAddOnsOfferingDTO": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "professional": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OfferingAddOnsProfessionalDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "service": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OfferingAddOnsServiceDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "service",
+        "professional"
+      ],
+      "type": "object"
+    },
+    "OfferingAddOnsProfessionalDTO": {
+      "properties": {
+        "businessName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "businessName"
+      ],
+      "type": "object"
+    },
+    "OfferingAddOnsResponseDTO": {
+      "properties": {
+        "addOns": {
+          "items": {
+            "$ref": "#/definitions/OfferingAddOnItemDTO"
+          },
+          "type": "array"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "offering": {
+          "$ref": "#/definitions/OfferingAddOnsOfferingDTO"
+        },
+        "offeringId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offeringId",
+        "locationType",
+        "offering",
+        "addOns"
+      ],
+      "type": "object"
+    },
+    "OfferingAddOnsServiceDTO": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
     "OfferingDetailLoaded": {
       "properties": {
         "baseStr": {

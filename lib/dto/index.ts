@@ -198,6 +198,15 @@ export type {
   AvailabilityOtherProsOk,
 } from '@/lib/dto/availability'
 
+// ── Offering add-ons (GET /api/v1/offerings/add-ons) ─────────────────────────
+export type {
+  OfferingAddOnItemDTO,
+  OfferingAddOnsServiceDTO,
+  OfferingAddOnsProfessionalDTO,
+  OfferingAddOnsOfferingDTO,
+  OfferingAddOnsResponseDTO,
+} from '@/lib/dto/offeringAddOns'
+
 // ── Search ───────────────────────────────────────────────────────────────────
 export type {
   SearchProLocationPreviewDto,

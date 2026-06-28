@@ -16,17 +16,9 @@ import {
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { isRecord } from '@/lib/guards'
-
-type AddOnDTO = {
-  id: string
-  serviceId: string
-  title: string
-  group: string | null
-  price: string
-  minutes: number
-  sortOrder: number
-  isRecommended: boolean
-}
+// Shared wire DTO for GET /api/v1/offerings/add-ons — single source of truth for
+// the add-on shape (web + native). The `id` is the OfferingAddOn link id.
+import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
 
 type Props = {
   holdId: string | null

@@ -3,22 +3,14 @@ import { headers } from 'next/headers'
 import AddOnsClient from './ui/AddOnsClient'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+// Shared wire DTO for GET /api/v1/offerings/add-ons — single source of truth for
+// the add-on shape (web + native). The `id` is the OfferingAddOn link id.
+import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
 
 export const dynamic = 'force-dynamic'
 
 type ServiceLocationType = 'SALON' | 'MOBILE'
 type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
-
-type AddOnDTO = {
-  id: string // OfferingAddOn.id ✅
-  serviceId: string
-  title: string
-  group: string | null
-  price: string // "25.00"
-  minutes: number
-  sortOrder: number
-  isRecommended: boolean
-}
 
 type AddOnsApiOk = {
   ok: true
