@@ -25,6 +25,10 @@ import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { getStripe } from '@/lib/stripe/server'
 import { parseTipAmount } from '@/lib/money'
 import type { CheckoutStripeSessionResponseDTO } from '@/lib/dto/checkout'
+import {
+  buildCheckoutReturnUrl,
+  isNativeCheckoutReturn,
+} from '@/lib/checkout/nativeReturn'
 
 export const dynamic = 'force-dynamic'
 
@@ -50,42 +54,6 @@ function trimmedString(value: unknown): string | null {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function normalizeBaseUrl(value: string): string {
-  return value.endsWith('/') ? value.slice(0, -1) : value
-}
-
-function getAppUrl(): string {
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.APP_URL ??
-    process.env.VERCEL_URL
-
-  if (!appUrl) {
-    throw new Error(
-      'NEXT_PUBLIC_APP_URL, APP_URL, or VERCEL_URL is required to create Stripe checkout sessions.',
-    )
-  }
-
-  return normalizeBaseUrl(
-    appUrl.startsWith('http') ? appUrl : `https://${appUrl}`,
-  )
-}
-
-function buildAftercareCheckoutReturnUrl(
-  bookingId: string,
-  status: 'success' | 'cancelled',
-): string {
-  const url = new URL(
-    `/client/bookings/${encodeURIComponent(bookingId)}`,
-    getAppUrl(),
-  )
-
-  url.searchParams.set('step', 'aftercare')
-  url.searchParams.set('checkout', status)
-
-  return url.toString()
 }
 
 function buildIdempotencyRequestBody(args: {
@@ -153,6 +121,8 @@ export async function POST(req: NextRequest, props: RouteContext) {
       return jsonFail(400, parsedTip.error)
     }
 
+    const native = isNativeCheckoutReturn(req)
+
     return await withRouteIdempotency<JsonObjectPayload>(
       {
         request: req,
@@ -198,14 +168,18 @@ export async function POST(req: NextRequest, props: RouteContext) {
             mode: 'payment',
             payment_method_types: ['card'],
             client_reference_id: prepared.booking.id,
-            success_url: buildAftercareCheckoutReturnUrl(
-              prepared.booking.id,
-              'success',
-            ),
-            cancel_url: buildAftercareCheckoutReturnUrl(
-              prepared.booking.id,
-              'cancelled',
-            ),
+            success_url: buildCheckoutReturnUrl({
+              bookingId: prepared.booking.id,
+              status: 'success',
+              kind: 'checkout',
+              native,
+            }),
+            cancel_url: buildCheckoutReturnUrl({
+              bookingId: prepared.booking.id,
+              status: 'cancelled',
+              kind: 'checkout',
+              native,
+            }),
             line_items: [
               {
                 quantity: 1,
