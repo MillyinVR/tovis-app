@@ -127,6 +127,30 @@ export type {
   ClientHomeDTO,
 } from '@/lib/dto/clientHome'
 
+// ── Client notifications (GET /api/v1/client/notifications{,/summary}, POST ──
+//    .../read) + preferences (GET/PATCH /api/v1/client/notification-preferences) ─
+export type {
+  ClientNotificationDTO,
+  ClientNotificationFiltersDTO,
+  ClientNotificationListDTO,
+  ClientNotificationSummaryDTO,
+  ClientNotificationsReadResponseDTO,
+} from '@/lib/dto/clientNotifications'
+
+// Preferences payload + its parts are already JSON-safe (no Decimal/Date), so
+// the engine's own types serve as the wire contract directly.
+export type {
+  ChannelPreferenceState,
+  QuietHoursState,
+  NotificationPreferencesPayload,
+} from '@/lib/notifications/preferenceService'
+
+export type {
+  NotificationCategoryKey,
+  NotificationCategoryEventMeta,
+  NotificationCategoryMeta,
+} from '@/lib/notifications/preferenceCategories'
+
 // ── Client "Me" aggregate (GET /api/v1/me) ───────────────────────────────────
 export type {
   ClientMeUserDTO,

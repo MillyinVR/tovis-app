@@ -2,6 +2,7 @@
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { isRecord } from '@/lib/guards'
+import type { ClientNotificationsReadResponseDTO } from '@/lib/dto/clientNotifications'
 import { markClientNotificationsRead } from '@/lib/notifications/clientNotifications'
 import { NotificationEventKey } from '@prisma/client'
 
@@ -89,12 +90,11 @@ export async function POST(req: Request) {
       ...(eventKeys && eventKeys.length > 0 ? { eventKeys } : {}),
     })
 
-    return jsonOk(
-      {
-        count: result.count,
-      },
-      200,
-    )
+    const payload: ClientNotificationsReadResponseDTO = {
+      count: result.count,
+    }
+
+    return jsonOk(payload, 200)
   } catch (err: unknown) {
     console.error('POST /api/v1/client/notifications/read error', err)
     const message = err instanceof Error ? err.message : 'Internal server error'
