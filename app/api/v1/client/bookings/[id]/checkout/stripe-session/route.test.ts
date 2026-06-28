@@ -588,6 +588,30 @@ describe('POST /api/v1/client/bookings/[id]/checkout/stripe-session', () => {
     )
   })
 
+  it('routes native callers through the tovis:// bounce return URLs', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_native_1'),
+    )
+
+    await POST(
+      makeRequest({
+        headers: {
+          'idempotency-key': 'idem_native_1',
+          'x-tovis-return-target': 'native',
+        },
+      }),
+      makeCtx(),
+    )
+
+    const stripeArgs = mocks.stripeCheckoutSessionsCreate.mock.calls[0]
+    expect(stripeArgs?.[0].success_url).toBe(
+      'http://localhost:3000/checkout/return?status=success&kind=checkout&bookingId=booking_1',
+    )
+    expect(stripeArgs?.[0].cancel_url).toBe(
+      'http://localhost:3000/checkout/return?status=cancelled&kind=checkout&bookingId=booking_1',
+    )
+  })
+
   it('maps booking errors from prepare through bookingJsonFail and marks idempotency failed', async () => {
     mocks.beginRouteIdempotency.mockResolvedValueOnce(
       makeStartedIdempotency('idem_zero_total'),
