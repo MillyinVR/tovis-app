@@ -41,6 +41,11 @@ jobs:
       PORT: 3000
       NEXT_TELEMETRY_DISABLED: 1
 
+      # Keep the availability perf sampler out of the functional e2e gate: it
+      # saturates the single shared `next start` server for ~3min and times out
+      # the specs that run right after it. It runs in perf-availability.yml.
+      E2E_SKIP_PERF: "1"
+
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tovis_e2e?schema=public
       DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5432/tovis_e2e?schema=public
 

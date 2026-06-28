@@ -15,6 +15,14 @@ const clientAuthFile = path.join(
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: /.*\.(spec|setup)\.ts/,
+  // The availability perf sampler hammers the single shared `next start`
+  // server for ~3min and wedges its connection pool, timing out the
+  // functional specs that run immediately after it. It has its own dedicated
+  // workflow (perf-availability.yml, which invokes it by explicit path), so
+  // the functional e2e gate sets E2E_SKIP_PERF=1 to keep it out of this run.
+  testIgnore: process.env.E2E_SKIP_PERF
+    ? [/availability\.perf\.spec\.ts/]
+    : [],
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
