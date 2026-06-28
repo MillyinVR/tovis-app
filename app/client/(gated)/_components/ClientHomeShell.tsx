@@ -5,6 +5,7 @@ import ClientGreeting from './ClientGreeting'
 import UpcomingAppointmentCard from './UpcomingAppointmentCard'
 import ClientActionCard from './ClientActionCard'
 import InboxBell from './InboxBell'
+import NotificationsBell from './NotificationsBell'
 import ClientLastMinuteInvites from './ClientLastMinuteInvites'
 import ClientWaitlistStrip from './ClientWaitlistStrip'
 import FavoriteProsRow from './FavoriteProsRow'
@@ -72,7 +73,10 @@ export default function ClientHomeShell({
           </h1>
         </div>
 
-        <InboxBell />
+        <div className="flex items-center gap-2.5">
+          <NotificationsBell />
+          <InboxBell />
+        </div>
       </header>
 
       {/* Main grid. grid-cols-1 (= minmax(0,1fr)) so single-column mobile/tablet
