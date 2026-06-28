@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
+import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +32,7 @@ export default async function ClientLayout({
 
   return (
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
+      <RefreshOnFocus />
       <div className="mx-auto w-full max-w-5xl px-4 pt-4">{children}</div>
     </div>
   )

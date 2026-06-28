@@ -12,6 +12,7 @@ import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate
 import { isProMigrationEnabled } from '@/lib/migration/featureFlag'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { buildWorkspaceOptions } from '@/lib/auth/workspaces'
+import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
 import ProHeader from './ProHeader'
 import ProComplianceBanner from './ProComplianceBanner'
 import ProReadinessBanner from './ProReadinessBanner'
@@ -97,6 +98,7 @@ export default async function ProRootLayout({
 
   return (
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
+      <RefreshOnFocus />
       <ProHeader
         businessName={proDisplayName}
         subtitle={pro.handle ? `@${pro.handle}` : null}
