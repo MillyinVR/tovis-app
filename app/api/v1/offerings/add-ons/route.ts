@@ -8,6 +8,10 @@ import {
   pickModeDurationMinutes,
 } from '@/lib/booking/locationContext'
 import { DEFAULT_DURATION_MINUTES } from '@/lib/booking/constants'
+import type {
+  OfferingAddOnItemDTO,
+  OfferingAddOnsResponseDTO,
+} from '@/lib/dto/offeringAddOns'
 
 export const dynamic = 'force-dynamic'
 
@@ -173,7 +177,7 @@ export async function GET(req: Request) {
           isRecommended: Boolean(link.isRecommended),
           minutes: durationMinutes,
           price,
-        },
+        } satisfies OfferingAddOnItemDTO,
       ]
     })
 
@@ -196,7 +200,7 @@ export async function GET(req: Request) {
           : null,
       },
       addOns,
-    })
+    } satisfies OfferingAddOnsResponseDTO)
   } catch (err: unknown) {
     console.error('GET /api/v1/offerings/add-ons error', err)
     return jsonFail(500, 'Internal server error.')
