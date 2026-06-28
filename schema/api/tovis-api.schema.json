@@ -1939,7 +1939,7 @@
           ]
         },
         "depositAmount": {
-          "description": "Formatted deposit amount (e.g. \"$25\"), or null when no deposit applies.",
+          "description": "Decimal deposit amount string (e.g. \"25.00\"), formatted client-side like the other checkout amounts. Null when no deposit applies.",
           "type": [
             "string",
             "null"
