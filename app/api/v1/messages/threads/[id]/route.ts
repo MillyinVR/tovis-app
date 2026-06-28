@@ -3,6 +3,7 @@ import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
+import { broadcastLive, liveChannelForUser } from '@/lib/live/broadcast'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
   resolveRouteParams,
@@ -183,6 +184,17 @@ export async function POST(req: Request, ctx: RouteContext) {
     if (!result.ok) {
       return jsonFail(result.status, result.error)
     }
+
+    // Live-sync: ping the OTHER participants' devices so the new message lands
+    // without a reload (the sender already has it).
+    const recipients = await prisma.messageThreadParticipant.findMany({
+      where: { threadId, userId: { not: userId } },
+      select: { userId: true },
+    })
+    await broadcastLive(
+      recipients.map((participant) => liveChannelForUser(participant.userId)),
+      'messages',
+    )
 
     return jsonOk({
       message: {

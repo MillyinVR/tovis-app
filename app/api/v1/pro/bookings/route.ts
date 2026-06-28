@@ -8,6 +8,11 @@ import {
 } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import {
+  broadcastLive,
+  liveChannelForPro,
+  liveChannelForUser,
+} from '@/lib/live/broadcast'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
@@ -383,6 +388,15 @@ export async function POST(req: Request) {
     // notifications it enqueued are now visible — drain them immediately (after
     // the response) instead of waiting for the cron tick.
     kickNotificationDrain()
+
+    // Live-sync: refresh the pro's other devices + the client's phone.
+    await broadcastLive(
+      [
+        liveChannelForPro(professionalId),
+        liveChannelForUser(result.clientUserId),
+      ],
+      'bookings',
+    )
 
     return jsonOk(responseBody, 201)
   } catch (error: unknown) {

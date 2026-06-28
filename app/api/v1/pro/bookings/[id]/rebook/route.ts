@@ -20,6 +20,7 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -323,6 +324,9 @@ export async function POST(req: Request, ctx: RouteContext) {
       responseStatus: 201,
       responseBody,
     })
+
+    // Live-sync: the new appointment shows on the client's phone + pro devices.
+    await broadcastBookingChange(result.booking.id, 'bookings')
 
     return jsonOk(data, 201)
   } catch (error: unknown) {

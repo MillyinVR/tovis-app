@@ -23,7 +23,7 @@ import 'server-only'
 import { safeError } from '@/lib/security/logging'
 
 /** Coarse hint for what changed, so a subscriber can refetch the right screen. */
-export type LiveTopic = 'bookings' | 'consultation' | 'invites'
+export type LiveTopic = 'bookings' | 'consultation' | 'invites' | 'messages'
 
 export function liveChannelForPro(
   professionalId: string | null | undefined,
