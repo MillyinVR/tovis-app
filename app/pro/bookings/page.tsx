@@ -34,6 +34,7 @@ import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProSchedul
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { isCloseoutPaymentAndAftercareComplete } from '@/lib/booking/closeoutState'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
+import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
 
 export const dynamic = 'force-dynamic'
 
@@ -752,6 +753,9 @@ export default async function ProBookingsPage(props: {
 
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8">
+      {/* Live-sync: this server-rendered list self-refreshes while left open on
+          the salon computer (focus refresh comes from the pro layout). */}
+      <RefreshOnFocus focus={false} pollMs={20000} />
       <header className="mb-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>

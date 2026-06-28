@@ -13,6 +13,7 @@ import {
 } from '@/lib/booking/writeBoundary'
 import { isBookingError } from '@/lib/booking/errors'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
@@ -60,6 +61,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     if (action === 'DECLINE') {
       await declineClientAftercareNextAppointment({ bookingId, clientId })
       kickNotificationDrain()
+      await broadcastBookingChange(bookingId, 'bookings')
       return jsonOk({ ok: true })
     }
 
@@ -108,6 +110,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     // Next appointment confirmed (new booking created) — deliver its
     // confirmation immediately.
     kickNotificationDrain()
+    await broadcastBookingChange(bookingId, 'bookings')
 
     return response
   } catch (error: unknown) {

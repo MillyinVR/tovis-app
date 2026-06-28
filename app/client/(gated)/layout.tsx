@@ -1,6 +1,9 @@
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
+import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
+import { LiveRefresh } from '@/app/_components/live/LiveRefresh'
+import { liveChannelForUser } from '@/lib/live/broadcast'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,8 +32,14 @@ export default async function ClientLayout({
     redirect(verifyHref(CLIENT_HOME))
   }
 
+  const liveChannels = [liveChannelForUser(user.id)].filter(
+    (c): c is string => Boolean(c),
+  )
+
   return (
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
+      <RefreshOnFocus />
+      <LiveRefresh channels={liveChannels} />
       <div className="mx-auto w-full max-w-5xl px-4 pt-4">{children}</div>
     </div>
   )

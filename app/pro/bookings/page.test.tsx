@@ -21,6 +21,12 @@ vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
 }))
 
+// The page mounts the live-sync <RefreshOnFocus/> (a client component with
+// hooks); this static page test doesn't exercise it, so render it as a no-op.
+vi.mock('@/app/_components/live/RefreshOnFocus', () => ({
+  RefreshOnFocus: () => null,
+}))
+
 vi.mock('next/link', () => ({
   default: ({
     href,
