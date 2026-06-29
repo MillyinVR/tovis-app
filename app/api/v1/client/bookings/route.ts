@@ -74,6 +74,13 @@ const bookingSelect = {
   depositStatus: true,
   depositAmount: true,
 
+  // Rebook-confirm state: the pro's proposed next appointment + whether it's been
+  // confirmed (an active rebooked booking exists) so the CTA hides after confirm.
+  aftercareSummary: {
+    select: { rebookMode: true, rebookedFor: true, rebookDeclinedAt: true },
+  },
+  rebooks: { select: { id: true, status: true } },
+
   totalDurationMinutes: true,
   bufferMinutes: true,
 
