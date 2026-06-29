@@ -117,8 +117,19 @@ jobs:
       - name: Backfill contact lookup hashes
         run: pnpm run backfill:contact-hash-v2 -- --write
 
+      # PRs run chromium only to roughly halve wall-clock — shorter jobs spend
+      # less time exposed to GitHub-hosted runner preemption (the intermittent
+      # "operation was canceled" infra flake) and give faster feedback. The
+      # post-merge push to `main` runs the FULL matrix (incl. mobile-chrome) so
+      # mobile-viewport regressions are still caught before release.
+      # `--project=chromium` auto-runs its `setup` dependency.
       - name: Run browser E2E
-        run: pnpm run test:e2e:ci
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pnpm exec playwright test --project=chromium
+          else
+            pnpm run test:e2e:ci
+          fi
 
       - name: Upload Playwright report
         if: always()
