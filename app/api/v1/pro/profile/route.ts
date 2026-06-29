@@ -53,6 +53,44 @@ function prismaErrorToResponse(e: unknown) {
   return null
 }
 
+// The editable-profile selection shared by GET (read) and PATCH (write) so the
+// native pro-profile editor reads exactly the fields it can write back. Native
+// has no other way to learn its own professionalId (the web server-renders it).
+const PRO_PROFILE_SELECT = {
+  id: true,
+  businessName: true,
+  handle: true,
+  bio: true,
+  location: true,
+  avatarUrl: true,
+  professionType: true,
+  nameDisplay: true,
+  isPremium: true,
+} satisfies Prisma.ProfessionalProfileSelect
+
+export async function GET() {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+
+    const profile = await prisma.professionalProfile.findUnique({
+      where: { id: auth.professionalId },
+      select: PRO_PROFILE_SELECT,
+    })
+
+    if (!profile) {
+      return jsonFail(404, 'Professional profile not found.')
+    }
+
+    return jsonOk({ profile }, 200)
+  } catch (e: unknown) {
+    const res = prismaErrorToResponse(e)
+    if (res) return res
+    console.error('GET /api/v1/pro/profile error', e)
+    return jsonFail(500, 'Failed to load profile.')
+  }
+}
+
 export async function PATCH(req: Request) {
   try {
     const auth = await requirePro()
@@ -164,17 +202,7 @@ export async function PATCH(req: Request) {
       const updated = await prisma.professionalProfile.update({
         where: { id: proProfileId },
         data,
-        select: {
-          id: true,
-          businessName: true,
-          handle: true,
-          bio: true,
-          location: true,
-          avatarUrl: true,
-          professionType: true,
-          nameDisplay: true,
-          isPremium: true,
-        },
+        select: PRO_PROFILE_SELECT,
       })
 
       return jsonOk({ ok: true, profile: updated }, 200)
