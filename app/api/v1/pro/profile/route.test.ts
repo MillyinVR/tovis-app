@@ -54,7 +54,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
 }))
 
-import { PATCH } from './route'
+import { GET, PATCH } from './route'
 
 function makeRequest(body: unknown) {
   return new Request('http://localhost/api/v1/pro/profile', {
@@ -396,5 +396,52 @@ describe('app/api/v1/pro/profile/route.ts', () => {
     })
 
     expect(mocks.prisma.professionalProfile.update).not.toHaveBeenCalled()
+  })
+})
+describe('GET /api/v1/pro/profile', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
+  })
+
+  it('returns the pro own editable profile', async () => {
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue({
+      id: 'pro_1',
+      businessName: 'Studio Lumen',
+      handle: 'studio-lumen',
+      bio: 'Balayage & lived-in color.',
+      location: 'Los Angeles, CA',
+      avatarUrl: null,
+      professionType: ProfessionType.HAIRSTYLIST,
+      nameDisplay: 'BUSINESS_NAME',
+      isPremium: true,
+    })
+
+    const result = await GET()
+    const body = await readJson<{ ok: true; profile: { id: string } }>(result)
+
+    expect(result.status).toBe(200)
+    expect(body.profile.id).toBe('pro_1')
+    expect(mocks.prisma.professionalProfile.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'pro_1' } }),
+    )
+  })
+
+  it('returns 404 when the profile is missing', async () => {
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue(null)
+
+    const result = await GET()
+
+    expect(result.status).toBe(404)
+  })
+
+  it('passes through a failed auth result unchanged', async () => {
+    const res = new Response(null, { status: 401 })
+    mocks.requirePro.mockResolvedValue({ ok: false, res })
+
+    const result = await GET()
+
+    expect(result).toBe(res)
+    expect(mocks.prisma.professionalProfile.findUnique).not.toHaveBeenCalled()
   })
 })
