@@ -220,6 +220,31 @@ export async function GET(_req: Request, ctx: RouteContext) {
         locationAddressSnapshot: true,
         locationLatSnapshot: true,
         locationLngSnapshot: true,
+        // Session lifecycle timestamps + step (drive the native Timing timeline).
+        sessionStep: true,
+        startedAt: true,
+        finishedAt: true,
+        // Payment breakdown (native Payment card). All Decimal? except the Stripe
+        // amount, which is minor units (Int).
+        totalAmount: true,
+        serviceSubtotalSnapshot: true,
+        taxAmount: true,
+        tipAmount: true,
+        discountAmount: true,
+        paymentCollectedAt: true,
+        selectedPaymentMethod: true,
+        stripePaymentStatus: true,
+        stripeAmountTotal: true,
+        stripeCurrency: true,
+        // Aftercare snapshot card.
+        aftercareSummary: {
+          select: {
+            notes: true,
+            sentToClientAt: true,
+            draftSavedAt: true,
+            version: true,
+          },
+        },
         serviceItems: {
           orderBy: { sortOrder: 'asc' },
           select: {
@@ -323,6 +348,54 @@ export async function GET(_req: Request, ctx: RouteContext) {
           subtotalSnapshot: moneyToFixed2String(
             booking.subtotalSnapshot ?? computedSubtotal,
           ),
+          // Session lifecycle (Timing timeline).
+          sessionStep: booking.sessionStep,
+          startedAt: booking.startedAt ? booking.startedAt.toISOString() : null,
+          finishedAt: booking.finishedAt
+            ? booking.finishedAt.toISOString()
+            : null,
+          // Payment breakdown (Payment card). Decimal? → "0.00"|null; Stripe total
+          // is minor units (Int).
+          totalAmount:
+            booking.totalAmount != null
+              ? moneyToFixed2String(booking.totalAmount)
+              : null,
+          serviceSubtotalSnapshot:
+            booking.serviceSubtotalSnapshot != null
+              ? moneyToFixed2String(booking.serviceSubtotalSnapshot)
+              : null,
+          taxAmount:
+            booking.taxAmount != null
+              ? moneyToFixed2String(booking.taxAmount)
+              : null,
+          tipAmount:
+            booking.tipAmount != null
+              ? moneyToFixed2String(booking.tipAmount)
+              : null,
+          discountAmount:
+            booking.discountAmount != null
+              ? moneyToFixed2String(booking.discountAmount)
+              : null,
+          paymentCollectedAt: booking.paymentCollectedAt
+            ? booking.paymentCollectedAt.toISOString()
+            : null,
+          selectedPaymentMethod: booking.selectedPaymentMethod ?? null,
+          stripePaymentStatus: booking.stripePaymentStatus ?? null,
+          stripeAmountTotal: booking.stripeAmountTotal ?? null,
+          stripeCurrency: booking.stripeCurrency ?? null,
+          // Aftercare snapshot (null until an aftercare summary exists).
+          aftercareSummary: booking.aftercareSummary
+            ? {
+                notes: booking.aftercareSummary.notes ?? null,
+                sentToClientAt: booking.aftercareSummary.sentToClientAt
+                  ? booking.aftercareSummary.sentToClientAt.toISOString()
+                  : null,
+                draftSavedAt: booking.aftercareSummary.draftSavedAt
+                  ? booking.aftercareSummary.draftSavedAt.toISOString()
+                  : null,
+                version: booking.aftercareSummary.version,
+              }
+            : null,
           client: {
             fullName,
             email: booking.client?.user?.email ?? null,
