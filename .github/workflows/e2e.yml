@@ -11,10 +11,39 @@ permissions:
   contents: read
 
 jobs:
-  e2e:
-    name: Browser E2E
+  # Compute which Playwright browser projects to run for this event. PRs run
+  # chromium only for fast feedback; the post-merge push to `main` runs the full
+  # matrix (incl. mobile-chrome) so mobile-viewport regressions are caught before
+  # release. The list is fanned out into one parallel job PER project below — so
+  # the full matrix runs as two short chromium-sized jobs rather than a single
+  # ~40min serial job. Long jobs were the root cause of the intermittent "the
+  # operation was canceled" preemption AND of the single shared `next start`
+  # server getting overloaded into navigation timeouts.
+  resolve-matrix:
+    name: Resolve browser matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    outputs:
+      projects: ${{ steps.resolve.outputs.projects }}
+    steps:
+      - id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo 'projects=["chromium"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'projects=["chromium","mobile-chrome"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  e2e:
+    name: Browser E2E (${{ matrix.project }})
+    needs: resolve-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Don't let one browser's failure cancel the sibling browser's job — we
+      # want to see every project's result, not just the first to fail.
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.resolve-matrix.outputs.projects) }}
 
     services:
       postgres:
@@ -117,25 +146,16 @@ jobs:
       - name: Backfill contact lookup hashes
         run: pnpm run backfill:contact-hash-v2 -- --write
 
-      # PRs run chromium only to roughly halve wall-clock — shorter jobs spend
-      # less time exposed to GitHub-hosted runner preemption (the intermittent
-      # "operation was canceled" infra flake) and give faster feedback. The
-      # post-merge push to `main` runs the FULL matrix (incl. mobile-chrome) so
-      # mobile-viewport regressions are still caught before release.
-      # `--project=chromium` auto-runs its `setup` dependency.
+      # One project per job (see the `matrix` job above). `--project=<name>`
+      # auto-runs its `setup` dependency, so each job seeds its own auth state.
       - name: Run browser E2E
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            pnpm exec playwright test --project=chromium
-          else
-            pnpm run test:e2e:ci
-          fi
+        run: pnpm exec playwright test --project=${{ matrix.project }}
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           path: playwright-report
           if-no-files-found: ignore
           retention-days: 14
@@ -144,7 +164,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-test-results
+          name: playwright-test-results-${{ matrix.project }}
           path: test-results
           if-no-files-found: ignore
           retention-days: 14
