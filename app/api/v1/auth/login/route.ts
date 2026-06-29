@@ -20,6 +20,7 @@ import {
 } from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import { captureAuthException } from '@/lib/observability/authEvents'
+import { isTransientPrismaError } from '@/lib/prismaErrors'
 import { prisma } from '@/lib/prisma'
 import { emailLookupHashV2 } from '@/lib/security/crypto/hashLookup'
 
@@ -192,6 +193,22 @@ async function recordFailedLoginAttempt(
   userId: string,
   now: Date,
 ): Promise<FailedLoginAttemptState> {
+  // This single-statement UPDATE touches a hot row (the User) and can transiently
+  // fail under connection-pool pressure or a write conflict. Retry once on a
+  // transient error before giving up; the caller degrades gracefully if it still
+  // fails (the rejected credential is never turned into a 500).
+  try {
+    return await runRecordFailedLoginAttempt(userId, now)
+  } catch (error) {
+    if (!isTransientPrismaError(error)) throw error
+    return runRecordFailedLoginAttempt(userId, now)
+  }
+}
+
+async function runRecordFailedLoginAttempt(
+  userId: string,
+  now: Date,
+): Promise<FailedLoginAttemptState> {
   const lockUntil = new Date(now.getTime() + LOGIN_LOCK_WINDOW_MS)
 
   const rows = await prisma.$queryRaw<FailedLoginAttemptState[]>(Prisma.sql`
@@ -302,8 +319,25 @@ export async function POST(request: Request) {
     }
 
     if (!isValid) {
-      const failedState = await recordFailedLoginAttempt(user.id, now)
-      const failedLockedUntil = coerceDate(failedState.lockedUntil)
+      // Recording the brute-force counter is best-effort. The composite IP+email
+      // rate limiter enforced above is the real guard, so a transient DB failure
+      // here must NOT escalate a rejected credential into a 500 — capture it for
+      // visibility and degrade to the normal invalid-credentials response. The
+      // worst case is one un-counted attempt, which the rate limiter still caps.
+      let failedLockedUntil: Date | null = null
+      try {
+        const failedState = await recordFailedLoginAttempt(user.id, now)
+        failedLockedUntil = coerceDate(failedState.lockedUntil)
+      } catch (error) {
+        captureAuthException({
+          event: 'auth.login.attempt_record_failed',
+          route: 'auth.login',
+          code: 'ATTEMPT_RECORD_DEGRADED',
+          userId: user.id,
+          email,
+          error,
+        })
+      }
 
       if (failedLockedUntil && failedLockedUntil.getTime() > now.getTime()) {
         return accountLockedResponse(

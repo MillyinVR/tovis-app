@@ -1,7 +1,7 @@
 // app/api/v1/auth/login/route.test.ts
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Role } from '@prisma/client'
+import { Prisma, Role } from '@prisma/client'
 
 import {
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
@@ -423,6 +423,78 @@ describe('app/api/v1/auth/login/route', () => {
     expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1)
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('retries the failed-attempt write once on a transient DB error, then returns 401', async () => {
+    mockUserLookupByWhere([makeUser({ loginAttempts: 3 })])
+    mockVerifyPassword.mockResolvedValue(false)
+
+    const transient = new Prisma.PrismaClientKnownRequestError(
+      'Timed out fetching a new connection from the connection pool',
+      { code: 'P2024', clientVersion: 'test' },
+    )
+    mockPrisma.$queryRaw
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValueOnce([{ loginAttempts: 4, lockedUntil: null }])
+
+    const result = await POST(
+      makeRequest({ email: 'user@example.com', password: 'WrongPassword' }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(401)
+    expect(body.code).toBe('INVALID_CREDENTIALS')
+    // First call threw a transient error; the retry succeeded.
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('degrades to 401 (not 500) and captures when the failed-attempt write keeps failing transiently', async () => {
+    mockUserLookupByWhere([makeUser({ loginAttempts: 3 })])
+    mockVerifyPassword.mockResolvedValue(false)
+
+    const transient = new Prisma.PrismaClientKnownRequestError(
+      'deadlock detected',
+      { code: 'P2034', clientVersion: 'test' },
+    )
+    mockPrisma.$queryRaw.mockRejectedValue(transient)
+
+    const result = await POST(
+      makeRequest({ email: 'user@example.com', password: 'WrongPassword' }),
+    )
+    const body = await result.json()
+
+    // The rejected credential must NOT escalate into a 500 just because the
+    // best-effort brute-force counter could not be written.
+    expect(result.status).toBe(401)
+    expect(body.code).toBe('INVALID_CREDENTIALS')
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2)
+    expect(mockCaptureAuthException).toHaveBeenCalledTimes(1)
+    expect(mockCaptureAuthException).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'auth.login.attempt_record_failed',
+        code: 'ATTEMPT_RECORD_DEGRADED',
+        userId: 'user_1',
+      }),
+    )
+  })
+
+  it('does not retry a non-transient failed-attempt write but still degrades to 401', async () => {
+    mockUserLookupByWhere([makeUser({ loginAttempts: 3 })])
+    mockVerifyPassword.mockResolvedValue(false)
+
+    mockPrisma.$queryRaw.mockRejectedValue(new Error('unexpected failure'))
+
+    const result = await POST(
+      makeRequest({ email: 'user@example.com', password: 'WrongPassword' }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(401)
+    expect(body.code).toBe('INVALID_CREDENTIALS')
+    // Non-transient → no retry, but caught and degraded rather than 500.
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1)
+    expect(mockCaptureAuthException).toHaveBeenCalledTimes(1)
   })
 
   it('locks the account on the 10th failed attempt', async () => {
