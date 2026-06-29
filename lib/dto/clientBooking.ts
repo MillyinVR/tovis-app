@@ -1,8 +1,10 @@
 // lib/dto/clientBooking.ts
 import {
   Prisma,
+  AftercareRebookMode,
   type BookingServiceItemType,
   type BookingDepositStatus,
+  type BookingStatus,
   type ProNameDisplay,
 } from '@prisma/client'
 import { moneyToString } from '@/lib/money'
@@ -134,6 +136,17 @@ export type ClientBookingDTO = {
 
   hasUnreadAftercare: boolean
   hasPendingConsultationApproval: boolean
+  /**
+   * True when the pro proposed a next appointment (aftercare
+   * BOOKED_NEXT_APPOINTMENT) the client hasn't confirmed or declined yet —
+   * drives the rebook-confirm CTA. Confirm/decline via
+   * POST /api/v1/client/bookings/[id]/aftercare-rebook { action }.
+   * Populated only where the source query selects the aftercare/rebook columns
+   * (the client bookings list route); false elsewhere.
+   */
+  hasPendingRebookConfirmation: boolean
+  /** The pro-proposed next-appointment instant (ISO) when one is pending; else null. */
+  rebookProposedFor: string | null
 
   consultation: ClientBookingConsultationDTO | null
 }
@@ -332,12 +345,39 @@ type ClientBookingDepositFields = {
   depositAmount?: Prisma.Decimal | null
 }
 
+// Rebook state lives on the related AftercareSummary + the rebook chain, neither
+// part of the canonical ClientBookingRow select. Optional here so callers that
+// don't surface a rebook (most) keep compiling unchanged; the list route selects
+// them so the native confirm CTA can light up.
+type ClientBookingRebookFields = {
+  aftercareSummary?: {
+    rebookMode: AftercareRebookMode
+    rebookedFor: Date | null
+    rebookDeclinedAt: Date | null
+  } | null
+  rebooks?: { id: string; status: BookingStatus }[]
+}
+
 export async function buildClientBookingDTO(input: {
-  booking: ClientBookingRow & ClientBookingDepositFields
+  booking: ClientBookingRow & ClientBookingDepositFields & ClientBookingRebookFields
   unreadAftercare: boolean
   hasPendingConsultationApproval: boolean
 }): Promise<ClientBookingDTO> {
   const { booking: b } = input
+
+  // A pro-proposed next appointment is still pending when it's BOOKED_NEXT_APPOINTMENT
+  // with a time, not declined, and not already confirmed (no active rebooked booking).
+  const after = b.aftercareSummary
+  const hasActiveRebookedBooking = (b.rebooks ?? []).some(
+    (r) => String(r.status).toUpperCase() !== 'CANCELLED',
+  )
+  const rebookPending = Boolean(
+    after &&
+      after.rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT &&
+      after.rebookedFor != null &&
+      after.rebookDeclinedAt == null &&
+      !hasActiveRebookedBooking,
+  )
 
   const items: ClientBookingItemDTO[] = (b.serviceItems ?? []).map((it) => {
     const rawType =
@@ -519,6 +559,11 @@ export async function buildClientBookingDTO(input: {
     hasPendingConsultationApproval: Boolean(
       input.hasPendingConsultationApproval,
     ),
+    hasPendingRebookConfirmation: rebookPending,
+    rebookProposedFor:
+      rebookPending && after?.rebookedFor
+        ? after.rebookedFor.toISOString()
+        : null,
 
     consultation,
   }

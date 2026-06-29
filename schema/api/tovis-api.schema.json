@@ -2318,6 +2318,10 @@
         "hasPendingConsultationApproval": {
           "type": "boolean"
         },
+        "hasPendingRebookConfirmation": {
+          "description": "True when the pro proposed a next appointment (aftercare BOOKED_NEXT_APPOINTMENT) the client hasn't confirmed or declined yet — drives the rebook-confirm CTA. Confirm/decline via POST /api/v1/client/bookings/[id]/aftercare-rebook { action }. Populated only where the source query selects the aftercare/rebook columns (the client bookings list route); false elsewhere.",
+          "type": "boolean"
+        },
         "hasUnreadAftercare": {
           "type": "boolean"
         },
@@ -2425,6 +2429,13 @@
             }
           ]
         },
+        "rebookProposedFor": {
+          "description": "The pro-proposed next-appointment instant (ISO) when one is pending; else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "scheduledFor": {
           "type": "string"
         },
@@ -2486,6 +2497,8 @@
         "productSales",
         "hasUnreadAftercare",
         "hasPendingConsultationApproval",
+        "hasPendingRebookConfirmation",
+        "rebookProposedFor",
         "consultation"
       ],
       "type": "object"
