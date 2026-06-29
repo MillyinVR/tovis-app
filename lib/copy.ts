@@ -71,6 +71,15 @@ export const COPY = {
       nextAppointmentUnavailable:
         'That time is no longer available. Try scheduling a different time.',
       nextAppointmentError: 'Something went wrong. Please try again.',
+
+      // Media-use consent (B3b) — the client lets their pro feature this session's
+      // before/after photos publicly. Toggling it only UNLOCKS the pro's publish
+      // action; nothing is shared automatically.
+      mediaConsentTitle: 'Photos & sharing',
+      mediaConsentLabel: 'Let my pro feature my photos & video',
+      mediaConsentDescription:
+        'Lets your pro share this session’s before & after on their portfolio. You can turn this off anytime.',
+      mediaConsentError: 'Couldn’t update that. Please try again.',
     },
 
     status: {

@@ -21,6 +21,7 @@ import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAft
 import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
 import AftercareNextAppointmentCard from './AftercareNextAppointmentCard'
+import MediaConsentCard from './MediaConsentCard'
 import AftercareRebookButton from './AftercareRebookButton'
 import AftercareStepper from './AftercareStepper'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
@@ -976,6 +977,15 @@ export default async function ClientBookingPage(props: {
   const statusInfo = statusMessage(booking.status)
   const statusUpper = upper(booking.status)
 
+  // Show the media-use consent toggle once the session has happened — i.e. there
+  // are (or will be) before/after photos to share: completed, finished, or any
+  // session media already attached.
+  const showMediaConsent =
+    statusUpper === 'COMPLETED' ||
+    Boolean(raw.finishedAt) ||
+    beforeMedia.length > 0 ||
+    afterMedia.length > 0
+
   const durationMinutes =
     booking.totalDurationMinutes > 0 ? booking.totalDurationMinutes : null
 
@@ -1496,6 +1506,13 @@ export default async function ClientBookingPage(props: {
                             serviceName={photoServiceName}
                           />
                         </ClientAftercareCard>
+
+                        {showMediaConsent ? (
+                          <MediaConsentCard
+                            bookingId={booking.id}
+                            granted={booking.mediaUseConsent}
+                          />
+                        ) : null}
 
                         <ClientAftercareCard>
                           <ClientAftercareSectionTitle title="Final service breakdown" />

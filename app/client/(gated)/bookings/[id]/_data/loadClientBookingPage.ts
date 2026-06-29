@@ -23,6 +23,10 @@ const bookingPageBookingSelect = {
   scheduledFor: true,
   finishedAt: true,
 
+  // Media-use consent (B3b) — drives the client's "Photos & sharing" toggle on
+  // the aftercare detail. buildClientBookingDTO reads this into mediaUseConsent.
+  mediaUseConsentAt: true,
+
   subtotalSnapshot: true,
   serviceSubtotalSnapshot: true,
   productSubtotalSnapshot: true,
