@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { Prisma } from '@prisma/client'
 import {
   isExclusionConstraintError,
+  isTransientPrismaError,
   isUniqueConstraintError,
 } from './prismaErrors'
 
@@ -33,6 +34,26 @@ describe('isUniqueConstraintError', () => {
 
   it('is false for non-Prisma errors', () => {
     expect(isUniqueConstraintError(new Error('nope'))).toBe(false)
+  })
+})
+
+describe('isTransientPrismaError', () => {
+  it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2034'])(
+    'is true for transient code %s',
+    (code) => {
+      expect(isTransientPrismaError(knownError('transient', code))).toBe(true)
+    },
+  )
+
+  it('is false for deterministic Prisma codes', () => {
+    expect(isTransientPrismaError(knownError('dupe', 'P2002'))).toBe(false)
+    expect(isTransientPrismaError(knownError('not found', 'P2025'))).toBe(false)
+  })
+
+  it('is false for non-Prisma and non-error values', () => {
+    expect(isTransientPrismaError(new Error('pool timeout'))).toBe(false)
+    expect(isTransientPrismaError(unknownError('P2024'))).toBe(false)
+    expect(isTransientPrismaError(null)).toBe(false)
   })
 })
 

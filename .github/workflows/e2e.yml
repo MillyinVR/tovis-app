@@ -75,7 +75,14 @@ jobs:
       # the specs that run right after it. It runs in perf-availability.yml.
       E2E_SKIP_PERF: "1"
 
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tovis_e2e?schema=public
+      # The functional suite drives a single `next start` process (one Prisma
+      # pool) and the heaviest spec (booking-lifecycle "launch proof") fans out
+      # many concurrent requests across two browser contexts. Prisma's default
+      # pool (~num_cpus*2+1 ≈ 9 on a 4-core runner) saturates under that burst,
+      # which surfaces as 30s navigation timeouts and the occasional transient
+      # login-write error. The Postgres service allows 100 connections, so give
+      # the pool real headroom. connection_limit is a no-op for `db push`/seed.
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tovis_e2e?schema=public&connection_limit=25&pool_timeout=30
       DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5432/tovis_e2e?schema=public
 
       JWT_SECRET: ci-test-jwt-secret-do-not-use-in-production

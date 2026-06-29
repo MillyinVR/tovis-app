@@ -19,6 +19,33 @@ export function isUniqueConstraintError(
 }
 
 /**
+ * Prisma error codes for failures that are transient — the same operation may
+ * well succeed if retried, because the cause is infrastructure pressure rather
+ * than a logical conflict in the request. Used to gate one-shot retries (and
+ * fail-safe degradation) on hot-path writes under load.
+ */
+const TRANSIENT_PRISMA_ERROR_CODES = new Set<string>([
+  'P1001', // can't reach the database server
+  'P1002', // database server reached but timed out
+  'P1008', // operation timed out
+  'P1017', // server has closed the connection
+  'P2024', // timed out fetching a connection from the pool (pool exhaustion)
+  'P2034', // write conflict / deadlock — the transaction should be retried
+])
+
+/**
+ * True for a Prisma error that is transient (connection/pool/deadlock pressure)
+ * and therefore worth retrying once, as opposed to a deterministic failure that
+ * would recur. See {@link TRANSIENT_PRISMA_ERROR_CODES}.
+ */
+export function isTransientPrismaError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    TRANSIENT_PRISMA_ERROR_CODES.has(error.code)
+  )
+}
+
+/**
  * True for a Postgres GIST EXCLUDE constraint violation (SQLSTATE 23P01) raised
  * by the named constraint. Prisma does not map 23P01 to a dedicated error code
  * for typed queries, so it surfaces as a known- or unknown-request error whose
