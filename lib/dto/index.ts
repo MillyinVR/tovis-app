@@ -207,6 +207,9 @@ export type {
   OfferingAddOnsResponseDTO,
 } from '@/lib/dto/offeringAddOns'
 
+// ── Client addresses (GET/POST /api/v1/client/addresses) ─────────────────────
+export type { ClientAddressDTO } from '@/lib/dto/clientAddress'
+
 // ── Search ───────────────────────────────────────────────────────────────────
 export type {
   SearchProLocationPreviewDto,

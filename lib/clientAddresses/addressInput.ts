@@ -1,6 +1,7 @@
 // lib/clientAddresses/addressInput.ts
 
 import { ClientAddressKind, Prisma } from '@prisma/client'
+import type { ClientAddressDTO } from '@/lib/dto/clientAddress'
 
 import { decimalToNullableNumber } from '@/lib/booking/snapshots'
 import { pickNumber, pickString } from '@/lib/pick'
@@ -293,7 +294,7 @@ export function buildNextClientAddressValues(args: {
   }
 }
 
-export function mapClientAddress(row: ClientAddressRow) {
+export function mapClientAddress(row: ClientAddressRow): ClientAddressDTO {
   return {
     id: row.id,
     kind: row.kind,
