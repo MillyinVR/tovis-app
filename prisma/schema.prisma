@@ -2667,6 +2667,13 @@ model Booking {
   startedAt  DateTime?
   finishedAt DateTime?
 
+  // Client media-use consent (B3b): when set, the client granted the pro the
+  // right to feature THIS session's photos/video publicly (portfolio/Looks) via
+  // the aftercare summary — a second public-share unlock alongside review-
+  // promotion (see lib/media/publicShareGuard.ts). It UNLOCKS the pro's publish
+  // action for the whole session's media; it does NOT auto-make anything public.
+  mediaUseConsentAt DateTime?
+
   mediaAssets             MediaAsset[]
   messageThreads          MessageThread[]              @relation("BookingThreads")
   productSales            ProductSale[]

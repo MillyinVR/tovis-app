@@ -2352,6 +2352,10 @@
             "null"
           ]
         },
+        "mediaUseConsent": {
+          "description": "True when the client has granted the pro media-use consent for this session (allow featuring their photos/video publicly — portfolio/Looks). Toggle via POST /api/v1/client/bookings/[id]/media-consent { granted }. Populated only where the source query selects `mediaUseConsentAt` (the client bookings list route); false elsewhere.",
+          "type": "boolean"
+        },
         "productSales": {
           "items": {
             "$ref": "#/definitions/ClientBookingProductSaleDTO"
@@ -2499,6 +2503,7 @@
         "hasPendingConsultationApproval",
         "hasPendingRebookConfirmation",
         "rebookProposedFor",
+        "mediaUseConsent",
         "consultation"
       ],
       "type": "object"
