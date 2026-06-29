@@ -25,6 +25,13 @@
       ],
       "type": "string"
     },
+    "$Enums.ClientAddressKind": {
+      "enum": [
+        "SEARCH_AREA",
+        "SERVICE_ADDRESS"
+      ],
+      "type": "string"
+    },
     "$Enums.DevicePlatform": {
       "enum": [
         "IOS",
@@ -1929,6 +1936,113 @@
         "stripeCheckout"
       ],
       "type": "object"
+    },
+    "ClientAddressDTO": {
+      "properties": {
+        "addressLine1": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "addressLine2": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "city": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "countryCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "formattedAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/definitions/ClientAddressKind"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lat": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lng": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "placeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "postalCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "isDefault",
+        "formattedAddress",
+        "addressLine1",
+        "addressLine2",
+        "city",
+        "state",
+        "postalCode",
+        "countryCode",
+        "placeId",
+        "lat",
+        "lng",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ClientAddressKind": {
+      "$ref": "#/definitions/%24Enums.ClientAddressKind"
     },
     "ClientBookingCheckoutDTO": {
       "properties": {
