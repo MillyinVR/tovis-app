@@ -22,16 +22,21 @@ import { BUCKETS } from '@/lib/storageBuckets'
 export type PublicShareCandidate = {
   storageBucket: string | null
   reviewId: string | null
+  // B3b: the client granted media-use consent for this asset via the aftercare
+  // summary — a second client-authorized unlock alongside review-promotion.
+  clientUseConsentAt?: Date | string | null
 }
 
 /**
- * True when the media is private-bucket media that the client has NOT promoted
- * via a review — i.e. it must not be made public by the pro.
+ * True when the media is private-bucket media the client has NOT authorized for
+ * public use — i.e. it must not be made public by the pro. The client authorizes
+ * it either by attaching it to a review (`reviewId`) or by granting media-use
+ * consent in the aftercare summary (`clientUseConsentAt`).
  */
 export function isUnpromotedPrivateMedia(media: PublicShareCandidate): boolean {
   const inPrivateBucket = media.storageBucket === BUCKETS.mediaPrivate
-  const reviewPromoted = Boolean(media.reviewId)
-  return inPrivateBucket && !reviewPromoted
+  const clientAuthorized = Boolean(media.reviewId) || Boolean(media.clientUseConsentAt)
+  return inPrivateBucket && !clientAuthorized
 }
 
 /** Inverse of {@link isUnpromotedPrivateMedia}. */
@@ -40,4 +45,4 @@ export function canProSharePublicly(media: PublicShareCandidate): boolean {
 }
 
 export const UNPROMOTED_MEDIA_MESSAGE =
-  'This session photo can only be shared publicly after the client adds it to a review.'
+  'This session photo can only be shared publicly after the client adds it to a review or allows it in their aftercare.'

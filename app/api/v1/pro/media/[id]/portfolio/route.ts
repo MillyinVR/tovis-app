@@ -25,6 +25,8 @@ async function loadOwnedMedia(mediaId: string, professionalId: string) {
       isFeaturedInPortfolio: true,
       isEligibleForLooks: true,
       visibility: true,
+      // B3b: the booking's client media-use consent also unlocks public sharing.
+      booking: { select: { mediaUseConsentAt: true } },
 
       // Canonical pointers
       storageBucket: true,
@@ -100,7 +102,11 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
 
     // Consent gate: a client's private session photo can only be featured
     // publicly after the client added it to a review (which sets reviewId).
-    if (!canProSharePublicly(owned.media)) {
+    if (!canProSharePublicly({
+      storageBucket: owned.media.storageBucket,
+      reviewId: owned.media.reviewId,
+      clientUseConsentAt: owned.media.booking?.mediaUseConsentAt ?? null,
+    })) {
       return jsonFail(403, UNPROMOTED_MEDIA_MESSAGE)
     }
 

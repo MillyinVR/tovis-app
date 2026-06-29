@@ -59,6 +59,8 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         caption: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
+        // B3b: the booking's client media-use consent also unlocks public sharing.
+        booking: { select: { mediaUseConsentAt: true } },
         services: { select: { serviceId: true } },
       },
     })
@@ -87,7 +89,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     // media may go public.
     if (
       nextVisibility === MediaVisibility.PUBLIC &&
-      !canProSharePublicly(existing)
+      !canProSharePublicly({
+        storageBucket: existing.storageBucket,
+        reviewId: existing.reviewId,
+        clientUseConsentAt: existing.booking?.mediaUseConsentAt ?? null,
+      })
     ) {
       return jsonFail(403, UNPROMOTED_MEDIA_MESSAGE)
     }

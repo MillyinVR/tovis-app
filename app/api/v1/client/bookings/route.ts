@@ -74,6 +74,10 @@ const bookingSelect = {
   depositStatus: true,
   depositAmount: true,
 
+  // Client media-use consent (B3b) — lets the client see/toggle whether the pro
+  // may feature this session's media publicly.
+  mediaUseConsentAt: true,
+
   // Rebook-confirm state: the pro's proposed next appointment + whether it's been
   // confirmed (an active rebooked booking exists) so the CTA hides after confirm.
   aftercareSummary: {

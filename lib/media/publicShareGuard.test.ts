@@ -26,4 +26,23 @@ describe('publicShareGuard', () => {
   it('treats unknown/null bucket as not-private (cannot be a private session photo)', () => {
     expect(canProSharePublicly({ storageBucket: null, reviewId: null })).toBe(true)
   })
+
+  it('allows private media once the client granted aftercare media-use consent (B3b)', () => {
+    const media = {
+      storageBucket: 'media-private',
+      reviewId: null,
+      clientUseConsentAt: new Date(),
+    }
+    expect(isUnpromotedPrivateMedia(media)).toBe(false)
+    expect(canProSharePublicly(media)).toBe(true)
+  })
+
+  it('still blocks when consent is null (not granted)', () => {
+    const media = {
+      storageBucket: 'media-private',
+      reviewId: null,
+      clientUseConsentAt: null,
+    }
+    expect(canProSharePublicly(media)).toBe(false)
+  })
 })

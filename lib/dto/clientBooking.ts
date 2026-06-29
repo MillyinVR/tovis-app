@@ -148,6 +148,15 @@ export type ClientBookingDTO = {
   /** The pro-proposed next-appointment instant (ISO) when one is pending; else null. */
   rebookProposedFor: string | null
 
+  /**
+   * True when the client has granted the pro media-use consent for this session
+   * (allow featuring their photos/video publicly — portfolio/Looks). Toggle via
+   * POST /api/v1/client/bookings/[id]/media-consent { granted }. Populated only
+   * where the source query selects `mediaUseConsentAt` (the client bookings list
+   * route); false elsewhere.
+   */
+  mediaUseConsent: boolean
+
   consultation: ClientBookingConsultationDTO | null
 }
 
@@ -358,8 +367,18 @@ type ClientBookingRebookFields = {
   rebooks?: { id: string; status: BookingStatus }[]
 }
 
+// Media-use consent lives on the Booking row but isn't part of the canonical
+// ClientBookingRow select. Optional so existing callers compile unchanged; the
+// list route selects it so the client can see/toggle the consent state.
+type ClientBookingMediaConsentFields = {
+  mediaUseConsentAt?: Date | null
+}
+
 export async function buildClientBookingDTO(input: {
-  booking: ClientBookingRow & ClientBookingDepositFields & ClientBookingRebookFields
+  booking: ClientBookingRow &
+    ClientBookingDepositFields &
+    ClientBookingRebookFields &
+    ClientBookingMediaConsentFields
   unreadAftercare: boolean
   hasPendingConsultationApproval: boolean
 }): Promise<ClientBookingDTO> {
@@ -564,6 +583,8 @@ export async function buildClientBookingDTO(input: {
       rebookPending && after?.rebookedFor
         ? after.rebookedFor.toISOString()
         : null,
+
+    mediaUseConsent: b.mediaUseConsentAt != null,
 
     consultation,
   }

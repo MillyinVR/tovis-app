@@ -56,6 +56,8 @@ const mediaAssetPublicationSelect =
     isEligibleForLooks: true,
     mediaType: true,
     createdAt: true,
+    // B3b: client media-use consent on the booking also authorizes public sharing.
+    booking: { select: { mediaUseConsentAt: true } },
     services: {
       select: {
         serviceId: true,
@@ -110,6 +112,8 @@ const proLookPublicationSelect =
         caption: true,
         visibility: true,
         isEligibleForLooks: true,
+        // B3b: client media-use consent on the booking also authorizes sharing.
+        booking: { select: { mediaUseConsentAt: true } },
         services: {
           select: {
             serviceId: true,
@@ -303,7 +307,7 @@ async function getProLookByIdOrThrow(
 function assertMediaAssetCanBackLooks(
   media: Pick<
     MediaAssetPublicationRow,
-    'visibility' | 'isEligibleForLooks' | 'storageBucket' | 'reviewId'
+    'visibility' | 'isEligibleForLooks' | 'storageBucket' | 'reviewId' | 'booking'
   >,
 ): void {
   if (media.visibility !== MediaVisibility.PUBLIC) {
@@ -319,7 +323,11 @@ function assertMediaAssetCanBackLooks(
   // Defense in depth: a client's unpromoted private session photo must never
   // back a public Look, even if its flags were somehow set. Only review-promoted
   // or public-bucket media may be published.
-  if (isUnpromotedPrivateMedia(media)) {
+  if (isUnpromotedPrivateMedia({
+    storageBucket: media.storageBucket,
+    reviewId: media.reviewId,
+    clientUseConsentAt: media.booking?.mediaUseConsentAt ?? null,
+  })) {
     throw new Error(UNPROMOTED_MEDIA_MESSAGE)
   }
 }

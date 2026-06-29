@@ -13261,6 +13261,44 @@ export async function declineClientAftercareNextAppointment(
   })
 }
 
+type SetClientBookingMediaUseConsentArgs = {
+  bookingId: string
+  clientId: string
+  granted: boolean
+}
+
+/**
+ * Client grants/revokes media-use consent for this session (B3b): authorizes the
+ * pro to feature this booking's photos/video publicly (portfolio/Looks). Sets
+ * (or clears) `Booking.mediaUseConsentAt`, which the public-share guard honors
+ * (lib/media/publicShareGuard.ts). Consent UNLOCKS the pro's publish action; it
+ * does NOT make anything public on its own. Foreign/missing bookings 404.
+ */
+export async function setClientBookingMediaUseConsent(
+  args: SetClientBookingMediaUseConsentArgs,
+): Promise<{ ok: true; mediaUseConsent: boolean }> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  return prisma.$transaction(async (tx) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: { id: true, clientId: true },
+    })
+
+    if (!booking || booking.clientId !== args.clientId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    await tx.booking.update({
+      where: { id: args.bookingId },
+      data: { mediaUseConsentAt: args.granted ? new Date() : null },
+    })
+
+    return { ok: true as const, mediaUseConsent: args.granted }
+  })
+}
+
 type SendExistingAftercareDraftArgs = {
   bookingId: string
   professionalId: string

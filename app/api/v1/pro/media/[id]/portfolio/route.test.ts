@@ -257,7 +257,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       await expect(res.json()).resolves.toEqual({
         ok: false,
         error:
-          'This session photo can only be shared publicly after the client adds it to a review.',
+          'This session photo can only be shared publicly after the client adds it to a review or allows it in their aftercare.',
       })
       expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
     })
@@ -297,6 +297,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
           isFeaturedInPortfolio: true,
           isEligibleForLooks: true,
           visibility: true,
+          booking: { select: { mediaUseConsentAt: true } },
           storageBucket: true,
           storagePath: true,
           thumbBucket: true,
