@@ -132,10 +132,20 @@ async function loginAs(args: {
 }): Promise<void> {
   await args.page.goto('/login')
 
-  await args.page.getByLabel(/email/i).fill(args.email)
+  // Wait for the login form to settle before interacting. On the slower
+  // mobile-chrome viewport the page can momentarily hold a duplicate,
+  // not-yet-hydrated copy of the email input in the DOM (present in the DOM
+  // but absent from the accessibility tree), which trips Playwright strict
+  // mode with "resolved to 2 elements". Scoping to the single visible form
+  // input and taking `.first()` makes the helper resilient to that transient
+  // double-render; Playwright re-resolves the locator on retry once the
+  // duplicate detaches.
+  const emailInput = args.page.getByLabel(/email/i)
+  await emailInput.first().waitFor({ state: 'visible' })
+  await emailInput.first().fill(args.email)
   // Anchored so it matches only the password input, not the "Show password"
   // visibility-toggle button that also carries "password" in its label.
-  await args.page.getByLabel(/^Password/i).fill(args.password)
+  await args.page.getByLabel(/^Password/i).first().fill(args.password)
 
   await Promise.all([
     args.page
@@ -642,6 +652,15 @@ test.describe('full booking lifecycle launch proof', () => {
     browser,
     baseURL,
   }) => {
+    // This spec schedules a quarter-hour-aligned slot (up to ~16.5min out) and
+    // then sleeps in real time via waitForSessionStartWindow until the
+    // session-start window opens (up to ~2min) before driving ~15 sequential
+    // API calls. That real-time wait alone can consume most of the default
+    // 60s test budget when the run starts late in a quarter-hour cycle, so
+    // give this one test a budget that comfortably covers the wait + the full
+    // lifecycle even when the shared server is slow.
+    test.setTimeout(240_000)
+
     if (!seed) throw new Error('Missing seed.')
 
     const resolvedBaseUrl = baseUrlFrom(baseURL)
