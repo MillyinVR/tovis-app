@@ -30,7 +30,11 @@ export default defineConfig({
   timeout: 60_000,
 
   expect: {
-    timeout: 10_000,
+    // On CI the functional specs share a single `next start` server and the
+    // heaviest spec ("booking lifecycle launch proof") drives it hard, so
+    // assertions that poll the UI/DB occasionally need more than the snappy
+    // local default before the server catches up.
+    timeout: isCI ? 15_000 : 10_000,
   },
 
   reporter: [['list'], ['html', { open: 'never' }]],
@@ -40,8 +44,16 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    actionTimeout: 15_000,
-    navigationTimeout: 30_000,
+    // The single shared `next start` server (one Prisma pool) is momentarily
+    // slow under the heaviest spec's request burst. The previous 15s/30s
+    // ceilings are what surfaced as the intermittent post-merge
+    // `apiRequestContext.{post,patch}: Timeout 15000ms` and
+    // `page.goto: Timeout 30000ms` failures on the mobile-chrome run (which
+    // only runs on `main`, so these only ever showed up post-merge). Give CI
+    // real headroom; healthy runs never reach these ceilings so passing runs
+    // are not slowed.
+    actionTimeout: isCI ? 30_000 : 15_000,
+    navigationTimeout: isCI ? 45_000 : 30_000,
   },
 
   projects: [
