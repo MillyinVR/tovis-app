@@ -405,9 +405,6 @@ app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddre
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddress.addressLine2}
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddress.postalCode}
 app/pro/bookings/new/NewBookingForm.tsx:optional direct property read:?.fullName ?? '')
-app/pro/bookings/page.tsx:Prisma select/include plaintext field:firstName: true,
-app/pro/bookings/page.tsx:Prisma select/include plaintext field:lastName: true,
-app/pro/bookings/page.tsx:Prisma select/include plaintext field:phone: true,
 app/pro/bookings/page.tsx:direct property read:? ` • ${booking.client.phone}`
 app/pro/bookings/page.tsx:direct property read:? ` • ${booking.client.user.email}`
 app/pro/bookings/page.tsx:direct property read:booking.client.lastName ?? ''
@@ -571,6 +568,11 @@ lib/notifications/proNotifications.ts:Prisma select/include plaintext field:emai
 lib/notifications/proNotifications.ts:Prisma select/include plaintext field:phone: true,
 lib/notifications/proNotifications.ts:direct property read:const profilePhone = normNullableString(professional.phone, 64)
 lib/notifications/proNotifications.ts:direct property read:const userPhone = normNullableString(professional.user.phone, 64)
+lib/pro/proBookingsList.ts:Prisma select/include plaintext field:firstName: true,
+lib/pro/proBookingsList.ts:Prisma select/include plaintext field:lastName: true,
+lib/pro/proBookingsList.ts:Prisma select/include plaintext field:phone: true,
+lib/pro/proBookingsList.ts:direct property read:booking.client.lastName ?? ''
+lib/pro/proBookingsList.ts:direct property read:const fullName = `${booking.client.firstName ?? ''} ${
 lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lat: true,
 lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lng: true,
 lib/profiles/publicProfileFormatting.ts:direct property read:const firstName = trimToNull(input.firstName)
