@@ -338,8 +338,6 @@ app/messages/thread/[id]/page.tsx:direct property read:? formatPersonName(thread
 app/messages/thread/[id]/page.tsx:optional direct property read:? formatPersonName(thread.client?.firstName, thread.client?.lastName) || 'Client'
 app/p/[handle]/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/p/[handle]/page.tsx:Prisma select/include plaintext field:lastName: true,
-app/pro/aftercare/page.tsx:Prisma select/include plaintext field:firstName: true,
-app/pro/aftercare/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/pro/bookings/[id]/aftercare/page.tsx:Prisma select/include plaintext field:email: true,
 app/pro/bookings/[id]/aftercare/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/bookings/[id]/aftercare/page.tsx:Prisma select/include plaintext field:lastName: true,
@@ -456,6 +454,8 @@ app/pro/verification/page.tsx:Prisma select/include plaintext field:firstName: t
 app/pro/verification/page.tsx:Prisma select/include plaintext field:lastName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:firstName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:lastName: true,
+lib/aftercare/loadProAftercareList.ts:Prisma select/include plaintext field:firstName: true,
+lib/aftercare/loadProAftercareList.ts:Prisma select/include plaintext field:lastName: true,
 lib/availability/core/placement.ts:Prisma select/include plaintext field:lat: true,
 lib/availability/core/placement.ts:Prisma select/include plaintext field:lng: true,
 lib/availability/data/offeringContext.ts:Prisma select/include plaintext field:firstName: true,
