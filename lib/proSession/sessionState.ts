@@ -11,7 +11,9 @@ import {
   SessionStep,
   type BookingCheckoutStatus,
   type BookingStatus,
+  type ConsultationApprovalProofMethod,
   type ConsultationApprovalStatus,
+  type ConsultationDecision,
   type PaymentMethod,
   type Prisma,
   type StripePaymentStatus,
@@ -38,6 +40,17 @@ export const PRO_SESSION_STATE_SELECT = {
       approvedAt: true,
       rejectedAt: true,
       updatedAt: true,
+      // Proof of how/when the consultation was decided (remote secure link vs
+      // in-person on the pro device) — surfaces the "proof recorded" card.
+      // Audit-only fields (destinationSnapshot, recordedByUserId) are
+      // intentionally excluded to keep this payload PII-free.
+      proof: {
+        select: {
+          decision: true,
+          method: true,
+          actedAt: true,
+        },
+      },
     },
   },
   aftercareSummary: {
@@ -66,6 +79,11 @@ export type ProSessionStateBookingRow = {
     approvedAt: Date | null
     rejectedAt: Date | null
     updatedAt: Date
+    proof: {
+      decision: ConsultationDecision
+      method: ConsultationApprovalProofMethod
+      actedAt: Date
+    } | null
   } | null
   aftercareSummary: {
     draftSavedAt: Date | null
@@ -87,6 +105,11 @@ export type ProSessionState = {
     approvedAt: string | null
     rejectedAt: string | null
     updatedAt: string
+    proof: {
+      decision: ConsultationDecision
+      method: ConsultationApprovalProofMethod
+      actedAt: string
+    } | null
   } | null
   checkout: {
     status: BookingCheckoutStatus
@@ -136,6 +159,13 @@ export function buildProSessionState(
           approvedAt: iso(booking.consultationApproval.approvedAt),
           rejectedAt: iso(booking.consultationApproval.rejectedAt),
           updatedAt: booking.consultationApproval.updatedAt.toISOString(),
+          proof: booking.consultationApproval.proof
+            ? {
+                decision: booking.consultationApproval.proof.decision,
+                method: booking.consultationApproval.proof.method,
+                actedAt: booking.consultationApproval.proof.actedAt.toISOString(),
+              }
+            : null,
         }
       : null,
     checkout: {
