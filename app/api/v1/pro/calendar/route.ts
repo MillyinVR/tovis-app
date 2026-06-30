@@ -17,6 +17,7 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes } from '@/lib/booking/conflicts'
+import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import {
   resolveApptTimeZoneFromValues,
@@ -224,6 +225,7 @@ const bookingSelect = {
   serviceItems: {
     select: {
       id: true,
+      itemType: true,
       sortOrder: true,
       durationMinutesSnapshot: true,
       priceSnapshot: true,
@@ -485,10 +487,13 @@ function getClientName(booking: BookingRow): string {
 }
 
 function getServiceName(booking: BookingRow): string {
-  const firstItemName = booking.serviceItems[0]?.service?.name?.trim() ?? ''
-  const bookingServiceName = booking.service?.name?.trim() ?? ''
-
-  return firstItemName || bookingServiceName || DEFAULT_BOOKING_SERVICE_NAME
+  return formatBookingServicesLabel(
+    booking.serviceItems.map((item) => ({
+      name: item.service?.name,
+      itemType: item.itemType,
+    })),
+    booking.service?.name?.trim() || DEFAULT_BOOKING_SERVICE_NAME,
+  )
 }
 
 function priceSnapshotToString(

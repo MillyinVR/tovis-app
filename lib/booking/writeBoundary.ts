@@ -3234,6 +3234,76 @@ async function buildBookingCheckoutRollupUpdate(args: {
   }
 }
 
+// A single persisted booking line item. A booking carries one or more co-equal
+// BASE services (e.g. cut + color) plus optional ADD_ONs that hang off a base.
+type PersistBookingServiceItem = {
+  serviceId: string
+  offeringId: string | null
+  itemType: BookingServiceItemType
+  priceSnapshot: Prisma.Decimal
+  durationMinutesSnapshot: number
+  notes: string | null
+  sortOrder: number
+}
+
+// Replace a booking's service items with `items`, preserving each item's
+// declared itemType. Multiple BASE items are co-equal services; ADD_ON items
+// are parented to the first BASE so the existing parent/child shape (and the
+// derived primary service/offering) stays valid. Callers must have already
+// validated the items (offering ownership, location mode, baseCount >= 1).
+async function replaceBookingServiceItems(
+  tx: Prisma.TransactionClient,
+  bookingId: string,
+  items: PersistBookingServiceItem[],
+): Promise<void> {
+  const baseItems = items.filter(
+    (item) => item.itemType === BookingServiceItemType.BASE,
+  )
+  if (baseItems.length < 1) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+
+  await tx.bookingServiceItem.deleteMany({ where: { bookingId } })
+
+  const toRow = (item: PersistBookingServiceItem, parentItemId: string | null) => ({
+    bookingId,
+    serviceId: item.serviceId,
+    offeringId: item.offeringId,
+    itemType: item.itemType,
+    parentItemId,
+    priceSnapshot: item.priceSnapshot,
+    durationMinutesSnapshot: item.durationMinutesSnapshot,
+    notes: item.notes,
+    sortOrder: item.sortOrder,
+  })
+
+  // Create the first base on its own so add-ons have a parent to point at.
+  const firstBase = baseItems[0]
+  if (!firstBase) {
+    throw bookingError('INVALID_SERVICE_ITEMS')
+  }
+  const otherBases = baseItems.slice(1)
+  const createdFirstBase = await tx.bookingServiceItem.create({
+    data: toRow(firstBase, null),
+    select: { id: true },
+  })
+
+  if (otherBases.length > 0) {
+    await tx.bookingServiceItem.createMany({
+      data: otherBases.map((item) => toRow(item, null)),
+    })
+  }
+
+  const addOnItems = items.filter(
+    (item) => item.itemType === BookingServiceItemType.ADD_ON,
+  )
+  if (addOnItems.length > 0) {
+    await tx.bookingServiceItem.createMany({
+      data: addOnItems.map((item) => toRow(item, createdFirstBase.id)),
+    })
+  }
+}
+
 function assertValidFinalReviewLineItems(
   items: ConfirmBookingFinalReviewLineItemInput[],
 ): void {
@@ -3245,10 +3315,10 @@ function assertValidFinalReviewLineItems(
   }
 
   const baseCount = items.filter((item) => item.itemType === BookingServiceItemType.BASE).length
-  if (baseCount !== 1) {
+  if (baseCount < 1) {
     throw bookingError('INVALID_SERVICE_ITEMS', {
-      message: 'Final review requires exactly one BASE service item.',
-      userMessage: 'You must have exactly one main service.',
+      message: 'Final review requires at least one BASE service item.',
+      userMessage: 'You need at least one main service.',
     })
   }
 
@@ -5912,52 +5982,19 @@ async function performLockedConfirmBookingFinalReview(args: {
     }
   }
 
-  await args.tx.bookingServiceItem.deleteMany({
-    where: { bookingId: booking.id },
-  })
-
-  const baseItem = normalizedItems.find(
-    (item) => item.itemType === BookingServiceItemType.BASE,
+  await replaceBookingServiceItems(
+    args.tx,
+    booking.id,
+    normalizedItems.map((item, index) => ({
+      serviceId: item.serviceId,
+      offeringId: item.offeringId,
+      itemType: item.itemType,
+      priceSnapshot: item.priceSnapshot,
+      durationMinutesSnapshot: item.durationMinutesSnapshot,
+      notes: item.notes,
+      sortOrder: index,
+    })),
   )
-
-  if (!baseItem) {
-    throw bookingError('INVALID_SERVICE_ITEMS')
-  }
-
-  const createdBaseItem = await args.tx.bookingServiceItem.create({
-    data: {
-      bookingId: booking.id,
-      serviceId: baseItem.serviceId,
-      offeringId: baseItem.offeringId,
-      itemType: BookingServiceItemType.BASE,
-      parentItemId: null,
-      priceSnapshot: baseItem.priceSnapshot,
-      durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
-      notes: baseItem.notes,
-      sortOrder: 0,
-    },
-    select: { id: true },
-  })
-
-  const addOnItems = normalizedItems.filter(
-    (item) => item.itemType === BookingServiceItemType.ADD_ON,
-  )
-
-  if (addOnItems.length > 0) {
-    await args.tx.bookingServiceItem.createMany({
-      data: addOnItems.map((item, index) => ({
-        bookingId: booking.id,
-        serviceId: item.serviceId,
-        offeringId: item.offeringId,
-        itemType: BookingServiceItemType.ADD_ON,
-        parentItemId: createdBaseItem.id,
-        priceSnapshot: item.priceSnapshot,
-        durationMinutesSnapshot: item.durationMinutesSnapshot,
-        notes: item.notes,
-        sortOrder: index + 1,
-      })),
-    })
-  }
 
   const checkoutRollup = await buildBookingCheckoutRollupUpdate({
     tx: args.tx,
@@ -7306,12 +7343,24 @@ await enforceBookingOverlapPolicy({
 
 type ConsultationProposedServiceItem = {
   offeringId: string
+  serviceId: string
+  // Each proposed line item carries its own type. Multiple BASE items are
+  // co-equal services (e.g. cut + color); ADD_ON items hang off a base.
+  itemType: BookingServiceItemType
   sortOrder: number
   // The price the pro and client agreed on during the consultation, in dollars.
   // Stored on the proposal as a decimal string (e.g. "120.00"); null when the
   // proposal carried no usable price, in which case we fall back to the
   // offering's catalog price during materialization.
   agreedPrice: Prisma.Decimal | null
+}
+
+function parseProposedItemType(
+  value: Prisma.JsonValue,
+): BookingServiceItemType {
+  return value === BookingServiceItemType.ADD_ON
+    ? BookingServiceItemType.ADD_ON
+    : BookingServiceItemType.BASE
 }
 
 function isJsonObjectRecord(
@@ -7364,8 +7413,13 @@ function parseConsultationProposedItems(
       throw bookingError('INVALID_SERVICE_ITEMS')
     }
 
+    const serviceId =
+      typeof row.serviceId === 'string' ? row.serviceId.trim() : ''
+
     return {
       offeringId,
+      serviceId,
+      itemType: parseProposedItemType(row.itemType ?? null),
       sortOrder:
         typeof row.sortOrder === 'number' && Number.isFinite(row.sortOrder)
           ? row.sortOrder
@@ -7453,6 +7507,9 @@ const offeringIds = Array.from(
     offerings.map((offering) => [offering.id, offering]),
   )
 
+  // Preserve each proposed line item's type so co-equal BASE services (e.g.
+  // cut + color) materialize as independent services rather than being demoted
+  // to add-ons. ADD_ON items still hang off a base.
   const requestedItems: RequestedServiceItemInput[] = proposedItems.map((item) => {
   const offering = offeringById.get(item.offeringId)
 
@@ -7464,6 +7521,7 @@ const offeringIds = Array.from(
     serviceId: offering.serviceId,
     offeringId: offering.id,
     sortOrder: item.sortOrder,
+    itemType: item.itemType,
   }
 })
 
@@ -7493,58 +7551,32 @@ const offeringIds = Array.from(
     computedDurationMinutes,
     computedSubtotal,
   } = computeBookingItemLikeTotals(
-    normalizedItems.map((item, index) => ({
+    normalizedItems.map((item) => ({
       serviceId: item.serviceId,
       offeringId: item.offeringId,
       durationMinutesSnapshot: item.durationMinutesSnapshot,
       priceSnapshot: item.priceSnapshot,
-      itemType:
-        index === 0
-          ? BookingServiceItemType.BASE
-          : BookingServiceItemType.ADD_ON,
+      itemType: item.itemType,
     })),
     'INVALID_SERVICE_ITEMS',
   )
 
-  await args.tx.bookingServiceItem.deleteMany({
-    where: { bookingId: booking.id },
-  })
-
-  const baseItem = normalizedItems[0]
-  if (!baseItem) {
-    throw bookingError('INVALID_SERVICE_ITEMS')
-  }
-
-  const createdBaseItem = await args.tx.bookingServiceItem.create({
-    data: {
-      bookingId: booking.id,
-      serviceId: baseItem.serviceId,
-      offeringId: baseItem.offeringId,
-      itemType: BookingServiceItemType.BASE,
-      parentItemId: null,
-      priceSnapshot: baseItem.priceSnapshot,
-      durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
-      sortOrder: 0,
-    },
-    select: { id: true },
-  })
-
-  const addOnItems = normalizedItems.slice(1)
-  if (addOnItems.length > 0) {
-    await args.tx.bookingServiceItem.createMany({
-      data: addOnItems.map((item, index) => ({
-        bookingId: booking.id,
-        serviceId: item.serviceId,
-        offeringId: item.offeringId,
-        itemType: BookingServiceItemType.ADD_ON,
-        parentItemId: createdBaseItem.id,
-        priceSnapshot: item.priceSnapshot,
-        durationMinutesSnapshot: item.durationMinutesSnapshot,
-        sortOrder: index + 1,
-        notes: 'CONSULTATION_APPROVED',
-      })),
-    })
-  }
+  await replaceBookingServiceItems(
+    args.tx,
+    booking.id,
+    normalizedItems.map((item, index) => ({
+      serviceId: item.serviceId,
+      offeringId: item.offeringId,
+      itemType: item.itemType,
+      priceSnapshot: item.priceSnapshot,
+      durationMinutesSnapshot: item.durationMinutesSnapshot,
+      notes:
+        item.itemType === BookingServiceItemType.ADD_ON
+          ? 'CONSULTATION_APPROVED'
+          : null,
+      sortOrder: index,
+    })),
+  )
 
   const checkoutRollup = await buildBookingCheckoutRollupUpdate({
     tx: args.tx,
@@ -10099,15 +10131,12 @@ if (args.notifyClient) {
   }
 
   const previewItems =
-    normalizedServiceItems?.map((item, index) => ({
+    normalizedServiceItems?.map((item) => ({
       serviceId: item.serviceId,
       offeringId: item.offeringId,
       durationMinutesSnapshot: item.durationMinutesSnapshot,
       priceSnapshot: item.priceSnapshot,
-      itemType:
-        index === 0
-          ? BookingServiceItemType.BASE
-          : BookingServiceItemType.ADD_ON,
+      itemType: item.itemType,
     })) ??
     (await args.tx.bookingServiceItem.findMany({
       where: { bookingId: existing.id },
@@ -10224,46 +10253,22 @@ if (args.notifyClient) {
   }
 
   if (normalizedServiceItems) {
-    await args.tx.bookingServiceItem.deleteMany({
-      where: { bookingId: existing.id },
-    })
-
-    const baseItem = normalizedServiceItems[0]
-    if (!baseItem) {
-      throw bookingError('INVALID_SERVICE_ITEMS')
-    }
-
-    const createdBaseItem = await args.tx.bookingServiceItem.create({
-      data: {
-        bookingId: existing.id,
-        serviceId: baseItem.serviceId,
-        offeringId: baseItem.offeringId,
-        itemType: BookingServiceItemType.BASE,
-        parentItemId: null,
-        priceSnapshot: baseItem.priceSnapshot,
-        durationMinutesSnapshot: baseItem.durationMinutesSnapshot,
-        sortOrder: 0,
-      },
-      select: { id: true },
-    })
-
-    const addOnItems = normalizedServiceItems.slice(1)
-
-    if (addOnItems.length > 0) {
-      await args.tx.bookingServiceItem.createMany({
-        data: addOnItems.map((item, index) => ({
-          bookingId: existing.id,
-          serviceId: item.serviceId,
-          offeringId: item.offeringId,
-          itemType: BookingServiceItemType.ADD_ON,
-          parentItemId: createdBaseItem.id,
-          priceSnapshot: item.priceSnapshot,
-          durationMinutesSnapshot: item.durationMinutesSnapshot,
-          sortOrder: index + 1,
-          notes: 'MANUAL_ADDON',
-        })),
-      })
-    }
+    await replaceBookingServiceItems(
+      args.tx,
+      existing.id,
+      normalizedServiceItems.map((item, index) => ({
+        serviceId: item.serviceId,
+        offeringId: item.offeringId,
+        itemType: item.itemType,
+        priceSnapshot: item.priceSnapshot,
+        durationMinutesSnapshot: item.durationMinutesSnapshot,
+        notes:
+          item.itemType === BookingServiceItemType.ADD_ON
+            ? 'MANUAL_ADDON'
+            : null,
+        sortOrder: index,
+      })),
+    )
   }
 
   const checkoutRollup = await buildBookingCheckoutRollupUpdate({

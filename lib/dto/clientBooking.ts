@@ -8,6 +8,7 @@ import {
   type ProNameDisplay,
 } from '@prisma/client'
 import { moneyToString } from '@/lib/money'
+import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import {
   resolveApptTimeZone,
   type TimeZoneTruthSource,
@@ -432,7 +433,14 @@ export async function buildClientBookingDTO(input: {
   const baseItem = items.find((x) => x.type === 'BASE') ?? items[0] ?? null
   const baseName = baseItem?.name ?? (b.service?.name ?? 'Appointment')
   const addOnNames = items.filter((x) => x.type === 'ADD_ON').map((x) => x.name)
-  const title = [baseName, ...addOnNames].join(' + ')
+  // Co-equal BASE services (e.g. cut + color) all surface in the title, not
+  // just the primary, then any add-ons.
+  const title = formatBookingServicesLabel(
+    [...items]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((x) => ({ name: x.name, itemType: x.type })),
+    b.service?.name ?? null,
+  )
 
   const locationLabel = buildLocationLabel({
     locationAddressSnapshot: b.locationAddressSnapshot,

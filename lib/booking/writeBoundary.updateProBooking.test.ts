@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingCheckoutStatus,
+  BookingServiceItemType,
   BookingStatus,
   Prisma,
   ProfessionalLocationType,
@@ -374,6 +375,7 @@ describe('lib/booking/writeBoundary.updateProBooking', () => {
       {
         serviceId: 'svc_new',
         offeringId: 'off_new',
+        itemType: BookingServiceItemType.BASE,
         durationMinutesSnapshot: 90,
         priceSnapshot: new Prisma.Decimal('120.00'),
       },
@@ -481,6 +483,7 @@ describe('lib/booking/writeBoundary.updateProBooking', () => {
       {
         serviceId: 'svc_old',
         offeringId: 'off_old',
+        itemType: BookingServiceItemType.BASE,
         durationMinutesSnapshot: 90,
         priceSnapshot: new Prisma.Decimal('100.00'),
       },

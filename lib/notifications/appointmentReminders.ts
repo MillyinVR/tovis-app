@@ -5,6 +5,7 @@ import {
 } from '@prisma/client'
 
 import { asTrimmedString, isRecord } from '@/lib/guards'
+import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import {
   cancelScheduledClientNotificationsForBooking,
   scheduleClientNotification,
@@ -93,6 +94,14 @@ const BOOKING_REMINDER_SELECT = {
     select: {
       name: true,
     },
+  },
+  serviceItems: {
+    select: {
+      itemType: true,
+      sortOrder: true,
+      service: { select: { name: true } },
+    },
+    orderBy: { sortOrder: 'asc' },
   },
 } satisfies Prisma.BookingSelect
 
@@ -379,7 +388,13 @@ function buildReminderPlanItem(args: {
       kind,
       scheduledFor,
       timeZone,
-      serviceName: booking.service?.name ?? 'Appointment',
+      serviceName: formatBookingServicesLabel(
+        (booking.serviceItems ?? []).map((item) => ({
+          name: item.service?.name,
+          itemType: item.itemType,
+        })),
+        booking.service?.name ?? null,
+      ),
       /**
        * Intentionally null for now.
        * This file should only include professionalName once booking-query truth
