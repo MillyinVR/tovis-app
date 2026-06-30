@@ -67,6 +67,7 @@ function makeBookingRow(
       approvedAt: null,
       rejectedAt: null,
       updatedAt: new Date('2026-06-09T10:01:00.000Z'),
+      proof: null,
     },
     aftercareSummary: null,
     ...overrides,

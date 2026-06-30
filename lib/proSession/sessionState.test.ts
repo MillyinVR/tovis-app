@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   BookingCheckoutStatus,
   BookingStatus,
+  ConsultationApprovalProofMethod,
   ConsultationApprovalStatus,
+  ConsultationDecision,
   SessionStep,
 } from '@prisma/client'
 
@@ -57,6 +59,7 @@ describe('buildProSessionState', () => {
           approvedAt: new Date('2026-06-09T10:10:00.000Z'),
           rejectedAt: null,
           updatedAt: new Date('2026-06-09T10:10:00.000Z'),
+          proof: null,
         },
       }),
     )
@@ -76,11 +79,36 @@ describe('buildProSessionState', () => {
           approvedAt: null,
           rejectedAt: new Date('2026-06-09T10:10:00.000Z'),
           updatedAt: new Date('2026-06-09T10:10:00.000Z'),
+          proof: null,
         },
       }),
     )
 
     expect(state.effectiveSessionStep).toBe(SessionStep.CONSULTATION)
+  })
+
+  it('maps the consultation proof (decision/method/actedAt) when present', () => {
+    const state = buildProSessionState(
+      makeRow({
+        consultationApproval: {
+          status: ConsultationApprovalStatus.APPROVED,
+          approvedAt: new Date('2026-06-09T10:10:00.000Z'),
+          rejectedAt: null,
+          updatedAt: new Date('2026-06-09T10:10:00.000Z'),
+          proof: {
+            decision: ConsultationDecision.APPROVED,
+            method: ConsultationApprovalProofMethod.REMOTE_SECURE_LINK,
+            actedAt: new Date('2026-06-09T10:09:30.000Z'),
+          },
+        },
+      }),
+    )
+
+    expect(state.consultation?.proof).toEqual({
+      decision: ConsultationDecision.APPROVED,
+      method: ConsultationApprovalProofMethod.REMOTE_SECURE_LINK,
+      actedAt: '2026-06-09T10:09:30.000Z',
+    })
   })
 
   it.each([
@@ -143,6 +171,7 @@ describe('computeProSessionStateHash', () => {
           approvedAt: null,
           rejectedAt: null,
           updatedAt: new Date('2026-06-09T10:10:00.000Z'),
+          proof: null,
         },
       }),
     )
@@ -154,6 +183,7 @@ describe('computeProSessionStateHash', () => {
           approvedAt: new Date('2026-06-09T10:11:00.000Z'),
           rejectedAt: null,
           updatedAt: new Date('2026-06-09T10:11:00.000Z'),
+          proof: null,
         },
       }),
     )
