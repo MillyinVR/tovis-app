@@ -12,6 +12,7 @@ import { normalizeEmail } from '@/app/api/_utils/email'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail } from '@/app/api/_utils/responses'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
@@ -62,6 +63,14 @@ const bookingCalendarSelect = {
     select: {
       name: true,
     },
+  },
+  serviceItems: {
+    select: {
+      itemType: true,
+      sortOrder: true,
+      service: { select: { name: true } },
+    },
+    orderBy: { sortOrder: 'asc' },
   },
   client: {
     select: {
@@ -262,8 +271,18 @@ function canAccessBooking(args: {
   return false
 }
 
+function resolveCalendarServiceName(booking: BookingCalendarRow): string {
+  return formatBookingServicesLabel(
+    (booking.serviceItems ?? []).map((item) => ({
+      name: item.service?.name,
+      itemType: item.itemType,
+    })),
+    booking.service?.name ?? null,
+  )
+}
+
 function buildTitle(booking: BookingCalendarRow): string {
-  const serviceName = booking.service?.name?.trim() || 'Appointment'
+  const serviceName = resolveCalendarServiceName(booking)
   const professionalName = formatProfessionalPublicDisplayName(
     booking.professional,
   )
@@ -295,7 +314,7 @@ function buildCalendarInvite(args: {
   endUtc: Date
   brandName: string
 }): string {
-  const serviceName = args.booking.service?.name?.trim() || 'Appointment'
+  const serviceName = resolveCalendarServiceName(args.booking)
   const professionalName = formatProfessionalPublicDisplayName(
     args.booking.professional,
   )

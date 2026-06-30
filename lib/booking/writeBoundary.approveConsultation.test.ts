@@ -191,10 +191,14 @@ function makePendingApprovalBooking(overrides?: {
           items: [
             {
               offeringId: 'off_base',
+              serviceId: 'svc_base',
+              itemType: BookingServiceItemType.BASE,
               sortOrder: 0,
             },
             {
               offeringId: 'off_addon',
+              serviceId: 'svc_addon',
+              itemType: BookingServiceItemType.ADD_ON,
               sortOrder: 1,
             },
           ],
@@ -366,12 +370,14 @@ function installApprovedMutationMocks() {
     {
       serviceId: 'svc_base',
       offeringId: 'off_base',
+      itemType: BookingServiceItemType.BASE,
       priceSnapshot: basePrice,
       durationMinutesSnapshot: 60,
     },
     {
       serviceId: 'svc_addon',
       offeringId: 'off_addon',
+      itemType: BookingServiceItemType.ADD_ON,
       priceSnapshot: addOnPrice,
       durationMinutesSnapshot: 15,
     },
@@ -524,11 +530,13 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
         serviceId: 'svc_base',
         offeringId: 'off_base',
         sortOrder: 0,
+        itemType: BookingServiceItemType.BASE,
       },
       {
         serviceId: 'svc_addon',
         offeringId: 'off_addon',
         sortOrder: 1,
+        itemType: BookingServiceItemType.ADD_ON,
       },
     ])
     expect(normalizeCall.locationType).toBe(ServiceLocationType.SALON)
@@ -552,6 +560,7 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
         parentItemId: null,
         priceSnapshot: basePrice,
         durationMinutesSnapshot: 60,
+        notes: null,
         sortOrder: 0,
       },
       select: { id: true },
@@ -671,6 +680,150 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
         noOp: false,
       },
     })
+  })
+
+  it('materializes multiple co-equal BASE services without demoting any to an add-on', async () => {
+    const cutPrice = new Prisma.Decimal(60)
+    const colorPrice = new Prisma.Decimal(140)
+    const computedSubtotal = new Prisma.Decimal(200)
+
+    mocks.txProfessionalServiceOfferingFindMany.mockResolvedValueOnce([
+      {
+        id: 'off_cut',
+        serviceId: 'svc_cut',
+        offersInSalon: true,
+        offersMobile: false,
+        salonDurationMinutes: 45,
+        mobileDurationMinutes: null,
+        salonPriceStartingAt: cutPrice,
+        mobilePriceStartingAt: null,
+        service: { defaultDurationMinutes: 45, name: 'Cut' },
+      },
+      {
+        id: 'off_color',
+        serviceId: 'svc_color',
+        offersInSalon: true,
+        offersMobile: false,
+        salonDurationMinutes: 90,
+        mobileDurationMinutes: null,
+        salonPriceStartingAt: colorPrice,
+        mobilePriceStartingAt: null,
+        service: { defaultDurationMinutes: 90, name: 'Color' },
+      },
+    ])
+
+    // Both line items are co-equal BASE services.
+    mocks.buildNormalizedBookingItemsFromRequestedOfferings.mockReturnValueOnce([
+      {
+        serviceId: 'svc_cut',
+        offeringId: 'off_cut',
+        itemType: BookingServiceItemType.BASE,
+        priceSnapshot: cutPrice,
+        durationMinutesSnapshot: 45,
+      },
+      {
+        serviceId: 'svc_color',
+        offeringId: 'off_color',
+        itemType: BookingServiceItemType.BASE,
+        priceSnapshot: colorPrice,
+        durationMinutesSnapshot: 90,
+      },
+    ])
+
+    mocks.computeBookingItemLikeTotals.mockReturnValueOnce({
+      primaryServiceId: 'svc_cut',
+      primaryOfferingId: 'off_cut',
+      computedDurationMinutes: 135,
+      computedSubtotal,
+    })
+
+    mocks.txBookingServiceItemDeleteMany.mockResolvedValueOnce({ count: 0 })
+    mocks.txBookingServiceItemCreate.mockResolvedValueOnce({ id: 'bsi_cut' })
+    mocks.txBookingServiceItemCreateMany.mockResolvedValueOnce({ count: 1 })
+
+    mocks.txBookingUpdate.mockResolvedValueOnce({
+      id: BOOKING_ID,
+      serviceId: 'svc_cut',
+      offeringId: 'off_cut',
+      subtotalSnapshot: computedSubtotal,
+      totalDurationMinutes: 135,
+      consultationConfirmedAt: TEST_NOW,
+    })
+
+    mocks.txConsultationApprovalUpdate.mockResolvedValueOnce({
+      id: 'approval_1',
+      status: ConsultationApprovalStatus.APPROVED,
+      approvedAt: TEST_NOW,
+      rejectedAt: null,
+    })
+
+    installBookingFindUniqueMocks({
+      consultationBooking: makePendingApprovalBooking({
+        proposedServicesJson: {
+          currency: 'USD',
+          items: [
+            {
+              offeringId: 'off_cut',
+              serviceId: 'svc_cut',
+              itemType: BookingServiceItemType.BASE,
+              sortOrder: 0,
+            },
+            {
+              offeringId: 'off_color',
+              serviceId: 'svc_color',
+              itemType: BookingServiceItemType.BASE,
+              sortOrder: 1,
+            },
+          ],
+        } satisfies Prisma.JsonObject,
+      }),
+    })
+
+    await approveConsultationAndMaterializeBooking({
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      professionalId: PROFESSIONAL_ID,
+    })
+
+    // First base persisted on its own (so add-ons have a parent), as BASE.
+    expect(mocks.txBookingServiceItemCreate).toHaveBeenCalledWith({
+      data: {
+        bookingId: BOOKING_ID,
+        serviceId: 'svc_cut',
+        offeringId: 'off_cut',
+        itemType: BookingServiceItemType.BASE,
+        parentItemId: null,
+        priceSnapshot: cutPrice,
+        durationMinutesSnapshot: 45,
+        notes: null,
+        sortOrder: 0,
+      },
+      select: { id: true },
+    })
+
+    // The SECOND service stays a co-equal BASE — not demoted to an add-on and
+    // not parented to the first base.
+    expect(mocks.txBookingServiceItemCreateMany).toHaveBeenCalledWith({
+      data: [
+        {
+          bookingId: BOOKING_ID,
+          serviceId: 'svc_color',
+          offeringId: 'off_color',
+          itemType: BookingServiceItemType.BASE,
+          parentItemId: null,
+          priceSnapshot: colorPrice,
+          durationMinutesSnapshot: 90,
+          notes: null,
+          sortOrder: 1,
+        },
+      ],
+    })
+
+    const bookingUpdateArgs = mocks.txBookingUpdate.mock.calls[0]?.[0]
+    expect(bookingUpdateArgs.data.serviceId).toBe('svc_cut')
+    expect(bookingUpdateArgs.data.offeringId).toBe('off_cut')
+    expect(bookingUpdateArgs.data.totalDurationMinutes).toBe(135)
+    expect(bookingUpdateArgs.data.subtotalSnapshot.toString()).toBe('200')
   })
 
   it('honors the agreed consultation price over the offering catalog price', async () => {

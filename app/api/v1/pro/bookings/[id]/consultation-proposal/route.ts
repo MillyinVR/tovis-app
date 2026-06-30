@@ -357,11 +357,13 @@ function parseProposalPayload(raw: unknown): ParsedProposalPayload | null {
 
   items.sort((a, b) => a.sortOrder - b.sortOrder)
 
+  // A booking carries one or more co-equal BASE services (e.g. cut + color);
+  // ADD_ON items hang off a base. Require at least one base.
   const baseCount = items.filter(
     (item) => item.itemType === BookingServiceItemType.BASE,
   ).length
 
-  if (baseCount !== 1) return null
+  if (baseCount < 1) return null
 
   return {
     items,
@@ -532,7 +534,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     if (!proposal) {
       return jsonFail(
         400,
-        'Invalid proposed services. Include exactly one base service, and each line item needs service, type, price, and duration.',
+        'Invalid proposed services. Include at least one base service, and each line item needs service, type, price, and duration.',
       )
     }
 

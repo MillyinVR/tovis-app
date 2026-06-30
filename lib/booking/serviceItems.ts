@@ -10,6 +10,7 @@ import { pickModeDurationMinutes } from '@/lib/booking/locationContext'
 export type NormalizedBookingItem = {
   serviceId: string
   offeringId: string
+  itemType: BookingServiceItemType
   durationMinutesSnapshot: number
   priceSnapshot: Prisma.Decimal
   sortOrder: number
@@ -41,6 +42,11 @@ export type RequestedServiceItemInput = {
   serviceId: string
   offeringId: string
   sortOrder: number
+  // BASE-or-co-equal by default. Multiple BASE items are co-equal services
+  // (e.g. cut + color) — each backed by its own active offering. ADD_ON items
+  // hang off a base. Callers that only ever supply offering-backed items can
+  // omit this (defaults to BASE).
+  itemType?: BookingServiceItemType
 }
 
 export type EditRouteOfferingRow = {
@@ -153,6 +159,7 @@ export function buildNormalizedBookingItemsFromServiceIds(args: {
     return {
       serviceId,
       offeringId: offering.id,
+      itemType: BookingServiceItemType.BASE,
       durationMinutesSnapshot: normalizeDurationSnapshot({
         rawDurationMinutes: rawDuration,
         stepMinutes,
@@ -220,6 +227,7 @@ export function buildNormalizedBookingItemsFromRequestedOfferings(args: {
     return {
       serviceId: item.serviceId,
       offeringId: item.offeringId,
+      itemType: item.itemType ?? BookingServiceItemType.BASE,
       durationMinutesSnapshot: normalizeDurationSnapshot({
         rawDurationMinutes: rawDuration,
         stepMinutes,

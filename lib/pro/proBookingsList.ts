@@ -143,18 +143,24 @@ export function getBaseAndAddOnNames(booking: BookingsListRow): {
   baseName: string
   addOnNames: string[]
 } {
-  const items = Array.isArray(booking.serviceItems) ? booking.serviceItems : []
+  const items = [...(Array.isArray(booking.serviceItems) ? booking.serviceItems : [])].sort(
+    (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
+  )
 
-  const baseItem =
-    items.find((item) => item.itemType === BookingServiceItemType.BASE) ??
-    items[0] ??
-    null
+  const baseNames = items
+    .filter((item) => item.itemType === BookingServiceItemType.BASE)
+    .map((item) => item.service?.name?.trim() ?? '')
+    .filter(Boolean)
 
   const addOnItems = items.filter(
     (item) => item.itemType === BookingServiceItemType.ADD_ON,
   )
 
-  const baseName = baseItem?.service?.name ?? booking.service?.name ?? 'Service'
+  // Co-equal BASE services (e.g. cut + color) all surface in the name.
+  const baseName =
+    baseNames.length > 0
+      ? baseNames.join(' + ')
+      : booking.service?.name ?? 'Service'
   const addOnNames = addOnItems
     .map((item) => item.service?.name ?? '')
     .map((name) => name.trim())

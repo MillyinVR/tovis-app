@@ -16,6 +16,7 @@
 import { NotificationEventKey, Prisma } from '@prisma/client'
 
 import { formatCents, formatMoneyFromUnknown } from '@/lib/money'
+import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 
 import { upsertClientNotification } from './clientNotifications'
 import { createProNotification } from './proNotifications'
@@ -27,6 +28,14 @@ const paymentBookingContextSelect = {
   stripePaymentIntentId: true,
   service: {
     select: { name: true },
+  },
+  serviceItems: {
+    select: {
+      itemType: true,
+      sortOrder: true,
+      service: { select: { name: true } },
+    },
+    orderBy: { sortOrder: 'asc' },
   },
 } satisfies Prisma.BookingSelect
 
@@ -53,7 +62,13 @@ async function loadPaymentBookingContext(
     clientId: booking.clientId,
     professionalId: booking.professionalId,
     paymentIntentId: booking.stripePaymentIntentId,
-    serviceName: booking.service?.name?.trim() || 'your appointment',
+    serviceName: formatBookingServicesLabel(
+      (booking.serviceItems ?? []).map((item) => ({
+        name: item.service?.name,
+        itemType: item.itemType,
+      })),
+      booking.service?.name?.trim() || 'your appointment',
+    ),
     totalAmountDisplay: formatMoneyFromUnknown(booking.totalAmount),
   }
 }
