@@ -13,7 +13,6 @@ import {
 
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import { COPY } from '@/lib/copy'
-import type { BookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 import {
   countProAftercareCards,
   sortProAftercareCards,
@@ -23,14 +22,13 @@ import {
   type ProAftercareRebookKind,
   type ProAftercareSortMode,
 } from '@/lib/aftercare/proAftercareList'
+import type { ProAftercareListItem } from '@/lib/aftercare/loadProAftercareList'
 
 import { nudgeAftercareAction, sendAftercareAction } from './actions'
 
 const C = COPY.proAftercareList
 
-export type ProAftercareListItem = ProAftercareCard & {
-  media: BookingBeforeAfterThumbs | null
-}
+export type { ProAftercareListItem }
 
 type FilterTab = 'all' | ProAftercareCardStatus
 
