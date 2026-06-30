@@ -6,9 +6,8 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { proClientVisibilityWhere } from '@/lib/clientVisibility'
-import { formatInTimeZone } from '@/lib/time'
+import { formatLastBookingLabel } from '@/lib/clients/lastBookingLabel'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
-import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 
 import NewClientForm from './NewClientForm'
 import ClientNameLink from '@/app/_components/ClientNameLink'
@@ -16,26 +15,6 @@ import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { Card, buttonClassName } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
-
-function formatLastSeen(
-  booking: { scheduledFor: Date; locationTimeZone: string | null } | null,
-  fallbackTz: string,
-) {
-  if (!booking) return 'No bookings yet'
-
-  // Show the last appointment in the zone where it took place, not the pro's
-  // home zone (a NY pro who served a client in LA should see Pacific time).
-  const tz = resolveAppointmentDisplayTimeZone(
-    booking.locationTimeZone,
-    fallbackTz,
-  )
-
-  return `Last booking: ${formatInTimeZone(booking.scheduledFor, tz, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })}`
-}
 
 function buildProToClientMessageHref(args: {
   proId: string
@@ -173,7 +152,7 @@ export default async function ProClientsPage() {
                       </div>
 
                       <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
-                        {formatLastSeen(lastBooking, scheduleTz)}
+                        {formatLastBookingLabel(lastBooking, scheduleTz)}
                       </div>
                     </div>
 
