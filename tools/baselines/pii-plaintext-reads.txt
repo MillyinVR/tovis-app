@@ -338,8 +338,6 @@ app/messages/thread/[id]/page.tsx:direct property read:? formatPersonName(thread
 app/messages/thread/[id]/page.tsx:optional direct property read:? formatPersonName(thread.client?.firstName, thread.client?.lastName) || 'Client'
 app/p/[handle]/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/p/[handle]/page.tsx:Prisma select/include plaintext field:lastName: true,
-app/pro/aftercare/page.tsx:Prisma select/include plaintext field:firstName: true,
-app/pro/aftercare/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/pro/bookings/[id]/aftercare/page.tsx:Prisma select/include plaintext field:email: true,
 app/pro/bookings/[id]/aftercare/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/bookings/[id]/aftercare/page.tsx:Prisma select/include plaintext field:lastName: true,
@@ -405,9 +403,6 @@ app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddre
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddress.addressLine2}
 app/pro/bookings/new/NewBookingForm.tsx:direct property read:value={serviceAddress.postalCode}
 app/pro/bookings/new/NewBookingForm.tsx:optional direct property read:?.fullName ?? '')
-app/pro/bookings/page.tsx:Prisma select/include plaintext field:firstName: true,
-app/pro/bookings/page.tsx:Prisma select/include plaintext field:lastName: true,
-app/pro/bookings/page.tsx:Prisma select/include plaintext field:phone: true,
 app/pro/bookings/page.tsx:direct property read:? ` • ${booking.client.phone}`
 app/pro/bookings/page.tsx:direct property read:? ` • ${booking.client.user.email}`
 app/pro/bookings/page.tsx:direct property read:booking.client.lastName ?? ''
@@ -452,6 +447,8 @@ app/pro/verification/page.tsx:Prisma select/include plaintext field:firstName: t
 app/pro/verification/page.tsx:Prisma select/include plaintext field:lastName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:firstName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:lastName: true,
+lib/aftercare/loadProAftercareList.ts:Prisma select/include plaintext field:firstName: true,
+lib/aftercare/loadProAftercareList.ts:Prisma select/include plaintext field:lastName: true,
 lib/availability/core/placement.ts:Prisma select/include plaintext field:lat: true,
 lib/availability/core/placement.ts:Prisma select/include plaintext field:lng: true,
 lib/availability/data/offeringContext.ts:Prisma select/include plaintext field:firstName: true,
@@ -571,6 +568,11 @@ lib/pro/loadProReviewsList.ts:direct property read:const first = pickNonEmptyStr
 lib/pro/loadProReviewsList.ts:direct property read:const last = pickNonEmptyString(rev.client?.lastName)
 lib/pro/loadProReviewsList.ts:optional direct property read:const first = pickNonEmptyString(rev.client?.firstName)
 lib/pro/loadProReviewsList.ts:optional direct property read:const last = pickNonEmptyString(rev.client?.lastName)
+lib/pro/proBookingsList.ts:Prisma select/include plaintext field:firstName: true,
+lib/pro/proBookingsList.ts:Prisma select/include plaintext field:lastName: true,
+lib/pro/proBookingsList.ts:Prisma select/include plaintext field:phone: true,
+lib/pro/proBookingsList.ts:direct property read:booking.client.lastName ?? ''
+lib/pro/proBookingsList.ts:direct property read:const fullName = `${booking.client.firstName ?? ''} ${
 lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lat: true,
 lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lng: true,
 lib/profiles/publicProfileFormatting.ts:direct property read:const firstName = trimToNull(input.firstName)
