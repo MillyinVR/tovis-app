@@ -448,10 +448,6 @@ app/pro/profile/public-profile/_data/loadProProfileManagementPage.ts:direct prop
 app/pro/reminders/page.tsx:direct property read:return `${client.firstName ?? ''} ${client.lastName ?? ''}`.trim()
 app/pro/reminders/page.tsx:direct property read:{client.user?.email ? ` • ${client.user.email}` : ''}
 app/pro/reminders/page.tsx:optional direct property read:{client.user?.email ? ` • ${client.user.email}` : ''}
-app/pro/reviews/page.tsx:direct property read:const first = pickNonEmptyString(rev.client?.firstName)
-app/pro/reviews/page.tsx:direct property read:const last = pickNonEmptyString(rev.client?.lastName)
-app/pro/reviews/page.tsx:optional direct property read:const first = pickNonEmptyString(rev.client?.firstName)
-app/pro/reviews/page.tsx:optional direct property read:const last = pickNonEmptyString(rev.client?.lastName)
 app/pro/verification/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/verification/page.tsx:Prisma select/include plaintext field:lastName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:firstName: true,
@@ -571,6 +567,10 @@ lib/notifications/proNotifications.ts:Prisma select/include plaintext field:emai
 lib/notifications/proNotifications.ts:Prisma select/include plaintext field:phone: true,
 lib/notifications/proNotifications.ts:direct property read:const profilePhone = normNullableString(professional.phone, 64)
 lib/notifications/proNotifications.ts:direct property read:const userPhone = normNullableString(professional.user.phone, 64)
+lib/pro/loadProReviewsList.ts:direct property read:const first = pickNonEmptyString(rev.client?.firstName)
+lib/pro/loadProReviewsList.ts:direct property read:const last = pickNonEmptyString(rev.client?.lastName)
+lib/pro/loadProReviewsList.ts:optional direct property read:const first = pickNonEmptyString(rev.client?.firstName)
+lib/pro/loadProReviewsList.ts:optional direct property read:const last = pickNonEmptyString(rev.client?.lastName)
 lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lat: true,
 lib/pro/readiness/proReadiness.ts:Prisma select/include plaintext field:lng: true,
 lib/profiles/publicProfileFormatting.ts:direct property read:const firstName = trimToNull(input.firstName)
