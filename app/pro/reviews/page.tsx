@@ -1,19 +1,11 @@
 // app/pro/reviews/page.tsx
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import MediaPortfolioToggle from './MediaPortfolioToggle'
 import HashJumpHighlight from './HashJumpHighlight'
-import { renderMediaUrls } from '@/lib/media/renderUrls'
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import { loadClientLinkViewer } from '@/lib/clientVisibility'
-import { resolveClientProfileHref } from '@/lib/profiles/profileHrefs'
-import { formatInTimeZone } from '@/lib/time'
-
-function pickNonEmptyString(v: unknown): string {
-  return typeof v === 'string' ? v.trim() : ''
-}
+import { loadProReviewsList } from '@/lib/pro/loadProReviewsList'
 
 export default async function ProReviewsPage() {
   const user = await getCurrentUser()
@@ -21,111 +13,12 @@ export default async function ProReviewsPage() {
     redirect('/login?from=/pro/reviews')
   }
 
-  const proId = user.professionalProfile.id
-  const clientLinkViewer = await loadClientLinkViewer(user)
-
-  // ✅ Option A: load canonical storage pointers for media assets
-  const reviews = await prisma.review.findMany({
-    where: { professionalId: proId },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-    include: {
-      client: true,
-      mediaAssets: {
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          caption: true,
-          mediaType: true,
-          isFeaturedInPortfolio: true,
-
-          // ✅ canonical pointers (single source of truth)
-          storageBucket: true,
-          storagePath: true,
-          thumbBucket: true,
-          thumbPath: true,
-
-          // legacy fallback only (renderMediaUrls will ignore unless already http(s))
-          url: true,
-          thumbUrl: true,
-
-          services: {
-            include: { service: true },
-          },
-        },
-      },
-    },
+  // Shared loader (also used by GET /api/v1/pro/reviews) runs the query +
+  // render-safe media URL resolution, so the page and API never drift.
+  const reviewsForUI = await loadProReviewsList({
+    professionalId: user.professionalProfile.id,
+    viewer: user,
   })
-
-  // ✅ Precompute render-safe src URLs server-side
-  const reviewsForUI = await Promise.all(
-    reviews.map(async (rev) => {
-      const first = pickNonEmptyString(rev.client?.firstName)
-      const last = pickNonEmptyString(rev.client?.lastName)
-      const clientName = `${first} ${last}`.trim() || 'Client'
-      const clientHref = rev.client
-        ? resolveClientProfileHref(
-            {
-              clientProfileId: rev.client.id,
-              handle: rev.client.handle,
-              isPublicProfile: rev.client.isPublicProfile,
-            },
-            clientLinkViewer,
-          )
-        : null
-      const date = formatInTimeZone(rev.createdAt, 'UTC', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-      const reviewAnchor = `review-${rev.id}`
-
-      const mediaTiles = (
-        await Promise.all(
-          (rev.mediaAssets || []).map(async (m) => {
-            // If canonical pointers are missing, we can’t render under Option A.
-            // (Leaving legacy fallback in renderMediaUrls as a safety net.)
-            if (!m.storageBucket || !m.storagePath) return null
-
-            const { renderUrl, renderThumbUrl } = await renderMediaUrls({
-              storageBucket: m.storageBucket,
-              storagePath: m.storagePath,
-              thumbBucket: m.thumbBucket ?? null,
-              thumbPath: m.thumbPath ?? null,
-              url: m.url ?? null,
-              thumbUrl: m.thumbUrl ?? null,
-            })
-
-            const src = (renderThumbUrl ?? renderUrl ?? '').trim()
-            if (!src) return null
-
-            return {
-              id: m.id,
-              caption: m.caption ?? null,
-              isVideo: m.mediaType === 'VIDEO',
-              isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
-              services: m.services ?? [],
-              src,
-            }
-          }),
-        )
-      ).filter((x): x is NonNullable<typeof x> => Boolean(x))
-
-      return {
-        id: rev.id,
-        rating: rev.rating,
-        headline: rev.headline ?? null,
-        body: rev.body ?? null,
-        bookingId: rev.bookingId ?? null,
-        createdAtISO: new Date(rev.createdAt).toISOString(),
-        date,
-        clientName,
-        clientHref,
-        reviewAnchor,
-        mediaTiles,
-      }
-    }),
-  )
 
   return (
     <main
@@ -335,7 +228,7 @@ export default async function ProReviewsPage() {
                                         borderRadius: 999,
                                       }}
                                     >
-                                      {t.service?.name || 'Service'}
+                                      {t.serviceName}
                                     </span>
                                   ))}
                                 </div>
