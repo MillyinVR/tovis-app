@@ -35,9 +35,67 @@ import {
 } from '@/lib/idempotency'
 import { moneyToString } from '@/lib/money'
 import { pickBool, pickInt } from '@/lib/pick'
+import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
+import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import {
+  loadProBookingsBuckets,
+  normalizeBookingsStatusFilter,
+  serializeBookingsListRow,
+  type BookingsListRow,
+  type ProBookingsListResponse,
+} from '@/lib/pro/proBookingsList'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+// GET /api/v1/pro/bookings — the native bookings list (web /pro/bookings parity).
+// Returns the today/upcoming/past/cancelled buckets + at-a-glance stats via the
+// shared loader, so this and the web page never drift.
+export async function GET(req: Request) {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+
+    const { searchParams } = new URL(req.url)
+    const statusFilter = normalizeBookingsStatusFilter(
+      searchParams.get('status'),
+    )
+
+    const scheduleTz = await resolveProScheduleTimeZone(
+      auth.professionalId,
+      auth.user.professionalProfile?.timeZone ?? null,
+    )
+
+    const [buckets, visibleClientIdSet] = await Promise.all([
+      loadProBookingsBuckets({
+        professionalId: auth.professionalId,
+        scheduleTz,
+        statusFilter,
+      }),
+      getVisibleClientIdSetForPro(auth.professionalId),
+    ])
+
+    const serialize = (rows: BookingsListRow[]) =>
+      rows.map((row) =>
+        serializeBookingsListRow(row, { scheduleTz, visibleClientIdSet }),
+      )
+
+    const body: ProBookingsListResponse = {
+      scheduleTimeZone: scheduleTz,
+      statusFilter,
+      stats: buckets.stats,
+      today: serialize(buckets.today),
+      upcoming: serialize(buckets.upcoming),
+      past: serialize(buckets.past),
+      cancelled: serialize(buckets.cancelled),
+    }
+
+    return jsonOk(body)
+  } catch (error) {
+    console.error('GET /api/v1/pro/bookings error', error)
+    return jsonFail(500, 'Internal server error')
+  }
+}
 
 type ProBookingSuccessBody = {
   booking: {

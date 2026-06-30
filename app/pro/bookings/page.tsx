@@ -1,13 +1,7 @@
 // app/pro/bookings/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import {
-  BookingServiceItemType,
-  BookingStatus,
-  Prisma,
-  SessionStep,
-} from '@prisma/client'
-import { prisma } from '@/lib/prisma'
+import { BookingStatus, Prisma, SessionStep } from '@prisma/client'
 import { getCurrentUser } from '@/lib/currentUser'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import BookingActions from './BookingActions'
@@ -25,132 +19,37 @@ import {
   DEFAULT_TIME_ZONE,
   isValidIanaTimeZone,
   pickTimeZoneOrNull,
-  sanitizeTimeZone,
-  getZonedParts,
-  zonedTimeToUtc,
 } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
-import { isCloseoutPaymentAndAftercareComplete } from '@/lib/booking/closeoutState'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
+import {
+  computeBookingTotal,
+  getBaseAndAddOnNames,
+  loadProBookingsBuckets,
+  needsCloseout,
+  normalizeBookingsStatusFilter,
+  type BookingsListRow,
+  type BookingsListStatusFilter,
+} from '@/lib/pro/proBookingsList'
 
 export const dynamic = 'force-dynamic'
 
-type StatusFilter =
-  | 'ALL'
-  | 'PENDING'
-  | 'ACCEPTED'
-  | 'IN_PROGRESS'
-  | 'COMPLETED'
-  | 'CANCELLED'
+// Data shapes (select, bucketing, derivations) live in the shared loader so this
+// page and GET /api/v1/pro/bookings never drift.
+type StatusFilter = BookingsListStatusFilter
 type SearchParams = Record<string, string | string[] | undefined>
-
-const BOOKING_STATUS = {
-  PENDING: BookingStatus.PENDING,
-  ACCEPTED: BookingStatus.ACCEPTED,
-  IN_PROGRESS: BookingStatus.IN_PROGRESS,
-  COMPLETED: BookingStatus.COMPLETED,
-  CANCELLED: BookingStatus.CANCELLED,
-} as const satisfies Record<Exclude<StatusFilter, 'ALL'>, BookingStatus>
-
-const bookingSelect = {
-  id: true,
-  status: true,
-  sessionStep: true,
-  scheduledFor: true,
-  startedAt: true,
-  finishedAt: true,
-  locationTimeZone: true,
-
-  checkoutStatus: true,
-  paymentCollectedAt: true,
-  aftercareSummary: {
-    select: {
-      sentToClientAt: true,
-    },
-  },
-
-  // Appointment location — drives the tap-for-directions chip. SALON bookings
-  // read the pro-location snapshot; MOBILE bookings read the client-address
-  // snapshot (where the pro physically travels). Snapshots are captured at
-  // booking time; `pickFormattedAddressFromSnapshot` reads display text without
-  // needing decryption (encrypted-only rows simply resolve to null → no chip).
-  locationType: true,
-  locationAddressSnapshot: true,
-  locationLatSnapshot: true,
-  locationLngSnapshot: true,
-  clientAddressSnapshot: true,
-  clientAddressLatSnapshot: true,
-  clientAddressLngSnapshot: true,
-
-  totalDurationMinutes: true,
-  subtotalSnapshot: true,
-  totalAmount: true,
-  discountAmount: true,
-  taxAmount: true,
-  tipAmount: true,
-
-  service: {
-    select: {
-      name: true,
-    },
-  },
-
-  serviceItems: {
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-    select: {
-      id: true,
-      itemType: true,
-      sortOrder: true,
-      service: { select: { name: true } },
-      priceSnapshot: true,
-      durationMinutesSnapshot: true,
-      parentItemId: true,
-    },
-    take: 50,
-  },
-
-  client: {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      phone: true,
-      user: { select: { email: true } },
-    },
-  },
-} satisfies Prisma.BookingSelect
-
-type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
+type BookingRow = BookingsListRow
 
 function firstParam(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? '') : (v ?? '')
 }
 
-function normalizeStatusFilter(raw: unknown): StatusFilter {
-  const s = String(raw || '').toUpperCase().trim()
-  if (
-    s === 'PENDING' ||
-    s === 'ACCEPTED' ||
-    s === 'IN_PROGRESS' ||
-    s === 'COMPLETED' ||
-    s === 'CANCELLED'
-  ) {
-    return s
-  }
-
-  return 'ALL'
-}
-
 function durationLabel(totalDurationMinutes: unknown): number {
   const n = Number(totalDurationMinutes ?? 0)
   return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
-}
-
-function sumDecimal(values: Prisma.Decimal[]) {
-  return values.reduce((acc, v) => acc.add(v), new Prisma.Decimal(0))
 }
 
 function formatMoneyOrNull(v: Prisma.Decimal | null | undefined): string | null {
@@ -176,31 +75,6 @@ function StatusPill({ status }: { status: string }) {
   const s = String(status || '')
 
   return <Badge tone={statusBadgeTone(s)}>{labelForBookingStatus(s)}</Badge>
-}
-
-// A booking "needs closeout" when the pro has sent aftercare (so it drops out
-// of the active-session footer) but payment + checkout aren't finished yet. It
-// still lives under the Active/IN_PROGRESS filter and otherwise looks identical
-// to a session still being worked — this is the "don't forget me" surface the
-// footer used to provide. The booking is intentionally NOT auto-completed on
-// aftercare send; it completes via closeout logic once payment lands.
-function needsCloseout(booking: BookingRow): boolean {
-  if (
-    booking.status !== BookingStatus.ACCEPTED &&
-    booking.status !== BookingStatus.IN_PROGRESS
-  ) {
-    return false
-  }
-  if (booking.finishedAt) return false
-
-  const aftercareSentAt = booking.aftercareSummary?.sentToClientAt ?? null
-  if (!aftercareSentAt) return false
-
-  return !isCloseoutPaymentAndAftercareComplete({
-    aftercareSentAt,
-    checkoutStatus: booking.checkoutStatus,
-    paymentCollectedAt: booking.paymentCollectedAt,
-  })
 }
 
 function CloseoutBadge({ bookingId }: { bookingId: string }) {
@@ -397,60 +271,6 @@ function formatWhenForRow(date: Date, tz: string) {
   return formatAppointmentWhen(date, safe)
 }
 
-function computeTodayTomorrowBoundsUtc(nowUtc: Date, scheduleTz: string) {
-  const tz = sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
-  const parts = getZonedParts(nowUtc, tz)
-
-  const startOfTodayUtc = zonedTimeToUtc({
-    year: parts.year,
-    month: parts.month,
-    day: parts.day,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    timeZone: tz,
-  })
-
-  const startOfTomorrowUtc = zonedTimeToUtc({
-    year: parts.year,
-    month: parts.month,
-    day: parts.day + 1,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    timeZone: tz,
-  })
-
-  return { startOfTodayUtc, startOfTomorrowUtc }
-}
-
-function getBaseAndAddOnNames(booking: BookingRow) {
-  const items = Array.isArray(booking.serviceItems) ? booking.serviceItems : []
-
-  const baseItem =
-    items.find((item) => item.itemType === BookingServiceItemType.BASE) ??
-    items[0] ??
-    null
-
-  const addOnItems = items.filter(
-    (item) => item.itemType === BookingServiceItemType.ADD_ON,
-  )
-
-  const baseName = baseItem?.service?.name ?? booking.service?.name ?? 'Service'
-  const addOnNames = addOnItems
-    .map((item) => item.service?.name ?? '')
-    .map((name) => name.trim())
-    .filter(Boolean)
-
-  return { baseName, addOnNames }
-}
-
-function computeFallbackSubtotal(booking: BookingRow): Prisma.Decimal | null {
-  const items = Array.isArray(booking.serviceItems) ? booking.serviceItems : []
-  if (!items.length) return null
-  return sumDecimal(items.map((item) => item.priceSnapshot))
-}
-
 function PriceBlock({ booking }: { booking: BookingRow }) {
   const explicitTotal = booking.totalAmount ?? null
   if (explicitTotal != null) {
@@ -461,20 +281,25 @@ function PriceBlock({ booking }: { booking: BookingRow }) {
     )
   }
 
-  const subtotal = booking.subtotalSnapshot ?? computeFallbackSubtotal(booking)
+  const items = Array.isArray(booking.serviceItems) ? booking.serviceItems : []
+  const subtotal =
+    booking.subtotalSnapshot ??
+    (items.length
+      ? items.reduce(
+          (acc, item) => acc.add(item.priceSnapshot),
+          new Prisma.Decimal(0),
+        )
+      : null)
   if (subtotal == null) {
     return <div className="text-[12px] text-textSecondary">Total unavailable</div>
   }
 
-  const zero = new Prisma.Decimal(0)
   const discount = booking.discountAmount ?? null
   const tax = booking.taxAmount ?? null
   const tip = booking.tipAmount ?? null
 
-  const computedTotal = subtotal
-    .minus(discount ?? zero)
-    .plus(tax ?? zero)
-    .plus(tip ?? zero)
+  // Total math is shared with the API via computeBookingTotal (no dup).
+  const computedTotal = computeBookingTotal(booking)
 
   const subtotalStr = formatMoneyOrNull(subtotal) ?? '0.00'
   const totalStr = formatMoneyOrNull(computedTotal) ?? subtotalStr
@@ -661,7 +486,7 @@ export default async function ProBookingsPage(props: {
   const sp =
     (await props.searchParams?.catch(() => ({} as SearchParams))) ??
     ({} as SearchParams)
-  const statusFilter = normalizeStatusFilter(firstParam(sp.status))
+  const statusFilter = normalizeBookingsStatusFilter(firstParam(sp.status))
 
   const proId = user.professionalProfile.id
   const scheduleTz = await resolveProScheduleTimeZone(
@@ -669,87 +494,30 @@ export default async function ProBookingsPage(props: {
     user.professionalProfile.timeZone,
   )
 
-  const nowUtc = new Date()
-  const { startOfTodayUtc, startOfTomorrowUtc } = computeTodayTomorrowBoundsUtc(
-    nowUtc,
-    scheduleTz,
-  )
-
   // Single source of truth for chart linkability — same rule as the clients
   // list and the page gate (includes the 30-day RECENT_COMPLETED window).
+  // Resolved before the bucket queries so the prisma call order is stable.
   const visibleClientIdSet = await getVisibleClientIdSetForPro(proId)
 
-  const nonCancelledStatusWhere:
-    | { status: { not: BookingStatus } }
-    | { status: BookingStatus }
-    | null =
-    statusFilter === 'ALL'
-      ? { status: { not: BOOKING_STATUS.CANCELLED } }
-      : statusFilter === 'CANCELLED'
-        ? null
-        : { status: statusFilter }
+  const buckets = await loadProBookingsBuckets({
+    professionalId: proId,
+    scheduleTz,
+    statusFilter,
+  })
 
-  const activeBucketsPromise: Promise<[BookingRow[], BookingRow[], BookingRow[]]> =
-    nonCancelledStatusWhere == null
-      ? Promise.resolve([[], [], []])
-      : Promise.all([
-          prisma.booking.findMany({
-            where: {
-              professionalId: proId,
-              ...nonCancelledStatusWhere,
-              scheduledFor: { gte: startOfTodayUtc, lt: startOfTomorrowUtc },
-            },
-            orderBy: { scheduledFor: 'asc' },
-            select: bookingSelect,
-          }),
-          prisma.booking.findMany({
-            where: {
-              professionalId: proId,
-              ...nonCancelledStatusWhere,
-              scheduledFor: { gte: startOfTomorrowUtc },
-            },
-            orderBy: { scheduledFor: 'asc' },
-            select: bookingSelect,
-          }),
-          prisma.booking.findMany({
-            where: {
-              professionalId: proId,
-              ...nonCancelledStatusWhere,
-              scheduledFor: { lt: startOfTodayUtc },
-            },
-            orderBy: { scheduledFor: 'desc' },
-            select: bookingSelect,
-          }),
-        ])
-
-  const cancelledBookingsPromise: Promise<BookingRow[]> =
-    statusFilter === 'ALL' || statusFilter === 'CANCELLED'
-      ? prisma.booking.findMany({
-          where: {
-            professionalId: proId,
-            status: BOOKING_STATUS.CANCELLED,
-          },
-          orderBy: { scheduledFor: 'desc' },
-          select: bookingSelect,
-        })
-      : Promise.resolve([])
-
-  const [[todayBookings, upcomingBookings, pastBookings], cancelledBookings] =
-    await Promise.all([activeBucketsPromise, cancelledBookingsPromise])
+  const {
+    today: todayBookings,
+    upcoming: upcomingBookings,
+    past: pastBookings,
+    cancelled: cancelledBookings,
+    stats,
+  } = buckets
 
   const showTz = pickTimeZoneOrNull(scheduleTz)
 
-  // Operational at-a-glance counts from the currently-loaded buckets. "Payment
-  // due" is the needsCloseout set (aftercare sent, payment not yet collected) —
-  // the same warn-styled "don't forget me" surface the cards carry.
-  const activeBuckets = [...todayBookings, ...upcomingBookings, ...pastBookings]
-  const todayCount = todayBookings.length
-  const inSessionCount = activeBuckets.filter(
-    (booking) => booking.status === BookingStatus.IN_PROGRESS,
-  ).length
-  const paymentDueCount = activeBuckets.filter((booking) =>
-    needsCloseout(booking),
-  ).length
+  const todayCount = stats.today
+  const inSessionCount = stats.inSession
+  const paymentDueCount = stats.paymentDue
 
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8">
