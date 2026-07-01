@@ -11,8 +11,17 @@ import type {
   ProFinanceCategoryInfo,
   ProFinanceExpenseItem,
 } from '@/lib/finance/proFinanceSummary'
+import { getZonedParts } from '@/lib/time'
 
 import { PencilIcon, PlusIcon, TrashIcon } from './icons'
+
+// "YYYY-MM-DD" for an instant in the pro's timezone (NOT the browser's / UTC) —
+// so an expense added on a month-end evening files under the pro's calendar day,
+// matching how the server groups it. Via @/lib/time to stay guard-compliant.
+function dateInputInTimeZone(instant: Date, timeZone: string): string {
+  const parts = getZonedParts(instant, timeZone)
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
+}
 
 export type ExpenseFormPayload = {
   category: string
@@ -28,6 +37,7 @@ type FinanceExpensesPanelProps = {
   expenses: ProFinanceExpenseItem[]
   expenseTotalLabel: string
   categories: ProFinanceCategoryInfo[]
+  timeZone: string
   onCreate: (payload: ExpenseFormPayload) => Promise<ExpenseMutationResult>
   onUpdate: (
     id: string,
@@ -36,16 +46,11 @@ type FinanceExpensesPanelProps = {
   onDelete: (id: string) => Promise<void>
 }
 
-function todayInputValue(): string {
-  // YYYY-MM-DD for the native date input's default. UTC slice is fine — it's an
-  // editable default, and toISOString is not a locale/Intl format (guard-safe).
-  return new Date().toISOString().slice(0, 10)
-}
-
 export default function FinanceExpensesPanel({
   expenses,
   expenseTotalLabel,
   categories,
+  timeZone,
   onCreate,
   onUpdate,
   onDelete,
@@ -104,6 +109,7 @@ export default function FinanceExpensesPanel({
           key={editingId ?? 'new'}
           categories={categories}
           editing={editingExpense}
+          timeZone={timeZone}
           onCancel={() => setFormOpen(false)}
           onSubmit={async (payload) => {
             const result = editingExpense
@@ -197,11 +203,13 @@ function ExpenseRow({
 function ExpenseForm({
   categories,
   editing,
+  timeZone,
   onSubmit,
   onCancel,
 }: {
   categories: ProFinanceCategoryInfo[]
   editing: ProFinanceExpenseItem | null
+  timeZone: string
   onSubmit: (payload: ExpenseFormPayload) => Promise<ExpenseMutationResult>
   onCancel: () => void
 }) {
@@ -213,7 +221,10 @@ function ExpenseForm({
   )
   const [label, setLabel] = useState(editing?.label ?? '')
   const [date, setDate] = useState(
-    editing?.spentAtIso?.slice(0, 10) ?? todayInputValue(),
+    dateInputInTimeZone(
+      editing ? new Date(editing.spentAtIso) : new Date(),
+      timeZone,
+    ),
   )
   const [notes, setNotes] = useState(editing?.notes ?? '')
   const [submitting, setSubmitting] = useState(false)
