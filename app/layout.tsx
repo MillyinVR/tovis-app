@@ -11,6 +11,7 @@ import '@/lib/brand/proOverview.css'
 import '@/lib/brand/proSession.css'
 import '@/lib/brand/proCalendar.css'
 import '@/lib/brand/proLastMinute.css'
+import '@/lib/brand/proFinance.css'
 
 import RoleFooter from '@/app/_components/RoleFooter'
 import WorkspaceSwitchLauncher from '@/app/_components/WorkspaceSwitchLauncher/WorkspaceSwitchLauncher'

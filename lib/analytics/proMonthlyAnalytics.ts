@@ -848,6 +848,18 @@ export async function recomputeProfessionalMonthlyAnalytics(args: {
   return saved
 }
 
+// The snapshot is a cache, not a write-once rollup: bookings can complete, get
+// re-priced, tipped, or refunded at any time and nothing else invalidates it.
+// So we treat a snapshot older than this as stale and recompute on read, which
+// keeps the dashboard self-healing (a completed booking shows up within the TTL)
+// without a booking-write-path hook. Tune here; a future event-driven
+// invalidation could drop the recompute-on-read entirely.
+const ANALYTICS_SNAPSHOT_TTL_MS = 60_000
+
+function isAnalyticsSnapshotStale(snapshot: { computedAt: Date }): boolean {
+  return Date.now() - snapshot.computedAt.getTime() > ANALYTICS_SNAPSHOT_TTL_MS
+}
+
 export async function ensureProfessionalMonthlyAnalytics(args: {
   professionalId: string
   monthKey: string
@@ -858,7 +870,7 @@ export async function ensureProfessionalMonthlyAnalytics(args: {
     monthKey: args.monthKey,
   })
 
-  if (existing) return existing
+  if (existing && !isAnalyticsSnapshotStale(existing)) return existing
 
   return recomputeProfessionalMonthlyAnalytics(args)
 }

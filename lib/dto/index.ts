@@ -33,6 +33,27 @@ export type {
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 
+// ── Pro Overview / performance dashboard (GET /api/v1/pro/overview) ───────────
+export type {
+  ProOverviewTrendTone,
+  ProOverviewMonthNavItem,
+  ProOverviewMetricItem,
+  ProOverviewTopServiceItem,
+  ProOverviewPageData,
+} from '@/lib/analytics/proMonthlyAnalytics'
+
+// ── Pro Finance & Tax tab (GET /api/v1/pro/finance) — superset of Overview ────
+export type {
+  ProFinanceCardTone,
+  ProFinanceSummaryCard,
+  ProFinanceIncomeBreakdownItem,
+  ProFinanceQuarterlyReminder,
+  ProFinanceExpenseItem,
+  ProFinanceCategoryInfo,
+  ProFinanceBlock,
+  ProFinancePageData,
+} from '@/lib/finance/proFinanceSummary'
+
 // ── Media signing / URL resolution (GET /api/v1/media/url, POST */uploads) ───
 export type {
   MediaSignedUrlDTO,
