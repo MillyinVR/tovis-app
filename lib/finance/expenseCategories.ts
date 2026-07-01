@@ -37,6 +37,30 @@ export const RISK_LABEL: Record<ExpenseRiskLevel, string> = {
   red: 'Proceed With Caution',
 }
 
+// Where each category lands on IRS Schedule C (Form 1040), Part II — used by the
+// "Schedule C Ready" PDF export to group expenses onto real form lines. These
+// are honest simplifications the PDF labels as such:
+//   - Licensing & Insurance → line 15 (Insurance); licenses may belong on 23.
+//   - Tools & Equipment → line 22 (Supplies) as a de-minimis expense; larger
+//     purchases may be depreciation / §179 (line 13).
+//   - Home Office → line 30 via Form 8829 (not a simple line total).
+//   - Clothing / Appearance → generally NOT deductible (line: null).
+export type ScheduleCLine = { line: string | null; label: string }
+
+export const SCHEDULE_C_LINE: Record<ExpenseCategory, ScheduleCLine> = {
+  SUPPLIES_PRODUCTS: { line: '22', label: 'Supplies' },
+  TOOLS_EQUIPMENT: { line: '22', label: 'Supplies' },
+  BOOTH_SUITE_RENT: { line: '20b', label: 'Rent (other business property)' },
+  SOFTWARE_APPS: { line: '27a', label: 'Other expenses' },
+  EDUCATION_TRAINING: { line: '27a', label: 'Other expenses' },
+  LICENSING_INSURANCE: { line: '15', label: 'Insurance' },
+  MARKETING: { line: '8', label: 'Advertising' },
+  MILEAGE: { line: '9', label: 'Car & truck expenses' },
+  HOME_OFFICE: { line: '30', label: 'Home office (Form 8829)' },
+  CLOTHING_APPEARANCE: { line: null, label: 'Not deductible' },
+  OTHER: { line: '27a', label: 'Other expenses' },
+}
+
 // Ordered as they appear in the Write-Offs list (spec §4). Green first, then
 // the conditional/risky ones toward the bottom.
 export const EXPENSE_CATEGORIES: readonly ExpenseCategoryConfig[] = [

@@ -2,46 +2,22 @@
 import 'server-only'
 
 import { formatCents } from '@/lib/money'
-import { prisma } from '@/lib/prisma'
-import {
-  DEFAULT_TIME_ZONE,
-  getZonedParts,
-  sanitizeTimeZone,
-} from '@/lib/time'
+import { getZonedParts } from '@/lib/time'
 
-import {
-  ensureProfessionalMonthlyAnalytics,
-  monthKey as buildMonthKey,
-} from '@/lib/analytics/proMonthlyAnalytics'
-import {
-  computeEstimatedTaxCents,
-  computeIncomeTotalCents,
-} from '@/lib/finance/proFinanceSummary'
 import { EXPENSE_CATEGORY_BY_ID } from '@/lib/finance/expenseCategories'
+import {
+  exportScopeLabel,
+  gatherFinanceExportData,
+  isFinanceExportScope,
+  monthKeysForScope,
+  type FinanceExportScope,
+} from '@/lib/finance/financeExportData'
 
-export type FinanceExportScope = 'month' | 'ytd' | 'year'
-
-export function isFinanceExportScope(value: string): value is FinanceExportScope {
-  return value === 'month' || value === 'ytd' || value === 'year'
-}
-
-// The list of monthKeys a scope covers, given the selected month ("YYYY-MM").
-export function monthKeysForScope(
-  scope: FinanceExportScope,
-  selectedMonthKey: string,
-): string[] {
-  const [yearRaw, monthRaw] = selectedMonthKey.split('-')
-  const year = Number(yearRaw)
-  const month = Number(monthRaw)
-
-  if (scope === 'month') return [selectedMonthKey]
-
-  const lastMonth = scope === 'ytd' ? month : 12
-  const keys: string[] = []
-  for (let m = 1; m <= lastMonth; m += 1) {
-    keys.push(buildMonthKey({ y: year, m }))
-  }
-  return keys
+// Re-exported so callers (routes, tests) keep a single import surface.
+export {
+  isFinanceExportScope,
+  monthKeysForScope,
+  type FinanceExportScope,
 }
 
 // RFC-4180-ish CSV cell: quote when it contains a comma, quote, or newline.
@@ -73,53 +49,24 @@ export async function buildFinanceCsv(args: {
   selectedMonthKey: string
   brandName: string
 }): Promise<FinanceExportResult> {
-  const timeZone = sanitizeTimeZone(args.timeZone, DEFAULT_TIME_ZONE)
-  const monthKeys = monthKeysForScope(args.scope, args.selectedMonthKey)
-
-  const [snapshots, expenses] = await Promise.all([
-    Promise.all(
-      monthKeys.map((monthKey) =>
-        ensureProfessionalMonthlyAnalytics({
-          professionalId: args.professionalId,
-          monthKey,
-          timeZone,
-        }),
-      ),
-    ),
-    prisma.professionalExpense.findMany({
-      where: { professionalId: args.professionalId, monthKey: { in: monthKeys } },
-      orderBy: [{ spentAt: 'asc' }, { createdAt: 'asc' }],
-      select: {
-        category: true,
-        amountCents: true,
-        mileageMiles: true,
-        label: true,
-        notes: true,
-        spentAt: true,
-      },
-    }),
-  ])
-
-  let serviceCents = 0
-  let tipCents = 0
-  let productCents = 0
-  for (const snapshot of snapshots) {
-    serviceCents += snapshot.serviceRevenueCents
-    tipCents += snapshot.tipCents
-    productCents += snapshot.productRevenueCents
-  }
-  const incomeTotalCents = computeIncomeTotalCents({
-    serviceRevenueCents: serviceCents,
-    productRevenueCents: productCents,
-    tipCents,
+  const data = await gatherFinanceExportData({
+    professionalId: args.professionalId,
+    timeZone: args.timeZone,
+    scope: args.scope,
+    selectedMonthKey: args.selectedMonthKey,
   })
-
-  const expenseTotalCents = expenses.reduce(
-    (sum, expense) => sum + expense.amountCents,
-    0,
-  )
-  const netProfitCents = incomeTotalCents - expenseTotalCents
-  const estTaxCents = computeEstimatedTaxCents(netProfitCents)
+  const {
+    timeZone,
+    monthKeys,
+    serviceCents,
+    tipCents,
+    productCents,
+    incomeTotalCents,
+    expenses,
+    expenseTotalCents,
+    netProfitCents,
+    estTaxCents,
+  } = data
 
   // Per-category expense totals (Schedule C rollup).
   const categoryTotals = new Map<string, number>()
@@ -181,15 +128,8 @@ export async function buildFinanceCsv(args: {
     ]),
   )
 
-  const scopeLabel =
-    args.scope === 'month'
-      ? args.selectedMonthKey
-      : args.scope === 'ytd'
-        ? `${args.selectedMonthKey.slice(0, 4)}-ytd`
-        : args.selectedMonthKey.slice(0, 4)
-
   return {
-    filename: `finance-${scopeLabel}.csv`,
+    filename: `finance-${exportScopeLabel(args.scope, args.selectedMonthKey)}.csv`,
     csv: rows.join('\n'),
   }
 }

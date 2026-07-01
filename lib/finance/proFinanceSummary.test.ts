@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   EXPENSE_CATEGORIES,
   resolveExpenseCategories,
+  SCHEDULE_C_LINE,
 } from './expenseCategories'
 import { computeMileageDeductionCents } from './taxRates'
 import {
@@ -133,5 +134,22 @@ describe('resolveExpenseCategories', () => {
     for (const category of EXPENSE_CATEGORIES) {
       expect(['green', 'yellow', 'red']).toContain(category.risk)
     }
+  })
+})
+
+describe('SCHEDULE_C_LINE', () => {
+  it('maps every category and puts the key ones on the right form line', () => {
+    // Exhaustive Record → every category is present at the type level; assert values.
+    for (const category of EXPENSE_CATEGORIES) {
+      expect(SCHEDULE_C_LINE[category.id]).toBeDefined()
+    }
+    expect(SCHEDULE_C_LINE.MARKETING).toEqual({ line: '8', label: 'Advertising' })
+    expect(SCHEDULE_C_LINE.MILEAGE.line).toBe('9')
+    expect(SCHEDULE_C_LINE.BOOTH_SUITE_RENT.line).toBe('20b')
+    // Supplies + Tools both roll onto line 22.
+    expect(SCHEDULE_C_LINE.SUPPLIES_PRODUCTS.line).toBe('22')
+    expect(SCHEDULE_C_LINE.TOOLS_EQUIPMENT.line).toBe('22')
+    // Clothing/appearance is non-deductible.
+    expect(SCHEDULE_C_LINE.CLOTHING_APPEARANCE.line).toBeNull()
   })
 })

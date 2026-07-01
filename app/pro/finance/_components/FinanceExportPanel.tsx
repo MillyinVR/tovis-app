@@ -1,8 +1,7 @@
 // app/pro/finance/_components/FinanceExportPanel.tsx
 //
-// The Finance "Export" sub-tab. CSV / Schedule-C export + receipt-forwarding are
-// v1.5 (endpoints not built yet), so the actions render as clearly-labeled
-// "coming soon" stubs rather than dead buttons.
+// The Finance "Export" sub-tab. CSV (monthly/YTD/full-year) + the Schedule-C
+// PDF download from /pro/finance/export; receipt-forwarding is still a stub.
 import { DownloadIcon } from './icons'
 
 type ExportRow = {
@@ -23,8 +22,11 @@ export default function FinanceExportPanel({
   year: string
   brandName: string
 }) {
-  const exportHref = (scope: 'month' | 'ytd' | 'year') =>
-    `/api/v1/pro/finance/export?scope=${scope}&month=${encodeURIComponent(monthKey)}`
+  const exportHref = (
+    scope: 'month' | 'ytd' | 'year',
+    format: 'csv' | 'pdf' = 'csv',
+  ) =>
+    `/api/v1/pro/finance/export?scope=${scope}&month=${encodeURIComponent(monthKey)}&format=${format}`
 
   const rows: ExportRow[] = [
     {
@@ -47,8 +49,9 @@ export default function FinanceExportPanel({
     },
     {
       title: 'Schedule C Ready',
-      sub: 'Formatted for your CPA or tax software',
+      sub: 'Mapped to form lines for your CPA or tax software',
       format: 'PDF',
+      href: exportHref('year', 'pdf'),
     },
   ]
 
