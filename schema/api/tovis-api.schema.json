@@ -39,6 +39,31 @@
       ],
       "type": "string"
     },
+    "$Enums.ExpenseCategory": {
+      "enum": [
+        "SUPPLIES_PRODUCTS",
+        "TOOLS_EQUIPMENT",
+        "BOOTH_SUITE_RENT",
+        "SOFTWARE_APPS",
+        "EDUCATION_TRAINING",
+        "LICENSING_INSURANCE",
+        "MARKETING",
+        "MILEAGE",
+        "HOME_OFFICE",
+        "CLOTHING_APPEARANCE",
+        "OTHER"
+      ],
+      "type": "string"
+    },
+    "$Enums.ExpenseSource": {
+      "enum": [
+        "MANUAL",
+        "RECEIPT_UPLOAD",
+        "COSMOPROF",
+        "SALON_CENTRIC"
+      ],
+      "type": "string"
+    },
     "$Enums.LastMinuteOfferType": {
       "enum": [
         "NONE",
@@ -5027,6 +5052,20 @@
       ],
       "type": "object"
     },
+    "ExpenseCategory": {
+      "$ref": "#/definitions/%24Enums.ExpenseCategory"
+    },
+    "ExpenseRiskLevel": {
+      "enum": [
+        "green",
+        "yellow",
+        "red"
+      ],
+      "type": "string"
+    },
+    "ExpenseSource": {
+      "$ref": "#/definitions/%24Enums.ExpenseSource"
+    },
     "FollowClientPreviewDto": {
       "properties": {
         "avatarUrl": {
@@ -8168,6 +8207,321 @@
       ],
       "type": "object"
     },
+    "ProFinanceBlock": {
+      "properties": {
+        "categories": {
+          "items": {
+            "$ref": "#/definitions/ProFinanceCategoryInfo"
+          },
+          "type": "array"
+        },
+        "estTaxCents": {
+          "type": "number"
+        },
+        "expenseTotalCents": {
+          "type": "number"
+        },
+        "expenseTotalLabel": {
+          "type": "string"
+        },
+        "expenses": {
+          "items": {
+            "$ref": "#/definitions/ProFinanceExpenseItem"
+          },
+          "type": "array"
+        },
+        "incomeBreakdown": {
+          "items": {
+            "$ref": "#/definitions/ProFinanceIncomeBreakdownItem"
+          },
+          "type": "array"
+        },
+        "incomeTotalCents": {
+          "type": "number"
+        },
+        "netProfitCents": {
+          "type": "number"
+        },
+        "quarterlyReminder": {
+          "$ref": "#/definitions/ProFinanceQuarterlyReminder"
+        },
+        "summaryCards": {
+          "items": {
+            "$ref": "#/definitions/ProFinanceSummaryCard"
+          },
+          "type": "array"
+        },
+        "taxYear": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "taxYear",
+        "incomeTotalCents",
+        "expenseTotalCents",
+        "netProfitCents",
+        "estTaxCents",
+        "expenseTotalLabel",
+        "summaryCards",
+        "incomeBreakdown",
+        "quarterlyReminder",
+        "expenses",
+        "categories"
+      ],
+      "type": "object"
+    },
+    "ProFinanceCardTone": {
+      "enum": [
+        "positive",
+        "negative",
+        "warn",
+        "neutral"
+      ],
+      "type": "string"
+    },
+    "ProFinanceCategoryInfo": {
+      "properties": {
+        "examples": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/definitions/ExpenseCategory"
+        },
+        "label": {
+          "type": "string"
+        },
+        "risk": {
+          "$ref": "#/definitions/ExpenseRiskLevel"
+        },
+        "riskLabel": {
+          "type": "string"
+        },
+        "tooltip": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "risk",
+        "riskLabel",
+        "tooltip",
+        "examples"
+      ],
+      "type": "object"
+    },
+    "ProFinanceExpenseItem": {
+      "properties": {
+        "amountCents": {
+          "type": "number"
+        },
+        "amountLabel": {
+          "type": "string"
+        },
+        "category": {
+          "$ref": "#/definitions/ExpenseCategory"
+        },
+        "categoryLabel": {
+          "type": "string"
+        },
+        "categoryRisk": {
+          "$ref": "#/definitions/ExpenseRiskLevel"
+        },
+        "dateLabel": {
+          "type": "string"
+        },
+        "hasReceipt": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receiptMediaId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/definitions/ExpenseSource"
+        },
+        "spentAtIso": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "categoryLabel",
+        "categoryRisk",
+        "source",
+        "amountCents",
+        "amountLabel",
+        "label",
+        "notes",
+        "dateLabel",
+        "spentAtIso",
+        "hasReceipt",
+        "receiptMediaId"
+      ],
+      "type": "object"
+    },
+    "ProFinanceIncomeBreakdownItem": {
+      "properties": {
+        "amountCents": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "source",
+        "value",
+        "amountCents"
+      ],
+      "type": "object"
+    },
+    "ProFinancePageData": {
+      "properties": {
+        "activeMonth": {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "timeZone": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "label",
+            "timeZone"
+          ],
+          "type": "object"
+        },
+        "finance": {
+          "$ref": "#/definitions/ProFinanceBlock"
+        },
+        "months": {
+          "items": {
+            "$ref": "#/definitions/ProOverviewMonthNavItem"
+          },
+          "type": "array"
+        },
+        "primaryStats": {
+          "items": {
+            "$ref": "#/definitions/ProOverviewMetricItem"
+          },
+          "type": "array"
+        },
+        "revenue": {
+          "properties": {
+            "sub": {
+              "type": "string"
+            },
+            "trendLabel": {
+              "type": "string"
+            },
+            "trendTone": {
+              "$ref": "#/definitions/ProOverviewTrendTone"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value",
+            "trendLabel",
+            "trendTone",
+            "sub"
+          ],
+          "type": "object"
+        },
+        "secondaryStats": {
+          "items": {
+            "$ref": "#/definitions/ProOverviewMetricItem"
+          },
+          "type": "array"
+        },
+        "topServices": {
+          "items": {
+            "$ref": "#/definitions/ProOverviewTopServiceItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "activeMonth",
+        "finance",
+        "months",
+        "primaryStats",
+        "revenue",
+        "secondaryStats",
+        "topServices"
+      ],
+      "type": "object"
+    },
+    "ProFinanceQuarterlyReminder": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "dueDateLabel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dueDateLabel",
+        "body"
+      ],
+      "type": "object"
+    },
+    "ProFinanceSummaryCard": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "sub": {
+          "type": "string"
+        },
+        "tone": {
+          "$ref": "#/definitions/ProFinanceCardTone"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value",
+        "sub",
+        "tone"
+      ],
+      "type": "object"
+    },
     "ProFollowStateResponseDto": {
       "properties": {
         "followerCount": {
@@ -8573,6 +8927,158 @@
     },
     "ProNameDisplay": {
       "$ref": "#/definitions/%24Enums.ProNameDisplay"
+    },
+    "ProOverviewMetricItem": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "sub": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value",
+        "sub"
+      ],
+      "type": "object"
+    },
+    "ProOverviewMonthNavItem": {
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "href": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "href",
+        "active"
+      ],
+      "type": "object"
+    },
+    "ProOverviewPageData": {
+      "properties": {
+        "activeMonth": {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "timeZone": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "label",
+            "timeZone"
+          ],
+          "type": "object"
+        },
+        "months": {
+          "items": {
+            "$ref": "#/definitions/ProOverviewMonthNavItem"
+          },
+          "type": "array"
+        },
+        "primaryStats": {
+          "items": {
+            "$ref": "#/definitions/ProOverviewMetricItem"
+          },
+          "type": "array"
+        },
+        "revenue": {
+          "properties": {
+            "sub": {
+              "type": "string"
+            },
+            "trendLabel": {
+              "type": "string"
+            },
+            "trendTone": {
+              "$ref": "#/definitions/ProOverviewTrendTone"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value",
+            "trendLabel",
+            "trendTone",
+            "sub"
+          ],
+          "type": "object"
+        },
+        "secondaryStats": {
+          "items": {
+            "$ref": "#/definitions/ProOverviewMetricItem"
+          },
+          "type": "array"
+        },
+        "topServices": {
+          "items": {
+            "$ref": "#/definitions/ProOverviewTopServiceItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "activeMonth",
+        "months",
+        "revenue",
+        "primaryStats",
+        "secondaryStats",
+        "topServices"
+      ],
+      "type": "object"
+    },
+    "ProOverviewTopServiceItem": {
+      "properties": {
+        "bookings": {
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "revenueLabel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "bookings",
+        "revenueLabel"
+      ],
+      "type": "object"
+    },
+    "ProOverviewTrendTone": {
+      "enum": [
+        "positive",
+        "negative",
+        "neutral"
+      ],
+      "type": "string"
     },
     "ProPublicProfileDto": {
       "properties": {

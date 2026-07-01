@@ -1615,6 +1615,7 @@ model ProfessionalProfile {
   bookingOverridePermissions BookingOverridePermission[]    @relation("BookingOverridePermissionProfessional")
   productSales               ProductSale[]
   monthlyAnalytics           ProfessionalMonthlyAnalytics[] @relation("ProMonthlyAnalytics")
+  expenses                   ProfessionalExpense[]          @relation("ProExpenses")
   nfcCards                   NfcCard[]
 
   paymentSettings    ProfessionalPaymentSettings?
@@ -1742,6 +1743,75 @@ model ProfessionalMonthlyProductAnalytics {
   @@unique([analyticsId, productId])
   @@index([analyticsId, rank])
   @@index([productId])
+}
+
+// Tax-deductible expense categories for the pro Finance tab. Ordering and
+// plain-English tooltips / audit-risk levels live in the app config
+// (lib/finance/expenseCategories.ts) — this enum is only the persisted key.
+enum ExpenseCategory {
+  SUPPLIES_PRODUCTS
+  TOOLS_EQUIPMENT
+  BOOTH_SUITE_RENT
+  SOFTWARE_APPS
+  EDUCATION_TRAINING
+  LICENSING_INSURANCE
+  MARKETING
+  MILEAGE
+  HOME_OFFICE
+  CLOTHING_APPEARANCE
+  OTHER
+}
+
+// How an expense row got created. IMPORT sources (CosmoProf / Salon Centric)
+// are the v1.5 supply-order scrape; MANUAL / RECEIPT_UPLOAD are the v1 paths.
+enum ExpenseSource {
+  MANUAL
+  RECEIPT_UPLOAD
+  COSMOPROF
+  SALON_CENTRIC
+}
+
+// A single tracked business expense on the pro Finance tab. Income is derived
+// from bookings (ProfessionalMonthlyAnalytics); expenses are the one thing the
+// pro (or an import) enters, so they get their own table.
+model ProfessionalExpense {
+  id String @id @default(cuid())
+
+  professionalId String
+  professional   ProfessionalProfile @relation("ProExpenses", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  category ExpenseCategory
+  source   ExpenseSource   @default(MANUAL)
+
+  // Money stored as cents so Finance reads avoid Decimal math (matches
+  // ProfessionalMonthlyAnalytics revenue columns + lib/money helpers).
+  amountCents Int
+
+  label String
+  notes String?
+
+  // The day the expense was incurred, chosen by the pro. Written as the
+  // start-of-day UTC instant for the picked calendar date in the pro's
+  // timezone. Used for display ("Apr 3") and sort order.
+  spentAt DateTime
+
+  // Calendar month (pro's timezone) this expense is filed under, e.g. "2026-04".
+  // Frozen at write time from spentAt + tz — matches the monthKey convention on
+  // ProfessionalMonthlyAnalytics and keeps month grouping cheap and stable even
+  // if the pro later changes their timezone.
+  monthKey String @db.VarChar(7)
+
+  // Optional receipt photo, reusing the existing MediaAsset upload pipeline.
+  // SetNull (not Cascade): deleting the image must not delete the expense row.
+  receiptMediaId String?
+  receiptMedia   MediaAsset? @relation("ExpenseReceipt", fields: [receiptMediaId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([professionalId, monthKey, spentAt])
+  @@index([professionalId, category, monthKey])
+  @@index([receiptMediaId])
 }
 
 model ProfessionalPaymentSettings {
@@ -3401,6 +3471,8 @@ model MediaAsset {
   services MediaServiceTag[]
   likes    MediaLike[]
   comments MediaComment[]
+
+  expenseReceipts ProfessionalExpense[] @relation("ExpenseReceipt")
 
   waitlistEntries WaitlistEntry[]
 

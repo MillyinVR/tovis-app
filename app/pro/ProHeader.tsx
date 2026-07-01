@@ -44,6 +44,7 @@ type ProHeaderTabItem = {
 }
 
 const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
+  { path: '/pro/finance', title: 'Tax & Finance' },
   { path: '/pro/dashboard', title: 'Overview' },
   { path: '/pro/reviews', title: 'Reviews' },
   { path: '/pro/aftercare', title: 'Aftercare' },
@@ -61,7 +62,7 @@ const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
 ]
 
 const PRO_HEADER_TABS: ProHeaderTabItem[] = [
-  { href: '/pro/dashboard', label: 'Overview', match: 'exact' },
+  { href: '/pro/finance', label: 'Finance', match: 'prefix' },
   { href: '/pro/reviews', label: 'Reviews', match: 'prefix' },
   { href: '/pro/aftercare', label: 'Aftercare', match: 'prefix' },
   { href: '/pro/bookings', label: 'Bookings', match: 'prefix' },

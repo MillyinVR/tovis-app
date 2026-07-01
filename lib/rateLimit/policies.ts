@@ -19,6 +19,7 @@ export type RateLimitBucket =
   | 'pro:offerings:write'
   | 'pro:locations:write'
   | 'pro:working-hours:write'
+  | 'pro:finance:expenses:write'
   | 'google:proxy'
   | 'pro-license:verify'
   | 'messages:send'
@@ -159,6 +160,12 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 12,
     windowSeconds: 60,
     prefix: 'rl:pro:working-hours:write',
+    mode: 'redis-only',
+  },
+  'pro:finance:expenses:write': {
+    limit: 30,
+    windowSeconds: 60,
+    prefix: 'rl:pro:finance:expenses:write',
     mode: 'redis-only',
   },
   'google:proxy': {
