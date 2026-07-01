@@ -209,7 +209,7 @@ describe('proxy', () => {
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
   })
 
-  it('rewrites vanity domains for non-verification sessions', async () => {
+  it('rewrites the vanity root to the profile for non-verification sessions', async () => {
     mockVerifyMiddlewareToken.mockResolvedValue({
       userId: 'user_1',
       role: 'CLIENT',
@@ -217,7 +217,7 @@ describe('proxy', () => {
       authVersion: 1,
     })
 
-    const req = makeRequest('https://tori.tovis.me/services', {
+    const req = makeRequest('https://tori.tovis.me/', {
       headers: {
         host: 'tori.tovis.me',
       },
@@ -228,9 +228,32 @@ describe('proxy', () => {
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
-    expect(res.headers.get('x-middleware-rewrite')).toContain(
-      '/p/tori/services',
+    expect(res.headers.get('x-middleware-rewrite')).toContain('/p/tori')
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('redirects non-root vanity paths to the canonical app host', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://tori.tovis.me/login?from=%2F&reason=pro-session', {
+      headers: {
+        host: 'tori.tovis.me',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    const res = await proxy(req)
+
+    expect(res.status).toBe(307)
+    expect(res.headers.get('location')).toBe(
+      'https://app.tovis.app/login?from=%2F&reason=pro-session',
     )
+    expect(res.headers.get('x-middleware-rewrite')).toBeNull()
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
   })
 

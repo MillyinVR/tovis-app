@@ -3,7 +3,6 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { friendlyTimeZoneLabel, isValidIanaTimeZone } from '@/lib/timeZone'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
@@ -133,8 +132,6 @@ export default async function VanityProfilePage({
           </div>
         </div>
       </section>
-
-      <ProSessionFooter />
     </main>
   )
 }
