@@ -141,6 +141,35 @@ export default function ProFinanceScreen({
     if (res?.ok) await refetchCurrent()
   }
 
+  async function confirmReceipt(
+    receiptId: string,
+    payload: ExpenseFormPayload,
+  ): Promise<ExpenseMutationResult> {
+    const res = await fetch(
+      `/api/v1/pro/finance/receipts/${encodeURIComponent(receiptId)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+    ).catch(() => null)
+
+    if (res?.ok) {
+      await refetchCurrent()
+      return { ok: true }
+    }
+    const raw: unknown = res ? await res.json().catch(() => null) : null
+    return { ok: false, error: readError(raw) }
+  }
+
+  async function dismissReceipt(id: string) {
+    const res = await fetch(
+      `/api/v1/pro/finance/receipts/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ).catch(() => null)
+    if (res?.ok) await refetchCurrent()
+  }
+
   const year = activeKey.slice(0, 4)
 
   return (
@@ -205,9 +234,12 @@ export default function ProFinanceScreen({
           categories={data.finance.categories}
           timeZone={data.activeMonth.timeZone}
           mileageRateCents={data.finance.mileageRateCents}
+          receiptInbox={data.finance.receiptInbox}
           onCreate={createExpense}
           onUpdate={updateExpense}
           onDelete={deleteExpense}
+          onConfirmReceipt={confirmReceipt}
+          onDismissReceipt={dismissReceipt}
         />
       )}
 
@@ -224,6 +256,7 @@ export default function ProFinanceScreen({
           monthKey={activeKey}
           year={year}
           brandName={brand.displayName}
+          receiptInboxAddress={data.finance.receiptInboxAddress}
         />
       )}
     </section>

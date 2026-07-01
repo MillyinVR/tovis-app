@@ -17,6 +17,11 @@ import {
   TAX_YEAR,
 } from '@/lib/finance/taxRates'
 import { formatCents } from '@/lib/money'
+import {
+  resolveReceiptInboxAddress,
+  serializeReceiptInboxItem,
+  type ProReceiptInboxItem,
+} from '@/lib/finance/receiptInbox'
 import { prisma } from '@/lib/prisma'
 import {
   DEFAULT_TIME_ZONE,
@@ -96,6 +101,10 @@ export type ProFinanceBlock = {
    *  add-expense form preview a trip's deduction live. */
   mileageRateCents: number
   mileageRateLabel: string
+  /** Captured receipts awaiting review (all-time PENDING, newest first). */
+  receiptInbox: ProReceiptInboxItem[]
+  /** The pro's forwarding address (<handle>@tovis.me) — premium only, else null. */
+  receiptInboxAddress: string | null
 }
 
 // Superset of the performance Overview view-model (nothing dropped) + the new
@@ -247,7 +256,7 @@ export async function loadProFinancePage(args: {
   const timeZone = overview.activeMonth.timeZone
   const monthKey = overview.activeMonth.key
 
-  const [snapshot, expenseRows] = await Promise.all([
+  const [snapshot, expenseRows, receiptRows, proMeta] = await Promise.all([
     ensureProfessionalMonthlyAnalytics({
       professionalId: args.professionalId,
       monthKey,
@@ -267,6 +276,26 @@ export async function loadProFinancePage(args: {
         spentAt: true,
         receiptMediaId: true,
       },
+    }),
+    prisma.professionalReceiptInbox.findMany({
+      where: { professionalId: args.professionalId, status: 'PENDING' },
+      orderBy: { receivedAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        source: true,
+        parsedAmountCents: true,
+        parsedVendor: true,
+        parsedDate: true,
+        emailFrom: true,
+        emailSubject: true,
+        receivedAt: true,
+        receiptMediaId: true,
+      },
+    }),
+    prisma.professionalProfile.findUnique({
+      where: { id: args.professionalId },
+      select: { handle: true, isPremium: true },
     }),
   ])
 
@@ -355,6 +384,13 @@ export async function loadProFinancePage(args: {
       categories,
       mileageRateCents: STANDARD_MILEAGE_RATE_CENTS,
       mileageRateLabel: mileageRateLabel(),
+      receiptInbox: receiptRows.map((row) =>
+        serializeReceiptInboxItem(row, timeZone),
+      ),
+      receiptInboxAddress: resolveReceiptInboxAddress({
+        handle: proMeta?.handle,
+        isPremium: proMeta?.isPremium ?? false,
+      }),
     },
   }
 }

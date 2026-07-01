@@ -11,10 +11,18 @@ import type {
   ProFinanceCategoryInfo,
   ProFinanceExpenseItem,
 } from '@/lib/finance/proFinanceSummary'
+import type { ProReceiptInboxItem } from '@/lib/finance/receiptInbox'
 import { formatCents } from '@/lib/money'
 import { getZonedParts } from '@/lib/time'
 
 import { PencilIcon, PlusIcon, TrashIcon } from './icons'
+
+// Seed values for the add-expense form when confirming a receipt.
+export type ExpenseFormSeed = {
+  amount?: string
+  label?: string
+  date?: string
+}
 
 const MILEAGE_CATEGORY = 'MILEAGE'
 
@@ -45,12 +53,18 @@ type FinanceExpensesPanelProps = {
   categories: ProFinanceCategoryInfo[]
   timeZone: string
   mileageRateCents: number
+  receiptInbox: ProReceiptInboxItem[]
   onCreate: (payload: ExpenseFormPayload) => Promise<ExpenseMutationResult>
   onUpdate: (
     id: string,
     payload: ExpenseFormPayload,
   ) => Promise<ExpenseMutationResult>
   onDelete: (id: string) => Promise<void>
+  onConfirmReceipt: (
+    receiptId: string,
+    payload: ExpenseFormPayload,
+  ) => Promise<ExpenseMutationResult>
+  onDismissReceipt: (id: string) => Promise<void>
 }
 
 export default function FinanceExpensesPanel({
@@ -59,22 +73,45 @@ export default function FinanceExpensesPanel({
   categories,
   timeZone,
   mileageRateCents,
+  receiptInbox,
   onCreate,
   onUpdate,
   onDelete,
+  onConfirmReceipt,
+  onDismissReceipt,
 }: FinanceExpensesPanelProps) {
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [reviewing, setReviewing] = useState<ProReceiptInboxItem | null>(null)
 
   function openCreate() {
     setEditingId(null)
+    setReviewing(null)
     setFormOpen(true)
   }
 
   function openEdit(expense: ProFinanceExpenseItem) {
     setEditingId(expense.id)
+    setReviewing(null)
     setFormOpen(true)
   }
+
+  function openReview(receipt: ProReceiptInboxItem) {
+    setReviewing(receipt)
+    setEditingId(null)
+    setFormOpen(true)
+  }
+
+  const reviewSeed: ExpenseFormSeed | null = reviewing
+    ? {
+        amount:
+          reviewing.parsedAmountCents != null
+            ? (reviewing.parsedAmountCents / 100).toFixed(2)
+            : undefined,
+        label: reviewing.title,
+        date: reviewing.dateHint ?? undefined,
+      }
+    : null
 
   const editingExpense =
     editingId != null
@@ -83,6 +120,14 @@ export default function FinanceExpensesPanel({
 
   return (
     <div>
+      {receiptInbox.length > 0 && !formOpen && (
+        <ReceiptReviewSection
+          items={receiptInbox}
+          onReview={openReview}
+          onDismiss={onDismissReceipt}
+        />
+      )}
+
       <div className="brand-pro-finance-expenses-head">
         <div>
           <div className="brand-cap brand-pro-finance-total-label">
@@ -114,17 +159,27 @@ export default function FinanceExpensesPanel({
 
       {formOpen && (
         <ExpenseForm
-          key={editingId ?? 'new'}
+          key={reviewing?.id ?? editingId ?? 'new'}
           categories={categories}
           editing={editingExpense}
+          seed={reviewSeed}
           timeZone={timeZone}
           mileageRateCents={mileageRateCents}
-          onCancel={() => setFormOpen(false)}
+          submitLabel={reviewing ? 'Add to expenses' : undefined}
+          onCancel={() => {
+            setFormOpen(false)
+            setReviewing(null)
+          }}
           onSubmit={async (payload) => {
-            const result = editingExpense
-              ? await onUpdate(editingExpense.id, payload)
-              : await onCreate(payload)
-            if (result.ok) setFormOpen(false)
+            const result = reviewing
+              ? await onConfirmReceipt(reviewing.id, payload)
+              : editingExpense
+                ? await onUpdate(editingExpense.id, payload)
+                : await onCreate(payload)
+            if (result.ok) {
+              setFormOpen(false)
+              setReviewing(null)
+            }
             return result
           }}
         />
@@ -222,15 +277,19 @@ function ExpenseRow({
 function ExpenseForm({
   categories,
   editing,
+  seed,
   timeZone,
   mileageRateCents,
+  submitLabel,
   onSubmit,
   onCancel,
 }: {
   categories: ProFinanceCategoryInfo[]
   editing: ProFinanceExpenseItem | null
+  seed?: ExpenseFormSeed | null
   timeZone: string
   mileageRateCents: number
+  submitLabel?: string
   onSubmit: (payload: ExpenseFormPayload) => Promise<ExpenseMutationResult>
   onCancel: () => void
 }) {
@@ -240,17 +299,16 @@ function ExpenseForm({
   const [amount, setAmount] = useState(
     editing && editing.mileageMiles == null
       ? (editing.amountCents / 100).toFixed(2)
-      : '',
+      : (seed?.amount ?? ''),
   )
   const [miles, setMiles] = useState(
     editing?.mileageMiles != null ? String(editing.mileageMiles) : '',
   )
-  const [label, setLabel] = useState(editing?.label ?? '')
+  const [label, setLabel] = useState(editing?.label ?? seed?.label ?? '')
   const [date, setDate] = useState(
-    dateInputInTimeZone(
-      editing ? new Date(editing.spentAtIso) : new Date(),
-      timeZone,
-    ),
+    editing
+      ? dateInputInTimeZone(new Date(editing.spentAtIso), timeZone)
+      : (seed?.date ?? dateInputInTimeZone(new Date(), timeZone)),
   )
   const [notes, setNotes] = useState(editing?.notes ?? '')
   const [submitting, setSubmitting] = useState(false)
@@ -391,10 +449,77 @@ function ExpenseForm({
           data-variant="primary"
           disabled={!canSubmit || submitting}
         >
-          {submitting ? 'Saving…' : editing ? 'Save changes' : 'Add expense'}
+          {submitting
+            ? 'Saving…'
+            : (submitLabel ?? (editing ? 'Save changes' : 'Add expense'))}
         </button>
       </div>
     </form>
+  )
+}
+
+function ReceiptReviewSection({
+  items,
+  onReview,
+  onDismiss,
+}: {
+  items: ProReceiptInboxItem[]
+  onReview: (item: ProReceiptInboxItem) => void
+  onDismiss: (id: string) => void
+}) {
+  return (
+    <section className="brand-pro-finance-panel brand-pro-finance-section-gap">
+      <div className="brand-cap brand-pro-finance-panel-title">
+        ◆ RECEIPTS TO REVIEW · {items.length}
+      </div>
+      <div className="brand-pro-finance-expense-list">
+        {items.map((item) => (
+          <article key={item.id} className="brand-pro-finance-expense-card">
+            <div className="brand-pro-finance-expense-main">
+              <div className="brand-pro-finance-expense-label">{item.title}</div>
+              <div className="brand-pro-finance-expense-meta">
+                <span className="brand-pro-finance-expense-cat" data-risk="green">
+                  {item.sourceLabel}
+                </span>
+                <span aria-hidden="true" className="brand-pro-finance-expense-date">
+                  ·
+                </span>
+                <span className="brand-pro-finance-expense-date">
+                  {item.receivedLabel}
+                </span>
+                {item.parsedAmountLabel && (
+                  <>
+                    <span aria-hidden="true" className="brand-pro-finance-expense-date">
+                      ·
+                    </span>
+                    <span className="brand-pro-finance-expense-date">
+                      {item.parsedAmountLabel}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="brand-pro-finance-btn brand-focus"
+              data-variant="primary"
+              onClick={() => onReview(item)}
+            >
+              Review
+            </button>
+            <button
+              type="button"
+              className="brand-pro-finance-icon-btn brand-focus"
+              data-danger="true"
+              onClick={() => onDismiss(item.id)}
+              aria-label={`Dismiss ${item.title}`}
+            >
+              <TrashIcon />
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
   )
 }
 

@@ -16,11 +16,13 @@ export default function FinanceExportPanel({
   monthKey,
   year,
   brandName,
+  receiptInboxAddress,
 }: {
   activeMonthLabel: string
   monthKey: string
   year: string
   brandName: string
+  receiptInboxAddress: string | null
 }) {
   const exportHref = (
     scope: 'month' | 'ytd' | 'year',
@@ -111,12 +113,24 @@ export default function FinanceExportPanel({
         <div className="brand-cap brand-pro-finance-forward-title">
           ◆ FORWARD RECEIPTS
         </div>
-        <p className="brand-pro-finance-forward-body">
-          Soon you&rsquo;ll be able to forward receipts to your {brandName}{' '}
-          inbox and we&rsquo;ll automatically parse and categorize them as
-          expenses.
-        </p>
-        <span className="brand-pro-finance-forward-soon">Coming soon</span>
+        {receiptInboxAddress ? (
+          <>
+            <p className="brand-pro-finance-forward-body">
+              Forward receipts to{' '}
+              <span className="brand-pro-finance-forward-email">
+                {receiptInboxAddress}
+              </span>{' '}
+              — or set it as your receipt email in CosmoProf / Salon Centric — and
+              they&rsquo;ll appear in your review inbox automatically.
+            </p>
+          </>
+        ) : (
+          <p className="brand-pro-finance-forward-body">
+            Claim your {brandName} handle to get a personal receipt-forwarding
+            address — forward or auto-send receipts and they land in your review
+            inbox.
+          </p>
+        )}
       </div>
     </div>
   )
