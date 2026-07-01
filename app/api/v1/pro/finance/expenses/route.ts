@@ -13,8 +13,10 @@ import { prisma } from '@/lib/prisma'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/time'
 
 import {
+  EXPENSE_SELECT,
   parseExpenseWriteInput,
   receiptBelongsToPro,
+  resolveExpenseAmount,
 } from './expenseInput'
 
 export const dynamic = 'force-dynamic'
@@ -38,21 +40,20 @@ export async function POST(request: Request) {
     const {
       category,
       amountCents,
+      miles,
       label,
       dateInput,
       notes,
       receiptMediaId,
     } = parsed.value
 
-    // requireAll guarantees these are present, but narrow for the type checker.
-    if (
-      category === undefined ||
-      amountCents === undefined ||
-      label === undefined ||
-      dateInput === undefined
-    ) {
+    // requireAll guarantees category/label/date; amount OR miles is resolved next.
+    if (category === undefined || label === undefined || dateInput === undefined) {
       return jsonFail(400, 'Missing required expense fields.')
     }
+
+    const money = resolveExpenseAmount({ category, amountCents, miles })
+    if (!money.ok) return jsonFail(400, money.error)
 
     if (receiptMediaId) {
       const owns = await receiptBelongsToPro({
@@ -74,23 +75,15 @@ export async function POST(request: Request) {
         professionalId: auth.professionalId,
         category,
         source: receiptMediaId ? 'RECEIPT_UPLOAD' : 'MANUAL',
-        amountCents,
+        amountCents: money.amountCents,
+        mileageMiles: money.mileageMiles,
         label,
         notes: notes ?? null,
         spentAt,
         monthKey,
         receiptMediaId: receiptMediaId ?? null,
       },
-      select: {
-        id: true,
-        category: true,
-        source: true,
-        amountCents: true,
-        label: true,
-        notes: true,
-        spentAt: true,
-        receiptMediaId: true,
-      },
+      select: EXPENSE_SELECT,
     })
 
     return jsonOk(serializeProFinanceExpense(created, timeZone), 201)

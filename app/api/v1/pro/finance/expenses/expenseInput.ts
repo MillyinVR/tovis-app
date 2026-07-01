@@ -1,9 +1,10 @@
 // Shared request-body parsing for the Finance expense write routes (POST create
 // / PATCH update). Kept out of the summary module — this is API-layer input
 // validation, not view-model logic.
-import { ExpenseCategory } from '@prisma/client'
+import { ExpenseCategory, Prisma } from '@prisma/client'
 
 import { pickString } from '@/app/api/_utils'
+import { computeMileageDeductionCents } from '@/lib/finance/taxRates'
 import { isRecord } from '@/lib/guards'
 import { moneyToCentsInt } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
@@ -12,12 +13,28 @@ const MAX_LABEL_LEN = 200
 const MAX_NOTES_LEN = 1000
 // $1,000,000 ceiling — a sanity bound, not a business rule.
 const MAX_AMOUNT_CENTS = 100_000_000
+// A single trip's business miles — generous upper bound.
+const MAX_MILES = 100_000
+
+// The columns every expense write route reads back to serialize the row.
+export const EXPENSE_SELECT = {
+  id: true,
+  category: true,
+  source: true,
+  amountCents: true,
+  mileageMiles: true,
+  label: true,
+  notes: true,
+  spentAt: true,
+  receiptMediaId: true,
+} satisfies Prisma.ProfessionalExpenseSelect
 
 export type ExpenseDateInput = { year: number; month: number; day: number }
 
 export type ExpenseWriteFields = {
   category?: ExpenseCategory
   amountCents?: number
+  miles?: number
   label?: string
   dateInput?: ExpenseDateInput
   notes?: string | null
@@ -30,6 +47,18 @@ export type ParseResult =
 
 function isExpenseCategory(value: string): value is ExpenseCategory {
   return (Object.values(ExpenseCategory) as string[]).includes(value)
+}
+
+function parseMiles(raw: unknown): number | null {
+  const n =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && raw.trim() !== ''
+        ? Number(raw.trim())
+        : NaN
+  if (!Number.isFinite(n) || n <= 0 || n > MAX_MILES) return null
+  // One decimal place, matching the Decimal(9,1) column.
+  return Math.round(n * 10) / 10
 }
 
 function parseAmountCents(raw: unknown): number | null {
@@ -96,14 +125,23 @@ export function parseExpenseWriteInput(
     return { ok: false, error: 'Missing expense category.' }
   }
 
-  // amount
+  // miles (mileage helper) — optional; drives the deduction for MILEAGE.
+  if (raw.miles !== undefined) {
+    const miles = parseMiles(raw.miles)
+    if (miles === null) {
+      return { ok: false, error: 'Invalid miles.' }
+    }
+    value.miles = miles
+  }
+
+  // amount — optional when miles is supplied (mileage computes the amount).
   if (raw.amount !== undefined || raw.amountCents !== undefined) {
     const cents = parseAmountCents(raw.amount ?? raw.amountCents)
     if (cents === null || cents <= 0 || cents > MAX_AMOUNT_CENTS) {
       return { ok: false, error: 'Invalid amount.' }
     }
     value.amountCents = cents
-  } else if (opts.requireAll) {
+  } else if (opts.requireAll && value.miles === undefined) {
     return { ok: false, error: 'Missing amount.' }
   }
 
@@ -156,6 +194,38 @@ export function parseExpenseWriteInput(
   }
 
   return { ok: true, value }
+}
+
+// Resolve the stored money for a write: for a MILEAGE expense with logged miles,
+// the deduction is computed server-side (rate stays authoritative) and the miles
+// are recorded; otherwise the dollar amount is used and miles cleared. Shared by
+// create + update so both stay consistent.
+export type ResolvedExpenseAmount =
+  | { ok: true; amountCents: number; mileageMiles: number | null }
+  | { ok: false; error: string }
+
+export function resolveExpenseAmount(args: {
+  category: ExpenseCategory
+  amountCents: number | undefined
+  miles: number | undefined
+}): ResolvedExpenseAmount {
+  if (args.category === 'MILEAGE' && args.miles !== undefined) {
+    return {
+      ok: true,
+      amountCents: computeMileageDeductionCents(args.miles),
+      mileageMiles: args.miles,
+    }
+  }
+  if (args.amountCents !== undefined) {
+    return { ok: true, amountCents: args.amountCents, mileageMiles: null }
+  }
+  return {
+    ok: false,
+    error:
+      args.category === 'MILEAGE'
+        ? 'Enter the miles for this trip.'
+        : 'Missing amount.',
+  }
 }
 
 // A receipt image may only be attached to an expense by the pro who owns the

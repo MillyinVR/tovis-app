@@ -45,7 +45,15 @@ export const ESTIMATED_TAX_DUE_DATES: ReadonlyArray<{ month: number; day: number
   { month: 9, day: 15 }, // Q3
 ]
 
-// "67¢/mi" — for interpolating the {mileageRate} token in category tooltips.
+// "72.5¢/mi" — for interpolating the {mileageRate} token in category tooltips.
 export function mileageRateLabel(): string {
   return `${STANDARD_MILEAGE_RATE_CENTS}¢/mi`
+}
+
+// The deductible amount (cents) for a logged trip: miles × the IRS rate. The
+// rate is snapshotted into amountCents at write time, so past entries keep the
+// rate that applied when logged even after the annual bump.
+export function computeMileageDeductionCents(miles: number): number {
+  if (!Number.isFinite(miles) || miles <= 0) return 0
+  return Math.round(miles * STANDARD_MILEAGE_RATE_CENTS)
 }

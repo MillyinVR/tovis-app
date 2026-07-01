@@ -8239,6 +8239,13 @@
         "incomeTotalCents": {
           "type": "number"
         },
+        "mileageRateCents": {
+          "description": "Current IRS standard mileage rate in cents/mile (e.g. 72.5) — lets the add-expense form preview a trip's deduction live.",
+          "type": "number"
+        },
+        "mileageRateLabel": {
+          "type": "string"
+        },
         "netProfitCents": {
           "type": "number"
         },
@@ -8266,7 +8273,9 @@
         "incomeBreakdown",
         "quarterlyReminder",
         "expenses",
-        "categories"
+        "categories",
+        "mileageRateCents",
+        "mileageRateLabel"
       ],
       "type": "object"
     },
@@ -8342,6 +8351,13 @@
         "label": {
           "type": "string"
         },
+        "mileageMiles": {
+          "description": "Logged business miles for a MILEAGE expense; null otherwise.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "notes": {
           "type": [
             "string",
@@ -8369,6 +8385,7 @@
         "source",
         "amountCents",
         "amountLabel",
+        "mileageMiles",
         "label",
         "notes",
         "dateLabel",

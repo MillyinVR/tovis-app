@@ -1801,6 +1801,11 @@ model ProfessionalExpense {
   // if the pro later changes their timezone.
   monthKey String @db.VarChar(7)
 
+  // For MILEAGE expenses only: the logged business miles. `amountCents` is the
+  // computed deduction (miles × the tax year's IRS standard rate, snapshotted
+  // server-side at write time). Null for every non-mileage expense.
+  mileageMiles Decimal? @db.Decimal(9, 1)
+
   // Optional receipt photo, reusing the existing MediaAsset upload pipeline.
   // SetNull (not Cascade): deleting the image must not delete the expense row.
   receiptMediaId String?

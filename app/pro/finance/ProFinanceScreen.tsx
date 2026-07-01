@@ -204,6 +204,7 @@ export default function ProFinanceScreen({
           expenseTotalLabel={data.finance.expenseTotalLabel}
           categories={data.finance.categories}
           timeZone={data.activeMonth.timeZone}
+          mileageRateCents={data.finance.mileageRateCents}
           onCreate={createExpense}
           onUpdate={updateExpense}
           onDelete={deleteExpense}

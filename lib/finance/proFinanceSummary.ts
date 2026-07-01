@@ -1,7 +1,7 @@
 // lib/finance/proFinanceSummary.ts
 import 'server-only'
 
-import type { ExpenseCategory, ExpenseSource } from '@prisma/client'
+import type { ExpenseCategory, ExpenseSource, Prisma } from '@prisma/client'
 
 import {
   EXPENSE_CATEGORY_BY_ID,
@@ -11,7 +11,9 @@ import {
 } from '@/lib/finance/expenseCategories'
 import {
   ESTIMATED_TAX_DUE_DATES,
+  mileageRateLabel,
   SELF_EMPLOYMENT_ESTIMATE_RATE,
+  STANDARD_MILEAGE_RATE_CENTS,
   TAX_YEAR,
 } from '@/lib/finance/taxRates'
 import { formatCents } from '@/lib/money'
@@ -59,6 +61,8 @@ export type ProFinanceExpenseItem = {
   source: ExpenseSource
   amountCents: number
   amountLabel: string
+  /** Logged business miles for a MILEAGE expense; null otherwise. */
+  mileageMiles: number | null
   label: string
   notes: string | null
   dateLabel: string
@@ -88,6 +92,10 @@ export type ProFinanceBlock = {
   quarterlyReminder: ProFinanceQuarterlyReminder
   expenses: ProFinanceExpenseItem[]
   categories: ProFinanceCategoryInfo[]
+  /** Current IRS standard mileage rate in cents/mile (e.g. 72.5) — lets the
+   *  add-expense form preview a trip's deduction live. */
+  mileageRateCents: number
+  mileageRateLabel: string
 }
 
 // Superset of the performance Overview view-model (nothing dropped) + the new
@@ -176,6 +184,7 @@ export function serializeProFinanceExpense(
     category: ExpenseCategory
     source: ExpenseSource
     amountCents: number
+    mileageMiles: Prisma.Decimal | null
     label: string
     notes: string | null
     spentAt: Date
@@ -193,6 +202,7 @@ export function serializeProFinanceExpense(
     source: row.source,
     amountCents: row.amountCents,
     amountLabel: formatCents(row.amountCents),
+    mileageMiles: row.mileageMiles != null ? row.mileageMiles.toNumber() : null,
     label: row.label,
     notes: row.notes,
     dateLabel: formatInTimeZone(
@@ -251,6 +261,7 @@ export async function loadProFinancePage(args: {
         category: true,
         source: true,
         amountCents: true,
+        mileageMiles: true,
         label: true,
         notes: true,
         spentAt: true,
@@ -342,6 +353,8 @@ export async function loadProFinancePage(args: {
         serializeProFinanceExpense(row, timeZone),
       ),
       categories,
+      mileageRateCents: STANDARD_MILEAGE_RATE_CENTS,
+      mileageRateLabel: mileageRateLabel(),
     },
   }
 }
