@@ -4,14 +4,14 @@
 // bump each tax year (design spec §11: "store rates in config so they're easy
 // to update annually").
 //
-// ⚠️ The dollar figures/rates below are the 2024 values carried over from the
-// original tax research. They MUST be reconfirmed against current-year IRS
-// numbers before each filing season, then TAX_YEAR bumped. Nothing here is tax
-// advice — the estimate is deliberately rough and labeled as such in the UI.
+// ⚠️ These figures MUST be reconfirmed against current-year IRS numbers before
+// each filing season, then TAX_YEAR bumped. Mileage was confirmed for 2026
+// (Notice 2026-10); the de-minimis, home-office, and gift figures are stable
+// long-standing amounts. Nothing here is tax advice — the estimate is
+// deliberately rough and labeled as such in the UI.
 
 // The tax year these figures are believed accurate for. Surface it in the UI so
 // pros know how current the guidance is.
-// TODO(finance): confirm 2026 IRS figures before shipping to pros.
 export const TAX_YEAR = 2026
 
 // Rough self-employment + income blend used for the "set aside for taxes"
@@ -19,8 +19,9 @@ export const TAX_YEAR = 2026
 // "make this user-adjustable?" open, which this single constant keeps cheap.
 export const SELF_EMPLOYMENT_ESTIMATE_RATE = 0.28
 
-// IRS standard mileage rate, in cents per mile (2024: 67¢). Mobile pros only.
-export const STANDARD_MILEAGE_RATE_CENTS = 67
+// IRS standard business mileage rate, in cents per mile. 2026: 72.5¢ (Notice
+// 2026-10, up 2.5¢ from 2025's 70¢). Mobile pros only. Bump each tax year.
+export const STANDARD_MILEAGE_RATE_CENTS = 72.5
 
 // Section 179 / de minimis safe harbor — equipment under this can generally be
 // deducted in full the year purchased rather than depreciated.

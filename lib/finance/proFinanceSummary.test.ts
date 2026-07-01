@@ -102,7 +102,7 @@ describe('resolveExpenseCategories', () => {
     expect(software?.examples).toContain('TOVIS subscription')
 
     const mileage = resolved.find((c) => c.id === 'MILEAGE')
-    expect(mileage?.tooltip).toContain('67¢/mi')
+    expect(mileage?.tooltip).toContain('72.5¢/mi')
 
     for (const category of resolved) {
       expect(category.tooltip).not.toContain('{brand}')
