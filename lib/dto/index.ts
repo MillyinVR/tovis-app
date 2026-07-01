@@ -54,6 +54,8 @@ export type {
   ProFinancePageData,
 } from '@/lib/finance/proFinanceSummary'
 
+export type { ProReceiptInboxItem } from '@/lib/finance/receiptInbox'
+
 // ── Media signing / URL resolution (GET /api/v1/media/url, POST */uploads) ───
 export type {
   MediaSignedUrlDTO,

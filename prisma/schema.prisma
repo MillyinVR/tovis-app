@@ -1616,6 +1616,7 @@ model ProfessionalProfile {
   productSales               ProductSale[]
   monthlyAnalytics           ProfessionalMonthlyAnalytics[] @relation("ProMonthlyAnalytics")
   expenses                   ProfessionalExpense[]          @relation("ProExpenses")
+  receiptInbox               ProfessionalReceiptInbox[]     @relation("ProReceiptInbox")
   nfcCards                   NfcCard[]
 
   paymentSettings    ProfessionalPaymentSettings?
@@ -1816,6 +1817,59 @@ model ProfessionalExpense {
 
   @@index([professionalId, monthKey, spentAt])
   @@index([professionalId, category, monthKey])
+  @@index([receiptMediaId])
+}
+
+// How a receipt reached the pro's inbox. UPLOAD = manual photo/PDF; EMAIL =
+// forwarded to their <handle>@tovis.me address; COSMOPROF / SALON_CENTRIC = a
+// recognized vendor order confirmation (still arrives via EMAIL, tagged for UI).
+enum ReceiptSource {
+  UPLOAD
+  EMAIL
+  COSMOPROF
+  SALON_CENTRIC
+}
+
+enum ReceiptStatus {
+  PENDING
+  CONFIRMED
+  DISMISSED
+}
+
+// A captured receipt awaiting the pro's review. Parsing (email/OCR) is
+// unreliable, so nothing becomes a ProfessionalExpense until the pro confirms —
+// this table is the review queue. On confirm we mint an expense and link it.
+model ProfessionalReceiptInbox {
+  id String @id @default(cuid())
+
+  professionalId String
+  professional   ProfessionalProfile @relation("ProReceiptInbox", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  source ReceiptSource
+  status ReceiptStatus @default(PENDING)
+
+  // Best-effort parsed hints (may be null → the pro fills them on confirm).
+  parsedAmountCents Int?
+  parsedVendor      String?
+  parsedDate        DateTime?
+
+  // Provenance for email-sourced items.
+  emailFrom    String?
+  emailSubject String?
+  receivedAt   DateTime @default(now())
+
+  // The original receipt image/PDF, via the existing MediaAsset pipeline.
+  // SetNull: deleting the media must not delete the inbox row.
+  receiptMediaId String?
+  receiptMedia   MediaAsset? @relation("ReceiptInboxMedia", fields: [receiptMediaId], references: [id], onDelete: SetNull)
+
+  // Set once confirmed → the expense this receipt produced.
+  createdExpenseId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([professionalId, status, receivedAt])
   @@index([receiptMediaId])
 }
 
@@ -3477,7 +3531,8 @@ model MediaAsset {
   likes    MediaLike[]
   comments MediaComment[]
 
-  expenseReceipts ProfessionalExpense[] @relation("ExpenseReceipt")
+  expenseReceipts ProfessionalExpense[]      @relation("ExpenseReceipt")
+  receiptInbox    ProfessionalReceiptInbox[] @relation("ReceiptInboxMedia")
 
   waitlistEntries WaitlistEntry[]
 

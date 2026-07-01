@@ -248,6 +248,15 @@
       ],
       "type": "string"
     },
+    "$Enums.ReceiptSource": {
+      "enum": [
+        "UPLOAD",
+        "EMAIL",
+        "COSMOPROF",
+        "SALON_CENTRIC"
+      ],
+      "type": "string"
+    },
     "$Enums.Role": {
       "enum": [
         "CLIENT",
@@ -8252,6 +8261,20 @@
         "quarterlyReminder": {
           "$ref": "#/definitions/ProFinanceQuarterlyReminder"
         },
+        "receiptInbox": {
+          "description": "Captured receipts awaiting review (all-time PENDING, newest first).",
+          "items": {
+            "$ref": "#/definitions/ProReceiptInboxItem"
+          },
+          "type": "array"
+        },
+        "receiptInboxAddress": {
+          "description": "The pro's forwarding address (<handle>@tovis.me) — premium only, else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "summaryCards": {
           "items": {
             "$ref": "#/definitions/ProFinanceSummaryCard"
@@ -8275,7 +8298,9 @@
         "expenses",
         "categories",
         "mileageRateCents",
-        "mileageRateLabel"
+        "mileageRateLabel",
+        "receiptInbox",
+        "receiptInboxAddress"
       ],
       "type": "object"
     },
@@ -9141,6 +9166,78 @@
       ],
       "type": "object"
     },
+    "ProReceiptInboxItem": {
+      "properties": {
+        "dateHint": {
+          "description": "\"YYYY-MM-DD\" hint to prefill the confirm form (parsed date, pro's tz).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "emailFrom": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasReceipt": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parsedAmountCents": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "parsedAmountLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receiptMediaId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receivedAtIso": {
+          "type": "string"
+        },
+        "receivedLabel": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/ReceiptSource"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "title": {
+          "description": "A human title: parsed vendor, else email subject, else a generic label.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "sourceLabel",
+        "title",
+        "receivedAtIso",
+        "receivedLabel",
+        "parsedAmountCents",
+        "parsedAmountLabel",
+        "dateHint",
+        "emailFrom",
+        "hasReceipt",
+        "receiptMediaId"
+      ],
+      "type": "object"
+    },
     "ProfessionType": {
       "$ref": "#/definitions/%24Enums.ProfessionType"
     },
@@ -9689,6 +9786,9 @@
         "endMinutes"
       ],
       "type": "object"
+    },
+    "ReceiptSource": {
+      "$ref": "#/definitions/%24Enums.ReceiptSource"
     },
     "ResolveThreadResponseDTO": {
       "properties": {
