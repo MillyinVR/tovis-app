@@ -10,17 +10,22 @@
 //
 // Status model (Draft → Sent → Finished):
 //   draft     — saved, not yet sent to the client.
-//   sent      — sent, but no confirmed next booking yet.
-//   finished  — sent AND the client has a confirmed next booking (loop closed).
+//   sent      — sent, but payment is still pending (not PAID/WAIVED).
+//   finished  — sent AND payment is resolved (PAID or WAIVED). "No pending
+//               payment = finished." A rebook does NOT decide this: rebooking is
+//               itself gated on resolved payment, so every confirmed next booking
+//               already implies a finished card. A paid client who hasn't rebooked
+//               is still finished — but keeps a rebook nudge (the loop can reopen
+//               any time; rebooking stays available after finish).
 //
-// Rebook chip (the dual-date logic):
+// Rebook chip (the dual-date logic) — keyed on the booking, not the status:
 //   recommended — pro entered a window/date, not yet booked.
 //   overdue     — that window/date is in the past with no booking.
 //   next        — a confirmed next booking exists; show its actual date.
 //
 // Time is rendered through `@/lib/time` (never raw Intl/toLocale*).
 
-import { AftercareRebookMode } from '@prisma/client'
+import { AftercareRebookMode, BookingCheckoutStatus } from '@prisma/client'
 
 import { formatInTimeZone, getZonedParts } from '@/lib/time'
 
@@ -46,6 +51,11 @@ export type ProAftercareRowInput = {
   clientName: string
   /** Resolved appointment timezone (IANA) for this row. */
   timeZone: string
+  /**
+   * Checkout state of the appointment this aftercare is for. `finished` means
+   * payment is resolved — PAID or WAIVED. Null is treated as unresolved.
+   */
+  checkoutStatus: BookingCheckoutStatus | null
   /** A confirmed next booking off this aftercare, or null if none/awaiting. */
   nextBooking: { scheduledFor: Date | null; bookedAt: Date } | null
 }
@@ -139,18 +149,27 @@ export function deriveProAftercareCard(
   const serviceName = row.serviceName?.trim() || ''
   const clientName = row.clientName.trim() || ''
 
-  const isFinished = row.nextBooking != null
-  const status: ProAftercareCardStatus = isFinished
-    ? 'finished'
-    : row.sentToClientAt
-      ? 'sent'
-      : 'draft'
+  // Finished = sent AND payment resolved (PAID/WAIVED). Sending is still a
+  // prerequisite — a paid appointment whose aftercare was never sent stays a
+  // draft (the pro still owes the client the send).
+  const paymentResolved =
+    row.checkoutStatus === BookingCheckoutStatus.PAID ||
+    row.checkoutStatus === BookingCheckoutStatus.WAIVED
+  const hasNextBooking = row.nextBooking != null
+  const status: ProAftercareCardStatus = !row.sentToClientAt
+    ? 'draft'
+    : paymentResolved
+      ? 'finished'
+      : 'sent'
 
-  // Rebook chip.
+  // Rebook chip — a confirmed next booking wins; otherwise surface the pro's
+  // recommended window/date. This is independent of the finished label: a
+  // finished (paid) card that hasn't rebooked still shows its rebook target so
+  // the pro can keep chasing the next appointment.
   let rebook: ProAftercareCard['rebook'] = null
-  if (isFinished && row.nextBooking?.scheduledFor) {
+  if (hasNextBooking && row.nextBooking?.scheduledFor) {
     rebook = { kind: 'next', value: formatDay(row.nextBooking.scheduledFor, row.timeZone) }
-  } else if (!isFinished && row.rebookMode !== AftercareRebookMode.NONE) {
+  } else if (!hasNextBooking && row.rebookMode !== AftercareRebookMode.NONE) {
     const value =
       row.rebookWindowStart && row.rebookWindowEnd
         ? formatWindow(row.rebookWindowStart, row.rebookWindowEnd, row.timeZone)
@@ -165,10 +184,11 @@ export function deriveProAftercareCard(
     }
   }
 
-  // Relative activity stamp + sort key.
+  // Relative activity stamp + sort key — keyed on the actual booking, so the
+  // "booked" stamp only shows once a next appointment is confirmed.
   let ago: ProAftercareCard['ago'] = null
   let sortKey = row.createdAt.getTime()
-  if (isFinished && row.nextBooking) {
+  if (hasNextBooking && row.nextBooking) {
     ago = { verb: 'booked', value: compactAgo(row.nextBooking.bookedAt, now) }
     sortKey = row.nextBooking.bookedAt.getTime()
   } else if (row.sentToClientAt) {
@@ -181,8 +201,12 @@ export function deriveProAftercareCard(
     ago = { verb: 'saved', value: compactAgo(row.createdAt, now) }
   }
 
+  // Draft → send it. Once a next appointment is booked the loop is fully closed
+  // (no action). Otherwise the rebook loop is still open — including a finished
+  // (paid) card that hasn't rebooked — so offer a nudge. `nudgeAftercareRebook`
+  // only requires the aftercare to have been sent, which every non-draft card is.
   const action: ProAftercareAction | null =
-    status === 'draft' ? 'send' : status === 'sent' ? 'nudge' : null
+    status === 'draft' ? 'send' : hasNextBooking ? null : 'nudge'
 
   return {
     id: row.id,
@@ -203,10 +227,12 @@ export function deriveProAftercareCard(
 }
 
 // "Needs action" rank: open loops first — drafts, then overdue, then
-// sent-awaiting, then finished last.
+// awaiting-a-nudge, then fully-closed (paid + rebooked) last. Keyed on the
+// action, not the status label, so a finished-but-not-rebooked card still sorts
+// up among the open loops rather than dropping to the bottom.
 function needsActionRank(card: ProAftercareCard): number {
   if (card.status === 'draft') return 0
-  if (card.status === 'finished') return 3
+  if (card.action == null) return 3
   return card.rebook?.kind === 'overdue' ? 1 : 2
 }
 
@@ -243,7 +269,9 @@ export function summarizeProAftercareCards(
   cards: ProAftercareCard[],
 ): ProAftercareSummary {
   const drafts = cards.filter((c) => c.status === 'draft').length
-  const awaiting = cards.filter((c) => c.status === 'sent').length
+  // Awaiting your follow-up: sent, loop still open (a nudge is offered). Includes
+  // finished-but-not-rebooked cards, which still await the next appointment.
+  const awaiting = cards.filter((c) => c.action === 'nudge').length
   const overdue = cards.filter((c) => c.rebook?.kind === 'overdue').length
   return { drafts, awaiting, overdue, hasOverdue: overdue > 0 }
 }
