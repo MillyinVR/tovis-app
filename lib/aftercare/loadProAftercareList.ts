@@ -62,6 +62,7 @@ export async function loadProAftercareList(args: {
           id: true,
           scheduledFor: true,
           locationTimeZone: true,
+          checkoutStatus: true,
           service: {
             select: {
               name: true,
@@ -119,6 +120,7 @@ export async function loadProAftercareList(args: {
       serviceName: row.booking.service?.name ?? null,
       clientName: formatClientName(row.booking.client),
       timeZone,
+      checkoutStatus: row.booking.checkoutStatus,
       nextBooking: confirmed
         ? { scheduledFor: confirmed.scheduledFor, bookedAt: confirmed.createdAt }
         : null,

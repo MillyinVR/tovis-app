@@ -1,6 +1,6 @@
 // lib/aftercare/proAftercareList.test.ts
 import { describe, expect, it } from 'vitest'
-import { AftercareRebookMode } from '@prisma/client'
+import { AftercareRebookMode, BookingCheckoutStatus } from '@prisma/client'
 
 import {
   compareProAftercareCards,
@@ -31,6 +31,7 @@ function row(overrides: Partial<ProAftercareRowInput> = {}): ProAftercareRowInpu
     serviceName: 'Cut & Tonal Gloss',
     clientName: 'Priya Anand',
     timeZone: TZ,
+    checkoutStatus: BookingCheckoutStatus.NOT_READY,
     nextBooking: null,
     ...overrides,
   }
@@ -99,6 +100,9 @@ describe('deriveProAftercareCard', () => {
     const card = deriveProAftercareCard(
       row({
         sentToClientAt: new Date('2026-06-15T17:00:00Z'),
+        // Rebooking is gated on resolved payment, so a confirmed next booking
+        // always coincides with a paid/waived checkout.
+        checkoutStatus: BookingCheckoutStatus.PAID,
         rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
         rebookedFor: new Date('2026-08-12T18:00:00Z'),
         nextBooking: {
@@ -113,6 +117,65 @@ describe('deriveProAftercareCard', () => {
     expect(card.needsAction).toBe(false)
     expect(card.rebook).toEqual({ kind: 'next', value: 'Aug 12' })
     expect(card.ago).toEqual({ verb: 'booked', value: '1d' })
+  })
+
+  it('marks a sent + paid summary as finished but keeps a rebook nudge when not yet rebooked', () => {
+    const card = deriveProAftercareCard(
+      row({
+        sentToClientAt: new Date('2026-06-20T17:00:00Z'),
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
+        rebookWindowStart: new Date('2026-08-01T12:00:00Z'),
+        rebookWindowEnd: new Date('2026-08-08T12:00:00Z'),
+      }),
+      { now: NOW },
+    )
+    expect(card.status).toBe('finished')
+    // Loop is still open — payment is done but the client hasn't rebooked.
+    expect(card.action).toBe('nudge')
+    expect(card.needsAction).toBe(true)
+    expect(card.rebook).toEqual({ kind: 'recommended', value: 'Aug 1–8' })
+    // No confirmed booking yet, so the stamp reflects the send, not a "booked".
+    expect(card.ago).toEqual({ verb: 'sent', value: '3d' })
+  })
+
+  it('treats a waived checkout the same as paid — finished', () => {
+    const card = deriveProAftercareCard(
+      row({
+        sentToClientAt: new Date('2026-06-20T17:00:00Z'),
+        checkoutStatus: BookingCheckoutStatus.WAIVED,
+      }),
+      { now: NOW },
+    )
+    expect(card.status).toBe('finished')
+    expect(card.action).toBe('nudge')
+  })
+
+  it('keeps a sent summary as sent (not finished) while payment is still pending', () => {
+    for (const checkoutStatus of [
+      BookingCheckoutStatus.NOT_READY,
+      BookingCheckoutStatus.READY,
+      BookingCheckoutStatus.PARTIALLY_PAID,
+    ]) {
+      const card = deriveProAftercareCard(
+        row({ sentToClientAt: new Date('2026-06-20T17:00:00Z'), checkoutStatus }),
+        { now: NOW },
+      )
+      expect(card.status).toBe('sent')
+      expect(card.action).toBe('nudge')
+    }
+  })
+
+  it('keeps a paid-but-unsent summary as a draft — sending is still required', () => {
+    const card = deriveProAftercareCard(
+      row({
+        draftSavedAt: new Date('2026-06-21T17:00:00Z'),
+        checkoutStatus: BookingCheckoutStatus.PAID,
+      }),
+      { now: NOW },
+    )
+    expect(card.status).toBe('draft')
+    expect(card.action).toBe('send')
   })
 
   it('shows no rebook chip when the mode is NONE', () => {
@@ -153,6 +216,7 @@ describe('counts + summary', () => {
       row({
         id: 'f',
         sentToClientAt: new Date('2026-06-15T17:00:00Z'),
+        checkoutStatus: BookingCheckoutStatus.PAID,
         nextBooking: {
           scheduledFor: new Date('2026-08-12T18:00:00Z'),
           bookedAt: new Date('2026-06-22T17:00:00Z'),
