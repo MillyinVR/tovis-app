@@ -124,6 +124,22 @@ function resolveAppOrigin(req: NextRequest): string {
   return req.nextUrl.origin.replace(/\/+$/, '')
 }
 
+/**
+ * Canonical app origin for redirecting non-profile paths off a vanity
+ * subdomain. Unlike resolveAppOrigin, this MUST NOT fall back to the request
+ * host — on a vanity domain that host is the subdomain we're redirecting away
+ * from, so falling back to it would loop. Falls back to `www.<root>` instead.
+ */
+function vanityAppOrigin(): string {
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (envUrl) {
+    return envUrl.replace(/\/+$/, '')
+  }
+
+  const root = process.env.APP_ROOT_DOMAIN?.trim() || 'tovis.me'
+  return `https://www.${root}`
+}
+
 function buildVerificationRedirectUrl(req: NextRequest): URL {
   const url = new URL('/verify-phone', resolveAppOrigin(req))
   const currentPath = `${req.nextUrl.pathname}${req.nextUrl.search}`
@@ -315,12 +331,25 @@ export async function proxy(req: NextRequest) {
   const host = hostToHostname(req.headers.get('host')) ?? ''
   const sub = getSubdomain(host, 'tovis.me')
 
-  // Vanity domains: *.tovis.me -> internally serve /p/{subdomain}.
-  // This does NOT change the URL in the browser; it just routes internally.
-  // Do not rewrite API or static asset requests; those should keep normal app routing.
+  // Vanity domains: *.tovis.me serve the pro's public profile — but ONLY at the
+  // root path, which is rewritten internally to /p/{subdomain} without changing
+  // the browser URL. Any OTHER path on the subdomain (in-app links like /looks,
+  // or a client-side redirect such as the pro-session guard bouncing a guest to
+  // /login) must be sent to the canonical app host; otherwise it would rewrite
+  // to a nonexistent /p/{subdomain}/<path> and 404. API and static assets keep
+  // normal routing so the subdomain can load the app's own assets.
   if (sub && !pathname.startsWith('/api/') && !isStaticAssetPath(pathname)) {
+    if (normalizePathname(pathname) !== '/') {
+      const target = new URL(vanityAppOrigin())
+      target.pathname = pathname
+      target.search = req.nextUrl.search
+
+      const res = NextResponse.redirect(target, 307)
+      return withRequestId(res, requestId)
+    }
+
     const url = req.nextUrl.clone()
-    url.pathname = `/p/${sub}${pathname === '/' ? '' : pathname}`
+    url.pathname = `/p/${sub}`
 
     const res = NextResponse.rewrite(url, {
       request: { headers: requestHeaders },

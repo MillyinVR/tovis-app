@@ -46,10 +46,6 @@ vi.mock('@/lib/currentUser', () => ({
   getCurrentUser: mockGetCurrentUser,
 }))
 
-vi.mock('@/app/_components/ProSessionFooter/ProSessionFooter', () => ({
-  default: () => <div data-testid="pro-session-footer">ProSessionFooter</div>,
-}))
-
 vi.mock('@/lib/timeZone', () => ({
   isValidIanaTimeZone: vi.fn(() => true),
   friendlyTimeZoneLabel: (tz: string | null | undefined) => tz ?? null,
@@ -135,7 +131,9 @@ describe('app/p/[handle]/page', () => {
       screen.getByRole('link', { name: /open full profile/i }),
     ).toHaveAttribute('href', '/professionals/pro_1')
 
-    expect(screen.getByTestId('pro-session-footer')).toBeInTheDocument()
+    // The public profile must NOT render the pro-session footer: its guard
+    // client-side-redirects unauthenticated visitors to /login?reason=pro-session.
+    expect(screen.queryByTestId('pro-session-footer')).not.toBeInTheDocument()
 
     expect(mocks.prisma.professionalProfile.findUnique).toHaveBeenCalledWith({
       where: { handleNormalized: 'tovisstudio' },
@@ -200,7 +198,7 @@ describe('app/p/[handle]/page', () => {
       screen.getByRole('link', { name: /open full profile/i }),
     ).toHaveAttribute('href', '/professionals/pro_1')
 
-    expect(screen.getByTestId('pro-session-footer')).toBeInTheDocument()
+    expect(screen.queryByTestId('pro-session-footer')).not.toBeInTheDocument()
   })
 
   it('calls notFound when the vanity handle does not resolve to a professional profile', async () => {
