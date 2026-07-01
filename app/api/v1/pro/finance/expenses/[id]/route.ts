@@ -17,24 +17,17 @@ import { prisma } from '@/lib/prisma'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/time'
 
 import {
+  EXPENSE_SELECT,
   parseExpenseWriteInput,
   receiptBelongsToPro,
+  resolveExpenseAmount,
   type ExpenseWriteFields,
 } from '../expenseInput'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-const EXPENSE_SELECT = {
-  id: true,
-  category: true,
-  source: true,
-  amountCents: true,
-  label: true,
-  notes: true,
-  spentAt: true,
-  receiptMediaId: true,
-} as const
+type ResolvedMoney = { amountCents: number; mileageMiles: number | null }
 
 export async function PATCH(request: Request, ctx: RouteContext) {
   try {
@@ -57,7 +50,7 @@ export async function PATCH(request: Request, ctx: RouteContext) {
 
     const existing = await prisma.professionalExpense.findFirst({
       where: { id: expenseId, professionalId: auth.professionalId },
-      select: { id: true },
+      select: { id: true, category: true },
     })
     if (!existing) return jsonFail(404, 'Expense not found.')
 
@@ -71,12 +64,27 @@ export async function PATCH(request: Request, ctx: RouteContext) {
       if (!owns) return jsonFail(400, 'Receipt not found.')
     }
 
+    // Recompute the stored amount/miles only when the caller changed either.
+    let resolvedMoney: ResolvedMoney | null = null
+    if (fields.amountCents !== undefined || fields.miles !== undefined) {
+      const money = resolveExpenseAmount({
+        category: fields.category ?? existing.category,
+        amountCents: fields.amountCents,
+        miles: fields.miles,
+      })
+      if (!money.ok) return jsonFail(400, money.error)
+      resolvedMoney = {
+        amountCents: money.amountCents,
+        mileageMiles: money.mileageMiles,
+      }
+    }
+
     const timeZone = sanitizeTimeZone(
       auth.user.professionalProfile?.timeZone,
       DEFAULT_TIME_ZONE,
     )
 
-    const data = buildUpdateData(fields, timeZone)
+    const data = buildUpdateData(fields, timeZone, resolvedMoney)
 
     const updated = await prisma.professionalExpense.update({
       where: { id: expenseId },
@@ -115,10 +123,15 @@ export async function DELETE(_request: Request, ctx: RouteContext) {
   }
 }
 
-function buildUpdateData(fields: ExpenseWriteFields, timeZone: string) {
+function buildUpdateData(
+  fields: ExpenseWriteFields,
+  timeZone: string,
+  money: ResolvedMoney | null,
+) {
   const data: {
     category?: ExpenseWriteFields['category']
     amountCents?: number
+    mileageMiles?: number | null
     label?: string
     notes?: string | null
     receiptMediaId?: string | null
@@ -128,7 +141,10 @@ function buildUpdateData(fields: ExpenseWriteFields, timeZone: string) {
   } = {}
 
   if (fields.category !== undefined) data.category = fields.category
-  if (fields.amountCents !== undefined) data.amountCents = fields.amountCents
+  if (money) {
+    data.amountCents = money.amountCents
+    data.mileageMiles = money.mileageMiles
+  }
   if (fields.label !== undefined) data.label = fields.label
   if (fields.notes !== undefined) data.notes = fields.notes
 

@@ -4,6 +4,7 @@ import {
   EXPENSE_CATEGORIES,
   resolveExpenseCategories,
 } from './expenseCategories'
+import { computeMileageDeductionCents } from './taxRates'
 import {
   computeEstimatedTaxCents,
   computeIncomeTotalCents,
@@ -42,6 +43,20 @@ describe('computeEstimatedTaxCents', () => {
   it('never estimates tax on a loss', () => {
     expect(computeEstimatedTaxCents(0)).toBe(0)
     expect(computeEstimatedTaxCents(-5000)).toBe(0)
+  })
+})
+
+describe('computeMileageDeductionCents', () => {
+  it('applies the 2026 rate (72.5¢/mi) and rounds to cents', () => {
+    expect(computeMileageDeductionCents(100)).toBe(7250) // $72.50
+    expect(computeMileageDeductionCents(45)).toBe(3263) // 45 × 72.5 = 3262.5 → 3263
+    expect(computeMileageDeductionCents(12.5)).toBe(906) // 906.25 → 906
+  })
+
+  it('is zero for non-positive / non-finite miles', () => {
+    expect(computeMileageDeductionCents(0)).toBe(0)
+    expect(computeMileageDeductionCents(-10)).toBe(0)
+    expect(computeMileageDeductionCents(Number.NaN)).toBe(0)
   })
 })
 

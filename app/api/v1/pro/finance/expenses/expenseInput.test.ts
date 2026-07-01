@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseExpenseWriteInput } from './expenseInput'
+import { parseExpenseWriteInput, resolveExpenseAmount } from './expenseInput'
 
 const validBody = {
   category: 'SUPPLIES_PRODUCTS',
@@ -83,6 +83,43 @@ describe('parseExpenseWriteInput (create / requireAll)', () => {
         { requireAll: true },
       ).ok,
     ).toBe(false)
+  })
+})
+
+describe('parseExpenseWriteInput (mileage)', () => {
+  it('accepts miles instead of amount on create', () => {
+    const result = parseExpenseWriteInput(
+      { category: 'MILEAGE', label: 'Drive to client', date: '2026-04-03', miles: '45' },
+      { requireAll: true },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.miles).toBe(45)
+    expect(result.value.amountCents).toBeUndefined()
+  })
+
+  it('rounds miles to one decimal and rejects junk', () => {
+    const ok = parseExpenseWriteInput({ miles: 12.34 }, { requireAll: false })
+    expect(ok.ok && ok.value.miles).toBe(12.3)
+    expect(parseExpenseWriteInput({ miles: '-5' }, { requireAll: false }).ok).toBe(false)
+    expect(parseExpenseWriteInput({ miles: 'abc' }, { requireAll: false }).ok).toBe(false)
+  })
+})
+
+describe('resolveExpenseAmount', () => {
+  it('computes the deduction from miles for a MILEAGE expense', () => {
+    const r = resolveExpenseAmount({ category: 'MILEAGE', amountCents: undefined, miles: 100 })
+    expect(r).toEqual({ ok: true, amountCents: 7250, mileageMiles: 100 })
+  })
+
+  it('uses the dollar amount (and clears miles) for a normal expense', () => {
+    const r = resolveExpenseAmount({ category: 'SUPPLIES_PRODUCTS', amountCents: 4200, miles: undefined })
+    expect(r).toEqual({ ok: true, amountCents: 4200, mileageMiles: null })
+  })
+
+  it('errors when neither miles nor amount is present', () => {
+    expect(resolveExpenseAmount({ category: 'MILEAGE', amountCents: undefined, miles: undefined }).ok).toBe(false)
+    expect(resolveExpenseAmount({ category: 'OTHER', amountCents: undefined, miles: undefined }).ok).toBe(false)
   })
 })
 

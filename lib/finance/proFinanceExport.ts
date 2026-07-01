@@ -92,6 +92,7 @@ export async function buildFinanceCsv(args: {
       select: {
         category: true,
         amountCents: true,
+        mileageMiles: true,
         label: true,
         notes: true,
         spentAt: true,
@@ -144,19 +145,20 @@ export async function buildFinanceCsv(args: {
   rows.push('')
 
   rows.push(csvRow(['EXPENSES']))
-  rows.push(csvRow(['Date', 'Category', 'Description', 'Amount', 'Notes']))
+  rows.push(csvRow(['Date', 'Category', 'Description', 'Miles', 'Amount', 'Notes']))
   for (const expense of expenses) {
     rows.push(
       csvRow([
         isoDateInTimeZone(expense.spentAt, timeZone),
         EXPENSE_CATEGORY_BY_ID[expense.category].label,
         expense.label,
+        expense.mileageMiles != null ? String(expense.mileageMiles) : '',
         formatCents(expense.amountCents),
         expense.notes ?? '',
       ]),
     )
   }
-  rows.push(csvRow(['Total Expenses', '', '', formatCents(expenseTotalCents), '']))
+  rows.push(csvRow(['Total Expenses', '', '', '', formatCents(expenseTotalCents), '']))
   rows.push('')
 
   rows.push(csvRow(['EXPENSES BY CATEGORY']))

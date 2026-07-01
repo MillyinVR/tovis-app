@@ -11,9 +11,12 @@ import type {
   ProFinanceCategoryInfo,
   ProFinanceExpenseItem,
 } from '@/lib/finance/proFinanceSummary'
+import { formatCents } from '@/lib/money'
 import { getZonedParts } from '@/lib/time'
 
 import { PencilIcon, PlusIcon, TrashIcon } from './icons'
+
+const MILEAGE_CATEGORY = 'MILEAGE'
 
 // "YYYY-MM-DD" for an instant in the pro's timezone (NOT the browser's / UTC) —
 // so an expense added on a month-end evening files under the pro's calendar day,
@@ -25,7 +28,10 @@ function dateInputInTimeZone(instant: Date, timeZone: string): string {
 
 export type ExpenseFormPayload = {
   category: string
-  amount: string
+  /** Dollar amount for a normal expense; omitted for mileage. */
+  amount?: string
+  /** Business miles for a MILEAGE expense; the server computes the deduction. */
+  miles?: string
   label: string
   date: string
   notes: string
@@ -38,6 +44,7 @@ type FinanceExpensesPanelProps = {
   expenseTotalLabel: string
   categories: ProFinanceCategoryInfo[]
   timeZone: string
+  mileageRateCents: number
   onCreate: (payload: ExpenseFormPayload) => Promise<ExpenseMutationResult>
   onUpdate: (
     id: string,
@@ -51,6 +58,7 @@ export default function FinanceExpensesPanel({
   expenseTotalLabel,
   categories,
   timeZone,
+  mileageRateCents,
   onCreate,
   onUpdate,
   onDelete,
@@ -110,6 +118,7 @@ export default function FinanceExpensesPanel({
           categories={categories}
           editing={editingExpense}
           timeZone={timeZone}
+          mileageRateCents={mileageRateCents}
           onCancel={() => setFormOpen(false)}
           onSubmit={async (payload) => {
             const result = editingExpense
@@ -170,6 +179,16 @@ function ExpenseRow({
           <span className="brand-pro-finance-expense-date">
             {expense.dateLabel}
           </span>
+          {expense.mileageMiles != null && (
+            <>
+              <span aria-hidden="true" className="brand-pro-finance-expense-date">
+                ·
+              </span>
+              <span className="brand-pro-finance-expense-date">
+                {expense.mileageMiles} mi
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -204,12 +223,14 @@ function ExpenseForm({
   categories,
   editing,
   timeZone,
+  mileageRateCents,
   onSubmit,
   onCancel,
 }: {
   categories: ProFinanceCategoryInfo[]
   editing: ProFinanceExpenseItem | null
   timeZone: string
+  mileageRateCents: number
   onSubmit: (payload: ExpenseFormPayload) => Promise<ExpenseMutationResult>
   onCancel: () => void
 }) {
@@ -217,7 +238,12 @@ function ExpenseForm({
     editing?.category ?? categories[0]?.id ?? '',
   )
   const [amount, setAmount] = useState(
-    editing ? (editing.amountCents / 100).toFixed(2) : '',
+    editing && editing.mileageMiles == null
+      ? (editing.amountCents / 100).toFixed(2)
+      : '',
+  )
+  const [miles, setMiles] = useState(
+    editing?.mileageMiles != null ? String(editing.mileageMiles) : '',
   )
   const [label, setLabel] = useState(editing?.label ?? '')
   const [date, setDate] = useState(
@@ -230,8 +256,18 @@ function ExpenseForm({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const isMileage = category === MILEAGE_CATEGORY
+  const milesValue = Number(miles)
+  const milesValid = miles.trim() !== '' && Number.isFinite(milesValue) && milesValue > 0
+  const mileagePreviewCents = milesValid
+    ? Math.round(milesValue * mileageRateCents)
+    : null
+
   const canSubmit =
-    category !== '' && amount.trim() !== '' && label.trim() !== '' && date !== ''
+    category !== '' &&
+    label.trim() !== '' &&
+    date !== '' &&
+    (isMileage ? milesValid : amount.trim() !== '')
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -240,7 +276,11 @@ function ExpenseForm({
     setSubmitting(true)
     setError(null)
 
-    const result = await onSubmit({ category, amount, label, date, notes })
+    const result = await onSubmit(
+      isMileage
+        ? { category, miles, label, date, notes }
+        : { category, amount, label, date, notes },
+    )
 
     if (!result.ok) {
       setError(result.error ?? 'Could not save this expense.')
@@ -266,17 +306,37 @@ function ExpenseForm({
           </select>
         </label>
 
-        <label className="brand-pro-finance-form-field">
-          <span className="brand-pro-finance-form-label">Amount</span>
-          <input
-            className="brand-pro-finance-input"
-            type="text"
-            inputMode="decimal"
-            placeholder="50 or 49.99"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-          />
-        </label>
+        {isMileage ? (
+          <label className="brand-pro-finance-form-field">
+            <span className="brand-pro-finance-form-label">Miles</span>
+            <input
+              className="brand-pro-finance-input"
+              type="text"
+              inputMode="decimal"
+              placeholder="e.g. 45"
+              value={miles}
+              onChange={(event) => setMiles(event.target.value)}
+            />
+            <span className="brand-pro-finance-field-hint">
+              {mileagePreviewCents != null
+                ? `= ${formatCents(mileagePreviewCents)} deduction`
+                : 'Business miles only'}{' '}
+              at {mileageRateCents}¢/mi
+            </span>
+          </label>
+        ) : (
+          <label className="brand-pro-finance-form-field">
+            <span className="brand-pro-finance-form-label">Amount</span>
+            <input
+              className="brand-pro-finance-input"
+              type="text"
+              inputMode="decimal"
+              placeholder="50 or 49.99"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+            />
+          </label>
+        )}
 
         <label className="brand-pro-finance-form-field" data-span="full">
           <span className="brand-pro-finance-form-label">Description</span>
