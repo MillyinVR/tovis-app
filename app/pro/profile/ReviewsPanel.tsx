@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import { isRecord } from '@/lib/guards'
+import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { Z } from '@/lib/zIndex'
 import {
@@ -34,6 +35,12 @@ export type ReviewForPanel = {
     mediaType: MediaType
     isFeaturedInPortfolio?: boolean
     isEligibleForLooks?: boolean
+    // Opt-in before/after pairing → this after photo renders as the slider.
+    before?: {
+      id: string
+      thumbUrl: string | null
+      fullUrl: string | null
+    } | null
   }>
 }
 
@@ -297,9 +304,23 @@ function ReviewsPanelInner({
             { month: 'short', day: 'numeric', year: 'numeric' },
           )
 
-          const media = review.mediaAssets ?? []
-          const primary = media[0] ?? null
+          const allMedia = review.mediaAssets ?? []
+          // A paired "after" (carries `before`) renders as the comparison slider
+          // in the right column; its before + the after itself drop out of the
+          // thumbnail strip so nothing shows twice.
+          const paired = allMedia.find((m) => m.before) ?? null
+          const pairedBefore = paired?.before ?? null
+          const pairedAfterSrc = paired ? mediaSrc(paired) : null
+          const showSlider = Boolean(paired && pairedBefore && pairedAfterSrc)
+
+          const media = showSlider
+            ? allMedia.filter(
+                (m) => m.id !== paired?.id && m.id !== pairedBefore?.id,
+              )
+            : allMedia
+          const primary = showSlider ? null : (media[0] ?? null)
           const primarySrc = primary ? mediaSrc(primary) : null
+          const hasRightColumn = showSlider || Boolean(primarySrc)
 
           const helpfulCount =
             typeof review.helpfulCount === 'number' ? review.helpfulCount : 0
@@ -316,7 +337,7 @@ function ReviewsPanelInner({
                 background: 'rgb(var(--bg-surface))',
                 padding: 12,
                 display: 'grid',
-                gridTemplateColumns: primarySrc ? '1fr 170px' : '1fr',
+                gridTemplateColumns: hasRightColumn ? '1fr 170px' : '1fr',
                 gap: 12,
                 alignItems: 'start',
               }}
@@ -551,7 +572,27 @@ function ReviewsPanelInner({
                 ) : null}
               </div>
 
-              {primary && primarySrc ? (
+              {showSlider && paired && pairedBefore && pairedAfterSrc ? (
+                <div
+                  style={{
+                    width: '100%',
+                    aspectRatio: '1 / 1',
+                    position: 'relative',
+                  }}
+                >
+                  <BeforeAfterReveal
+                    beforeSrc={
+                      pairedBefore.thumbUrl ??
+                      pairedBefore.fullUrl ??
+                      pairedAfterSrc
+                    }
+                    afterSrc={pairedAfterSrc}
+                    beforeAlt="Before"
+                    afterAlt="After"
+                    className="brand-before-after-fill"
+                  />
+                </div>
+              ) : primary && primarySrc ? (
                 <button
                   type="button"
                   onClick={() => open(primarySrc, primary.mediaType)}
