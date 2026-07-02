@@ -13348,11 +13348,14 @@ export async function createWaitlistOffer(
         })
       }
 
+      // ACTIVE (never offered) or NOTIFIED (already has a pending offer we're
+      // replacing). BOOKED/CANCELLED entries are not offerable — a re-offer to
+      // a NOTIFIED entry supersedes its prior PENDING offer below.
       const entry = await tx.waitlistEntry.findFirst({
         where: {
           id: args.waitlistEntryId,
           professionalId: args.professionalId,
-          status: WaitlistStatus.ACTIVE,
+          status: { in: [WaitlistStatus.ACTIVE, WaitlistStatus.NOTIFIED] },
         },
         select: { id: true, clientId: true, serviceId: true },
       })
