@@ -7780,6 +7780,32 @@
       ],
       "type": "object"
     },
+    "PairedBeforeDto": {
+      "description": "The chosen \"before\" of an opt-in before/after pair, resolved to renderable URLs. Present on a displayed asset (portfolio tile / review after-photo) that a pro or client paired; null → render the asset as a single tile. The tile's own `src`/`thumbUrl` are the \"after\".",
+      "properties": {
+        "fullUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "thumbUrl",
+        "fullUrl"
+      ],
+      "type": "object"
+    },
     "PaymentMethod": {
       "$ref": "#/definitions/%24Enums.PaymentMethod"
     },
@@ -9523,6 +9549,16 @@
     },
     "PublicPortfolioTileDto": {
       "properties": {
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PairedBeforeDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "caption": {
           "type": [
             "string",
@@ -9573,7 +9609,8 @@
         "visibility",
         "isEligibleForLooks",
         "isFeaturedInPortfolio",
-        "serviceIds"
+        "serviceIds",
+        "before"
       ],
       "type": "object"
     },

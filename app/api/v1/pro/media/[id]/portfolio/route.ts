@@ -3,9 +3,10 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
-import { MediaVisibility } from '@prisma/client'
+import { MediaPhase, MediaType, MediaVisibility } from '@prisma/client'
 import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { loadPrimaryBeforeAssetId } from '@/lib/media/bookingBeforeAfter'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 import { safeError } from '@/lib/security/logging'
 
@@ -25,6 +26,10 @@ async function loadOwnedMedia(mediaId: string, professionalId: string) {
       isFeaturedInPortfolio: true,
       isEligibleForLooks: true,
       visibility: true,
+      // Needed to auto-pair the featured "after" with its booking's "before".
+      bookingId: true,
+      phase: true,
+      mediaType: true,
       // B3b: the booking's client media-use consent also unlocks public sharing.
       booking: { select: { mediaUseConsentAt: true } },
 
@@ -87,7 +92,68 @@ async function backfillPointersIfMissing(mediaId: string, m: {
   })
 }
 
-export async function POST(_req: NextRequest, ctx: RouteContext) {
+type PairField = { present: boolean; value: string | null }
+
+/**
+ * Read an optional `beforeAssetId` from the feature request body, distinguishing
+ * three cases: omitted (auto-pair from the booking, the default-on behaviour),
+ * an explicit id (pair with that specific before), or explicit null / non-string
+ * (unpair). Callers that just toggle the feature flag send no body → auto-pair.
+ */
+function parseBeforeAssetField(body: unknown): PairField {
+  if (!body || typeof body !== 'object' || !('beforeAssetId' in body)) {
+    return { present: false, value: null }
+  }
+  const raw = (body as Record<string, unknown>).beforeAssetId
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    return { present: true, value: trimmed.length > 0 ? trimmed : null }
+  }
+  return { present: true, value: null }
+}
+
+/**
+ * Validate an explicitly-chosen "before": it must be another photo owned by the
+ * same pro (never a video, never the after itself). Keeps a pro from pairing
+ * across tenants or with a foreign asset id.
+ */
+async function validateExplicitBefore(
+  beforeAssetId: string,
+  professionalId: string,
+  afterAssetId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (beforeAssetId === afterAssetId) {
+    return { ok: false, error: 'A photo can’t be paired with itself.' }
+  }
+  const before = await prisma.mediaAsset.findUnique({
+    where: { id: beforeAssetId },
+    select: { id: true, professionalId: true, mediaType: true },
+  })
+  if (!before || before.professionalId !== professionalId) {
+    return { ok: false, error: 'Before photo not found.' }
+  }
+  if (before.mediaType !== MediaType.IMAGE) {
+    return { ok: false, error: 'A before/after pair must both be photos.' }
+  }
+  return { ok: true }
+}
+
+/**
+ * Default-on pairing: when a pro features an "after" that came from a booking,
+ * pair it with that booking's primary before. Skips videos and BEFORE-phase
+ * photos (a before isn't an "after"), and assets with no booking.
+ */
+async function resolveAutoPairedBefore(
+  media: { mediaType: MediaType; phase: MediaPhase; bookingId: string | null },
+  afterAssetId: string,
+): Promise<string | null> {
+  if (media.mediaType !== MediaType.IMAGE) return null
+  if (media.phase === MediaPhase.BEFORE) return null
+  if (!media.bookingId) return null
+  return loadPrimaryBeforeAssetId(media.bookingId, afterAssetId)
+}
+
+export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -113,17 +179,40 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
     // Optional: move old rows toward canonical pointers
     await backfillPointersIfMissing(mediaId, owned.media)
 
+    // Opt-in before/after pairing (default-on): an explicit body wins, otherwise
+    // auto-pair with the booking's before so the portfolio tile can render the
+    // comparison slider. The pro can unpair later by sending `beforeAssetId:null`.
+    const pairField = parseBeforeAssetField(await req.json().catch(() => null))
+    let beforeAssetId: string | null
+    if (pairField.present) {
+      if (pairField.value === null) {
+        beforeAssetId = null
+      } else {
+        const check = await validateExplicitBefore(
+          pairField.value,
+          professionalId,
+          mediaId,
+        )
+        if (!check.ok) return jsonFail(400, check.error)
+        beforeAssetId = pairField.value
+      }
+    } else {
+      beforeAssetId = await resolveAutoPairedBefore(owned.media, mediaId)
+    }
+
     const updated = await prisma.mediaAsset.update({
       where: { id: mediaId },
       data: {
         isFeaturedInPortfolio: true,
         visibility: computeVisibility(true, owned.media.isEligibleForLooks),
+        beforeAssetId,
       },
       select: {
         id: true,
         isFeaturedInPortfolio: true,
         isEligibleForLooks: true,
         visibility: true,
+        beforeAssetId: true,
 
         storageBucket: true,
         storagePath: true,
@@ -175,12 +264,16 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       data: {
         isFeaturedInPortfolio: false,
         visibility: computeVisibility(false, owned.media.isEligibleForLooks),
+        // Unpair on removal — a tile that's no longer featured shouldn't keep a
+        // dangling before/after pairing.
+        beforeAssetId: null,
       },
       select: {
         id: true,
         isFeaturedInPortfolio: true,
         isEligibleForLooks: true,
         visibility: true,
+        beforeAssetId: true,
 
         storageBucket: true,
         storagePath: true,

@@ -129,3 +129,32 @@ export async function loadBookingBeforeAfterThumbsFor(
   const map = await loadBookingBeforeAfterThumbs([bookingId])
   return map.get(bookingId) ?? EMPTY
 }
+
+/**
+ * The asset id of a booking's primary "before" photo — the earliest BEFORE-phase
+ * IMAGE — for auto-pairing an "after" with its before (opt-in before/after
+ * pairing). Chooses the same "primary before" that
+ * {@link loadBookingBeforeAfterThumbs} would render. Returns null when the
+ * booking has no before image (or only the `excludeAssetId` one, so an asset is
+ * never paired with itself).
+ */
+export async function loadPrimaryBeforeAssetId(
+  bookingId: string,
+  excludeAssetId?: string,
+): Promise<string | null> {
+  const trimmed = typeof bookingId === 'string' ? bookingId.trim() : ''
+  if (!trimmed) return null
+
+  const before = await prisma.mediaAsset.findFirst({
+    where: {
+      bookingId: trimmed,
+      mediaType: MediaType.IMAGE,
+      phase: MediaPhase.BEFORE,
+      ...(excludeAssetId ? { id: { not: excludeAssetId } } : {}),
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  })
+
+  return before?.id ?? null
+}
