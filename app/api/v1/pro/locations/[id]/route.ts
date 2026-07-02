@@ -9,9 +9,10 @@ import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
-import { hasOwn, isRecord, type UnknownRecord } from '@/lib/guards'
+import { hasOwn, type UnknownRecord } from '@/lib/guards'
 import { pickBool, pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
+import { locationHasBlockingReferences } from '@/lib/proLocations/locationReferences'
 import { evaluatePublishableLocation } from '@/lib/pro/readiness/proReadiness'
 import {
   deleteLocationFromIndex,
@@ -47,6 +48,7 @@ async function loadOwnedLocation(args: {
     where: {
       id: args.locationId,
       professionalId: args.professionalId,
+      archivedAt: null,
     },
     select: PROFESSIONAL_LOCATION_SELECT,
   })
@@ -372,46 +374,74 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       return jsonFail(400, 'Missing id')
     }
 
-    try {
-      const deleted = await prisma.professionalLocation.deleteMany({
-        where: {
-          id: locationId,
-          professionalId,
-        },
-      })
+    const existing = await prisma.professionalLocation.findFirst({
+      where: {
+        id: locationId,
+        professionalId,
+        archivedAt: null,
+      },
+      select: {
+        id: true,
+        isPrimary: true,
+      },
+    })
 
-      if (deleted.count !== 1) {
-        return jsonFail(404, 'Location not found')
-      }
-
-      await bumpScheduleConfigVersion(professionalId)
-      await deleteLocationFromIndex(locationId)
-
-      return jsonOk({})
-    } catch (error: unknown) {
-      const code = isRecord(error) ? pickString(error.code) : null
-
-      const message =
-        error instanceof Error
-          ? error.message
-          : isRecord(error)
-            ? pickString(error.message)
-            : null
-
-      if (
-        code === 'P2003' ||
-        (message &&
-          (message.includes('Foreign key constraint') ||
-            message.includes('violates foreign key')))
-      ) {
-        return jsonFail(
-          409,
-          'This location is used by existing bookings and cannot be deleted.',
-        )
-      }
-
-      throw error
+    if (!existing) {
+      return jsonFail(404, 'Location not found')
     }
+
+    // A location referenced by bookings/holds/openings/rebook slots cannot be
+    // hard-deleted (Restrict FKs, and we must keep booking history). Archive it
+    // instead so it disappears from every pro-facing surface while the history
+    // it anchors stays intact. Locations with no references are truly deleted.
+    const referenced = await locationHasBlockingReferences(prisma, locationId)
+
+    await prisma.$transaction(async (tx) => {
+      // Never leave a pro without a primary: if we're removing the primary,
+      // promote another live location before it goes.
+      if (existing.isPrimary) {
+        const nextPrimary = await tx.professionalLocation.findFirst({
+          where: {
+            professionalId,
+            archivedAt: null,
+            id: { not: locationId },
+          },
+          orderBy: [
+            { isBookable: 'desc' },
+            { isPrimary: 'desc' },
+            { createdAt: 'asc' },
+          ],
+          select: { id: true },
+        })
+
+        if (nextPrimary) {
+          await tx.professionalLocation.updateMany({
+            where: { id: nextPrimary.id, professionalId },
+            data: { isPrimary: true },
+          })
+        }
+      }
+
+      if (referenced) {
+        await tx.professionalLocation.updateMany({
+          where: { id: locationId, professionalId, archivedAt: null },
+          data: {
+            archivedAt: new Date(),
+            isBookable: false,
+            isPrimary: false,
+          },
+        })
+      } else {
+        await tx.professionalLocation.deleteMany({
+          where: { id: locationId, professionalId },
+        })
+      }
+    })
+
+    await bumpScheduleConfigVersion(professionalId)
+    await deleteLocationFromIndex(locationId)
+
+    return jsonOk({ archived: referenced })
   } catch (error) {
     console.error('DELETE /api/v1/pro/locations/[id] error', error)
 

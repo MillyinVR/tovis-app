@@ -91,6 +91,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       where: {
         id: locationId,
         professionalId,
+        archivedAt: null,
       },
       select: {
         id: true,

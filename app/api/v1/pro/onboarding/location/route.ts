@@ -172,6 +172,7 @@ export async function POST(req: Request) {
           where: {
             professionalId,
             type: ProfessionalLocationType.MOBILE_BASE,
+            archivedAt: null,
           },
         })
 

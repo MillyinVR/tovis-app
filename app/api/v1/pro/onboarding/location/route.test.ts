@@ -430,6 +430,7 @@ describe('POST /api/v1/pro/onboarding/location', () => {
       where: {
         professionalId: 'pro_123',
         type: ProfessionalLocationType.MOBILE_BASE,
+        archivedAt: null,
       },
     })
 

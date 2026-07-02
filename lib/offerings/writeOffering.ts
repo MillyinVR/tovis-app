@@ -71,7 +71,7 @@ export async function ensureLocationsForOffering(args: {
   ]
 
   const existing = await tx.professionalLocation.findMany({
-    where: { professionalId, type: { in: relevantTypes } },
+    where: { professionalId, type: { in: relevantTypes }, archivedAt: null },
     select: { type: true },
     take: 50,
   })
@@ -85,7 +85,7 @@ export async function ensureLocationsForOffering(args: {
   )
 
   let totalLocationCount = await tx.professionalLocation.count({
-    where: { professionalId },
+    where: { professionalId, archivedAt: null },
   })
 
   if (offersInSalon && !hasSalonCapableLocation) {

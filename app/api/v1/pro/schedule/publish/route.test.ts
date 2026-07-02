@@ -223,6 +223,7 @@ describe('POST /api/v1/pro/schedule/publish', () => {
       where: {
         professionalId: 'pro_123',
         isBookable: false,
+        archivedAt: null,
       },
       select: {
         id: true,
