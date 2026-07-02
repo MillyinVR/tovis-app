@@ -1,3 +1,4 @@
+import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import type { BookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 
@@ -66,6 +67,21 @@ export default function AftercareBeforeAfter(props: {
   if (!beforeUrl && !afterUrl) return null
 
   const serviceName = props.serviceName ?? null
+
+  // Both halves present → the interactive reveal slider (parity with the iOS
+  // BeforeAfterCompareView). Only one half → fall back to the branded tiles
+  // below, which keep a labelled placeholder for the missing side.
+  if (beforeUrl && afterUrl) {
+    return (
+      <BeforeAfterReveal
+        beforeSrc={beforeUrl}
+        afterSrc={afterUrl}
+        beforeAlt={photoAlt('Before', serviceName)}
+        afterAlt={photoAlt('After', serviceName)}
+        className={props.className}
+      />
+    )
+  }
 
   return (
     <div
