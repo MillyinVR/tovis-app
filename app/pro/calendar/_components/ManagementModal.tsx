@@ -29,6 +29,8 @@ type ManagementModalProps = {
 
   onApproveBookingId?: (bookingId: string) => void | Promise<void>
   onDenyBookingId?: (bookingId: string) => void | Promise<void>
+  /** Waitlist rows: open the availability-aware "Offer a time" modal. */
+  onOfferTime?: (event: CalendarEvent) => void
   actionBusyId?: string | null
   actionError?: string | null
 
@@ -123,6 +125,7 @@ type ManagementEventRowProps = {
   onPickEvent: (event: CalendarEvent) => void
   onApproveBookingId?: (bookingId: string) => void | Promise<void>
   onDenyBookingId?: (bookingId: string) => void | Promise<void>
+  onOfferTime?: (event: CalendarEvent) => void
 }
 
 type ModerationActionsProps = {
@@ -520,6 +523,7 @@ export function ManagementModal(props: ManagementModalProps) {
     onBlockFullDayToday,
     onApproveBookingId,
     onDenyBookingId,
+    onOfferTime,
     actionBusyId = null,
     actionError = null,
     copy: copyOverride,
@@ -685,6 +689,7 @@ export function ManagementModal(props: ManagementModalProps) {
                   onPickEvent={onPickEvent}
                   onApproveBookingId={onApproveBookingId}
                   onDenyBookingId={onDenyBookingId}
+                  onOfferTime={onOfferTime}
                 />
               ))}
             </div>
@@ -717,6 +722,7 @@ function ManagementEventRow(props: ManagementEventRowProps) {
     onPickEvent,
     onApproveBookingId,
     onDenyBookingId,
+    onOfferTime,
   } = props
 
   const bookingId = bookingIdFor(event)
@@ -729,6 +735,14 @@ function ManagementEventRow(props: ManagementEventRowProps) {
   const preferenceLabel =
     event.kind === 'BOOKING' ? normalizeText(event.preferenceLabel) : ''
   const offerHref = event.kind === 'BOOKING' ? event.offerHref ?? null : null
+  const canOfferTime =
+    isWaitlist &&
+    event.kind === 'BOOKING' &&
+    Boolean(onOfferTime) &&
+    Boolean(event.waitlistEntryId) &&
+    Boolean(event.offeringId)
+  const pendingOffer =
+    event.kind === 'BOOKING' ? event.pendingOffer ?? null : null
   const waitlistMessageHref = isWaitlist ? messageHrefForWaitlist(event.id) : null
 
   const rowCopy = buildEventRowCopy({
@@ -806,7 +820,28 @@ function ManagementEventRow(props: ManagementEventRowProps) {
         <div className="brand-pro-calendar-management-row-primary-actions">
           {isWaitlist ? (
             <>
-              {offerHref ? (
+              {pendingOffer ? (
+                <span
+                  className="brand-pro-calendar-management-status-badge"
+                  data-tone="info"
+                >
+                  {`Offered · ${formatInTimeZone(
+                    new Date(pendingOffer.startsAt),
+                    viewportTimeZone,
+                    {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    },
+                  )}`}
+                </span>
+              ) : canOfferTime && onOfferTime ? (
+                <ActionButton tone="primary" onClick={() => onOfferTime(event)}>
+                  {copy.offerTimeAction}
+                </ActionButton>
+              ) : offerHref ? (
                 <ActionLink href={offerHref} tone="primary">
                   {copy.offerTimeAction}
                 </ActionLink>

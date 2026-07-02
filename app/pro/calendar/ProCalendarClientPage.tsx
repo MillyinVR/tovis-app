@@ -13,6 +13,7 @@ import { CalendarMobileShell } from './_components/CalendarMobileShell'
 import { CalendarTabletShell } from './_components/CalendarTabletShell'
 import { ConfirmChangeModal } from './_components/ConfirmChangeModal'
 import { ManagementModal } from './_components/ManagementModal'
+import WaitlistOfferModal from './_components/WaitlistOfferModal'
 
 import { useCalendarData } from './_hooks/useCalendarData'
 import { useCalendarNavigation } from './_hooks/useCalendarNavigation'
@@ -73,9 +74,26 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
 
   const cal = useCalendarData({ view, currentDate })
 
+  // Waitlist "Offer a time" modal: the event whose client we're offering a slot.
+  const [offerEvent, setOfferEvent] = useState<CalendarEvent | null>(null)
+
   const calendarTimeZone = useMemo(
     () => safeCalendarTimeZone(cal.timeZone),
     [cal.timeZone],
+  )
+
+  // v1 offers are in-salon only, so anchor them to the pro's salon/suite location
+  // (prefer the primary). null when the pro has no bookable salon location.
+  const offerSalonLocation = useMemo(
+    () =>
+      (cal.locations ?? [])
+        .filter(
+          (location) =>
+            location.isBookable &&
+            (location.type === 'SALON' || location.type === 'SUITE'),
+        )
+        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))[0] ?? null,
+    [cal.locations],
   )
 
   const activeLocationTimeZone = useMemo(
@@ -323,9 +341,44 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onDenyBookingId={(bookingId) => {
           void cal.denyBookingById(bookingId)
         }}
+        onOfferTime={
+          offerSalonLocation && cal.professionalId
+            ? (event) => {
+                cal.closeManagement()
+                setOfferEvent(event)
+              }
+            : undefined
+        }
         actionBusyId={cal.managementActionBusyId}
         actionError={cal.managementActionError}
       />
+
+      {offerEvent &&
+      offerEvent.kind === 'BOOKING' &&
+      offerEvent.waitlistEntryId &&
+      offerEvent.serviceId &&
+      offerSalonLocation &&
+      cal.professionalId ? (
+        <WaitlistOfferModal
+          open
+          onClose={() => setOfferEvent(null)}
+          professionalId={cal.professionalId}
+          waitlistEntryId={offerEvent.waitlistEntryId}
+          serviceId={offerEvent.serviceId}
+          offeringId={offerEvent.offeringId ?? null}
+          locationId={offerSalonLocation.id}
+          timeZone={validTimeZoneOrFallback(
+            offerSalonLocation.timeZone,
+            calendarTimeZone,
+          )}
+          clientName={offerEvent.clientName}
+          serviceName={offerEvent.details.serviceName}
+          onOffered={() => {
+            setOfferEvent(null)
+            void cal.reload()
+          }}
+        />
+      ) : null}
 
       <ConfirmChangeModal
         open={cal.confirmOpen}

@@ -469,6 +469,8 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     activeLocationType: loc.activeLocationType,
     activeStepMinutes: loc.activeStepMinutes,
 
+    professionalId: cal.professionalId,
+
     canSalon: loc.canSalon,
     canMobile: loc.canMobile,
 

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     bookingFindMany: vi.fn(),
     calendarBlockFindMany: vi.fn(),
     waitlistEntryFindMany: vi.fn(),
+    waitlistOfferFindMany: vi.fn(),
     professionalServiceOfferingFindMany: vi.fn(),
   }
 })
@@ -29,6 +30,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     waitlistEntry: {
       findMany: mocks.waitlistEntryFindMany,
+    },
+    waitlistOffer: {
+      findMany: mocks.waitlistOfferFindMany,
     },
     professionalServiceOffering: {
       findMany: mocks.professionalServiceOfferingFindMany,
@@ -194,6 +198,7 @@ describe('GET /api/v1/pro/calendar', () => {
     mocks.bookingFindMany.mockResolvedValue([salonBooking, mobileBooking])
 
     mocks.waitlistEntryFindMany.mockResolvedValue([])
+    mocks.waitlistOfferFindMany.mockResolvedValue([])
     mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
 
     mocks.calendarBlockFindMany.mockImplementation(

@@ -138,6 +138,18 @@ enum WaitlistStatus {
   CANCELLED
 }
 
+// Lifecycle of a pro-proposed waitlist time offer. The pro proposes a concrete
+// slot (PENDING); the client Confirms (ACCEPTED → a real booking) or Declines
+// (DECLINED, entry stays ACTIVE so the pro can re-offer). CANCELLED = superseded
+// by a newer PENDING offer for the same entry.
+enum WaitlistOfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
 enum ClientIntentType {
   VIEW_PRO
   VIEW_SERVICE
@@ -553,6 +565,9 @@ enum NotificationEventKey {
   APPOINTMENT_REMINDER
   AFTERCARE_READY
   LAST_MINUTE_OPENING_AVAILABLE
+  // A pro proposed a specific appointment time to a waitlisted client; the
+  // client must Confirm before it books (see WaitlistOffer).
+  WAITLIST_TIME_OFFERED
   VIRAL_REQUEST_APPROVED
   PAYMENT_COLLECTED
   PAYMENT_ACTION_REQUIRED
@@ -1455,6 +1470,7 @@ model ClientProfile {
   notifications          ClientNotification[]
   scheduledNotifications ScheduledClientNotification[]
   waitlistEntries        WaitlistEntry[]
+  waitlistOffers         WaitlistOffer[]
 
   referralsAsReferrer Referral[] @relation("ReferrerReferrals")
   referralsAsReferred Referral[] @relation("ReferredReferrals")
@@ -1637,6 +1653,7 @@ model ProfessionalProfile {
   searchIndexEntries ProfessionalSearchIndex[]
 
   aftercareRebookSlots AftercareRebookSlot[]
+  waitlistOffers       WaitlistOffer[]
 
   referrals Referral[]
 
@@ -2047,6 +2064,7 @@ model ProfessionalLocation {
   searchIndexEntry ProfessionalSearchIndex?
 
   aftercareRebookSlots AftercareRebookSlot[]
+  waitlistOffers       WaitlistOffer[]
 
   @@index([placeId])
   @@index([professionalId])
@@ -2315,6 +2333,7 @@ model ProfessionalServiceOffering {
   addOns OfferingAddOn[]
 
   aftercareRebookSlots AftercareRebookSlot[]
+  waitlistOffers       WaitlistOffer[]
 
   lastMinuteOpeningServices LastMinuteOpeningService[]
   priceRamps                OfferingPriceRamp[]
@@ -2789,6 +2808,7 @@ model Booking {
   clientActionTokens         ClientActionToken[]
 
   aftercareSummary             AftercareSummary?
+  waitlistOffer                WaitlistOffer?
   clientNotifications          ClientNotification[]
   scheduledClientNotifications ScheduledClientNotification[]
   reviews                      Review[]
@@ -4004,12 +4024,63 @@ model WaitlistEntry {
   service      Service             @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   media        MediaAsset?         @relation(fields: [mediaId], references: [id], onDelete: SetNull)
 
-  messageThread MessageThread? @relation("WaitlistThread")
+  messageThread MessageThread?  @relation("WaitlistThread")
+  offers        WaitlistOffer[]
 
   @@index([professionalId, status, createdAt])
   @@index([clientId, status, createdAt])
   @@index([serviceId, status, createdAt])
   @@index([professionalId, preferenceType, status])
+}
+
+// A pro-proposed appointment time for a waitlisted client, awaiting the client's
+// Confirm/Decline (the true client-confirm gate for the waitlist "Offer a time"
+// flow). Mirrors the aftercare BOOKED_NEXT_APPOINTMENT proposal, but is scoped to
+// a WaitlistEntry instead of a completed source booking. On Confirm this
+// materializes a normal ACCEPTED booking via performLockedCreateProBooking.
+//
+// A partial unique index (status = 'PENDING') enforces at most one outstanding
+// offer per entry — added by raw SQL in the migration (Prisma can't express a
+// partial unique index).
+model WaitlistOffer {
+  id String @id @default(cuid())
+
+  waitlistEntryId String
+  waitlistEntry   WaitlistEntry @relation(fields: [waitlistEntryId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  clientId String
+  client   ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  offeringId String
+  offering   ProfessionalServiceOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+
+  locationId   String
+  location     ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  locationType ServiceLocationType
+
+  startsAt        DateTime
+  endsAt          DateTime
+  durationMinutes Int
+
+  status    WaitlistOfferStatus @default(PENDING)
+  expiresAt DateTime?
+
+  // Set when the client confirms → the booking this offer materialized.
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  respondedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([waitlistEntryId, status])
+  @@index([clientId, status, createdAt])
+  @@index([professionalId, status, createdAt])
+  @@index([offeringId])
+  @@index([locationId])
 }
 
 model MessageThread {

@@ -34,6 +34,9 @@ export const IDEMPOTENCY_ROUTES = {
   BOOKING_AFTERCARE_SEND: 'POST /api/v1/pro/bookings/[id]/aftercare',
   CLIENT_AFTERCARE_REBOOK: 'POST /api/v1/client/rebook/[token]',
 
+  PRO_WAITLIST_OFFER: 'POST /api/v1/pro/waitlist/[entryId]/offer',
+  CLIENT_WAITLIST_OFFER: 'POST /api/v1/client/waitlist-offers/[id]',
+
   CLIENT_CHECKOUT_CONFIRM: 'POST /api/v1/client/bookings/[id]/checkout',
   CLIENT_CHECKOUT_STRIPE_SESSION:
     'POST /api/v1/client/bookings/[id]/checkout/stripe-session',

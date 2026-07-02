@@ -21,6 +21,7 @@ export type NotificationTemplateKey =
   | 'appointment_reminder'
   | 'aftercare_ready'
   | 'last_minute_opening_available'
+  | 'waitlist_time_offered'
   | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
@@ -137,6 +138,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.APPOINTMENT_REMINDER,
   NotificationEventKey.AFTERCARE_READY,
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
+  NotificationEventKey.WAITLIST_TIME_OFFERED,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
@@ -398,6 +400,22 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  [NotificationEventKey.WAITLIST_TIME_OFFERED]: {
+    // A pro proposed a specific appointment time to a waitlisted client, who
+    // must Confirm before it books. Time-sensitive (the slot can be taken), so
+    // it pushes as well as landing in-app — but stays a non-transactional,
+    // quiet-hours-respecting nudge like the sibling last-minute opening.
+    key: NotificationEventKey.WAITLIST_TIME_OFFERED,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'waitlist_time_offered',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: {
     key: NotificationEventKey.VIRAL_REQUEST_APPROVED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -611,6 +629,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.APPOINTMENT_REMINDER,
   NotificationEventKey.AFTERCARE_READY,
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
+  NotificationEventKey.WAITLIST_TIME_OFFERED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
