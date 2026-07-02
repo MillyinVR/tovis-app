@@ -148,6 +148,11 @@ export const publicReviewMediaAssetSelect =
     thumbPath: true,
     url: true,
     thumbUrl: true,
+
+    // Opt-in before/after pairing → render the comparison slider when present.
+    beforeAsset: {
+      select: pairedBeforeAssetSelect,
+    },
   })
 
 export const publicReviewSelect = Prisma.validator<Prisma.ReviewSelect>()({

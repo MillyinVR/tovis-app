@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
 
   txMediaAssetFindMany: vi.fn(),
   txMediaAssetUpdateMany: vi.fn(),
+  txMediaAssetUpdate: vi.fn(),
   txMediaAssetCreateMany: vi.fn(),
 
   txProfessionalProfileFindUnique: vi.fn(),
@@ -139,6 +140,7 @@ const tx = {
   mediaAsset: {
     findMany: mocks.txMediaAssetFindMany,
     updateMany: mocks.txMediaAssetUpdateMany,
+    update: mocks.txMediaAssetUpdate,
     createMany: mocks.txMediaAssetCreateMany,
   },
   professionalProfile: {
@@ -518,6 +520,7 @@ describe('app/api/v1/client/bookings/[id]/review/route.ts POST', () => {
 
     mocks.validateUploadSession.mockResolvedValue(clientReviewSession())
     mocks.consumeUploadSession.mockResolvedValue(undefined)
+    mocks.txMediaAssetUpdate.mockResolvedValue({ id: 'media_after' })
 
     mocks.beginRouteIdempotency.mockResolvedValue(makeStartedIdempotency())
     mocks.isRouteIdempotencyHandled.mockReturnValue(false)
@@ -767,7 +770,7 @@ describe('app/api/v1/client/bookings/[id]/review/route.ts POST', () => {
         visibility: MediaVisibility.PRO_CLIENT,
         mediaType: { in: [MediaType.IMAGE, MediaType.VIDEO] },
       },
-      select: { id: true },
+      select: { id: true, phase: true, mediaType: true },
     })
 
     expect(mocks.txMediaAssetUpdateMany).toHaveBeenCalledWith({
@@ -874,6 +877,67 @@ describe('app/api/v1/client/bookings/[id]/review/route.ts POST', () => {
       ok: true,
       ...expectedResponseBody(),
     })
+  })
+
+  it('pairs an attached before with an attached after so the review can render the slider', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_review_pair'),
+    )
+
+    mocks.txReviewFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+    mocks.txMediaAssetFindMany.mockResolvedValueOnce([
+      { id: 'media_before', phase: MediaPhase.BEFORE, mediaType: MediaType.IMAGE },
+      { id: 'media_after', phase: MediaPhase.AFTER, mediaType: MediaType.IMAGE },
+    ])
+    mocks.txReviewCreate.mockResolvedValueOnce({ id: 'review_1' })
+    mocks.txMediaAssetUpdateMany.mockResolvedValueOnce({ count: 2 })
+    mocks.txReviewFindUnique.mockResolvedValueOnce(makeFullReview())
+
+    const req = makeIdempotentRequest({
+      key: 'idem_review_pair',
+      body: makeValidBody({
+        attachedMediaIds: ['media_before', 'media_after'],
+        media: [],
+      }),
+      headers: { 'x-request-id': 'req_review_pair' },
+    })
+
+    const res = await POST(req, makeCtx())
+    expect(res.status).toBe(201)
+
+    // The after gets its chosen before — the review now renders the slider.
+    expect(mocks.txMediaAssetUpdate).toHaveBeenCalledWith({
+      where: { id: 'media_after' },
+      data: { beforeAssetId: 'media_before' },
+    })
+  })
+
+  it('does not pair when only one phase is attached', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_review_solo'),
+    )
+
+    mocks.txReviewFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+    mocks.txMediaAssetFindMany.mockResolvedValueOnce([
+      { id: 'media_after', phase: MediaPhase.AFTER, mediaType: MediaType.IMAGE },
+    ])
+    mocks.txReviewCreate.mockResolvedValueOnce({ id: 'review_1' })
+    mocks.txMediaAssetUpdateMany.mockResolvedValueOnce({ count: 1 })
+    mocks.txReviewFindUnique.mockResolvedValueOnce(makeFullReview())
+
+    const req = makeIdempotentRequest({
+      key: 'idem_review_solo',
+      body: makeValidBody({ attachedMediaIds: ['media_after'], media: [] }),
+      headers: { 'x-request-id': 'req_review_solo' },
+    })
+
+    const res = await POST(req, makeCtx())
+    expect(res.status).toBe(201)
+    expect(mocks.txMediaAssetUpdate).not.toHaveBeenCalled()
   })
 
   it('returns the existing review inside transaction, completes idempotency as 200, and does not create or audit again', async () => {

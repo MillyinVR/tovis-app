@@ -135,6 +135,8 @@ export type PublicReviewMediaDto = {
   thumbUrl: string | null
   mediaType: MediaType
   isFeaturedInPortfolio: boolean
+  /** Paired "before" for the comparison slider, or null when not paired. */
+  before: PairedBeforeDto | null
 }
 
 export type PublicReviewDto = {
@@ -483,12 +485,19 @@ export async function mapPublicReviewMediaAssetToDto(
 
   if (!rendered.url) return null
 
+  // Only an image "after" carries a before/after pairing (parity with portfolio).
+  const before =
+    asset.mediaType === MediaType.IMAGE
+      ? await mapPairedBeforeToDto(asset.beforeAsset)
+      : null
+
   return {
     id: asset.id,
     url: rendered.url,
     thumbUrl: rendered.thumbUrl,
     mediaType: asset.mediaType,
     isFeaturedInPortfolio: asset.isFeaturedInPortfolio,
+    before,
   }
 }
 

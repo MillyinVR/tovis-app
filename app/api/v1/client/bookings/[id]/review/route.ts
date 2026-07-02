@@ -3,6 +3,7 @@
 import { NextRequest } from 'next/server'
 import {
   BookingCloseoutAuditAction,
+  MediaPhase,
   MediaType,
   MediaVisibility,
   NotificationEventKey,
@@ -467,7 +468,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 visibility: MediaVisibility.PRO_CLIENT,
                 mediaType: { in: [MediaType.IMAGE, MediaType.VIDEO] },
               },
-              select: { id: true },
+              select: { id: true, phase: true, mediaType: true },
             })
           : []
 
@@ -505,6 +506,31 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               reviewLocked: true,
             },
           })
+
+          // Opt-in before/after pairing: when the client attaches BOTH a before
+          // and an after photo, pair them so the review renders the comparison
+          // slider. Pairs only within the attached set — it never surfaces an
+          // un-attached session photo the client didn't choose to show.
+          const attachedBefore = attachables.find(
+            (item) =>
+              item.phase === MediaPhase.BEFORE &&
+              item.mediaType === MediaType.IMAGE,
+          )
+          const attachedAfter = attachables.find(
+            (item) =>
+              item.phase === MediaPhase.AFTER &&
+              item.mediaType === MediaType.IMAGE,
+          )
+          if (
+            attachedBefore &&
+            attachedAfter &&
+            attachedBefore.id !== attachedAfter.id
+          ) {
+            await tx.mediaAsset.update({
+              where: { id: attachedAfter.id },
+              data: { beforeAssetId: attachedBefore.id },
+            })
+          }
         }
 
         if (resolvedClientMedia.length > 0) {

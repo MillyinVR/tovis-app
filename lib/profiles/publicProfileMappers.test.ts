@@ -15,6 +15,7 @@ vi.mock('@/lib/media/renderUrls', () => ({
 import {
   mapPairedBeforeToDto,
   mapPublicPortfolioTileToDto,
+  mapPublicReviewMediaAssetToDto,
 } from './publicProfileMappers'
 
 const beforeImage = {
@@ -96,5 +97,51 @@ describe('mapPublicPortfolioTileToDto before/after pairing', () => {
       makePortfolioRow({ mediaType: MediaType.VIDEO, beforeAsset: beforeImage }),
     )
     expect(tile?.before).toBeNull()
+  })
+})
+
+function makeReviewMediaRow(
+  overrides?: Partial<{
+    mediaType: MediaType
+    beforeAsset: typeof beforeImage | null
+  }>,
+) {
+  return {
+    id: 'review_after_1',
+    mediaType: MediaType.IMAGE,
+    isFeaturedInPortfolio: false,
+    storageBucket: 'media-public',
+    storagePath: 'p/review_after_1.jpg',
+    thumbBucket: null,
+    thumbPath: null,
+    url: 'https://cdn.example.com/review_after_1.jpg',
+    thumbUrl: 'https://cdn.example.com/review_after_1_thumb.jpg',
+    beforeAsset: null as typeof beforeImage | null,
+    ...(overrides ?? {}),
+  }
+}
+
+describe('mapPublicReviewMediaAssetToDto before/after pairing', () => {
+  it('exposes the paired before on a review after photo', async () => {
+    const media = await mapPublicReviewMediaAssetToDto(
+      makeReviewMediaRow({ beforeAsset: beforeImage }),
+    )
+    expect(media?.before).toEqual({
+      id: 'before_1',
+      thumbUrl: 'https://cdn.example.com/before_1_thumb.jpg',
+      fullUrl: 'https://cdn.example.com/before_1.jpg',
+    })
+  })
+
+  it('has a null before when the review photo is unpaired', async () => {
+    const media = await mapPublicReviewMediaAssetToDto(makeReviewMediaRow())
+    expect(media?.before).toBeNull()
+  })
+
+  it('drops the pairing when the review photo is a video', async () => {
+    const media = await mapPublicReviewMediaAssetToDto(
+      makeReviewMediaRow({ mediaType: MediaType.VIDEO, beforeAsset: beforeImage }),
+    )
+    expect(media?.before).toBeNull()
   })
 })
