@@ -4,8 +4,12 @@
 // URLs server-side, so the two surfaces never drift.
 import type { CurrentUser } from '@/lib/currentUser'
 
+import { MediaType } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
+import { mapPairedBeforeToDto, type PairedBeforeDto } from '@/lib/media/pairedBefore'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { pairedBeforeAssetSelect } from '@/lib/profiles/publicProfileSelects'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 
 type ClientLinkViewer = Awaited<ReturnType<typeof loadClientLinkViewer>>
@@ -19,6 +23,8 @@ export type ProReviewMediaTile = {
   isFeaturedInPortfolio: boolean
   services: { id: string; serviceName: string }[]
   src: string
+  /** Opt-in before/after pairing → render the comparison slider when present. */
+  before: PairedBeforeDto | null
 }
 
 export type ProReviewListItem = {
@@ -67,6 +73,10 @@ export async function loadProReviewsList(args: {
           thumbPath: true,
           url: true,
           thumbUrl: true,
+          // Opt-in before/after pairing → render the comparison slider when present.
+          beforeAsset: {
+            select: pairedBeforeAssetSelect,
+          },
           services: {
             include: { service: true },
           },
@@ -113,6 +123,12 @@ export async function loadProReviewsList(args: {
             const src = (renderThumbUrl ?? renderUrl ?? '').trim()
             if (!src) return null
 
+            // Only an image "after" carries a pairing (parity with the other mappers).
+            const before =
+              m.mediaType === MediaType.IMAGE
+                ? await mapPairedBeforeToDto(m.beforeAsset)
+                : null
+
             const tile: ProReviewMediaTile = {
               id: m.id,
               caption: m.caption ?? null,
@@ -123,6 +139,7 @@ export async function loadProReviewsList(args: {
                 serviceName: s.service?.name ?? 'Service',
               })),
               src,
+              before,
             }
             return tile
           }),
