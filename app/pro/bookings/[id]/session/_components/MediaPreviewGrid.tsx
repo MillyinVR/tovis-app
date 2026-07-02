@@ -1,12 +1,9 @@
 // app/pro/bookings/[id]/session/_components/MediaPreviewGrid.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
-import MediaFill from '@/app/_components/media/MediaFill'
-import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
+import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
-import { cn } from '@/lib/utils'
 
 type Item = {
   id: string
@@ -37,10 +34,6 @@ function fmtDate(v: unknown) {
 }
 
 export default function MediaPreviewGrid({ items, title }: { items: Item[]; title: string }) {
-  const [openId, setOpenId] = useState<string | null>(null)
-
-  const active = useMemo(() => items.find((x) => x.id === openId) ?? null, [items, openId])
-
   const footerOffsetPx = UI_SIZES.footerHeight ?? 0
 
   return (
@@ -67,31 +60,15 @@ export default function MediaPreviewGrid({ items, title }: { items: Item[]; titl
                 {m.caption ? <div className="mt-1 text-sm text-textSecondary">{m.caption}</div> : null}
 
                 {previewSrc ? (
-                  <button
-                    type="button"
-                    onClick={() => setOpenId(m.id)}
-                    className={cn(
-                      'mt-2 block w-full overflow-hidden rounded-card border border-white/10 bg-bgPrimary',
-                      'focus:outline-none focus:ring-2 focus:ring-accentPrimary/35',
-                    )}
-                    title="Open fullscreen"
-                  >
-                    <div className="relative w-full aspect-[9/16]">
-                      <MediaFill
-                        src={previewSrc}
-                        mediaType={m.mediaType}
-                        alt="Media preview"
-                        fit="cover"
-                        className="absolute inset-0 h-full w-full"
-                        videoProps={{
-                          muted: true,
-                          playsInline: true,
-                          preload: 'metadata',
-                          controls: false,
-                        }}
-                      />
-                    </div>
-                  </button>
+                  <ClickableMedia
+                    thumbSrc={previewSrc}
+                    fullSrc={openSrc}
+                    mediaType={m.mediaType}
+                    alt="Media preview"
+                    caption={m.caption}
+                    footerOffsetPx={footerOffsetPx}
+                    className="mt-2 aspect-[9/16] w-full rounded-card border border-white/10 bg-bgPrimary"
+                  />
                 ) : (
                   <div className="mt-2 rounded-card border border-white/10 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
                     Couldn’t generate a render URL (file missing or storage error).
@@ -116,50 +93,6 @@ export default function MediaPreviewGrid({ items, title }: { items: Item[]; titl
           })}
         </div>
       )}
-
-      {active?.renderUrl ? (
-        <MediaFullscreenViewer
-          src={active.renderUrl}
-          mediaType={active.mediaType}
-          alt={active.caption || 'Media'}
-          fit="contain"
-          showGradients
-          footerOffsetPx={footerOffsetPx}
-          topLeft={
-            <button
-              type="button"
-              onClick={() => setOpenId(null)}
-              className={cn(
-                'tap-target inline-flex items-center gap-2 rounded-full border border-white/10',
-                'bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary',
-                'backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
-                'hover:bg-white/10',
-              )}
-            >
-              ← Back
-            </button>
-          }
-          bottom={
-            <div className="pointer-events-none">
-              <div className="pointer-events-auto w-full max-w-[680px]">
-                <div
-                  className={cn(
-                    'rounded-[18px] border border-white/10 bg-bgPrimary/25 backdrop-blur-xl',
-                    'px-4 py-3',
-                    'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
-                  )}
-                >
-                  {active.caption ? (
-                    <div className="text-[14px] font-black leading-snug text-textPrimary">{active.caption}</div>
-                  ) : (
-                    <div className="text-[12px] font-semibold text-white/70">No caption</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          }
-        />
-      ) : null}
     </>
   )
 }
