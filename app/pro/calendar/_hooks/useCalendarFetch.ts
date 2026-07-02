@@ -171,6 +171,10 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
   const [stats, setStats] = useState<CalendarStats>(null)
   const [blockedMinutesToday, setBlockedMinutesToday] = useState(0)
 
+  // The authed pro's own id, surfaced so the waitlist "Offer a time" modal can
+  // query availability (GET /api/v1/availability/day) for a proposed slot.
+  const [professionalId, setProfessionalId] = useState<string | null>(null)
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -399,6 +403,7 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
       setNeedsTimeZoneSetup(parsedCalendar.needsTimeZoneSetup)
       setCanSalon(parsedCalendar.canSalon)
       setCanMobile(parsedCalendar.canMobile)
+      setProfessionalId(parsedCalendar.professionalId ?? null)
       setStats(parsedCalendar.stats)
       setBlockedMinutesToday(parsedCalendar.blockedMinutesToday)
       setAutoAccept(parsedCalendar.autoAcceptBookings)
@@ -488,6 +493,7 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
     blockedMinutesToday,
 
     stats,
+    professionalId,
     loading,
     setLoading,
     error,

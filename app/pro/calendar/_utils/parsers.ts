@@ -394,6 +394,28 @@ function parseBookingEvent(
   const clientProfileId = optionalText(value.clientProfileId)
   const preferenceLabel = optionalText(value.preferenceLabel)
   const offerHref = optionalText(value.offerHref)
+  const waitlistEntryId = optionalText(value.waitlistEntryId)
+  const serviceId = optionalText(value.serviceId)
+  const offeringId = optionalText(value.offeringId)
+  const pendingOfferRecord = isRecord(value.pendingOffer)
+    ? value.pendingOffer
+    : null
+  const pendingOfferId = pendingOfferRecord
+    ? optionalText(pendingOfferRecord.id)
+    : undefined
+  const pendingOfferStartsAt = pendingOfferRecord
+    ? validIsoString(pendingOfferRecord.startsAt)
+    : null
+  const pendingOffer =
+    pendingOfferId && pendingOfferStartsAt
+      ? {
+          id: pendingOfferId,
+          startsAt: pendingOfferStartsAt,
+          locationType:
+            normalizeServiceLocationType(pendingOfferRecord?.locationType) ??
+            'SALON',
+        }
+      : null
 
   const event: BookingCalendarEvent = {
     kind: 'BOOKING',
@@ -426,6 +448,10 @@ function parseBookingEvent(
     ...(clientProfileId ? { clientProfileId } : {}),
     ...(preferenceLabel ? { preferenceLabel } : {}),
     ...(offerHref ? { offerHref } : {}),
+    ...(waitlistEntryId ? { waitlistEntryId } : {}),
+    ...(serviceId ? { serviceId } : {}),
+    ...(offeringId ? { offeringId } : {}),
+    ...(pendingOffer ? { pendingOffer } : {}),
   }
 
   return event
@@ -540,7 +566,10 @@ export function parseCalendarResponse(value: unknown): CalendarResponse | null {
 
   if (!range) return null
 
+  const professionalId = optionalText(value.professionalId)
+
   return {
+    ...(professionalId ? { professionalId } : {}),
     location: parseCalendarResponseLocation(value.location),
     range,
 

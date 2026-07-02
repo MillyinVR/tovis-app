@@ -64,6 +64,9 @@ export type BookingErrorCode =
   | "AFTERCARE_CLIENT_MISMATCH"
   | "AFTERCARE_OFFERING_MISMATCH"
   | "AFTERCARE_DELIVERY_FAILED"
+  | "WAITLIST_ENTRY_NOT_FOUND"
+  | "WAITLIST_OFFER_NOT_FOUND"
+  | "WAITLIST_OFFER_NOT_PENDING"
   | "STALE_VERSION"
   | "INTERNAL_ERROR";
 
@@ -572,6 +575,31 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "REFRESH_AVAILABILITY",
     message: "Aftercare version is stale.",
     userMessage: "This aftercare draft is out of date. Refresh and try again.",
+  },
+
+  WAITLIST_ENTRY_NOT_FOUND: {
+    // Uniform 404 for missing / foreign / no-longer-active waitlist entries
+    // (no-leak: never distinguish "not yours" from "gone").
+    httpStatus: 404,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Waitlist entry not found or not active.",
+    userMessage: "That waitlist request is no longer available.",
+  },
+  WAITLIST_OFFER_NOT_FOUND: {
+    httpStatus: 404,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Waitlist offer not found.",
+    userMessage: "That offer is no longer available.",
+  },
+  WAITLIST_OFFER_NOT_PENDING: {
+    // The offer was already accepted / declined / expired / superseded.
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Waitlist offer is not pending.",
+    userMessage: "This offer has already been responded to or has expired.",
   },
 
   INTERNAL_ERROR: {

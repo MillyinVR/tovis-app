@@ -5,6 +5,7 @@ import {
   Prisma,
   ProfessionalLocationType,
   ServiceLocationType,
+  WaitlistOfferStatus,
   WaitlistStatus,
 } from '@prisma/client'
 
@@ -117,6 +118,19 @@ type WaitlistEvent = {
   // pro can offer a matching slot. null when the pro has no active offering for
   // the requested service.
   offerHref: string | null
+  // The underlying waitlist entry + service/offering, so the pro can open the
+  // availability-aware "Offer a time" modal and POST a proposed slot. (id here is
+  // the raw WaitlistEntry.id — the row's `id` field carries the "waitlist:" prefix.)
+  waitlistEntryId: string
+  serviceId: string
+  offeringId: string | null
+  // A still-PENDING offer already sent for this entry, so the row can show
+  // "Offer pending · <time>" instead of the offer action. null when none outstanding.
+  pendingOffer: {
+    id: string
+    startsAt: string
+    locationType: ServiceLocationType
+  } | null
   details: {
     serviceName: string
     bufferMinutes: number
@@ -679,11 +693,18 @@ function buildWaitlistOfferHref(args: {
   return `/pro/bookings/new?${params.toString()}`
 }
 
+type PendingOfferSummary = {
+  id: string
+  startsAt: string
+  locationType: ServiceLocationType
+}
+
 function toWaitlistEvent(args: {
   entry: WaitlistRow
   viewportTimeZone: string
   viewportTodayKey: string
   offeringIdByServiceId: ReadonlyMap<string, string>
+  pendingOfferByEntryId: ReadonlyMap<string, PendingOfferSummary>
   visibleClientIds: ReadonlySet<string>
 }): WaitlistEvent | null {
   const {
@@ -691,6 +712,7 @@ function toWaitlistEvent(args: {
     viewportTimeZone,
     viewportTodayKey,
     offeringIdByServiceId,
+    pendingOfferByEntryId,
     visibleClientIds,
   } = args
 
@@ -729,6 +751,10 @@ function toWaitlistEvent(args: {
       clientProfileId: entry.client?.id,
       offeringId: offeringIdByServiceId.get(entry.serviceId) ?? null,
     }),
+    waitlistEntryId: entry.id,
+    serviceId: entry.serviceId,
+    offeringId: offeringIdByServiceId.get(entry.serviceId) ?? null,
+    pendingOffer: pendingOfferByEntryId.get(entry.id) ?? null,
     details: {
       serviceName,
       bufferMinutes: 0,
@@ -1030,6 +1056,35 @@ export async function GET(req: Request) {
       offeringRows.map((offering) => [offering.serviceId, offering.id]),
     )
 
+    // Any still-PENDING offers already sent for the listed entries, so the
+    // Waitlist tab shows "Offer pending · <time>" instead of re-offering.
+    const waitlistEntryIds = waitlistRows.map((entry) => entry.id)
+    const pendingOfferRows =
+      waitlistEntryIds.length > 0
+        ? await prisma.waitlistOffer.findMany({
+            where: {
+              waitlistEntryId: { in: waitlistEntryIds },
+              status: WaitlistOfferStatus.PENDING,
+            },
+            select: {
+              id: true,
+              waitlistEntryId: true,
+              startsAt: true,
+              locationType: true,
+            },
+          })
+        : []
+    const pendingOfferByEntryId = new Map<string, PendingOfferSummary>(
+      pendingOfferRows.map((offer) => [
+        offer.waitlistEntryId,
+        {
+          id: offer.id,
+          startsAt: offer.startsAt.toISOString(),
+          locationType: offer.locationType,
+        },
+      ]),
+    )
+
     const waitlistTodayEvents = waitlistRows
       .map((entry) =>
         toWaitlistEvent({
@@ -1037,6 +1092,7 @@ export async function GET(req: Request) {
           viewportTimeZone,
           viewportTodayKey,
           offeringIdByServiceId,
+          pendingOfferByEntryId,
           visibleClientIds,
         }),
       )
@@ -1051,6 +1107,9 @@ export async function GET(req: Request) {
 
     return jsonOk(
       {
+        // The authed pro's own id — used by the waitlist "Offer a time" modal to
+        // query availability (GET /api/v1/availability/day) for a proposed slot.
+        professionalId,
         location: {
           id: selectedLocation.id,
           type: selectedLocation.type,

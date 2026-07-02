@@ -78,6 +78,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.APPOINTMENT_REMINDER]: 'Appointment reminder',
   [NotificationEventKey.AFTERCARE_READY]: 'Aftercare ready',
   [NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE]: 'Last-minute opening',
+  [NotificationEventKey.WAITLIST_TIME_OFFERED]: 'Waitlist time offered',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: 'Payment action needed',
@@ -145,8 +146,11 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
   {
     key: 'LAST_MINUTE',
     label: 'Last-minute openings',
-    description: 'Newly available openings that match what you want.',
-    eventKeys: [NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE],
+    description: 'Newly available openings and offered times that match what you want.',
+    eventKeys: [
+      NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
+      NotificationEventKey.WAITLIST_TIME_OFFERED,
+    ],
   },
   {
     key: 'SOCIAL',

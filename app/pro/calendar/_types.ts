@@ -175,6 +175,24 @@ export type BookingCalendarEvent = CalendarEventBase & {
   offerHref?: string | null
 
   /**
+   * Waitlist rows only: the underlying entry + service/offering, so the pro can
+   * open the availability-aware "Offer a time" modal and POST a proposed slot.
+   */
+  waitlistEntryId?: string
+  serviceId?: string
+  offeringId?: string | null
+
+  /**
+   * Waitlist rows only: a still-PENDING offer already sent for this entry, so
+   * the row shows "Offer pending · <time>" in place of the offer action.
+   */
+  pendingOffer?: {
+    id: string
+    startsAt: string
+    locationType: ServiceLocationType
+  } | null
+
+  /**
    * Authoritative appointment-local timezone for this booking.
    */
   timeZone: IanaTimeZone
@@ -269,6 +287,8 @@ export type CalendarRangeMeta = {
 }
 
 export type CalendarResponse = {
+  /** The authed pro's own id — used by the waitlist "Offer a time" modal. */
+  professionalId?: string
   location: CalendarResponseLocation | null
   range: CalendarRangeMeta
 

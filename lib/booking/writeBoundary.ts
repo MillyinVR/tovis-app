@@ -33,6 +33,8 @@ import {
   StripeCheckoutSessionStatus,
   StripePaymentStatus,
   ReminderType,
+  WaitlistOfferStatus,
+  WaitlistStatus,
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
@@ -13260,6 +13262,403 @@ export async function declineClientAftercareNextAppointment(
     await tx.aftercareSummary.update({
       where: { id: record.id },
       data: { rebookDeclinedAt: new Date() },
+    })
+
+    return { ok: true as const }
+  })
+}
+
+// ─── Waitlist offers (pro proposes a time → client confirms) ────────────────────
+
+type CreateWaitlistOfferArgs = {
+  professionalId: string
+  actorUserId: string
+  waitlistEntryId: string
+  scheduledFor: Date
+  endsAt: Date
+  locationId: string
+  locationType: ServiceLocationType
+  durationMinutes: number
+  expiresAt?: Date | null
+}
+
+type CreateWaitlistOfferResult = {
+  offer: {
+    id: string
+    status: WaitlistOfferStatus
+    startsAt: Date
+    endsAt: Date
+    locationType: ServiceLocationType
+  }
+}
+
+/**
+ * Pro proposes a concrete appointment time to a waitlisted client (the calendar
+ * "Offer a time" action). Creates a PENDING WaitlistOffer, moves the entry to
+ * NOTIFIED, and notifies the client to Confirm/Decline. NO booking is created
+ * yet — the client's confirm (confirmClientWaitlistOffer) materializes it.
+ *
+ * v1 is in-salon only. The proposed slot comes from the pro's live availability
+ * picker, so it is not re-validated for working-hours/overlap here; that full
+ * check happens at confirm (TIME_BOOKED if the slot was taken since). A partial
+ * unique index enforces one PENDING offer per entry, so any prior still-pending
+ * offer for the entry is superseded (CANCELLED) first.
+ */
+export async function createWaitlistOffer(
+  args: CreateWaitlistOfferArgs,
+): Promise<CreateWaitlistOfferResult> {
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+  assertNonEmptyLocationId(args.locationId)
+  if (!args.waitlistEntryId.trim()) {
+    throw bookingError('WAITLIST_ENTRY_NOT_FOUND')
+  }
+  assertValidRequestedStart(args.scheduledFor)
+
+  if (args.locationType !== ServiceLocationType.SALON) {
+    throw bookingError('MODE_NOT_SUPPORTED', {
+      message: 'Waitlist offers support in-salon appointments only for now.',
+      userMessage: 'You can only offer in-salon times right now.',
+    })
+  }
+
+  const startsAt = normalizeToMinute(new Date(args.scheduledFor))
+  const endsAt = new Date(args.endsAt)
+  if (
+    !Number.isFinite(startsAt.getTime()) ||
+    !Number.isFinite(endsAt.getTime()) ||
+    endsAt.getTime() <= startsAt.getTime()
+  ) {
+    throw bookingError('INVALID_SCHEDULED_FOR')
+  }
+  const durationMinutes = clampInt(
+    args.durationMinutes,
+    Math.max(15, Math.round((endsAt.getTime() - startsAt.getTime()) / 60_000)),
+    15,
+    MAX_SLOT_DURATION_MINUTES,
+  )
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) => {
+      if (startsAt.getTime() < now.getTime() + 60_000) {
+        throw bookingError('INVALID_SCHEDULED_FOR', {
+          message: 'Offer time must be at least 1 minute in the future.',
+          userMessage: 'Pick a time in the future.',
+        })
+      }
+
+      const entry = await tx.waitlistEntry.findFirst({
+        where: {
+          id: args.waitlistEntryId,
+          professionalId: args.professionalId,
+          status: WaitlistStatus.ACTIVE,
+        },
+        select: { id: true, clientId: true, serviceId: true },
+      })
+      if (!entry) {
+        throw bookingError('WAITLIST_ENTRY_NOT_FOUND')
+      }
+
+      // The pro's active offering for the requested service (unique per pro+service).
+      const offering = await tx.professionalServiceOffering.findFirst({
+        where: {
+          professionalId: args.professionalId,
+          serviceId: entry.serviceId,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          offersInSalon: true,
+          service: { select: { name: true } },
+        },
+      })
+      if (!offering) {
+        throw bookingError('OFFERING_NOT_FOUND')
+      }
+      if (!offering.offersInSalon) {
+        throw bookingError('MODE_NOT_SUPPORTED', {
+          message: 'Offering does not support in-salon appointments.',
+          userMessage: 'This service isn’t offered in-salon.',
+        })
+      }
+
+      const location = await tx.professionalLocation.findFirst({
+        where: { id: args.locationId, professionalId: args.professionalId },
+        select: { id: true, type: true },
+      })
+      if (!location) {
+        throw bookingError('LOCATION_NOT_FOUND')
+      }
+      if (
+        location.type !== ProfessionalLocationType.SALON &&
+        location.type !== ProfessionalLocationType.SUITE
+      ) {
+        throw bookingError('BAD_LOCATION', {
+          message: 'Waitlist offers require a salon location.',
+          userMessage: 'Offer from an in-salon location.',
+        })
+      }
+
+      // Supersede any still-pending offer for this entry (partial unique index).
+      await tx.waitlistOffer.updateMany({
+        where: {
+          waitlistEntryId: entry.id,
+          status: WaitlistOfferStatus.PENDING,
+        },
+        data: { status: WaitlistOfferStatus.CANCELLED, respondedAt: now },
+      })
+
+      const offer = await tx.waitlistOffer.create({
+        data: {
+          waitlistEntryId: entry.id,
+          professionalId: args.professionalId,
+          clientId: entry.clientId,
+          offeringId: offering.id,
+          locationId: location.id,
+          locationType: ServiceLocationType.SALON,
+          startsAt,
+          endsAt,
+          durationMinutes,
+          status: WaitlistOfferStatus.PENDING,
+          expiresAt: args.expiresAt ?? null,
+        },
+        select: {
+          id: true,
+          status: true,
+          startsAt: true,
+          endsAt: true,
+          locationType: true,
+        },
+      })
+
+      await tx.waitlistEntry.update({
+        where: { id: entry.id },
+        data: { status: WaitlistStatus.NOTIFIED },
+      })
+
+      const serviceName = offering.service?.name?.trim() || 'your service'
+      await upsertClientNotification({
+        tx,
+        clientId: entry.clientId,
+        eventKey: NotificationEventKey.WAITLIST_TIME_OFFERED,
+        title: 'A time was offered',
+        body: `Tap to confirm your ${serviceName} appointment time.`,
+        dedupeKey: `WAITLIST_TIME_OFFERED:${offer.id}`,
+        href: '/client/offers',
+        data: {
+          waitlistOfferId: offer.id,
+          waitlistEntryId: entry.id,
+          notificationReason: 'WAITLIST_TIME_OFFERED',
+        },
+      })
+
+      return { offer }
+    },
+  )
+}
+
+const WAITLIST_OFFER_CONFIRM_SELECT = {
+  id: true,
+  status: true,
+  clientId: true,
+  professionalId: true,
+  waitlistEntryId: true,
+  offeringId: true,
+  locationId: true,
+  locationType: true,
+  startsAt: true,
+  durationMinutes: true,
+  expiresAt: true,
+  bookingId: true,
+  professional: { select: { userId: true } },
+} satisfies Prisma.WaitlistOfferSelect
+
+type WaitlistOfferConfirmRecord = Prisma.WaitlistOfferGetPayload<{
+  select: typeof WAITLIST_OFFER_CONFIRM_SELECT
+}>
+
+function assertConfirmableWaitlistOffer(
+  record: WaitlistOfferConfirmRecord | null,
+  clientId: string,
+  now: Date,
+): WaitlistOfferConfirmRecord {
+  // Uniform not-found for missing or foreign offers (no-leak: never distinguish
+  // "not yours" from "gone").
+  if (!record || record.clientId !== clientId) {
+    throw bookingError('WAITLIST_OFFER_NOT_FOUND')
+  }
+  if (record.status !== WaitlistOfferStatus.PENDING) {
+    throw bookingError('WAITLIST_OFFER_NOT_PENDING')
+  }
+  if (record.expiresAt && record.expiresAt.getTime() <= now.getTime()) {
+    throw bookingError('WAITLIST_OFFER_NOT_PENDING', {
+      message: 'Waitlist offer has expired.',
+      userMessage: 'This offer has expired.',
+    })
+  }
+  return record
+}
+
+type ConfirmClientWaitlistOfferArgs = {
+  offerId: string
+  clientId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+/**
+ * Session-authenticated confirm of a pro-proposed waitlist time. Materializes a
+ * normal ACCEPTED booking at the offered slot by reusing performLockedCreateProBooking
+ * (so working-hours / overlap / pricing rules all apply and the pro-created
+ * status is ACCEPTED), then marks the offer ACCEPTED + links the booking and
+ * flips the waitlist entry to BOOKED. If the slot was taken since the offer, the
+ * create throws TIME_BOOKED (surfaced as 409). Idempotency is enforced at the
+ * route layer (withRouteIdempotency) and belt-and-suspenders via the booking's
+ * creationIdempotencyKey; a second confirm of an already-accepted offer is
+ * rejected with WAITLIST_OFFER_NOT_PENDING.
+ */
+export async function confirmClientWaitlistOffer(
+  args: ConfirmClientWaitlistOfferArgs,
+): Promise<CreateProBookingResult> {
+  assertNonEmptyClientId(args.clientId)
+  if (!args.offerId.trim()) {
+    throw bookingError('WAITLIST_OFFER_NOT_FOUND')
+  }
+
+  // Pre-lock read to resolve which professional's schedule to lock + fail fast.
+  const pre = assertConfirmableWaitlistOffer(
+    await prisma.waitlistOffer.findUnique({
+      where: { id: args.offerId },
+      select: WAITLIST_OFFER_CONFIRM_SELECT,
+    }),
+    args.clientId,
+    new Date(),
+  )
+
+  return withLockedProfessionalTransaction(
+    pre.professionalId,
+    async ({ tx, now }) => {
+      const locked = assertConfirmableWaitlistOffer(
+        await tx.waitlistOffer.findUnique({
+          where: { id: args.offerId },
+          select: WAITLIST_OFFER_CONFIRM_SELECT,
+        }),
+        args.clientId,
+        now,
+      )
+
+      const actorUserId = locked.professional?.userId
+      if (!actorUserId) {
+        throw bookingError('PRO_NOT_READY')
+      }
+
+      const result = await performLockedCreateProBooking({
+        tx,
+        now,
+        professionalId: locked.professionalId,
+        clientId: args.clientId,
+        offeringId: locked.offeringId,
+        locationId: locked.locationId,
+        locationType: locked.locationType,
+        scheduledFor: locked.startsAt,
+        clientAddressId: null,
+        internalNotes: null,
+        requestedBufferMinutes: null,
+        requestedTotalDurationMinutes: locked.durationMinutes,
+        allowOutsideWorkingHours: false,
+        allowShortNotice: false,
+        allowFarFuture: false,
+        actorUserId,
+        overrideReason: null,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      })
+
+      await tx.waitlistOffer.update({
+        where: { id: locked.id },
+        data: {
+          status: WaitlistOfferStatus.ACCEPTED,
+          bookingId: result.booking.id,
+          respondedAt: now,
+        },
+      })
+      await tx.waitlistEntry.update({
+        where: { id: locked.waitlistEntryId },
+        data: { status: WaitlistStatus.BOOKED },
+      })
+
+      // Tell the pro their offered time was confirmed (a real booking now exists).
+      await createProNotification({
+        tx,
+        professionalId: locked.professionalId,
+        eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+        title: 'Offer confirmed',
+        body: `${result.serviceName} — your client confirmed the time you offered.`,
+        href: `/pro/bookings/${result.booking.id}`,
+        dedupeKey: `WAITLIST_OFFER_ACCEPTED:${locked.id}`,
+        data: {
+          bookingId: result.booking.id,
+          waitlistOfferId: locked.id,
+        },
+      })
+
+      return result
+    },
+  )
+}
+
+type DeclineClientWaitlistOfferArgs = {
+  offerId: string
+  clientId: string
+}
+
+/**
+ * Session-authenticated decline of a pro-proposed waitlist time. Marks the offer
+ * DECLINED and returns the entry to ACTIVE (from NOTIFIED) so the pro can offer
+ * another time. No booking is created. (A pro-facing "client passed" nudge is
+ * intentionally omitted in v1 — the pro sees the entry return to their active
+ * waitlist and the offer flip to DECLINED.)
+ */
+export async function declineClientWaitlistOffer(
+  args: DeclineClientWaitlistOfferArgs,
+): Promise<{ ok: true }> {
+  assertNonEmptyClientId(args.clientId)
+  if (!args.offerId.trim()) {
+    throw bookingError('WAITLIST_OFFER_NOT_FOUND')
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const offer = await tx.waitlistOffer.findUnique({
+      where: { id: args.offerId },
+      select: {
+        id: true,
+        status: true,
+        clientId: true,
+        waitlistEntryId: true,
+      },
+    })
+    if (!offer || offer.clientId !== args.clientId) {
+      throw bookingError('WAITLIST_OFFER_NOT_FOUND')
+    }
+    if (offer.status !== WaitlistOfferStatus.PENDING) {
+      throw bookingError('WAITLIST_OFFER_NOT_PENDING')
+    }
+
+    await tx.waitlistOffer.update({
+      where: { id: offer.id },
+      data: { status: WaitlistOfferStatus.DECLINED, respondedAt: new Date() },
+    })
+
+    // Return the entry to ACTIVE so the pro can re-offer. Only flip a NOTIFIED
+    // entry (the state a sent offer left it in) — never disturb one already
+    // BOOKED or CANCELLED.
+    await tx.waitlistEntry.updateMany({
+      where: {
+        id: offer.waitlistEntryId,
+        status: WaitlistStatus.NOTIFIED,
+      },
+      data: { status: WaitlistStatus.ACTIVE },
     })
 
     return { ok: true as const }
