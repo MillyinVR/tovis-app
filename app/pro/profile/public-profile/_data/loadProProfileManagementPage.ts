@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import {
   LookPostStatus,
   LookPostVisibility,
+  MediaType,
   ModerationStatus,
   Prisma,
   Role,
@@ -23,6 +24,7 @@ import {
   type ClientLinkViewer,
 } from '@/lib/profiles/profileHrefs'
 import { qrSvgFor } from '@/lib/media/qr'
+import { mapPairedBeforeToDto } from '@/lib/media/pairedBefore'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pairedBeforeAssetSelect } from '@/lib/profiles/publicProfileSelects'
 import { pickString } from '@/lib/pick'
@@ -130,6 +132,10 @@ const reviewSelect = Prisma.validator<Prisma.ReviewSelect>()({
       thumbPath: true,
       url: true,
       thumbUrl: true,
+      // Opt-in before/after pairing → render the comparison slider when present.
+      beforeAsset: {
+        select: pairedBeforeAssetSelect,
+      },
     },
   },
   client: {
@@ -398,12 +404,20 @@ async function mapReviewMediaForUi(
   const url = pickString(rendered.renderUrl)
   if (!url) return null
 
+  // Only an image "after" carries a before/after pairing (parity with the
+  // public + portfolio mappers).
+  const before =
+    media.mediaType === MediaType.IMAGE
+      ? await mapPairedBeforeToDto(media.beforeAsset)
+      : null
+
   return {
     id: media.id,
     url,
     thumbUrl: pickString(rendered.renderThumbUrl),
     mediaType: media.mediaType,
     isFeaturedInPortfolio: media.isFeaturedInPortfolio,
+    before,
   }
 }
 
