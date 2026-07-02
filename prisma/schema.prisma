@@ -3522,6 +3522,13 @@ model MediaAsset {
   proTenantId      String?
   bookingId        String?
   reviewId         String?
+  // Opt-in before/after pairing: on the *displayed* asset (the "after" a pro
+  // features to portfolio, or the after-photo of a review), points at the
+  // chosen "before" counterpart so surfaces can render the comparison slider
+  // (BeforeAfterReveal / BeforeAfterCompareView). Null = show as a single tile.
+  // Self-relation, nullable; onDelete SetNull so deleting a before never
+  // cascades to the after that references it.
+  beforeAssetId    String?
   // Every media asset is anchored to a primary bookable service so it can always
   // route to "book this" (the product goal: media → easy booking). Required by
   // DB constraint + by the MediaAssetWriteInput type (single create choke point,
@@ -3551,6 +3558,8 @@ model MediaAsset {
   proTenant      Tenant?             @relation("TenantMediaAssets", fields: [proTenantId], references: [id], onDelete: Restrict)
   booking        Booking?            @relation(fields: [bookingId], references: [id])
   review         Review?             @relation(fields: [reviewId], references: [id])
+  beforeAsset    MediaAsset?         @relation("MediaBeforeAfterPair", fields: [beforeAssetId], references: [id], onDelete: SetNull)
+  pairedAsAfter  MediaAsset[]        @relation("MediaBeforeAfterPair")
   primaryService Service             @relation("MediaPrimaryService", fields: [primaryServiceId], references: [id])
   phase          MediaPhase          @default(OTHER)
   uploadedByUser User?               @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])
@@ -3581,6 +3590,7 @@ model MediaAsset {
   @@index([bookingId, createdAt])
   @@index([proTenantId])
   @@index([primaryServiceId])
+  @@index([beforeAssetId])
 }
 
 // UploadSession binds a server-minted signed-upload URL to the eventual

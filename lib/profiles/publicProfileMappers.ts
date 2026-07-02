@@ -103,6 +103,18 @@ export type PublicOfferingDto = {
   isFavorited: boolean
 }
 
+/**
+ * The chosen "before" of an opt-in before/after pair, resolved to renderable
+ * URLs. Present on a displayed asset (portfolio tile / review after-photo) that
+ * a pro or client paired; null → render the asset as a single tile. The tile's
+ * own `src`/`thumbUrl` are the "after".
+ */
+export type PairedBeforeDto = {
+  id: string
+  thumbUrl: string | null
+  fullUrl: string | null
+}
+
 export type PublicPortfolioTileDto = {
   id: string
   caption: string | null
@@ -114,6 +126,7 @@ export type PublicPortfolioTileDto = {
   isEligibleForLooks: boolean
   isFeaturedInPortfolio: boolean
   serviceIds: string[]
+  before: PairedBeforeDto | null
 }
 
 export type PublicReviewMediaDto = {
@@ -372,6 +385,43 @@ export function getPublicProfilePriceFromLabel(
   return lowest.priceLabel
 }
 
+/**
+ * Resolve a paired "before" asset to renderable URLs, or null when there's no
+ * pairing (or the counterpart is a video / has no usable URL). Shared by the
+ * portfolio and review mappers so the before/after slider gets the same data
+ * shape everywhere.
+ */
+export async function mapPairedBeforeToDto(
+  beforeAsset: {
+    id: string
+    mediaType: MediaType
+    storageBucket: string
+    storagePath: string
+    thumbBucket: string | null
+    thumbPath: string | null
+    url: string | null
+    thumbUrl: string | null
+  } | null,
+): Promise<PairedBeforeDto | null> {
+  if (!beforeAsset) return null
+  if (beforeAsset.mediaType !== MediaType.IMAGE) return null
+
+  const rendered = await renderAssetUrls({
+    storageBucket: beforeAsset.storageBucket,
+    storagePath: beforeAsset.storagePath,
+    thumbBucket: beforeAsset.thumbBucket,
+    thumbPath: beforeAsset.thumbPath,
+    url: beforeAsset.url,
+    thumbUrl: beforeAsset.thumbUrl,
+  })
+
+  const fullUrl = rendered.url ?? rendered.thumbUrl
+  const thumbUrl = rendered.thumbUrl ?? rendered.url
+  if (!fullUrl && !thumbUrl) return null
+
+  return { id: beforeAsset.id, thumbUrl, fullUrl }
+}
+
 export async function mapPublicPortfolioTileToDto(
   asset: PublicPortfolioMediaAssetRow,
 ): Promise<PublicPortfolioTileDto | null> {
@@ -387,6 +437,13 @@ export async function mapPublicPortfolioTileToDto(
   const src = rendered.thumbUrl ?? rendered.url
   if (!src) return null
 
+  // A featured video can't be a before/after "after"; the mapper drops the
+  // pairing for non-image afters too.
+  const before =
+    asset.mediaType === MediaType.IMAGE
+      ? await mapPairedBeforeToDto(asset.beforeAsset)
+      : null
+
   return {
     id: asset.id,
     caption: pickString(asset.caption),
@@ -398,6 +455,7 @@ export async function mapPublicPortfolioTileToDto(
     isEligibleForLooks: asset.isEligibleForLooks,
     isFeaturedInPortfolio: asset.isFeaturedInPortfolio,
     serviceIds: pickServiceIds(asset.services),
+    before,
   }
 }
 

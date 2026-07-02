@@ -75,6 +75,23 @@ export const publicPortfolioServiceTagSelect =
     serviceId: true,
   })
 
+/**
+ * The chosen "before" counterpart of a paired portfolio/review asset — just the
+ * pointers needed to render its thumbnail + full-size URL for the comparison
+ * slider. (No nested `beforeAsset` here: pairing is one level deep.)
+ */
+export const pairedBeforeAssetSelect =
+  Prisma.validator<Prisma.MediaAssetSelect>()({
+    id: true,
+    mediaType: true,
+    storageBucket: true,
+    storagePath: true,
+    thumbBucket: true,
+    thumbPath: true,
+    url: true,
+    thumbUrl: true,
+  })
+
 export const publicPortfolioMediaAssetSelect =
   Prisma.validator<Prisma.MediaAssetSelect>()({
     id: true,
@@ -91,6 +108,11 @@ export const publicPortfolioMediaAssetSelect =
     thumbPath: true,
     url: true,
     thumbUrl: true,
+
+    // Opt-in before/after pairing → render the comparison slider when present.
+    beforeAsset: {
+      select: pairedBeforeAssetSelect,
+    },
 
     services: {
       select: publicPortfolioServiceTagSelect,
