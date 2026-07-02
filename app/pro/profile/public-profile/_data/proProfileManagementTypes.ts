@@ -9,6 +9,7 @@ import type {
 } from '@prisma/client'
 
 import type { LooksPortfolioTileDto } from '@/lib/looks/types'
+import type { PairedBeforeDto } from '@/lib/media/pairedBefore'
 
 export type ProProfileManagementTab = 'portfolio' | 'services' | 'reviews'
 
@@ -98,6 +99,7 @@ export type ProProfileManagementReviewMedia = {
   thumbUrl: string | null
   mediaType: MediaType
   isFeaturedInPortfolio: boolean
+  before: PairedBeforeDto | null
 }
 
 export type ProProfileManagementReview = {
