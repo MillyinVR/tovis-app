@@ -11,6 +11,7 @@ import type {
   Role,
   VerificationStatus,
 } from '@prisma/client'
+import type { PairedBeforeDto } from '@/lib/media/pairedBefore'
 
 export type LooksCategoryDto = {
   name: string
@@ -263,6 +264,8 @@ export type LooksPortfolioTileDto = {
   serviceIds: string[]
   isVideo: boolean
   mediaType: MediaType
+  /** Opt-in before/after pairing → render the comparison slider when present. */
+  before: PairedBeforeDto | null
 }
 
 export type LooksBoardPreviewPrimaryMediaDto = {

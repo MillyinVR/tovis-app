@@ -791,6 +791,41 @@ describe('lib/looks/mappers.ts', () => {
         serviceIds: ['service_1', 'service_2'],
         isVideo: true,
         mediaType: MediaType.VIDEO,
+        before: null,
+      })
+    })
+
+    it('resolves the paired before for an image tile', async () => {
+      const result = await mapPortfolioTileToDto({
+        id: 'after_1',
+        caption: 'Balayage',
+        visibility: MediaVisibility.PUBLIC,
+        isEligibleForLooks: false,
+        isFeaturedInPortfolio: true,
+        mediaType: MediaType.IMAGE,
+        storageBucket: 'media-public',
+        storagePath: 'portfolio/after.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: null,
+        thumbUrl: null,
+        services: [],
+        beforeAsset: {
+          id: 'before_1',
+          mediaType: MediaType.IMAGE,
+          storageBucket: 'media-public',
+          storagePath: 'portfolio/before.jpg',
+          thumbBucket: null,
+          thumbPath: null,
+          url: null,
+          thumbUrl: null,
+        },
+      })
+
+      expect(result?.before).toEqual({
+        id: 'before_1',
+        thumbUrl: 'https://rendered.example.com/media-thumb.jpg',
+        fullUrl: 'https://rendered.example.com/media.jpg',
       })
     })
 

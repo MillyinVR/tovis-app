@@ -4,6 +4,7 @@ import 'server-only'
 import { MediaType } from '@prisma/client'
 import type { MediaVisibility, Role } from '@prisma/client'
 
+import { mapPairedBeforeToDto } from '@/lib/media/pairedBefore'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import {
   resolveLookPrimaryService,
@@ -499,6 +500,18 @@ export async function mapPortfolioTileToDto(input: {
       id: string
     } | null
   }> | null
+  // Opt-in before/after pairing. Only the surfaces that select it (e.g. the pro
+  // portfolio management grid) pass a value; elsewhere it's absent → no slider.
+  beforeAsset?: {
+    id: string
+    mediaType: MediaType
+    storageBucket: string
+    storagePath: string
+    thumbBucket: string | null
+    thumbPath: string | null
+    url: string | null
+    thumbUrl: string | null
+  } | null
 }): Promise<LooksPortfolioTileDto | null> {
   const rendered = await renderAssetUrls({
     storageBucket: input.storageBucket,
@@ -512,6 +525,12 @@ export async function mapPortfolioTileToDto(input: {
   const src = rendered.thumbUrl ?? rendered.url
   if (!src) return null
 
+  // Only an image "after" carries a pairing (parity with the public mapper).
+  const before =
+    input.mediaType === MediaType.IMAGE
+      ? await mapPairedBeforeToDto(input.beforeAsset ?? null)
+      : null
+
   return {
     id: input.id,
     caption: input.caption ?? null,
@@ -522,6 +541,7 @@ export async function mapPortfolioTileToDto(input: {
     serviceIds: pickMediaServiceTagIds(input.services),
     isVideo: input.mediaType === MediaType.VIDEO,
     mediaType: input.mediaType,
+    before,
   }
 }
 

@@ -6,6 +6,10 @@ import type { MediaVisibility, ProfessionType } from '@prisma/client'
 
 import { moneyToString } from '@/lib/money'
 import { requiresLicense } from '@/lib/licensing/licenseRequirement'
+import {
+  mapPairedBeforeToDto,
+  type PairedBeforeDto,
+} from '@/lib/media/pairedBefore'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import {
@@ -103,17 +107,11 @@ export type PublicOfferingDto = {
   isFavorited: boolean
 }
 
-/**
- * The chosen "before" of an opt-in before/after pair, resolved to renderable
- * URLs. Present on a displayed asset (portfolio tile / review after-photo) that
- * a pro or client paired; null → render the asset as a single tile. The tile's
- * own `src`/`thumbUrl` are the "after".
- */
-export type PairedBeforeDto = {
-  id: string
-  thumbUrl: string | null
-  fullUrl: string | null
-}
+// The before/after pairing mapper lives in lib/media (a media concept shared by
+// the portfolio and review mappers). Re-exported here so existing importers keep
+// their import path.
+export { mapPairedBeforeToDto }
+export type { PairedBeforeDto }
 
 export type PublicPortfolioTileDto = {
   id: string
@@ -387,42 +385,6 @@ export function getPublicProfilePriceFromLabel(
   return lowest.priceLabel
 }
 
-/**
- * Resolve a paired "before" asset to renderable URLs, or null when there's no
- * pairing (or the counterpart is a video / has no usable URL). Shared by the
- * portfolio and review mappers so the before/after slider gets the same data
- * shape everywhere.
- */
-export async function mapPairedBeforeToDto(
-  beforeAsset: {
-    id: string
-    mediaType: MediaType
-    storageBucket: string
-    storagePath: string
-    thumbBucket: string | null
-    thumbPath: string | null
-    url: string | null
-    thumbUrl: string | null
-  } | null,
-): Promise<PairedBeforeDto | null> {
-  if (!beforeAsset) return null
-  if (beforeAsset.mediaType !== MediaType.IMAGE) return null
-
-  const rendered = await renderAssetUrls({
-    storageBucket: beforeAsset.storageBucket,
-    storagePath: beforeAsset.storagePath,
-    thumbBucket: beforeAsset.thumbBucket,
-    thumbPath: beforeAsset.thumbPath,
-    url: beforeAsset.url,
-    thumbUrl: beforeAsset.thumbUrl,
-  })
-
-  const fullUrl = rendered.url ?? rendered.thumbUrl
-  const thumbUrl = rendered.thumbUrl ?? rendered.url
-  if (!fullUrl && !thumbUrl) return null
-
-  return { id: beforeAsset.id, thumbUrl, fullUrl }
-}
 
 export async function mapPublicPortfolioTileToDto(
   asset: PublicPortfolioMediaAssetRow,

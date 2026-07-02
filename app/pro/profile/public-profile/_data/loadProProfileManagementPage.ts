@@ -24,6 +24,7 @@ import {
 } from '@/lib/profiles/profileHrefs'
 import { qrSvgFor } from '@/lib/media/qr'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { pairedBeforeAssetSelect } from '@/lib/profiles/publicProfileSelects'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
@@ -101,6 +102,10 @@ const portfolioMediaAssetSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
   thumbPath: true,
   url: true,
   thumbUrl: true,
+  // Opt-in before/after pairing → render the comparison slider when present.
+  beforeAsset: {
+    select: pairedBeforeAssetSelect,
+  },
   services: {
     select: {
       serviceId: true,
