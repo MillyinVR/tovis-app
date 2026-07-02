@@ -62,6 +62,7 @@ type TabletHeaderProps = {
   onBack: () => void
   onNext: () => void
   onBlockTime: () => void
+  onAddAppointment: () => void
   onToggleHoursForm: () => void
 }
 
@@ -162,6 +163,7 @@ export function CalendarTabletShell(props: CalendarTabletShellProps) {
           onBack={onBack}
           onNext={onNext}
           onBlockTime={cal.openCreateBlockNow}
+          onAddAppointment={cal.openCreateAppointment}
           onToggleHoursForm={() => {
             cal.setShowHoursForm((current) => !current)
           }}
@@ -250,6 +252,7 @@ function TabletHeader(props: TabletHeaderProps) {
     onBack,
     onNext,
     onBlockTime,
+    onAddAppointment,
     onToggleHoursForm,
   } = props
 
@@ -279,7 +282,11 @@ function TabletHeader(props: TabletHeaderProps) {
           onBack={onBack}
           onNext={onNext}
           onBlockTime={onBlockTime}
-          blockTimeLabel={copy.actions.blockTime}
+          onAddAppointment={onAddAppointment}
+          createMenuButtonLabel={copy.actions.createMenuButton}
+          createMenuLabel={copy.actions.createMenu}
+          addAppointmentLabel={copy.actions.addAppointment}
+          blockPersonalTimeLabel={copy.actions.blockPersonalTime}
         />
 
         <button

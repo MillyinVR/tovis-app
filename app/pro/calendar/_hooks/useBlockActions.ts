@@ -97,12 +97,23 @@ function safeCalendarTimeZone(deps: BlockActionsDeps) {
   )
 }
 
-function nextStepStartFromNow(args: {
+/**
+ * Next step-aligned start time, anchored to a calendar day.
+ *
+ * The time-of-day rounds up from `now` to the next `stepMinutes` slot; that
+ * time is then applied to `day` (defaults to `now`'s day). Passing a different
+ * `day` seeds a start on the viewed day (e.g. the calendar "+" appointment
+ * action) while still avoiding a past time when the viewed day is today.
+ * Rolls to the next day's midnight when the rounded time overflows.
+ */
+export function nextStepStartFromNow(args: {
   now: Date
   timeZone: string
   stepMinutes: number
+  day?: Date
 }) {
   const stepMinutes = normalizeStepMinutes(args.stepMinutes)
+  const anchorDay = args.day ?? args.now
   const zonedParts = getZonedParts(args.now, args.timeZone)
   const currentMinutes = zonedParts.hour * 60 + zonedParts.minute
   const roundedMinutes = snapMinutes(
@@ -112,17 +123,17 @@ function nextStepStartFromNow(args: {
 
   if (roundedMinutes < FULL_DAY_MINUTES) {
     return utcFromDayAndMinutesInTimeZone(
-      args.now,
+      anchorDay,
       roundedMinutes,
       args.timeZone,
     )
   }
 
-  const todayStart = startOfDayUtcInTimeZone(args.now, args.timeZone)
-  const tomorrowStart = new Date(todayStart.getTime() + FULL_DAY_MINUTES * 60_000)
+  const dayStart = startOfDayUtcInTimeZone(anchorDay, args.timeZone)
+  const nextDayStart = new Date(dayStart.getTime() + FULL_DAY_MINUTES * 60_000)
 
   return utcFromDayAndMinutesInTimeZone(
-    tomorrowStart,
+    nextDayStart,
     0,
     args.timeZone,
   )

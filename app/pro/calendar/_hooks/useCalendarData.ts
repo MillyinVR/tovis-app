@@ -38,7 +38,7 @@ import {
 import { useCalendarLocations } from './useCalendarLocations'
 import { useCalendarFetch } from './useCalendarFetch'
 import { useManagementPanel } from './useManagementPanel'
-import { useBlockActions } from './useBlockActions'
+import { useBlockActions, nextStepStartFromNow } from './useBlockActions'
 import { useConfirmChange } from './useConfirmChange'
 import { useDragDrop } from './useDragDrop'
 import { useBookingModal } from './useBookingModal'
@@ -386,6 +386,58 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     ],
   )
 
+  const openCreateAppointment = useCallback((): void => {
+    if (
+      confirm.confirmOpen ||
+      confirm.pendingChange ||
+      bookingModal.openBookingId
+    ) {
+      return
+    }
+
+    if (mgmt.managementOpen) return
+    if (blocks.blockCreateOpen || blocks.editBlockOpen) return
+
+    if (!loc.activeLocationId) {
+      showTemporaryError(NO_LOCATION_SELECTED_MESSAGE)
+      return
+    }
+
+    // Seed the new-booking form to the viewed day at the next open step (never a
+    // past time when viewing today). The route + intercept modal read this via
+    // the `scheduledAt` query param.
+    const timeZone = resolveActiveCalendarTimeZone()
+    const startUtc = nextStepStartFromNow({
+      now: new Date(),
+      day: currentDate,
+      timeZone,
+      stepMinutes: loc.activeStepMinutes,
+    })
+    const scheduledAt = toDatetimeLocalValueInTimeZone(startUtc, timeZone)
+
+    const query = new URLSearchParams({
+      locationId: loc.activeLocationId,
+      locationType: loc.activeLocationType,
+      scheduledAt,
+    })
+
+    router.push(`/pro/bookings/new?${query.toString()}`)
+  }, [
+    blocks.blockCreateOpen,
+    blocks.editBlockOpen,
+    bookingModal.openBookingId,
+    confirm.confirmOpen,
+    confirm.pendingChange,
+    currentDate,
+    loc.activeLocationId,
+    loc.activeLocationType,
+    loc.activeStepMinutes,
+    mgmt.managementOpen,
+    resolveActiveCalendarTimeZone,
+    router,
+    showTemporaryError,
+  ])
+
   const utils = useMemo(
     () => ({
       startOfWeek,
@@ -538,6 +590,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     resize: dragDrop.resize,
 
     openCreateForClick,
+    openCreateAppointment,
 
     utils,
 

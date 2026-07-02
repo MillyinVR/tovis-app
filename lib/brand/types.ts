@@ -82,6 +82,12 @@ export type BrandProCalendarActionsCopy = {
   today: string
   blockTime: string
   createBlock: string
+  addAppointment: string
+  addAppointmentHint: string
+  blockPersonalTime: string
+  blockPersonalTimeHint: string
+  createMenu: string
+  createMenuButton: string
   editSchedule: string
   editHours: string
   hideHours: string
