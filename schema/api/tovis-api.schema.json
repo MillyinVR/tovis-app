@@ -9803,6 +9803,17 @@
     },
     "PublicReviewMediaDto": {
       "properties": {
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PairedBeforeDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Paired \"before\" for the comparison slider, or null when not paired."
+        },
         "id": {
           "type": "string"
         },
@@ -9827,7 +9838,8 @@
         "url",
         "thumbUrl",
         "mediaType",
-        "isFeaturedInPortfolio"
+        "isFeaturedInPortfolio",
+        "before"
       ],
       "type": "object"
     },
