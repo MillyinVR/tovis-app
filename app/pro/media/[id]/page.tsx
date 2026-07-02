@@ -29,6 +29,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
       professionalId: true,
       isEligibleForLooks: true,
       isFeaturedInPortfolio: true,
+      beforeAssetId: true,
 
       // ✅ canonical storage pointers
       storageBucket: true,
@@ -106,12 +107,14 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
           <OwnerMediaMenu
             mediaId={media.id}
             serviceOptions={serviceOptions}
+            isVideo={isVideo}
             initial={{
               caption: media.caption ?? null,
               visibility: media.visibility,
               isEligibleForLooks: Boolean(media.isEligibleForLooks),
               isFeaturedInPortfolio: Boolean(media.isFeaturedInPortfolio),
               serviceIds: (media.services || []).map((s) => s.serviceId).filter(Boolean),
+              beforeAssetId: media.beforeAssetId ?? null,
             }}
           />
         ) : null

@@ -9,9 +9,12 @@ import { MediaVisibility } from '@prisma/client'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type Visibility = MediaVisibility
 type ServiceOption = { id: string; name: string }
+type BeforeOption = { id: string; thumbUrl: string; phase: string }
 
 type Props = {
   mediaId: string
@@ -21,8 +24,12 @@ type Props = {
     isEligibleForLooks: boolean
     isFeaturedInPortfolio: boolean
     serviceIds: string[]
+    /** Currently-paired "before" asset id (drives the comparison slider), or null. */
+    beforeAssetId: string | null
   }
   serviceOptions: ServiceOption[]
+  /** Videos can't be a before/after "after" — hides the pairing picker. */
+  isVideo?: boolean
 }
 
 type JsonObject = Record<string, unknown>
@@ -65,7 +72,7 @@ function visibilityFromFlags(flags: { isEligibleForLooks: boolean; isFeaturedInP
   return flags.isEligibleForLooks || flags.isFeaturedInPortfolio ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
 }
 
-export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Props) {
+export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVideo = false }: Props) {
   const router = useRouter()
 
   const [openMenu, setOpenMenu] = useState(false)
@@ -80,6 +87,14 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
   const [isFeaturedInPortfolio, setIsFeaturedInPortfolio] = useState(Boolean(initial.isFeaturedInPortfolio))
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>(uniqueStrings(initial.serviceIds ?? []))
   const [serviceQuery, setServiceQuery] = useState('')
+
+  // Before/after pairing state. `beforeAssetId` is the chosen "before" (null =
+  // unpaired). Only sent to the server when the pro actually touches the picker,
+  // so an unrelated save doesn't clobber the default-on auto-pairing.
+  const [beforeAssetId, setBeforeAssetId] = useState<string | null>(initial.beforeAssetId ?? null)
+  const [pairingTouched, setPairingTouched] = useState(false)
+  const [beforeOptions, setBeforeOptions] = useState<BeforeOption[]>([])
+  const [beforeOptionsLoaded, setBeforeOptionsLoaded] = useState(false)
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const busy = saving
@@ -99,6 +114,39 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
+
+  // Lazy-load the booking's candidate "before" photos the first time the edit
+  // modal opens for an image (videos can't have a before/after pairing).
+  useEffect(() => {
+    if (!openEdit || isVideo || beforeOptionsLoaded) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/v1/pro/media/${encodeURIComponent(mediaId)}/before-options`,
+          { cache: 'no-store' },
+        )
+        const data = await safeJsonObject(res)
+        if (cancelled) return
+        const raw = Array.isArray(data.options) ? data.options : []
+        const clean: BeforeOption[] = raw
+          .filter(isRecord)
+          .map((o) => ({
+            id: pickString(o.id) ?? '',
+            thumbUrl: pickString(o.thumbUrl) ?? '',
+            phase: pickString(o.phase) ?? '',
+          }))
+          .filter((o) => o.id && o.thumbUrl)
+        setBeforeOptions(clean)
+        setBeforeOptionsLoaded(true)
+      } catch {
+        if (!cancelled) setBeforeOptionsLoaded(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [openEdit, isVideo, beforeOptionsLoaded, mediaId])
 
   // Footer + safe-area math so the modal never hides behind bottom nav
   const footerPx = UI_SIZES.footerHeight ?? 0
@@ -180,6 +228,10 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
           isEligibleForLooks,
           isFeaturedInPortfolio,
           serviceIds: selectedServiceIds,
+
+          // Only send the pairing when the pro actually changed it, so a normal
+          // save doesn't override the server's default-on auto-pairing.
+          ...(pairingTouched ? { beforeAssetId } : {}),
 
           // optional compatibility: send computed visibility (server should still normalize)
           visibility: computedVisibility,
@@ -381,6 +433,89 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                     disabled={busy}
                   />
                 </div>
+
+                {/* Before / after pairing (images only) */}
+                {!isVideo ? (
+                  <Field
+                    label="Before / after"
+                    hint="Pair a “before” photo to show a comparison slider on your public portfolio."
+                  >
+                    <div className="flex flex-wrap gap-2 rounded-[18px] border border-white/10 bg-bgPrimary/25 p-3">
+                      {!beforeOptionsLoaded ? (
+                        <div className="grid h-16 place-items-center px-2 text-[11px] font-semibold text-textSecondary">
+                          Loading…
+                        </div>
+                      ) : beforeOptions.length === 0 && beforeAssetId === null ? (
+                        <div className="grid h-16 place-items-center px-2 text-[11px] font-semibold text-textSecondary">
+                          No before photos from this booking to pair.
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              setBeforeAssetId(null)
+                              setPairingTouched(true)
+                              setError(null)
+                            }}
+                            className={cn(
+                              'grid h-16 w-16 place-items-center rounded-xl border text-[11px] font-black transition',
+                              beforeAssetId === null
+                                ? 'border-accentPrimary/40 bg-accentPrimary/15 text-accentPrimary'
+                                : 'border-white/12 bg-bgPrimary/30 text-textSecondary hover:bg-white/5',
+                              busy ? 'cursor-not-allowed opacity-70' : '',
+                            )}
+                            title="No before/after pairing"
+                          >
+                            None
+                          </button>
+
+                          {beforeOptions.map((opt) => {
+                            const on = beforeAssetId === opt.id
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                disabled={busy}
+                                onClick={() => {
+                                  setBeforeAssetId(opt.id)
+                                  setPairingTouched(true)
+                                  setError(null)
+                                }}
+                                className={cn(
+                                  'relative h-16 w-16 overflow-hidden rounded-xl border transition',
+                                  on
+                                    ? 'border-accentPrimary shadow-[0_0_0_2px_rgb(var(--accent-primary)/0.45)]'
+                                    : 'border-white/12 hover:border-white/30',
+                                  busy ? 'cursor-not-allowed opacity-70' : '',
+                                )}
+                                title={
+                                  opt.phase === 'BEFORE'
+                                    ? 'Before photo'
+                                    : 'Photo from this booking'
+                                }
+                              >
+                                <RemoteImage
+                                  src={opt.thumbUrl}
+                                  alt="Before candidate"
+                                  width={128}
+                                  height={128}
+                                  className="h-full w-full object-cover"
+                                />
+                                {on ? (
+                                  <span className="absolute bottom-1 right-1 grid h-4 w-4 place-items-center rounded-full bg-accentPrimary text-[10px] font-black text-bgPrimary">
+                                    ✓
+                                  </span>
+                                ) : null}
+                              </button>
+                            )
+                          })}
+                        </>
+                      )}
+                    </div>
+                  </Field>
+                ) : null}
 
                 {/* Services */}
                 <Field

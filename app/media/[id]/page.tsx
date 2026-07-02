@@ -29,6 +29,7 @@ const mediaPageSelect = {
   professionalId: true,
   isEligibleForLooks: true,
   isFeaturedInPortfolio: true,
+  beforeAssetId: true,
   storageBucket: true,
   storagePath: true,
   thumbBucket: true,
@@ -154,12 +155,14 @@ export default async function MediaDetailPage({ params }: PageProps) {
           <OwnerMediaMenu
             mediaId={media.id}
             serviceOptions={serviceOptions}
+            isVideo={isVideo}
             initial={{
               caption: media.caption ?? null,
               visibility: media.visibility,
               isEligibleForLooks: media.isEligibleForLooks,
               isFeaturedInPortfolio: media.isFeaturedInPortfolio,
               serviceIds: media.services.map((tag) => tag.serviceId),
+              beforeAssetId: media.beforeAssetId ?? null,
             }}
           />
         ) : null
