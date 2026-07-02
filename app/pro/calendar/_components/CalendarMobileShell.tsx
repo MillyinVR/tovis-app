@@ -1,7 +1,9 @@
 // app/pro/calendar/_components/CalendarMobileShell.tsx
 'use client'
 
+import { useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
+import { CalendarCreateSheet } from './CalendarCreateSheet'
 import { CalendarStatsPanel } from './CalendarStatsPanel'
 import { DayWeekGrid } from './DayWeekGrid'
 import { MobileAutoAcceptBar } from './MobileAutoAcceptBar'
@@ -95,6 +97,8 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
     onDismissPendingBar,
     cal,
   } = props
+
+  const [createSheetOpen, setCreateSheetOpen] = useState(false)
 
   return (
     <>
@@ -208,8 +212,26 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
         }}
       />
       <MobileCalendarFab
-        onClick={cal.openCreateBlockNow}
-        label={copy.actions.createBlock}
+        onClick={() => setCreateSheetOpen(true)}
+        label={copy.actions.createMenu}
+      />
+
+      <CalendarCreateSheet
+        open={createSheetOpen}
+        onClose={() => setCreateSheetOpen(false)}
+        heading={copy.actions.createMenu}
+        appointmentLabel={copy.actions.addAppointment}
+        appointmentHint={copy.actions.addAppointmentHint}
+        blockLabel={copy.actions.blockPersonalTime}
+        blockHint={copy.actions.blockPersonalTimeHint}
+        onAddAppointment={() => {
+          setCreateSheetOpen(false)
+          cal.openCreateAppointment()
+        }}
+        onBlockTime={() => {
+          setCreateSheetOpen(false)
+          cal.openCreateBlockNow()
+        }}
       />
 
       <MobileAutoAcceptBar

@@ -209,7 +209,11 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
               onBack={onBack}
               onNext={onNext}
               onBlockTime={cal.openCreateBlockNow}
-              blockTimeLabel={copy.actions.blockTime}
+              onAddAppointment={cal.openCreateAppointment}
+              createMenuButtonLabel={copy.actions.createMenuButton}
+              createMenuLabel={copy.actions.createMenu}
+              addAppointmentLabel={copy.actions.addAppointment}
+              blockPersonalTimeLabel={copy.actions.blockPersonalTime}
             />
 
             <button

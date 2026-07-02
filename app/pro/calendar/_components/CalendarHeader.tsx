@@ -1,6 +1,10 @@
 // app/pro/calendar/_components/CalendarHeader.tsx
 'use client'
 
+import { useEffect, useState } from 'react'
+
+import { Z } from '@/lib/zIndex'
+
 import type { ViewMode } from '../_types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -26,24 +30,32 @@ type CalendarHeaderControlsBaseProps = {
   viewAriaLabels: CalendarViewLabels
 }
 
-type CalendarHeaderControlsWithBlockTime = CalendarHeaderControlsBaseProps & {
+type CalendarHeaderControlsWithCreateMenu = CalendarHeaderControlsBaseProps & {
   /**
-   * Tablet / desktop inline CTA.
-   * Mobile uses MobileCalendarFab instead.
+   * Tablet / desktop inline "+ Add" menu — choose add-appointment vs block time.
+   * Mobile uses MobileCalendarFab + CalendarCreateSheet instead.
    */
   onBlockTime: () => void
-  blockTimeLabel: string
+  onAddAppointment: () => void
+  createMenuButtonLabel: string
+  createMenuLabel: string
+  addAppointmentLabel: string
+  blockPersonalTimeLabel: string
 }
 
-type CalendarHeaderControlsWithoutBlockTime =
+type CalendarHeaderControlsWithoutCreateMenu =
   CalendarHeaderControlsBaseProps & {
     onBlockTime?: undefined
-    blockTimeLabel?: undefined
+    onAddAppointment?: undefined
+    createMenuButtonLabel?: undefined
+    createMenuLabel?: undefined
+    addAppointmentLabel?: undefined
+    blockPersonalTimeLabel?: undefined
   }
 
 type CalendarHeaderControlsProps =
-  | CalendarHeaderControlsWithBlockTime
-  | CalendarHeaderControlsWithoutBlockTime
+  | CalendarHeaderControlsWithCreateMenu
+  | CalendarHeaderControlsWithoutCreateMenu
 
 type IconButtonDirection = 'previous' | 'next'
 
@@ -68,7 +80,16 @@ type ViewTabButtonProps = ViewOption & {
   onSelect: (view: ViewMode) => void
 }
 
-type BlockTimeButtonProps = {
+type CreateMenuButtonProps = {
+  buttonLabel: string
+  menuLabel: string
+  appointmentLabel: string
+  blockLabel: string
+  onAddAppointment: () => void
+  onBlockTime: () => void
+}
+
+type CreateMenuItemProps = {
   label: string
   onClick: () => void
 }
@@ -108,13 +129,14 @@ function blockTimeButtonClassName(): string {
   return 'brand-pro-calendar-block-button brand-focus'
 }
 
-function shouldShowBlockTimeButton(
+function shouldShowCreateMenu(
   props: CalendarHeaderControlsProps,
-): props is CalendarHeaderControlsWithBlockTime {
+): props is CalendarHeaderControlsWithCreateMenu {
   return (
     typeof props.onBlockTime === 'function' &&
-    typeof props.blockTimeLabel === 'string' &&
-    props.blockTimeLabel.trim().length > 0
+    typeof props.onAddAppointment === 'function' &&
+    typeof props.createMenuButtonLabel === 'string' &&
+    props.createMenuButtonLabel.trim().length > 0
   )
 }
 
@@ -188,16 +210,125 @@ function IconButton(props: IconButtonProps) {
   )
 }
 
-function BlockTimeButton(props: BlockTimeButtonProps) {
+function CreateMenuButton(props: CreateMenuButtonProps) {
+  const {
+    buttonLabel,
+    menuLabel,
+    appointmentLabel,
+    blockLabel,
+    onAddAppointment,
+    onBlockTime,
+  } = props
+
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === 'Escape') setOpen(false)
+    }
+
+    document.addEventListener('keydown', onKey)
+
+    return () => {
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  function choose(action: () => void): void {
+    setOpen(false)
+    action()
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className={blockTimeButtonClassName()}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={menuLabel}
+        title={menuLabel}
+      >
+        {buttonLabel}
+      </button>
+
+      {open ? (
+        <>
+          <button
+            type="button"
+            aria-label={menuLabel}
+            onClick={() => setOpen(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: Z.overlay,
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              cursor: 'default',
+            }}
+          />
+
+          <div
+            role="menu"
+            aria-label={menuLabel}
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              right: 0,
+              zIndex: Z.modal,
+              minWidth: 220,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              padding: 6,
+              background: 'rgb(var(--bg-surface))',
+              border: '1px solid var(--line)',
+              borderRadius: 14,
+              boxShadow: 'var(--shadow-strong)',
+            }}
+          >
+            <CreateMenuItem
+              label={appointmentLabel}
+              onClick={() => choose(onAddAppointment)}
+            />
+            <CreateMenuItem
+              label={blockLabel}
+              onClick={() => choose(onBlockTime)}
+            />
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function CreateMenuItem(props: CreateMenuItemProps) {
   const { label, onClick } = props
 
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={onClick}
-      className={blockTimeButtonClassName()}
-      aria-label={label}
-      title={label}
+      className="tovis-focus"
+      style={{
+        display: 'block',
+        width: '100%',
+        textAlign: 'left',
+        padding: '10px 12px',
+        borderRadius: 10,
+        border: 'none',
+        background: 'transparent',
+        color: 'rgb(var(--text-primary))',
+        fontFamily: 'var(--font-display)',
+        fontWeight: 600,
+        fontSize: 14,
+        cursor: 'pointer',
+      }}
     >
       {label}
     </button>
@@ -270,10 +401,14 @@ export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
 
         <IconButton label={nextLabel} onClick={onNext} direction="next" />
 
-        {shouldShowBlockTimeButton(props) ? (
-          <BlockTimeButton
-            label={props.blockTimeLabel}
-            onClick={props.onBlockTime}
+        {shouldShowCreateMenu(props) ? (
+          <CreateMenuButton
+            buttonLabel={props.createMenuButtonLabel}
+            menuLabel={props.createMenuLabel}
+            appointmentLabel={props.addAppointmentLabel}
+            blockLabel={props.blockPersonalTimeLabel}
+            onAddAppointment={props.onAddAppointment}
+            onBlockTime={props.onBlockTime}
           />
         ) : null}
       </div>
