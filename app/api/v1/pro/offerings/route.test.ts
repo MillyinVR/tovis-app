@@ -703,13 +703,14 @@ describe('app/api/v1/pro/offerings/route.ts', () => {
               ProfessionalLocationType.SUITE,
             ],
           },
+          archivedAt: null,
         },
         select: { type: true },
         take: 50,
       })
 
       expect(mocks.professionalLocation.count).toHaveBeenCalledWith({
-        where: { professionalId: 'pro_123' },
+        where: { professionalId: 'pro_123', archivedAt: null },
       })
 
       expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
@@ -821,6 +822,7 @@ describe('app/api/v1/pro/offerings/route.ts', () => {
           type: {
             in: [ProfessionalLocationType.MOBILE_BASE],
           },
+          archivedAt: null,
         },
         select: { type: true },
         take: 50,

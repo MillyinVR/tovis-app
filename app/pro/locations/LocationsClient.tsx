@@ -9,7 +9,7 @@ import type { LocationType, ProLocation, PickedPlace } from '@/lib/contracts/pro
 import { parseLocationType, parsePickedPlace, parseProLocationsPayload } from '@/lib/contracts/proLocations'
 import { zClass } from '@/lib/zIndex'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
-import { clampInt } from '@/lib/guards'
+import { clampInt, isRecord } from '@/lib/guards'
 import { kmToMiles } from '@/lib/units'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
@@ -349,15 +349,22 @@ async function updateAdvanceNotice(
         headers: { Accept: 'application/json' },
       })
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(readErrorMessage(data) ?? `Failed to delete (${res.status}).`)
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? `Failed to remove (${res.status}).`)
 
-      showToast({ tone: 'success', title: 'Location deleted' })
+      const archived = isRecord(data) && data.archived === true
+      showToast({
+        tone: 'success',
+        title: 'Location removed',
+        body: archived
+          ? 'Bookings tied to this location are kept on record.'
+          : null,
+      })
       setConfirmDelete({ open: false, id: null })
       await refresh()
     } catch (e: unknown) {
-      const msg = errorMessageFromUnknown(e, 'Failed to delete location.')
+      const msg = errorMessageFromUnknown(e, 'Failed to remove location.')
       setError(msg)
-      showToast({ tone: 'error', title: 'Couldn’t delete', body: msg })
+      showToast({ tone: 'error', title: 'Couldn’t remove', body: msg })
     } finally {
       setBusy(false)
       setBusyId(null)
@@ -605,9 +612,9 @@ async function updateAdvanceNotice(
 
       <ConfirmModal
         open={confirmDelete.open}
-        title="Delete this location?"
-        body="This removes it from your profile and booking system. If you have bookings tied to it, the server may block deletion."
-        confirmLabel="Delete"
+        title="Remove this location?"
+        body="It’ll be removed from your profile and booking system. Any past or upcoming bookings tied to it stay on record — the location is just hidden and can no longer be booked."
+        confirmLabel="Remove"
         tone="danger"
         busy={busy && Boolean(confirmDelete.id)}
         onCancel={() => (busy ? null : setConfirmDelete({ open: false, id: null }))}
@@ -1046,7 +1053,7 @@ async function updateAdvanceNotice(
                       onClick={() => setConfirmDelete({ open: true, id: l.id })}
                       disabled={busy}
                     >
-                      {busyId === l.id ? 'Deleting…' : 'Delete'}
+                      {busyId === l.id ? 'Removing…' : 'Remove'}
                     </Button>
                   </div>
                 </div>

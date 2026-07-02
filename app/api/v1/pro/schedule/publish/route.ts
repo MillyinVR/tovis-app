@@ -29,6 +29,7 @@ export async function POST() {
       where: {
         professionalId,
         isBookable: false,
+        archivedAt: null,
       },
       select: {
         id: true,

@@ -50,8 +50,17 @@ const mocks = vi.hoisted(() => {
     deleteMany: vi.fn(),
   }
 
+  const booking = { findFirst: vi.fn() }
+  const bookingHold = { findFirst: vi.fn() }
+  const lastMinuteOpening = { findFirst: vi.fn() }
+  const aftercareRebookSlot = { findFirst: vi.fn() }
+
   const prisma = {
     professionalLocation,
+    booking,
+    bookingHold,
+    lastMinuteOpening,
+    aftercareRebookSlot,
     $transaction: vi.fn(),
   }
 
@@ -67,6 +76,10 @@ const mocks = vi.hoisted(() => {
     evaluatePublishableLocation,
     buildAddressPrivacyWriteData,
     professionalLocation,
+    booking,
+    bookingHold,
+    lastMinuteOpening,
+    aftercareRebookSlot,
     prisma,
   }
 })
@@ -313,6 +326,12 @@ describe('app/api/v1/pro/locations/[id]/route.ts', () => {
     mocks.professionalLocation.updateMany.mockResolvedValue({ count: 1 })
     mocks.professionalLocation.deleteMany.mockResolvedValue({ count: 1 })
 
+    // No blocking references by default → DELETE takes the hard-delete path.
+    mocks.booking.findFirst.mockResolvedValue(null)
+    mocks.bookingHold.findFirst.mockResolvedValue(null)
+    mocks.lastMinuteOpening.findFirst.mockResolvedValue(null)
+    mocks.aftercareRebookSlot.findFirst.mockResolvedValue(null)
+
     mocks.bumpScheduleConfigVersion.mockResolvedValue(1)
     mocks.refreshLocation.mockResolvedValue(undefined)
     mocks.deleteLocationFromIndex.mockResolvedValue(undefined)
@@ -413,7 +432,7 @@ describe('app/api/v1/pro/locations/[id]/route.ts', () => {
       })
 
       expect(mocks.professionalLocation.findFirst).toHaveBeenCalledWith({
-        where: { id: 'loc_123', professionalId: 'pro_123' },
+        where: { id: 'loc_123', professionalId: 'pro_123', archivedAt: null },
         select: {
           id: true,
           type: true,
@@ -1088,28 +1107,31 @@ describe('app/api/v1/pro/locations/[id]/route.ts', () => {
       expect(mocks.professionalLocation.deleteMany).not.toHaveBeenCalled()
     })
 
-    it('deletes the location, bumps schedule version, and removes search index row', async () => {
+    it('hard-deletes an unreferenced location, bumps schedule version, and removes search index row', async () => {
       const result = await DELETE(makeDeleteRequest(), makeCtx())
 
       const body = await readJson<{
         ok: true
+        archived: boolean
       }>(result)
 
       expect(result.status).toBe(200)
       expect(body).toEqual({
         ok: true,
+        archived: false,
       })
 
       expect(mocks.professionalLocation.deleteMany).toHaveBeenCalledWith({
         where: { id: 'loc_123', professionalId: 'pro_123' },
       })
+      expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
 
       expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_123')
       expect(mocks.deleteLocationFromIndex).toHaveBeenCalledWith('loc_123')
     })
 
-    it('returns 404 when DELETE finds no matching location', async () => {
-      mocks.professionalLocation.deleteMany.mockResolvedValueOnce({ count: 0 })
+    it('returns 404 when DELETE finds no matching (non-archived) location', async () => {
+      mocks.professionalLocation.findFirst.mockResolvedValueOnce(null)
 
       const result = await DELETE(makeDeleteRequest(), makeCtx())
 
@@ -1124,51 +1146,64 @@ describe('app/api/v1/pro/locations/[id]/route.ts', () => {
         error: 'Location not found',
       })
 
+      expect(mocks.professionalLocation.deleteMany).not.toHaveBeenCalled()
+      expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
       expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
       expect(mocks.deleteLocationFromIndex).not.toHaveBeenCalled()
     })
 
-    it('returns 409 when DELETE hits a Prisma foreign-key constraint error', async () => {
-      mocks.professionalLocation.deleteMany.mockRejectedValueOnce({
-        code: 'P2003',
-        message: 'Foreign key constraint failed',
-      })
-
-      const result = await DELETE(makeDeleteRequest(), makeCtx())
-
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
-
-      expect(result.status).toBe(409)
-      expect(body).toEqual({
-        ok: false,
-        error:
-          'This location is used by existing bookings and cannot be deleted.',
-      })
-
-      expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
-      expect(mocks.deleteLocationFromIndex).not.toHaveBeenCalled()
-    })
-
-    it('returns 409 when DELETE hits a textual foreign-key error', async () => {
-      mocks.professionalLocation.deleteMany.mockRejectedValueOnce(
-        new Error('violates foreign key constraint'),
+    it('archives (soft-deletes) a location that is still referenced by bookings', async () => {
+      mocks.professionalLocation.findFirst.mockResolvedValueOnce(
+        makeExistingLocation({ isPrimary: false }),
       )
+      mocks.booking.findFirst.mockResolvedValueOnce({ id: 'bk_1' })
 
       const result = await DELETE(makeDeleteRequest(), makeCtx())
 
       const body = await readJson<{
-        ok: false
-        error: string
+        ok: true
+        archived: boolean
       }>(result)
 
-      expect(result.status).toBe(409)
+      expect(result.status).toBe(200)
       expect(body).toEqual({
-        ok: false,
-        error:
-          'This location is used by existing bookings and cannot be deleted.',
+        ok: true,
+        archived: true,
+      })
+
+      const updateCall = mocks.professionalLocation.updateMany.mock.calls.at(-1)?.[0]
+      expect(updateCall).toBeDefined()
+      expect(updateCall.where).toEqual({
+        id: 'loc_123',
+        professionalId: 'pro_123',
+        archivedAt: null,
+      })
+      expect(updateCall.data.isBookable).toBe(false)
+      expect(updateCall.data.isPrimary).toBe(false)
+      expect(updateCall.data.archivedAt).toBeInstanceOf(Date)
+
+      expect(mocks.professionalLocation.deleteMany).not.toHaveBeenCalled()
+      expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_123')
+      expect(mocks.deleteLocationFromIndex).toHaveBeenCalledWith('loc_123')
+    })
+
+    it('promotes another live location to primary before removing the primary', async () => {
+      mocks.professionalLocation.findFirst
+        .mockResolvedValueOnce(makeExistingLocation({ isPrimary: true }))
+        .mockResolvedValueOnce({ id: 'loc_next' })
+
+      const result = await DELETE(makeDeleteRequest(), makeCtx())
+
+      expect(result.status).toBe(200)
+
+      expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
+        where: { id: 'loc_next', professionalId: 'pro_123' },
+        data: { isPrimary: true },
+      })
+
+      // No references → the original primary is hard-deleted.
+      expect(mocks.professionalLocation.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'loc_123', professionalId: 'pro_123' },
       })
     })
 

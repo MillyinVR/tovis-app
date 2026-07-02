@@ -2027,6 +2027,13 @@ model ProfessionalLocation {
   advanceNoticeMinutes Int @default(15)
   maxDaysAhead         Int @default(365)
 
+  // Soft-delete. A pro can "remove" a location even when historical bookings
+  // still reference it (FK is Restrict). Referenced locations are archived
+  // (hidden everywhere the pro manages/publishes/books) rather than hard-deleted
+  // so booking history and FK integrity are preserved. Locations with no
+  // references are hard-deleted and never get an archivedAt.
+  archivedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2045,6 +2052,7 @@ model ProfessionalLocation {
   @@index([professionalId])
   @@index([professionalId, isPrimary])
   @@index([professionalId, isBookable])
+  @@index([professionalId, archivedAt])
   @@index([lat, lng])
   @@index([isBookable, type, lat, lng])
   @@index([postalCodePrefix])

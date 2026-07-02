@@ -42,7 +42,7 @@ export default async function ProLocationsPage() {
   })
 
   const rows = await prisma.professionalLocation.findMany({
-    where: { professionalId: user.professionalProfile.id },
+    where: { professionalId: user.professionalProfile.id, archivedAt: null },
     orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     select: {
       id: true,

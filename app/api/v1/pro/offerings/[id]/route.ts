@@ -181,6 +181,7 @@ async function ensureLocationsForOffering(args: {
     where: {
       professionalId,
       type: { in: relevantTypes },
+      archivedAt: null,
     },
     select: {
       type: true,
@@ -197,7 +198,7 @@ async function ensureLocationsForOffering(args: {
   )
 
   let totalLocationCount = await tx.professionalLocation.count({
-    where: { professionalId },
+    where: { professionalId, archivedAt: null },
   })
 
   if (ensureSalon && !hasSalonCapableLocation) {

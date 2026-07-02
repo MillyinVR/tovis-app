@@ -26,7 +26,7 @@ export const dynamic = 'force-dynamic'
 
 async function loadProfessionalLocations(professionalId: string) {
   const locations = await prisma.professionalLocation.findMany({
-    where: { professionalId },
+    where: { professionalId, archivedAt: null },
     orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     select: PROFESSIONAL_LOCATION_SELECT,
     take: 100,
@@ -126,7 +126,7 @@ export async function POST(req: Request) {
 
     const created = await prisma.$transaction(async (tx) => {
       const existingCount = await tx.professionalLocation.count({
-        where: { professionalId },
+        where: { professionalId, archivedAt: null },
       })
 
       const isFirst = existingCount === 0
