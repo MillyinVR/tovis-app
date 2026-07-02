@@ -113,12 +113,14 @@ function PortfolioMediaTile({
         <OwnerMediaMenu
           mediaId={tile.id}
           serviceOptions={serviceOptions}
+          isVideo={tile.isVideo}
           initial={{
             caption: tile.caption ?? null,
             visibility: tile.visibility,
             isEligibleForLooks: tile.isEligibleForLooks,
             isFeaturedInPortfolio: tile.isFeaturedInPortfolio,
             serviceIds: tile.serviceIds,
+            beforeAssetId: tile.before?.id ?? null,
           }}
         />
       </div>

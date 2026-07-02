@@ -3,6 +3,11 @@ import { prisma } from '@/lib/prisma'
 import { MediaVisibility } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
+import {
+  parseBeforeAssetField,
+  resolveAutoPairedBefore,
+  resolveFeaturePairing,
+} from '@/lib/media/portfolioPairing'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 import { pickBool, pickString } from '@/lib/pick'
 import { safeError } from '@/lib/security/logging'
@@ -59,6 +64,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         caption: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
+        // Before/after pairing: resolve/auto-pair when featuring via the edit modal.
+        mediaType: true,
+        phase: true,
+        bookingId: true,
+        beforeAssetId: true,
         // B3b: the booking's client media-use consent also unlocks public sharing.
         booking: { select: { mediaUseConsentAt: true } },
         services: { select: { serviceId: true } },
@@ -120,11 +130,37 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       }
     }
 
+    // Before/after pairing on the featured "after". An explicit `beforeAssetId`
+    // in the body wins (the pro picked/cleared a before); otherwise newly
+    // featuring auto-pairs from the booking (consistency with the portfolio POST
+    // path) and unfeaturing clears the pairing. `undefined` → leave untouched.
+    const pairField = parseBeforeAssetField(body)
+    let beforeAssetIdWrite: string | null | undefined
+    if (pairField.present) {
+      const pairing = await resolveFeaturePairing({
+        afterAssetId: mediaId,
+        professionalId: auth.professionalId,
+        media: existing,
+        pairField,
+      })
+      if (!pairing.ok) return jsonFail(400, pairing.error)
+      beforeAssetIdWrite = pairing.beforeAssetId
+    } else if (portfolioPatch === true && !existing.isFeaturedInPortfolio) {
+      // Newly featured → auto-pair (consistency with the portfolio POST path).
+      beforeAssetIdWrite = await resolveAutoPairedBefore(existing, mediaId)
+    } else if (portfolioPatch === false && existing.isFeaturedInPortfolio) {
+      // Newly unfeatured → clear the pairing (matches the portfolio DELETE path).
+      beforeAssetIdWrite = null
+    }
+
     const data: Parameters<typeof prisma.mediaAsset.update>[0]['data'] = {
       caption,
       visibility: nextVisibility,
       ...(looksPatch === null ? {} : { isEligibleForLooks: looksPatch }),
       ...(portfolioPatch === null ? {} : { isFeaturedInPortfolio: portfolioPatch }),
+      ...(beforeAssetIdWrite === undefined
+        ? {}
+        : { beforeAssetId: beforeAssetIdWrite }),
 
       ...(serviceIdsProvided
         ? {

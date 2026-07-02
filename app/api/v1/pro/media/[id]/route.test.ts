@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => {
     mediaAssetDelete: vi.fn(),
     serviceFindMany: vi.fn(),
 
+    resolveFeaturePairing: vi.fn(),
+    resolveAutoPairedBefore: vi.fn(),
+
     safeError: vi.fn((error: unknown) => ({
       name: error instanceof Error ? error.name : 'NonErrorThrown',
       message: error instanceof Error ? error.message : String(error),
@@ -70,6 +73,24 @@ vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
 }))
 
+// Real body parsing; the two async resolvers are stubbed so the test controls
+// what the PATCH handler writes for beforeAssetId.
+vi.mock('@/lib/media/portfolioPairing', () => ({
+  parseBeforeAssetField: (body: unknown) => {
+    if (!body || typeof body !== 'object' || !('beforeAssetId' in body)) {
+      return { present: false, value: null }
+    }
+    const raw = (body as Record<string, unknown>).beforeAssetId
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim()
+      return { present: true, value: trimmed.length > 0 ? trimmed : null }
+    }
+    return { present: true, value: null }
+  },
+  resolveFeaturePairing: mocks.resolveFeaturePairing,
+  resolveAutoPairedBefore: mocks.resolveAutoPairedBefore,
+}))
+
 import { DELETE, PATCH } from './route'
 
 type TestCtx = {
@@ -107,6 +128,10 @@ function makeExistingMedia(
     caption: string | null
     isEligibleForLooks: boolean
     isFeaturedInPortfolio: boolean
+    mediaType: 'IMAGE' | 'VIDEO'
+    phase: 'BEFORE' | 'AFTER' | 'OTHER'
+    bookingId: string | null
+    beforeAssetId: string | null
     services: { serviceId: string }[]
   }>,
 ) {
@@ -118,6 +143,10 @@ function makeExistingMedia(
     caption: 'Before caption',
     isEligibleForLooks: false,
     isFeaturedInPortfolio: false,
+    mediaType: 'IMAGE' as const,
+    phase: 'AFTER' as const,
+    bookingId: 'booking_1',
+    beforeAssetId: null,
     services: [{ serviceId: 'service_1' }],
     ...(overrides ?? {}),
   }
@@ -150,6 +179,12 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
     mocks.mediaAssetDelete.mockResolvedValue({
       id: 'media_1',
     })
+
+    mocks.resolveFeaturePairing.mockResolvedValue({
+      ok: true,
+      beforeAssetId: null,
+    })
+    mocks.resolveAutoPairedBefore.mockResolvedValue(null)
   })
 
   describe('PATCH', () => {
@@ -442,6 +477,99 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
           isFeaturedInPortfolio: false,
         },
       })
+    })
+
+    it('auto-pairs a before/after when newly featured via the edit modal', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeExistingMedia({ isFeaturedInPortfolio: false }),
+      )
+      mocks.resolveAutoPairedBefore.mockResolvedValueOnce('before_1')
+
+      await PATCH(
+        makeJsonRequest({ isFeaturedInPortfolio: true }),
+        makeCtx(),
+      )
+
+      expect(mocks.resolveAutoPairedBefore).toHaveBeenCalled()
+      expect(mocks.mediaAssetUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ beforeAssetId: 'before_1' }),
+        }),
+      )
+    })
+
+    it('does not touch pairing when the feature flag is unchanged', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeExistingMedia({ isFeaturedInPortfolio: true }),
+      )
+
+      await PATCH(makeJsonRequest({ caption: 'Just a caption' }), makeCtx())
+
+      expect(mocks.resolveAutoPairedBefore).not.toHaveBeenCalled()
+      expect(mocks.mediaAssetUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.not.objectContaining({
+            beforeAssetId: expect.anything(),
+          }),
+        }),
+      )
+    })
+
+    it('clears the pairing when the media is unfeatured', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeExistingMedia({ isFeaturedInPortfolio: true }),
+      )
+
+      await PATCH(
+        makeJsonRequest({ isFeaturedInPortfolio: false }),
+        makeCtx(),
+      )
+
+      expect(mocks.mediaAssetUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ beforeAssetId: null }),
+        }),
+      )
+    })
+
+    it('applies an explicit before pairing from the picker', async () => {
+      mocks.resolveFeaturePairing.mockResolvedValueOnce({
+        ok: true,
+        beforeAssetId: 'before_9',
+      })
+
+      await PATCH(
+        makeJsonRequest({ beforeAssetId: 'before_9' }),
+        makeCtx(),
+      )
+
+      expect(mocks.resolveFeaturePairing).toHaveBeenCalled()
+      // An explicit pairing is not re-auto-paired.
+      expect(mocks.resolveAutoPairedBefore).not.toHaveBeenCalled()
+      expect(mocks.mediaAssetUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ beforeAssetId: 'before_9' }),
+        }),
+      )
+    })
+
+    it('returns 400 when the explicit before pairing is invalid', async () => {
+      mocks.resolveFeaturePairing.mockResolvedValueOnce({
+        ok: false,
+        error: 'Before photo not found.',
+      })
+
+      const res = await PATCH(
+        makeJsonRequest({ beforeAssetId: 'nope' }),
+        makeCtx(),
+      )
+
+      expect(res.status).toBe(400)
+      await expect(res.json()).resolves.toEqual({
+        ok: false,
+        error: 'Before photo not found.',
+      })
+      expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
     })
 
     it('returns 500 and logs a safe error when update throws', async () => {
