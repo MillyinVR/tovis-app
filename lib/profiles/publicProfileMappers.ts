@@ -98,6 +98,9 @@ export type PublicOfferingDto = {
   durationMinutes: number | null
   offersInSalon: boolean
   offersMobile: boolean
+  // Whether the current viewer has saved this offering's underlying service.
+  // Always false for guests / non-client viewers.
+  isFavorited: boolean
 }
 
 export type PublicPortfolioTileDto = {
@@ -323,6 +326,7 @@ export function formatOfferingPricing(offering: PublicOfferingRow): string[] {
 
 export function mapPublicOfferingToDto(
   offering: PublicOfferingRow,
+  favoritedServiceIds?: ReadonlySet<string>,
 ): PublicOfferingDto {
   const lowestPrice = pickLowestPriceCandidate(offering)
 
@@ -339,15 +343,17 @@ export function mapPublicOfferingToDto(
     durationMinutes: lowestPrice?.durationMinutes ?? null,
     offersInSalon: offering.offersInSalon,
     offersMobile: offering.offersMobile,
+    isFavorited: favoritedServiceIds?.has(offering.serviceId) ?? false,
   }
 }
 
 export function mapPublicOfferingsToDtos(
   offerings: PublicOfferingRow[],
+  favoritedServiceIds?: ReadonlySet<string>,
 ): PublicOfferingDto[] {
   return offerings
     .filter((offering) => offering.isActive)
-    .map((offering) => mapPublicOfferingToDto(offering))
+    .map((offering) => mapPublicOfferingToDto(offering, favoritedServiceIds))
 }
 
 export function getPublicProfilePriceFromLabel(

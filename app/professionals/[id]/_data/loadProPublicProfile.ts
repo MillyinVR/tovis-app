@@ -17,6 +17,11 @@ import {
 } from '@prisma/client'
 
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
+import {
+  listPublicAcceptedMethods,
+  publicPaymentMethodsSelect,
+  type PublicAcceptedMethod,
+} from '@/lib/payments/publicAcceptedMethods'
 import { prisma } from '@/lib/prisma'
 import type { ClientLinkViewer } from '@/lib/profiles/profileHrefs'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
@@ -52,6 +57,7 @@ export type ProPublicProfileBase = {
   header: PublicProfileHeaderDto
   stats: PublicProfileStatsDto
   offerings: PublicOfferingDto[]
+  acceptedPayments: PublicAcceptedMethod[]
   isFavoritedByMe: boolean
   viewerUserId: string | null
 }
@@ -100,6 +106,7 @@ export async function loadProPublicProfileBase(args: {
     completedBookingCount,
     offeringRows,
     favoriteRow,
+    paymentSettingsRow,
   ] = await Promise.all([
     prisma.review.aggregate({
       where: { professionalId: profileRow.id },
@@ -139,10 +146,27 @@ export async function loadProPublicProfileBase(args: {
           select: { id: true },
         })
       : Promise.resolve(null),
+
+    prisma.professionalPaymentSettings.findUnique({
+      where: { professionalId: profileRow.id },
+      select: publicPaymentMethodsSelect,
+    }),
   ])
 
   const reviewCount = reviewStats._count._all
   const averageRating = reviewStats._avg.rating ?? null
+
+  // Which of this pro's offered services the viewer has saved (client-only).
+  // Keyed on the underlying serviceId, matching the /services/[id]/favorite API.
+  const favoritedServiceIds = new Set<string>()
+  if (viewerUserId && offeringRows.length > 0) {
+    const serviceIds = [...new Set(offeringRows.map((o) => o.serviceId))]
+    const savedRows = await prisma.serviceFavorite.findMany({
+      where: { userId: viewerUserId, serviceId: { in: serviceIds } },
+      select: { serviceId: true },
+    })
+    for (const row of savedRows) favoritedServiceIds.add(row.serviceId)
+  }
 
   return {
     kind: 'ok',
@@ -150,7 +174,8 @@ export async function loadProPublicProfileBase(args: {
       professionalId: profileRow.id,
       verificationStatus: profileRow.verificationStatus,
       header: mapPublicProfileHeaderToDto(profileRow),
-      offerings: mapPublicOfferingsToDtos(offeringRows),
+      offerings: mapPublicOfferingsToDtos(offeringRows, favoritedServiceIds),
+      acceptedPayments: listPublicAcceptedMethods(paymentSettingsRow),
       stats: mapPublicProfileStatsToDto({
         offerings: offeringRows,
         completedBookingCount,
@@ -222,6 +247,9 @@ export type ProPublicProfileDto = {
   header: PublicProfileHeaderDto
   stats: PublicProfileStatsDto
   offerings: PublicOfferingDto[]
+  // Handle-free payment method labels the pro accepts (e.g. "Cash", "Venmo").
+  // Empty when the pro has no saved payment settings.
+  acceptedPayments: string[]
   portfolioTiles: PublicPortfolioTileDto[]
   reviews: PublicReviewDto[]
   isFavoritedByMe: boolean
@@ -255,6 +283,7 @@ export async function loadProPublicProfile(args: {
     header: base.header,
     stats: base.stats,
     offerings: base.offerings,
+    acceptedPayments: base.acceptedPayments.map((method) => method.label),
     portfolioTiles,
     reviews,
     isFavoritedByMe: base.isFavoritedByMe,
