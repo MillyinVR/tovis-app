@@ -8,8 +8,8 @@ import {
   SessionStep,
 } from '@prisma/client'
 
-import MediaPreviewGrid from '../_components/MediaPreviewGrid'
 import MediaUploader from '../MediaUploader'
+import SessionPhotoGrid from '../_components/SessionPhotoGrid'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
@@ -196,32 +196,6 @@ function SessionHeader({
         </span>
       </div>
     </header>
-  )
-}
-
-function PhotoPlaceholderGrid({ count }: { count: number }) {
-  const capturedCount = Math.min(Math.max(count, 0), 3)
-  const emptyCount = Math.max(0, 3 - capturedCount)
-
-  return (
-    <div className="brand-pro-session-photo-grid">
-      {Array.from({ length: capturedCount }, (_, index) => (
-        <div key={`captured-${index}`} className="brand-pro-session-photo-tile">
-          <div className="brand-pro-session-photo-check">
-            <CheckIcon size={10} />
-          </div>
-          <span className="brand-pro-session-photo-label" data-tone="after">
-            AFTER
-          </span>
-        </div>
-      ))}
-
-      {Array.from({ length: emptyCount }, (_, index) => (
-        <div key={`empty-${index}`} className="brand-pro-session-photo-add">
-          <CameraIcon />
-        </div>
-      ))}
-    </div>
   )
 }
 
@@ -420,7 +394,7 @@ export default async function ProAfterPhotosPage(props: PageProps) {
             </div>
           </div>
 
-          <PhotoPlaceholderGrid count={afterCount} />
+          <SessionPhotoGrid items={items} label="After" />
         </section>
 
         <section className="mt-4">
@@ -457,11 +431,6 @@ export default async function ProAfterPhotosPage(props: PageProps) {
           />
         </section>
 
-        <section className="mt-4 pb-4">
-          <Card>
-            <MediaPreviewGrid items={items} title="Uploaded after media" />
-          </Card>
-        </section>
       </div>
     </PageShell>
   )
