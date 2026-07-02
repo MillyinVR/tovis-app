@@ -157,6 +157,24 @@ export type BookingCalendarEvent = CalendarEventBase & {
   locationType: ServiceLocationType | null
 
   /**
+   * ClientProfile id, present only when the viewing pro may open this client's
+   * chart. `null`/absent → the name renders as plain text (no link, no id leak).
+   */
+  clientProfileId?: string | null
+
+  /**
+   * Waitlist rows only: human label for the client's preferred time
+   * (e.g. "Any time", "Morning", "Jun 14"), shown in place of a concrete time.
+   */
+  preferenceLabel?: string
+
+  /**
+   * Waitlist rows only: deep-link into the pre-filled new-booking flow so the
+   * pro can offer a matching slot. Absent when there's no active offering.
+   */
+  offerHref?: string | null
+
+  /**
    * Authoritative appointment-local timezone for this booking.
    */
   timeZone: IanaTimeZone

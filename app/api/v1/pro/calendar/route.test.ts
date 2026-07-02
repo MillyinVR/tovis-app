@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     bookingFindMany: vi.fn(),
     calendarBlockFindMany: vi.fn(),
     waitlistEntryFindMany: vi.fn(),
+    professionalServiceOfferingFindMany: vi.fn(),
   }
 })
 
@@ -28,6 +29,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     waitlistEntry: {
       findMany: mocks.waitlistEntryFindMany,
+    },
+    professionalServiceOffering: {
+      findMany: mocks.professionalServiceOfferingFindMany,
     },
   },
 }))
@@ -190,6 +194,7 @@ describe('GET /api/v1/pro/calendar', () => {
     mocks.bookingFindMany.mockResolvedValue([salonBooking, mobileBooking])
 
     mocks.waitlistEntryFindMany.mockResolvedValue([])
+    mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
 
     mocks.calendarBlockFindMany.mockImplementation(
       async (args: { where?: { OR?: Array<{ locationId: string | null }> } }) => {
@@ -344,12 +349,15 @@ describe('GET /api/v1/pro/calendar', () => {
     timeOfDay?: 'MORNING' | 'AFTERNOON' | 'EVENING' | null
     windowStartMin?: number | null
     windowEndMin?: number | null
+    serviceId?: string
     serviceName?: string
     clientFirstName?: string
   }) {
     return {
       id: args.id,
       status: 'ACTIVE',
+      createdAt: new Date('2030-01-10T00:00:00.000Z'),
+      serviceId: args.serviceId ?? 'svc-1',
       preferenceType: args.preferenceType,
       specificDate: args.specificDate ?? null,
       timeOfDay: args.timeOfDay ?? null,
@@ -357,6 +365,7 @@ describe('GET /api/v1/pro/calendar', () => {
       windowEndMin: args.windowEndMin ?? null,
       service: { name: args.serviceName ?? 'Balayage' },
       client: {
+        id: 'client-wl-1',
         firstName: args.clientFirstName ?? 'Wendy',
         lastName: 'Waitlister',
         user: { email: 'wendy@example.com' },
@@ -364,9 +373,13 @@ describe('GET /api/v1/pro/calendar', () => {
     }
   }
 
-  it('maps an undated ACTIVE waitlist entry into management.waitlistToday as a WAITLIST event', async () => {
+  it('maps an ACTIVE waitlist entry into a WAITLIST event with a preference label and offer link', async () => {
     mocks.waitlistEntryFindMany.mockResolvedValue([
       makeWaitlistEntry({ id: 'wl-anytime', preferenceType: 'ANY_TIME' }),
+    ])
+    // An active offering for the requested service enables the "Offer a time" deep-link.
+    mocks.professionalServiceOfferingFindMany.mockResolvedValue([
+      { id: 'offering-1', serviceId: 'svc-1' },
     ])
 
     const response = await GET(new Request('https://example.test/api/v1/pro/calendar'))
@@ -383,14 +396,17 @@ describe('GET /api/v1/pro/calendar', () => {
       title: 'Balayage',
       clientName: 'Wendy Waitlister',
       locationId: null,
+      preferenceLabel: 'Any time',
     })
+    expect(event.offerHref).toContain('/pro/bookings/new')
+    expect(event.offerHref).toContain('offeringId=offering-1')
     // Synthetic waitlist events never enter the top-level grid.
     expect(
       body.events.some((e: { id: string }) => e.id === 'waitlist:wl-anytime'),
     ).toBe(false)
   })
 
-  it('excludes a SPECIFIC_DATE waitlist entry whose requested day is not today', async () => {
+  it('shows the full active waitlist regardless of a SPECIFIC_DATE preference date', async () => {
     mocks.waitlistEntryFindMany.mockResolvedValue([
       makeWaitlistEntry({
         id: 'wl-future',
@@ -403,6 +419,9 @@ describe('GET /api/v1/pro/calendar', () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
-    expect(body.management.waitlistToday).toHaveLength(0)
+    expect(body.management.waitlistToday).toHaveLength(1)
+    expect(body.management.waitlistToday[0].preferenceLabel).toBe('Jan 1')
+    // No active offering was stubbed → no bookable slot to offer.
+    expect(body.management.waitlistToday[0].offerHref).toBeNull()
   })
 })

@@ -17,6 +17,8 @@ import { ManagementModal } from './_components/ManagementModal'
 import { useCalendarData } from './_hooks/useCalendarData'
 import { useCalendarNavigation } from './_hooks/useCalendarNavigation'
 
+import { isBlockedEvent } from './_utils/calendarMath'
+
 import { DEFAULT_CALENDAR_VIEW } from './_constants'
 
 import {
@@ -32,13 +34,33 @@ import {
   visibleDaysForCalendarView,
 } from './_viewModel/proCalendarDisplay'
 
-import type { ViewMode } from './_types'
+import type { CalendarEvent, ManagementLists, ViewMode } from './_types'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ProCalendarClientPageProps = {
   copy: BrandProCalendarCopy
+}
+
+// ─── Management-scope helpers ───────────────────────────────────────────────────
+
+/** Noun for the calendar's current range, used in the management sheet copy. */
+function rangeScopeWordForView(view: ViewMode): string {
+  if (view === 'week') return 'week'
+  if (view === 'month') return 'month'
+  return 'day'
+}
+
+/**
+ * A booking that occupies the schedule (anything the calendar shows that isn't a
+ * pending request, which has its own tab). Waitlist rows never enter `events`.
+ */
+function isScheduledBookingEvent(event: CalendarEvent): boolean {
+  return (
+    event.kind === 'BOOKING' &&
+    String(event.status).trim().toUpperCase() !== 'PENDING'
+  )
 }
 
 // ─── Exported client page ─────────────────────────────────────────────────────
@@ -152,6 +174,40 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
     [copy.titles, view],
   )
 
+  // The "Booked" and "Blocked" tabs reflect the timeframe the calendar is on
+  // (day/week/month), derived from the already-fetched range events, while
+  // "Pending" and "Waitlist" stay global (all requests / all waitlist clients).
+  const managementForModal = useMemo<ManagementLists>(
+    () => ({
+      ...cal.management,
+      todaysBookings: cal.events.filter(isScheduledBookingEvent),
+      blockedToday: cal.events.filter(isBlockedEvent),
+    }),
+    [cal.management, cal.events],
+  )
+
+  const managementCopyOverride = useMemo(() => {
+    const scopeWord = rangeScopeWordForView(view)
+
+    return {
+      tabs: {
+        todaysBookings: {
+          title: `Booked · ${headerLabel}`,
+          shortTitle: 'Booked',
+          description: `Appointments on your schedule for the selected ${scopeWord}.`,
+          emptyTitle: 'No booked appointments.',
+          emptyBody: `Nothing is on your schedule for the selected ${scopeWord}.`,
+        },
+        blockedToday: {
+          title: `Blocked time · ${headerLabel}`,
+          description: `Personal time you've blocked off for the selected ${scopeWord}.`,
+          emptyTitle: 'No blocked time.',
+          emptyBody: `Use block time to protect breaks or close off the ${scopeWord}.`,
+        },
+      },
+    }
+  }, [headerLabel, view])
+
   return (
     <main className="brand-pro-calendar-page">
       <CalendarMobileShell
@@ -244,7 +300,8 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
       <ManagementModal
         open={cal.managementOpen}
         activeKey={cal.managementKey}
-        management={cal.management}
+        management={managementForModal}
+        copy={managementCopyOverride}
         viewportTimeZone={calendarTimeZone}
         onClose={cal.closeManagement}
         onSetKey={cal.setManagementKey}

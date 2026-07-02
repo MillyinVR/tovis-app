@@ -7,6 +7,7 @@ import type { MouseEvent, ReactNode } from 'react'
 import { initialsForName } from '@/lib/initials'
 import { formatInTimeZone } from '@/lib/time'
 import { Avatar } from '@/app/_components/ui'
+import ClientNameLink from '@/app/_components/ClientNameLink'
 
 import type { CalendarEvent, ManagementKey, ManagementLists } from '../_types'
 
@@ -58,6 +59,7 @@ type ManagementModalCopy = {
   reviewRescheduleAction: string
   openAction: string
   messageAction: string
+  offerTimeAction: string
 
   cancelAction: string
   denyAction: string
@@ -86,7 +88,8 @@ type ManagementModalCopyOverride =
 
 type EventRowCopy = {
   title: string
-  subtitle: string
+  /** Name shown before the time (client name, or a block's note/label). */
+  primaryName: string
   initials: string
   timeLabel: string
   statusLabel: string
@@ -152,6 +155,7 @@ const DEFAULT_COPY: ManagementModalCopy = {
   reviewRescheduleAction: 'Review / Reschedule',
   openAction: 'Open',
   messageAction: 'Message',
+  offerTimeAction: 'Offer a time',
 
   cancelAction: 'Cancel',
   denyAction: 'Deny',
@@ -186,12 +190,12 @@ const DEFAULT_COPY: ManagementModalCopy = {
       emptyBody: 'Freshly calm. Suspicious, but we will take it.',
     },
     waitlistToday: {
-      title: 'Waitlist today',
+      title: 'Waitlist',
       shortTitle: 'Waitlist',
-      description: 'Clients trying to get into an opening today.',
-      emptyTitle: 'No waitlist entries.',
+      description: 'Clients waiting for an opening — offer one a matching time.',
+      emptyTitle: 'No one on the waitlist.',
       emptyBody:
-        'When waitlist data is available, same-day holds will appear here.',
+        'Clients who join your waitlist show up here with the service and times they want.',
     },
     blockedToday: {
       title: 'Blocked time today',
@@ -278,6 +282,21 @@ function canModerateEvent(key: ManagementKey, event: CalendarEvent): boolean {
 function messageHrefForBooking(bookingId: string): string {
   return `/messages/start?contextType=BOOKING&contextId=${encodeURIComponent(
     bookingId,
+  )}`
+}
+
+function isWaitlistEvent(event: CalendarEvent): boolean {
+  return event.kind === 'BOOKING' && normalizeStatus(event.status) === 'WAITLIST'
+}
+
+/** Waitlist rows carry id `waitlist:<entryId>`; message via the WAITLIST thread. */
+function messageHrefForWaitlist(eventId: string): string | null {
+  const entryId = eventId.startsWith('waitlist:')
+    ? eventId.slice('waitlist:'.length)
+    : null
+  if (!entryId) return null
+  return `/messages/start?contextType=WAITLIST&contextId=${encodeURIComponent(
+    entryId,
   )}`
 }
 
@@ -372,7 +391,7 @@ function buildEventRowCopy(args: {
 
     return {
       title: copy.blockedTimeTitle,
-      subtitle: `${note || title || copy.personalTimeFallback} · ${timeLabel}`,
+      primaryName: note || title || copy.personalTimeFallback,
       initials: copy.blockedInitials,
       timeLabel,
       statusLabel: statusMeta.label,
@@ -384,7 +403,7 @@ function buildEventRowCopy(args: {
 
   return {
     title: title || copy.appointmentFallback,
-    subtitle: `${clientName || copy.clientFallback} · ${timeLabel}`,
+    primaryName: clientName || copy.clientFallback,
     initials: initialsForName(clientName, '?'),
     timeLabel,
     statusLabel: statusMeta.label,
@@ -702,12 +721,24 @@ function ManagementEventRow(props: ManagementEventRowProps) {
 
   const bookingId = bookingIdFor(event)
   const isBlock = isBlockedEvent(event)
+  const isWaitlist = isWaitlistEvent(event)
+
+  const clientProfileId =
+    event.kind === 'BOOKING' ? event.clientProfileId ?? null : null
+
+  const preferenceLabel =
+    event.kind === 'BOOKING' ? normalizeText(event.preferenceLabel) : ''
+  const offerHref = event.kind === 'BOOKING' ? event.offerHref ?? null : null
+  const waitlistMessageHref = isWaitlist ? messageHrefForWaitlist(event.id) : null
 
   const rowCopy = buildEventRowCopy({
     event,
     viewportTimeZone,
     copy,
   })
+
+  // Waitlist rows show the preferred-time label in place of a concrete time.
+  const secondaryText = isWaitlist ? preferenceLabel : rowCopy.timeLabel
 
   const statusMeta = calendarStatusMeta({
     status: event.status,
@@ -748,34 +779,65 @@ function ManagementEventRow(props: ManagementEventRowProps) {
             </div>
 
             <p className="brand-pro-calendar-management-row-subtitle">
-              {rowCopy.subtitle}
+              {clientProfileId ? (
+                <ClientNameLink
+                  canLink
+                  clientId={clientProfileId}
+                  className="brand-pro-calendar-management-row-client-link"
+                >
+                  {rowCopy.primaryName}
+                </ClientNameLink>
+              ) : (
+                rowCopy.primaryName
+              )}
+              {secondaryText ? ` · ${secondaryText}` : ''}
             </p>
           </div>
         </div>
 
-        <p className="brand-pro-calendar-management-row-time">
-          {rowCopy.timeLabel}
-        </p>
+        {isWaitlist ? null : (
+          <p className="brand-pro-calendar-management-row-time">
+            {rowCopy.timeLabel}
+          </p>
+        )}
       </div>
 
       <div className="brand-pro-calendar-management-row-actions">
         <div className="brand-pro-calendar-management-row-primary-actions">
-          <ActionButton
-            onClick={() => {
-              onSetConfirmDenyId(null)
-              onPickEvent(event)
-            }}
-          >
-            {activeKey === 'pendingRequests' && !isBlock
-              ? copy.reviewRescheduleAction
-              : copy.openAction}
-          </ActionButton>
+          {isWaitlist ? (
+            <>
+              {offerHref ? (
+                <ActionLink href={offerHref} tone="primary">
+                  {copy.offerTimeAction}
+                </ActionLink>
+              ) : null}
 
-          {messageBookingId ? (
-            <ActionLink href={messageHrefForBooking(messageBookingId)}>
-              {copy.messageAction}
-            </ActionLink>
-          ) : null}
+              {waitlistMessageHref ? (
+                <ActionLink href={waitlistMessageHref}>
+                  {copy.messageAction}
+                </ActionLink>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <ActionButton
+                onClick={() => {
+                  onSetConfirmDenyId(null)
+                  onPickEvent(event)
+                }}
+              >
+                {activeKey === 'pendingRequests' && !isBlock
+                  ? copy.reviewRescheduleAction
+                  : copy.openAction}
+              </ActionButton>
+
+              {messageBookingId ? (
+                <ActionLink href={messageHrefForBooking(messageBookingId)}>
+                  {copy.messageAction}
+                </ActionLink>
+              ) : null}
+            </>
+          )}
         </div>
 
         {showModeration ? (
