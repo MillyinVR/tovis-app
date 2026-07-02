@@ -391,6 +391,9 @@ function parseBookingEvent(
   const detailsRecord = isRecord(value.details) ? value.details : null
   const viewLocalDateKey = optionalText(value.viewLocalDateKey)
   const durationMinutes = positiveNumberOrUndefined(value.durationMinutes)
+  const clientProfileId = optionalText(value.clientProfileId)
+  const preferenceLabel = optionalText(value.preferenceLabel)
+  const offerHref = optionalText(value.offerHref)
 
   const event: BookingCalendarEvent = {
     kind: 'BOOKING',
@@ -420,6 +423,9 @@ function parseBookingEvent(
     },
     ...(viewLocalDateKey ? { viewLocalDateKey } : {}),
     ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+    ...(clientProfileId ? { clientProfileId } : {}),
+    ...(preferenceLabel ? { preferenceLabel } : {}),
+    ...(offerHref ? { offerHref } : {}),
   }
 
   return event

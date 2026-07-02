@@ -1984,7 +1984,10 @@
 .brand-pro-calendar-block-panel {
   display: flex;
   width: 100%;
-  max-height: 94vh;
+  /* svh (small viewport) so a bottom-anchored sheet always fits even while the
+     mobile browser chrome is showing — vh (large viewport) overflowed below the
+     visible area and, with body scroll locked, could not be reached. */
+  max-height: 94svh;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid rgb(var(--surface-glass) / 0.16);
@@ -2178,7 +2181,11 @@
 }
 
 .brand-pro-calendar-management-body {
-  max-height: 72vh;
+  /* Single scroll region: flex to fill the panel between the sticky header and
+     footer instead of a fixed vh cap (which clipped on the blocked tab and on
+     short viewports). min-height: 0 lets it shrink so overflow can scroll. */
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 16px;
 }
@@ -2306,6 +2313,21 @@
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Client-name link inside a management row: inherits the subtitle color but
+   gets an underline so it reads as tappable → the pro-only client chart. */
+.brand-pro-calendar-management-row-client-link {
+  color: rgb(var(--text-primary));
+  font-weight: 900;
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--surface-glass) / 0.35);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 160ms ease;
+}
+
+.brand-pro-calendar-management-row-client-link:hover {
+  text-decoration-color: rgb(var(--surface-glass) / 0.7);
 }
 
 .brand-pro-calendar-management-row-time {

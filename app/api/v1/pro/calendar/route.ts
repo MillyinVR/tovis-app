@@ -5,12 +5,12 @@ import {
   Prisma,
   ProfessionalLocationType,
   ServiceLocationType,
-  WaitlistPreferenceType,
   WaitlistStatus,
-  WaitlistTimeOfDay,
 } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
+import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 import {
   DEFAULT_DURATION_MINUTES,
   MAX_BUFFER_MINUTES,
@@ -71,6 +71,10 @@ type BookingEvent = {
   endsAt: string
   title: string
   clientName: string
+  // ClientProfile id, present only when this pro is allowed to open the client's
+  // chart (see getVisibleClientIdSetForPro). null keeps the id from leaking so the
+  // name renders as plain text for anyone without access.
+  clientProfileId: string | null
   status: BookingStatus
   locationType: ServiceLocationType | null
   locationId: string
@@ -97,6 +101,7 @@ type WaitlistEvent = {
   endsAt: string
   title: string
   clientName: string
+  clientProfileId: string | null
   status: 'WAITLIST'
   locationType: null
   locationId: null
@@ -105,6 +110,13 @@ type WaitlistEvent = {
   timeZoneSource: TimeZoneTruthSource
   localDateKey: string
   viewLocalDateKey: string
+  // Human label for the client's preferred time (e.g. "Any time", "Morning",
+  // "Jun 14") shown in place of a concrete time on waitlist rows.
+  preferenceLabel: string
+  // Deep-link into the pre-filled new-booking flow (client + offering) so the
+  // pro can offer a matching slot. null when the pro has no active offering for
+  // the requested service.
+  offerHref: string | null
   details: {
     serviceName: string
     bufferMinutes: number
@@ -202,6 +214,7 @@ const bookingSelect = {
   locationTimeZone: true,
   client: {
     select: {
+      id: true,
       firstName: true,
       lastName: true,
       user: {
@@ -529,12 +542,25 @@ function toCalendarServiceItems(booking: BookingRow): CalendarServiceItem[] {
   }))
 }
 
+/**
+ * The ClientProfile id to expose on an event, gated by the pro's visible-client
+ * set so it never leaks for a client the pro is not allowed to open.
+ */
+function linkableClientProfileId(
+  clientId: string | null | undefined,
+  visibleClientIds: ReadonlySet<string>,
+): string | null {
+  return clientId && visibleClientIds.has(clientId) ? clientId : null
+}
+
 function toBookingEvent(args: {
   booking: BookingRow
   professionalTimeZone: string | null
   viewportTimeZone: string
+  visibleClientIds: ReadonlySet<string>
 }): BookingEvent | null {
-  const { booking, professionalTimeZone, viewportTimeZone } = args
+  const { booking, professionalTimeZone, viewportTimeZone, visibleClientIds } =
+    args
 
   if (!booking.locationId) return null
 
@@ -579,6 +605,7 @@ function toBookingEvent(args: {
     endsAt: end.toISOString(),
     title: serviceName,
     clientName: getClientName(booking),
+    clientProfileId: linkableClientProfileId(booking.client?.id, visibleClientIds),
     status: booking.status,
     locationType: booking.locationType,
     locationId: booking.locationId,
@@ -595,21 +622,11 @@ function toBookingEvent(args: {
   }
 }
 
-// Canonical time-of-day → minute windows, mirroring the audience matcher
-// (lib/lastMinute/audience/buildTier1WaitlistAudience.ts): MORNING hour<12, AFTERNOON 12–16,
-// EVENING 17+.
-const WAITLIST_TIME_OF_DAY_WINDOWS: Record<
-  WaitlistTimeOfDay,
-  { startMin: number; endMin: number }
-> = {
-  MORNING: { startMin: 0, endMin: 720 },
-  AFTERNOON: { startMin: 720, endMin: 1020 },
-  EVENING: { startMin: 1020, endMin: 1440 },
-}
-
 const waitlistSelect = {
   id: true,
   status: true,
+  createdAt: true,
+  serviceId: true,
   preferenceType: true,
   specificDate: true,
   timeOfDay: true,
@@ -618,6 +635,7 @@ const waitlistSelect = {
   service: { select: { name: true } },
   client: {
     select: {
+      id: true,
       firstName: true,
       lastName: true,
       user: { select: { email: true } },
@@ -639,77 +657,78 @@ function getWaitlistClientName(entry: WaitlistRow): string {
   return email || DEFAULT_BOOKING_CLIENT_NAME
 }
 
+/**
+ * Deep-link into the pre-filled new-booking flow so the pro can offer a
+ * waitlist client a matching slot. Returns null when there's no active offering
+ * for the requested service (nothing bookable to pre-fill). The new-booking page
+ * grants client visibility via the waitlist message thread and lets the pro pick
+ * the concrete time / location before it books.
+ */
+function buildWaitlistOfferHref(args: {
+  clientProfileId: string | null | undefined
+  offeringId: string | null | undefined
+}): string | null {
+  const { clientProfileId, offeringId } = args
+  if (!clientProfileId || !offeringId) return null
+
+  const params = new URLSearchParams({
+    clientId: clientProfileId,
+    offeringId,
+  })
+
+  return `/pro/bookings/new?${params.toString()}`
+}
+
 function toWaitlistEvent(args: {
   entry: WaitlistRow
   viewportTimeZone: string
   viewportTodayKey: string
-  viewportTodayStart: Date
-  viewportTomorrowStart: Date
+  offeringIdByServiceId: ReadonlyMap<string, string>
+  visibleClientIds: ReadonlySet<string>
 }): WaitlistEvent | null {
   const {
     entry,
     viewportTimeZone,
     viewportTodayKey,
-    viewportTodayStart,
-    viewportTomorrowStart,
+    offeringIdByServiceId,
+    visibleClientIds,
   } = args
 
-  // A SPECIFIC_DATE entry only counts for today when the requested calendar date IS today.
-  // specificDate is a @db.Date stored at UTC midnight, so compare the literal calendar date
-  // (UTC slice) against the pro's local "today" key — this avoids a timezone day-shift.
-  if (entry.preferenceType === WaitlistPreferenceType.SPECIFIC_DATE) {
-    const requested = entry.specificDate
-      ? entry.specificDate.toISOString().slice(0, 10)
-      : null
-    if (!requested || requested !== viewportTodayKey) return null
-  }
-
-  // Map the preference window onto today in the viewport timezone.
-  let startMin = 0
-  let endMin = 1440
-  if (entry.preferenceType === WaitlistPreferenceType.TIME_OF_DAY && entry.timeOfDay) {
-    const band = WAITLIST_TIME_OF_DAY_WINDOWS[entry.timeOfDay]
-    startMin = band.startMin
-    endMin = band.endMin
-  } else if (
-    entry.preferenceType === WaitlistPreferenceType.TIME_RANGE &&
-    entry.windowStartMin != null &&
-    entry.windowEndMin != null &&
-    entry.windowEndMin > entry.windowStartMin
-  ) {
-    startMin = entry.windowStartMin
-    endMin = entry.windowEndMin
-  }
-
-  const start =
-    startMin <= 0
-      ? viewportTodayStart
-      : new Date(viewportTodayStart.getTime() + startMin * 60000)
-  const end =
-    endMin >= 1440
-      ? viewportTomorrowStart
-      : new Date(viewportTodayStart.getTime() + endMin * 60000)
-  const durationMinutes = Math.max(
-    0,
-    Math.round((end.getTime() - start.getTime()) / 60000),
-  )
   const serviceName = entry.service?.name?.trim() || DEFAULT_BOOKING_SERVICE_NAME
+
+  // Waitlist rows carry no concrete occupancy: anchor the synthetic instant to
+  // the join time so the list sorts FIFO (oldest first), matching /pro/waitlist.
+  const joinedAt = entry.createdAt.toISOString()
+
+  const preferenceLabel = formatWaitlistPreferenceLabel({
+    preferenceType: entry.preferenceType,
+    specificDate: entry.specificDate,
+    timeOfDay: entry.timeOfDay,
+    windowStartMin: entry.windowStartMin,
+    windowEndMin: entry.windowEndMin,
+  })
 
   return {
     id: `waitlist:${entry.id}`,
     kind: 'BOOKING',
-    startsAt: start.toISOString(),
-    endsAt: end.toISOString(),
+    startsAt: joinedAt,
+    endsAt: joinedAt,
     title: serviceName,
     clientName: getWaitlistClientName(entry),
+    clientProfileId: linkableClientProfileId(entry.client?.id, visibleClientIds),
     status: 'WAITLIST',
     locationType: null,
     locationId: null,
-    durationMinutes,
+    durationMinutes: 0,
     timeZone: safeEventTimeZone(viewportTimeZone),
     timeZoneSource: 'PROFESSIONAL',
-    localDateKey: utcDateToLocalYmd(start, viewportTimeZone),
+    localDateKey: utcDateToLocalYmd(entry.createdAt, viewportTimeZone),
     viewLocalDateKey: viewportTodayKey,
+    preferenceLabel,
+    offerHref: buildWaitlistOfferHref({
+      clientProfileId: entry.client?.id,
+      offeringId: offeringIdByServiceId.get(entry.serviceId) ?? null,
+    }),
     details: {
       serviceName,
       bufferMinutes: 0,
@@ -888,6 +907,11 @@ export async function GET(req: Request) {
     const { from, requestedToExclusive, effectiveToExclusive, wasClamped } =
       rangeResult
 
+    // Which of this pro's clients they're allowed to open (chart access). Used to
+    // gate the clientProfileId we expose on booking / waitlist events so names can
+    // link to the pro-only client chart without leaking ids for anyone else.
+    const visibleClientIds = await getVisibleClientIdSetForPro(professionalId)
+
     const [bookings, blocks] = await Promise.all([
       prisma.booking.findMany({
         where: {
@@ -932,6 +956,7 @@ export async function GET(req: Request) {
           booking,
           professionalTimeZone: proProfile.timeZone,
           viewportTimeZone,
+          visibleClientIds,
         }),
       )
       .filter((event): event is BookingEvent => event !== null)
@@ -971,28 +996,39 @@ export async function GET(req: Request) {
       tomorrowStart: viewportTomorrowStart,
     })
 
-    // Active waitlist entries relevant to today: undated preferences (ANY_TIME / TIME_OF_DAY /
-    // TIME_RANGE) always apply; SPECIFIC_DATE only when it lands on today (exact-matched in
-    // toWaitlistEvent). The date OR-clause is a loose ±1-day pre-filter to absorb tz shift.
+    // The pro's full active waitlist (FIFO by join time), so the calendar's
+    // Waitlist tab shows every client waiting — with their requested service and
+    // preferred-time label — not just same-day holds.
     const waitlistRows = await prisma.waitlistEntry.findMany({
       where: {
         professionalId,
         status: WaitlistStatus.ACTIVE,
-        OR: [
-          { preferenceType: { not: WaitlistPreferenceType.SPECIFIC_DATE } },
-          {
-            preferenceType: WaitlistPreferenceType.SPECIFIC_DATE,
-            specificDate: {
-              gte: addDaysUtc(viewportTodayStart, -1),
-              lt: addDaysUtc(viewportTomorrowStart, 1),
-            },
-          },
-        ],
       },
       select: waitlistSelect,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'asc' },
       take: MAX_CALENDAR_EVENTS_PER_RANGE,
     })
+
+    // Resolve each waitlisted service to the pro's active offering (unique per
+    // professional+service) so the "Offer a time" action can deep-link the
+    // pre-filled new-booking flow. Batched to avoid an N+1.
+    const waitlistServiceIds = [
+      ...new Set(waitlistRows.map((entry) => entry.serviceId)),
+    ]
+    const offeringRows =
+      waitlistServiceIds.length > 0
+        ? await prisma.professionalServiceOffering.findMany({
+            where: {
+              professionalId,
+              serviceId: { in: waitlistServiceIds },
+              isActive: true,
+            },
+            select: { id: true, serviceId: true },
+          })
+        : []
+    const offeringIdByServiceId = new Map(
+      offeringRows.map((offering) => [offering.serviceId, offering.id]),
+    )
 
     const waitlistTodayEvents = waitlistRows
       .map((entry) =>
@@ -1000,8 +1036,8 @@ export async function GET(req: Request) {
           entry,
           viewportTimeZone,
           viewportTodayKey,
-          viewportTodayStart,
-          viewportTomorrowStart,
+          offeringIdByServiceId,
+          visibleClientIds,
         }),
       )
       .filter((event): event is WaitlistEvent => event !== null)
