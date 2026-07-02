@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { getCurrentUser } from '@/lib/currentUser'
 import MediaPortfolioToggle from './MediaPortfolioToggle'
 import HashJumpHighlight from './HashJumpHighlight'
+import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { loadProReviewsList } from '@/lib/pro/loadProReviewsList'
 
@@ -162,7 +163,48 @@ export default async function ProReviewsPage() {
                         gap: 8,
                       }}
                     >
-                      {rev.mediaTiles.map((m) => {
+                      {rev.mediaTiles
+                        .filter(
+                          (m) =>
+                            // A paired before is subsumed by its after's slider.
+                            !rev.mediaTiles.some(
+                              (t) => t.before?.id === m.id,
+                            ),
+                        )
+                        .map((m) => {
+                        if (m.before) {
+                          // Paired before/after → the comparison slider fills the tile.
+                          return (
+                            <div
+                              key={m.id}
+                              style={{
+                                borderRadius: 10,
+                                border: '1px solid rgb(var(--text-primary) / 0.10)',
+                                overflow: 'hidden',
+                                background: 'rgb(var(--text-primary) / 0.04)',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  position: 'relative',
+                                  aspectRatio: '1 / 1',
+                                }}
+                              >
+                                <BeforeAfterReveal
+                                  beforeSrc={
+                                    m.before.thumbUrl ??
+                                    m.before.fullUrl ??
+                                    m.src
+                                  }
+                                  afterSrc={m.src}
+                                  beforeAlt={m.caption ? `Before — ${m.caption}` : 'Before'}
+                                  afterAlt={m.caption ? `After — ${m.caption}` : 'After'}
+                                  className="brand-before-after-fill"
+                                />
+                              </div>
+                            </div>
+                          )
+                        }
                         return (
                           <div
                             key={m.id}
