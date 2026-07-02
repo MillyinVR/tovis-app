@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { MediaVisibility } from '@prisma/client'
 
+import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 
@@ -83,18 +84,30 @@ function PortfolioMediaTile({
 
   return (
     <div className="brand-pro-profile-media-tile" title={title}>
-      <Link
-        href={`/media/${encodeURIComponent(tile.id)}`}
-        className="brand-focus"
-        aria-label={title}
-      >
-        <RemoteImage
-          src={tile.src}
-          alt={alt}
-          className="brand-pro-profile-media-img"
-          intrinsic
+      {tile.before ? (
+        // Paired before/after → the comparison slider fills the tile; the owner
+        // menu + badges below still let the pro manage the post.
+        <BeforeAfterReveal
+          beforeSrc={tile.before.thumbUrl ?? tile.before.fullUrl ?? tile.src}
+          afterSrc={tile.src}
+          beforeAlt={tile.caption ? `Before — ${tile.caption}` : 'Before'}
+          afterAlt={tile.caption ? `After — ${tile.caption}` : 'After'}
+          className="brand-before-after-fill"
         />
-      </Link>
+      ) : (
+        <Link
+          href={`/media/${encodeURIComponent(tile.id)}`}
+          className="brand-focus"
+          aria-label={title}
+        >
+          <RemoteImage
+            src={tile.src}
+            alt={alt}
+            className="brand-pro-profile-media-img"
+            intrinsic
+          />
+        </Link>
+      )}
 
       <div className="brand-pro-profile-owner-menu-wrap">
         <OwnerMediaMenu
