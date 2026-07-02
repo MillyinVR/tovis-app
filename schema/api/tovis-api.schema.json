@@ -9139,6 +9139,12 @@
     },
     "ProPublicProfileDto": {
       "properties": {
+        "acceptedPayments": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "header": {
           "$ref": "#/definitions/PublicProfileHeaderDto"
         },
@@ -9175,6 +9181,7 @@
         "header",
         "stats",
         "offerings",
+        "acceptedPayments",
         "portfolioTiles",
         "reviews",
         "isFavoritedByMe"
@@ -9460,6 +9467,9 @@
             "null"
           ]
         },
+        "isFavorited": {
+          "type": "boolean"
+        },
         "name": {
           "type": "string"
         },
@@ -9506,7 +9516,8 @@
         "priceFromNumber",
         "durationMinutes",
         "offersInSalon",
-        "offersMobile"
+        "offersMobile",
+        "isFavorited"
       ],
       "type": "object"
     },

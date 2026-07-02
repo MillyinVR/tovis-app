@@ -5,7 +5,6 @@ import { notFound } from 'next/navigation'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { getCurrentUser } from '@/lib/currentUser'
 import { messageStartHref } from '@/lib/messages'
-import { prisma } from '@/lib/prisma'
 import {
   buildLoginHref,
   buildProfessionalProfileHref,
@@ -17,10 +16,6 @@ import {
   pickPublicProfileTab,
   type PublicProfileSearchParams,
 } from '@/lib/profiles/publicProfileFormatting'
-import {
-  listPublicAcceptedMethods,
-  publicPaymentMethodsSelect,
-} from '@/lib/payments/publicAcceptedMethods'
 
 import {
   loadPortfolioTiles,
@@ -62,19 +57,10 @@ export default async function PublicProfessionalProfilePage({
     return <PendingVerificationSurface />
   }
 
-  const { header, stats, offerings, isFavoritedByMe, viewerUserId } =
+  const { header, stats, offerings, acceptedPayments, isFavoritedByMe, viewerUserId } =
     baseResult.base
   const professionalId = baseResult.base.professionalId
   const isClientViewer = viewerUserId !== null
-
-  // Accepted-payments + message href stay in the page (UI-only / not part of the
-  // native profile DTO).
-  const paymentSettingsRow = await prisma.professionalPaymentSettings.findUnique({
-    where: { professionalId },
-    select: publicPaymentMethodsSelect,
-  })
-
-  const acceptedPayments = listPublicAcceptedMethods(paymentSettingsRow)
 
   const portfolioTiles =
     activeTab === 'portfolio' ? await loadPortfolioTiles(professionalId) : []
