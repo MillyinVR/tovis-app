@@ -857,6 +857,86 @@
   color: rgb(var(--color-acid));
 }
 
+/* ── Before/after reveal — interactive comparison slider ──────────────────────
+   The "after" fills the frame; the "before" is layered on top and clipped to a
+   draggable divider, so dragging/tapping wipes between the two. Mirrors the iOS
+   BeforeAfterCompareView so the swipe reads the same on both platforms. Shown
+   wherever a complete before+after pair exists (the aftercare surfaces). */
+.brand-before-after-reveal {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 4 / 5;
+  border-radius: 14px;
+  background: rgb(var(--bg-secondary));
+  /* Own horizontal drags so the divider tracks the pointer even in a scroll
+     list (matches the iOS slider's minimum-distance-0 gesture). */
+  touch-action: none;
+  user-select: none;
+  cursor: ew-resize;
+}
+
+.brand-before-after-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.brand-before-after-reveal:focus-visible {
+  outline: 2px solid rgb(var(--accent-primary) / 0.55);
+  outline-offset: 2px;
+}
+
+.brand-before-after-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgb(var(--bg-primary) / 0.9);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.brand-before-after-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--bg-primary) / 0.92);
+  color: rgb(var(--accent-primary));
+  box-shadow: var(--shadow-soft);
+  transform: translate(-50%, -50%);
+}
+
+.brand-before-after-tag {
+  position: absolute;
+  top: 8px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--bg-primary) / 0.75);
+  color: rgb(var(--text-secondary));
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.brand-before-after-tag[data-side='before'] {
+  left: 8px;
+}
+
+.brand-before-after-tag[data-side='after'] {
+  right: 8px;
+}
+
+.brand-before-after-tag[data-tone='after'] {
+  color: rgb(var(--color-acid));
+}
+
 /* Privacy banner — "every shot is saved privately" reassurance. */
 .brand-pro-session-privacy {
   display: flex;
