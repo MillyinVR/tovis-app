@@ -880,6 +880,14 @@
   inset: 0;
 }
 
+/* Fill a fixed-aspect parent tile (e.g. a portfolio grid cell) instead of the
+   reveal's own portrait aspect ratio. */
+.brand-before-after-reveal.brand-before-after-fill {
+  aspect-ratio: auto;
+  height: 100%;
+  border-radius: 0;
+}
+
 .brand-before-after-reveal:focus-visible {
   outline: 2px solid rgb(var(--accent-primary) / 0.55);
   outline-offset: 2px;

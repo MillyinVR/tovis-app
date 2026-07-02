@@ -1,6 +1,7 @@
 // app/professionals/[id]/PortfolioGrid.tsx// app/professionals/[id]/PortfolioGrid.tsx
 import Link from 'next/link'
 
+import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import type { PublicPortfolioTileDto } from '@/lib/profiles/publicProfileMappers'
 
@@ -47,6 +48,22 @@ function PortfolioTile({
 }) {
   const title = tile.caption ?? 'Open portfolio post'
   const alt = tile.caption ?? 'Portfolio'
+
+  // A paired tile becomes the interactive before/after comparison slider in
+  // place of the static image (the slider is the content, so no post link).
+  if (tile.before) {
+    return (
+      <div className="brand-profile-media-tile">
+        <BeforeAfterReveal
+          beforeSrc={tile.before.thumbUrl ?? tile.before.fullUrl ?? tile.src}
+          afterSrc={tile.src}
+          beforeAlt={tile.caption ? `Before — ${tile.caption}` : 'Before'}
+          afterAlt={tile.caption ? `After — ${tile.caption}` : 'After'}
+          className="brand-before-after-fill"
+        />
+      </div>
+    )
+  }
 
   return (
     <Link
