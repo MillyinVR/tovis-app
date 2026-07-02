@@ -29,7 +29,7 @@ import { pickString } from '@/lib/pick'
 import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
 import { isBookingError } from '@/lib/booking/errors'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
-import RemoteImage from '@/app/_components/media/RemoteImage'
+import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 export const dynamic = 'force-dynamic'
@@ -71,30 +71,16 @@ function MediaStrip(props: {
     <SectionCard title={props.title}>
       {props.items.length > 0 ? (
         <div className="grid grid-cols-3 gap-2">
-          {props.items.map((item) => {
-            const src = item.thumbUrl || item.url
-
-            return (
-              <div
-                key={item.id}
-                className="aspect-square overflow-hidden rounded-card border border-white/10 bg-bgPrimary"
-              >
-                {src ? (
-                  <RemoteImage
-                    src={src}
-                    alt={props.title}
-                    className="h-full w-full object-cover"
-                    width={400}
-                    height={400}
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs text-textSecondary">
-                    Unavailable
-                  </div>
-                )}
-              </div>
-            )
-          })}
+          {props.items.map((item) => (
+            <ClickableMedia
+              key={item.id}
+              thumbSrc={item.thumbUrl || item.url}
+              fullSrc={item.url || item.thumbUrl}
+              mediaType={item.mediaType?.toUpperCase() === 'VIDEO' ? 'VIDEO' : 'IMAGE'}
+              alt={props.title}
+              className="aspect-square w-full rounded-card border border-white/10 bg-bgPrimary"
+            />
+          ))}
         </div>
       ) : (
         <div className="text-sm text-textSecondary/75">No photos available.</div>

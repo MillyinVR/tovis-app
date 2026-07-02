@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
-import RemoteImage from '@/app/_components/media/RemoteImage'
+import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 
 import { getBrandConfig } from '@/lib/brand'
@@ -625,34 +625,21 @@ function MediaStrip(props: {
       </div>
       <div className="looksNoScrollbar flex gap-2 overflow-x-auto pb-1">
         {props.items.map((mediaItem) => {
-            const href =
-              typeof mediaItem.url === 'string' && mediaItem.url.trim()
-                ? mediaItem.url
-                : typeof mediaItem.thumbUrl === 'string' && mediaItem.thumbUrl.trim()
-                  ? mediaItem.thumbUrl
-                  : null
+            const previewSrc = mediaPreviewSrc(mediaItem)
+            const fullSrc = mediaFullSrc(mediaItem)
 
-            const previewSrc =
-              typeof mediaItem.thumbUrl === 'string' && mediaItem.thumbUrl.trim()
-                ? mediaItem.thumbUrl
-                : href
-
-            if (!href || !previewSrc) return null
+            if (!previewSrc || !fullSrc) return null
 
             return (
-              <a
+              <ClickableMedia
                 key={mediaItem.id}
-                href={href}
-                className="block h-32 w-32 shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
-              >
-                <RemoteImage
-                  src={previewSrc}
-                  alt={sessionPhotoAlt(props.label, props.serviceName)}
-                  width={256}
-                  height={256}
-                  className="h-full w-full object-cover"
-                />
-              </a>
+                thumbSrc={previewSrc}
+                fullSrc={fullSrc}
+                mediaType={mediaItem.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'}
+                alt={sessionPhotoAlt(props.label, props.serviceName)}
+                caption={sessionPhotoAlt(props.label, props.serviceName)}
+                className="h-32 w-32 shrink-0 rounded-card border border-white/10 bg-bgSecondary"
+              />
             )
           })}
       </div>
@@ -809,6 +796,15 @@ function mediaPreviewSrc(media: LoadedRenderableMedia | null): string | null {
   return url ? media.url : null
 }
 
+// Full-size render URL for tap-to-open (falls back to the thumb).
+function mediaFullSrc(media: LoadedRenderableMedia | null): string | null {
+  if (!media) return null
+  const url = typeof media.url === 'string' ? media.url.trim() : ''
+  if (url) return media.url
+  const thumb = typeof media.thumbUrl === 'string' ? media.thumbUrl.trim() : ''
+  return thumb ? media.thumbUrl : null
+}
+
 function AftercarePrivacyNote() {
   return (
     <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-semibold text-textSecondary">
@@ -852,6 +848,8 @@ function ClientAftercareBeforeAfter(props: {
         media={{
           beforeUrl: mediaPreviewSrc(primaryBefore),
           afterUrl: mediaPreviewSrc(primaryAfter),
+          beforeFullUrl: mediaFullSrc(primaryBefore),
+          afterFullUrl: mediaFullSrc(primaryAfter),
         }}
         serviceName={props.serviceName}
       />

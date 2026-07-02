@@ -56,22 +56,22 @@ vi.mock('@/lib/media/renderUrls', () => ({
   renderMediaUrls: mocks.renderMediaUrls,
 }))
 
-vi.mock('../_components/MediaPreviewGrid', () => ({
+vi.mock('../_components/SessionPhotoGrid', () => ({
   default: ({
     items,
-    title,
+    label,
   }: {
     items: Array<{ id: string }>
-    title: string
+    label: string
   }) =>
     React.createElement(
       'div',
       {
-        'data-testid': 'media-preview-grid',
-        'data-title': title,
+        'data-testid': 'session-photo-grid',
+        'data-label': label,
         'data-count': String(items.length),
       },
-      title,
+      label,
     ),
 }))
 
@@ -355,7 +355,7 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
       }),
     )
 
-    const grids = findElementsByTestId(page, 'media-preview-grid')
+    const grids = findElementsByTestId(page, 'session-photo-grid')
     expect(grids).toHaveLength(1)
     expect(grids[0]?.props['data-count']).toBe('1')
   })

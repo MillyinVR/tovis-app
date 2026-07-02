@@ -1650,7 +1650,19 @@
     "BookingBeforeAfterThumbs": {
       "description": "The primary \"before\" and \"after\" photo for a booking, already resolved to renderable URLs (signed for the private session bucket, public otherwise).\n\nThis is the single source of truth for the before/after pair shown anywhere that links to a client's aftercare summary (home action card, aftercare inbox, …) — so those surfaces don't each re-implement the media select + phase pick + URL rendering.",
       "properties": {
+        "afterFullUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "afterUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "beforeFullUrl": {
           "type": [
             "string",
             "null"
@@ -1665,7 +1677,9 @@
       },
       "required": [
         "beforeUrl",
-        "afterUrl"
+        "afterUrl",
+        "beforeFullUrl",
+        "afterFullUrl"
       ],
       "type": "object"
     },

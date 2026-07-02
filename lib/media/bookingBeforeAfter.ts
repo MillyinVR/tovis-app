@@ -17,9 +17,17 @@ import { renderMediaUrls } from '@/lib/media/renderUrls'
 export type BookingBeforeAfterThumbs = {
   beforeUrl: string | null
   afterUrl: string | null
+  // Full-size render URLs (for tap-to-open); fall back to the thumb URL.
+  beforeFullUrl: string | null
+  afterFullUrl: string | null
 }
 
-const EMPTY: BookingBeforeAfterThumbs = { beforeUrl: null, afterUrl: null }
+const EMPTY: BookingBeforeAfterThumbs = {
+  beforeUrl: null,
+  afterUrl: null,
+  beforeFullUrl: null,
+  afterFullUrl: null,
+}
 
 const beforeAfterMediaSelect = {
   bookingId: true,
@@ -98,9 +106,15 @@ export async function loadBookingBeforeAfterThumbs(
       const afterUrl = afterRendered
         ? afterRendered.renderThumbUrl ?? afterRendered.renderUrl
         : null
+      const beforeFullUrl = beforeRendered
+        ? beforeRendered.renderUrl ?? beforeRendered.renderThumbUrl
+        : null
+      const afterFullUrl = afterRendered
+        ? afterRendered.renderUrl ?? afterRendered.renderThumbUrl
+        : null
 
       if (beforeUrl || afterUrl) {
-        result.set(bookingId, { beforeUrl, afterUrl })
+        result.set(bookingId, { beforeUrl, afterUrl, beforeFullUrl, afterFullUrl })
       }
     }),
   )

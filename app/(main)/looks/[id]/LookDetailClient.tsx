@@ -21,6 +21,7 @@ import { useViewerLocation } from '@/lib/useViewerLocation'
 import AvailabilityDrawer from '../../booking/AvailabilityDrawer'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ClickableMedia from '@/app/_components/media/ClickableMedia'
 
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
@@ -451,34 +452,17 @@ export default function LookDetailClient({
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
-                  {secondaryAssets.map((asset) => {
-                    const previewSrc = asset.media.thumbUrl ?? asset.media.url
-
-                    return (
-                      <div
-                        key={asset.id}
-                        className="overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgPrimary"
-                      >
-                        {asset.media.mediaType === 'VIDEO' ? (
-                          <video
-                            src={asset.media.url}
-                            muted
-                            playsInline
-                            preload="metadata"
-                            className="h-24 w-full object-cover"
-                          />
-                        ) : (
-                          <RemoteImage
-                            src={previewSrc}
-                            alt={asset.media.caption || 'Look asset'}
-                            width={400}
-                            height={400}
-                            className="h-24 w-full object-cover"
-                          />
-                        )}
-                      </div>
-                    )
-                  })}
+                  {secondaryAssets.map((asset) => (
+                    <ClickableMedia
+                      key={asset.id}
+                      thumbSrc={asset.media.thumbUrl ?? asset.media.url}
+                      fullSrc={asset.media.url ?? asset.media.thumbUrl}
+                      mediaType={asset.media.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'}
+                      alt={asset.media.caption || 'Look asset'}
+                      caption={asset.media.caption}
+                      className="h-24 w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary"
+                    />
+                  ))}
                 </div>
               </div>
             ) : null}
