@@ -14,13 +14,25 @@
 // Bump `SHOT_PACKS_VERSION` on every content change — clients use it to cache.
 
 /** Pose-rule kinds the iOS coach can currently measure. Adding a kind here
- * requires the matching evaluator in the app (older apps skip unknown kinds). */
-export type PoseRuleKind =
-  | 'handNearFace' // a wrist within params.maxFaceHeights of the face center
-  | 'bothHandsVisible' // both wrists confidently in frame
-  | 'shouldersTilted' // shoulder line at least params.minDegrees off level
-  | 'shouldersLevel' // shoulder line within params.maxDegrees of level
-  | 'faceNearShoulder' // face center within params.maxFaceWidths of a shoulder
+ * requires the matching evaluator in the app (older apps skip unknown kinds).
+ *  - handNearFace — a wrist within params.maxFaceHeights of the face center
+ *  - bothHandsVisible — both wrists confidently in frame
+ *  - shouldersTilted — shoulder line at least params.minDegrees off level
+ *  - shouldersLevel — shoulder line within params.maxDegrees of level
+ *  - faceNearShoulder — face center within params.maxFaceWidths of a shoulder
+ *
+ * Kept as a runtime array (type derived from it) so server-side consumers —
+ * e.g. the Claude-vision look brief — can validate rules against the same
+ * single source of truth. */
+export const POSE_RULE_KINDS = [
+  'handNearFace',
+  'bothHandsVisible',
+  'shouldersTilted',
+  'shouldersLevel',
+  'faceNearShoulder',
+] as const
+
+export type PoseRuleKind = (typeof POSE_RULE_KINDS)[number]
 
 export type ShotPackPoseRule = {
   kind: PoseRuleKind

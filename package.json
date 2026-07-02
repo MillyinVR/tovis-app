@@ -95,6 +95,7 @@
     "import:license-permissions": "tsx scripts/importLicensePermissions.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.109.1",
     "@next/env": "16.2.6",
     "@prisma/client": "^6.19.0",
     "@radix-ui/react-select": "^2.2.6",

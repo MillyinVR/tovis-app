@@ -20,6 +20,8 @@ export type RateLimitBucket =
   | 'pro:locations:write'
   | 'pro:working-hours:write'
   | 'pro:finance:expenses:write'
+  | 'pro:camera:look-brief'
+  | 'pro:camera:set-critique'
   | 'google:proxy'
   | 'pro-license:verify'
   | 'messages:send'
@@ -166,6 +168,21 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 30,
     windowSeconds: 60,
     prefix: 'rl:pro:finance:expenses:write',
+    mode: 'redis-only',
+  },
+  // Claude-vision camera features are the daily free allowance (the cost
+  // model is "free with a daily cap"): each Anthropic call costs real money,
+  // so the window is a day, not a burst-smoothing minute. Keyed per user.
+  'pro:camera:look-brief': {
+    limit: 25,
+    windowSeconds: 24 * 60 * 60,
+    prefix: 'rl:pro:camera:look-brief',
+    mode: 'redis-only',
+  },
+  'pro:camera:set-critique': {
+    limit: 10,
+    windowSeconds: 24 * 60 * 60,
+    prefix: 'rl:pro:camera:set-critique',
     mode: 'redis-only',
   },
   'google:proxy': {
