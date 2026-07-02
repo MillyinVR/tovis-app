@@ -538,7 +538,6 @@ export default function AvailabilityDrawer(props: {
   )
 
   const otherProsRef = useRef<HTMLDivElement | null>(null)
-  const holdStatusRef = useRef<HTMLDivElement | null>(null)
   const selectedHoldIdRef = useRef<string | null>(null)
 
   const setSelectedHold = useCallback((next: SelectedHold | null) => {
@@ -551,18 +550,6 @@ export default function AvailabilityDrawer(props: {
   const summaryLoadedTrackedRef = useRef(false)
   const lastDaySlotsTrackedKeyRef = useRef<string | null>(null)
   const openedOnceRef = useRef(false)
-
-  useEffect(() => {
-    if (!open) return
-    if (!selected?.holdId) return
-
-    window.requestAnimationFrame(() => {
-      holdStatusRef.current?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'nearest',
-      })
-    })
-  }, [open, selected?.holdId])
 
   const discoveryIds = useMemo(() => {
     return {
@@ -1705,29 +1692,19 @@ export default function AvailabilityDrawer(props: {
             </div>
           ) : null}
 
+          {/* Constant margin: the countdown lives in the held-time banner below
+              the picker (and the sticky footer), so nothing inserts above the
+              day/slot selector on hold — keeping it from jumping on selection. */}
           <div
             className="text-[30px] font-bold leading-[1.1] text-textPrimary"
             style={{
               fontFamily: 'var(--font-display-face, "Fraunces"), Georgia, serif',
               fontStyle: 'italic',
-              marginBottom: holdLabel ? 6 : 18,
+              marginBottom: 18,
             }}
           >
             When works?
           </div>
-
-          {holdLabel ? (
-            <div className="mb-4 text-[12px] font-semibold text-textSecondary">
-              Hold expires{' '}
-              <span
-                className={
-                  holdUrgent ? 'font-black text-toneDanger' : 'font-black text-textPrimary'
-                }
-              >
-                {holdLabel}
-              </span>
-            </div>
-          ) : null}
 
           {summary && primary && !showMobileAddressSelector ? (
             <>
@@ -1930,7 +1907,6 @@ export default function AvailabilityDrawer(props: {
 
               {holding ? (
                 <div
-                  ref={holdStatusRef}
                   className="mb-[14px] rounded-[14px] border border-white/10 bg-bgPrimary/35 p-[12px_14px]"
                 >
                   <div className="text-[13px] font-black text-textPrimary">
@@ -1942,7 +1918,6 @@ export default function AvailabilityDrawer(props: {
                 </div>
               ) : selected?.holdId && selectedLine ? (
                 <div
-                  ref={holdStatusRef}
                   data-testid="availability-hold-banner"
                   className="mb-[14px] rounded-[14px] border border-accentPrimary/35 bg-accentPrimary/10 p-[14px]"
                 >
