@@ -1,10 +1,18 @@
 // app/professionals/[id]/page.tsx
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
+import JsonLdScript from '@/app/_components/seo/JsonLdScript'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { getCurrentUser } from '@/lib/currentUser'
 import { messageStartHref } from '@/lib/messages'
+import { loadProProfileSeoById } from '@/lib/profiles/proProfileSeo'
+import { absoluteUrl } from '@/lib/seo/absoluteUrl'
+import { buildProProfileJsonLd } from '@/lib/seo/proProfileJsonLd'
+import { buildProProfileMetadata } from '@/lib/seo/proProfileMetadata'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import {
   buildLoginHref,
   buildProfessionalProfileHref,
@@ -31,6 +39,32 @@ import ReviewsSummary from './ReviewsSummary'
 import ServicesPanel from './ServicesPanel'
 
 export const dynamic = 'force-dynamic'
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}): Promise<Metadata> {
+  const { id } = await params
+  if (!id) return {}
+
+  let seo: Awaited<ReturnType<typeof loadProProfileSeoById>>
+  try {
+    seo = await loadProProfileSeoById(id)
+  } catch {
+    // Never let a metadata fetch failure 500 the page; fall back to defaults.
+    return {}
+  }
+  if (!seo) return {}
+
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+
+  return buildProProfileMetadata({
+    seo,
+    canonicalPath: `/professionals/${id}`,
+    brandDisplayName: brand.displayName,
+  })
+}
 
 export default async function PublicProfessionalProfilePage({
   params,
@@ -93,8 +127,28 @@ export default async function PublicProfessionalProfilePage({
 
   const tabs = buildPublicProfileTabs(professionalId)
 
+  // Crawler-facing structured data; cache() dedupes with generateMetadata.
+  // Fail-soft: SEO decoration must never break the page render.
+  let jsonLd: Record<string, unknown> | null = null
+  try {
+    const seo = await loadProProfileSeoById(professionalId)
+    if (seo) {
+      const brand = getBrandForTenantContext(
+        await resolveTenantContextForLayout(),
+      )
+      jsonLd = buildProProfileJsonLd({
+        seo,
+        canonicalUrl: absoluteUrl(`/professionals/${professionalId}`),
+        brandDisplayName: brand.displayName,
+      })
+    }
+  } catch {
+    jsonLd = null
+  }
+
   return (
     <main className="brand-profile-page min-h-screen pb-28">
+      {jsonLd ? <JsonLdScript data={jsonLd} /> : null}
       <div className="brand-profile-shell">
         <ProfileHero
           header={header}
