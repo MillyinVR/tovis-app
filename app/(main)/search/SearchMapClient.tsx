@@ -47,7 +47,7 @@ type ResolvedPlace = {
   viewport: Bounds | null
 }
 
-type SortMode = 'DISTANCE' | 'NAME'
+type SortMode = 'DISTANCE' | 'NAME' | 'RATING'
 
 const MapView = dynamic(() => import('./_components/MapView'), { ssr: false })
 
@@ -130,7 +130,7 @@ function isApiPro(value: unknown): value is ApiPro {
 }
 
 function isSortMode(value: string): value is SortMode {
-  return value === 'DISTANCE' || value === 'NAME'
+  return value === 'DISTANCE' || value === 'NAME' || value === 'RATING'
 }
 
 function nearlyEqual(a: number, b: number, eps = 1e-5) {
@@ -331,6 +331,16 @@ function sortPros(list: ApiPro[], mode: SortMode): ApiPro[] {
     return sorted
   }
 
+  if (mode === 'RATING') {
+    sorted.sort((a, b) => {
+      const aRating = typeof a.ratingAvg === 'number' ? a.ratingAvg : -1
+      const bRating = typeof b.ratingAvg === 'number' ? b.ratingAvg : -1
+      if (bRating !== aRating) return bRating - aRating
+      return (b.ratingCount ?? 0) - (a.ratingCount ?? 0)
+    })
+    return sorted
+  }
+
   sorted.sort((a, b) => {
     const aDistance = typeof a.distanceMiles === 'number' ? a.distanceMiles : Number.POSITIVE_INFINITY
     const bDistance = typeof b.distanceMiles === 'number' ? b.distanceMiles : Number.POSITIVE_INFINITY
@@ -390,6 +400,27 @@ export default function SearchMapClient() {
   const inFlightRef = useRef<AbortController | null>(null)
   const lastSearchRef = useRef<SearchArgs>({ query: '', origin: null, categoryId: null })
   const radiusMilesRef = useRef(radiusMiles)
+
+  // Secondary result filters — the API has supported these since the search
+  // index landed; the UI just never exposed them.
+  const [minRating, setMinRating] = useState<number | null>(null)
+  const [maxPrice, setMaxPrice] = useState<number | null>(null)
+  const [openNowOnly, setOpenNowOnly] = useState(false)
+  const [mobileOnly, setMobileOnly] = useState(false)
+  const minRatingRef = useRef(minRating)
+  const maxPriceRef = useRef(maxPrice)
+  const openNowOnlyRef = useRef(openNowOnly)
+  const mobileOnlyRef = useRef(mobileOnly)
+
+  const sortModeRef = useRef<SortMode>(sortMode)
+
+  useEffect(() => {
+    minRatingRef.current = minRating
+    maxPriceRef.current = maxPrice
+    openNowOnlyRef.current = openNowOnly
+    mobileOnlyRef.current = mobileOnly
+    sortModeRef.current = sortMode
+  }, [minRating, maxPrice, openNowOnly, mobileOnly, sortMode])
 
   const inputRef = useRef<HTMLInputElement | null>(null)
   const acRootRef = useRef<HTMLDivElement | null>(null)
@@ -470,6 +501,18 @@ export default function SearchMapClient() {
       const qs = new URLSearchParams()
 
       qs.set('radiusMiles', String(radiusMilesRef.current))
+
+      if (minRatingRef.current != null) {
+        qs.set('minRating', String(minRatingRef.current))
+      }
+      if (maxPriceRef.current != null) {
+        qs.set('maxPrice', String(maxPriceRef.current))
+      }
+      if (openNowOnlyRef.current) qs.set('openNow', '1')
+      if (mobileOnlyRef.current) qs.set('mobile', '1')
+      // Server-side ordering matters when results are truncated at the take
+      // limit — the client-side sortPros then re-sorts the returned page.
+      qs.set('sort', sortModeRef.current)
 
       if (args.query) qs.set('q', args.query)
       if (args.categoryId) qs.set('categoryId', args.categoryId)
@@ -624,7 +667,7 @@ export default function SearchMapClient() {
     }
 
     void runSearch(lastSearchRef.current)
-  }, [radiusMiles, runSearch])
+  }, [radiusMiles, minRating, maxPrice, openNowOnly, mobileOnly, sortMode, runSearch])
 
   const applyOrigin = useCallback((resolved: ResolvedPlace, zoom?: number) => {
     setOrigin(resolved.coords)
@@ -948,8 +991,12 @@ export default function SearchMapClient() {
     let count = 0
     if (radiusMiles !== 15) count += 1
     if (sortMode !== 'DISTANCE') count += 1
+    if (minRating != null) count += 1
+    if (maxPrice != null) count += 1
+    if (openNowOnly) count += 1
+    if (mobileOnly) count += 1
     return count
-  }, [radiusMiles, sortMode])
+  }, [radiusMiles, sortMode, minRating, maxPrice, openNowOnly, mobileOnly])
 
   // The map is always live on desktop, so "Search this area" is relevant there
   // even when the mobile toggle would be in GRID mode.
@@ -1263,8 +1310,72 @@ export default function SearchMapClient() {
                     aria-label="Sort"
                   >
                     <option value="DISTANCE">Sort: Distance</option>
+                    <option value="RATING">Sort: Rating</option>
                     <option value="NAME">Sort: Name</option>
                   </select>
+
+                  <select
+                    value={minRating ?? ''}
+                    onChange={(event) => {
+                      const raw = event.target.value
+                      setMinRating(raw ? Number(raw) : null)
+                    }}
+                    className={cn(
+                      'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
+                      'text-[12px] font-black text-textPrimary outline-none',
+                    )}
+                    aria-label="Minimum rating"
+                  >
+                    <option value="">Rating: Any</option>
+                    <option value={4}>Rating: 4.0+</option>
+                    <option value={4.5}>Rating: 4.5+</option>
+                  </select>
+
+                  <select
+                    value={maxPrice ?? ''}
+                    onChange={(event) => {
+                      const raw = event.target.value
+                      setMaxPrice(raw ? Number(raw) : null)
+                    }}
+                    className={cn(
+                      'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
+                      'text-[12px] font-black text-textPrimary outline-none',
+                    )}
+                    aria-label="Maximum starting price"
+                  >
+                    <option value="">Price: Any</option>
+                    <option value={50}>Under $50</option>
+                    <option value={100}>Under $100</option>
+                    <option value={200}>Under $200</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setOpenNowOnly((v) => !v)}
+                    aria-pressed={openNowOnly}
+                    className={cn(
+                      'rounded-full border px-3 py-2 text-[12px] font-black transition',
+                      openNowOnly
+                        ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
+                        : 'border-white/12 bg-bgPrimary/20 text-textSecondary hover:bg-white/10',
+                    )}
+                  >
+                    Open now
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMobileOnly((v) => !v)}
+                    aria-pressed={mobileOnly}
+                    className={cn(
+                      'rounded-full border px-3 py-2 text-[12px] font-black transition',
+                      mobileOnly
+                        ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
+                        : 'border-white/12 bg-bgPrimary/20 text-textSecondary hover:bg-white/10',
+                    )}
+                  >
+                    Comes to you
+                  </button>
 
                   {me ? (
                     <button
