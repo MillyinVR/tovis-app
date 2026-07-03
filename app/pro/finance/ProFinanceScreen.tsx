@@ -257,6 +257,7 @@ export default function ProFinanceScreen({
           year={year}
           brandName={brand.displayName}
           receiptInboxAddress={data.finance.receiptInboxAddress}
+          canExportTaxDocs={data.finance.canExportTaxDocs}
         />
       )}
     </section>

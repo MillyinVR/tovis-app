@@ -4,9 +4,9 @@
 // plan live in lib/pro/entitlements.ts; this is purely the commercial side. Stripe
 // price ids come from env so test/live use different Billing objects.
 
-import type { PlanKey } from '@/lib/pro/entitlements'
+import { CAMERA_IMAGES_PER_MONTH, type PlanKey } from '@/lib/pro/entitlements'
 
-/** First month free on Pro (a trial on top of the permanent free tier). */
+/** First month free on paid plans (a trial on top of the permanent free tier). */
 export const PRO_TRIAL_DAYS = 30
 
 export type BillingInterval = 'month' | 'year'
@@ -26,6 +26,8 @@ export type MembershipPlan = {
   name: string
   blurb: string
   trialDays: number
+  /** Monthly AI-camera image allowance (from the entitlement matrix). */
+  cameraImagesPerMonth: number
   /** Billing options; empty for the free plan. */
   prices: MembershipPrice[]
 }
@@ -37,14 +39,16 @@ export function getMembershipPlans(): MembershipPlan[] {
       name: 'Free',
       blurb: 'Take bookings, get paid, and accept any payment method.',
       trialDays: 0,
+      cameraImagesPerMonth: CAMERA_IMAGES_PER_MONTH.free,
       prices: [],
     },
     {
       key: 'pro',
       name: 'Pro',
       blurb:
-        'Custom handle, quarterly tax export, advanced analytics, and priority in Discovery.',
+        'Custom handle, tax exports + receipt inbox, priority in Discovery — and your new clients book with no discovery fee.',
       trialDays: PRO_TRIAL_DAYS,
+      cameraImagesPerMonth: CAMERA_IMAGES_PER_MONTH.pro,
       prices: [
         {
           interval: 'month',
@@ -57,6 +61,28 @@ export function getMembershipPlans(): MembershipPlan[] {
           amountCents: 24000,
           perMonthCents: 2000,
           stripePriceId: process.env.STRIPE_PRO_ANNUAL_PRICE_ID ?? null,
+        },
+      ],
+    },
+    {
+      key: 'premium',
+      name: 'Premium',
+      blurb:
+        'Everything in Pro plus the full AI photographer allowance. Group bookings join here when they ship.',
+      trialDays: PRO_TRIAL_DAYS,
+      cameraImagesPerMonth: CAMERA_IMAGES_PER_MONTH.premium,
+      prices: [
+        {
+          interval: 'month',
+          amountCents: 4500,
+          perMonthCents: 4500,
+          stripePriceId: process.env.STRIPE_PREMIUM_MONTHLY_PRICE_ID ?? null,
+        },
+        {
+          interval: 'year',
+          amountCents: 43200,
+          perMonthCents: 3600,
+          stripePriceId: process.env.STRIPE_PREMIUM_ANNUAL_PRICE_ID ?? null,
         },
       ],
     },

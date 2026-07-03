@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   proClientInviteCount: vi.fn(),
   messageThreadCount: vi.fn(),
   paymentSettingsFindUnique: vi.fn(),
+  subscriptionFindUnique: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -28,6 +29,7 @@ vi.mock('@/lib/prisma', () => ({
     proClientInvite: { count: mocks.proClientInviteCount },
     messageThread: { count: mocks.messageThreadCount },
     professionalPaymentSettings: { findUnique: mocks.paymentSettingsFindUnique },
+    professionalSubscription: { findUnique: mocks.subscriptionFindUnique },
   },
 }))
 
@@ -49,6 +51,7 @@ describe('resolveDiscoveryFinalize — sourceLookPostId (remix attribution)', ()
     mocks.proClientInviteCount.mockResolvedValue(0)
     mocks.messageThreadCount.mockResolvedValue(0)
     mocks.paymentSettingsFindUnique.mockResolvedValue(null)
+    mocks.subscriptionFindUnique.mockResolvedValue(null)
   })
 
   it('returns the validated lookPostId when the look is owned + published + approved', async () => {

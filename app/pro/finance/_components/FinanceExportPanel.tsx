@@ -2,6 +2,10 @@
 //
 // The Finance "Export" sub-tab. CSV (monthly/YTD/full-year) + the Schedule-C
 // PDF download from /pro/finance/export; receipt-forwarding is still a stub.
+// When the pro's plan lacks tax_export (membership enforcement on), the
+// download buttons give way to an upgrade CTA — the route 403s anyway.
+import Link from 'next/link'
+
 import { DownloadIcon } from './icons'
 
 type ExportRow = {
@@ -17,12 +21,14 @@ export default function FinanceExportPanel({
   year,
   brandName,
   receiptInboxAddress,
+  canExportTaxDocs,
 }: {
   activeMonthLabel: string
   monthKey: string
   year: string
   brandName: string
   receiptInboxAddress: string | null
+  canExportTaxDocs: boolean
 }) {
   const exportHref = (
     scope: 'month' | 'ytd' | 'year',
@@ -64,6 +70,26 @@ export default function FinanceExportPanel({
         Schedule C yourself.
       </p>
 
+      {!canExportTaxDocs ? (
+        <div className="brand-pro-finance-export-card">
+          <div>
+            <div className="brand-pro-finance-export-title">
+              Exports are a membership feature
+            </div>
+            <div className="brand-pro-finance-export-sub">
+              Your numbers stay right here for free — upgrade to download CSV
+              and Schedule&nbsp;C files for your CPA or tax software.
+            </div>
+          </div>
+          <Link
+            href="/pro/membership"
+            className="brand-pro-finance-export-btn brand-focus"
+          >
+            Upgrade
+          </Link>
+        </div>
+      ) : null}
+
       <div className="brand-pro-finance-export-list">
         {rows.map((row) => (
           <div key={row.title} className="brand-pro-finance-export-card">
@@ -71,7 +97,7 @@ export default function FinanceExportPanel({
               <div className="brand-pro-finance-export-title">{row.title}</div>
               <div className="brand-pro-finance-export-sub">{row.sub}</div>
             </div>
-            {row.href ? (
+            {row.href && canExportTaxDocs ? (
               <a
                 href={row.href}
                 className="brand-pro-finance-export-btn brand-focus"
@@ -92,7 +118,11 @@ export default function FinanceExportPanel({
                 type="button"
                 className="brand-pro-finance-export-btn brand-focus"
                 disabled
-                aria-label={`Export ${row.title} as ${row.format} — coming soon`}
+                aria-label={
+                  canExportTaxDocs
+                    ? `Export ${row.title} as ${row.format} — coming soon`
+                    : `Export ${row.title} as ${row.format} — membership required`
+                }
               >
                 <span
                   style={{

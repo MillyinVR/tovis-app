@@ -35,6 +35,8 @@ import {
   type DiscoveryLocationDto,
 } from '@/lib/discovery/nearby'
 import { coarsenPublicCoordinate } from '@/lib/discovery/publicCoordinates'
+import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
+import { entitledStatuses, planKeysGranting } from '@/lib/pro/entitlements'
 import { prismaRead } from '@/lib/prisma'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
@@ -186,6 +188,8 @@ type CandidateRow = {
   minMobilePrice: number | null
   minAnyPrice: number | null
   distanceMiles: number | null
+  /** Membership priority-discovery perk; constant FALSE while enforcement is off. */
+  hasPriorityDiscovery: boolean
 }
 
 // Secondary lookup row for primaryLocation (the closest location may not
@@ -205,22 +209,35 @@ type PrimaryLocationRow = {
   workingHours: unknown
 }
 
-function buildSortClause(sort: SearchProsSort): Prisma.Sql {
+function buildSortClause(sort: SearchProsSort, prioritize: boolean): Prisma.Sql {
+  // Membership perk (priority_discovery): members win TIES — same rating,
+  // same price, same mile of distance — they never leapfrog relevance
+  // outright. NAME stays purely alphabetical.
+  const priorityTiebreak = prioritize
+    ? Prisma.sql`t."hasPriorityDiscovery" DESC, `
+    : Prisma.empty
+
   if (sort === 'NAME') {
     return Prisma.sql`LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
   }
 
   if (sort === 'RATING') {
-    return Prisma.sql`t."ratingAvg" DESC NULLS LAST, t."ratingCount" DESC, LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
+    return Prisma.sql`t."ratingAvg" DESC NULLS LAST, ${priorityTiebreak}t."ratingCount" DESC, LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
   }
 
   if (sort === 'PRICE') {
-    return Prisma.sql`COALESCE(t."minMobilePrice", t."minAnyPrice") ASC NULLS LAST, LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
+    return Prisma.sql`COALESCE(t."minMobilePrice", t."minAnyPrice") ASC NULLS LAST, ${priorityTiebreak}LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
   }
 
   // DISTANCE — null distances sort last (matches prior JS behavior of
   // pushing missing distances to +Infinity). Rating breaks distance ties so
   // equally-near pros surface by quality instead of name.
+  if (prioritize) {
+    // Priority applies within a whole-mile bucket: members lead their mile,
+    // then exact distance and rating order the rest. NULL distances land in a
+    // far sentinel bucket, preserving the NULLS LAST behavior.
+    return Prisma.sql`FLOOR(COALESCE(t."distanceMiles", 1000000)) ASC, t."hasPriorityDiscovery" DESC, t."distanceMiles" ASC NULLS LAST, t."ratingAvg" DESC NULLS LAST, LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
+  }
   return Prisma.sql`t."distanceMiles" ASC NULLS LAST, t."ratingAvg" DESC NULLS LAST, LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
 }
 
@@ -356,7 +373,22 @@ export async function fetchProSearchCandidates(
     ? Prisma.sql`psi."professionalId", ${distanceExpr} ASC NULLS LAST, psi."isPrimary" DESC, psi."locationId" ASC`
     : Prisma.sql`psi."professionalId", psi."isPrimary" DESC, psi."locationId" ASC`
 
-  const sortClause = buildSortClause(params.sort)
+  // Priority-discovery membership perk — only computed (and only paid for as
+  // a per-row EXISTS) while membership enforcement is on. Plan keys and
+  // entitled statuses come from the entitlement matrix so SQL can't drift
+  // from lib/pro/entitlements.
+  const prioritize = membershipEnforcementEnabled()
+  const priorityColumn = prioritize
+    ? Prisma.sql`EXISTS (
+        SELECT 1
+        FROM "ProfessionalSubscription" ps
+        WHERE ps."professionalId" = psi."professionalId"
+          AND ps."status"::text IN (${Prisma.join(entitledStatuses().map(String))})
+          AND ps."planKey" IN (${Prisma.join(planKeysGranting('priority_discovery'))})
+      )`
+    : Prisma.sql`FALSE`
+
+  const sortClause = buildSortClause(params.sort, prioritize)
 
   // Note: replica-lag awareness — index hooks fire best-effort after
   // each mutation; reads go through prismaRead. A 1-5s lag is acceptable
@@ -386,7 +418,8 @@ export async function fetchProSearchCandidates(
         psi."offersMobile",
         psi."minMobilePrice"::float AS "minMobilePrice",
         psi."minAnyPrice"::float AS "minAnyPrice",
-        ${distanceExpr} AS "distanceMiles"
+        ${distanceExpr} AS "distanceMiles",
+        ${priorityColumn} AS "hasPriorityDiscovery"
       FROM "ProfessionalSearchIndex" psi
       JOIN "ProfessionalLocation" pl ON pl."id" = psi."locationId"
       WHERE ${whereClause}

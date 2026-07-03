@@ -2,15 +2,20 @@ import { describe, it, expect } from 'vitest'
 import { SubscriptionStatus } from '@prisma/client'
 
 import {
+  CAMERA_IMAGES_PER_MONTH,
+  entitledStatuses,
+  resolveCameraImageMonthlyQuota,
   resolveEntitlements,
   planGrants,
+  planKeysGranting,
   effectivePlanKey,
   normalizePlanKey,
 } from '@/lib/pro/entitlements'
 
 describe('normalizePlanKey', () => {
-  it('passes through pro/studio and defaults everything else to free', () => {
+  it('passes through pro/premium/studio and defaults everything else to free', () => {
     expect(normalizePlanKey('pro')).toBe('pro')
+    expect(normalizePlanKey('premium')).toBe('premium')
     expect(normalizePlanKey('studio')).toBe('studio')
     expect(normalizePlanKey('free')).toBe('free')
     expect(normalizePlanKey(null)).toBe('free')
@@ -71,6 +76,83 @@ describe('resolveEntitlements', () => {
 
   it('missing status (no subscription row) = free', () => {
     expect(resolveEntitlements({ planKey: 'pro', status: null })).toEqual([])
+  })
+
+  it('active Pro/Premium waive the discovery fee; Premium equals Pro on booleans', () => {
+    expect(
+      planGrants({
+        planKey: 'pro',
+        status: SubscriptionStatus.ACTIVE,
+        entitlement: 'discovery_fee_waiver',
+      }),
+    ).toBe(true)
+    expect(
+      resolveEntitlements({
+        planKey: 'premium',
+        status: SubscriptionStatus.ACTIVE,
+      }),
+    ).toEqual(
+      resolveEntitlements({ planKey: 'pro', status: SubscriptionStatus.ACTIVE }),
+    )
+    expect(
+      planGrants({
+        planKey: 'premium',
+        status: SubscriptionStatus.ACTIVE,
+        entitlement: 'white_label',
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('camera image monthly quota', () => {
+  it('grants 3/6/30/30 across the tiers while entitled', () => {
+    expect(CAMERA_IMAGES_PER_MONTH).toEqual({
+      free: 3,
+      pro: 6,
+      premium: 30,
+      studio: 30,
+    })
+    expect(
+      resolveCameraImageMonthlyQuota({
+        planKey: 'premium',
+        status: SubscriptionStatus.ACTIVE,
+      }),
+    ).toBe(30)
+    expect(
+      resolveCameraImageMonthlyQuota({
+        planKey: 'pro',
+        status: SubscriptionStatus.TRIALING,
+      }),
+    ).toBe(6)
+  })
+
+  it('lapsed or missing subscriptions collapse to the free allowance', () => {
+    expect(
+      resolveCameraImageMonthlyQuota({
+        planKey: 'premium',
+        status: SubscriptionStatus.PAST_DUE,
+      }),
+    ).toBe(CAMERA_IMAGES_PER_MONTH.free)
+    expect(
+      resolveCameraImageMonthlyQuota({ planKey: null, status: null }),
+    ).toBe(CAMERA_IMAGES_PER_MONTH.free)
+  })
+})
+
+describe('SQL call-site helpers', () => {
+  it('planKeysGranting mirrors the matrix (priority_discovery = all paid plans)', () => {
+    expect(planKeysGranting('priority_discovery')).toEqual([
+      'pro',
+      'premium',
+      'studio',
+    ])
+    expect(planKeysGranting('white_label')).toEqual(['studio'])
+  })
+
+  it('entitledStatuses is exactly ACTIVE + TRIALING', () => {
+    expect(new Set(entitledStatuses())).toEqual(
+      new Set([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
+    )
   })
 })
 

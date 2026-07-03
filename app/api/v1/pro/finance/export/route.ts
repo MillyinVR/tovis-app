@@ -5,6 +5,8 @@
 import { jsonFail } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
+import { hasEntitlement } from '@/lib/pro/entitlements'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import {
   buildFinanceCsv,
@@ -30,6 +32,20 @@ export async function GET(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
+
+    // Tax exports are a paid-tier feature once membership enforcement is on.
+    // The finance dashboard itself stays free — only the CSV / Schedule C
+    // artifacts are gated.
+    if (
+      membershipEnforcementEnabled() &&
+      !(await hasEntitlement(auth.professionalId, 'tax_export'))
+    ) {
+      return jsonFail(
+        403,
+        'Tax exports are included with a paid membership. Upgrade to download your books.',
+        { code: 'MEMBERSHIP_REQUIRED', entitlement: 'tax_export' },
+      )
+    }
 
     const url = new URL(req.url)
     const scopeParam = url.searchParams.get('scope') ?? 'month'

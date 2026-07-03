@@ -44,6 +44,7 @@ export default async function ProMembershipPage() {
         name: p.name,
         blurb: p.blurb,
         trialDays: p.trialDays,
+        cameraImagesPerMonth: p.cameraImagesPerMonth,
         prices: p.prices.map((price) => ({
           interval: price.interval,
           amountCents: price.amountCents,

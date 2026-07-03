@@ -12,6 +12,11 @@ import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
+  enforceCameraImageQuota,
+  recordCameraImageUse,
+} from '@/lib/pro/cameraQuota'
+import { cameraQuotaExceededResponse } from '@/lib/pro/cameraQuotaResponse'
+import {
   CameraVisionError,
   LOOK_IMAGE_MAX_BASE64_CHARS,
   enhanceReferenceLook,
@@ -34,6 +39,12 @@ export async function POST(req: Request) {
     })
     if (limited) return limited
 
+    const quota = await enforceCameraImageQuota({
+      professionalId: auth.professionalId,
+      imageCount: 1,
+    })
+    if (!quota.allowed) return cameraQuotaExceededResponse(quota)
+
     const body = await readJsonRecord(req)
 
     const parsed = parseCameraVisionImage(
@@ -46,6 +57,11 @@ export async function POST(req: Request) {
       image: parsed.image,
       serviceName: pickString(body.serviceName),
       measuredSummary: pickString(body.measuredSummary),
+    })
+
+    await recordCameraImageUse({
+      professionalId: auth.professionalId,
+      imageCount: 1,
     })
 
     return jsonOk({ brief })

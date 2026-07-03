@@ -13,14 +13,14 @@ import { SubscriptionStatus } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 
-export type PlanKey = 'free' | 'pro' | 'studio'
+export type PlanKey = 'free' | 'pro' | 'premium' | 'studio'
 
 export type Entitlement =
   | 'custom_handle' // custom .tovis handle (today's ProfessionalProfile.isPremium)
   | 'tax_export' // transaction ledger + quarterly/CSV tax export
   | 'advanced_analytics' // retention insights beyond the monthly dashboard
-  | 'priority_discovery' // priority placement / reduced discovery-fee share
-  | 'reduced_platform_fee' // lower platform take on discovery deposits
+  | 'priority_discovery' // priority placement on discovery surfaces
+  | 'discovery_fee_waiver' // member's new discovery clients pay no platform fee
   | 'white_label' // salon white-label / multi-pro
 
 const FREE: Entitlement[] = []
@@ -30,15 +30,33 @@ const PRO: Entitlement[] = [
   'tax_export',
   'advanced_analytics',
   'priority_discovery',
-  'reduced_platform_fee',
+  'discovery_fee_waiver',
 ]
 
-const STUDIO: Entitlement[] = [...PRO, 'white_label']
+// Premium's extra value is the full AI-camera allowance (a QUOTA, not a boolean —
+// see cameraImageMonthlyQuota below), so its boolean entitlements equal Pro's.
+const PREMIUM: Entitlement[] = [...PRO]
+
+const STUDIO: Entitlement[] = [...PREMIUM, 'white_label']
 
 const PLAN_ENTITLEMENTS: Record<PlanKey, Entitlement[]> = {
   free: FREE,
   pro: PRO,
+  premium: PREMIUM,
   studio: STUDIO,
+}
+
+/**
+ * Monthly AI-camera image allowance per plan. Every plan gets a taste (the camera
+ * is the product's viral wedge); Premium/Studio get the working allowance. Each
+ * analyzed image counts once (a look-brief = 1, a set-critique = its photo count).
+ * Enforced in lib/pro/cameraQuota.ts only while membership enforcement is on.
+ */
+export const CAMERA_IMAGES_PER_MONTH: Record<PlanKey, number> = {
+  free: 3,
+  pro: 6,
+  premium: 30,
+  studio: 30,
 }
 
 /** Subscription states that actually grant the plan's paid entitlements. */
@@ -48,8 +66,24 @@ const ENTITLED_STATUSES: ReadonlySet<SubscriptionStatus> = new Set([
 ])
 
 export function normalizePlanKey(key: string | null | undefined): PlanKey {
-  if (key === 'pro' || key === 'studio') return key
+  if (key === 'pro' || key === 'premium' || key === 'studio') return key
   return 'free'
+}
+
+/**
+ * Plan keys whose ENTITLED holders carry this entitlement — for call sites that
+ * must express the entitlement check in SQL (e.g. the search index priority
+ * boost). Keeps the matrix here as the single source of truth.
+ */
+export function planKeysGranting(entitlement: Entitlement): PlanKey[] {
+  return (Object.keys(PLAN_ENTITLEMENTS) as PlanKey[]).filter((key) =>
+    PLAN_ENTITLEMENTS[key].includes(entitlement),
+  )
+}
+
+/** SubscriptionStatus values that grant paid entitlements, for SQL call sites. */
+export function entitledStatuses(): SubscriptionStatus[] {
+  return [...ENTITLED_STATUSES]
 }
 
 /**
@@ -107,4 +141,31 @@ export async function hasEntitlement(
 ): Promise<boolean> {
   const entitlements = await getProEntitlements(professionalId)
   return entitlements.includes(entitlement)
+}
+
+/**
+ * Pure resolver: the monthly AI-camera image allowance a (planKey, status) pair
+ * grants. Non-entitled statuses collapse to the free allowance, mirroring
+ * resolveEntitlements.
+ */
+export function resolveCameraImageMonthlyQuota(args: {
+  planKey: string | null | undefined
+  status: SubscriptionStatus | null | undefined
+}): number {
+  return CAMERA_IMAGES_PER_MONTH[effectivePlanKey(args)]
+}
+
+/** A pro's current monthly AI-camera image allowance. Missing row = free plan. */
+export async function getProCameraImageMonthlyQuota(
+  professionalId: string,
+): Promise<number> {
+  const sub = await prisma.professionalSubscription.findUnique({
+    where: { professionalId },
+    select: { planKey: true, status: true },
+  })
+
+  return resolveCameraImageMonthlyQuota({
+    planKey: sub?.planKey ?? 'free',
+    status: sub?.status ?? null,
+  })
 }

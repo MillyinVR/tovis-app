@@ -23,6 +23,7 @@ type PlanCard = {
   name: string
   blurb: string
   trialDays: number
+  cameraImagesPerMonth: number
   prices: PlanPrice[]
 }
 
@@ -39,10 +40,10 @@ type Props = {
 
 const ENTITLEMENT_LABELS: Record<Entitlement, string> = {
   custom_handle: 'Custom .tovis handle',
-  tax_export: 'Quarterly tax export + transaction ledger',
+  tax_export: 'Tax exports (CSV + Schedule C) + transaction ledger',
   advanced_analytics: 'Advanced analytics & retention insights',
   priority_discovery: 'Priority placement in Discovery',
-  reduced_platform_fee: 'Reduced platform fee share',
+  discovery_fee_waiver: 'Your new clients book with no discovery fee',
   white_label: 'White-label / multi-pro salon',
 }
 
@@ -122,7 +123,7 @@ export default function MembershipClient(props: Props) {
         <div className="mt-4 text-[12px] text-toneDanger">{error}</div>
       ) : null}
 
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
         {props.plans.map((plan) => {
           const isCurrent = plan.key === props.currentPlanKey
           const monthly = plan.prices.find((p) => p.interval === 'month')
@@ -149,6 +150,10 @@ export default function MembershipClient(props: Props) {
                 </div>
               </div>
               <p className="mt-1 text-[12px] text-textSecondary">{plan.blurb}</p>
+
+              <div className="mt-1 text-[11px] text-textSecondary">
+                {plan.cameraImagesPerMonth} AI photographer images / month
+              </div>
 
               {annual ? (
                 <div className="mt-1 text-[11px] text-textSecondary">
