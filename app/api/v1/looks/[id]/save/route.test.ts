@@ -114,6 +114,8 @@ const mocks = vi.hoisted(() => {
   const loadLookAccess = vi.fn()
   const canViewLookPost = vi.fn()
   const canSaveLookPost = vi.fn()
+  const notifyLookSaved = vi.fn()
+  const kickNotificationDrain = vi.fn()
 
   return {
     jsonOk,
@@ -129,6 +131,8 @@ const mocks = vi.hoisted(() => {
     loadLookAccess,
     canViewLookPost,
     canSaveLookPost,
+    notifyLookSaved,
+    kickNotificationDrain,
   }
 })
 
@@ -164,6 +168,14 @@ vi.mock('@/lib/looks/access', () => ({
 vi.mock('@/lib/looks/guards', () => ({
   canViewLookPost: mocks.canViewLookPost,
   canSaveLookPost: mocks.canSaveLookPost,
+}))
+
+vi.mock('@/lib/notifications/lookEngagement', () => ({
+  notifyLookSaved: mocks.notifyLookSaved,
+}))
+
+vi.mock('@/lib/notifications/delivery/kickNotificationDrain', () => ({
+  kickNotificationDrain: mocks.kickNotificationDrain,
 }))
 
 import { DELETE, GET, POST } from './route'
@@ -217,6 +229,7 @@ function makeAccess(
     look: {
       id: string
       professionalId: string
+      clientAuthorId: string | null
       status: LookPostStatus
       visibility: LookPostVisibility
       moderationStatus: ModerationStatus
@@ -234,6 +247,7 @@ function makeAccess(
     look: {
       id: 'look_1',
       professionalId: 'pro_1',
+      clientAuthorId: null,
       status: LookPostStatus.PUBLISHED,
       visibility: LookPostVisibility.PUBLIC,
       moderationStatus: ModerationStatus.APPROVED,
@@ -341,6 +355,7 @@ describe('app/api/v1/looks/[id]/save/route.ts', () => {
     mocks.removeBoardItem.mockResolvedValue(makeRemoveMutationResult(3))
     mocks.getBoardErrorMeta.mockReturnValue(null)
     mocks.prisma.lookPost.findUnique.mockResolvedValue({ id: 'look_1' })
+    mocks.notifyLookSaved.mockResolvedValue(undefined)
   })
 
   describe('GET', () => {
@@ -523,6 +538,23 @@ describe('app/api/v1/looks/[id]/save/route.ts', () => {
           },
         ],
       })
+
+      // A genuinely-new save emits the batched notification (best-effort).
+      expect(mocks.notifyLookSaved).toHaveBeenCalledTimes(1)
+      expect(mocks.notifyLookSaved).toHaveBeenCalledWith({
+        lookPostId: 'look_1',
+        look: {
+          professionalId: 'pro_1',
+          clientAuthorId: null,
+        },
+        actor: {
+          userId: 'user_1',
+          clientProfileId: 'client_1',
+          professionalProfileId: null,
+        },
+        count: 5,
+      })
+      expect(mocks.kickNotificationDrain).toHaveBeenCalledTimes(1)
     })
 
     it('returns 200 when addBoardItem reports the item was already present, keeping route behavior delegation-only', async () => {
@@ -557,6 +589,10 @@ describe('app/api/v1/looks/[id]/save/route.ts', () => {
           },
         ],
       })
+
+      // Re-saving into the same board is not a new save — no notification.
+      expect(mocks.notifyLookSaved).not.toHaveBeenCalled()
+      expect(mocks.kickNotificationDrain).not.toHaveBeenCalled()
     })
 
     it('returns the auth response immediately and does not perform access, helper, or save-state work', async () => {
