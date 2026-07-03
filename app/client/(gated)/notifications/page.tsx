@@ -63,6 +63,8 @@ const CATEGORY_EVENT_KEYS: Record<
     NotificationEventKey.VIRAL_REQUEST_APPROVED,
     NotificationEventKey.LOOK_FOLLOWER_NEW,
     NotificationEventKey.CLIENT_FOLLOW,
+    NotificationEventKey.LOOK_COMMENTED,
+    NotificationEventKey.LOOK_COMMENT_REPLIED,
     NotificationEventKey.REFERRAL_TAP_RECEIVED,
     NotificationEventKey.REFERRAL_CONFIRMED,
     NotificationEventKey.REFERRAL_CONVERTED,

@@ -86,6 +86,10 @@ export async function GET(
           viewerUserId,
           viewerIsAdmin,
           clientLinkViewer,
+          lookAuthor: {
+            professionalId: access.look.professionalId,
+            clientAuthorId: access.look.clientAuthorId,
+          },
         }),
       ),
       replyCount,

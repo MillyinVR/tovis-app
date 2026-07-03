@@ -185,6 +185,11 @@ export type LooksCommentUserDto = {
   // Link to the author's public profile (/u/[handle] for clients,
   // /professionals/[id] for pros), or null when no public profile is addressable.
   profileHref: string | null
+  // The commenter authored the look this comment sits on (the pro, or the
+  // client author for client-shared looks) — renders the "Creator" badge.
+  isLookAuthor: boolean
+  // The commenter is a professional on the platform — renders the "Pro" badge.
+  isPro: boolean
 }
 
 export type LooksCommentDto = {

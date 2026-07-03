@@ -200,6 +200,8 @@ function makeComment(overrides?: Partial<LooksCommentDto>): LooksCommentDto {
       displayName: 'Tori Morales',
       avatarUrl: null,
       profileHref: null,
+      isLookAuthor: false,
+      isPro: false,
     },
     parentCommentId: null,
     likeCount: 0,

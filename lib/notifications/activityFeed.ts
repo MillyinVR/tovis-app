@@ -19,10 +19,13 @@ type ActivityDb = PrismaClient | Prisma.TransactionClient
  */
 export const ACTIVITY_FEED_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.CLIENT_FOLLOW,
+  NotificationEventKey.LOOK_COMMENTED,
+  NotificationEventKey.LOOK_COMMENT_REPLIED,
 ]
 
 export type ActivityIconKind =
   | 'follow'
+  | 'comment'
   | 'save'
   | 'remix'
   | 'featured'
@@ -68,6 +71,10 @@ const activityNotificationSelect =
     id: true,
     eventKey: true,
     data: true,
+    // Comment rows carry the (public) comment snippet as the body and the look
+    // permalink as the href.
+    body: true,
+    href: true,
     readAt: true,
     createdAt: true,
   })
@@ -86,15 +93,28 @@ type ActivityFollowerRow = Prisma.ClientProfileGetPayload<{
   select: typeof activityFollowerSelect
 }>
 
-/** Safely reads `followerClientId` out of a CLIENT_FOLLOW notification's JSON. */
-function readFollowerClientId(data: Prisma.JsonValue | null): string | null {
+/** Safely reads a string field out of a notification's JSON data. */
+function readDataString(
+  data: Prisma.JsonValue | null,
+  field: string,
+): string | null {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     return null
   }
-  const value = data.followerClientId
+  const value = data[field]
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+/** Safely reads `followerClientId` out of a CLIENT_FOLLOW notification's JSON. */
+function readFollowerClientId(data: Prisma.JsonValue | null): string | null {
+  return readDataString(data, 'followerClientId')
+}
+
+/** Reads the commenter's client id out of a comment notification's JSON. */
+function readActorClientId(data: Prisma.JsonValue | null): string | null {
+  return readDataString(data, 'actorClientId')
 }
 
 function buildFollowItem(
@@ -133,6 +153,36 @@ function buildFollowItem(
   }
 }
 
+function buildCommentItem(
+  row: ActivityNotificationRow,
+  ctx: {
+    followers: Map<string, ActivityFollowerRow>
+  },
+): ClientActivityItem {
+  const actorClientId = readActorClientId(row.data)
+  const actor = actorClientId ? (ctx.followers.get(actorClientId) ?? null) : null
+
+  // Same PII rule as follows: only publicly-addressable commenters are named —
+  // everyone else renders as a generic actor.
+  const isPublic = Boolean(actor?.isPublicProfile && actor?.handle)
+  const handle = isPublic ? (actor?.handle ?? null) : null
+
+  const isReply = row.eventKey === NotificationEventKey.LOOK_COMMENT_REPLIED
+  const body = row.body?.trim() ?? ''
+
+  return {
+    id: row.id,
+    iconKind: 'comment',
+    who: handle ? `@${handle}` : 'Someone',
+    action: isReply ? 'replied to your comment' : 'commented on your look',
+    highlight: body ? `“${body}”` : null,
+    timestamp: row.createdAt.toISOString(),
+    unread: row.readAt === null,
+    href: row.href ?? null,
+    followBack: null,
+  }
+}
+
 function buildActivityItem(
   row: ActivityNotificationRow,
   ctx: {
@@ -143,6 +193,9 @@ function buildActivityItem(
   switch (row.eventKey) {
     case NotificationEventKey.CLIENT_FOLLOW:
       return buildFollowItem(row, ctx)
+    case NotificationEventKey.LOOK_COMMENTED:
+    case NotificationEventKey.LOOK_COMMENT_REPLIED:
+      return buildCommentItem(row, ctx)
     default:
       // Not an event the feed knows how to present yet — skip it rather than
       // render a half-blank row. (The allowlist already filters the query.)
@@ -189,13 +242,17 @@ export async function listClientActivity(
     countUnreadClientActivity(db, clientId),
   ])
 
-  // Collect follower ids referenced by CLIENT_FOLLOW rows for batch resolution.
+  // Collect the client ids referenced by rows (followers, comment actors) so
+  // handles/visibility resolve in one batch.
   const followerIds = new Set<string>()
   for (const row of rows) {
     if (row.eventKey === NotificationEventKey.CLIENT_FOLLOW) {
       const followerClientId = readFollowerClientId(row.data)
       if (followerClientId) followerIds.add(followerClientId)
+      continue
     }
+    const actorClientId = readActorClientId(row.data)
+    if (actorClientId) followerIds.add(actorClientId)
   }
 
   const followers = new Map<string, ActivityFollowerRow>()

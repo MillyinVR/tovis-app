@@ -73,6 +73,7 @@ const mocks = vi.hoisted(() => {
     ),
     lookComment: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       count: vi.fn(),
     },
   }
@@ -83,8 +84,11 @@ const mocks = vi.hoisted(() => {
   const canViewLookPost = vi.fn()
   const canCommentOnLookPost = vi.fn()
   const recomputeLookPostCommentCount = vi.fn()
+  const recomputeLookCommentReplyCount = vi.fn()
   const enqueueRecomputeLookCounts = vi.fn()
   const mapLooksCommentToDto = vi.fn()
+  const notifyLookCommentCreated = vi.fn()
+  const kickNotificationDrain = vi.fn()
 
   return {
     jsonOk,
@@ -97,8 +101,11 @@ const mocks = vi.hoisted(() => {
     canViewLookPost,
     canCommentOnLookPost,
     recomputeLookPostCommentCount,
+    recomputeLookCommentReplyCount,
     enqueueRecomputeLookCounts,
     mapLooksCommentToDto,
+    notifyLookCommentCreated,
+    kickNotificationDrain,
   }
 })
 
@@ -158,6 +165,7 @@ vi.mock('@/lib/looks/guards', () => ({
 
 vi.mock('@/lib/looks/counters', () => ({
   recomputeLookPostCommentCount: mocks.recomputeLookPostCommentCount,
+  recomputeLookCommentReplyCount: mocks.recomputeLookCommentReplyCount,
 }))
 
 vi.mock('@/lib/jobs/looksSocial/enqueue', () => ({
@@ -166,6 +174,14 @@ vi.mock('@/lib/jobs/looksSocial/enqueue', () => ({
 
 vi.mock('@/lib/looks/mappers', () => ({
   mapLooksCommentToDto: mocks.mapLooksCommentToDto,
+}))
+
+vi.mock('@/lib/notifications/lookComments', () => ({
+  notifyLookCommentCreated: mocks.notifyLookCommentCreated,
+}))
+
+vi.mock('@/lib/notifications/delivery/kickNotificationDrain', () => ({
+  kickNotificationDrain: mocks.kickNotificationDrain,
 }))
 
 import { GET, POST } from './route'
@@ -224,6 +240,7 @@ function makeAccess(
     look: {
       id: 'look_1',
       professionalId: 'pro_1',
+      clientAuthorId: null,
       status: LookPostStatus.PUBLISHED,
       visibility: LookPostVisibility.PUBLIC,
       moderationStatus: ModerationStatus.APPROVED,
@@ -293,10 +310,12 @@ describe('app/api/v1/looks/[id]/comments/route.ts', () => {
       maxAttempts: 5,
     })
     mocks.prisma.lookComment.findMany.mockResolvedValue([])
+    mocks.prisma.lookComment.findFirst.mockResolvedValue(null)
     mocks.prisma.lookComment.count.mockResolvedValue(0)
     mocks.mapLooksCommentToDto.mockImplementation(
       (row: { id: string; body: string }) => makeCommentDto(row.id, row.body),
     )
+    mocks.notifyLookCommentCreated.mockResolvedValue(undefined)
   })
 
   it('GET lists approved comments by canonical lookPostId and returns the canonical id in the contract', async () => {
@@ -418,6 +437,81 @@ describe('app/api/v1/looks/[id]/comments/route.ts', () => {
       comment: mapped,
       commentsCount: 4,
     })
+
+    expect(mocks.notifyLookCommentCreated).toHaveBeenCalledWith({
+      lookPostId: 'look_1',
+      look: { professionalId: 'pro_1', clientAuthorId: null },
+      comment: { id: 'comment_9', body: 'Sharp work' },
+      parent: null,
+      actor: {
+        userId: 'user_1',
+        clientProfileId: 'client_1',
+        professionalProfileId: null,
+      },
+    })
+    expect(mocks.kickNotificationDrain).toHaveBeenCalled()
+  })
+
+  it('POST on a reply passes the replied-to author to the notifier', async () => {
+    mocks.prisma.lookComment.findFirst.mockResolvedValue({
+      id: 'comment_parent',
+      parentCommentId: null,
+      userId: 'user_9',
+      user: {
+        clientProfile: null,
+        professionalProfile: { id: 'pro_1' },
+      },
+    })
+    mocks.tx.lookComment.create.mockResolvedValue(
+      makeCommentRow('comment_10', 'Agreed'),
+    )
+
+    const res = await POST(
+      new Request('http://localhost/api/v1/looks/look_1/comments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          body: 'Agreed',
+          parentCommentId: 'comment_parent',
+        }),
+      }),
+      makeCtx('look_1'),
+    )
+
+    expect(res.status).toBe(201)
+
+    expect(mocks.notifyLookCommentCreated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: {
+          userId: 'user_9',
+          clientProfileId: null,
+          professionalProfileId: 'pro_1',
+        },
+      }),
+    )
+  })
+
+  it('POST still succeeds when the notifier fails (best-effort)', async () => {
+    mocks.notifyLookCommentCreated.mockRejectedValue(
+      new Error('notify exploded'),
+    )
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const res = await POST(
+      new Request('http://localhost/api/v1/looks/look_1/comments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'Sharp work' }),
+      }),
+      makeCtx('look_1'),
+    )
+
+    expect(res.status).toBe(201)
+    expect(mocks.kickNotificationDrain).toHaveBeenCalled()
+
+    errorSpy.mockRestore()
   })
 
   it('returns 403 when the shared interaction policy forbids comments', async () => {

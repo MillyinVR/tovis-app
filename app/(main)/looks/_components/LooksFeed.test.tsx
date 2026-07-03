@@ -309,6 +309,8 @@ function makeComment(
       displayName: 'Tori Morales',
       avatarUrl: null,
       profileHref: null,
+      isLookAuthor: false,
+      isPro: false,
     },
     parentCommentId: null,
     likeCount: 0,

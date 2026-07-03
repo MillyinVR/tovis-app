@@ -579,6 +579,9 @@ describe('lib/looks/mappers.ts', () => {
           avatarUrl: 'https://cdn.example.com/client-avatar.jpg',
           // Shown as a client → links to the /u/[handle] creator profile.
           profileHref: '/u/tori',
+          // No lookAuthor context passed → never flagged as the author.
+          isLookAuthor: false,
+          isPro: true,
         },
         parentCommentId: null,
         likeCount: 3,
@@ -724,6 +727,107 @@ describe('lib/looks/mappers.ts', () => {
       // Previously rendered the literal "User" because only businessName was
       // read; a solo pro with no business name must show their real name.
       expect(result.user.displayName).toBe('Jordan Rivera')
+    })
+
+    it('flags the look author via the pro identity on pro-authored looks', () => {
+      const row = {
+        id: 'comment_1',
+        body: 'Thanks for the love',
+        createdAt: new Date('2026-04-18T12:00:00.000Z'),
+        userId: 'user_2',
+        parentCommentId: null,
+        likeCount: 0,
+        replyCount: 0,
+        likes: [],
+        user: {
+          id: 'user_2',
+          clientProfile: null,
+          professionalProfile: {
+            id: 'pro_1',
+            businessName: 'TOVIS Studio',
+            firstName: null,
+            lastName: null,
+            avatarUrl: null,
+          },
+        },
+      }
+
+      const withAuthor = mapLooksCommentToDto(row, {
+        viewerUserId: null,
+        viewerIsAdmin: false,
+        lookAuthor: { professionalId: 'pro_1', clientAuthorId: null },
+      })
+      expect(withAuthor.user.isLookAuthor).toBe(true)
+      expect(withAuthor.user.isPro).toBe(true)
+
+      const differentLook = mapLooksCommentToDto(row, {
+        viewerUserId: null,
+        viewerIsAdmin: false,
+        lookAuthor: { professionalId: 'pro_other', clientAuthorId: null },
+      })
+      expect(differentLook.user.isLookAuthor).toBe(false)
+    })
+
+    it('flags the client author (not the visited pro) on client-shared looks', () => {
+      const clientRow = {
+        id: 'comment_1',
+        body: 'My look!',
+        createdAt: new Date('2026-04-18T12:00:00.000Z'),
+        userId: 'user_1',
+        parentCommentId: null,
+        likeCount: 0,
+        replyCount: 0,
+        likes: [],
+        user: {
+          id: 'user_1',
+          clientProfile: {
+            id: 'client_author',
+            firstName: 'Tori',
+            lastName: 'Morales',
+            avatarUrl: null,
+            handle: null,
+            isPublicProfile: false,
+          },
+          professionalProfile: null,
+        },
+      }
+
+      const lookAuthor = {
+        professionalId: 'pro_1',
+        clientAuthorId: 'client_author',
+      }
+
+      const clientComment = mapLooksCommentToDto(clientRow, {
+        viewerUserId: null,
+        viewerIsAdmin: false,
+        lookAuthor,
+      })
+      expect(clientComment.user.isLookAuthor).toBe(true)
+      expect(clientComment.user.isPro).toBe(false)
+
+      // The visited pro is NOT the author of a client-shared look.
+      const proRow = {
+        ...clientRow,
+        userId: 'user_2',
+        user: {
+          id: 'user_2',
+          clientProfile: null,
+          professionalProfile: {
+            id: 'pro_1',
+            businessName: 'TOVIS Studio',
+            firstName: null,
+            lastName: null,
+            avatarUrl: null,
+          },
+        },
+      }
+      const proComment = mapLooksCommentToDto(proRow, {
+        viewerUserId: null,
+        viewerIsAdmin: false,
+        lookAuthor,
+      })
+      expect(proComment.user.isLookAuthor).toBe(false)
+      expect(proComment.user.isPro).toBe(true)
     })
   })
 

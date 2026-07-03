@@ -89,7 +89,9 @@ function CommentRow({
     onDelete(comment)
   }
 
-  const { displayName, avatarUrl, profileHref } = comment.user
+  const { displayName, avatarUrl, profileHref, isLookAuthor, isPro } =
+    comment.user
+  const badge = isLookAuthor ? 'Creator' : isPro ? 'Pro' : null
   const avatar = (
     <CommentAvatar
       displayName={displayName}
@@ -126,6 +128,11 @@ function CommentRow({
               {displayName}
             </span>
           )}
+          {badge ? (
+            <span className="flex-[0_0_auto] rounded-full border border-accentPrimary/35 bg-accentPrimary/12 px-1.5 py-px text-[9.5px] font-extrabold uppercase tracking-wide text-textPrimary">
+              {badge}
+            </span>
+          ) : null}
           <span className="flex-[0_0_auto] text-[11px] text-textSecondary">
             {formatRelativeTimeCompact(comment.createdAt)}
           </span>

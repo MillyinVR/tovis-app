@@ -31,6 +31,8 @@ import type {
   LooksCommentsListResponseDto,
 } from '@/lib/looks/types'
 import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
+import { notifyLookCommentCreated } from '@/lib/notifications/lookComments'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
 
@@ -107,6 +109,10 @@ export async function GET(req: Request, ctx: RouteContext) {
           viewerUserId,
           viewerIsAdmin,
           clientLinkViewer,
+          lookAuthor: {
+            professionalId: access.look.professionalId,
+            clientAuthorId: access.look.clientAuthorId,
+          },
         }),
       ),
       commentsCount,
@@ -171,7 +177,14 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     // Resolve the real parent. Threading is flattened to one level: replying to
     // a reply re-roots the new comment under that reply's top-level ancestor.
+    // The author of the comment the user actually targeted (not the re-rooted
+    // ancestor) is who the reply notification goes to.
     let parentCommentId: string | null = null
+    let repliedToAuthor: {
+      userId: string
+      clientProfileId: string | null
+      professionalProfileId: string | null
+    } | null = null
     if (requestedParentId) {
       const parent = await prisma.lookComment.findFirst({
         where: {
@@ -179,7 +192,17 @@ export async function POST(req: Request, ctx: RouteContext) {
           lookPostId,
           moderationStatus: ModerationStatus.APPROVED,
         },
-        select: { id: true, parentCommentId: true },
+        select: {
+          id: true,
+          parentCommentId: true,
+          userId: true,
+          user: {
+            select: {
+              clientProfile: { select: { id: true } },
+              professionalProfile: { select: { id: true } },
+            },
+          },
+        },
       })
 
       if (!parent) {
@@ -189,6 +212,11 @@ export async function POST(req: Request, ctx: RouteContext) {
       }
 
       parentCommentId = parent.parentCommentId ?? parent.id
+      repliedToAuthor = {
+        userId: parent.userId,
+        clientProfileId: parent.user.clientProfile?.id ?? null,
+        professionalProfileId: parent.user.professionalProfile?.id ?? null,
+      }
     }
 
     const viewerUserId = auth.user.id
@@ -216,12 +244,36 @@ export async function POST(req: Request, ctx: RouteContext) {
       return { comment, commentsCount }
     })
 
+    // Best-effort social notifications — the comment is already committed, so
+    // a notify failure must never fail the request (mirrors the follow route).
+    await notifyLookCommentCreated({
+      lookPostId,
+      look: {
+        professionalId: access.look.professionalId,
+        clientAuthorId: access.look.clientAuthorId,
+      },
+      comment: { id: result.comment.id, body: text },
+      parent: repliedToAuthor,
+      actor: {
+        userId: viewerUserId,
+        clientProfileId: auth.user.clientProfile?.id ?? null,
+        professionalProfileId: auth.user.professionalProfile?.id ?? null,
+      },
+    }).catch((error) => {
+      console.error('POST /api/v1/looks/[id]/comments notify error', error)
+    })
+    kickNotificationDrain()
+
     const body: LooksCommentCreateResponseDto = {
       lookPostId,
       comment: mapLooksCommentToDto(result.comment, {
         viewerUserId,
         viewerIsAdmin,
         clientLinkViewer,
+        lookAuthor: {
+          professionalId: access.look.professionalId,
+          clientAuthorId: access.look.clientAuthorId,
+        },
       }),
       commentsCount: result.commentsCount,
     }
