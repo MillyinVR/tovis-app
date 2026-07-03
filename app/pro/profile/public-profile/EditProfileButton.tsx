@@ -33,6 +33,9 @@ type Props = {
     handle: string | null
     nameDisplay: ProNameDisplay
     isPremium: boolean
+    instagramHandle: string | null
+    tiktokHandle: string | null
+    websiteUrl: string | null
   }
 }
 
@@ -139,6 +142,11 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
   const [nameDisplay, setNameDisplay] = useState<ProNameDisplay>(
     initial.nameDisplay,
   )
+  const [instagramHandle, setInstagramHandle] = useState(
+    initial.instagramHandle ?? '',
+  )
+  const [tiktokHandle, setTiktokHandle] = useState(initial.tiktokHandle ?? '')
+  const [websiteUrl, setWebsiteUrl] = useState(initial.websiteUrl ?? '')
 
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string>('')
@@ -429,6 +437,9 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
           bio,
           avatarUrl: nextAvatarUrl,
           nameDisplay,
+          instagramHandle,
+          tiktokHandle,
+          websiteUrl,
           ...(canEditHandle ? { handle } : {}),
         }),
       })
@@ -756,6 +767,37 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                   className="w-full resize-y rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
                   placeholder="Short, confident, clear."
                   disabled={busy}
+                />
+              </Field>
+
+              <Field label="Instagram">
+                <input
+                  value={instagramHandle}
+                  onChange={(event) => setInstagramHandle(event.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  placeholder="@yourhandle"
+                  disabled={busy}
+                />
+              </Field>
+
+              <Field label="TikTok">
+                <input
+                  value={tiktokHandle}
+                  onChange={(event) => setTiktokHandle(event.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  placeholder="@yourhandle"
+                  disabled={busy}
+                />
+              </Field>
+
+              <Field label="Website">
+                <input
+                  value={websiteUrl}
+                  onChange={(event) => setWebsiteUrl(event.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  placeholder="yoursite.com"
+                  disabled={busy}
+                  inputMode="url"
                 />
               </Field>
 

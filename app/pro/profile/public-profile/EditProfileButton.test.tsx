@@ -49,6 +49,9 @@ function makeInitial() {
     handle: 'tovisstudio',
     nameDisplay: ProNameDisplay.BUSINESS_NAME,
     isPremium: true,
+    instagramHandle: null,
+    tiktokHandle: null,
+    websiteUrl: null,
   }
 }
 

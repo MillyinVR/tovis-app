@@ -9746,6 +9746,12 @@
         "id": {
           "type": "string"
         },
+        "instagramHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "isLicenseVerified": {
           "type": "boolean"
         },
@@ -9771,6 +9777,12 @@
             }
           ]
         },
+        "tiktokHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "timeZone": {
           "type": [
             "string",
@@ -9782,6 +9794,12 @@
         },
         "verificationStatus": {
           "$ref": "#/definitions/VerificationStatus"
+        },
+        "websiteUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -9799,7 +9817,10 @@
         "professionType",
         "professionLabel",
         "location",
-        "timeZone"
+        "timeZone",
+        "instagramHandle",
+        "tiktokHandle",
+        "websiteUrl"
       ],
       "type": "object"
     },

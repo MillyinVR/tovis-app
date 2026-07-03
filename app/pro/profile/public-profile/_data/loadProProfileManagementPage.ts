@@ -63,6 +63,9 @@ const proProfileManagementSelect =
     avatarUrl: true,
     professionType: true,
     nameDisplay: true,
+    instagramHandle: true,
+    tiktokHandle: true,
+    websiteUrl: true,
     paymentSettings: {
       select: {
         collectPaymentAt: true,
@@ -468,6 +471,9 @@ function buildEditProfileInitial(
     handle: pickString(pro.handle),
     nameDisplay: pro.nameDisplay,
     isPremium: pro.isPremium,
+    instagramHandle: pickString(pro.instagramHandle),
+    tiktokHandle: pickString(pro.tiktokHandle),
+    websiteUrl: pickString(pro.websiteUrl),
   }
 }
 
