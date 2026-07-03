@@ -26,6 +26,7 @@ import {
 
 import { prisma } from '@/lib/prisma'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import { summarizeDiscoveryOfferingsForProfessional } from '@/lib/discovery/nearby'
 import { checkProReadinessWithDb } from '@/lib/pro/readiness/proReadiness'
 
@@ -39,6 +40,7 @@ export type RefreshSource =
   | 'offering.delete'
   | 'verification.status'
   | 'schedule.publish'
+  | 'review.moderation'
   | 'backfill'
   | 'manual'
 
@@ -171,7 +173,7 @@ async function loadProRollups(
     }),
     client.review.groupBy({
       by: ['professionalId'],
-      where: { professionalId },
+      where: { professionalId, ...visibleReviewsWhere },
       _avg: { rating: true },
       _count: { _all: true },
     }),

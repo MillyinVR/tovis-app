@@ -30,6 +30,7 @@ import { pairedBeforeAssetSelect } from '@/lib/profiles/publicProfileSelects'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 
 import {
   PRO_PROFILE_MANAGEMENT_ROUTES,
@@ -287,7 +288,7 @@ async function loadReviewStats(
   professionalId: string,
 ): Promise<ReviewStats> {
   const stats = await prisma.review.aggregate({
-    where: { professionalId },
+    where: { professionalId, ...visibleReviewsWhere },
     _count: { _all: true },
     _avg: { rating: true },
   })
@@ -348,7 +349,7 @@ async function loadReviews(
   clientLinkViewer: ClientLinkViewer,
 ): Promise<ProProfileManagementReview[]> {
   const reviews = await prisma.review.findMany({
-    where: { professionalId },
+    where: { professionalId, ...visibleReviewsWhere },
     orderBy: { createdAt: 'desc' },
     take: PROFILE_MANAGEMENT_LIMITS.reviews,
     select: reviewSelect,

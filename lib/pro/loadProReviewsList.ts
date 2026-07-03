@@ -14,6 +14,7 @@ import { loadClientLinkViewer } from '@/lib/clientVisibility'
 
 type ClientLinkViewer = Awaited<ReturnType<typeof loadClientLinkViewer>>
 import { resolveClientProfileHref } from '@/lib/profiles/profileHrefs'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import { formatInTimeZone } from '@/lib/time'
 
 export type ProReviewMediaTile = {
@@ -57,7 +58,7 @@ export async function loadProReviewsList(args: {
     args.clientLinkViewer ?? (await loadClientLinkViewer(viewer))
 
   const reviews = await prisma.review.findMany({
-    where: { professionalId },
+    where: { professionalId, ...visibleReviewsWhere },
     orderBy: { createdAt: 'desc' },
     take: 100,
     include: {

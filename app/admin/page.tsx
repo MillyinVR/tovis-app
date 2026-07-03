@@ -154,6 +154,13 @@ export default async function AdminHomePage() {
                 tone="highlight"
               />
               <Card
+                title="Review moderation"
+                desc="Hide abusive reviews or remove a pro's reply; hidden reviews stop counting toward ratings."
+                href="/admin/reviews"
+                cta="Moderate reviews"
+                tone="highlight"
+              />
+              <Card
                 title="Permissions"
                 desc="Scope what admins can do."
                 href="/admin/permissions"
