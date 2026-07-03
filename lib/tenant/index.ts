@@ -17,6 +17,7 @@ export { resolveTenantContextForRequest } from './requestContext'
 export {
   bookingTenantVisibilityFilter,
   nfcCardTenantVisibilityFilter,
+  ownerScopedLookPostFilter,
   platformCrossTenantProVisibilityFilter,
   proDiscoveryVisibilityFilter,
   searchIndexVisibilityFilter,

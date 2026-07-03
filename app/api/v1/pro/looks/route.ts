@@ -4,6 +4,8 @@ import { LookPostVisibility } from '@prisma/client'
 import {
   jsonFail,
   jsonOk,
+  pickInt,
+  pickString,
   requirePro,
 } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
@@ -15,6 +17,16 @@ import type {
   CreateProLookRequestDto,
   ProLookPublicationResultDto,
 } from '@/lib/looks/publication/contracts'
+import {
+  buildProLooksCursorWhere,
+  buildProLooksWhere,
+  decodeProLooksCursor,
+  encodeProLooksCursor,
+  parseProLooksStatusParam,
+} from '@/lib/looks/proLooksList'
+import { looksFeedSelect } from '@/lib/looks/selects'
+import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
+import type { LooksFeedResponseDto } from '@/lib/looks/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,8 +157,87 @@ function toErrorResponse(error: unknown): Response {
   return jsonFail(500, message)
 }
 
-export async function GET() {
-  return jsonFail(501, 'GET /api/v1/pro/looks is not implemented yet.')
+export async function GET(req: Request) {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+
+    const { searchParams } = new URL(req.url)
+
+    const requestedLimit = pickInt(searchParams.get('limit')) ?? 24
+    const limit = Math.max(1, Math.min(requestedLimit, 50))
+
+    const statuses = parseProLooksStatusParam(searchParams.get('status'))
+    if (!statuses) {
+      return jsonFail(400, 'Invalid looks status filter.')
+    }
+
+    const rawCursor = pickString(searchParams.get('cursor'))
+    const cursor = decodeProLooksCursor(rawCursor)
+    if (rawCursor && !cursor) {
+      return jsonFail(400, 'Invalid looks cursor.')
+    }
+
+    const where = buildProLooksWhere({
+      professionalId: auth.professionalId,
+      statuses,
+    })
+
+    const pageWhere = cursor
+      ? { AND: [where, buildProLooksCursorWhere(cursor)] }
+      : where
+
+    const rows = await prisma.lookPost.findMany({
+      where: pageWhere,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      select: looksFeedSelect,
+    })
+
+    const hasMore = rows.length > limit
+    const items = hasMore ? rows.slice(0, limit) : rows
+
+    const mapped = await Promise.all(
+      items.map(async (item) => {
+        const dto = await mapLooksFeedMediaToDto({
+          item,
+          // Owner listing: like/save/follow flags describe a viewer looking
+          // at someone else's look, so they stay false here.
+          viewerLiked: false,
+          viewerSaved: false,
+          viewerFollows: false,
+        })
+        if (!dto) return null
+
+        return {
+          ...dto,
+          status: item.status,
+          visibility: item.visibility,
+        }
+      }),
+    )
+
+    const payload = mapped.filter(
+      (item): item is NonNullable<typeof item> => item !== null,
+    )
+
+    const lastItem = items[items.length - 1]
+    const nextCursor =
+      hasMore && lastItem !== undefined
+        ? encodeProLooksCursor(lastItem)
+        : null
+
+    const body: LooksFeedResponseDto & { ok: true } = {
+      ok: true,
+      items: payload,
+      nextCursor,
+    }
+
+    return jsonOk(body)
+  } catch (error: unknown) {
+    console.error('GET /api/v1/pro/looks error', error)
+    return jsonFail(500, 'Failed to load looks.')
+  }
 }
 
 export async function POST(req: Request) {

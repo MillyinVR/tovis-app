@@ -1,6 +1,8 @@
 // app/api/v1/pro/looks/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { LookPostVisibility } from '@prisma/client'
+import { LookPostStatus, LookPostVisibility } from '@prisma/client'
+
+import { encodeProLooksCursor } from '@/lib/looks/proLooksList'
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn(
@@ -29,9 +31,14 @@ const mocks = vi.hoisted(() => {
 
   const requirePro = vi.fn()
   const createOrUpdateProLookFromMediaAsset = vi.fn()
+  const lookPostFindMany = vi.fn()
+  const mapLooksFeedMediaToDto = vi.fn()
 
   const prisma = {
     __brand: 'prisma-test-double',
+    lookPost: {
+      findMany: lookPostFindMany,
+    },
   }
 
   return {
@@ -39,6 +46,8 @@ const mocks = vi.hoisted(() => {
     jsonFail,
     requirePro,
     createOrUpdateProLookFromMediaAsset,
+    lookPostFindMany,
+    mapLooksFeedMediaToDto,
     prisma,
   }
 })
@@ -47,6 +56,17 @@ vi.mock('@/app/api/_utils', () => ({
   jsonOk: mocks.jsonOk,
   jsonFail: mocks.jsonFail,
   requirePro: mocks.requirePro,
+  pickString: (v: unknown) =>
+    typeof v === 'string' && v.trim() ? v.trim() : null,
+  pickInt: (v: unknown) => {
+    const n =
+      typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN
+    return Number.isFinite(n) ? Math.trunc(n) : null
+  },
+}))
+
+vi.mock('@/lib/looks/mappers', () => ({
+  mapLooksFeedMediaToDto: mocks.mapLooksFeedMediaToDto,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -139,6 +159,21 @@ function makeTextRequest(body = 'x'): Request {
   })
 }
 
+function makeGetRequest(query = ''): Request {
+  return new Request(`http://localhost/api/v1/pro/looks${query}`, {
+    method: 'GET',
+  })
+}
+
+function makeOwnedLookRow(id: string, createdAt: Date) {
+  return {
+    id,
+    createdAt,
+    status: LookPostStatus.PUBLISHED,
+    visibility: LookPostVisibility.PUBLIC,
+  }
+}
+
 async function readJson(res: Response): Promise<unknown> {
   return await res.json()
 }
@@ -198,17 +233,126 @@ describe('app/api/v1/pro/looks/route.ts', () => {
     mocks.createOrUpdateProLookFromMediaAsset.mockResolvedValue(
       makeLookPublicationResult(),
     )
+    mocks.mapLooksFeedMediaToDto.mockImplementation(
+      ({ item }: { item: { id: string } }) =>
+        Promise.resolve({ id: item.id, url: `https://cdn.test/${item.id}` }),
+    )
   })
 
-  it('returns 501 for GET because listing looks is not implemented yet', async () => {
-    const res = await GET()
-    const body = await readJson(res)
+  it('GET propagates the failed pro auth response unchanged', async () => {
+    const authRes = Response.json(
+      { ok: false, error: 'Unauthorized' },
+      { status: 401 },
+    )
+    mocks.requirePro.mockResolvedValue({ ok: false as const, res: authRes })
 
-    expect(res.status).toBe(501)
-    expect(body).toEqual({
-      ok: false,
-      error: 'GET /api/v1/pro/looks is not implemented yet.',
+    const res = await GET(makeGetRequest())
+
+    expect(res).toBe(authRes)
+    expect(mocks.lookPostFindMany).not.toHaveBeenCalled()
+  })
+
+  it('GET lists the pro’s own looks with owner status/visibility fields', async () => {
+    const createdAt = new Date('2026-07-01T00:00:00.000Z')
+    mocks.lookPostFindMany.mockResolvedValue([
+      makeOwnedLookRow('look_1', createdAt),
+    ])
+
+    const res = await GET(makeGetRequest())
+    const body = (await readJson(res)) as {
+      ok: boolean
+      items: Array<Record<string, unknown>>
+      nextCursor: string | null
+    }
+
+    expect(res.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(body.items).toHaveLength(1)
+    expect(body.items[0]).toMatchObject({
+      id: 'look_1',
+      status: LookPostStatus.PUBLISHED,
+      visibility: LookPostVisibility.PUBLIC,
     })
+    expect(body.nextCursor).toBeNull()
+
+    const args = mocks.lookPostFindMany.mock.calls[0]?.[0] as {
+      where: Record<string, unknown>
+      take: number
+    }
+    expect(args.where).toMatchObject({
+      professionalId: 'pro_1',
+      clientAuthorId: null,
+      removedAt: null,
+    })
+    expect(args.take).toBe(25)
+  })
+
+  it('GET rejects an invalid status filter', async () => {
+    const res = await GET(makeGetRequest('?status=REMOVED'))
+
+    expect(res.status).toBe(400)
+    expect(mocks.lookPostFindMany).not.toHaveBeenCalled()
+  })
+
+  it('GET rejects an invalid cursor', async () => {
+    const res = await GET(makeGetRequest('?cursor=garbage'))
+
+    expect(res.status).toBe(400)
+    expect(mocks.lookPostFindMany).not.toHaveBeenCalled()
+  })
+
+  it('GET returns a nextCursor when more rows exist and honors it on page 2', async () => {
+    const first = new Date('2026-07-02T00:00:00.000Z')
+    const second = new Date('2026-07-01T00:00:00.000Z')
+    mocks.lookPostFindMany.mockResolvedValue([
+      makeOwnedLookRow('look_2', first),
+      makeOwnedLookRow('look_1', second),
+    ])
+
+    const res = await GET(makeGetRequest('?limit=1'))
+    const body = (await readJson(res)) as {
+      items: Array<{ id: string }>
+      nextCursor: string | null
+    }
+
+    expect(body.items).toHaveLength(1)
+    expect(body.items[0]?.id).toBe('look_2')
+    expect(body.nextCursor).toBe(
+      encodeProLooksCursor({ createdAt: first, id: 'look_2' }),
+    )
+
+    mocks.lookPostFindMany.mockResolvedValue([
+      makeOwnedLookRow('look_1', second),
+    ])
+    const page2 = await GET(
+      makeGetRequest(`?limit=1&cursor=${body.nextCursor}`),
+    )
+    const page2Body = (await readJson(page2)) as {
+      items: Array<{ id: string }>
+      nextCursor: string | null
+    }
+
+    expect(page2Body.items[0]?.id).toBe('look_1')
+    expect(page2Body.nextCursor).toBeNull()
+
+    const page2Args = mocks.lookPostFindMany.mock.calls[1]?.[0] as {
+      where: { AND?: unknown[] }
+    }
+    expect(Array.isArray(page2Args.where.AND)).toBe(true)
+  })
+
+  it('GET drops rows the mapper rejects (e.g. unrenderable media)', async () => {
+    const createdAt = new Date('2026-07-01T00:00:00.000Z')
+    mocks.lookPostFindMany.mockResolvedValue([
+      makeOwnedLookRow('look_1', createdAt),
+    ])
+    mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
+
+    const res = await GET(makeGetRequest())
+    const body = (await readJson(res)) as { items: unknown[] }
+
+    expect(res.status).toBe(200)
+    expect(body.items).toHaveLength(0)
   })
 
   it('passes through failed pro auth responses unchanged', async () => {

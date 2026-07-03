@@ -76,6 +76,11 @@ export type LooksFeedItemDto = {
   reviewHelpfulCount: number | null
   reviewRating: number | null
   reviewHeadline: string | null
+
+  // Owner-facing publication state. Present only on the pro's own listing
+  // (GET /api/v1/pro/looks); public feed surfaces omit both fields.
+  status?: LookPostStatus
+  visibility?: LookPostVisibility
 }
 
 export type LooksFeedViewerContextDto = {

@@ -51,6 +51,10 @@ const TENANT_HELPER_PATTERNS = [
   // proDiscoveryVisibilityFilter internally, so composing it is proof the
   // looks feed is tenant-scoped.
   'buildLooksFeedWhere',
+  // buildProLooksWhere composes ownerScopedLookPostFilter internally: it
+  // scopes to the authed pro's OWN rows (owner read, not discovery), which
+  // is stricter than any tenant filter. See lib/tenant/visibility.ts.
+  'buildProLooksWhere',
 ]
 
 const SCAN_DIRS = ['app', 'lib']

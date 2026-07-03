@@ -87,3 +87,19 @@ export function searchIndexVisibilitySql(ctx: TenantContext): Prisma.Sql {
 export function platformCrossTenantProVisibilityFilter(): Prisma.ProfessionalProfileWhereInput {
   return {}
 }
+
+/**
+ * Explicit marker for OWNER-scoped LookPost reads: the authed pro reading
+ * their own rows (e.g. GET /api/v1/pro/looks). Ownership scoping is stricter
+ * than tenant scoping — the result set can never contain another pro's rows,
+ * regardless of tenant — so no TenantContext is threaded. Composing this
+ * helper, rather than writing `{ professionalId }` inline, is what
+ * tools/check-tenant-aware-discovery.mjs accepts as proof the missing tenant
+ * filter was a decision, not an oversight. Never use it on a surface that
+ * enumerates more than one pro.
+ */
+export function ownerScopedLookPostFilter(
+  professionalId: string,
+): Prisma.LookPostWhereInput {
+  return { professionalId }
+}

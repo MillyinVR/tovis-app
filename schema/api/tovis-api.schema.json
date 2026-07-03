@@ -6361,6 +6361,9 @@
             "null"
           ]
         },
+        "status": {
+          "$ref": "#/definitions/LookPostStatus"
+        },
         "thumbUrl": {
           "type": [
             "string",
@@ -6388,6 +6391,9 @@
         },
         "viewerSaved": {
           "type": "boolean"
+        },
+        "visibility": {
+          "$ref": "#/definitions/LookPostVisibility"
         }
       },
       "required": [
