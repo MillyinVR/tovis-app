@@ -4817,6 +4817,112 @@
       ],
       "type": "object"
     },
+    "ClientPaymentMethodConfirmRequestDTO": {
+      "description": "Request body for POST /api/v1/client/payment-methods (persist a confirmed card).",
+      "properties": {
+        "setupIntentId": {
+          "description": "The SetupIntent the client just confirmed with Stripe.js.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "setupIntentId"
+      ],
+      "type": "object"
+    },
+    "ClientPaymentMethodConfirmResponseDTO": {
+      "description": "Response for POST /api/v1/client/payment-methods (a card was persisted).",
+      "properties": {
+        "paymentMethod": {
+          "$ref": "#/definitions/ClientPaymentMethodDTO"
+        }
+      },
+      "required": [
+        "paymentMethod"
+      ],
+      "type": "object"
+    },
+    "ClientPaymentMethodDTO": {
+      "description": "A single saved card, safe to render (never the full PAN).",
+      "properties": {
+        "brand": {
+          "description": "Card network, e.g. \"visa\" | \"mastercard\". Null until Stripe details load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "description": "ISO-8601 instant the card was saved.",
+          "type": "string"
+        },
+        "expMonth": {
+          "description": "Expiry month 1-12.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "expYear": {
+          "description": "Expiry year, four digits.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "isDefault": {
+          "description": "The card charged first for no-show fees. Exactly one default per client.",
+          "type": "boolean"
+        },
+        "last4": {
+          "description": "Last four digits of the card. Null until Stripe details load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "brand",
+        "last4",
+        "expMonth",
+        "expYear",
+        "isDefault",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ClientPaymentMethodDeleteResponseDTO": {
+      "description": "Response for DELETE /api/v1/client/payment-methods/[id].",
+      "properties": {
+        "removedId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "removedId"
+      ],
+      "type": "object"
+    },
+    "ClientPaymentMethodsListResponseDTO": {
+      "description": "Response for GET /api/v1/client/payment-methods.",
+      "properties": {
+        "paymentMethods": {
+          "items": {
+            "$ref": "#/definitions/ClientPaymentMethodDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paymentMethods"
+      ],
+      "type": "object"
+    },
     "ClientReviewMediaAssetSummaryDTO": {
       "properties": {
         "createdAt": {
@@ -4982,6 +5088,29 @@
         "professionalId",
         "bookingId",
         "mediaAssets"
+      ],
+      "type": "object"
+    },
+    "ClientSetupIntentResponseDTO": {
+      "description": "Response for POST /api/v1/client/payment-methods/setup-intent.",
+      "properties": {
+        "clientSecret": {
+          "description": "SetupIntent client secret to confirm the card with Stripe.js on the client.",
+          "type": "string"
+        },
+        "customerId": {
+          "description": "The client's Stripe Billing customer id.",
+          "type": "string"
+        },
+        "setupIntentId": {
+          "description": "SetupIntent id, echoed back to the confirm (POST payment-methods) step.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientSecret",
+        "setupIntentId",
+        "customerId"
       ],
       "type": "object"
     },
