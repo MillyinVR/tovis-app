@@ -152,6 +152,9 @@ describe('app/p/[handle]/page', () => {
         location: true,
         timeZone: true,
         isPremium: true,
+        instagramHandle: true,
+        tiktokHandle: true,
+        websiteUrl: true,
       },
     })
   })
