@@ -5,6 +5,7 @@ import { BookingSource, BookingStatus, Prisma } from '@prisma/client'
 
 import { moneyToCentsInt, moneyToFixed2String, moneyToString } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import {
   DEFAULT_TIME_ZONE,
   formatInTimeZone,
@@ -456,6 +457,7 @@ async function buildMonthlyAnalytics(args: {
     prisma.review.aggregate({
       where: {
         professionalId: args.professionalId,
+        ...visibleReviewsWhere,
         createdAt: {
           gte: args.periodStartUtc,
           lt: args.periodEndUtc,

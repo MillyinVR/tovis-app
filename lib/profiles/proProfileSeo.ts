@@ -17,6 +17,7 @@ import {
   type PublicProfileHeaderDto,
 } from '@/lib/profiles/publicProfileMappers'
 import { publicProfessionalProfileSelect } from '@/lib/profiles/publicProfileSelects'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 
 export type ProProfileSeo = {
   header: PublicProfileHeaderDto
@@ -47,7 +48,7 @@ async function loadByWhere(
 
   const [reviewStats, primaryLocation] = await Promise.all([
     prisma.review.aggregate({
-      where: { professionalId: profileRow.id },
+      where: { professionalId: profileRow.id, ...visibleReviewsWhere },
       _count: { _all: true },
       _avg: { rating: true },
     }),

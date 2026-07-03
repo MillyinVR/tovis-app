@@ -44,6 +44,7 @@ import {
   publicProfessionalProfileSelect,
   publicReviewSelect,
 } from '@/lib/profiles/publicProfileSelects'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 
 type Viewer = {
   id: string
@@ -109,7 +110,7 @@ export async function loadProPublicProfileBase(args: {
     paymentSettingsRow,
   ] = await Promise.all([
     prisma.review.aggregate({
-      where: { professionalId: profileRow.id },
+      where: { professionalId: profileRow.id, ...visibleReviewsWhere },
       _count: { _all: true },
       _avg: { rating: true },
     }),
@@ -212,7 +213,7 @@ export async function loadReviewsForUi(args: {
   clientLinkViewer: ClientLinkViewer
 }): Promise<PublicReviewDto[]> {
   const reviews = await prisma.review.findMany({
-    where: { professionalId: args.professionalId },
+    where: { professionalId: args.professionalId, ...visibleReviewsWhere },
     orderBy: { createdAt: 'desc' },
     take: PUBLIC_PROFILE_LIMITS.reviews,
     select: publicReviewSelect,

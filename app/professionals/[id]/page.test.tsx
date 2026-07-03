@@ -429,7 +429,7 @@ describe('app/professionals/[id]/page', () => {
     expect(screen.getByText('No portfolio posts yet.')).toBeInTheDocument()
 
     expect(mocks.prisma.review.aggregate).toHaveBeenCalledWith({
-      where: { professionalId: 'pro_1' },
+      where: { professionalId: 'pro_1', hiddenAt: null },
       _count: { _all: true },
       _avg: { rating: true },
     })
@@ -558,7 +558,7 @@ describe('app/professionals/[id]/page', () => {
     )
     expect(mocks.prisma.review.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { professionalId: 'pro_1' },
+        where: { professionalId: 'pro_1', hiddenAt: null },
         orderBy: { createdAt: 'desc' },
       }),
     )

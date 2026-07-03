@@ -3474,6 +3474,13 @@ model Review {
   proReplyBody String?
   proReplyAt   DateTime?
 
+  // Admin soft-moderation. A hidden review keeps its row but disappears from
+  // review lists and rating aggregates (filter via lib/reviews/visibility.ts);
+  // the author still sees it on their own booking. Unhide clears all three.
+  hiddenAt            DateTime?
+  hiddenByAdminUserId String?
+  hiddenReason        String?
+
   idempotencyKey String?
   requestId      String?
 

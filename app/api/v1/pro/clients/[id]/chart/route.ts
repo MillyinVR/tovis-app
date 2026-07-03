@@ -18,6 +18,7 @@ import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { moneyToString } from '@/lib/money'
 import { pickString } from '@/lib/pick'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -139,14 +140,14 @@ export async function GET(_req: Request, ctx: RouteContext) {
           },
         }),
         prisma.booking.findMany({ where: { clientId }, orderBy: { scheduledFor: 'desc' }, take: 500, select: BOOKING_SELECT }),
-        prisma.review.count({ where: { clientId } }),
+        prisma.review.count({ where: { clientId, ...visibleReviewsWhere } }),
         prisma.productRecommendation.findMany({
           where: { aftercareSummary: { booking: { clientId, professionalId: proId } } },
           orderBy: { id: 'desc' },
           take: 200,
           select: PRODUCT_SELECT,
         }),
-        prisma.review.findMany({ where: { clientId }, orderBy: { createdAt: 'desc' }, take: 200, select: REVIEW_SELECT }),
+        prisma.review.findMany({ where: { clientId, ...visibleReviewsWhere }, orderBy: { createdAt: 'desc' }, take: 200, select: REVIEW_SELECT }),
         prisma.clientProfessionalNote.findMany({ where: { clientId }, orderBy: { createdAt: 'desc' }, take: 200, select: FEEDBACK_SELECT }),
         prisma.mediaAsset.findMany({
           where: {

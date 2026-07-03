@@ -8,6 +8,7 @@ import type { ReactNode } from 'react'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { prisma } from '@/lib/prisma'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
@@ -2083,7 +2084,7 @@ export default async function ClientDetailPage(props: {
         take: 2000,
         select: BOOKING_ROW_SELECT,
       }),
-      prisma.review.count({ where: { clientId } }),
+      prisma.review.count({ where: { clientId, ...visibleReviewsWhere } }),
       prisma.referral.count({
         where: {
           referrerClientId: clientId,
@@ -2165,7 +2166,7 @@ export default async function ClientDetailPage(props: {
     })
   } else if (tab === 'reviews-left') {
     clientLeftReviews = await prisma.review.findMany({
-      where: { clientId },
+      where: { clientId, ...visibleReviewsWhere },
       orderBy: { createdAt: 'desc' },
       take: 2000,
       select: CLIENT_LEFT_REVIEW_SELECT,

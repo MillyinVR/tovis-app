@@ -14,6 +14,7 @@ import { coarsenPublicCoordinate } from '@/lib/discovery/publicCoordinates'
 import { prisma } from '@/lib/prisma'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
+import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import { fetchProSearchCandidates } from '@/lib/search/pros'
 import { proDiscoveryVisibilityFilter, type TenantContext } from '@/lib/tenant'
 
@@ -293,6 +294,7 @@ async function loadNearbyProsLegacy(
       by: ['professionalId'],
       where: {
         professionalId: { in: professionalIds },
+        ...visibleReviewsWhere,
       },
       _avg: { rating: true },
       _count: { _all: true },
