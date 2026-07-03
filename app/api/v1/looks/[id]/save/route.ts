@@ -19,6 +19,8 @@ import {
   canSaveLookPost,
   canViewLookPost,
 } from '@/lib/looks/guards'
+import { notifyLookSaved } from '@/lib/notifications/lookEngagement'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
 
@@ -177,6 +179,28 @@ export async function POST(req: Request, ctx: RouteContext) {
       clientId: auth.clientId,
       lookPostId,
     })
+
+    if (result.added) {
+      // Best-effort batched notification — the save is already committed, so a
+      // notify failure must never fail the request. Re-saving into the same
+      // board (added=false) is a no-op; self-saves are skipped in the helper.
+      await notifyLookSaved({
+        lookPostId,
+        look: {
+          professionalId: access.look.professionalId,
+          clientAuthorId: access.look.clientAuthorId,
+        },
+        actor: {
+          userId: auth.user.id,
+          clientProfileId: auth.clientId,
+          professionalProfileId: auth.user.professionalProfile?.id ?? null,
+        },
+        count: result.saveCount,
+      }).catch((error) => {
+        console.error('POST /api/v1/looks/[id]/save notify error', error)
+      })
+      kickNotificationDrain()
+    }
 
     const state = await getViewerLookSaveState(prisma, {
       viewerClientId: auth.clientId,

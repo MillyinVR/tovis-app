@@ -60,6 +60,8 @@ const CATEGORY_EVENT_KEYS: Record<
     NotificationEventKey.LOOK_FOLLOWER_NEW,
     NotificationEventKey.LOOK_COMMENTED,
     NotificationEventKey.LOOK_COMMENT_REPLIED,
+    NotificationEventKey.LOOK_LIKED,
+    NotificationEventKey.LOOK_SAVED,
   ],
 }
 

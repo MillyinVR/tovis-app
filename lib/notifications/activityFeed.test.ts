@@ -259,6 +259,108 @@ describe('listClientActivity', () => {
     })
   })
 
+  it('names a single public liker and links to the look', async () => {
+    db.clientNotification.findMany.mockResolvedValue([
+      {
+        id: 'notif_l1',
+        eventKey: NotificationEventKey.LOOK_LIKED,
+        data: { lookPostId: 'look_1', count: 1, actorClientId: 'client_liker' },
+        body: null,
+        href: '/looks/look_1',
+        readAt: null,
+        createdAt: new Date('2026-06-19T12:00:00.000Z'),
+      },
+    ])
+    db.clientProfile.findMany.mockResolvedValue([
+      { id: 'client_liker', handle: 'amara', isPublicProfile: true },
+    ])
+
+    const feed = await listClientActivity(asDb(db), { clientId: 'client_1' })
+
+    expect(feed.items[0]).toMatchObject({
+      iconKind: 'like',
+      who: '@amara',
+      action: 'liked your look',
+      href: '/looks/look_1',
+      followBack: null,
+    })
+  })
+
+  it('renders a batched like row with the count and no actor name', async () => {
+    db.clientNotification.findMany.mockResolvedValue([
+      {
+        id: 'notif_l2',
+        eventKey: NotificationEventKey.LOOK_LIKED,
+        data: { lookPostId: 'look_1', count: 4, actorClientId: 'client_liker' },
+        body: null,
+        href: '/looks/look_1',
+        readAt: null,
+        createdAt: new Date('2026-06-19T12:00:00.000Z'),
+      },
+    ])
+    db.clientProfile.findMany.mockResolvedValue([
+      { id: 'client_liker', handle: 'amara', isPublicProfile: true },
+    ])
+
+    const feed = await listClientActivity(asDb(db), { clientId: 'client_1' })
+
+    expect(feed.items[0]).toMatchObject({
+      iconKind: 'like',
+      who: '4 people',
+      action: 'liked your look',
+    })
+  })
+
+  it('renders save rows counting saves, not people', async () => {
+    db.clientNotification.findMany.mockResolvedValue([
+      {
+        id: 'notif_s1',
+        eventKey: NotificationEventKey.LOOK_SAVED,
+        data: { lookPostId: 'look_1', count: 3 },
+        body: null,
+        href: '/looks/look_1',
+        readAt: null,
+        createdAt: new Date('2026-06-19T12:00:00.000Z'),
+      },
+    ])
+
+    const feed = await listClientActivity(asDb(db), { clientId: 'client_1' })
+
+    expect(feed.items[0]).toMatchObject({
+      iconKind: 'save',
+      who: '3 saves',
+      action: 'on your look',
+    })
+  })
+
+  it('renders a new-look row with the caption highlight', async () => {
+    db.clientNotification.findMany.mockResolvedValue([
+      {
+        id: 'notif_n1',
+        eventKey: NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
+        data: { lookPostId: 'look_1', professionalId: 'pro_1' },
+        body: 'Fresh balayage',
+        href: '/looks/look_1',
+        readAt: null,
+        createdAt: new Date('2026-06-19T12:00:00.000Z'),
+      },
+    ])
+
+    const feed = await listClientActivity(asDb(db), { clientId: 'client_1' })
+
+    expect(feed.items[0]).toEqual({
+      id: 'notif_n1',
+      iconKind: 'new-look',
+      who: 'A pro you follow',
+      action: 'posted a new look',
+      highlight: '“Fresh balayage”',
+      timestamp: '2026-06-19T12:00:00.000Z',
+      unread: true,
+      href: '/looks/look_1',
+      followBack: null,
+    })
+  })
+
   it('marks read rows as not unread', async () => {
     db.clientNotification.findMany.mockResolvedValue([
       followRow({

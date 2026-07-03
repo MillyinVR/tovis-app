@@ -6,6 +6,7 @@ export const LOOKS_SOCIAL_JOB_TYPES = [
   LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE,
   LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE,
   LooksSocialJobType.FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS,
+  LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
   LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
   LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
   LooksSocialJobType.MODERATION_SCAN_COMMENT,
@@ -27,6 +28,10 @@ export type FanOutViralRequestApprovalNotificationsJobPayload = {
   requestId: string
 }
 
+export type FanOutNewLookNotificationsJobPayload = {
+  lookPostId: string
+}
+
 export type IndexLookPostDocumentJobPayload = {
   lookPostId: string
 }
@@ -44,6 +49,7 @@ export type LooksSocialJobPayloadByType = {
   [LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE]: RecomputeLookSpotlightScoreJobPayload
   [LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE]: RecomputeLookRankScoreJobPayload
   [LooksSocialJobType.FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS]: FanOutViralRequestApprovalNotificationsJobPayload
+  [LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS]: FanOutNewLookNotificationsJobPayload
   [LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT]: IndexLookPostDocumentJobPayload
   [LooksSocialJobType.MODERATION_SCAN_LOOK_POST]: ModerationScanLookPostJobPayload
   [LooksSocialJobType.MODERATION_SCAN_COMMENT]: ModerationScanCommentJobPayload
@@ -90,6 +96,8 @@ export function makeEmptyLooksSocialJobPerTypeCounts(): LooksSocialJobPerTypeCou
     [LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE]:
       makeEmptyLooksSocialJobBatchCounts(),
     [LooksSocialJobType.FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS]:
       makeEmptyLooksSocialJobBatchCounts(),
     [LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT]:
       makeEmptyLooksSocialJobBatchCounts(),

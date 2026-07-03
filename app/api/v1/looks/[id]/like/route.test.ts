@@ -72,6 +72,8 @@ const mocks = vi.hoisted(() => {
   const canSaveLookPost = vi.fn()
   const recomputeLookPostLikeCount = vi.fn()
   const enqueueRecomputeLookCounts = vi.fn()
+  const notifyLookLiked = vi.fn()
+  const kickNotificationDrain = vi.fn()
 
   return {
     jsonOk,
@@ -84,6 +86,8 @@ const mocks = vi.hoisted(() => {
     canSaveLookPost,
     recomputeLookPostLikeCount,
     enqueueRecomputeLookCounts,
+    notifyLookLiked,
+    kickNotificationDrain,
   }
 })
 
@@ -117,6 +121,14 @@ vi.mock('@/lib/looks/counters', () => ({
 
 vi.mock('@/lib/jobs/looksSocial/enqueue', () => ({
   enqueueRecomputeLookCounts: mocks.enqueueRecomputeLookCounts,
+}))
+
+vi.mock('@/lib/notifications/lookEngagement', () => ({
+  notifyLookLiked: mocks.notifyLookLiked,
+}))
+
+vi.mock('@/lib/notifications/delivery/kickNotificationDrain', () => ({
+  kickNotificationDrain: mocks.kickNotificationDrain,
 }))
 
 import { DELETE, POST } from './route'
@@ -163,6 +175,7 @@ function makeAccess(
     look: {
       id: string
       professionalId: string
+      clientAuthorId: string | null
       status: LookPostStatus
       visibility: LookPostVisibility
       moderationStatus: ModerationStatus
@@ -179,6 +192,7 @@ function makeAccess(
     look: {
       id: 'look_1',
       professionalId: 'pro_1',
+      clientAuthorId: null,
       status: LookPostStatus.PUBLISHED,
       visibility: LookPostVisibility.PUBLIC,
       moderationStatus: ModerationStatus.APPROVED,
@@ -248,6 +262,7 @@ describe('app/api/v1/looks/[id]/like/route.ts', () => {
     mocks.tx.lookLike.deleteMany.mockResolvedValue({ count: 1 })
     mocks.recomputeLookPostLikeCount.mockResolvedValue(7)
     mocks.enqueueRecomputeLookCounts.mockResolvedValue(makeQueuedJob())
+    mocks.notifyLookLiked.mockResolvedValue(undefined)
   })
 
   describe('POST', () => {
@@ -290,11 +305,43 @@ describe('app/api/v1/looks/[id]/like/route.ts', () => {
 
       expectSynchronousAndAsyncLikeReconciliation('look_1')
 
+      // Best-effort batched notification, emitted after the tx + drain kick.
+      expect(mocks.notifyLookLiked).toHaveBeenCalledTimes(1)
+      expect(mocks.notifyLookLiked).toHaveBeenCalledWith({
+        lookPostId: 'look_1',
+        look: {
+          professionalId: 'pro_1',
+          clientAuthorId: null,
+        },
+        actor: {
+          userId: 'user_1',
+          clientProfileId: 'client_1',
+          professionalProfileId: null,
+        },
+        count: 7,
+      })
+      expect(mocks.kickNotificationDrain).toHaveBeenCalledTimes(1)
+
       expect(body).toEqual({
         lookPostId: 'look_1',
         liked: true,
         likeCount: 7,
       })
+    })
+
+    it('returns 200 even when the like notification emit rejects (best-effort)', async () => {
+      mocks.notifyLookLiked.mockRejectedValueOnce(new Error('notify down'))
+
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(200)
+      expect(body).toEqual({
+        lookPostId: 'look_1',
+        liked: true,
+        likeCount: 7,
+      })
+      expect(mocks.kickNotificationDrain).toHaveBeenCalledTimes(1)
     })
 
     it('swallows duplicate like writes, then still recomputes and enqueues reconciliation for the canonical lookPostId', async () => {

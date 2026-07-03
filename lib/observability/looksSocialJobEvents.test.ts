@@ -35,6 +35,13 @@ function makePerTypeCounts(): LooksSocialJobPerTypeCounts {
       retryScheduledCount: 0,
       failedCount: 1,
     },
+    [LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS]: {
+      scannedCount: 0,
+      processedCount: 0,
+      completedCount: 0,
+      retryScheduledCount: 0,
+      failedCount: 0,
+    },
     [LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT]: {
       scannedCount: 0,
       processedCount: 0,

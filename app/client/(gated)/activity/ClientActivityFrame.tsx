@@ -4,6 +4,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
+  Bookmark,
+  Camera,
   Heart,
   MessageCircle,
   Repeat2,
@@ -36,7 +38,13 @@ const ICONS: Record<
     tint: 'text-accentPrimary',
     bg: 'bg-accentPrimary/15',
   },
-  save: { Icon: Heart, tint: 'text-toneDanger', bg: 'bg-toneDanger/15' },
+  like: { Icon: Heart, tint: 'text-toneDanger', bg: 'bg-toneDanger/15' },
+  save: { Icon: Bookmark, tint: 'text-toneWarn', bg: 'bg-toneWarn/15' },
+  'new-look': {
+    Icon: Camera,
+    tint: 'text-accentPrimary',
+    bg: 'bg-accentPrimary/15',
+  },
   remix: { Icon: Repeat2, tint: 'text-accentPrimary', bg: 'bg-accentPrimary/15' },
   featured: { Icon: Sparkles, tint: 'text-toneInfo', bg: 'bg-toneInfo/15' },
   milestone: { Icon: Trophy, tint: 'text-toneWarn', bg: 'bg-toneWarn/15' },
