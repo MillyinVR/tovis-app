@@ -149,6 +149,7 @@ import {
   syncBookingAppointmentReminders,
 } from '@/lib/notifications/appointmentReminders'
 import { createProNotification } from '@/lib/notifications/proNotifications'
+import { scheduleReviewRequestOnCompletion } from '@/lib/notifications/reviewRequests'
 import {
   emitPaymentActionRequiredNotifications,
   emitPaymentCollectedNotifications,
@@ -2604,6 +2605,14 @@ async function maybeCompleteBookingCloseout(args: {
       finishedAt: args.booking.finishedAt ?? args.now,
     },
     select: { id: true } satisfies Prisma.BookingSelect,
+  })
+
+  // Post-visit review request (review flywheel): scheduled in the same tx,
+  // idempotent per booking via dedupeKey, re-validated at drain time.
+  await scheduleReviewRequestOnCompletion({
+    tx: args.tx,
+    bookingId: args.booking.id,
+    now: args.now,
   })
 
   return true

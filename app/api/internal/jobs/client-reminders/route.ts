@@ -5,6 +5,7 @@ import {
   cancelDueAppointmentReminder,
   validateDueAppointmentReminder,
 } from '@/lib/notifications/appointmentReminders'
+import { validateDueReviewRequest } from '@/lib/notifications/reviewRequests'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import { prisma } from '@/lib/prisma'
 import { NotificationEventKey, Prisma } from '@prisma/client'
@@ -23,8 +24,17 @@ const DUE_REMINDER_ORDER_BY = [
   { id: 'asc' },
 ] satisfies Prisma.ScheduledClientNotificationOrderByWithRelationInput[]
 
+// Every scheduled-client-notification kind this cron drains. Each kind pairs
+// with a drain-time validator that re-derives canonical state (PROCESS /
+// SKIP / CANCEL) before the inbox row is created.
+const DRAINED_EVENT_KEYS = [
+  NotificationEventKey.APPOINTMENT_REMINDER,
+  NotificationEventKey.REVIEW_REQUESTED,
+] as const
+
 const dueReminderCandidateSelect = {
   id: true,
+  eventKey: true,
 } satisfies Prisma.ScheduledClientNotificationSelect
 
 type DueReminderCandidate = Prisma.ScheduledClientNotificationGetPayload<{
@@ -114,15 +124,23 @@ function getSafeReminderProcessError(): string {
 
 async function processReminder(args: {
   rowId: string
+  eventKey: NotificationEventKey
   now: Date
 }): Promise<ProcessReminderResult> {
   try {
     return await prisma.$transaction(async (tx) => {
-      const validation = await validateDueAppointmentReminder({
-        tx,
-        scheduledClientNotificationId: args.rowId,
-        now: args.now,
-      })
+      const validation =
+        args.eventKey === NotificationEventKey.REVIEW_REQUESTED
+          ? await validateDueReviewRequest({
+              tx,
+              scheduledClientNotificationId: args.rowId,
+              now: args.now,
+            })
+          : await validateDueAppointmentReminder({
+              tx,
+              scheduledClientNotificationId: args.rowId,
+              now: args.now,
+            })
 
       if (validation.action === 'SKIP') {
         return {
@@ -150,7 +168,7 @@ async function processReminder(args: {
         tx,
         clientId: validation.clientId,
         bookingId: validation.bookingId,
-        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+        eventKey: args.eventKey,
         title: validation.notification.title,
         body: validation.notification.body,
         dedupeKey: validation.dedupeKey,
@@ -206,7 +224,7 @@ async function loadDueRows(args: {
 }): Promise<DueReminderCandidate[]> {
   return prisma.scheduledClientNotification.findMany({
     where: {
-      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+      eventKey: { in: [...DRAINED_EVENT_KEYS] },
       cancelledAt: null,
       processedAt: null,
       failedAt: null,
@@ -252,6 +270,7 @@ async function runJob(req: Request) {
     results.push(
       await processReminder({
         rowId: row.id,
+        eventKey: row.eventKey,
         now,
       }),
     )

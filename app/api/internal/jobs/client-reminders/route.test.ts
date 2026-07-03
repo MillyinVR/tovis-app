@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
   validateDueAppointmentReminder: vi.fn(),
   cancelDueAppointmentReminder: vi.fn(),
+  validateDueReviewRequest: vi.fn(),
   upsertClientNotification: vi.fn(),
 
   safeError: vi.fn((error: unknown) => ({
@@ -39,6 +40,10 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/notifications/appointmentReminders', () => ({
   validateDueAppointmentReminder: mocks.validateDueAppointmentReminder,
   cancelDueAppointmentReminder: mocks.cancelDueAppointmentReminder,
+}))
+
+vi.mock('@/lib/notifications/reviewRequests', () => ({
+  validateDueReviewRequest: mocks.validateDueReviewRequest,
 }))
 
 vi.mock('@/lib/notifications/clientNotifications', () => ({
@@ -212,7 +217,12 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
 
     expect(mocks.scheduledClientNotificationFindMany).toHaveBeenCalledWith({
       where: {
-        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+        eventKey: {
+          in: [
+            NotificationEventKey.APPOINTMENT_REMINDER,
+            NotificationEventKey.REVIEW_REQUESTED,
+          ],
+        },
         cancelledAt: null,
         processedAt: null,
         failedAt: null,
@@ -224,6 +234,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       take: 100,
       select: {
         id: true,
+        eventKey: true,
       },
     })
 
@@ -278,7 +289,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
 
   it('processes a due SEND reminder, creates notification, and marks row processed', async () => {
     mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
-      { id: 'reminder_1' },
+      { id: 'reminder_1', eventKey: NotificationEventKey.APPOINTMENT_REMINDER },
     ])
 
     mocks.validateDueAppointmentReminder.mockResolvedValueOnce(
@@ -337,9 +348,67 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     })
   })
 
+  it('routes a due REVIEW_REQUESTED row through the review-request validator', async () => {
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'review_req_1', eventKey: NotificationEventKey.REVIEW_REQUESTED },
+    ])
+
+    mocks.validateDueReviewRequest.mockResolvedValueOnce({
+      action: 'PROCESS',
+      rowId: 'review_req_1',
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      eventKey: NotificationEventKey.REVIEW_REQUESTED,
+      dedupeKey: 'REVIEW_REQUEST:booking_1',
+      href: '/client/bookings/booking_1#review',
+      notification: {
+        title: 'How was your visit?',
+        body: 'Leave a quick review — it helps others find great pros.',
+        data: { bookingId: 'booking_1' },
+      },
+    })
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.validateDueReviewRequest).toHaveBeenCalledWith({
+      tx: expect.any(Object),
+      scheduledClientNotificationId: 'review_req_1',
+      now: NOW,
+    })
+    expect(mocks.validateDueAppointmentReminder).not.toHaveBeenCalled()
+
+    expect(mocks.upsertClientNotification).toHaveBeenCalledWith({
+      tx: expect.any(Object),
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      eventKey: NotificationEventKey.REVIEW_REQUESTED,
+      title: 'How was your visit?',
+      body: 'Leave a quick review — it helps others find great pros.',
+      dedupeKey: 'REVIEW_REQUEST:booking_1',
+      href: '/client/bookings/booking_1#review',
+      data: { bookingId: 'booking_1' },
+    })
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toMatchObject({
+      ok: true,
+      scannedCount: 1,
+      processedCount: 1,
+      skippedCount: 0,
+      cancelledCount: 0,
+      failedCount: 0,
+      cancelled: [],
+      failed: [],
+    })
+  })
+
   it('skips a due reminder when validation returns SKIP', async () => {
     mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
-      { id: 'reminder_skip_1' },
+      { id: 'reminder_skip_1', eventKey: NotificationEventKey.APPOINTMENT_REMINDER },
     ])
 
     mocks.validateDueAppointmentReminder.mockResolvedValueOnce({
@@ -370,7 +439,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
 
   it('cancels a due reminder when validation returns CANCEL', async () => {
     mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
-      { id: 'reminder_cancel_1' },
+      { id: 'reminder_cancel_1', eventKey: NotificationEventKey.APPOINTMENT_REMINDER },
     ])
 
     mocks.validateDueAppointmentReminder.mockResolvedValueOnce({
@@ -413,7 +482,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
 
   it('skips when processed marker update loses the race', async () => {
     mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
-      { id: 'reminder_race_1' },
+      { id: 'reminder_race_1', eventKey: NotificationEventKey.APPOINTMENT_REMINDER },
     ])
 
     mocks.validateDueAppointmentReminder.mockResolvedValueOnce(
@@ -449,7 +518,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
 
   it('marks retryable failure with a generic error when processing throws', async () => {
     mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
-      { id: 'reminder_failed_1' },
+      { id: 'reminder_failed_1', eventKey: NotificationEventKey.APPOINTMENT_REMINDER },
     ])
 
     mocks.validateDueAppointmentReminder.mockRejectedValueOnce(
@@ -494,7 +563,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
 
   it('returns skipped when retryable failure marker loses the race', async () => {
     mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
-      { id: 'reminder_failed_race_1' },
+      { id: 'reminder_failed_race_1', eventKey: NotificationEventKey.APPOINTMENT_REMINDER },
     ])
 
     mocks.validateDueAppointmentReminder.mockRejectedValueOnce(

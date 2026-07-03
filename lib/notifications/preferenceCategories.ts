@@ -75,6 +75,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.CONSULTATION_APPROVED]: 'Consultation approved',
   [NotificationEventKey.CONSULTATION_REJECTED]: 'Consultation declined',
   [NotificationEventKey.REVIEW_RECEIVED]: 'New review',
+  [NotificationEventKey.REVIEW_REQUESTED]: 'Review requests',
   [NotificationEventKey.APPOINTMENT_REMINDER]: 'Appointment reminder',
   [NotificationEventKey.AFTERCARE_READY]: 'Aftercare ready',
   [NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE]: 'Last-minute opening',
@@ -158,6 +159,7 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     description: 'Reviews, followers, features, and referrals.',
     eventKeys: [
       NotificationEventKey.REVIEW_RECEIVED,
+      NotificationEventKey.REVIEW_REQUESTED,
       NotificationEventKey.VIRAL_REQUEST_APPROVED,
       NotificationEventKey.LOOK_FOLLOWER_NEW,
       NotificationEventKey.REFERRAL_TAP_RECEIVED,

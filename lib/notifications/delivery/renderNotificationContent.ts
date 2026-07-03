@@ -311,6 +311,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   consultation_approved: 'View consultation',
   consultation_rejected: 'View consultation',
   review_received: 'View review',
+  review_requested: 'Leave a review',
   appointment_reminder: 'View appointment',
   aftercare_ready: 'View aftercare',
   last_minute_opening_available: 'View opening',
@@ -366,6 +367,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   review_received: buildStandardTemplateRenderer(
     templateCtaLabels.review_received,
+  ),
+  review_requested: buildStandardTemplateRenderer(
+    templateCtaLabels.review_requested,
   ),
   appointment_reminder: buildStandardTemplateRenderer(
     templateCtaLabels.appointment_reminder,
