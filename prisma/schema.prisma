@@ -45,6 +45,10 @@ enum BookingStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+  // Client did not attend a confirmed appointment. Terminal, like CANCELLED, and
+  // treated as non-occupancy on the calendar (see app/pro/calendar). Gates the
+  // no-show fee flow (revenue protection, Phase 2) behind ENABLE_NO_SHOW_PROTECTION.
+  NO_SHOW
 }
 
 enum BookingSource {
@@ -1436,6 +1440,13 @@ model ClientProfile {
   phoneVerifiedAt     DateTime?
   avatarUrl           String?
 
+  // Stripe Billing customer for client-side card-on-file (no-show protection,
+  // Phase 2). Created lazily on first save-card (SetupIntent) and is the source
+  // of truth for the customer id. Distinct from ProfessionalSubscription's
+  // stripeCustomerId (pro membership billing). Inert unless
+  // ENABLE_NO_SHOW_PROTECTION is on.
+  stripeCustomerId String? @unique
+
   // Client-as-creator public identity (engagement loop). A client only becomes
   // publicly addressable once they opt in (isPublicProfile) and claim a handle;
   // both default off/null so existing clients are unaffected. Mirrors the
@@ -1499,6 +1510,9 @@ model ClientProfile {
   followedPros ProFollow[]
   boards       Board[]
 
+  // Cards this client has saved on file (card-on-file / no-show protection).
+  paymentMethods ClientPaymentMethod[]
+
   // Engagement loop: looks this client authored from their visits, plus the
   // client→client follow graph (followers of this client / who they follow).
   authoredLooks LookPost[]     @relation("ClientAuthoredLooks")
@@ -1510,6 +1524,36 @@ model ClientProfile {
   @@index([phoneHashKeyVersion])
   @@index([homeTenantId])
   @@index([handleNormalized])
+}
+
+/// A card a client has saved on file for card-on-file / no-show protection
+/// (Phase 2). Mirrors the payment methods attached to `ClientProfile.stripeCustomerId`
+/// in Stripe; Stripe stays the source of truth for the card itself while this row
+/// caches display metadata (brand/last4/exp) and the default flag so the app can
+/// list saved cards without a Stripe round-trip. Inert unless
+/// ENABLE_NO_SHOW_PROTECTION is on; no card is ever charged from this slice.
+model ClientPaymentMethod {
+  id                    String @id @default(cuid())
+  clientId              String
+  // Stripe PaymentMethod id (`pm_…`), attached to the client's Stripe customer.
+  stripePaymentMethodId String @unique
+
+  // Cached display metadata (never the PAN; Stripe holds the card). Nullable so a
+  // row can exist before Stripe details are hydrated.
+  brand    String? // e.g. "visa"
+  last4    String? @db.VarChar(4)
+  expMonth Int?
+  expYear  Int?
+
+  // Exactly one default per client (enforced in application code, not the DB).
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
 }
 
 model ClientAddress {
