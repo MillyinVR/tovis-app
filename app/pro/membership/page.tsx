@@ -4,8 +4,9 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import {
-  effectivePlanKey,
-  resolveEntitlements,
+  activeCompPlanKey,
+  resolveEffectiveEntitlements,
+  resolveEffectivePlanKey,
 } from '@/lib/pro/entitlements'
 import { getProSubscription } from '@/lib/membership/subscription'
 import { getMembershipPlans } from '@/lib/membership/plans'
@@ -27,14 +28,22 @@ export default async function ProMembershipPage() {
   }
 
   const sub = await getProSubscription(professionalProfile.id)
-  const planKey = sub?.planKey ?? 'free'
-  const status = sub?.status ?? null
+  const now = new Date()
+  const state = {
+    planKey: sub?.planKey ?? 'free',
+    status: sub?.status ?? null,
+    compPlanKey: sub?.compPlanKey ?? null,
+    compUntil: sub?.compUntil ?? null,
+  }
+  const compPlan = activeCompPlanKey(state, now)
 
   return (
     <MembershipClient
-      currentPlanKey={effectivePlanKey({ planKey, status })}
-      status={status}
-      entitlements={resolveEntitlements({ planKey, status })}
+      currentPlanKey={resolveEffectivePlanKey(state, now)}
+      status={state.status}
+      compPlanKey={compPlan}
+      compUntil={compPlan ? (sub?.compUntil?.toISOString() ?? null) : null}
+      entitlements={resolveEffectiveEntitlements(state, now)}
       currentPeriodEnd={sub?.currentPeriodEnd?.toISOString() ?? null}
       cancelAtPeriodEnd={sub?.cancelAtPeriodEnd ?? false}
       trialEndsAt={sub?.trialEndsAt?.toISOString() ?? null}

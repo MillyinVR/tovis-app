@@ -66,6 +66,10 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/internal/jobs/membership-comp-expiry",
+      "schedule": "15 9 * * *"
+    },
+    {
       "path": "/api/internal/jobs/nfc/tap-intent-cleanup",
       "schedule": "30 9 * * *"
     }

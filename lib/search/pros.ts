@@ -383,8 +383,12 @@ export async function fetchProSearchCandidates(
         SELECT 1
         FROM "ProfessionalSubscription" ps
         WHERE ps."professionalId" = psi."professionalId"
-          AND ps."status"::text IN (${Prisma.join(entitledStatuses().map(String))})
-          AND ps."planKey" IN (${Prisma.join(planKeysGranting('priority_discovery'))})
+          AND (
+            (ps."status"::text IN (${Prisma.join(entitledStatuses().map(String))})
+              AND ps."planKey" IN (${Prisma.join(planKeysGranting('priority_discovery'))}))
+            OR (ps."compUntil" > NOW()
+              AND ps."compPlanKey" IN (${Prisma.join(planKeysGranting('priority_discovery'))}))
+          )
       )`
     : Prisma.sql`FALSE`
 

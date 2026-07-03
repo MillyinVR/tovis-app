@@ -3,8 +3,11 @@ import { SubscriptionStatus } from '@prisma/client'
 
 import {
   CAMERA_IMAGES_PER_MONTH,
+  activeCompPlanKey,
   entitledStatuses,
   resolveCameraImageMonthlyQuota,
+  resolveEffectiveEntitlements,
+  resolveEffectivePlanKey,
   resolveEntitlements,
   planGrants,
   planKeysGranting,
@@ -152,6 +155,82 @@ describe('SQL call-site helpers', () => {
   it('entitledStatuses is exactly ACTIVE + TRIALING', () => {
     expect(new Set(entitledStatuses())).toEqual(
       new Set([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
+    )
+  })
+})
+
+describe('admin comps (resolveEffective*)', () => {
+  const NOW = new Date('2026-07-03T12:00:00Z')
+  const FUTURE = new Date('2026-09-01T00:00:00Z')
+  const PAST = new Date('2026-06-01T00:00:00Z')
+
+  it('an active comp grants its plan even with no paid subscription', () => {
+    const state = {
+      planKey: 'free',
+      status: null,
+      compPlanKey: 'premium',
+      compUntil: FUTURE,
+    }
+    expect(activeCompPlanKey(state, NOW)).toBe('premium')
+    expect(resolveEffectivePlanKey(state, NOW)).toBe('premium')
+    expect(resolveEffectiveEntitlements(state, NOW)).toContain(
+      'discovery_fee_waiver',
+    )
+    expect(resolveCameraImageMonthlyQuota(state, NOW)).toBe(30)
+  })
+
+  it('a comp survives a lapsed paid subscription', () => {
+    const state = {
+      planKey: 'premium',
+      status: SubscriptionStatus.PAST_DUE,
+      compPlanKey: 'pro',
+      compUntil: FUTURE,
+    }
+    expect(resolveEffectivePlanKey(state, NOW)).toBe('pro')
+    expect(resolveEffectiveEntitlements(state, NOW)).toContain('tax_export')
+  })
+
+  it('the higher of paid vs comp wins', () => {
+    expect(
+      resolveEffectivePlanKey(
+        {
+          planKey: 'premium',
+          status: SubscriptionStatus.ACTIVE,
+          compPlanKey: 'pro',
+          compUntil: FUTURE,
+        },
+        NOW,
+      ),
+    ).toBe('premium')
+    expect(
+      resolveCameraImageMonthlyQuota(
+        {
+          planKey: 'pro',
+          status: SubscriptionStatus.ACTIVE,
+          compPlanKey: 'premium',
+          compUntil: FUTURE,
+        },
+        NOW,
+      ),
+    ).toBe(30)
+  })
+
+  it('an expired comp is ignored (boundary: compUntil == now is expired)', () => {
+    const base = { planKey: 'free', status: null, compPlanKey: 'pro' }
+    expect(activeCompPlanKey({ ...base, compUntil: PAST }, NOW)).toBeNull()
+    expect(activeCompPlanKey({ ...base, compUntil: NOW }, NOW)).toBeNull()
+    expect(
+      resolveEffectivePlanKey({ ...base, compUntil: PAST }, NOW),
+    ).toBe('free')
+  })
+
+  it('missing comp fields behave exactly like the paid-only resolvers', () => {
+    const state = { planKey: 'pro', status: SubscriptionStatus.ACTIVE }
+    expect(resolveEffectivePlanKey(state, NOW)).toBe(
+      effectivePlanKey(state),
+    )
+    expect(resolveEffectiveEntitlements(state, NOW)).toEqual(
+      resolveEntitlements(state),
     )
   })
 })

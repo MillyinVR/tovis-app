@@ -116,21 +116,84 @@ export function effectivePlanKey(args: {
   return normalizePlanKey(args.planKey)
 }
 
+// ── admin comps ─────────────────────────────────────────────────────────────
+//
+// An admin can grant complimentary months of a paid tier (compPlanKey +
+// compUntil on ProfessionalSubscription). Comp state lives beside the paid
+// Stripe state and is never written by webhooks. Because every tier is a
+// strict superset of the one below it, "paid + comp" resolves to whichever
+// plan is higher — entitlements, camera quota, and display all follow.
+
+/** The subscription-row fields that decide what a pro is entitled to. */
+export type SubscriptionEntitlementState = {
+  planKey: string | null | undefined
+  status: SubscriptionStatus | null | undefined
+  compPlanKey?: string | null
+  compUntil?: Date | null
+}
+
+const PLAN_ORDER: Record<PlanKey, number> = {
+  free: 0,
+  pro: 1,
+  premium: 2,
+  studio: 3,
+}
+
+/** The comp's plan while it is still in the future, else null. */
+export function activeCompPlanKey(
+  state: Pick<SubscriptionEntitlementState, 'compPlanKey' | 'compUntil'>,
+  now: Date,
+): PlanKey | null {
+  if (!state.compPlanKey || !state.compUntil) return null
+  if (state.compUntil.getTime() <= now.getTime()) return null
+  const key = normalizePlanKey(state.compPlanKey)
+  return key === 'free' ? null : key
+}
+
+/** Effective plan across paid + comp: whichever grants more. */
+export function resolveEffectivePlanKey(
+  state: SubscriptionEntitlementState,
+  now: Date = new Date(),
+): PlanKey {
+  const paid = effectivePlanKey(state)
+  const comp = activeCompPlanKey(state, now) ?? 'free'
+  return PLAN_ORDER[comp] > PLAN_ORDER[paid] ? comp : paid
+}
+
+/** Entitlements across paid + comp (the higher plan's set). */
+export function resolveEffectiveEntitlements(
+  state: SubscriptionEntitlementState,
+  now: Date = new Date(),
+): Entitlement[] {
+  return PLAN_ENTITLEMENTS[resolveEffectivePlanKey(state, now)]
+}
+
+/** The row fields every entitlement lookup needs (paid + comp). */
+const ENTITLEMENT_STATE_SELECT = {
+  planKey: true,
+  status: true,
+  compPlanKey: true,
+  compUntil: true,
+} as const
+
 /**
- * Load a pro's current subscription and return their entitlements. A missing row =
- * free plan (every pro is implicitly free). Performs one indexed lookup.
+ * Load a pro's current subscription and return their entitlements (paid + any
+ * active admin comp). A missing row = free plan (every pro is implicitly free).
+ * Performs one indexed lookup.
  */
 export async function getProEntitlements(
   professionalId: string,
 ): Promise<Entitlement[]> {
   const sub = await prisma.professionalSubscription.findUnique({
     where: { professionalId },
-    select: { planKey: true, status: true },
+    select: ENTITLEMENT_STATE_SELECT,
   })
 
-  return resolveEntitlements({
+  return resolveEffectiveEntitlements({
     planKey: sub?.planKey ?? 'free',
     status: sub?.status ?? null,
+    compPlanKey: sub?.compPlanKey ?? null,
+    compUntil: sub?.compUntil ?? null,
   })
 }
 
@@ -144,15 +207,15 @@ export async function hasEntitlement(
 }
 
 /**
- * Pure resolver: the monthly AI-camera image allowance a (planKey, status) pair
- * grants. Non-entitled statuses collapse to the free allowance, mirroring
- * resolveEntitlements.
+ * Pure resolver: the monthly AI-camera image allowance the subscription state
+ * grants (paid + any active comp — the higher plan wins). Non-entitled paid
+ * statuses collapse to the free allowance, mirroring resolveEntitlements.
  */
-export function resolveCameraImageMonthlyQuota(args: {
-  planKey: string | null | undefined
-  status: SubscriptionStatus | null | undefined
-}): number {
-  return CAMERA_IMAGES_PER_MONTH[effectivePlanKey(args)]
+export function resolveCameraImageMonthlyQuota(
+  state: SubscriptionEntitlementState,
+  now: Date = new Date(),
+): number {
+  return CAMERA_IMAGES_PER_MONTH[resolveEffectivePlanKey(state, now)]
 }
 
 /** A pro's current monthly AI-camera image allowance. Missing row = free plan. */
@@ -161,11 +224,13 @@ export async function getProCameraImageMonthlyQuota(
 ): Promise<number> {
   const sub = await prisma.professionalSubscription.findUnique({
     where: { professionalId },
-    select: { planKey: true, status: true },
+    select: ENTITLEMENT_STATE_SELECT,
   })
 
   return resolveCameraImageMonthlyQuota({
     planKey: sub?.planKey ?? 'free',
     status: sub?.status ?? null,
+    compPlanKey: sub?.compPlanKey ?? null,
+    compUntil: sub?.compUntil ?? null,
   })
 }

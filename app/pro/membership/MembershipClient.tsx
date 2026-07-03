@@ -30,6 +30,9 @@ type PlanCard = {
 type Props = {
   currentPlanKey: PlanKey
   status: SubscriptionStatus | null
+  /** Active admin-granted comp, when one is in effect. */
+  compPlanKey: PlanKey | null
+  compUntil: string | null
   entitlements: Entitlement[]
   currentPeriodEnd: string | null
   cancelAtPeriodEnd: boolean
@@ -101,6 +104,7 @@ export default function MembershipClient(props: Props) {
 
   const renewLabel = formatDate(props.currentPeriodEnd)
   const trialLabel = formatDate(props.trialEndsAt)
+  const compLabel = formatDate(props.compUntil)
 
   return (
     <section className="mx-auto mt-16 w-full max-w-2xl px-4 pb-12 text-textPrimary">
@@ -110,7 +114,15 @@ export default function MembershipClient(props: Props) {
         Upgrade to unlock business tools.
       </p>
 
-      {props.status && props.currentPlanKey !== 'free' ? (
+      {props.compPlanKey && compLabel ? (
+        <div className="mt-4 rounded-card border border-accentPrimary/30 bg-bgSecondary p-3 text-[12px] text-textSecondary">
+          You have a complimentary{' '}
+          <span className="font-black text-textPrimary">{props.compPlanKey}</span>{' '}
+          membership through {compLabel} — on the house.
+        </div>
+      ) : null}
+
+      {props.status && props.currentPlanKey !== 'free' && !props.compPlanKey ? (
         <div className="mt-4 rounded-card border border-accentPrimary/30 bg-bgSecondary p-3 text-[12px] text-textSecondary">
           You&apos;re on <span className="font-black text-textPrimary">{props.currentPlanKey}</span>
           {props.cancelAtPeriodEnd ? ' (cancels at period end)' : ''}.

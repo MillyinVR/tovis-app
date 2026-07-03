@@ -1998,6 +1998,16 @@ model ProfessionalSubscription {
   cancelAtPeriodEnd    Boolean   @default(false)
   trialEndsAt          DateTime?
 
+  // Admin-granted complimentary membership ("free months"). Lives BESIDE the
+  // paid Stripe state — webhooks never write these fields, so a comp survives
+  // real-subscription churn. Entitlements resolve to the better of paid vs
+  // comp while compUntil is in the future; the comp-expiry job clears expired
+  // comps and recomputes the isPremium backfill.
+  compPlanKey         String?
+  compUntil           DateTime?
+  compNote            String?
+  compGrantedByUserId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2007,6 +2017,7 @@ model ProfessionalSubscription {
   @@index([status])
   @@index([stripeCustomerId])
   @@index([stripeSubscriptionId])
+  @@index([compUntil])
 }
 
 model ProfessionalLocation {
