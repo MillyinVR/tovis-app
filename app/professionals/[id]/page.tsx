@@ -128,20 +128,27 @@ export default async function PublicProfessionalProfilePage({
   const tabs = buildPublicProfileTabs(professionalId)
 
   // Crawler-facing structured data; cache() dedupes with generateMetadata.
-  const seo = await loadProProfileSeoById(professionalId).catch(() => null)
-  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+  // Fail-soft: SEO decoration must never break the page render.
+  let jsonLd: Record<string, unknown> | null = null
+  try {
+    const seo = await loadProProfileSeoById(professionalId)
+    if (seo) {
+      const brand = getBrandForTenantContext(
+        await resolveTenantContextForLayout(),
+      )
+      jsonLd = buildProProfileJsonLd({
+        seo,
+        canonicalUrl: absoluteUrl(`/professionals/${professionalId}`),
+        brandDisplayName: brand.displayName,
+      })
+    }
+  } catch {
+    jsonLd = null
+  }
 
   return (
     <main className="brand-profile-page min-h-screen pb-28">
-      {seo ? (
-        <JsonLdScript
-          data={buildProProfileJsonLd({
-            seo,
-            canonicalUrl: absoluteUrl(`/professionals/${professionalId}`),
-            brandDisplayName: brand.displayName,
-          })}
-        />
-      ) : null}
+      {jsonLd ? <JsonLdScript data={jsonLd} /> : null}
       <div className="brand-profile-shell">
         <ProfileHero
           header={header}

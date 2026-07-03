@@ -116,20 +116,27 @@ export default async function VanityProfilePage({
   const proTimeZone = displayTimeZoneOrNull(pro.timeZone)
 
   // Crawler-facing structured data; cache() dedupes with generateMetadata.
-  const seo = await loadProProfileSeoByHandle(normalized).catch(() => null)
-  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+  // Fail-soft: SEO decoration must never break the page render.
+  let jsonLd: Record<string, unknown> | null = null
+  try {
+    const seo = await loadProProfileSeoByHandle(normalized)
+    if (seo) {
+      const brand = getBrandForTenantContext(
+        await resolveTenantContextForLayout(),
+      )
+      jsonLd = buildProProfileJsonLd({
+        seo,
+        canonicalUrl: absoluteUrl(`/professionals/${pro.id}`),
+        brandDisplayName: brand.displayName,
+      })
+    }
+  } catch {
+    jsonLd = null
+  }
 
   return (
     <main className="mx-auto max-w-180 px-4 pb-28 pt-6">
-      {seo ? (
-        <JsonLdScript
-          data={buildProProfileJsonLd({
-            seo,
-            canonicalUrl: absoluteUrl(`/professionals/${pro.id}`),
-            brandDisplayName: brand.displayName,
-          })}
-        />
-      ) : null}
+      {jsonLd ? <JsonLdScript data={jsonLd} /> : null}
       <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="flex items-start justify-between gap-3">
           <Link
