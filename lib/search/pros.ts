@@ -219,8 +219,9 @@ function buildSortClause(sort: SearchProsSort): Prisma.Sql {
   }
 
   // DISTANCE — null distances sort last (matches prior JS behavior of
-  // pushing missing distances to +Infinity).
-  return Prisma.sql`t."distanceMiles" ASC NULLS LAST, LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
+  // pushing missing distances to +Infinity). Rating breaks distance ties so
+  // equally-near pros surface by quality instead of name.
+  return Prisma.sql`t."distanceMiles" ASC NULLS LAST, t."ratingAvg" DESC NULLS LAST, LOWER(t."businessName") ASC NULLS LAST, t."professionalId" ASC`
 }
 
 function toFiniteCount(value: number | bigint): number {
