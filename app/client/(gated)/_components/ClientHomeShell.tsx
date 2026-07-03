@@ -10,6 +10,7 @@ import ClientLastMinuteInvites from './ClientLastMinuteInvites'
 import ClientWaitlistStrip from './ClientWaitlistStrip'
 import FavoriteProsRow from './FavoriteProsRow'
 import FavoritedServicesRow from './FavoritedServicesRow'
+import InviteFriendCard from './InviteFriendCard'
 import ViralLooksBand from './ViralLooksBand'
 
 type ClientHomeShellProps = {
@@ -97,6 +98,7 @@ export default function ClientHomeShell({
           />
           <FavoritedServicesRow favoriteServices={home.favoriteServices} />
           <ClientWaitlistStrip waitlists={home.waitlists} />
+          <InviteFriendCard />
         </div>
       </div>
 

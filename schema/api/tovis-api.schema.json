@@ -4268,6 +4268,32 @@
       ],
       "type": "object"
     },
+    "ClientInviteLinkResponseDTO": {
+      "properties": {
+        "cardId": {
+          "type": "string"
+        },
+        "path": {
+          "description": "Root-relative share path (/c/{shortCode}); clients absolutize it.",
+          "type": "string"
+        },
+        "shortCode": {
+          "description": "Raw short code (Crockford-ish Base32).",
+          "type": "string"
+        },
+        "shortCodeDisplay": {
+          "description": "TOV-XXXX-XXXX display form.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cardId",
+        "shortCode",
+        "shortCodeDisplay",
+        "path"
+      ],
+      "type": "object"
+    },
     "ClientLookRemix": {
       "properties": {
         "bookedAt": {

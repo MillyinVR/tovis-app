@@ -174,6 +174,9 @@ export type {
   NotificationCategoryMeta,
 } from '@/lib/notifications/preferenceCategories'
 
+// ── Client invite link (GET /api/v1/client/referrals/invite-link) ────────────
+export type { ClientInviteLinkResponseDTO } from '@/lib/dto/clientInviteLink'
+
 // ── Client "Me" aggregate (GET /api/v1/me) ───────────────────────────────────
 export type {
   ClientMeUserDTO,
