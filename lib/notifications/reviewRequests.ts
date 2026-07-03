@@ -16,7 +16,10 @@ import {
 } from '@prisma/client'
 
 import { scheduleClientNotification } from '@/lib/notifications/clientNotifications'
-import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import {
+  formatProfessionalPublicDisplayName,
+  professionalPublicDisplayNameSelect,
+} from '@/lib/privacy/professionalDisplayName'
 
 export const REVIEW_REQUEST_DELAY_MS = 4 * 60 * 60 * 1000
 
@@ -49,14 +52,6 @@ export function buildReviewRequestHref(bookingId: string): string {
   return `/client/bookings/${bookingId}#review`
 }
 
-const REVIEW_REQUEST_PRO_SELECT = {
-  businessName: true,
-  firstName: true,
-  lastName: true,
-  handle: true,
-  nameDisplay: true,
-} satisfies Prisma.ProfessionalProfileSelect
-
 const REVIEW_REQUEST_BOOKING_SELECT = {
   id: true,
   clientId: true,
@@ -65,7 +60,9 @@ const REVIEW_REQUEST_BOOKING_SELECT = {
     select: { claimStatus: true },
   },
   professional: {
-    select: REVIEW_REQUEST_PRO_SELECT,
+    // Sanctioned display-name fragment (lib/privacy) — keeps raw name-field
+    // selects out of this module per check-pii-plaintext-reads.
+    select: professionalPublicDisplayNameSelect,
   },
 } satisfies Prisma.BookingSelect
 
