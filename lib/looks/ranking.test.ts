@@ -22,6 +22,7 @@ function makeInput(
     likeCount: number
     commentCount: number
     saveCount: number
+    shareCount: number
   }>,
 ) {
   return {
@@ -35,6 +36,7 @@ function makeInput(
     likeCount: overrides?.likeCount ?? 0,
     commentCount: overrides?.commentCount ?? 0,
     saveCount: overrides?.saveCount ?? 0,
+    shareCount: overrides?.shareCount ?? 0,
   }
 }
 
@@ -46,6 +48,12 @@ describe('lib/looks/ranking.ts', () => {
       )
       expect(LOOK_POST_RANK_WEIGHTS.comment).toBeGreaterThan(
         LOOK_POST_RANK_WEIGHTS.like,
+      )
+    })
+
+    it('keeps shares as the strongest signal, above saves', () => {
+      expect(LOOK_POST_RANK_WEIGHTS.share).toBeGreaterThan(
+        LOOK_POST_RANK_WEIGHTS.save,
       )
     })
   })
@@ -87,14 +95,15 @@ describe('lib/looks/ranking.ts', () => {
   })
 
   describe('computeLookPostRankBaseEngagement', () => {
-    it('weights likes, comments, and saves correctly', () => {
+    it('weights likes, comments, saves, and shares correctly', () => {
       const result = computeLookPostRankBaseEngagement({
         likeCount: 11,
         commentCount: 6,
         saveCount: 3,
+        shareCount: 2,
       })
 
-      expect(result).toBe(35)
+      expect(result).toBe(51)
     })
 
     it('weights saves above likes at the same rough sample size', () => {
@@ -102,15 +111,35 @@ describe('lib/looks/ranking.ts', () => {
         likeCount: 1,
         commentCount: 1,
         saveCount: 4,
+        shareCount: 0,
       })
 
       const likeHeavy = computeLookPostRankBaseEngagement({
         likeCount: 4,
         commentCount: 1,
         saveCount: 1,
+        shareCount: 0,
       })
 
       expect(saveHeavy).toBeGreaterThan(likeHeavy)
+    })
+
+    it('weights shares above saves at the same rough sample size', () => {
+      const shareHeavy = computeLookPostRankBaseEngagement({
+        likeCount: 1,
+        commentCount: 1,
+        saveCount: 1,
+        shareCount: 4,
+      })
+
+      const saveHeavy = computeLookPostRankBaseEngagement({
+        likeCount: 1,
+        commentCount: 1,
+        saveCount: 4,
+        shareCount: 1,
+      })
+
+      expect(shareHeavy).toBeGreaterThan(saveHeavy)
     })
 
     it('normalizes negative and non-finite counts to zero', () => {
@@ -118,6 +147,7 @@ describe('lib/looks/ranking.ts', () => {
         likeCount: -4,
         commentCount: Number.NaN,
         saveCount: Number.POSITIVE_INFINITY,
+        shareCount: -1,
       })
 
       expect(result).toBe(0)

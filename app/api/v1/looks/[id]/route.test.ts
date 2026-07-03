@@ -48,6 +48,9 @@ const mocks = vi.hoisted(() => {
     lookLike: {
       findUnique: vi.fn(),
     },
+    boardItem: {
+      findFirst: vi.fn(),
+    },
   }
 
   const getCurrentUser = vi.fn()
@@ -273,6 +276,7 @@ function makeMappedDetailDto(
     viewerContext: {
       isAuthenticated: boolean
       viewerLiked: boolean
+      viewerSaved: boolean
       canComment: boolean
       canSave: boolean
       isOwner: boolean
@@ -362,6 +366,7 @@ function makeMappedDetailDto(
     viewerContext: {
       isAuthenticated: false,
       viewerLiked: false,
+      viewerSaved: false,
       canComment: true,
       canSave: true,
       isOwner: false,
@@ -383,6 +388,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
 
     mocks.prisma.lookPost.findUnique.mockResolvedValue(makeDetailRow())
     mocks.prisma.lookLike.findUnique.mockResolvedValue(null)
+    mocks.prisma.boardItem.findFirst.mockResolvedValue(null)
 
     mocks.mapLooksDetailMediaToRenderable.mockResolvedValue(
       makeRenderableDetailRow(),
@@ -429,6 +435,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
     })
 
     expect(mocks.prisma.lookLike.findUnique).not.toHaveBeenCalled()
+    expect(mocks.prisma.boardItem.findFirst).not.toHaveBeenCalled()
     expect(mocks.mapLooksDetailMediaToRenderable).toHaveBeenCalledWith(dbRow)
 
     expect(mocks.mapLooksDetailToDto).toHaveBeenCalledWith({
@@ -436,6 +443,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
       viewerContext: {
         isAuthenticated: false,
         viewerLiked: false,
+        viewerSaved: false,
         canComment: true,
         canSave: true,
         isOwner: false,
@@ -454,6 +462,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
       viewerContext: {
         isAuthenticated: true,
         viewerLiked: true,
+        viewerSaved: true,
         canComment: true,
         canSave: true,
         isOwner: false,
@@ -469,6 +478,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
     mocks.prisma.lookLike.findUnique.mockResolvedValue({
       lookPostId: 'look_1',
     })
+    mocks.prisma.boardItem.findFirst.mockResolvedValue({ id: 'board_item_1' })
     mocks.mapLooksDetailToDto.mockReturnValue(dto)
 
     const res = await GET(
@@ -497,11 +507,20 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
       },
     })
 
+    expect(mocks.prisma.boardItem.findFirst).toHaveBeenCalledWith({
+      where: {
+        lookPostId: 'look_1',
+        board: { clientId: 'client_1' },
+      },
+      select: { id: true },
+    })
+
     expect(mocks.mapLooksDetailToDto).toHaveBeenCalledWith({
       item: makeRenderableDetailRow(),
       viewerContext: {
         isAuthenticated: true,
         viewerLiked: true,
+        viewerSaved: true,
         canComment: true,
         canSave: true,
         isOwner: false,
@@ -520,6 +539,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
       viewerContext: {
         isAuthenticated: true,
         viewerLiked: false,
+        viewerSaved: false,
         canComment: true,
         canSave: true,
         isOwner: true,
@@ -558,6 +578,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
       viewerContext: {
         isAuthenticated: true,
         viewerLiked: false,
+        viewerSaved: false,
         canComment: true,
         canSave: true,
         isOwner: true,
@@ -576,6 +597,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
       viewerContext: {
         isAuthenticated: true,
         viewerLiked: false,
+        viewerSaved: false,
         canComment: false,
         canSave: false,
         isOwner: false,
@@ -622,6 +644,7 @@ describe('app/api/v1/looks/[id]/route.ts', () => {
       viewerContext: {
         isAuthenticated: true,
         viewerLiked: false,
+        viewerSaved: false,
         canComment: false,
         canSave: false,
         isOwner: false,

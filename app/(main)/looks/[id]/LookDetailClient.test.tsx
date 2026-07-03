@@ -302,6 +302,7 @@ function makeDetailItem(): LooksDetailItemDto {
     viewerContext: {
       isAuthenticated: true,
       viewerLiked: false,
+      viewerSaved: false,
       canComment: true,
       canSave: true,
       isOwner: false,

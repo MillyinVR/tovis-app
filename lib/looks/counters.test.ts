@@ -243,7 +243,7 @@ describe('lib/looks/counters.ts', () => {
         }),
       )
 
-      expect(result).toBe(30.625)
+      expect(result).toBe(44.625)
     })
 
     it('weights saves above likes', () => {
@@ -261,7 +261,7 @@ describe('lib/looks/counters.ts', () => {
           likeCount: 4,
           commentCount: 1,
           saveCount: 1,
-          shareCount: 99,
+          shareCount: 0,
         }),
       )
 
@@ -285,7 +285,7 @@ describe('lib/looks/counters.ts', () => {
           likeCount: 11,
           commentCount: 6,
           saveCount: 3,
-          shareCount: 999,
+          shareCount: 2,
         }),
       )
 
@@ -335,7 +335,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           likeCount: 7,
           spotlightScore: 69.02,
-          rankScore: 44.625,
+          rankScore: 58.625,
         },
         select: { id: true },
       })
@@ -375,7 +375,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           commentCount: 4,
           spotlightScore: 69.02,
-          rankScore: 44.625,
+          rankScore: 58.625,
         },
         select: { id: true },
       })
@@ -463,7 +463,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           saveCount: 9,
           spotlightScore: 69.02,
-          rankScore: 44.625,
+          rankScore: 58.625,
         },
         select: { id: true },
       })
@@ -554,12 +554,12 @@ describe('lib/looks/counters.ts', () => {
       expect(db.lookPost.update).toHaveBeenCalledWith({
         where: { id: 'look_1' },
         data: {
-          rankScore: 30.625,
+          rankScore: 44.625,
         },
         select: { id: true },
       })
 
-      expect(result).toBe(30.625)
+      expect(result).toBe(44.625)
     })
 
     it('uses an explicit now option for deterministic rank recomputes', async () => {
@@ -585,12 +585,12 @@ describe('lib/looks/counters.ts', () => {
       expect(db.lookPost.update).toHaveBeenCalledWith({
         where: { id: 'look_1' },
         data: {
-          rankScore: 27.2222,
+          rankScore: 39.6667,
         },
         select: { id: true },
       })
 
-      expect(result).toBe(27.2222)
+      expect(result).toBe(39.6667)
     })
   })
 
@@ -616,14 +616,14 @@ describe('lib/looks/counters.ts', () => {
         where: { id: 'look_1' },
         data: {
           spotlightScore: 37.5667,
-          rankScore: 30.625,
+          rankScore: 44.625,
         },
         select: { id: true },
       })
 
       expect(result).toEqual({
         spotlightScore: 37.5667,
-        rankScore: 30.625,
+        rankScore: 44.625,
       })
     })
   })
@@ -671,7 +671,7 @@ describe('lib/looks/counters.ts', () => {
           commentCount: 6,
           saveCount: 3,
           spotlightScore: 37.5667,
-          rankScore: 30.625,
+          rankScore: 44.625,
         },
         select: { id: true },
       })
@@ -681,7 +681,7 @@ describe('lib/looks/counters.ts', () => {
         commentCount: 6,
         saveCount: 3,
         spotlightScore: 37.5667,
-        rankScore: 30.625,
+        rankScore: 44.625,
       })
     })
   })

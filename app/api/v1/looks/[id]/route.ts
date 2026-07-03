@@ -63,7 +63,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
       })
     }
 
-    const [row, liked] = await Promise.all([
+    const viewerClientId = viewer?.clientProfile?.id ?? null
+
+    const [row, liked, savedItem] = await Promise.all([
       prisma.lookPost.findUnique({
         where: { id: lookPostId },
         select: looksDetailSelect,
@@ -79,6 +81,17 @@ export async function GET(_req: Request, ctx: RouteContext) {
             select: {
               lookPostId: true,
             },
+          })
+        : Promise.resolve(null),
+      // Saved = the look sits on any of the viewer's boards (clients only —
+      // guests and pros always read false, mirroring the feed's viewer flags).
+      viewerClientId
+        ? prisma.boardItem.findFirst({
+            where: {
+              lookPostId,
+              board: { clientId: viewerClientId },
+            },
+            select: { id: true },
           })
         : Promise.resolve(null),
     ])
@@ -131,6 +144,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
         viewerContext: {
           isAuthenticated: Boolean(viewer),
           viewerLiked: Boolean(liked),
+          viewerSaved: Boolean(savedItem),
           canComment,
           canSave,
           isOwner: access.isOwner,

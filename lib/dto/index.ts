@@ -300,6 +300,7 @@ export type {
   LooksCommentUserDto,
   LooksCommentDto,
   LooksLikeResponseDto,
+  LooksShareResponseDto,
   LooksCommentsListResponseDto,
   LooksCommentCreateResponseDto,
   LooksCommentRepliesListResponseDto,

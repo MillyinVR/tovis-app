@@ -542,6 +542,7 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
 
   const isAuthenticated = pickBoolean(viewerContextRaw.isAuthenticated)
   const viewerLiked = pickBoolean(viewerContextRaw.viewerLiked)
+  const viewerSaved = pickBoolean(viewerContextRaw.viewerSaved)
   const canComment = pickBoolean(viewerContextRaw.canComment)
   const canSave = pickBoolean(viewerContextRaw.canSave)
   const isOwner = pickBoolean(viewerContextRaw.isOwner)
@@ -559,6 +560,7 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
     shares === null ||
     isAuthenticated === null ||
     viewerLiked === null ||
+    viewerSaved === null ||
     canComment === null ||
     canSave === null ||
     isOwner === null
@@ -600,6 +602,7 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
     viewerContext: {
       isAuthenticated,
       viewerLiked,
+      viewerSaved,
       canComment,
       canSave,
       isOwner,
