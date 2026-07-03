@@ -1,4 +1,5 @@
 // app/p/[handle]/page.tsx
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
@@ -8,8 +9,44 @@ import { friendlyTimeZoneLabel, isValidIanaTimeZone } from '@/lib/timeZone'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import { normalizeHandle } from '@/lib/handles'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import JsonLdScript from '@/app/_components/seo/JsonLdScript'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { loadProProfileSeoByHandle } from '@/lib/profiles/proProfileSeo'
+import { absoluteUrl } from '@/lib/seo/absoluteUrl'
+import { buildProProfileJsonLd } from '@/lib/seo/proProfileJsonLd'
+import { buildProProfileMetadata } from '@/lib/seo/proProfileMetadata'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 export const dynamic = 'force-dynamic'
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ handle: string }>
+}): Promise<Metadata> {
+  const { handle } = await params
+  const normalized = normalizeHandle(handle)
+  if (!normalized) return {}
+
+  let seo: Awaited<ReturnType<typeof loadProProfileSeoByHandle>>
+  try {
+    seo = await loadProProfileSeoByHandle(normalized)
+  } catch {
+    // Never let a metadata fetch failure 500 the page; fall back to defaults.
+    return {}
+  }
+  if (!seo) return {}
+
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+
+  return buildProProfileMetadata({
+    seo,
+    // The vanity mirror canonicalizes to the full profile route so search
+    // signals consolidate on one URL.
+    canonicalPath: `/professionals/${seo.header.id}`,
+    brandDisplayName: brand.displayName,
+  })
+}
 
 function displayTimeZoneOrNull(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
@@ -78,8 +115,21 @@ export default async function VanityProfilePage({
   const location = pro.location?.trim() || null
   const proTimeZone = displayTimeZoneOrNull(pro.timeZone)
 
+  // Crawler-facing structured data; cache() dedupes with generateMetadata.
+  const seo = await loadProProfileSeoByHandle(normalized).catch(() => null)
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+
   return (
     <main className="mx-auto max-w-180 px-4 pb-28 pt-6">
+      {seo ? (
+        <JsonLdScript
+          data={buildProProfileJsonLd({
+            seo,
+            canonicalUrl: absoluteUrl(`/professionals/${pro.id}`),
+            brandDisplayName: brand.displayName,
+          })}
+        />
+      ) : null}
       <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="flex items-start justify-between gap-3">
           <Link
