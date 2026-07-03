@@ -7,6 +7,7 @@ import type {
   PublicProfileHeaderDto,
   PublicProfileStatsDto,
 } from '@/lib/profiles/publicProfileMappers'
+import SocialLinkChips from '@/app/_components/profiles/SocialLinkChips'
 
 import FavoriteButton from './FavoriteButton'
 import ShareButton from './ShareButton'
@@ -117,6 +118,13 @@ export default function ProfileHero({
               </>
             ) : null}
           </div>
+
+          <SocialLinkChips
+            instagramHandle={header.instagramHandle}
+            tiktokHandle={header.tiktokHandle}
+            websiteUrl={header.websiteUrl}
+            className="mt-2 flex flex-wrap items-center gap-2"
+          />
         </div>
       </section>
 
@@ -166,3 +174,4 @@ function ProfileHeroStat({
     </div>
   )
 }
+

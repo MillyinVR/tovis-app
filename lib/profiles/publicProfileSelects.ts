@@ -38,6 +38,9 @@ export const publicProfessionalProfileSelect =
     licenseVerified: true,
     location: true,
     timeZone: true,
+    instagramHandle: true,
+    tiktokHandle: true,
+    websiteUrl: true,
   })
 
 export const publicOfferingServiceSelect =

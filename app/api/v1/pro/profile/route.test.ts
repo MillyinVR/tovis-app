@@ -205,6 +205,9 @@ describe('app/api/v1/pro/profile/route.ts', () => {
         professionType: true,
         nameDisplay: true,
         isPremium: true,
+        instagramHandle: true,
+        tiktokHandle: true,
+        websiteUrl: true,
       },
     })
 
@@ -268,6 +271,9 @@ describe('app/api/v1/pro/profile/route.ts', () => {
         professionType: true,
         nameDisplay: true,
         isPremium: true,
+        instagramHandle: true,
+        tiktokHandle: true,
+        websiteUrl: true,
       },
     })
 
@@ -320,6 +326,9 @@ describe('app/api/v1/pro/profile/route.ts', () => {
         professionType: true,
         nameDisplay: true,
         isPremium: true,
+        instagramHandle: true,
+        tiktokHandle: true,
+        websiteUrl: true,
       },
     })
 

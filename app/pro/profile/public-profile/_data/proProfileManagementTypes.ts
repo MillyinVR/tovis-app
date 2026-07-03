@@ -56,6 +56,9 @@ export type ProProfileManagementEditProfileInitial = {
   handle: string | null
   nameDisplay: ProNameDisplay
   isPremium: boolean
+  instagramHandle: string | null
+  tiktokHandle: string | null
+  websiteUrl: string | null
 }
 
 export type ProProfileManagementTipSuggestion = {

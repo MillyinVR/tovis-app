@@ -10,6 +10,7 @@ import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import { normalizeHandle } from '@/lib/handles'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import JsonLdScript from '@/app/_components/seo/JsonLdScript'
+import SocialLinkChips from '@/app/_components/profiles/SocialLinkChips'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { loadProProfileSeoByHandle } from '@/lib/profiles/proProfileSeo'
 import { absoluteUrl } from '@/lib/seo/absoluteUrl'
@@ -83,6 +84,9 @@ export default async function VanityProfilePage({
       location: true,
       timeZone: true,
       isPremium: true,
+      instagramHandle: true,
+      tiktokHandle: true,
+      websiteUrl: true,
     },
   })
 
@@ -176,6 +180,23 @@ export default async function VanityProfilePage({
               {subtitle}
               {location ? ` • ${location}` : ''}
             </div>
+
+            {/* Above-the-fold booking CTA: this page doubles as the pro's
+                link-in-bio, so the primary action must be visible without
+                scrolling. */}
+            <Link
+              href={`/professionals/${pro.id}?tab=services`}
+              className="mt-3 inline-flex items-center rounded-full bg-accentPrimary px-5 py-2.5 text-[13px] font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
+            >
+              Book now
+            </Link>
+
+            <SocialLinkChips
+              instagramHandle={pro.instagramHandle}
+              tiktokHandle={pro.tiktokHandle}
+              websiteUrl={pro.websiteUrl}
+              className="mt-3 flex flex-wrap items-center gap-2"
+            />
 
             {pro.bio ? (
               <div className="mt-3 text-[13px] text-textSecondary">{pro.bio}</div>

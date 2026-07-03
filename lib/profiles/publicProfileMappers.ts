@@ -87,6 +87,10 @@ export type PublicProfileHeaderDto = {
   professionLabel: string
   location: string | null
   timeZone: string | null
+  // Public social presence (handles stored without "@").
+  instagramHandle: string | null
+  tiktokHandle: string | null
+  websiteUrl: string | null
 }
 
 export type PublicOfferingDto = {
@@ -337,6 +341,9 @@ export function mapPublicProfileHeaderToDto(
     professionLabel: formatProfessionLabel(profile.professionType),
     location: formatProfileLocation(profile.location),
     timeZone: formatDisplayTimeZone(profile.timeZone),
+    instagramHandle: pickString(profile.instagramHandle),
+    tiktokHandle: pickString(profile.tiktokHandle),
+    websiteUrl: pickString(profile.websiteUrl),
   }
 }
 

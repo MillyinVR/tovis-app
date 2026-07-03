@@ -1566,6 +1566,13 @@ model ProfessionalProfile {
   bio              String?
   avatarUrl        String?
 
+  // Public social presence (display-only deep links; normalized without "@").
+  // Instagram is the industry's #2 discovery channel — pros link their
+  // portfolio identity here and the profile links back out.
+  instagramHandle String?
+  tiktokHandle    String?
+  websiteUrl      String?
+
   // Display-only (public profile)
   location String @default("") // e.g. "San Diego, CA"
 

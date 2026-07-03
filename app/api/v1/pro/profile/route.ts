@@ -9,6 +9,10 @@ import {
   normalizeHandle,
 } from '@/lib/handles'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import {
+  normalizeSocialHandle,
+  normalizeWebsiteUrl,
+} from '@/lib/profiles/socialLinks'
 
 export const dynamic = 'force-dynamic'
 
@@ -66,6 +70,9 @@ const PRO_PROFILE_SELECT = {
   professionType: true,
   nameDisplay: true,
   isPremium: true,
+  instagramHandle: true,
+  tiktokHandle: true,
+  websiteUrl: true,
 } satisfies Prisma.ProfessionalProfileSelect
 
 export async function GET() {
@@ -119,6 +126,47 @@ export async function PATCH(req: Request) {
     const bio = pickNonEmptyStringOrUndefined(body.bio)
     const location = pickNonEmptyStringOrUndefined(body.location)
     const avatarUrl = pickNonEmptyStringOrUndefined(body.avatarUrl)
+
+    // Social presence: absent = untouched, empty string = clear, otherwise
+    // normalized (handles stored without "@"; website coerced to https).
+    let instagramHandle: string | null | undefined = undefined
+    if (typeof body.instagramHandle === 'string') {
+      const trimmed = body.instagramHandle.trim()
+      if (!trimmed) {
+        instagramHandle = null
+      } else {
+        instagramHandle = normalizeSocialHandle(trimmed)
+        if (!instagramHandle) {
+          return jsonFail(400, 'Invalid Instagram handle.')
+        }
+      }
+    }
+
+    let tiktokHandle: string | null | undefined = undefined
+    if (typeof body.tiktokHandle === 'string') {
+      const trimmed = body.tiktokHandle.trim()
+      if (!trimmed) {
+        tiktokHandle = null
+      } else {
+        tiktokHandle = normalizeSocialHandle(trimmed)
+        if (!tiktokHandle) {
+          return jsonFail(400, 'Invalid TikTok handle.')
+        }
+      }
+    }
+
+    let websiteUrl: string | null | undefined = undefined
+    if (typeof body.websiteUrl === 'string') {
+      const trimmed = body.websiteUrl.trim()
+      if (!trimmed) {
+        websiteUrl = null
+      } else {
+        websiteUrl = normalizeWebsiteUrl(trimmed)
+        if (!websiteUrl) {
+          return jsonFail(400, 'Invalid website URL.')
+        }
+      }
+    }
 
     const professionTypeRaw = pickNonEmptyStringOrUndefined(body.professionType)
     let professionType: ProfessionType | undefined = undefined
@@ -183,6 +231,9 @@ export async function PATCH(req: Request) {
       ...(bio !== undefined ? { bio } : {}),
       ...(location !== undefined ? { location } : {}),
       ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+      ...(instagramHandle !== undefined ? { instagramHandle } : {}),
+      ...(tiktokHandle !== undefined ? { tiktokHandle } : {}),
+      ...(websiteUrl !== undefined ? { websiteUrl } : {}),
       ...(professionType !== undefined ? { professionType } : {}),
       ...(nameDisplay !== undefined ? { nameDisplay } : {}),
       ...(handleActuallyChanges
