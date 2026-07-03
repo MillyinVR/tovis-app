@@ -135,7 +135,12 @@ export async function POST(req: NextRequest, props: RouteContext) {
                   currency: prepared.stripe.currency.toLowerCase(),
                   unit_amount: prepared.stripe.totalCents,
                   product_data: {
-                    name: `Deposit + booking fee — ${prepared.stripe.lineItemDescription}`,
+                    // Fee can be 0 (membership waiver / env-configured) — don't
+                    // bill a "booking fee" the client isn't paying.
+                    name:
+                      prepared.stripe.feeCents > 0
+                        ? `Deposit + booking fee — ${prepared.stripe.lineItemDescription}`
+                        : `Deposit — ${prepared.stripe.lineItemDescription}`,
                   },
                 },
               },
@@ -147,8 +152,12 @@ export async function POST(req: NextRequest, props: RouteContext) {
               kind: DISCOVERY_DEPOSIT_CHECKOUT_KIND,
             },
             payment_intent_data: {
-              // The platform keeps the one-time fee; the deposit settles to the pro.
-              application_fee_amount: prepared.stripe.feeCents,
+              // The platform keeps the one-time fee; the deposit settles to the
+              // pro. Omit the fee entirely when it's 0 (waived) — Stripe treats
+              // an explicit 0 differently from absent on some paths.
+              ...(prepared.stripe.feeCents > 0
+                ? { application_fee_amount: prepared.stripe.feeCents }
+                : {}),
               transfer_data: {
                 destination: prepared.stripe.connectedAccountId,
               },

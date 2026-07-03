@@ -8304,6 +8304,10 @@
     },
     "ProFinanceBlock": {
       "properties": {
+        "canExportTaxDocs": {
+          "description": "False when membership enforcement is on and the pro's plan lacks tax_export.",
+          "type": "boolean"
+        },
         "categories": {
           "items": {
             "$ref": "#/definitions/ProFinanceCategoryInfo"
@@ -8386,7 +8390,8 @@
         "mileageRateCents",
         "mileageRateLabel",
         "receiptInbox",
-        "receiptInboxAddress"
+        "receiptInboxAddress",
+        "canExportTaxDocs"
       ],
       "type": "object"
     },

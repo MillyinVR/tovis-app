@@ -16,7 +16,9 @@ import {
   STANDARD_MILEAGE_RATE_CENTS,
   TAX_YEAR,
 } from '@/lib/finance/taxRates'
+import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import { formatCents } from '@/lib/money'
+import { hasEntitlement } from '@/lib/pro/entitlements'
 import {
   resolveReceiptInboxAddress,
   serializeReceiptInboxItem,
@@ -105,6 +107,8 @@ export type ProFinanceBlock = {
   receiptInbox: ProReceiptInboxItem[]
   /** The pro's forwarding address (<handle>@tovis.me) — premium only, else null. */
   receiptInboxAddress: string | null
+  /** False when membership enforcement is on and the pro's plan lacks tax_export. */
+  canExportTaxDocs: boolean
 }
 
 // Superset of the performance Overview view-model (nothing dropped) + the new
@@ -256,7 +260,8 @@ export async function loadProFinancePage(args: {
   const timeZone = overview.activeMonth.timeZone
   const monthKey = overview.activeMonth.key
 
-  const [snapshot, expenseRows, receiptRows, proMeta] = await Promise.all([
+  const [snapshot, expenseRows, receiptRows, proMeta, canExportTaxDocs] =
+    await Promise.all([
     ensureProfessionalMonthlyAnalytics({
       professionalId: args.professionalId,
       monthKey,
@@ -297,6 +302,9 @@ export async function loadProFinancePage(args: {
       where: { id: args.professionalId },
       select: { handle: true, isPremium: true },
     }),
+    membershipEnforcementEnabled()
+      ? hasEntitlement(args.professionalId, 'tax_export')
+      : Promise.resolve(true),
   ])
 
   const incomeTotalCents = computeIncomeTotalCents(snapshot)
@@ -391,6 +399,7 @@ export async function loadProFinancePage(args: {
         handle: proMeta?.handle,
         isPremium: proMeta?.isPremium ?? false,
       }),
+      canExportTaxDocs,
     },
   }
 }

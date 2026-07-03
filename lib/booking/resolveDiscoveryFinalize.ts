@@ -28,6 +28,8 @@ import {
   resolveDiscoveryFeeCents,
 } from '@/lib/booking/discoveryFee'
 import type { DepositSettings } from '@/lib/booking/discoveryDepositPlan'
+import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
+import { planGrants } from '@/lib/pro/entitlements'
 
 // Discovery-view attribution event written when a client opens a pro from the feed
 // / Discovery tab. Mirrors the NFC AttributionEvent pattern (lib/tapIntentConsume).
@@ -111,6 +113,7 @@ export async function resolveDiscoveryFinalize(args: {
     acceptedInviteCount,
     threadCount,
     paymentSettings,
+    subscription,
   ] = await Promise.all([
     resolveValidLookPost({
       professionalId: args.professionalId,
@@ -171,6 +174,10 @@ export async function resolveDiscoveryFinalize(args: {
         stripePayoutsEnabled: true,
       },
     }),
+    prisma.professionalSubscription.findUnique({
+      where: { professionalId: args.professionalId },
+      select: { planKey: true, status: true },
+    }),
   ])
 
   const provenance = resolveDiscoveryProvenance({
@@ -208,12 +215,27 @@ export async function resolveDiscoveryFinalize(args: {
     arrivedViaProNfc,
   })
 
-  return baseDirective(
+  const directive = baseDirective(
     provenance,
     feeEligible,
     depositSettings,
     validLookPost.sourceLookPostId,
   )
+
+  // Membership perk (client-paid-fee model, Option 1): a subscribed pro's new
+  // discovery clients pay NO platform fee — the deposit still applies, so
+  // feeEligible stands and only the fee is zeroed. The 0 is stamped onto the
+  // booking at finalize, so checkout (application fee), refunds, and the
+  // relationship-establishment queries all follow from it.
+  const feeWaived =
+    membershipEnforcementEnabled() &&
+    planGrants({
+      planKey: subscription?.planKey ?? 'free',
+      status: subscription?.status ?? null,
+      entitlement: 'discovery_fee_waiver',
+    })
+
+  return feeWaived ? { ...directive, discoveryFeeCents: 0 } : directive
 }
 
 type ValidLookPostResult = {

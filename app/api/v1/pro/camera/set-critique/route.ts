@@ -13,6 +13,11 @@ import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { isRecord } from '@/lib/guards'
 import {
+  enforceCameraImageQuota,
+  recordCameraImageUse,
+} from '@/lib/pro/cameraQuota'
+import { cameraQuotaExceededResponse } from '@/lib/pro/cameraQuotaResponse'
+import {
   CRITIQUE_MAX_PHOTOS,
   CRITIQUE_MIN_PHOTOS,
   CRITIQUE_PHOTO_MAX_BASE64_CHARS,
@@ -106,9 +111,20 @@ export async function POST(req: Request) {
     const parsed = parsePhotos(body.photos)
     if (!parsed.ok) return jsonFail(400, parsed.error)
 
+    const quota = await enforceCameraImageQuota({
+      professionalId: auth.professionalId,
+      imageCount: parsed.photos.length,
+    })
+    if (!quota.allowed) return cameraQuotaExceededResponse(quota)
+
     const critique = await critiqueSessionSet({
       photos: parsed.photos,
       serviceName: pickString(body.serviceName),
+    })
+
+    await recordCameraImageUse({
+      professionalId: auth.professionalId,
+      imageCount: parsed.photos.length,
     })
 
     return jsonOk({ critique })
