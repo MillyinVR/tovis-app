@@ -15,6 +15,8 @@ function comment(overrides?: Partial<UiComment>): UiComment {
       displayName: 'Tori Morales',
       avatarUrl: null,
       profileHref: null,
+      isLookAuthor: false,
+      isPro: false,
     },
     parentCommentId: null,
     likeCount: 2,

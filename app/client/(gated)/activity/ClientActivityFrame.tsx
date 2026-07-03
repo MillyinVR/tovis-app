@@ -5,6 +5,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   Heart,
+  MessageCircle,
   Repeat2,
   Sparkles,
   Trophy,
@@ -30,6 +31,11 @@ const ICONS: Record<
   { Icon: LucideIcon; tint: string; bg: string }
 > = {
   follow: { Icon: UserPlus, tint: 'text-toneInfo', bg: 'bg-toneInfo/15' },
+  comment: {
+    Icon: MessageCircle,
+    tint: 'text-accentPrimary',
+    bg: 'bg-accentPrimary/15',
+  },
   save: { Icon: Heart, tint: 'text-toneDanger', bg: 'bg-toneDanger/15' },
   remix: { Icon: Repeat2, tint: 'text-accentPrimary', bg: 'bg-accentPrimary/15' },
   featured: { Icon: Sparkles, tint: 'text-toneInfo', bg: 'bg-toneInfo/15' },

@@ -10,6 +10,9 @@ export const lookAccessSelect =
   Prisma.validator<Prisma.LookPostSelect>()({
     id: true,
     professionalId: true,
+    // For client-shared looks the author is the client, not the visited pro —
+    // comment notifications + author badges route on this.
+    clientAuthorId: true,
     status: true,
     visibility: true,
     moderationStatus: true,

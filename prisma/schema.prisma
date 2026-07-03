@@ -580,6 +580,12 @@ enum NotificationEventKey {
   LOOK_FOLLOWER_NEW
   // Client→client follow ("started following you") — powers the activity feed.
   CLIENT_FOLLOW
+  // Someone commented on your look — routed to the look's author (the pro, or
+  // the client author for client-shared looks).
+  LOOK_COMMENTED
+  // Someone replied to your comment on a look — routed to the parent comment's
+  // author (pro or client).
+  LOOK_COMMENT_REPLIED
   REFERRAL_TAP_RECEIVED
   REFERRAL_CONFIRMED
   REFERRAL_CONVERTED

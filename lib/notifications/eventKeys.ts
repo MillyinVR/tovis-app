@@ -29,6 +29,8 @@ export type NotificationTemplateKey =
   | 'payment_refunded'
   | 'look_follower_new'
   | 'client_follow'
+  | 'look_commented'
+  | 'look_comment_replied'
   | 'referral_tap_received'
   | 'referral_confirmed'
   | 'referral_converted'
@@ -147,6 +149,8 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
   NotificationEventKey.CLIENT_FOLLOW,
+  NotificationEventKey.LOOK_COMMENTED,
+  NotificationEventKey.LOOK_COMMENT_REPLIED,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
@@ -525,6 +529,45 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  // Someone commented on your look. Social engagement, so in-app only for now
+  // (the digest handles email later; PUSH arrives with the A4 decision). The
+  // recipient is whichever identity authored the look — the pro, or the client
+  // author for client-shared looks. Non-transactional, no quiet-hours bypass
+  // (mirrors LOOK_FOLLOWER_NEW / CLIENT_FOLLOW).
+  [NotificationEventKey.LOOK_COMMENTED]: {
+    key: NotificationEventKey.LOOK_COMMENTED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'look_commented',
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  // Someone replied to your comment on a look. Same policy as LOOK_COMMENTED;
+  // the recipient is the parent comment's author (pro or client).
+  [NotificationEventKey.LOOK_COMMENT_REPLIED]: {
+    key: NotificationEventKey.LOOK_COMMENT_REPLIED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'look_comment_replied',
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.REFERRAL_TAP_RECEIVED]: {
     key: NotificationEventKey.REFERRAL_TAP_RECEIVED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -631,6 +674,8 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
+  NotificationEventKey.LOOK_COMMENTED,
+  NotificationEventKey.LOOK_COMMENT_REPLIED,
 ]
 
 export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -654,6 +699,8 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
+  NotificationEventKey.LOOK_COMMENTED,
+  NotificationEventKey.LOOK_COMMENT_REPLIED,
 ]
 
 export const ADMIN_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [

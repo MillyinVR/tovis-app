@@ -49,6 +49,32 @@ function followRow(
   }
 }
 
+function commentRow(
+  overrides?: Partial<{
+    id: string
+    eventKey: NotificationEventKey
+    actorClientId: string | null
+    body: string | null
+    href: string | null
+    readAt: Date | null
+  }>,
+) {
+  const actorClientId =
+    overrides && 'actorClientId' in overrides
+      ? overrides.actorClientId
+      : 'client_commenter'
+
+  return {
+    id: overrides?.id ?? 'notif_c1',
+    eventKey: overrides?.eventKey ?? NotificationEventKey.LOOK_COMMENTED,
+    data: actorClientId === null ? {} : { actorClientId },
+    body: overrides && 'body' in overrides ? overrides.body : 'Love this',
+    href: overrides && 'href' in overrides ? overrides.href : '/looks/look_1',
+    readAt: overrides?.readAt ?? null,
+    createdAt: new Date('2026-06-19T12:00:00.000Z'),
+  }
+}
+
 describe('countUnreadClientActivity', () => {
   it('counts unread rows scoped to the engagement allowlist', async () => {
     const db = makeDb()
@@ -175,6 +201,61 @@ describe('listClientActivity', () => {
       who: 'Someone',
       href: null,
       followBack: null,
+    })
+  })
+
+  it('maps a comment from a public commenter into a named item with the snippet', async () => {
+    db.clientNotification.findMany.mockResolvedValue([commentRow()])
+    db.clientProfile.findMany.mockResolvedValue([
+      { id: 'client_commenter', handle: 'amara', isPublicProfile: true },
+    ])
+
+    const feed = await listClientActivity(asDb(db), { clientId: 'client_1' })
+
+    expect(feed.items[0]).toEqual({
+      id: 'notif_c1',
+      iconKind: 'comment',
+      who: '@amara',
+      action: 'commented on your look',
+      highlight: '“Love this”',
+      timestamp: '2026-06-19T12:00:00.000Z',
+      unread: true,
+      href: '/looks/look_1',
+      followBack: null,
+    })
+  })
+
+  it('maps a reply row with the reply wording and keeps private actors generic', async () => {
+    db.clientNotification.findMany.mockResolvedValue([
+      commentRow({
+        eventKey: NotificationEventKey.LOOK_COMMENT_REPLIED,
+      }),
+    ])
+    db.clientProfile.findMany.mockResolvedValue([
+      { id: 'client_commenter', handle: 'amara', isPublicProfile: false },
+    ])
+
+    const feed = await listClientActivity(asDb(db), { clientId: 'client_1' })
+
+    expect(feed.items[0]).toMatchObject({
+      iconKind: 'comment',
+      who: 'Someone',
+      action: 'replied to your comment',
+    })
+  })
+
+  it('renders a comment row without an actor id as a generic item', async () => {
+    db.clientNotification.findMany.mockResolvedValue([
+      commentRow({ actorClientId: null, body: null, href: null }),
+    ])
+
+    const feed = await listClientActivity(asDb(db), { clientId: 'client_1' })
+
+    expect(db.clientProfile.findMany).not.toHaveBeenCalled()
+    expect(feed.items[0]).toMatchObject({
+      who: 'Someone',
+      highlight: null,
+      href: null,
     })
   })
 

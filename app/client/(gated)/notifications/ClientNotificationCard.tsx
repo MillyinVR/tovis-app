@@ -48,6 +48,9 @@ function eventKeyLabel(eventKey: NotificationEventKey): string {
     case NotificationEventKey.LOOK_FOLLOWER_NEW:
     case NotificationEventKey.CLIENT_FOLLOW:
       return 'Follower'
+    case NotificationEventKey.LOOK_COMMENTED:
+    case NotificationEventKey.LOOK_COMMENT_REPLIED:
+      return 'Comment'
     case NotificationEventKey.REFERRAL_TAP_RECEIVED:
     case NotificationEventKey.REFERRAL_CONFIRMED:
     case NotificationEventKey.REFERRAL_CONVERTED:

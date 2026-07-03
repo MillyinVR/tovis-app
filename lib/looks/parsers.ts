@@ -245,6 +245,8 @@ export function parseLooksComment(raw: unknown): LooksCommentDto | null {
       displayName,
       avatarUrl: pickString(userRaw.avatarUrl),
       profileHref: pickString(userRaw.profileHref),
+      isLookAuthor: pickBoolean(userRaw.isLookAuthor) ?? false,
+      isPro: pickBoolean(userRaw.isPro) ?? false,
     },
     parentCommentId: pickString(raw.parentCommentId),
     likeCount: pickNumber(raw.likeCount) ?? 0,

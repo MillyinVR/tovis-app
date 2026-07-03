@@ -32,6 +32,17 @@ function eventKeyLabel(eventKey: NotificationEventKey): string {
     return 'Review'
   }
 
+  if (
+    eventKey === NotificationEventKey.LOOK_COMMENTED ||
+    eventKey === NotificationEventKey.LOOK_COMMENT_REPLIED
+  ) {
+    return 'Comment'
+  }
+
+  if (eventKey === NotificationEventKey.LOOK_FOLLOWER_NEW) {
+    return 'Follower'
+  }
+
   return 'Booking update'
 }
 

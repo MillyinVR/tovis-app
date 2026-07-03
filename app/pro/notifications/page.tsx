@@ -56,7 +56,11 @@ const CATEGORY_EVENT_KEYS: Record<
     NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
   ],
   REVIEWS: [NotificationEventKey.REVIEW_RECEIVED],
-  SOCIAL: [NotificationEventKey.LOOK_FOLLOWER_NEW],
+  SOCIAL: [
+    NotificationEventKey.LOOK_FOLLOWER_NEW,
+    NotificationEventKey.LOOK_COMMENTED,
+    NotificationEventKey.LOOK_COMMENT_REPLIED,
+  ],
 }
 
 function spString(value: unknown): string {

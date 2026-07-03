@@ -113,6 +113,13 @@ export type LooksCommentViewerContext = {
   // Lets a comment author's name/avatar upgrade to the pro chart link when the
   // viewer is a pro who can open that client. Omitted → public links only.
   clientLinkViewer?: ClientLinkViewer
+  // The look's author identity, so the mapper can flag the author's own
+  // comments ("Creator" badge). Omitted → no comment gets the flag.
+  lookAuthor?: {
+    professionalId: string
+    /** Set for client-shared looks — the client, not the pro, is the author. */
+    clientAuthorId: string | null
+  }
 }
 
 type StoredMediaShape = {
@@ -214,6 +221,16 @@ function pickMediaServiceTagIds(
   return [...ids]
 }
 
+function isLookAuthorUser(
+  user: MediaCommentUserShape,
+  lookAuthor: LooksCommentViewerContext['lookAuthor'],
+): boolean {
+  if (!lookAuthor) return false
+  return lookAuthor.clientAuthorId
+    ? user.clientProfile?.id === lookAuthor.clientAuthorId
+    : user.professionalProfile?.id === lookAuthor.professionalId
+}
+
 function normalizeCommentUser(
   user: MediaCommentUserShape,
   clientLinkViewer: ClientLinkViewer,
@@ -222,6 +239,7 @@ function normalizeCommentUser(
   displayName: string
   avatarUrl: string | null
   profileHref: string | null
+  isPro: boolean
 } {
   const clientFirst = user.clientProfile?.firstName?.trim() ?? ''
   const clientLast = user.clientProfile?.lastName?.trim() ?? ''
@@ -243,6 +261,7 @@ function normalizeCommentUser(
     profileHref: resolveCommentUserProfileHref(user, clientLinkViewer, {
       clientNameShown: Boolean(clientFullName),
     }),
+    isPro: Boolean(user.professionalProfile),
   }
 }
 
@@ -438,10 +457,13 @@ export function mapLooksCommentToDto(
     id: comment.id,
     body: comment.body,
     createdAt: comment.createdAt.toISOString(),
-    user: normalizeCommentUser(
-      comment.user,
-      viewer.clientLinkViewer ?? EMPTY_CLIENT_LINK_VIEWER,
-    ),
+    user: {
+      ...normalizeCommentUser(
+        comment.user,
+        viewer.clientLinkViewer ?? EMPTY_CLIENT_LINK_VIEWER,
+      ),
+      isLookAuthor: isLookAuthorUser(comment.user, viewer.lookAuthor),
+    },
     parentCommentId: comment.parentCommentId,
     likeCount: comment.likeCount,
     replyCount: comment.replyCount,

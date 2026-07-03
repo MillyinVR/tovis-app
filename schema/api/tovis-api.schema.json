@@ -187,6 +187,8 @@
         "PAYMENT_REFUNDED",
         "LOOK_FOLLOWER_NEW",
         "CLIENT_FOLLOW",
+        "LOOK_COMMENTED",
+        "LOOK_COMMENT_REPLIED",
         "REFERRAL_TAP_RECEIVED",
         "REFERRAL_CONFIRMED",
         "REFERRAL_CONVERTED",
@@ -5905,6 +5907,12 @@
         "id": {
           "type": "string"
         },
+        "isLookAuthor": {
+          "type": "boolean"
+        },
+        "isPro": {
+          "type": "boolean"
+        },
         "profileHref": {
           "type": [
             "string",
@@ -5916,7 +5924,9 @@
         "id",
         "displayName",
         "avatarUrl",
-        "profileHref"
+        "profileHref",
+        "isLookAuthor",
+        "isPro"
       ],
       "type": "object"
     },
