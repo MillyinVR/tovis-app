@@ -2,6 +2,13 @@ import { NotificationEventKey, Prisma } from '@prisma/client'
 
 import { createClientNotification } from './clientNotifications'
 import { createProNotification } from './proNotifications'
+import {
+  isLookAuthorIdentity,
+  lookAuthorRecipient,
+  toLookNotificationRecipient,
+  type LookNotificationRecipient,
+  type LookPartyIdentity,
+} from './lookParty'
 
 /**
  * Social notifications for Looks comments (social-first plan A1):
@@ -17,9 +24,7 @@ import { createProNotification } from './proNotifications'
 const MAX_SNIPPET = 140
 
 /** Whichever identity should receive the notification (pro or client inbox). */
-export type LookCommentNotificationRecipient =
-  | { kind: 'pro'; professionalId: string }
-  | { kind: 'client'; clientId: string }
+export type LookCommentNotificationRecipient = LookNotificationRecipient
 
 export type LookCommentNotificationData = {
   lookPostId: string
@@ -137,11 +142,7 @@ export async function createLookCommentRepliedNotification(
 }
 
 /** A user identity as both inbox routes see it (either profile may be absent). */
-export type LookCommentPartyIdentity = {
-  userId: string
-  clientProfileId: string | null
-  professionalProfileId: string | null
-}
+export type LookCommentPartyIdentity = LookPartyIdentity
 
 export type NotifyLookCommentCreatedArgs = {
   lookPostId: string
@@ -158,28 +159,6 @@ export type NotifyLookCommentCreatedArgs = {
   parent: LookCommentPartyIdentity | null
   actor: LookCommentPartyIdentity
   tx?: Prisma.TransactionClient
-}
-
-function isLookAuthorIdentity(
-  identity: LookCommentPartyIdentity,
-  look: NotifyLookCommentCreatedArgs['look'],
-): boolean {
-  return look.clientAuthorId
-    ? identity.clientProfileId === look.clientAuthorId
-    : identity.professionalProfileId === look.professionalId
-}
-
-/** Routes a party to whichever inbox it can receive (pro-first). */
-function toRecipient(
-  identity: LookCommentPartyIdentity,
-): LookCommentNotificationRecipient | null {
-  if (identity.professionalProfileId) {
-    return { kind: 'pro', professionalId: identity.professionalProfileId }
-  }
-  if (identity.clientProfileId) {
-    return { kind: 'client', clientId: identity.clientProfileId }
-  }
-  return null
 }
 
 /**
@@ -206,7 +185,7 @@ export async function notifyLookCommentCreated(
   let parentNotifiedIsLookAuthor = false
 
   if (args.parent && args.parent.userId !== args.actor.userId) {
-    const parentRecipient = toRecipient(args.parent)
+    const parentRecipient = toLookNotificationRecipient(args.parent)
     if (parentRecipient) {
       await createLookCommentRepliedNotification({
         ...shared,
@@ -221,9 +200,7 @@ export async function notifyLookCommentCreated(
   if (!actorIsLookAuthor && !parentNotifiedIsLookAuthor) {
     await createLookCommentedNotification({
       ...shared,
-      recipient: args.look.clientAuthorId
-        ? { kind: 'client', clientId: args.look.clientAuthorId }
-        : { kind: 'pro', professionalId: args.look.professionalId },
+      recipient: lookAuthorRecipient(args.look),
     })
   }
 }

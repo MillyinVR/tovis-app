@@ -31,6 +31,9 @@ export type NotificationTemplateKey =
   | 'client_follow'
   | 'look_commented'
   | 'look_comment_replied'
+  | 'look_liked'
+  | 'look_saved'
+  | 'look_new_from_followed_pro'
   | 'referral_tap_received'
   | 'referral_confirmed'
   | 'referral_converted'
@@ -151,6 +154,9 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.CLIENT_FOLLOW,
   NotificationEventKey.LOOK_COMMENTED,
   NotificationEventKey.LOOK_COMMENT_REPLIED,
+  NotificationEventKey.LOOK_LIKED,
+  NotificationEventKey.LOOK_SAVED,
+  NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
@@ -568,6 +574,59 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  // Batched "your look got liked" — one windowed inbox row per look per day
+  // (the emit helper's dedupeKey carries the window; a refresh updates the
+  // count and re-marks unread without re-dispatching). In-app only, like the
+  // sibling social events. Recipient is the look's author (pro or client).
+  [NotificationEventKey.LOOK_LIKED]: {
+    key: NotificationEventKey.LOOK_LIKED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'look_liked',
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  // Batched "your look got saved to a board" — same windowed-dedupe policy as
+  // LOOK_LIKED.
+  [NotificationEventKey.LOOK_SAVED]: {
+    key: NotificationEventKey.LOOK_SAVED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'look_saved',
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  // A pro you follow published a new look — the FAN_OUT_NEW_LOOK_NOTIFICATIONS
+  // job writes one per follower. In-app only (the future digest handles email;
+  // PUSH arrives with the A4 decision).
+  [NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO]: {
+    key: NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'look_new_from_followed_pro',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.REFERRAL_TAP_RECEIVED]: {
     key: NotificationEventKey.REFERRAL_TAP_RECEIVED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -676,6 +735,8 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_FOLLOWER_NEW,
   NotificationEventKey.LOOK_COMMENTED,
   NotificationEventKey.LOOK_COMMENT_REPLIED,
+  NotificationEventKey.LOOK_LIKED,
+  NotificationEventKey.LOOK_SAVED,
 ]
 
 export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -701,6 +762,9 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REFERRAL_CONVERTED,
   NotificationEventKey.LOOK_COMMENTED,
   NotificationEventKey.LOOK_COMMENT_REPLIED,
+  NotificationEventKey.LOOK_LIKED,
+  NotificationEventKey.LOOK_SAVED,
+  NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
 ]
 
 export const ADMIN_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [

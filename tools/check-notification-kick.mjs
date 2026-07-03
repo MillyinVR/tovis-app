@@ -37,6 +37,9 @@ const EMIT_SIGNALS = [
   'createClientClaimInviteDelivery',
   'createLookFollowerNewProNotification',
   'createClientFollowNotification',
+  'notifyLookCommentCreated',
+  'notifyLookLiked',
+  'notifyLookSaved',
   'emitAdminVerificationReviewNeeded',
   'emitAdminViralRequestPending',
   // Write-boundary functions that enqueue notifications as part of the mutation.

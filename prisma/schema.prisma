@@ -586,6 +586,15 @@ enum NotificationEventKey {
   // Someone replied to your comment on a look — routed to the parent comment's
   // author (pro or client).
   LOOK_COMMENT_REPLIED
+  // Batched "your look got liked" — one refreshed inbox row per look per day
+  // (windowed dedupeKey), count carried in data. Routed to the look's author.
+  LOOK_LIKED
+  // Batched "your look got saved to a board" — same windowed-dedupe shape as
+  // LOOK_LIKED. Routed to the look's author.
+  LOOK_SAVED
+  // A pro you follow published a new look — fanned out to ProFollow followers
+  // via the FAN_OUT_NEW_LOOK_NOTIFICATIONS job.
+  LOOK_NEW_FROM_FOLLOWED_PRO
   REFERRAL_TAP_RECEIVED
   REFERRAL_CONFIRMED
   REFERRAL_CONVERTED
@@ -699,6 +708,9 @@ enum LooksSocialJobType {
   RECOMPUTE_LOOK_SPOTLIGHT_SCORE
   RECOMPUTE_LOOK_RANK_SCORE
   FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS
+  // On publish: LOOK_NEW_FROM_FOLLOWED_PRO client notifications to each
+  // ProFollow follower of the look's pro.
+  FAN_OUT_NEW_LOOK_NOTIFICATIONS
   INDEX_LOOK_POST_DOCUMENT
   MODERATION_SCAN_LOOK_POST
   MODERATION_SCAN_COMMENT

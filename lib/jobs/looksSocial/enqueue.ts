@@ -7,6 +7,7 @@ import {
 } from '@prisma/client'
 
 import type {
+  FanOutNewLookNotificationsJobPayload,
   FanOutViralRequestApprovalNotificationsJobPayload,
   IndexLookPostDocumentJobPayload,
   ModerationScanCommentJobPayload,
@@ -155,6 +156,19 @@ export function enqueueFanOutViralRequestApprovalNotifications(
     type: LooksSocialJobType.FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS,
     dedupeKey: `viral-request:${requestId}:fan-out-approval-notifications`,
     payload: { requestId },
+  })
+}
+
+export function enqueueFanOutNewLookNotifications(
+  db: LooksSocialJobDb,
+  payload: FanOutNewLookNotificationsJobPayload,
+) {
+  const lookPostId = normalizeRequiredId('lookPostId', payload.lookPostId)
+
+  return enqueueLooksSocialJob(db, {
+    type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+    dedupeKey: `look:${lookPostId}:fan-out-new-look-notifications`,
+    payload: { lookPostId },
   })
 }
 

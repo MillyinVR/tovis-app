@@ -9,6 +9,7 @@ import {
   makeEmptyLooksSocialJobPerTypeCounts,
   type LooksSocialJobPerTypeCounts,
 } from '@/lib/jobs/looksSocial/contracts'
+import { processFanOutNewLookNotifications } from '@/lib/jobs/looksSocial/fanOutNewLook'
 import { processIndexLookPostDocument } from '@/lib/jobs/looksSocial/indexLookPostDocument'
 import {
   recomputeLookPostCounters,
@@ -155,6 +156,12 @@ async function runLooksSocialJob(
     case LooksSocialJobType.FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS:
       await runViralRequestApprovalOrchestration(prisma, {
         requestId: readRequiredString(job.payload, 'requestId'),
+      })
+      return
+
+    case LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS:
+      await processFanOutNewLookNotifications(prisma, {
+        lookPostId: readRequiredString(job.payload, 'lookPostId'),
       })
       return
 

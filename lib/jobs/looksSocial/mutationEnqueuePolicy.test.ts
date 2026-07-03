@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
   const enqueueRecomputeLookRankScore = vi.fn()
   const enqueueIndexLookPostDocument = vi.fn()
   const enqueueModerationScanLookPost = vi.fn()
+  const enqueueFanOutNewLookNotifications = vi.fn()
 
   return {
     enqueueRecomputeLookCounts,
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => {
     enqueueRecomputeLookRankScore,
     enqueueIndexLookPostDocument,
     enqueueModerationScanLookPost,
+    enqueueFanOutNewLookNotifications,
   }
 })
 
@@ -32,6 +34,7 @@ vi.mock('./enqueue', () => ({
   enqueueRecomputeLookRankScore: mocks.enqueueRecomputeLookRankScore,
   enqueueIndexLookPostDocument: mocks.enqueueIndexLookPostDocument,
   enqueueModerationScanLookPost: mocks.enqueueModerationScanLookPost,
+  enqueueFanOutNewLookNotifications: mocks.enqueueFanOutNewLookNotifications,
 }))
 
 import {
@@ -73,6 +76,9 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
     mocks.enqueueModerationScanLookPost.mockResolvedValue(
       makeQueuedJob('job_moderation_1', 'looks:moderation:look_1'),
     )
+    mocks.enqueueFanOutNewLookNotifications.mockResolvedValue(
+      makeQueuedJob('job_fan_out_new_look_1', 'looks:fan-out-new-look:look_1'),
+    )
   })
 
   afterAll(async () => {
@@ -109,6 +115,10 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
       {
         type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
         processorSupport: 'DEFERRED',
+      },
+      {
+        type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+        processorSupport: 'SUPPORTED',
       },
     ])
   })
@@ -155,6 +165,12 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
 
     expect(mocks.enqueueModerationScanLookPost).not.toHaveBeenCalled()
 
+    expect(mocks.enqueueFanOutNewLookNotifications).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueFanOutNewLookNotifications.mock.calls[0]?.[0]).toBe(db)
+    expect(mocks.enqueueFanOutNewLookNotifications.mock.calls[0]?.[1]).toEqual({
+      lookPostId: 'look_1',
+    })
+
     expect(result).toEqual({
       lookPostId: 'look_1',
       mutation: 'PUBLISH',
@@ -178,6 +194,10 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
         {
           type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
           processorSupport: 'DEFERRED',
+        },
+        {
+          type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+          processorSupport: 'SUPPORTED',
         },
       ],
       enqueuedJobs: [
@@ -208,6 +228,13 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
           processorSupport: 'SUPPORTED',
           jobId: 'job_index_1',
           dedupeKey: 'looks:index:look_1',
+        },
+        {
+          type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_fan_out_new_look_1',
+          dedupeKey: 'looks:fan-out-new-look:look_1',
         },
       ],
       gatedJobs: [

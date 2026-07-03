@@ -6,6 +6,7 @@ import {
 } from '@prisma/client'
 
 import {
+  enqueueFanOutNewLookNotifications,
   enqueueFanOutViralRequestApprovalNotifications,
   enqueueIndexLookPostDocument,
   enqueueLooksSocialJob,
@@ -377,6 +378,43 @@ describe('lib/jobs/looksSocial/enqueue', () => {
             'viral-request:request_7:fan-out-approval-notifications',
           payload: {
             requestId: 'request_7',
+          },
+        }),
+        select: expect.any(Object),
+      })
+    })
+
+    it('enqueueFanOutNewLookNotifications builds the canonical dedupe key and payload', async () => {
+      const db = makeDb()
+      const prismaDb = asLooksSocialJobDb(db)
+
+      db.looksSocialJob.upsert.mockResolvedValue(
+        makeJobRow({
+          id: 'job_new_look_1',
+          type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+          dedupeKey: 'look:look_9:fan-out-new-look-notifications',
+        }),
+      )
+
+      await enqueueFanOutNewLookNotifications(prismaDb, {
+        lookPostId: ' look_9 ',
+      })
+
+      expect(db.looksSocialJob.upsert).toHaveBeenCalledWith({
+        where: {
+          dedupeKey: 'look:look_9:fan-out-new-look-notifications',
+        },
+        update: expect.objectContaining({
+          type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+          payload: {
+            lookPostId: 'look_9',
+          },
+        }),
+        create: expect.objectContaining({
+          type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+          dedupeKey: 'look:look_9:fan-out-new-look-notifications',
+          payload: {
+            lookPostId: 'look_9',
           },
         }),
         select: expect.any(Object),

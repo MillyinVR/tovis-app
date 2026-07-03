@@ -15,6 +15,8 @@ import { recomputeLookPostLikeCount } from '@/lib/looks/counters'
 import { loadLookAccess } from '@/lib/looks/access'
 import type { LooksLikeResponseDto } from '@/lib/looks/types'
 import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
+import { notifyLookLiked } from '@/lib/notifications/lookEngagement'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
 
@@ -106,6 +108,26 @@ export async function POST(_req: Request, ctx: RouteContext) {
     }
       },
     )
+
+    // Best-effort batched notification — the like is already committed, so a
+    // notify failure must never fail the request (mirrors the comments route).
+    // Self-likes are skipped inside the helper.
+    await notifyLookLiked({
+      lookPostId,
+      look: {
+        professionalId: access.look.professionalId,
+        clientAuthorId: access.look.clientAuthorId,
+      },
+      actor: {
+        userId: auth.user.id,
+        clientProfileId: auth.user.clientProfile?.id ?? null,
+        professionalProfileId: auth.user.professionalProfile?.id ?? null,
+      },
+      count: result.likeCount,
+    }).catch((error) => {
+      console.error('POST /api/v1/looks/[id]/like notify error', error)
+    })
+    kickNotificationDrain()
 
     return jsonOk(result, 200)
   } catch (e) {

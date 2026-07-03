@@ -6,6 +6,7 @@ import {
 } from '@prisma/client'
 
 import {
+  enqueueFanOutNewLookNotifications,
   enqueueIndexLookPostDocument,
   enqueueModerationScanLookPost,
   enqueueRecomputeLookCounts,
@@ -110,6 +111,7 @@ const SUPPORTED_LOOK_POST_JOB_TYPES = new Set<LooksSocialJobType>([
   LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE,
   LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE,
   LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+  LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
 ])
 
 const DEFERRED_LOOK_POST_JOB_TYPES = new Set<LooksSocialJobType>([
@@ -196,6 +198,13 @@ function buildPlannedLookPostMutationJobTypes(
     addPlannedJob(jobTypes, LooksSocialJobType.MODERATION_SCAN_LOOK_POST)
   }
 
+  // Publishing is the follower-notification moment. The processor re-checks
+  // feed eligibility (and skips client-authored looks) at run time, and both
+  // the job and per-follower notifications dedupe, so a re-publish is safe.
+  if (args.mutation === 'PUBLISH') {
+    addPlannedJob(jobTypes, LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS)
+  }
+
   return [...jobTypes]
 }
 
@@ -255,6 +264,17 @@ async function enqueuePlannedLookPostJob(
 
     case LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT: {
       const job = await enqueueIndexLookPostDocument(db, { lookPostId })
+      return {
+        type,
+        disposition: 'ENQUEUED',
+        processorSupport: 'SUPPORTED',
+        jobId: job.id,
+        dedupeKey: job.dedupeKey,
+      }
+    }
+
+    case LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS: {
+      const job = await enqueueFanOutNewLookNotifications(db, { lookPostId })
       return {
         type,
         disposition: 'ENQUEUED',

@@ -21,12 +21,17 @@ export const ACTIVITY_FEED_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.CLIENT_FOLLOW,
   NotificationEventKey.LOOK_COMMENTED,
   NotificationEventKey.LOOK_COMMENT_REPLIED,
+  NotificationEventKey.LOOK_LIKED,
+  NotificationEventKey.LOOK_SAVED,
+  NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
 ]
 
 export type ActivityIconKind =
   | 'follow'
   | 'comment'
+  | 'like'
   | 'save'
+  | 'new-look'
   | 'remix'
   | 'featured'
   | 'milestone'
@@ -112,9 +117,19 @@ function readFollowerClientId(data: Prisma.JsonValue | null): string | null {
   return readDataString(data, 'followerClientId')
 }
 
-/** Reads the commenter's client id out of a comment notification's JSON. */
+/** Reads the acting client's id out of an engagement notification's JSON. */
 function readActorClientId(data: Prisma.JsonValue | null): string | null {
   return readDataString(data, 'actorClientId')
+}
+
+/** Safely reads the batched engagement count out of a notification's JSON. */
+function readDataCount(data: Prisma.JsonValue | null): number {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return 1
+  }
+  const value = data.count
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 1
+  return Math.max(1, Math.trunc(value))
 }
 
 function buildFollowItem(
@@ -183,6 +198,65 @@ function buildCommentItem(
   }
 }
 
+function buildEngagementItem(
+  row: ActivityNotificationRow,
+  ctx: {
+    followers: Map<string, ActivityFollowerRow>
+  },
+): ClientActivityItem {
+  const isLike = row.eventKey === NotificationEventKey.LOOK_LIKED
+  const count = readDataCount(row.data)
+
+  // A single actor may be nameable (same PII rule as follows/comments); a
+  // batched row is inherently anonymous ("4 people" / "4 saves").
+  const actorClientId = readActorClientId(row.data)
+  const actor = actorClientId ? (ctx.followers.get(actorClientId) ?? null) : null
+  const isPublic = Boolean(actor?.isPublicProfile && actor?.handle)
+  const handle = count === 1 && isPublic ? (actor?.handle ?? null) : null
+
+  const single = handle ? `@${handle}` : 'Someone'
+  // Likes count distinct people; saves count board items, so the plural copy
+  // counts saves, not people.
+  const who = count > 1 ? (isLike ? `${count} people` : `${count} saves`) : single
+  const action =
+    count > 1
+      ? isLike
+        ? 'liked your look'
+        : 'on your look'
+      : isLike
+        ? 'liked your look'
+        : 'saved your look'
+
+  return {
+    id: row.id,
+    iconKind: isLike ? 'like' : 'save',
+    who,
+    action,
+    highlight: null,
+    timestamp: row.createdAt.toISOString(),
+    unread: row.readAt === null,
+    href: row.href ?? null,
+    followBack: null,
+  }
+}
+
+function buildNewLookItem(row: ActivityNotificationRow): ClientActivityItem {
+  // The caption snippet rides in the body (public content on the look).
+  const body = row.body?.trim() ?? ''
+
+  return {
+    id: row.id,
+    iconKind: 'new-look',
+    who: 'A pro you follow',
+    action: 'posted a new look',
+    highlight: body ? `“${body}”` : null,
+    timestamp: row.createdAt.toISOString(),
+    unread: row.readAt === null,
+    href: row.href ?? null,
+    followBack: null,
+  }
+}
+
 function buildActivityItem(
   row: ActivityNotificationRow,
   ctx: {
@@ -196,6 +270,11 @@ function buildActivityItem(
     case NotificationEventKey.LOOK_COMMENTED:
     case NotificationEventKey.LOOK_COMMENT_REPLIED:
       return buildCommentItem(row, ctx)
+    case NotificationEventKey.LOOK_LIKED:
+    case NotificationEventKey.LOOK_SAVED:
+      return buildEngagementItem(row, ctx)
+    case NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO:
+      return buildNewLookItem(row)
     default:
       // Not an event the feed knows how to present yet — skip it rather than
       // render a half-blank row. (The allowlist already filters the query.)
