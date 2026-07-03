@@ -21,6 +21,8 @@ export type ProSubscriptionRow = {
   currentPeriodEnd: Date | null
   cancelAtPeriodEnd: boolean
   trialEndsAt: Date | null
+  compPlanKey: string | null
+  compUntil: Date | null
 }
 
 const SUBSCRIPTION_SELECT = {
@@ -33,6 +35,8 @@ const SUBSCRIPTION_SELECT = {
   currentPeriodEnd: true,
   cancelAtPeriodEnd: true,
   trialEndsAt: true,
+  compPlanKey: true,
+  compUntil: true,
 } satisfies Prisma.ProfessionalSubscriptionSelect
 
 /** Read a pro's subscription row (null when they're on the implicit free plan). */

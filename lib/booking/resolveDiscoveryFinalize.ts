@@ -29,7 +29,7 @@ import {
 } from '@/lib/booking/discoveryFee'
 import type { DepositSettings } from '@/lib/booking/discoveryDepositPlan'
 import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
-import { planGrants } from '@/lib/pro/entitlements'
+import { resolveEffectiveEntitlements } from '@/lib/pro/entitlements'
 
 // Discovery-view attribution event written when a client opens a pro from the feed
 // / Discovery tab. Mirrors the NFC AttributionEvent pattern (lib/tapIntentConsume).
@@ -176,7 +176,12 @@ export async function resolveDiscoveryFinalize(args: {
     }),
     prisma.professionalSubscription.findUnique({
       where: { professionalId: args.professionalId },
-      select: { planKey: true, status: true },
+      select: {
+        planKey: true,
+        status: true,
+        compPlanKey: true,
+        compUntil: true,
+      },
     }),
   ])
 
@@ -229,11 +234,15 @@ export async function resolveDiscoveryFinalize(args: {
   // relationship-establishment queries all follow from it.
   const feeWaived =
     membershipEnforcementEnabled() &&
-    planGrants({
-      planKey: subscription?.planKey ?? 'free',
-      status: subscription?.status ?? null,
-      entitlement: 'discovery_fee_waiver',
-    })
+    resolveEffectiveEntitlements(
+      {
+        planKey: subscription?.planKey ?? 'free',
+        status: subscription?.status ?? null,
+        compPlanKey: subscription?.compPlanKey ?? null,
+        compUntil: subscription?.compUntil ?? null,
+      },
+      now,
+    ).includes('discovery_fee_waiver')
 
   return feeWaived ? { ...directive, discoveryFeeCents: 0 } : directive
 }

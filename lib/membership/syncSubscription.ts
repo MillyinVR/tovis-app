@@ -6,8 +6,9 @@
 
 import { Prisma, SubscriptionStatus } from '@prisma/client'
 
+import { applyCustomHandleBackfill } from '@/lib/membership/customHandleBackfill'
 import { configuredPriceIds } from '@/lib/membership/plans'
-import { resolveEntitlements } from '@/lib/pro/entitlements'
+import { resolveEffectiveEntitlements } from '@/lib/pro/entitlements'
 
 export type StripeSubscriptionLike = {
   id: string
@@ -89,7 +90,13 @@ export async function applyStripeSubscriptionInTransaction(
         ...(professionalId ? [{ professionalId }] : []),
       ],
     },
-    select: { id: true, professionalId: true, planKey: true },
+    select: {
+      id: true,
+      professionalId: true,
+      planKey: true,
+      compPlanKey: true,
+      compUntil: true,
+    },
   })
 
   if (!existing) return { handled: false }
@@ -115,20 +122,19 @@ export async function applyStripeSubscriptionInTransaction(
     },
   })
 
-  // Backfill the legacy ProfessionalProfile.isPremium (custom-handle gate) from the
-  // entitlement so every existing reader reflects membership without per-site changes.
-  // The column is the transition surface; entitlements are the source of truth.
-  const grantsCustomHandle = resolveEntitlements({ planKey, status }).includes(
-    'custom_handle',
-  )
-  await tx.professionalProfile.update({
-    where: { id: existing.professionalId },
-    data: {
-      isPremium: grantsCustomHandle,
-      // When the handle goes live, drop the reservation timer; when membership lapses,
-      // restart it so a now-unpaid handle gets the full grace window before release.
-      handleReservedAt: grantsCustomHandle ? null : new Date(),
-    },
+  // Backfill isPremium from the EFFECTIVE entitlements — paid state just
+  // synced plus any admin comp on the row (webhooks never write comp fields,
+  // and a paid lapse must not strip a comped pro's custom handle).
+  const grantsCustomHandle = resolveEffectiveEntitlements({
+    planKey,
+    status,
+    compPlanKey: existing.compPlanKey,
+    compUntil: existing.compUntil,
+  }).includes('custom_handle')
+
+  await applyCustomHandleBackfill(tx, {
+    professionalId: existing.professionalId,
+    grantsCustomHandle,
   })
 
   return { handled: true, deleted: Boolean(opts?.deleted) }

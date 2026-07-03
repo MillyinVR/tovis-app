@@ -5,8 +5,9 @@
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import {
-  effectivePlanKey,
-  resolveEntitlements,
+  activeCompPlanKey,
+  resolveEffectiveEntitlements,
+  resolveEffectivePlanKey,
 } from '@/lib/pro/entitlements'
 import { getProSubscription } from '@/lib/membership/subscription'
 import { safeError } from '@/lib/security/logging'
@@ -19,17 +20,25 @@ export async function GET() {
     if (!auth.ok) return auth.res
 
     const sub = await getProSubscription(auth.professionalId)
-    const planKey = sub?.planKey ?? 'free'
-    const status = sub?.status ?? null
+    const now = new Date()
+    const state = {
+      planKey: sub?.planKey ?? 'free',
+      status: sub?.status ?? null,
+      compPlanKey: sub?.compPlanKey ?? null,
+      compUntil: sub?.compUntil ?? null,
+    }
+    const compPlan = activeCompPlanKey(state, now)
 
     return jsonOk(
       {
         ok: true,
         membership: {
-          planKey: effectivePlanKey({ planKey, status }),
-          rawPlanKey: planKey,
-          status,
-          entitlements: resolveEntitlements({ planKey, status }),
+          planKey: resolveEffectivePlanKey(state, now),
+          rawPlanKey: state.planKey,
+          status: state.status,
+          compPlanKey: compPlan,
+          compUntil: compPlan ? (sub?.compUntil?.toISOString() ?? null) : null,
+          entitlements: resolveEffectiveEntitlements(state, now),
           currentPeriodEnd: sub?.currentPeriodEnd?.toISOString() ?? null,
           cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
           trialEndsAt: sub?.trialEndsAt?.toISOString() ?? null,

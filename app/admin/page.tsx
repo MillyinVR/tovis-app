@@ -147,6 +147,13 @@ export default async function AdminHomePage() {
           {perms.canManagePermissions ? (
             <>
               <Card
+                title="Memberships"
+                desc="Look up a pro's plan and grant or revoke complimentary months."
+                href="/admin/memberships"
+                cta="Manage memberships"
+                tone="highlight"
+              />
+              <Card
                 title="Permissions"
                 desc="Scope what admins can do."
                 href="/admin/permissions"
