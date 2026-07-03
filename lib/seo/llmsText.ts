@@ -46,6 +46,7 @@ export function buildLlmsText(args: {
 ## Key pages
 
 - Home: ${url('/')}
+- Why ${brandDisplayName} (the fee model, in full): ${url('/why')}
 - Looks feed: ${url('/looks')}
 - Search: ${url('/search')}
 - Sitemap: ${url('/sitemap.xml')}
