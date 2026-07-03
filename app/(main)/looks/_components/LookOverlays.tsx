@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
+import { moneyToString } from '@/lib/money'
 import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { FeedItem } from './lookTypes'
@@ -62,6 +63,13 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
   const serviceLabel = pickTrimmed(m.serviceName)
   const caption = pickTrimmed(m.caption)
 
+  // "From $X" — the attainable half of the daydream. Only for priced looks.
+  const priceAmount =
+    typeof m.priceStartingAt === 'number' && m.priceStartingAt > 0
+      ? moneyToString(m.priceStartingAt)
+      : null
+  const priceLabel = priceAmount ? `From $${priceAmount}` : null
+
   const isReviewSpotlight = Boolean(m.reviewId)
   const reviewHeadline = pickTrimmed(m.reviewHeadline)
   const reviewHelpfulCount = typeof m.reviewHelpfulCount === 'number' ? m.reviewHelpfulCount : null
@@ -73,7 +81,9 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
   const proHref = pro?.id ? `/professionals/${encodeURIComponent(pro.id)}` : null
   const profileHref = posterHref
 
-  const hasAnyContent = Boolean(displayName || captionText || serviceLabel)
+  const hasAnyContent = Boolean(
+    displayName || captionText || serviceLabel || priceLabel,
+  )
   if (!hasAnyContent) return null
 
   const captionStyle: ClampStyle = {
@@ -245,7 +255,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
       ) : null}
 
       {/* Row 3: Pills */}
-      {(serviceLabel || spotlightMeta) ? (
+      {(serviceLabel || priceLabel || spotlightMeta) ? (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {serviceLabel ? (
             <div
@@ -265,6 +275,27 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
               }}
             >
               {serviceLabel}
+            </div>
+          ) : null}
+
+          {priceLabel ? (
+            <div
+              style={{
+                padding: '4px 10px',
+                background: 'rgb(var(--bg-secondary) / 0.65)',
+                border: '1px solid rgb(var(--accent-primary) / 0.35)',
+                borderRadius: 999,
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase' as const,
+                color: 'rgb(var(--text-primary) / 0.9)',
+              }}
+            >
+              {priceLabel}
             </div>
           ) : null}
 

@@ -162,6 +162,7 @@ export function computeLookPostRankScore(
       likeCount: row.likeCount,
       commentCount: row.commentCount,
       saveCount: row.saveCount,
+      shareCount: row.shareCount,
     },
     options,
   )

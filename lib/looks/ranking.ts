@@ -7,6 +7,9 @@ export const LOOK_POST_RANK_WEIGHTS = {
   like: 1,
   comment: 2,
   save: 4,
+  // Shares are the strongest engagement signal: the viewer pushed the look
+  // outside the platform.
+  share: 8,
 } as const
 
 export const LOOK_POST_RANK_RECENCY_HALF_LIFE_DAYS = 7
@@ -18,6 +21,7 @@ export type LookPostRankScoreInput = {
   likeCount: number
   commentCount: number
   saveCount: number
+  shareCount: number
 }
 
 export type LookPostRankEligibleInput = LookPostRankScoreInput & {
@@ -36,6 +40,7 @@ export type LookPostRankScoreOptions = {
  * - likeCount
  * - commentCount
  * - saveCount
+ * - shareCount
  *
  * Intentionally deferred from this persisted score:
  * - local relevance
@@ -78,17 +83,19 @@ export function isLookPostRankEligible(
 export function computeLookPostRankBaseEngagement(
   input: Pick<
     LookPostRankScoreInput,
-    'likeCount' | 'commentCount' | 'saveCount'
+    'likeCount' | 'commentCount' | 'saveCount' | 'shareCount'
   >,
 ): number {
   const likeCount = normalizeCount(input.likeCount)
   const commentCount = normalizeCount(input.commentCount)
   const saveCount = normalizeCount(input.saveCount)
+  const shareCount = normalizeCount(input.shareCount)
 
   return (
     likeCount * LOOK_POST_RANK_WEIGHTS.like +
     commentCount * LOOK_POST_RANK_WEIGHTS.comment +
-    saveCount * LOOK_POST_RANK_WEIGHTS.save
+    saveCount * LOOK_POST_RANK_WEIGHTS.save +
+    shareCount * LOOK_POST_RANK_WEIGHTS.share
   )
 }
 

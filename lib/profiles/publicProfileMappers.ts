@@ -169,6 +169,9 @@ export type PublicProfileStatsDto = {
   favoritesLabel: string
   reviewCountLabel: string
   averageRatingLabel: string | null
+  // Raw ProFollow count (index-backed) — the Follow button needs a number it
+  // can nudge optimistically, so this stays unformatted unlike the labels.
+  followerCount: number
 }
 
 function isNonNull<T>(value: T | null): value is T {
@@ -545,6 +548,7 @@ export function mapPublicProfileStatsToDto(args: {
   favoritesCount: number
   reviewCount: number
   averageRating: number | null
+  followerCount: number
 }): PublicProfileStatsDto {
   return {
     priceFromLabel: getPublicProfilePriceFromLabel(args.offerings),
@@ -552,5 +556,6 @@ export function mapPublicProfileStatsToDto(args: {
     favoritesLabel: formatCompactCount(args.favoritesCount),
     reviewCountLabel: formatCompactCount(args.reviewCount),
     averageRatingLabel: formatAverageRating(args.averageRating),
+    followerCount: Math.max(0, Math.trunc(args.followerCount)),
   }
 }

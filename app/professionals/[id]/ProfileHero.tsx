@@ -3,6 +3,7 @@
 import Link from 'next/link'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
 import type {
   PublicProfileHeaderDto,
   PublicProfileStatsDto,
@@ -10,15 +11,20 @@ import type {
 import SocialLinkChips from '@/app/_components/profiles/SocialLinkChips'
 
 import FavoriteButton from './FavoriteButton'
+import FollowButton from './FollowButton'
 import ShareButton from './ShareButton'
 
 type ProfileHeroProps = {
   header: PublicProfileHeaderDto
   stats: PublicProfileStatsDto
   isClientViewer: boolean
+  // Clients and guests can follow (guests get the login redirect); a pro
+  // viewer can't, so the pill is hidden for them.
+  canFollow: boolean
   isFavoritedByMe: boolean
   messageHref: string
   servicesHref: string
+  fromPath: string
   backHref?: string
 }
 
@@ -26,9 +32,11 @@ export default function ProfileHero({
   header,
   stats,
   isClientViewer,
+  canFollow,
   isFavoritedByMe,
   messageHref,
   servicesHref,
+  fromPath,
   backHref = '/looks',
 }: ProfileHeroProps) {
   return (
@@ -118,6 +126,18 @@ export default function ProfileHero({
               </>
             ) : null}
           </div>
+
+          {canFollow ? (
+            <FollowButton
+              professionalId={header.id}
+              initialFollowerCount={stats.followerCount}
+              fromPath={fromPath}
+            />
+          ) : stats.followerCount > 0 ? (
+            <div className="brand-profile-subtext mt-3">
+              {formatFollowerLabel(stats.followerCount)}
+            </div>
+          ) : null}
 
           <SocialLinkChips
             instagramHandle={header.instagramHandle}

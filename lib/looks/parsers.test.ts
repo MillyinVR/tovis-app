@@ -429,6 +429,7 @@ describe('lib/looks/parsers.ts', () => {
           viewerContext: {
             isAuthenticated: false,
             viewerLiked: false,
+            viewerSaved: false,
             canComment: true,
             canSave: true,
             isOwner: false,
@@ -486,6 +487,7 @@ describe('lib/looks/parsers.ts', () => {
         viewerContext: {
           isAuthenticated: false,
           viewerLiked: false,
+          viewerSaved: false,
           canComment: true,
           canSave: true,
           isOwner: false,
@@ -522,6 +524,7 @@ describe('lib/looks/parsers.ts', () => {
           viewerContext: {
             isAuthenticated: 'nope',
             viewerLiked: false,
+            viewerSaved: false,
             canComment: true,
             canSave: true,
             isOwner: false,

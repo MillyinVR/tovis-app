@@ -224,6 +224,31 @@ export default function LookDetailClient({
     }
   }, [item, redirectToLogin])
 
+  // Fire-and-forget share ping: counts the share server-side (S1.4) and
+  // reconciles the visible shares tally. Never block the share UX over it.
+  const recordShare = useCallback((lookPostId: string) => {
+    void fetch(`/api/v1/looks/${encodeURIComponent(lookPostId)}/share`, {
+      method: 'POST',
+    })
+      .then(async (res) => {
+        if (!res.ok) return
+        const raw = await safeJson(res)
+        const shareCount =
+          isRecord(raw) && typeof raw.shareCount === 'number'
+            ? Math.max(0, raw.shareCount)
+            : null
+        if (shareCount === null) return
+
+        setItem((prev) => ({
+          ...prev,
+          _count: { ...prev._count, shares: shareCount },
+        }))
+      })
+      .catch(() => {
+        // ignore — the share itself already happened
+      })
+  }, [])
+
   const shareLook = useCallback(async () => {
     if (typeof window === 'undefined') return
 
@@ -238,19 +263,22 @@ export default function LookDetailClient({
           text: item.caption ?? undefined,
           url,
         })
+        recordShare(item.id)
         return
       }
 
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(url)
+        recordShare(item.id)
         return
       }
 
       window.prompt('Copy this link:', url)
+      recordShare(item.id)
     } catch {
-      // ignore
+      // ignore — an abandoned share sheet shouldn't count
     }
-  }, [brand.displayName, item.caption, item.id])
+  }, [brand.displayName, item.caption, item.id, recordShare])
 
   const review = item.primaryMedia.review
   const reviewStars = review
@@ -304,6 +332,7 @@ export default function LookDetailClient({
             }}
             clientAuthor={item.clientAuthor}
             viewerLiked={item.viewerContext.viewerLiked}
+            viewerSaved={item.viewerContext.viewerSaved}
             likeCount={item._count.likes}
             commentCount={item._count.comments}
             bottom={16}
@@ -315,6 +344,10 @@ export default function LookDetailClient({
             onSaveStateChange={(state) => {
               setItem((prev) => ({
                 ...prev,
+                viewerContext: {
+                  ...prev.viewerContext,
+                  viewerSaved: state.isSaved,
+                },
                 _count: {
                   ...prev._count,
                   saves: state.saveCount,

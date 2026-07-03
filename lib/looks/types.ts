@@ -131,6 +131,9 @@ export type LooksDetailCountsDto = LooksCountsDto & {
 export type LooksDetailViewerContextDto = {
   isAuthenticated: boolean
   viewerLiked: boolean
+  // Whether the viewer has this look saved to any of their boards (false for
+  // guests / non-client viewers) — lights up the bookmark on the action rail.
+  viewerSaved: boolean
   canComment: boolean
   canSave: boolean
   isOwner: boolean
@@ -208,6 +211,11 @@ export type LooksLikeResponseDto = {
   lookPostId: string
   liked: boolean
   likeCount: number
+}
+
+export type LooksShareResponseDto = {
+  lookPostId: string
+  shareCount: number
 }
 
 export type LooksCommentsListResponseDto = {

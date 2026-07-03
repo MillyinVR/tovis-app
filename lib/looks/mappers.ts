@@ -642,6 +642,7 @@ export function mapLooksDetailToDto(args: {
   viewerContext: {
     isAuthenticated: boolean
     viewerLiked: boolean
+    viewerSaved: boolean
     canComment: boolean
     canSave: boolean
     isOwner: boolean
@@ -703,6 +704,7 @@ export function mapLooksDetailToDto(args: {
     viewerContext: {
       isAuthenticated: viewerContext.isAuthenticated,
       viewerLiked: viewerContext.viewerLiked,
+      viewerSaved: viewerContext.viewerSaved,
       canComment: viewerContext.canComment,
       canSave: viewerContext.canSave,
       isOwner: viewerContext.isOwner,

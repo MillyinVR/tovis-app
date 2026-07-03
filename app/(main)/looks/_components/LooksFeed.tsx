@@ -711,6 +711,16 @@ export default function LooksFeed() {
     [viewerLoc],
   )
 
+  // Fire-and-forget share ping: counts the share server-side (S1.4). Never
+  // block or fail the share UX over it.
+  const recordShare = useCallback((lookPostId: string) => {
+    void fetch(`/api/v1/looks/${encodeURIComponent(lookPostId)}/share`, {
+      method: 'POST',
+    }).catch(() => {
+      // ignore — the share itself already happened
+    })
+  }, [])
+
   const shareLook = useCallback(
     async (item: FeedItem) => {
       if (typeof window === 'undefined') return
@@ -726,20 +736,23 @@ export default function LooksFeed() {
             text: item.caption ? item.caption.slice(0, 120) : undefined,
             url,
           })
+          recordShare(lookPostId)
           return
         }
 
         if (navigator.clipboard?.writeText) {
           await navigator.clipboard.writeText(url)
+          recordShare(lookPostId)
           return
         }
 
         window.prompt('Copy this link:', url)
+        recordShare(lookPostId)
       } catch {
-        // ignore
+        // ignore — an abandoned share sheet shouldn't count
       }
     },
-    [brand.displayName],
+    [brand.displayName, recordShare],
   )
 
   const feedViewportHeight = `calc(100dvh - ${FOOTER_HEIGHT}px)`
@@ -815,6 +828,7 @@ export default function LooksFeed() {
                 }
                 clientAuthor={item.clientAuthor}
                 viewerLiked={item.viewerLiked}
+                viewerSaved={item.viewerSaved}
                 likeCount={item._count.likes}
                 commentCount={item._count.comments}
                 bottom={RIGHT_RAIL_BOTTOM}
@@ -822,6 +836,15 @@ export default function LooksFeed() {
                 onToggleLike={() => void toggleLike(item.id)}
                 onOpenComments={() => setOpenCommentsFor(item.id)}
                 onShare={() => void shareLook(item)}
+                onSaveStateChange={(state) =>
+                  setItems((prev) =>
+                    prev.map((feedItem) =>
+                      feedItem.id === item.id
+                        ? { ...feedItem, viewerSaved: state.isSaved }
+                        : feedItem,
+                    ),
+                  )
+                }
               />
                 )
 

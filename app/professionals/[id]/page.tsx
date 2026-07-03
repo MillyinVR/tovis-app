@@ -154,9 +154,11 @@ export default async function PublicProfessionalProfilePage({
           header={header}
           stats={stats}
           isClientViewer={isClientViewer}
+          canFollow={isClientViewer || !viewer}
           isFavoritedByMe={isFavoritedByMe}
           messageHref={messageHref}
           servicesHref={servicesHref}
+          fromPath={fromPath}
         />
 
         <AcceptedPayments methods={acceptedPayments} />

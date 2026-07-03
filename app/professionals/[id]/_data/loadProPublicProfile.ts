@@ -105,6 +105,7 @@ export async function loadProPublicProfileBase(args: {
     reviewStats,
     favoritesCount,
     completedBookingCount,
+    followerCount,
     offeringRows,
     favoriteRow,
     paymentSettingsRow,
@@ -124,6 +125,10 @@ export async function loadProPublicProfileBase(args: {
         professionalId: profileRow.id,
         status: BookingStatus.COMPLETED,
       },
+    }),
+
+    prisma.proFollow.count({
+      where: { professionalId: profileRow.id },
     }),
 
     prisma.professionalServiceOffering.findMany({
@@ -183,6 +188,7 @@ export async function loadProPublicProfileBase(args: {
         favoritesCount,
         reviewCount,
         averageRating,
+        followerCount,
       }),
       isFavoritedByMe: Boolean(favoriteRow),
       viewerUserId,

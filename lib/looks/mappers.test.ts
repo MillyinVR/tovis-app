@@ -1050,6 +1050,7 @@ describe('lib/looks/mappers.ts', () => {
         viewerContext: {
           isAuthenticated: true,
           viewerLiked: true,
+          viewerSaved: true,
           canComment: true,
           canSave: true,
           isOwner: false,
@@ -1132,6 +1133,7 @@ describe('lib/looks/mappers.ts', () => {
         viewerContext: {
           isAuthenticated: true,
           viewerLiked: true,
+          viewerSaved: true,
           canComment: true,
           canSave: true,
           isOwner: false,
@@ -1151,6 +1153,7 @@ describe('lib/looks/mappers.ts', () => {
         viewerContext: {
           isAuthenticated: true,
           viewerLiked: false,
+          viewerSaved: false,
           canComment: false,
           canSave: false,
           isOwner: false,

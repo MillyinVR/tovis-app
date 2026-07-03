@@ -6297,11 +6297,15 @@
         },
         "viewerLiked": {
           "type": "boolean"
+        },
+        "viewerSaved": {
+          "type": "boolean"
         }
       },
       "required": [
         "isAuthenticated",
         "viewerLiked",
+        "viewerSaved",
         "canComment",
         "canSave",
         "isOwner"
@@ -6841,6 +6845,21 @@
         "id",
         "name",
         "visibility"
+      ],
+      "type": "object"
+    },
+    "LooksShareResponseDto": {
+      "properties": {
+        "lookPostId": {
+          "type": "string"
+        },
+        "shareCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "shareCount"
       ],
       "type": "object"
     },
@@ -9857,6 +9876,9 @@
         "favoritesLabel": {
           "type": "string"
         },
+        "followerCount": {
+          "type": "number"
+        },
         "priceFromLabel": {
           "type": [
             "string",
@@ -9872,7 +9894,8 @@
         "completedBookingsLabel",
         "favoritesLabel",
         "reviewCountLabel",
-        "averageRatingLabel"
+        "averageRatingLabel",
+        "followerCount"
       ],
       "type": "object"
     },
