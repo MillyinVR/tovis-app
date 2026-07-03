@@ -18,6 +18,7 @@ export type NotificationTemplateKey =
   | 'consultation_approved'
   | 'consultation_rejected'
   | 'review_received'
+  | 'review_requested'
   | 'appointment_reminder'
   | 'aftercare_ready'
   | 'last_minute_opening_available'
@@ -135,6 +136,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.CONSULTATION_APPROVED,
   NotificationEventKey.CONSULTATION_REJECTED,
   NotificationEventKey.REVIEW_RECEIVED,
+  NotificationEventKey.REVIEW_REQUESTED,
   NotificationEventKey.APPOINTMENT_REMINDER,
   NotificationEventKey.AFTERCARE_READY,
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
@@ -352,6 +354,21 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // Tier C social: in-app + push. No email — reviews are not a durable-record
       // event worth an inbox message, but a push tap fits.
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.REVIEW_REQUESTED]: {
+    key: NotificationEventKey.REVIEW_REQUESTED,
+    defaultPriority: NotificationPriority.LOW,
+    // Promotional-adjacent nudge, NOT transactional: review requests are not
+    // in the approved transactional SMS use cases (lib/transactionalSmsPolicy)
+    // — so no SMS channel, no quiet-hours bypass.
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'review_requested',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -626,6 +643,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
   NotificationEventKey.CONSULTATION_APPROVED,
   NotificationEventKey.CONSULTATION_REJECTED,
+  NotificationEventKey.REVIEW_REQUESTED,
   NotificationEventKey.APPOINTMENT_REMINDER,
   NotificationEventKey.AFTERCARE_READY,
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,

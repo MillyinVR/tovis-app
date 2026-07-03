@@ -562,6 +562,9 @@ enum NotificationEventKey {
   CONSULTATION_APPROVED
   CONSULTATION_REJECTED
   REVIEW_RECEIVED
+  // Post-visit "leave a review" nudge to the client, scheduled a few hours
+  // after the booking completes (lib/notifications/reviewRequests.ts).
+  REVIEW_REQUESTED
   APPOINTMENT_REMINDER
   AFTERCARE_READY
   LAST_MINUTE_OPENING_AVAILABLE
