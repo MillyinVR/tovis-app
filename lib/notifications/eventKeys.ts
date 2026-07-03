@@ -535,8 +535,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
-  // Someone commented on your look. Social engagement, so in-app only for now
-  // (the digest handles email later; PUSH arrives with the A4 decision). The
+  // Someone commented on your look. Social engagement → in-app + PUSH (A4
+  // decision: push+in-app now; PUSH stays inert until APNs/FCM creds land, so
+  // this is safe until then). Email is deferred to the future digest. The
   // recipient is whichever identity authored the look — the pro, or the client
   // author for client-shared looks. Non-transactional, no quiet-hours bypass
   // (mirrors LOOK_FOLLOWER_NEW / CLIENT_FOLLOW).
@@ -551,13 +552,13 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       NotificationRecipientKind.CLIENT,
     ],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
   },
 
-  // Someone replied to your comment on a look. Same policy as LOOK_COMMENTED;
-  // the recipient is the parent comment's author (pro or client).
+  // Someone replied to your comment on a look. Same policy as LOOK_COMMENTED
+  // (in-app + PUSH); the recipient is the parent comment's author (pro or client).
   [NotificationEventKey.LOOK_COMMENT_REPLIED]: {
     key: NotificationEventKey.LOOK_COMMENT_REPLIED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -569,15 +570,16 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       NotificationRecipientKind.CLIENT,
     ],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
   },
 
   // Batched "your look got liked" — one windowed inbox row per look per day
   // (the emit helper's dedupeKey carries the window; a refresh updates the
-  // count and re-marks unread without re-dispatching). In-app only, like the
-  // sibling social events. Recipient is the look's author (pro or client).
+  // count and re-marks unread without re-dispatching). In-app + PUSH, like the
+  // sibling social events; the windowed dedupe means at most one push per look
+  // per day, so it never becomes spammy. Recipient is the look's author.
   [NotificationEventKey.LOOK_LIKED]: {
     key: NotificationEventKey.LOOK_LIKED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -589,13 +591,13 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       NotificationRecipientKind.CLIENT,
     ],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
   },
 
   // Batched "your look got saved to a board" — same windowed-dedupe policy as
-  // LOOK_LIKED.
+  // LOOK_LIKED (in-app + PUSH, at most one push per look per day).
   [NotificationEventKey.LOOK_SAVED]: {
     key: NotificationEventKey.LOOK_SAVED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -607,14 +609,14 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       NotificationRecipientKind.CLIENT,
     ],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
   },
 
   // A pro you follow published a new look — the FAN_OUT_NEW_LOOK_NOTIFICATIONS
-  // job writes one per follower. In-app only (the future digest handles email;
-  // PUSH arrives with the A4 decision).
+  // job writes one per follower. In-app + PUSH (A4 decision; the future digest
+  // handles email). This is the strongest "come back and scroll" pull.
   [NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO]: {
     key: NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
     defaultPriority: NotificationPriority.NORMAL,
@@ -623,7 +625,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'look_new_from_followed_pro',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
   },
 
