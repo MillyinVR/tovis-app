@@ -1,15 +1,24 @@
 # Push notifications — go-live runbook (operator)
 
-The push backend (APNs + FCM) is **fully built and deployed but dormant**. This is
-the intended state *before* the native iOS/Android app exists: the backend is
-native-ready and waiting. Nothing sends until BOTH of these are true:
+The push backend (APNs + FCM) is **fully built and deployed but dormant**, and
+the **native iOS app now ships a registration path** (`Tovis/PushManager.swift` →
+`client.devices.register(...)` → `POST /api/v1/devices` on launch, once signed
+in). Everything is coded on both ends. Nothing sends until BOTH of these are true:
 
 1. The push **credentials** below are set in the environment, AND
-2. A **device registers a token** by calling `POST /api/v1/devices` (the native
-   app does this on launch).
+2. A **device registers a token** (the iOS app does this automatically on launch
+   for a signed-in user; it can also be done by hand with the `curl` in the smoke
+   test).
 
 So you can set the credentials whenever — even now, harmlessly — and push will
-light up the moment the native client registers its first token.
+light up the moment a client registers its first token.
+
+> **A4 (2026-07-03) made this the last blocker for social push.** The Looks
+> social events — `LOOK_COMMENTED`, `LOOK_COMMENT_REPLIED`, `LOOK_LIKED`,
+> `LOOK_SAVED`, `LOOK_NEW_FROM_FOLLOWED_PRO` — now include the **PUSH** channel in
+> their `defaultChannelsByRecipient` (they were in-app only through A1/A2). They
+> stay inert exactly like every other push event until the creds below are set;
+> provisioning them lights up the whole real-time social dopamine loop on device.
 
 How it stays safe until then: `isPushProviderConfigured()`
 (`lib/notifications/config.ts`) returns false while the creds are unset, which
@@ -49,8 +58,12 @@ unconfigured side just stays inert).
    secrets manager. Its file contents = `APNS_AUTH_KEY`.
 3. The key's **Key ID** is shown on that page = `APNS_KEY_ID`.
 4. **Team ID**: top-right of your Apple Developer **Membership** page = `APNS_TEAM_ID`.
-5. `APNS_BUNDLE_ID` = the iOS app's bundle identifier. The App ID must have the
-   **Push Notifications** capability enabled.
+5. `APNS_BUNDLE_ID` = the iOS app's bundle identifier, which is **`app.tovis.Tovis`**
+   (`PRODUCT_BUNDLE_IDENTIFIER` in `tovis-ios.xcodeproj`). The App ID must have the
+   **Push Notifications** capability enabled, and the Xcode app target must have the
+   **Push Notifications** capability + APNs entitlement (Signing & Capabilities →
+   ＋ Capability → Push Notifications) so `didRegisterForRemoteNotifications…`
+   actually fires and hands a token to `PushManager`.
 
 ### ⚠️ The APNs sandbox/production gotcha
 APNs device tokens are environment-specific:
@@ -84,21 +97,34 @@ Firebase projects.
 
 ## Smoke test (once you have a device token)
 
-You need a real device token, which means a build (even a minimal one) of the
-native app that obtains the APNs/FCM token. Then:
+You need a real device token, which means a build of the native app on a real
+device (the Simulator does not produce a usable APNs token). The iOS app registers
+automatically — so the fastest path is:
 
-1. **Register the token** as a logged-in user:
+**iOS end-to-end (recommended):**
+1. Build the app to a **physical device** from Xcode (a dev build → **sandbox**
+   token → set `APNS_ENV=sandbox` in Vercel and redeploy; TestFlight/App Store →
+   **production** → `APNS_ENV=production`). See the sandbox/production gotcha above.
+2. **Sign in** — `PushManager` (via the AppDelegate's
+   `didRegisterForRemoteNotificationsWithDeviceToken`) calls
+   `client.devices.register(...)` → `POST /api/v1/devices {platform:"IOS", token,
+   deviceId}` automatically. Confirm a `DeviceToken` row exists for that user.
+3. From a second account, **like or comment on one of that user's looks** (an A4
+   social event) — or trigger any push event.
+4. **Confirm** the device receives the push. The cron drain
+   (`/api/internal/jobs/notifications/process`) sends due deliveries; tapping the
+   push routes via the payload's `href` deep-link.
+
+**By hand (no app build):** register a token you already have as a logged-in user:
    ```bash
    curl -X POST https://<app>/api/v1/devices \
      -H "Authorization: Bearer <user-jwt>" \
      -H "Content-Type: application/json" \
-     -d '{"platform":"IOS","token":"<device-token>"}'   # or "ANDROID"
+     -d '{"platform":"IOS","token":"<device-token>","deviceId":"<device-id>"}'  # or "ANDROID"
    ```
-2. **Trigger** an event whose defaults include PUSH (e.g. a booking confirmation
-   for that user — see `defaultChannelsByRecipient` in
-   `lib/notifications/eventKeys.ts`).
-3. **Confirm** the device receives the notification. The cron drain
-   (`/api/internal/jobs/notifications/process`) sends due deliveries.
+   then trigger an event whose defaults include PUSH (see
+   `defaultChannelsByRecipient` in `lib/notifications/eventKeys.ts`) and confirm
+   receipt via the cron drain.
 4. **Token invalidation:** uninstall the app (or use a stale token) and trigger
    again — the provider returns a dead-token error and the row's `DeviceToken`
    flips `isActive=false` automatically. Verify in the DB.
@@ -125,6 +151,8 @@ preference tables (default on). Push respects quiet hours like SMS/email.
 - `DeviceToken` model + `POST`/`DELETE /api/v1/devices` (#391)
 - PUSH channel + per-device fan-out wired through the engine (#392)
 - APNs + FCM provider clients + dead-token invalidation (#393)
+- Native iOS registration on launch (`Tovis/PushManager.swift` + AppDelegate)
+- Social events (`LOOK_*`) opted into PUSH (A4)
 
-Remaining is **this runbook only**: set the env vars, redeploy, and (when the app
-exists) smoke-test on a device.
+Remaining is **this runbook only**: set the env vars, redeploy, and smoke-test on
+a device.
