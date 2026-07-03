@@ -28,6 +28,9 @@ export type ReviewForPanel = {
   helpfulCount?: number
   viewerHelpful?: boolean
 
+  // The pro's single public response, or null/absent when none.
+  proReply?: { body: string; repliedAt: string } | null
+
   mediaAssets?: Array<{
     id: string
     url: string
@@ -393,6 +396,40 @@ function ReviewsPanelInner({
                 {review.body ? (
                   <div style={{ marginTop: 6, fontSize: 12, color: 'rgb(var(--text-secondary))' }}>
                     {review.body}
+                  </div>
+                ) : null}
+
+                {review.proReply ? (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      borderLeft: '2px solid rgb(var(--text-primary) / 0.15)',
+                      paddingLeft: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 650,
+                        color: 'rgb(var(--text-muted))',
+                      }}
+                    >
+                      Response from the pro ·{' '}
+                      {formatInTimeZone(
+                        review.proReply.repliedAt,
+                        getViewerTimeZone() ?? DEFAULT_TIME_ZONE,
+                        { month: 'short', day: 'numeric', year: 'numeric' },
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: 12,
+                        color: 'rgb(var(--text-secondary))',
+                      }}
+                    >
+                      {review.proReply.body}
+                    </div>
                   </div>
                 ) : null}
 

@@ -39,6 +39,8 @@ export type ProReviewListItem = {
   clientHref: string | null
   reviewAnchor: string
   mediaTiles: ProReviewMediaTile[]
+  /** The pro's own public response (null until they reply). */
+  proReply: { body: string; repliedAtISO: string } | null
 }
 
 function pickNonEmptyString(v: unknown): string {
@@ -158,6 +160,13 @@ export async function loadProReviewsList(args: {
         clientHref,
         reviewAnchor: `review-${rev.id}`,
         mediaTiles,
+        proReply:
+          rev.proReplyBody && rev.proReplyAt
+            ? {
+                body: rev.proReplyBody,
+                repliedAtISO: new Date(rev.proReplyAt).toISOString(),
+              }
+            : null,
       }
       return item
     }),

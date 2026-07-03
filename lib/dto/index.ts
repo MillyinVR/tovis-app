@@ -198,8 +198,16 @@ export type {
   PublicPortfolioTileDto,
   PublicReviewMediaDto,
   PublicReviewDto,
+  PublicReviewProReplyDto,
   PublicProfileStatsDto,
 } from '@/lib/profiles/publicProfileMappers'
+
+// ── Pro review reply (PUT/DELETE /api/v1/pro/reviews/[id]/reply) ─────────────
+export type {
+  ProReviewReplyDTO,
+  ProReviewReplyUpsertResponseDTO,
+  ProReviewReplyDeleteResponseDTO,
+} from '@/lib/dto/proReviewReply'
 
 // ── Last-minute opening detail (GET /api/v1/offerings/[id]) ───────────────────
 export type {

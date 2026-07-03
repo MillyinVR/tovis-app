@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { getCurrentUser } from '@/lib/currentUser'
 import MediaPortfolioToggle from './MediaPortfolioToggle'
 import HashJumpHighlight from './HashJumpHighlight'
+import ReviewReplyEditor from './ReviewReplyEditor'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { loadProReviewsList } from '@/lib/pro/loadProReviewsList'
@@ -289,6 +290,11 @@ export default async function ProReviewsPage() {
                     </div>
                   </div>
                 ) : null}
+
+                <ReviewReplyEditor
+                  reviewId={rev.id}
+                  reply={rev.proReply}
+                />
               </article>
             )
           })}
