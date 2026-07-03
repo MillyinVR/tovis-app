@@ -9305,6 +9305,55 @@
       ],
       "type": "object"
     },
+    "ProReviewReplyDTO": {
+      "description": "The pro's public response to a review, as rendered on review surfaces.",
+      "properties": {
+        "body": {
+          "description": "Reply text (trimmed, 1–1000 chars).",
+          "type": "string"
+        },
+        "repliedAtISO": {
+          "description": "When the reply was last written/edited (ISO-8601).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "body",
+        "repliedAtISO"
+      ],
+      "type": "object"
+    },
+    "ProReviewReplyDeleteResponseDTO": {
+      "properties": {
+        "deleted": {
+          "const": true,
+          "type": "boolean"
+        },
+        "reviewId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reviewId",
+        "deleted"
+      ],
+      "type": "object"
+    },
+    "ProReviewReplyUpsertResponseDTO": {
+      "properties": {
+        "reply": {
+          "$ref": "#/definitions/ProReviewReplyDTO"
+        },
+        "reviewId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reviewId",
+        "reply"
+      ],
+      "type": "object"
+    },
     "ProfessionType": {
       "$ref": "#/definitions/%24Enums.ProfessionType"
     },
@@ -9799,6 +9848,16 @@
           },
           "type": "array"
         },
+        "proReply": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PublicReviewProReplyDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "rating": {
           "type": "number"
         },
@@ -9816,7 +9875,8 @@
         "clientHref",
         "helpfulCount",
         "viewerHelpful",
-        "mediaAssets"
+        "mediaAssets",
+        "proReply"
       ],
       "type": "object"
     },
@@ -9859,6 +9919,21 @@
         "mediaType",
         "isFeaturedInPortfolio",
         "before"
+      ],
+      "type": "object"
+    },
+    "PublicReviewProReplyDto": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "repliedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "body",
+        "repliedAt"
       ],
       "type": "object"
     },

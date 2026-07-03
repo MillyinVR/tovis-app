@@ -162,6 +162,8 @@ export const publicReviewSelect = Prisma.validator<Prisma.ReviewSelect>()({
   body: true,
   createdAt: true,
   helpfulCount: true,
+  proReplyBody: true,
+  proReplyAt: true,
 
   client: {
     select: publicReviewClientSelect,

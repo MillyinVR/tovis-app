@@ -150,6 +150,13 @@ export type PublicReviewDto = {
   helpfulCount: number
   viewerHelpful: boolean
   mediaAssets: PublicReviewMediaDto[]
+  // The pro's single public response, or null when they haven't replied.
+  proReply: PublicReviewProReplyDto | null
+}
+
+export type PublicReviewProReplyDto = {
+  body: string
+  repliedAt: string
 }
 
 export type PublicProfileStatsDto = {
@@ -497,6 +504,13 @@ export async function mapPublicReviewToDto(args: {
     helpfulCount: review.helpfulCount ?? 0,
     viewerHelpful: viewerHelpfulReviewIds?.has(review.id) ?? false,
     mediaAssets: mediaAssets.filter(isNonNull),
+    proReply:
+      review.proReplyBody && review.proReplyAt
+        ? {
+            body: review.proReplyBody,
+            repliedAt: formatDateIso(review.proReplyAt),
+          }
+        : null,
   }
 }
 
