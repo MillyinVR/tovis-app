@@ -1,7 +1,7 @@
 // app/pro/calendar/_components/CalendarHeader.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Z } from '@/lib/zIndex'
 
@@ -221,6 +221,7 @@ function CreateMenuButton(props: CreateMenuButtonProps) {
   } = props
 
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -229,10 +230,22 @@ function CreateMenuButton(props: CreateMenuButtonProps) {
       if (event.key === 'Escape') setOpen(false)
     }
 
+    // Dismiss on any pointerdown outside the menu. Using a passive document
+    // listener (instead of a full-viewport scrim button) means the same click
+    // that closes the menu still reaches its target — e.g. the Week/Month
+    // toggle actuates on the first click instead of being swallowed.
+    function onPointerDown(event: PointerEvent): void {
+      const target = event.target
+      if (target instanceof Node && rootRef.current?.contains(target)) return
+      setOpen(false)
+    }
+
     document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointerDown)
 
     return () => {
       document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointerDown)
     }
   }, [open])
 
@@ -242,7 +255,7 @@ function CreateMenuButton(props: CreateMenuButtonProps) {
   }
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={rootRef} style={{ position: 'relative' }}>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -256,51 +269,34 @@ function CreateMenuButton(props: CreateMenuButtonProps) {
       </button>
 
       {open ? (
-        <>
-          <button
-            type="button"
-            aria-label={menuLabel}
-            onClick={() => setOpen(false)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: Z.overlay,
-              background: 'transparent',
-              border: 'none',
-              padding: 0,
-              cursor: 'default',
-            }}
+        <div
+          role="menu"
+          aria-label={menuLabel}
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            right: 0,
+            zIndex: Z.modal,
+            minWidth: 220,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            padding: 6,
+            background: 'rgb(var(--bg-surface))',
+            border: '1px solid var(--line)',
+            borderRadius: 14,
+            boxShadow: 'var(--shadow-strong)',
+          }}
+        >
+          <CreateMenuItem
+            label={appointmentLabel}
+            onClick={() => choose(onAddAppointment)}
           />
-
-          <div
-            role="menu"
-            aria-label={menuLabel}
-            style={{
-              position: 'absolute',
-              top: 'calc(100% + 6px)',
-              right: 0,
-              zIndex: Z.modal,
-              minWidth: 220,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              padding: 6,
-              background: 'rgb(var(--bg-surface))',
-              border: '1px solid var(--line)',
-              borderRadius: 14,
-              boxShadow: 'var(--shadow-strong)',
-            }}
-          >
-            <CreateMenuItem
-              label={appointmentLabel}
-              onClick={() => choose(onAddAppointment)}
-            />
-            <CreateMenuItem
-              label={blockLabel}
-              onClick={() => choose(onBlockTime)}
-            />
-          </div>
-        </>
+          <CreateMenuItem
+            label={blockLabel}
+            onClick={() => choose(onBlockTime)}
+          />
+        </div>
       ) : null}
     </div>
   )
