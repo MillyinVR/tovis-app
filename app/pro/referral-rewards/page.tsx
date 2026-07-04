@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
+import { loadProReferralActivity } from '@/lib/referral/proReferralActivity'
+import ProReferralActivitySection from './ProReferralActivitySection'
 import ReferralRewardsClient from './ReferralRewardsClient'
 
 export const dynamic = 'force-dynamic'
@@ -14,16 +16,20 @@ export default async function ProReferralRewardsPage() {
   }
 
   const professionalId = user.professionalProfile.id
+  const timeZone = user.professionalProfile.timeZone ?? null
 
-  const settings = await prisma.professionalPaymentSettings.findUnique({
-    where: { professionalId },
-    select: {
-      referralRewardEnabled: true,
-      referralRewardTier: true,
-      referralDiscountPercent: true,
-      referralCreditAmount: true,
-    },
-  })
+  const [settings, referralActivity] = await Promise.all([
+    prisma.professionalPaymentSettings.findUnique({
+      where: { professionalId },
+      select: {
+        referralRewardEnabled: true,
+        referralRewardTier: true,
+        referralDiscountPercent: true,
+        referralCreditAmount: true,
+      },
+    }),
+    loadProReferralActivity({ professionalId }),
+  ])
 
   const initial = {
     referralRewardEnabled: settings?.referralRewardEnabled ?? false,
@@ -35,8 +41,12 @@ export default async function ProReferralRewardsPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-8">
+    <main className="mx-auto w-full max-w-2xl space-y-8 px-4 py-8">
       <ReferralRewardsClient initial={initial} />
+      <ProReferralActivitySection
+        activity={referralActivity}
+        timeZone={timeZone}
+      />
     </main>
   )
 }
