@@ -12,6 +12,7 @@ import Input from '../Input'
 import PasswordInput from '../PasswordInput'
 import PrimaryButton from '../PrimaryButton'
 import SecondaryLinkButton from '../SecondaryLinkButton'
+import SocialSignIn from '../social/SocialSignIn'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
@@ -699,6 +700,10 @@ export default function SignupClientClient() {
           </SecondaryLinkButton>
         </div>
       </form>
+
+      <div className="mt-4">
+        <SocialSignIn />
+      </div>
     </AuthShell>
   )
 }

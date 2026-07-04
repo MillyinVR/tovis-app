@@ -31,6 +31,7 @@ export type RateLimitBucket =
   | 'auth:login'
   | 'auth:login:identity'
   | 'auth:apple'
+  | 'auth:google'
   | 'auth:phone-login'
   | 'auth:register'
   | 'auth:register:verified'
@@ -259,6 +260,15 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 20,
     windowSeconds: 15 * 60,
     prefix: 'rl:auth:apple',
+    mode: 'auth-critical',
+  },
+  // Google Sign-In token exchanges, per IP. Same envelope as Apple: verified
+  // OIDC id-tokens, rate-limited to blunt token-replay abuse. Auth-critical so a
+  // Redis outage degrades to in-memory, not unlimited.
+  'auth:google': {
+    limit: 20,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:google',
     mode: 'auth-critical',
   },
   // Phone-OTP login verify attempts, per IP. (Per-phone SMS volume is bounded
