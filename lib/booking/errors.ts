@@ -67,6 +67,7 @@ export type BookingErrorCode =
   | "WAITLIST_ENTRY_NOT_FOUND"
   | "WAITLIST_OFFER_NOT_FOUND"
   | "WAITLIST_OFFER_NOT_PENDING"
+  | "NO_SHOW_FEE_NOT_WAIVABLE"
   | "STALE_VERSION"
   | "INTERNAL_ERROR";
 
@@ -600,6 +601,17 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Waitlist offer is not pending.",
     userMessage: "This offer has already been responded to or has expired.",
+  },
+
+  NO_SHOW_FEE_NOT_WAIVABLE: {
+    // Only a fee that was assessed but never collected (FAILED) can be waived
+    // in-app. A CHARGED fee must be refunded (separate PaymentIntent); a SKIPPED
+    // or absent fee has nothing to forgive.
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "No-show fee is not in a waivable state.",
+    userMessage: "This fee can't be waived — it was never charged, or was already collected.",
   },
 
   INTERNAL_ERROR: {

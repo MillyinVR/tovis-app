@@ -5581,6 +5581,66 @@ export async function recordNoShowFeeCharge(args: {
   })
 }
 
+export type WaiveNoShowFeeResult = {
+  status: NoShowFeeStatus
+  meta: { mutated: boolean; noOp: boolean }
+}
+
+/**
+ * Pro (or admin-on-behalf) forgives a no-show / late-cancel fee that was
+ * assessed but never successfully collected. Only a fee currently in
+ * NoShowFeeStatus.FAILED can be waived here: a CHARGED fee lives on its own
+ * PaymentIntent and must be REFUNDED, not waived; a SKIPPED / absent fee has
+ * nothing to forgive. Ownership-scoped to the professional and idempotent — a
+ * fee already WAIVED is a no-op. No money moves; this only records the pro's
+ * decision so the fee stops reading as outstanding.
+ */
+export async function waiveNoShowFee(args: {
+  bookingId: string
+  professionalId: string
+}): Promise<WaiveNoShowFeeResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return withLockedProfessionalTransaction(args.professionalId, async ({ tx }) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: {
+        id: true,
+        professionalId: true,
+        noShowFeeStatus: true,
+      },
+    })
+
+    if (!booking || booking.professionalId !== args.professionalId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    // Already forgiven — idempotent no-op.
+    if (booking.noShowFeeStatus === NoShowFeeStatus.WAIVED) {
+      return {
+        status: NoShowFeeStatus.WAIVED,
+        meta: { mutated: false, noOp: true },
+      }
+    }
+
+    if (booking.noShowFeeStatus !== NoShowFeeStatus.FAILED) {
+      throw bookingError('NO_SHOW_FEE_NOT_WAIVABLE')
+    }
+
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: { noShowFeeStatus: NoShowFeeStatus.WAIVED },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+
+    return {
+      status: NoShowFeeStatus.WAIVED,
+      meta: { mutated: true, noOp: false },
+    }
+  })
+}
+
 async function performLockedStartBookingSession(args: {
   tx: Prisma.TransactionClient
   now: Date

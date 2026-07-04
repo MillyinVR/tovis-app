@@ -59,12 +59,12 @@ vi.mock('../BookingActions', () => ({
     React.createElement('div', { 'data-testid': 'booking-actions' }, status),
 }))
 
-vi.mock('./RefundButton', () => ({
+vi.mock('@/app/_components/booking/MoneyTrailInspector', () => ({
   default: ({ bookingId }: { bookingId: string }) =>
     React.createElement(
-      'button',
-      { 'data-testid': 'refund-button', 'data-booking-id': bookingId },
-      'Refund',
+      'div',
+      { 'data-testid': 'money-trail-inspector', 'data-booking-id': bookingId },
+      'Money trail',
     ),
 }))
 
@@ -312,13 +312,16 @@ describe('app/pro/bookings/[id]/page.tsx', () => {
     expect(hasText(page, 'v3')).toBe(true)
   })
 
-  it('does not render the Refund button when the booking has no captured Stripe payment', async () => {
+  it('always mounts the money-trail inspector (refund/waive actions gate server-side)', async () => {
+    // The inspector renders for every booking and resolves capabilities from its
+    // own /money-trail fetch, so the page no longer computes refundability. It
+    // mounts even for a MANUAL booking with no captured Stripe payment.
     const page = await renderPage(
       makeBooking({
         paymentProvider: PaymentProvider.MANUAL,
         stripePaymentStatus: null,
       }),
     )
-    expect(hasText(page, 'Refund')).toBe(false)
+    expect(hasText(page, 'Money trail')).toBe(true)
   })
 })
