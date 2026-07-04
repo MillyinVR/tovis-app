@@ -1,0 +1,256 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  BookingStatus,
+  NoShowFeeReason,
+  NoShowFeeStatus,
+  NoShowFeeType,
+  Prisma,
+} from '@prisma/client'
+
+const mocks = vi.hoisted(() => ({
+  bookingFindUnique: vi.fn(),
+  paymentIntentsCreate: vi.fn(),
+  recordNoShowFeeCharge: vi.fn(),
+  flagEnabled: vi.fn(),
+}))
+
+vi.mock('@/lib/prisma', () => ({
+  prisma: { booking: { findUnique: mocks.bookingFindUnique } },
+}))
+
+vi.mock('@/lib/stripe/server', () => ({
+  getStripe: () => ({
+    paymentIntents: { create: mocks.paymentIntentsCreate },
+  }),
+}))
+
+vi.mock('@/lib/booking/writeBoundary', () => ({
+  recordNoShowFeeCharge: mocks.recordNoShowFeeCharge,
+}))
+
+vi.mock('@/lib/noShowProtection/flag', () => ({
+  noShowProtectionEnabled: mocks.flagEnabled,
+}))
+
+import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
+
+const D = (v: string | number) => new Prisma.Decimal(v)
+
+// A confirmed booking whose pro has FLAT $25 protection on, client has a default
+// card, and the pro is connected. Override per-test.
+function bookingFixture(over: Record<string, unknown> = {}) {
+  return {
+    id: 'bk_1',
+    clientId: 'cl_1',
+    professionalId: 'pro_1',
+    scheduledFor: new Date('2026-07-10T18:00:00.000Z'),
+    subtotalSnapshot: D('120'),
+    noShowFeeStatus: null,
+    client: {
+      stripeCustomerId: 'cus_1',
+      paymentMethods: [{ stripePaymentMethodId: 'pm_1' }],
+    },
+    professional: {
+      noShowSettings: {
+        enabled: true,
+        feeType: NoShowFeeType.FLAT,
+        feeFlatAmount: D('25'),
+        feePercent: null,
+        cancelWindowHours: 24,
+        chargeNoShow: true,
+        chargeLateCancel: true,
+      },
+      paymentSettings: {
+        stripeAccountId: 'acct_1',
+        acceptStripeCard: true,
+        stripeChargesEnabled: true,
+      },
+    },
+    ...over,
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.flagEnabled.mockReturnValue(true)
+})
+
+describe('assessAndChargeNoShowFee gating', () => {
+  it('does nothing when the flag is off', async () => {
+    mocks.flagEnabled.mockReturnValue(false)
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toEqual({ kind: 'NOT_CHARGEABLE', reason: 'flag_off' })
+    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when the pro has protection off', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(
+      bookingFixture({ professional: { noShowSettings: null, paymentSettings: null } }),
+    )
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toEqual({ kind: 'NOT_CHARGEABLE', reason: 'protection_off' })
+    expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  it('short-circuits when the fee was already charged', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(
+      bookingFixture({ noShowFeeStatus: NoShowFeeStatus.CHARGED }),
+    )
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toMatchObject({ kind: 'ATTEMPTED', status: 'CHARGED', alreadyCharged: true })
+    expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
+    expect(mocks.recordNoShowFeeCharge).not.toHaveBeenCalled()
+  })
+
+  it('does not charge a no-show when chargeNoShow is off', async () => {
+    const fix = bookingFixture()
+    fix.professional.noShowSettings.chargeNoShow = false
+    mocks.bookingFindUnique.mockResolvedValue(fix)
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toEqual({ kind: 'NOT_CHARGEABLE', reason: 'no_show_charging_off' })
+  })
+
+  it('does not charge a late cancel outside the window', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(bookingFixture())
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.LATE_CANCEL,
+      now: new Date('2026-07-08T18:00:00.000Z'), // 48h before, window 24h
+    })
+    expect(out).toEqual({ kind: 'NOT_CHARGEABLE', reason: 'outside_cancel_window' })
+    expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  it('does not charge a late cancel of an unconfirmed (PENDING) booking', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(bookingFixture())
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.LATE_CANCEL,
+      priorStatus: BookingStatus.PENDING,
+      now: new Date('2026-07-10T12:00:00.000Z'), // inside window
+    })
+    expect(out).toEqual({ kind: 'NOT_CHARGEABLE', reason: 'not_confirmed' })
+    expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  it('records SKIPPED when the client has no saved card', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(
+      bookingFixture({
+        client: { stripeCustomerId: null, paymentMethods: [] },
+      }),
+    )
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toMatchObject({ kind: 'SKIPPED', reason: 'no_card_on_file' })
+    expect(mocks.recordNoShowFeeCharge).toHaveBeenCalledWith(
+      expect.objectContaining({ status: NoShowFeeStatus.SKIPPED }),
+    )
+    expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  it('records SKIPPED when the pro is not connected for charges', async () => {
+    const fix = bookingFixture()
+    fix.professional.paymentSettings.stripeChargesEnabled = false
+    mocks.bookingFindUnique.mockResolvedValue(fix)
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toMatchObject({ kind: 'SKIPPED', reason: 'pro_not_connected' })
+    expect(mocks.recordNoShowFeeCharge).toHaveBeenCalledWith(
+      expect.objectContaining({ status: NoShowFeeStatus.SKIPPED }),
+    )
+  })
+})
+
+describe('assessAndChargeNoShowFee charging', () => {
+  it('charges the default card off-session and routes to the pro (destination charge)', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(bookingFixture())
+    mocks.paymentIntentsCreate.mockResolvedValue({ id: 'pi_1', status: 'succeeded' })
+
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+
+    expect(mocks.paymentIntentsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 2500,
+        currency: 'usd',
+        customer: 'cus_1',
+        payment_method: 'pm_1',
+        off_session: true,
+        confirm: true,
+        transfer_data: { destination: 'acct_1' },
+      }),
+      { idempotencyKey: 'tovis:no-show-fee:bk_1' },
+    )
+    expect(out).toMatchObject({
+      kind: 'ATTEMPTED',
+      status: NoShowFeeStatus.CHARGED,
+      amount: '25.00',
+      stripePaymentIntentId: 'pi_1',
+    })
+    expect(mocks.recordNoShowFeeCharge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: NoShowFeeStatus.CHARGED,
+        reason: NoShowFeeReason.NO_SHOW,
+        stripePaymentIntentId: 'pi_1',
+      }),
+    )
+  })
+
+  it('records FAILED when the off-session charge is declined', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(bookingFixture())
+    mocks.paymentIntentsCreate.mockRejectedValue(
+      Object.assign(new Error('card_declined'), {
+        raw: { payment_intent: { id: 'pi_fail' } },
+      }),
+    )
+
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+
+    expect(out).toMatchObject({
+      kind: 'ATTEMPTED',
+      status: NoShowFeeStatus.FAILED,
+      stripePaymentIntentId: 'pi_fail',
+    })
+    expect(mocks.recordNoShowFeeCharge).toHaveBeenCalledWith(
+      expect.objectContaining({ status: NoShowFeeStatus.FAILED }),
+    )
+  })
+
+  it('charges a late cancel inside the window', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(bookingFixture())
+    mocks.paymentIntentsCreate.mockResolvedValue({ id: 'pi_2', status: 'succeeded' })
+
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.LATE_CANCEL,
+      now: new Date('2026-07-10T12:00:00.000Z'), // 6h before start
+    })
+
+    expect(out).toMatchObject({ kind: 'ATTEMPTED', status: NoShowFeeStatus.CHARGED })
+    expect(mocks.recordNoShowFeeCharge).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: NoShowFeeReason.LATE_CANCEL }),
+    )
+  })
+})

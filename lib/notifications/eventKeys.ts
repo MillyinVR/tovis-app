@@ -27,6 +27,7 @@ export type NotificationTemplateKey =
   | 'payment_collected'
   | 'payment_action_required'
   | 'payment_refunded'
+  | 'no_show_fee_charged'
   | 'look_follower_new'
   | 'client_follow'
   | 'look_commented'
@@ -150,6 +151,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
+  NotificationEventKey.NO_SHOW_FEE_CHARGED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
   NotificationEventKey.CLIENT_FOLLOW,
   NotificationEventKey.LOOK_COMMENTED,
@@ -509,6 +511,21 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  [NotificationEventKey.NO_SHOW_FEE_CHARGED]: {
+    key: NotificationEventKey.NO_SHOW_FEE_CHARGED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    emailAlwaysOn: true,
+    templateKey: 'no_show_fee_charged',
+    // Client-only: the receipt goes to the client whose card was charged.
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // Tier B receipt: in-app + email + push. No SMS.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: {
     key: NotificationEventKey.LOOK_FOLLOWER_NEW,
     defaultPriority: NotificationPriority.NORMAL,
@@ -759,6 +776,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
+  NotificationEventKey.NO_SHOW_FEE_CHARGED,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,

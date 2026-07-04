@@ -163,6 +163,11 @@ export type ProProfileManagementPageModel = {
 
   editProfileInitial: ProProfileManagementEditProfileInitial
   paymentSettingsInitial: ProProfileManagementPaymentSettingsInitial | null
+  /**
+   * Phase 2 revenue protection flag (server-side `noShowProtectionEnabled()`).
+   * Gates the "No-show & late-cancel fees" section in the payment settings modal.
+   */
+  noShowFeatureEnabled: boolean
 
   portfolio: ProProfileManagementPortfolio
   reviews: ProProfileManagementReviews

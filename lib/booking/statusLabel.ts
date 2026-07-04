@@ -17,6 +17,8 @@ export function labelForBookingStatus(status: string): string {
       return 'Completed'
     case BookingStatus.CANCELLED:
       return 'Cancelled'
+    case BookingStatus.NO_SHOW:
+      return 'No-show'
     default:
       return status
   }

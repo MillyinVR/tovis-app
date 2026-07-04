@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from '../BookingActions'
 import RefundButton from './RefundButton'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { moneyToString } from '@/lib/money'
 import {
   PaymentProvider,
@@ -462,6 +463,7 @@ export default async function ProBookingDetailPage(props: {
               booking.finishedAt ? booking.finishedAt.toISOString() : null
             }
             timeZone={apptTz}
+            noShowFeatureEnabled={noShowProtectionEnabled()}
           />
         </div>
       </section>

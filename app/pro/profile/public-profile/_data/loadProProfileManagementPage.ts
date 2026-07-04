@@ -17,6 +17,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { countFollowers } from '@/lib/follows'
 import { isRecord } from '@/lib/guards'
 import { vanityLinkFor } from '@/lib/handles'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import {
@@ -260,6 +261,7 @@ export async function loadProProfileManagementPage({
 
     editProfileInitial: buildEditProfileInitial(pro),
     paymentSettingsInitial: buildPaymentSettingsInitial(pro),
+    noShowFeatureEnabled: noShowProtectionEnabled(),
 
     portfolio,
     reviews: {

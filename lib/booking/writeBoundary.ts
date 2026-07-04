@@ -20,6 +20,8 @@ import {
   MediaPhase,
   MediaType,
   MediaVisibility,
+  NoShowFeeReason,
+  NoShowFeeStatus,
   NotificationEventKey,
   NotificationPriority,
   OpeningStatus,
@@ -5385,6 +5387,198 @@ await maybeCreateBookingCancelledNotification({
     },
     meta: buildMeta(true),
   }
+}
+
+// ─── No-show / late-cancel fee (Phase 2 revenue protection) ──────────────────
+//
+// Marking a booking NO_SHOW is a pro-driven terminal transition (like cancel).
+// The fee CHARGE cannot run inside this transaction (Stripe I/O), so the flow is
+// two-phase, mirroring the checkout prepare→charge→record pattern:
+//   1. markBookingNoShow — locked status transition to NO_SHOW.
+//   2. assessAndChargeNoShowFee (lib/noShowProtection/charge.ts) — off-session
+//      Stripe charge, then recordNoShowFeeCharge to persist the outcome.
+
+export type MarkBookingNoShowResult = {
+  booking: { id: string; status: BookingStatus }
+  meta: MutationMeta
+  /** True when the booking was already NO_SHOW (idempotent no-op). */
+  alreadyNoShow: boolean
+}
+
+async function performLockedMarkNoShow(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  professionalId: string
+  actorUserId?: string | null
+}): Promise<MarkBookingNoShowResult> {
+  const booking = await loadBookingForCancel(args.tx, args.bookingId)
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.status === BookingStatus.NO_SHOW) {
+    return {
+      booking: { id: booking.id, status: booking.status },
+      meta: buildMeta(false),
+      alreadyNoShow: true,
+    }
+  }
+
+  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  // A no-show is only meaningful for a confirmed-but-not-started appointment.
+  if (booking.status !== BookingStatus.ACCEPTED) {
+    throw bookingError('FORBIDDEN', {
+      message: `Booking status ${booking.status} cannot be marked no-show.`,
+      userMessage: 'Only confirmed appointments can be marked as a no-show.',
+    })
+  }
+
+  recordStatusTransition({
+    from: booking.status,
+    to: BookingStatus.NO_SHOW,
+    actor: 'PRO',
+    route: 'lib/booking/writeBoundary.ts:markBookingNoShow',
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+  })
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      status: BookingStatus.NO_SHOW,
+      sessionStep: SessionStep.NONE,
+      startedAt: null,
+      finishedAt: null,
+      noShowMarkedAt: args.now,
+    },
+    select: { id: true, status: true } satisfies Prisma.BookingSelect,
+  })
+
+  await cancelBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: booking.id,
+  })
+
+  await bumpProfessionalScheduleVersion(booking.professionalId)
+
+  return {
+    booking: { id: updated.id, status: updated.status },
+    meta: buildMeta(true),
+    alreadyNoShow: false,
+  }
+}
+
+/**
+ * Pro (or admin-on-behalf) marks a confirmed booking as a no-show. Terminal
+ * transition to BookingStatus.NO_SHOW under the professional's schedule lock.
+ * Does NOT charge a fee — the caller runs assessAndChargeNoShowFee after this
+ * commits (Stripe I/O can't live in the transaction).
+ */
+export async function markBookingNoShow(args: {
+  bookingId: string
+  professionalId: string
+  actorUserId?: string | null
+}): Promise<MarkBookingNoShowResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) =>
+      performLockedMarkNoShow({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        actorUserId: args.actorUserId ?? null,
+      }),
+  )
+}
+
+/**
+ * Persist the outcome of a no-show / late-cancel fee charge on the booking, and
+ * notify the client when the card was actually charged. Ownership-scoped to the
+ * professional. Idempotent: a booking already in NoShowFeeStatus.CHARGED is never
+ * overwritten. This is the only Booking write for the fee — the charge itself is
+ * performed by lib/noShowProtection/charge.ts, which calls this.
+ */
+export async function recordNoShowFeeCharge(args: {
+  bookingId: string
+  professionalId: string
+  status: NoShowFeeStatus
+  reason: NoShowFeeReason
+  amount: Prisma.Decimal | null
+  stripePaymentIntentId: string | null
+  now?: Date
+}): Promise<void> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  const now = args.now ?? new Date()
+
+  await withLockedProfessionalTransaction(args.professionalId, async ({ tx }) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        noShowFeeStatus: true,
+      },
+    })
+
+    if (!booking || booking.professionalId !== args.professionalId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    // A prior success is authoritative; never clobber it.
+    if (booking.noShowFeeStatus === NoShowFeeStatus.CHARGED) return
+
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        noShowFeeStatus: args.status,
+        noShowFeeReason: args.reason,
+        noShowFeeAmount: args.amount ?? undefined,
+        noShowFeeStripePaymentIntentId: args.stripePaymentIntentId ?? undefined,
+        noShowFeeChargedAt:
+          args.status === NoShowFeeStatus.CHARGED ? now : undefined,
+      },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+
+    if (args.status === NoShowFeeStatus.CHARGED && args.amount) {
+      const reasonLabel =
+        args.reason === NoShowFeeReason.NO_SHOW
+          ? 'missed appointment'
+          : 'late cancellation'
+      await createUpdateClientNotification({
+        tx,
+        clientId: booking.clientId,
+        bookingId: booking.id,
+        eventKey: NotificationEventKey.NO_SHOW_FEE_CHARGED,
+        title: 'A fee was charged',
+        body: `Your saved card was charged $${args.amount.toFixed(
+          2,
+        )} for a ${reasonLabel}.`,
+        dedupeKey: `NO_SHOW_FEE:${booking.id}`,
+        href: `/client/bookings/${booking.id}?step=overview`,
+        data: {
+          reason: args.reason,
+          amount: args.amount.toFixed(2),
+        },
+      })
+    }
+  })
 }
 
 async function performLockedStartBookingSession(args: {

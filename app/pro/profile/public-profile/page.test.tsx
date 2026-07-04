@@ -139,6 +139,7 @@ function makeModel(
       paypalHandle: null,
       paymentNote: null,
     },
+    noShowFeatureEnabled: false,
 
     portfolio: {
       tiles: [],
