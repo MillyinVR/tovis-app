@@ -126,6 +126,8 @@ export type LooksDetailServiceDto = {
 export type LooksDetailCountsDto = LooksCountsDto & {
   saves: number
   shares: number
+  // Denormalized, sampled view total (feed impressions + detail opens).
+  views: number
 }
 
 export type LooksDetailViewerContextDto = {

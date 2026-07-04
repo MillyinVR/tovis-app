@@ -298,6 +298,7 @@ function makeDetailItem(): LooksDetailItemDto {
       comments: 1,
       saves: 2,
       shares: 3,
+      views: 87,
     },
     viewerContext: {
       isAuthenticated: true,

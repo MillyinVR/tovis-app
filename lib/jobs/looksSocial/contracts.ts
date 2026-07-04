@@ -10,6 +10,7 @@ export const LOOKS_SOCIAL_JOB_TYPES = [
   LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
   LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
   LooksSocialJobType.MODERATION_SCAN_COMMENT,
+  LooksSocialJobType.APPLY_LOOK_VIEWS,
 ] as const
 
 export type RecomputeLookCountsJobPayload = {
@@ -44,6 +45,13 @@ export type ModerationScanCommentJobPayload = {
   commentId: string
 }
 
+export type ApplyLookViewsJobPayload = {
+  // Look ids that received a view since the last flush. Each id is incremented
+  // by one (the client already dedupes per session), so a repeated id in the
+  // list still counts once — see buildApplyLookViewsUpdate.
+  lookPostIds: string[]
+}
+
 export type LooksSocialJobPayloadByType = {
   [LooksSocialJobType.RECOMPUTE_LOOK_COUNTS]: RecomputeLookCountsJobPayload
   [LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE]: RecomputeLookSpotlightScoreJobPayload
@@ -53,6 +61,7 @@ export type LooksSocialJobPayloadByType = {
   [LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT]: IndexLookPostDocumentJobPayload
   [LooksSocialJobType.MODERATION_SCAN_LOOK_POST]: ModerationScanLookPostJobPayload
   [LooksSocialJobType.MODERATION_SCAN_COMMENT]: ModerationScanCommentJobPayload
+  [LooksSocialJobType.APPLY_LOOK_VIEWS]: ApplyLookViewsJobPayload
 }
 
 export type LooksSocialJobRequest<
@@ -104,6 +113,8 @@ export function makeEmptyLooksSocialJobPerTypeCounts(): LooksSocialJobPerTypeCou
     [LooksSocialJobType.MODERATION_SCAN_LOOK_POST]:
       makeEmptyLooksSocialJobBatchCounts(),
     [LooksSocialJobType.MODERATION_SCAN_COMMENT]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.APPLY_LOOK_VIEWS]:
       makeEmptyLooksSocialJobBatchCounts(),
   }
 }

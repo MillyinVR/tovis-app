@@ -3,7 +3,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { isRecord } from '@/lib/guards'
@@ -26,6 +26,7 @@ import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
 import { useProFollow } from '../_components/useProFollow'
+import { trackLookView } from '../_lib/viewTracker'
 
 function currentLooksDetailPath(lookPostId: string): string {
   return `/looks/${encodeURIComponent(lookPostId)}`
@@ -73,6 +74,12 @@ export default function LookDetailClient({
   const { brand } = useBrand()
 
   const [item, setItem] = useState(initialItem)
+
+  // Record the detail open as a sampled view (B2). The tracker dedupes per
+  // session, so a back-and-forth to the same look only counts once.
+  useEffect(() => {
+    trackLookView(initialItem.id)
+  }, [initialItem.id])
 
   const [commentsOpen, setCommentsOpen] = useState(false)
 
@@ -442,6 +449,10 @@ export default function LookDetailClient({
             ) : null}
 
             <div className="flex flex-wrap gap-3 text-[12px] text-textSecondary">
+              <span>
+                <span className="font-black text-textPrimary">Views:</span>{' '}
+                {item._count.views}
+              </span>
               <span>
                 <span className="font-black text-textPrimary">Likes:</span>{' '}
                 {item._count.likes}

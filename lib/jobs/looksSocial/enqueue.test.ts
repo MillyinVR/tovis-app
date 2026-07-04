@@ -6,6 +6,7 @@ import {
 } from '@prisma/client'
 
 import {
+  enqueueApplyLookViews,
   enqueueFanOutNewLookNotifications,
   enqueueFanOutViralRequestApprovalNotifications,
   enqueueIndexLookPostDocument,
@@ -265,6 +266,43 @@ describe('lib/jobs/looksSocial/enqueue', () => {
       expect(result.dedupeKey).toBe(
         'look:look_42:recompute-counts',
       )
+    })
+
+    it('enqueueApplyLookViews enqueues a nonce-keyed job with the deduped id list', async () => {
+      const db = makeDb()
+      const prismaDb = asLooksSocialJobDb(db)
+
+      db.looksSocialJob.upsert.mockResolvedValue(
+        makeJobRow({
+          id: 'job_views_1',
+          type: LooksSocialJobType.APPLY_LOOK_VIEWS,
+          dedupeKey: 'look-views:nonce',
+        }),
+      )
+
+      const result = await enqueueApplyLookViews(prismaDb, {
+        lookPostIds: ['look_1', ' look_1 ', 'look_2'],
+      })
+
+      expect(db.looksSocialJob.upsert).toHaveBeenCalledTimes(1)
+      const call = db.looksSocialJob.upsert.mock.calls[0]?.[0]
+      // Nonce dedupeKey (each flush is its own row — no upsert collapse).
+      expect(call.where.dedupeKey).toMatch(/^look-views:/)
+      expect(call.create.type).toBe(LooksSocialJobType.APPLY_LOOK_VIEWS)
+      expect(call.create.payload).toEqual({
+        lookPostIds: ['look_1', 'look_2'],
+      })
+      expect(result?.type).toBe(LooksSocialJobType.APPLY_LOOK_VIEWS)
+    })
+
+    it('enqueueApplyLookViews returns null and enqueues nothing for an empty batch', () => {
+      const db = makeDb()
+      const prismaDb = asLooksSocialJobDb(db)
+
+      const result = enqueueApplyLookViews(prismaDb, { lookPostIds: ['', '  '] })
+
+      expect(result).toBeNull()
+      expect(db.looksSocialJob.upsert).not.toHaveBeenCalled()
     })
 
     it('enqueueRecomputeLookSpotlightScore builds the canonical dedupe key and payload', async () => {
