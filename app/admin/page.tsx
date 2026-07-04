@@ -161,6 +161,13 @@ export default async function AdminHomePage() {
                 tone="highlight"
               />
               <Card
+                title="Looks moderation"
+                desc="Reported, pending, and flagged looks & comments across tenants; approve/reject/remove, dismiss reports, or feature into Spotlight."
+                href="/admin/looks"
+                cta="Moderate looks"
+                tone="highlight"
+              />
+              <Card
                 title="Permissions"
                 desc="Scope what admins can do."
                 href="/admin/permissions"
