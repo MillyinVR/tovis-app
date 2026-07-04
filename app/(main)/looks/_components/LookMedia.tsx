@@ -3,6 +3,7 @@
 
 import type { FeedItem } from './lookTypes'
 import MediaFill from '@/app/_components/media/MediaFill'
+import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 
 type FeedItemWithRender = FeedItem & {
   renderUrl?: string | null
@@ -31,6 +32,27 @@ export default function LookMedia({ item, isActive }: { item: FeedItemWithRender
       <div className="grid h-full w-full place-items-center bg-bgPrimary/30 text-[12px] font-black text-textSecondary">
         Missing media URL
       </div>
+    )
+  }
+
+  // Before/after pairing → the reveal slider is the money-shot. Only for images
+  // (never a video), and it must let vertical swipes fall through to the pager
+  // (passVerticalScroll) so it doesn't fight the feed's snap scroll.
+  const beforeSrc =
+    mediaType === 'IMAGE' && item.before
+      ? pickNonEmpty(item.before.thumbUrl) ?? pickNonEmpty(item.before.fullUrl)
+      : null
+
+  if (beforeSrc) {
+    return (
+      <BeforeAfterReveal
+        beforeSrc={beforeSrc}
+        afterSrc={src}
+        beforeAlt={item.caption ? `Before — ${item.caption}` : 'Before'}
+        afterAlt={item.caption || 'Look'}
+        className="brand-before-after-fill h-full w-full"
+        passVerticalScroll
+      />
     )
   }
 

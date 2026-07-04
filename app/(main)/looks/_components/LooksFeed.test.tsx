@@ -288,6 +288,7 @@ function makeFeedItem(
     category: 'Hair',
     serviceIds: ['service_1'],
     priceStartingAt: null,
+    before: null,
     uploadedByRole: null,
     reviewId: null,
     reviewHelpfulCount: null,

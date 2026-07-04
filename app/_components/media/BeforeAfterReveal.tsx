@@ -12,10 +12,27 @@ type Props = {
   beforeAlt: string
   afterAlt: string
   className?: string
+  /**
+   * Let vertical gestures fall through to a scrolling ancestor (the Looks feed's
+   * vertical snap pager) while the slider still owns *horizontal* drags. When
+   * false (the default, for small tiles in a normally-scrolling page) the slider
+   * owns every gesture the moment a pointer lands — `touch-action: none`, and a
+   * tap moves the divider. When true, `touch-action: pan-y` keeps native
+   * vertical scrolling, a plain tap does nothing (so double-tap-to-like still
+   * reaches the slide), and only a decisively horizontal drag engages the wipe.
+   */
+  passVerticalScroll?: boolean
 }
 
 /** Keyboard nudge, in fraction units (matches the arrow-key feel of a slider). */
 const STEP = 0.04
+
+/**
+ * Horizontal travel (px) a pointer must exceed — and beat its vertical travel —
+ * before the slider claims the gesture in `passVerticalScroll` mode. Below this
+ * the browser is still free to start a vertical scroll.
+ */
+const ENGAGE_THRESHOLD_PX = 8
 
 /**
  * Interactive before/after comparison slider — the web counterpart of the iOS
@@ -37,11 +54,15 @@ export default function BeforeAfterReveal({
   beforeAlt,
   afterAlt,
   className,
+  passVerticalScroll = false,
 }: Props) {
   /** How much of the "before" is revealed from the left, 0…1. */
   const [fraction, setFraction] = useState(0.5)
   const containerRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
+  // In passVerticalScroll mode we don't claim the gesture until a horizontal
+  // drag proves itself; this holds the pointer's origin while we watch it.
+  const pendingStartRef = useRef<{ x: number; y: number } | null>(null)
 
   const setFromClientX = useCallback((clientX: number) => {
     const el = containerRef.current
@@ -54,6 +75,14 @@ export default function BeforeAfterReveal({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      if (passVerticalScroll) {
+        // Watch, don't claim: let the browser keep the option of a vertical
+        // scroll until the pointer moves decisively sideways. No capture, no
+        // preventDefault, no stopPropagation yet.
+        pendingStartRef.current = { x: e.clientX, y: e.clientY }
+        draggingRef.current = false
+        return
+      }
       // Own the gesture: never let a tap/drag reach a parent link/button.
       e.preventDefault()
       e.stopPropagation()
@@ -61,19 +90,42 @@ export default function BeforeAfterReveal({
       e.currentTarget.setPointerCapture(e.pointerId)
       setFromClientX(e.clientX)
     },
-    [setFromClientX],
+    [passVerticalScroll, setFromClientX],
   )
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!draggingRef.current) return
+      if (!draggingRef.current) {
+        const start = pendingStartRef.current
+        if (!start) return
+        const dx = e.clientX - start.x
+        const dy = e.clientY - start.y
+        // Vertical intent wins → release it to the pager and stop watching.
+        if (Math.abs(dy) > ENGAGE_THRESHOLD_PX && Math.abs(dy) >= Math.abs(dx)) {
+          pendingStartRef.current = null
+          return
+        }
+        // Decisively horizontal → claim the gesture for the wipe.
+        if (Math.abs(dx) > ENGAGE_THRESHOLD_PX && Math.abs(dx) > Math.abs(dy)) {
+          draggingRef.current = true
+          pendingStartRef.current = null
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }
+        return
+      }
+      if (passVerticalScroll) {
+        // Now that we own it, keep the browser from also scrolling.
+        e.preventDefault()
+        e.stopPropagation()
+      }
       setFromClientX(e.clientX)
     },
-    [setFromClientX],
+    [passVerticalScroll, setFromClientX],
   )
 
   const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     draggingRef.current = false
+    pendingStartRef.current = null
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId)
     }
@@ -111,6 +163,9 @@ export default function BeforeAfterReveal({
     <div
       ref={containerRef}
       className={cn('brand-before-after-reveal', className)}
+      // pan-y hands vertical panning back to the feed pager; the pointer handlers
+      // still claim horizontal drags for the wipe (see passVerticalScroll).
+      style={passVerticalScroll ? { touchAction: 'pan-y' } : undefined}
       role="slider"
       tabIndex={0}
       aria-label="Before and after comparison — drag to reveal"
@@ -124,6 +179,9 @@ export default function BeforeAfterReveal({
       onPointerCancel={endDrag}
       onKeyDown={onKeyDown}
       onClick={(e) => {
+        // In passthrough mode a plain tap is left alone so double-tap-to-like on
+        // the feed slide still fires; a drag never produces a click here anyway.
+        if (passVerticalScroll) return
         e.preventDefault()
         e.stopPropagation()
       }}

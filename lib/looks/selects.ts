@@ -1,6 +1,8 @@
 // lib/looks/selects.ts
 import { Prisma } from '@prisma/client'
 
+import { pairedBeforeAssetSelect } from '@/lib/profiles/publicProfileSelects'
+
 const looksServiceCategorySelect =
   Prisma.validator<Prisma.ServiceCategorySelect>()({
     name: true,
@@ -83,6 +85,17 @@ const looksMediaPreviewSelect =
     createdAt: true,
   })
 
+// The feed card's primary media additionally carries its opt-in before/after
+// pairing so the reveal slider can render inline in the pager (parity with the
+// portfolio grid + review surfaces). Board previews keep the leaner select.
+const looksFeedPrimaryMediaSelect =
+  Prisma.validator<Prisma.MediaAssetSelect>()({
+    ...looksMediaPreviewSelect,
+    beforeAsset: {
+      select: pairedBeforeAssetSelect,
+    },
+  })
+
 const looksDetailMediaAssetSelect =
   Prisma.validator<Prisma.MediaAssetSelect>()({
     id: true,
@@ -100,6 +113,12 @@ const looksDetailMediaAssetSelect =
     isEligibleForLooks: true,
     isFeaturedInPortfolio: true,
     reviewId: true,
+
+    // Opt-in before/after pairing → the detail page renders the reveal slider
+    // for the primary asset when present.
+    beforeAsset: {
+      select: pairedBeforeAssetSelect,
+    },
 
     review: {
       select: {
@@ -140,7 +159,7 @@ export const looksFeedSelect =
     rankScore: true,
 
     primaryMediaAsset: {
-      select: looksMediaPreviewSelect,
+      select: looksFeedPrimaryMediaSelect,
     },
 
     professional: {

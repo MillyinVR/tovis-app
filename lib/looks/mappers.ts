@@ -4,7 +4,11 @@ import 'server-only'
 import { MediaType } from '@prisma/client'
 import type { MediaVisibility, Role } from '@prisma/client'
 
-import { mapPairedBeforeToDto } from '@/lib/media/pairedBefore'
+import {
+  mapPairedBeforeToDto,
+  type PairedBeforeAssetInput,
+  type PairedBeforeDto,
+} from '@/lib/media/pairedBefore'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import {
   resolveLookPrimaryService,
@@ -143,6 +147,9 @@ type FeedPrimaryMediaShape = StoredMediaShape & {
     rating: number
     headline: string | null
   } | null
+  // Opt-in before/after pairing on the "after" asset (image only); drives the
+  // in-feed reveal slider.
+  beforeAsset?: PairedBeforeAssetInput | null
 }
 
 type RenderableStoredMedia<T extends StoredMediaShape> = T & {
@@ -156,7 +163,13 @@ export type LooksRenderableDetailMedia = Omit<
   LooksDetailRow,
   'primaryMediaAsset' | 'assets'
 > & {
-  primaryMediaAsset: RenderableStoredMedia<LooksDetailRow['primaryMediaAsset']>
+  primaryMediaAsset: RenderableStoredMedia<
+    LooksDetailRow['primaryMediaAsset']
+  > & {
+    // Resolved opt-in before/after pairing for the primary asset (image only),
+    // computed during the async render step so the sync DTO mapper can read it.
+    before: PairedBeforeDto | null
+  }
   assets: Array<
     Omit<LooksDetailAssetRow, 'mediaAsset'> & {
       mediaAsset: RenderableStoredMedia<LooksDetailAssetRow['mediaAsset']>
@@ -399,6 +412,13 @@ export async function mapLooksFeedMediaToDto(args: {
   })
   const primaryService = toLookPrimaryServiceSummary(resolvedPrimaryService)
 
+  // Only an image "after" carries a pairing (parity with the portfolio/review
+  // mappers) — a video primary never renders the reveal slider.
+  const before =
+    primaryMedia.mediaType === MediaType.IMAGE
+      ? await mapPairedBeforeToDto(primaryMedia.beforeAsset ?? null)
+      : null
+
   return {
     id: item.id,
     url: rendered.url,
@@ -437,6 +457,8 @@ export async function mapLooksFeedMediaToDto(args: {
     serviceIds: resolvedPrimaryService.serviceIds,
 
     priceStartingAt: toFinitePrice(item.priceStartingAt),
+
+    before,
 
     uploadedByRole: primaryMedia.uploadedByRole ?? null,
     reviewId: primaryMedia.reviewId ?? null,
@@ -576,6 +598,13 @@ export async function mapLooksDetailMediaToRenderable(
 
   if (!primaryMediaAsset) return null
 
+  // Resolve the primary asset's before/after pairing to renderable URLs (image
+  // only, parity with the feed/portfolio mappers) so the detail slider matches.
+  const primaryBefore =
+    item.primaryMediaAsset.mediaType === MediaType.IMAGE
+      ? await mapPairedBeforeToDto(item.primaryMediaAsset.beforeAsset ?? null)
+      : null
+
   const assets = await Promise.all(
     item.assets.map(async (asset) => {
       const mediaAsset = await mapStoredMediaToRenderable(asset.mediaAsset)
@@ -590,7 +619,10 @@ export async function mapLooksDetailMediaToRenderable(
 
   return {
     ...item,
-    primaryMediaAsset,
+    primaryMediaAsset: {
+      ...primaryMediaAsset,
+      before: primaryBefore,
+    },
     assets: assets.filter(isNonNull),
   }
 }
@@ -686,6 +718,7 @@ export function mapLooksDetailToDto(args: {
       : null,
 
     primaryMedia: mapRenderableLooksDetailMediaToDto(item.primaryMediaAsset),
+    before: item.primaryMediaAsset.before,
 
     assets: item.assets.map((asset): LooksDetailAssetDto => ({
       id: asset.id,

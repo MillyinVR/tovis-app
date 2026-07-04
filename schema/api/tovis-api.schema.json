@@ -6233,6 +6233,16 @@
           },
           "type": "array"
         },
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PairedBeforeDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "caption": {
           "type": [
             "string",
@@ -6306,6 +6316,7 @@
         "clientAuthor",
         "service",
         "primaryMedia",
+        "before",
         "assets",
         "_count",
         "viewerContext"
@@ -6459,6 +6470,16 @@
         "_count": {
           "$ref": "#/definitions/LooksCountsDto"
         },
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PairedBeforeDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "caption": {
           "type": [
             "string",
@@ -6605,7 +6626,8 @@
         "reviewId",
         "reviewHelpfulCount",
         "reviewRating",
-        "reviewHeadline"
+        "reviewHeadline",
+        "before"
       ],
       "type": "object"
     },

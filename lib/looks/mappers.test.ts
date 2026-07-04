@@ -74,6 +74,7 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
       mediaType: MediaType.IMAGE,
       caption: 'Primary caption',
       createdAt: new Date('2026-04-18T11:30:00.000Z'),
+      beforeAsset: null,
     },
     professional: {
       id: 'pro_1',
@@ -162,6 +163,7 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
       isEligibleForLooks: true,
       isFeaturedInPortfolio: false,
       reviewId: 'review_1',
+      beforeAsset: null,
       review: {
         id: 'review_1',
         rating: 5,
@@ -191,6 +193,7 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
           isEligibleForLooks: true,
           isFeaturedInPortfolio: false,
           reviewId: 'review_1',
+          beforeAsset: null,
           review: {
             id: 'review_1',
             rating: 5,
@@ -393,6 +396,7 @@ describe('lib/looks/mappers.ts', () => {
         category: null,
         serviceIds: ['service_1'],
         priceStartingAt: null,
+        before: null,
         uploadedByRole: null,
         reviewId: null,
         reviewHelpfulCount: null,
@@ -443,6 +447,7 @@ describe('lib/looks/mappers.ts', () => {
         category: 'Hair',
         serviceIds: ['service_1'],
         priceStartingAt: null,
+        before: null,
         uploadedByRole: null,
         reviewId: null,
         reviewHelpfulCount: null,
@@ -466,6 +471,50 @@ describe('lib/looks/mappers.ts', () => {
       expect(result?.priceStartingAt).toBe(240)
     })
 
+    it('resolves the paired before for an image primary asset (feed slider)', async () => {
+      const base = makeFeedRow()
+      const row: LooksFeedRow = {
+        ...base,
+        primaryMediaAsset: {
+          ...base.primaryMediaAsset,
+          beforeAsset: {
+            id: 'before_1',
+            mediaType: MediaType.IMAGE,
+            storageBucket: 'media-public',
+            storagePath: 'looks/before.jpg',
+            thumbBucket: null,
+            thumbPath: null,
+            url: 'https://cdn.example.com/before.jpg',
+            thumbUrl: 'https://cdn.example.com/before-thumb.jpg',
+          },
+        },
+      }
+
+      const result = await mapLooksFeedMediaToDto({
+        item: row,
+        viewerLiked: false,
+        viewerSaved: false,
+        viewerFollows: false,
+      })
+
+      expect(result?.before).toEqual({
+        id: 'before_1',
+        thumbUrl: 'https://cdn.example.com/before-thumb.jpg',
+        fullUrl: 'https://cdn.example.com/before.jpg',
+      })
+    })
+
+    it('leaves before null when the primary asset has no pairing', async () => {
+      const result = await mapLooksFeedMediaToDto({
+        item: makeFeedRow(),
+        viewerLiked: false,
+        viewerSaved: false,
+        viewerFollows: false,
+      })
+
+      expect(result?.before).toBeNull()
+    })
+
     it('uses rendered URLs when direct URLs are missing', async () => {
       const row = makeFeedRow({
         primaryMediaAsset: {
@@ -479,6 +528,7 @@ describe('lib/looks/mappers.ts', () => {
           mediaType: MediaType.IMAGE,
           caption: 'Primary caption',
           createdAt: new Date('2026-04-18T11:30:00.000Z'),
+          beforeAsset: null,
         },
       })
 
@@ -517,6 +567,7 @@ describe('lib/looks/mappers.ts', () => {
           mediaType: MediaType.IMAGE,
           caption: 'Primary caption',
           createdAt: new Date('2026-04-18T11:30:00.000Z'),
+          beforeAsset: null,
         },
       })
 
@@ -978,6 +1029,7 @@ describe('lib/looks/mappers.ts', () => {
           isEligibleForLooks: true,
           isFeaturedInPortfolio: false,
           reviewId: 'review_1',
+          beforeAsset: null,
           review: {
             id: 'review_1',
             rating: 5,
@@ -1007,6 +1059,7 @@ describe('lib/looks/mappers.ts', () => {
               isEligibleForLooks: true,
               isFeaturedInPortfolio: false,
               reviewId: 'review_1',
+              beforeAsset: null,
               review: {
                 id: 'review_1',
                 rating: 5,
@@ -1039,6 +1092,72 @@ describe('lib/looks/mappers.ts', () => {
   })
 
   describe('mapLooksDetailToDto', () => {
+    it('surfaces the paired before for an image primary asset (detail slider)', async () => {
+      const base = makeDetailRow()
+      const row: LooksDetailRow = {
+        ...base,
+        primaryMediaAsset: {
+          ...base.primaryMediaAsset,
+          beforeAsset: {
+            id: 'before_1',
+            mediaType: MediaType.IMAGE,
+            storageBucket: 'media-public',
+            storagePath: 'looks/before.jpg',
+            thumbBucket: null,
+            thumbPath: null,
+            url: 'https://cdn.example.com/before.jpg',
+            thumbUrl: 'https://cdn.example.com/before-thumb.jpg',
+          },
+        },
+      }
+
+      const renderable = await mapLooksDetailMediaToRenderable(row)
+      if (!renderable) {
+        throw new Error('Expected renderable look detail row')
+      }
+
+      const result = mapLooksDetailToDto({
+        item: renderable,
+        viewerContext: {
+          isAuthenticated: true,
+          viewerLiked: false,
+          viewerSaved: false,
+          canComment: true,
+          canSave: true,
+          isOwner: false,
+          canModerate: false,
+        },
+      })
+
+      expect(result.before).toEqual({
+        id: 'before_1',
+        thumbUrl: 'https://cdn.example.com/before-thumb.jpg',
+        fullUrl: 'https://cdn.example.com/before.jpg',
+      })
+    })
+
+    it('leaves detail before null when the primary asset has no pairing', async () => {
+      const renderable = await mapLooksDetailMediaToRenderable(makeDetailRow())
+      if (!renderable) {
+        throw new Error('Expected renderable look detail row')
+      }
+
+      const result = mapLooksDetailToDto({
+        item: renderable,
+        viewerContext: {
+          isAuthenticated: true,
+          viewerLiked: false,
+          viewerSaved: false,
+          canComment: true,
+          canSave: true,
+          isOwner: false,
+          canModerate: false,
+        },
+      })
+
+      expect(result.before).toBeNull()
+    })
+
     it('maps a renderable detail row into the stable detail DTO', async () => {
       const renderable = await mapLooksDetailMediaToRenderable(makeDetailRow())
 
@@ -1104,6 +1223,7 @@ describe('lib/looks/mappers.ts', () => {
             helpfulCount: 8,
           },
         },
+        before: null,
         assets: [
           {
             id: 'asset_1',

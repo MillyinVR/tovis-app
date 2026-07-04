@@ -22,6 +22,7 @@ import AvailabilityDrawer from '../../booking/AvailabilityDrawer'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
+import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
@@ -317,6 +318,26 @@ export default function LookDetailClient({
                 preload="metadata"
                 className="h-auto w-full max-h-[520px]"
               />
+            ) : item.before ? (
+              // Paired before/after → the reveal slider is the money-shot. Its
+              // 4:5 aspect is capped so the frame stays within the 520px band;
+              // passVerticalScroll keeps the page scrollable under a touch drag.
+              <div className="w-full max-w-[416px]">
+                <BeforeAfterReveal
+                  beforeSrc={
+                    item.before.thumbUrl ??
+                    item.before.fullUrl ??
+                    item.primaryMedia.url
+                  }
+                  afterSrc={item.primaryMedia.url}
+                  beforeAlt={
+                    item.caption ? `Before — ${item.caption}` : 'Before'
+                  }
+                  afterAlt={item.caption || `Look by ${proDisplayName}`}
+                  className="w-full"
+                  passVerticalScroll
+                />
+              </div>
             ) : (
               <RemoteImage
                 src={item.primaryMedia.url}
