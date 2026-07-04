@@ -16,6 +16,9 @@ export const lookAccessSelect =
     status: true,
     visibility: true,
     moderationStatus: true,
+    // Pre-mutation counts — the "before" side of milestone-threshold detection
+    // (the like/save routes diff these against the recomputed count post-commit).
+    likeCount: true,
     saveCount: true,
     professional: {
       select: {

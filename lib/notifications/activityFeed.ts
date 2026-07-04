@@ -24,6 +24,7 @@ export const ACTIVITY_FEED_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_LIKED,
   NotificationEventKey.LOOK_SAVED,
   NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
+  NotificationEventKey.LOOK_MILESTONE_REACHED,
 ]
 
 export type ActivityIconKind =
@@ -130,6 +131,16 @@ function readDataCount(data: Prisma.JsonValue | null): number {
   const value = data.count
   if (typeof value !== 'number' || !Number.isFinite(value)) return 1
   return Math.max(1, Math.trunc(value))
+}
+
+/** Reads the milestone threshold (e.g. 50) out of a milestone notification's JSON. */
+function readDataThreshold(data: Prisma.JsonValue | null): number | null {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return null
+  }
+  const value = data.threshold
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.trunc(value)
 }
 
 function buildFollowItem(
@@ -257,6 +268,24 @@ function buildNewLookItem(row: ActivityNotificationRow): ClientActivityItem {
   }
 }
 
+function buildMilestoneItem(row: ActivityNotificationRow): ClientActivityItem {
+  const metric = readDataString(row.data, 'metric')
+  const noun = metric === 'saves' ? 'saves' : 'likes'
+  const threshold = readDataThreshold(row.data)
+
+  return {
+    id: row.id,
+    iconKind: 'milestone',
+    who: 'Your look',
+    action: threshold ? `hit ${threshold} ${noun}` : `hit a new ${noun} milestone`,
+    highlight: null,
+    timestamp: row.createdAt.toISOString(),
+    unread: row.readAt === null,
+    href: row.href ?? null,
+    followBack: null,
+  }
+}
+
 function buildActivityItem(
   row: ActivityNotificationRow,
   ctx: {
@@ -275,6 +304,8 @@ function buildActivityItem(
       return buildEngagementItem(row, ctx)
     case NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO:
       return buildNewLookItem(row)
+    case NotificationEventKey.LOOK_MILESTONE_REACHED:
+      return buildMilestoneItem(row)
     default:
       // Not an event the feed knows how to present yet — skip it rather than
       // render a half-blank row. (The allowlist already filters the query.)

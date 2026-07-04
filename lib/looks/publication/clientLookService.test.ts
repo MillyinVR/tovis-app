@@ -5,6 +5,7 @@ import {
   MediaPhase,
   MediaType,
   MediaVisibility,
+  ModerationStatus,
   Role,
 } from '@prisma/client'
 
@@ -141,7 +142,8 @@ describe('createClientLookFromVisit', () => {
       isEligibleForLooks: true,
     })
 
-    // LookPost: client-authored, tagged pro, born-bookable service, PUBLISHED.
+    // LookPost: client-authored, tagged pro, born-bookable service, PUBLISHED,
+    // pre-moderated (PENDING_REVIEW) with the per-look feed opt-in (social C2).
     const lookData = mocks.lookPostCreate.mock.calls[0]![0].data
     expect(lookData).toMatchObject({
       clientAuthorId: CLIENT_ID,
@@ -149,6 +151,8 @@ describe('createClientLookFromVisit', () => {
       serviceId: 'svc_1',
       primaryMediaAssetId: 'media_new',
       visibility: LookPostVisibility.PUBLIC,
+      moderationStatus: ModerationStatus.PENDING_REVIEW,
+      publicToFeed: true,
       caption: 'Glazed donut blonde\nzero brass',
     })
 
@@ -334,7 +338,7 @@ describe('updateClientLookVisibility', () => {
     expect(result.visibility).toBe(LookPostVisibility.UNLISTED)
     expect(mocks.lookPostUpdate).toHaveBeenCalledWith({
       where: { id: 'look_1' },
-      data: { visibility: LookPostVisibility.UNLISTED },
+      data: { visibility: LookPostVisibility.UNLISTED, publicToFeed: false },
     })
   })
 

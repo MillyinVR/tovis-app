@@ -25,6 +25,7 @@
 import {
   LookPostStatus,
   LookPostVisibility,
+  ModerationStatus,
   MediaPhase,
   MediaType,
   MediaVisibility,
@@ -419,6 +420,13 @@ export async function createClientLookFromVisit(
         caption: lookCaption,
         status: LookPostStatus.PUBLISHED,
         visibility,
+        // Client UGC is pre-moderated (social-first C2 / App Store gate): a
+        // client look enters the AM1 /admin/looks PENDING queue and is NOT
+        // publicly visible (the feed requires moderationStatus APPROVED) until a
+        // human approves it. publicToFeed carries the client's per-look opt-in so
+        // it surfaces the moment it's approved (when shared publicly).
+        moderationStatus: ModerationStatus.PENDING_REVIEW,
+        publicToFeed: args.isPublic,
         publishedAt: now,
       },
       select: { id: true },
@@ -491,7 +499,10 @@ export async function updateClientLookVisibility(
   await db.$transaction(async (tx) => {
     await tx.lookPost.update({
       where: { id: lookPostId },
-      data: { visibility },
+      // Keep the per-look discovery opt-in in lockstep with the public/unlisted
+      // choice: unlisting a look pulls it from the feed, re-sharing re-adds it
+      // (still subject to the APPROVED moderation gate).
+      data: { visibility, publicToFeed: args.isPublic },
     })
     await recomputeLookPostScores(tx, lookPostId)
   })

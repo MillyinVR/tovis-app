@@ -113,7 +113,7 @@ describe('lib/looks/feed.ts', () => {
       )
     })
 
-    it('gates client-authored looks to opted-in public authors (pro looks always qualify)', () => {
+    it('gates client-authored looks to per-look opt-in (pro looks always qualify)', () => {
       const where = buildLooksFeedWhere({
         tenant: ROOT_TENANT,
         kind: 'ALL',
@@ -124,10 +124,7 @@ describe('lib/looks/feed.ts', () => {
       expect(andFilters).toEqual(
         expect.arrayContaining([
           {
-            OR: [
-              { clientAuthorId: null },
-              { clientAuthor: { is: { isPublicProfile: true } } },
-            ],
+            OR: [{ clientAuthorId: null }, { publicToFeed: true }],
           },
         ]),
       )

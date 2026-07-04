@@ -35,6 +35,7 @@ export type NotificationTemplateKey =
   | 'look_liked'
   | 'look_saved'
   | 'look_new_from_followed_pro'
+  | 'look_milestone'
   | 'referral_tap_received'
   | 'referral_confirmed'
   | 'referral_converted'
@@ -159,6 +160,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_LIKED,
   NotificationEventKey.LOOK_SAVED,
   NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
+  NotificationEventKey.LOOK_MILESTONE_REACHED,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
@@ -646,6 +648,27 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  // "Your look hit N likes / N saves" — a one-time supply-side growth nudge to
+  // the look's author each time a like/save threshold is crossed (fires once per
+  // look+metric+threshold). In-app + PUSH like the sibling social events; the
+  // permanent per-threshold dedupe means at most a handful ever per look, so it
+  // never becomes spammy. Recipient is the look's author (pro or client).
+  [NotificationEventKey.LOOK_MILESTONE_REACHED]: {
+    key: NotificationEventKey.LOOK_MILESTONE_REACHED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'look_milestone',
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.REFERRAL_TAP_RECEIVED]: {
     key: NotificationEventKey.REFERRAL_TAP_RECEIVED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -756,6 +779,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_COMMENT_REPLIED,
   NotificationEventKey.LOOK_LIKED,
   NotificationEventKey.LOOK_SAVED,
+  NotificationEventKey.LOOK_MILESTONE_REACHED,
 ]
 
 export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -785,6 +809,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_LIKED,
   NotificationEventKey.LOOK_SAVED,
   NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
+  NotificationEventKey.LOOK_MILESTONE_REACHED,
 ]
 
 export const ADMIN_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
