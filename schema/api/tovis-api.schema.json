@@ -154,6 +154,13 @@
       ],
       "type": "string"
     },
+    "$Enums.NoShowFeeType": {
+      "enum": [
+        "FLAT",
+        "PERCENT"
+      ],
+      "type": "string"
+    },
     "$Enums.NotificationChannel": {
       "enum": [
         "IN_APP",
@@ -186,6 +193,7 @@
         "PAYMENT_COLLECTED",
         "PAYMENT_ACTION_REQUIRED",
         "PAYMENT_REFUNDED",
+        "NO_SHOW_FEE_CHARGED",
         "LOOK_FOLLOWER_NEW",
         "CLIENT_FOLLOW",
         "LOOK_COMMENTED",
@@ -7428,6 +7436,9 @@
       ],
       "type": "object"
     },
+    "NoShowFeeType": {
+      "$ref": "#/definitions/%24Enums.NoShowFeeType"
+    },
     "NotificationCategoryEventMeta": {
       "properties": {
         "emailLocked": {
@@ -9222,6 +9233,108 @@
     },
     "ProNameDisplay": {
       "$ref": "#/definitions/%24Enums.ProNameDisplay"
+    },
+    "ProNoShowSettingsDTO": {
+      "description": "A pro's account-level no-show / late-cancel fee policy.",
+      "properties": {
+        "cancelWindowHours": {
+          "description": "Hours before start inside which a client cancel is a billable late cancel.",
+          "type": "number"
+        },
+        "chargeLateCancel": {
+          "description": "Charge when a client cancels inside the window.",
+          "type": "boolean"
+        },
+        "chargeNoShow": {
+          "description": "Charge when the pro marks a booking as a no-show.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Master opt-in. While false the pro never charges a fee.",
+          "type": "boolean"
+        },
+        "feeFlatAmount": {
+          "description": "Flat fee as a 2dp money string (e.g. \"25.00\"), or null when unset.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "feePercent": {
+          "description": "Percent of the booking total (1–100), or null when unset.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "feeType": {
+          "$ref": "#/definitions/NoShowFeeType",
+          "description": "How the fee is computed: a flat dollar amount or a percent of the total."
+        }
+      },
+      "required": [
+        "enabled",
+        "feeType",
+        "feeFlatAmount",
+        "feePercent",
+        "cancelWindowHours",
+        "chargeNoShow",
+        "chargeLateCancel"
+      ],
+      "type": "object"
+    },
+    "ProNoShowSettingsResponseDTO": {
+      "description": "Response for GET /api/v1/pro/no-show-settings.",
+      "properties": {
+        "settings": {
+          "$ref": "#/definitions/ProNoShowSettingsDTO"
+        }
+      },
+      "required": [
+        "settings"
+      ],
+      "type": "object"
+    },
+    "ProNoShowSettingsUpdateRequestDTO": {
+      "description": "Request body for PUT /api/v1/pro/no-show-settings.",
+      "properties": {
+        "cancelWindowHours": {
+          "type": "number"
+        },
+        "chargeLateCancel": {
+          "type": "boolean"
+        },
+        "chargeNoShow": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "feeFlatAmount": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "feePercent": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "feeType": {
+          "$ref": "#/definitions/NoShowFeeType"
+        }
+      },
+      "required": [
+        "enabled",
+        "feeType",
+        "feeFlatAmount",
+        "feePercent",
+        "chargeNoShow",
+        "chargeLateCancel"
+      ],
+      "type": "object"
     },
     "ProOverviewMetricItem": {
       "properties": {

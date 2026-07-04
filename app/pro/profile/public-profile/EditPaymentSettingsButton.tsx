@@ -3,9 +3,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import type { NoShowFeeType } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { zClass } from '@/lib/zIndex'
+import type {
+  ProNoShowSettingsDTO,
+  ProNoShowSettingsUpdateRequestDTO,
+} from '@/lib/dto/noShowSettings'
 
 export type PaymentCollectionTiming = 'AT_BOOKING' | 'AFTER_SERVICE'
 export type DepositType = 'FLAT' | 'PERCENT'
@@ -48,7 +53,17 @@ type Props = {
     paypalHandle: string | null
     paymentNote: string | null
   } | null
+
+  /**
+   * Phase 2 revenue protection flag (server-side `noShowProtectionEnabled()`).
+   * When false, the "No-show & late-cancel fees" section is not rendered and the
+   * separate no-show endpoints are never touched.
+   */
+  noShowFeatureEnabled?: boolean
 }
+
+// The cancel window is locked to 24h at launch — not an editable field.
+const NO_SHOW_CANCEL_WINDOW_HOURS = 24
 
 type TipSuggestionDraft = {
   id: string
@@ -127,7 +142,35 @@ function extractErrorMessage(data: unknown): string | null {
   return readErrorMessage(data)
 }
 
-export default function EditPaymentSettingsButton({ initial }: Props) {
+function parseNoShowSettings(data: unknown): ProNoShowSettingsDTO | null {
+  if (!isRecord(data)) return null
+
+  const settings = data.settings
+  if (!isRecord(settings)) return null
+
+  const feeType = settings.feeType
+  if (feeType !== 'FLAT' && feeType !== 'PERCENT') return null
+
+  return {
+    enabled: settings.enabled === true,
+    feeType,
+    feeFlatAmount:
+      typeof settings.feeFlatAmount === 'string' ? settings.feeFlatAmount : null,
+    feePercent:
+      typeof settings.feePercent === 'number' ? settings.feePercent : null,
+    cancelWindowHours:
+      typeof settings.cancelWindowHours === 'number'
+        ? settings.cancelWindowHours
+        : NO_SHOW_CANCEL_WINDOW_HOURS,
+    chargeNoShow: settings.chargeNoShow === true,
+    chargeLateCancel: settings.chargeLateCancel === true,
+  }
+}
+
+export default function EditPaymentSettingsButton({
+  initial,
+  noShowFeatureEnabled = false,
+}: Props) {
   const router = useRouter()
   const closeBtnRef = useRef<HTMLButtonElement | null>(null)
 
@@ -193,6 +236,16 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
   const [paypalHandle, setPaypalHandle] = useState(initial?.paypalHandle ?? '')
   const [paymentNote, setPaymentNote] = useState(initial?.paymentNote ?? '')
 
+  // No-show / late-cancel fees load from + save to their own endpoints, gated on
+  // `noShowFeatureEnabled`. The 24h cancel window is fixed and echoed back on save.
+  const [noShowEnabled, setNoShowEnabled] = useState(false)
+  const [noShowFeeType, setNoShowFeeType] = useState<NoShowFeeType>('FLAT')
+  const [noShowFeeFlatAmount, setNoShowFeeFlatAmount] = useState('')
+  const [noShowFeePercent, setNoShowFeePercent] = useState('')
+  const [chargeNoShow, setChargeNoShow] = useState(true)
+  const [chargeLateCancel, setChargeLateCancel] = useState(true)
+  const noShowCancelWindowHoursRef = useRef(NO_SHOW_CANCEL_WINDOW_HOURS)
+
   const busy = saving
 
   function beginClose() {
@@ -236,6 +289,41 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
     if (!open) return
     closeBtnRef.current?.focus()
   }, [open])
+
+  // Load the pro's current no-show / late-cancel fee policy when the modal opens.
+  // A 404 (flag off) or any failure leaves the section on its defaults.
+  useEffect(() => {
+    if (!open || !noShowFeatureEnabled) return
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/v1/pro/no-show-settings', {
+          headers: { Accept: 'application/json' },
+        })
+        if (!res.ok) return
+        const data = await safeJson(res)
+        const parsed = parseNoShowSettings(data)
+        if (!parsed || cancelled) return
+
+        setNoShowEnabled(parsed.enabled)
+        setNoShowFeeType(parsed.feeType)
+        setNoShowFeeFlatAmount(parsed.feeFlatAmount ?? '')
+        setNoShowFeePercent(
+          parsed.feePercent != null ? String(parsed.feePercent) : '',
+        )
+        setChargeNoShow(parsed.chargeNoShow)
+        setChargeLateCancel(parsed.chargeLateCancel)
+        noShowCancelWindowHoursRef.current = parsed.cancelWindowHours
+      } catch {
+        // Leave defaults in place — the section still saves cleanly.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, noShowFeatureEnabled])
 
   const acceptedMethodsCount = useMemo(() => {
     return [
@@ -345,6 +433,46 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
         throw new Error(
           extractErrorMessage(data) ?? 'Failed to save payment settings.',
         )
+      }
+
+      // No-show / late-cancel fees save through their own endpoint — never part
+      // of the payment-settings PATCH payload above.
+      if (noShowFeatureEnabled) {
+        const noShowPayload: ProNoShowSettingsUpdateRequestDTO = {
+          enabled: noShowEnabled,
+          feeType: noShowFeeType,
+          feeFlatAmount:
+            noShowEnabled && noShowFeeType === 'FLAT'
+              ? noShowFeeFlatAmount.trim()
+              : null,
+          feePercent:
+            noShowEnabled &&
+            noShowFeeType === 'PERCENT' &&
+            noShowFeePercent.trim()
+              ? Number(noShowFeePercent.trim())
+              : null,
+          cancelWindowHours: noShowCancelWindowHoursRef.current,
+          chargeNoShow,
+          chargeLateCancel,
+        }
+
+        const noShowRes = await fetch('/api/v1/pro/no-show-settings', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(noShowPayload),
+        })
+
+        const noShowData = await safeJson(noShowRes)
+
+        if (!noShowRes.ok) {
+          throw new Error(
+            extractErrorMessage(noShowData) ??
+              'Failed to save no-show fee settings.',
+          )
+        }
       }
 
       setSavedFlash(true)
@@ -546,6 +674,95 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
                   ) : null}
                 </div>
               </SectionCard>
+
+              {noShowFeatureEnabled ? (
+                <SectionCard
+                  title="No-show & late-cancel fees"
+                  subtitle="Protect your time by charging a fee when a client no-shows or cancels at the last minute. Fees are charged to the client's saved card on file."
+                >
+                  <div className="grid gap-3">
+                    <ToggleRow
+                      checked={noShowEnabled}
+                      onChange={setNoShowEnabled}
+                      label="Charge a no-show / late-cancel fee"
+                      description="When on, eligible bookings can be charged the fee below."
+                      disabled={busy}
+                    />
+
+                    {noShowEnabled ? (
+                      <>
+                        <div className="grid gap-2">
+                          <div className="text-[12px] font-black text-textSecondary">
+                            Fee amount
+                          </div>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            <RadioRow
+                              checked={noShowFeeType === 'FLAT'}
+                              onChange={() => setNoShowFeeType('FLAT')}
+                              label="Flat amount"
+                              description="A fixed dollar fee."
+                              disabled={busy}
+                              name="noShowFeeType"
+                            />
+                            <RadioRow
+                              checked={noShowFeeType === 'PERCENT'}
+                              onChange={() => setNoShowFeeType('PERCENT')}
+                              label="Percent of price"
+                              description="A share of the booking total."
+                              disabled={busy}
+                              name="noShowFeeType"
+                            />
+                          </div>
+                        </div>
+
+                        {noShowFeeType === 'FLAT' ? (
+                          <TextInput
+                            label="Fee amount ($)"
+                            value={noShowFeeFlatAmount}
+                            onChange={setNoShowFeeFlatAmount}
+                            placeholder="e.g. 25"
+                            disabled={busy}
+                          />
+                        ) : (
+                          <TextInput
+                            label="Fee percent (1–100)"
+                            value={noShowFeePercent}
+                            onChange={setNoShowFeePercent}
+                            placeholder="e.g. 50"
+                            disabled={busy}
+                          />
+                        )}
+
+                        <div className="grid gap-3">
+                          <div className="text-[12px] font-black text-textSecondary">
+                            When the fee applies
+                          </div>
+                          <ToggleRow
+                            checked={chargeNoShow}
+                            onChange={setChargeNoShow}
+                            label="No-shows"
+                            description="Charge when you mark a booking as a no-show."
+                            disabled={busy}
+                          />
+                          <ToggleRow
+                            checked={chargeLateCancel}
+                            onChange={setChargeLateCancel}
+                            label="Late cancellations"
+                            description="Charge when a client cancels within 24 hours of the appointment."
+                            disabled={busy}
+                          />
+                        </div>
+
+                        <div className="rounded-card border border-white/10 bg-bgPrimary/60 p-3 text-[11px] text-textSecondary">
+                          Applies to cancellations within 24 hours of the
+                          appointment. Charging a fee requires the client to have
+                          a saved card on file.
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                </SectionCard>
+              ) : null}
 
               <SectionCard
                 title="Accepted methods"

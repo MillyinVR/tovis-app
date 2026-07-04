@@ -62,6 +62,31 @@ describe('buildLifecycleActionViewModel — pro role', () => {
     expect(vm.displayLabel).toBe('Confirmed')
   })
 
+  it('ACCEPTED with no-show feature off → no Mark no-show action', () => {
+    const vm = buildLifecycleActionViewModel(
+      input({ status: BookingStatus.ACCEPTED, role: 'PRO' }),
+    )
+    expect(verbs(vm)).not.toContain('NO_SHOW')
+  })
+
+  it('ACCEPTED with no-show feature on → adds Mark no-show', () => {
+    const vm = buildLifecycleActionViewModel(
+      input({
+        status: BookingStatus.ACCEPTED,
+        role: 'PRO',
+        noShowFeatureEnabled: true,
+      }),
+    )
+    expect(verbs(vm)).toEqual(['START_SESSION', 'CANCEL', 'NO_SHOW'])
+
+    const noShow = vm.actions.find((a) => a.verb === 'NO_SHOW')
+    expect(requireDefined(noShow).method).toBe('POST')
+    expect(requireDefined(noShow).href).toBe(
+      `/api/v1/pro/bookings/${BOOKING_ID}/no-show`,
+    )
+    expect(requireDefined(noShow).confirmCopy).toBeTruthy()
+  })
+
   it('IN_PROGRESS at any non-DONE step → Continue session', () => {
     for (const step of [
       SessionStep.NONE,

@@ -70,7 +70,10 @@ export default function ProProfileCard({ model }: ProProfileCardProps) {
           initial={model.editProfileInitial}
         />
 
-        <EditPaymentSettingsButton initial={model.paymentSettingsInitial} />
+        <EditPaymentSettingsButton
+          initial={model.paymentSettingsInitial}
+          noShowFeatureEnabled={model.noShowFeatureEnabled}
+        />
 
         {model.profile.livePublicUrl ? (
           <Link

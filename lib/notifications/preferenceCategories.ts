@@ -84,6 +84,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: 'Payment action needed',
   [NotificationEventKey.PAYMENT_REFUNDED]: 'Refund issued',
+  [NotificationEventKey.NO_SHOW_FEE_CHARGED]: 'No-show / late-cancel fee',
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: 'New look follower',
   [NotificationEventKey.CLIENT_FOLLOW]: 'New follower',
   [NotificationEventKey.LOOK_COMMENTED]: 'Comments on your looks',
@@ -147,6 +148,7 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
       NotificationEventKey.PAYMENT_COLLECTED,
       NotificationEventKey.PAYMENT_ACTION_REQUIRED,
       NotificationEventKey.PAYMENT_REFUNDED,
+      NotificationEventKey.NO_SHOW_FEE_CHARGED,
     ],
   },
   {

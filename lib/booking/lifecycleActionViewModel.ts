@@ -31,6 +31,7 @@ export type LifecycleViewerRole = 'PRO' | 'CLIENT' | 'ADMIN'
 export type LifecycleActionVerb =
   | 'ACCEPT'
   | 'CANCEL'
+  | 'NO_SHOW'
   | 'START_SESSION'
   | 'CONTINUE_SESSION'
   | 'CLIENT_CANCEL'
@@ -93,6 +94,12 @@ export type LifecycleViewModelInput = {
   consultationApprovalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | null
   rescheduleHoldId?: string | null
   hasAftercareLink?: boolean
+  /**
+   * Whether Phase 2 revenue protection is live (server-side
+   * `noShowProtectionEnabled()`). Gates the pro "Mark no-show" action — the
+   * `/no-show` route 404s while the flag is off, so the button must stay hidden.
+   */
+  noShowFeatureEnabled?: boolean
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -228,6 +235,17 @@ function proActions(input: LifecycleViewModelInput): LifecycleAction[] {
       idempotencyKeyHint: idempotencyKeyHint(bookingId, 'CANCEL'),
       confirmCopy: 'Cancel this booking? This will notify the client.',
     })
+    if (input.noShowFeatureEnabled) {
+      actions.push({
+        verb: 'NO_SHOW',
+        label: 'Mark no-show',
+        method: 'POST',
+        href: `/api/v1/pro/bookings/${safeId}/no-show`,
+        idempotencyKeyHint: idempotencyKeyHint(bookingId, 'NO_SHOW'),
+        confirmCopy:
+          'Mark this client as a no-show? This may charge their saved card a fee per your no-show policy.',
+      })
+    }
     return actions
   }
 

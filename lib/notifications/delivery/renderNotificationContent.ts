@@ -320,6 +320,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   payment_collected: 'View payment',
   payment_action_required: 'Resolve payment',
   payment_refunded: 'View refund',
+  no_show_fee_charged: 'View details',
   look_follower_new: 'View your profile',
   client_follow: 'View activity',
   look_commented: 'View comment',
@@ -399,6 +400,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   payment_refunded: buildStandardTemplateRenderer(
     templateCtaLabels.payment_refunded,
+  ),
+  no_show_fee_charged: buildStandardTemplateRenderer(
+    templateCtaLabels.no_show_fee_charged,
   ),
   look_follower_new: buildStandardTemplateRenderer(
     templateCtaLabels.look_follower_new,

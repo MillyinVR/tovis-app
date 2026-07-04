@@ -1,8 +1,9 @@
 // app/api/v1/bookings/[id]/cancel/route.ts
 
-import { Role, type Prisma } from '@prisma/client'
+import { NoShowFeeReason, Role, type Prisma } from '@prisma/client'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
+import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
@@ -17,6 +18,8 @@ import {
   applyAutoCancelRefund,
   applyDiscoveryDepositCancelRefund,
 } from '@/lib/booking/cancelRefund'
+import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { safeError } from '@/lib/security/logging'
@@ -208,6 +211,21 @@ export async function POST(req: Request, ctx: RouteContext) {
         operation: 'POST /api/v1/bookings/[id]/cancel',
       },
       async () => {
+        // Capture the pre-cancel status: only a confirmed booking can incur a
+        // late-cancel fee (checked in assessAndChargeNoShowFee). Read before the
+        // cancel flips it to CANCELLED. Gated behind the feature flag so the DB
+        // read is skipped entirely while no-show protection is dark.
+        const lateCancelFeeActive =
+          actor.kind === 'client' && noShowProtectionEnabled()
+        const priorStatus = lateCancelFeeActive
+          ? ((
+              await prisma.booking.findUnique({
+                where: { id: bookingId },
+                select: { status: true },
+              })
+            )?.status ?? undefined)
+          : undefined
+
         const result = await cancelBooking({
           bookingId,
           actor,
@@ -230,6 +248,25 @@ export async function POST(req: Request, ctx: RouteContext) {
           actorUserId: user.id,
           cancelMutated: result.meta.mutated,
         })
+
+        // Late-cancel fee (Phase 2 revenue protection). Only a CLIENT cancel can
+        // incur one, and only when the cancel actually mutated and lands inside
+        // the pro's window (enforced in assessAndChargeNoShowFee). Best-effort:
+        // a charge failure never blocks the committed cancellation. Inert unless
+        // ENABLE_NO_SHOW_PROTECTION is on.
+        if (lateCancelFeeActive && result.meta.mutated) {
+          await assessAndChargeNoShowFee({
+            bookingId,
+            reason: NoShowFeeReason.LATE_CANCEL,
+            priorStatus,
+          }).catch((error: unknown) => {
+            console.error(
+              'POST /api/v1/bookings/[id]/cancel late-cancel fee error',
+              safeError(error),
+            )
+            return null
+          })
+        }
 
         return { status: 200, body: toCancelResponseBody(result) }
       },

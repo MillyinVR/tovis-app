@@ -5,6 +5,7 @@ import { BookingStatus, Prisma, SessionStep } from '@prisma/client'
 import { getCurrentUser } from '@/lib/currentUser'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import BookingActions from './BookingActions'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { moneyToString } from '@/lib/money'
 import {
   resolveBookingLocationMeta,
@@ -463,6 +464,7 @@ function Section({
                         booking.finishedAt ? booking.finishedAt.toISOString() : null
                       }
                       timeZone={rowTz}
+                      noShowFeatureEnabled={noShowProtectionEnabled()}
                     />
                   </div>
                 </div>

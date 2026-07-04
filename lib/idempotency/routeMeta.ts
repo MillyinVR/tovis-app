@@ -6,6 +6,7 @@ export const IDEMPOTENCY_ROUTES = {
   PRO_BOOKING_CREATE: 'POST /api/v1/pro/bookings',
   PRO_BOOKING_UPDATE: 'PATCH /api/v1/pro/bookings/[id]',
   PRO_BOOKING_CANCEL: 'PATCH /api/v1/pro/bookings/[id]/cancel',
+  PRO_BOOKING_NO_SHOW: 'POST /api/v1/pro/bookings/[id]/no-show',
   PRO_BOOKING_REBOOK: 'POST /api/v1/pro/bookings/[id]/rebook',
   PRO_BOOKING_FINAL_REVIEW: 'POST /api/v1/pro/bookings/[id]/final-review',
   PRO_BOOKING_CHECKOUT_MARK_PAID:

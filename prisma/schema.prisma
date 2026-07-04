@@ -581,6 +581,9 @@ enum NotificationEventKey {
   // Refund receipt (final-bill or deposit refund) — emitted from the refund
   // reconcile paths.
   PAYMENT_REFUNDED
+  // A no-show / late-cancel fee was charged to the client's saved card (Phase 2
+  // revenue protection). Client-facing receipt; inert unless the flag is on.
+  NO_SHOW_FEE_CHARGED
   LOOK_FOLLOWER_NEW
   // Client→client follow ("started following you") — powers the activity feed.
   CLIENT_FOLLOW
@@ -1708,6 +1711,7 @@ model ProfessionalProfile {
   nfcCards                   NfcCard[]
 
   paymentSettings    ProfessionalPaymentSettings?
+  noShowSettings     ProNoShowSettings?
   subscription       ProfessionalSubscription?
   lastMinuteSettings LastMinuteSettings?          @relation("ProLastMinuteSettings")
   lastMinuteOpenings LastMinuteOpening[]          @relation("ProOpenings")
@@ -2024,6 +2028,65 @@ model ProfessionalPaymentSettings {
   @@index([professionalId])
   @@index([stripeAccountId])
   @@index([stripeAccountStatus])
+}
+
+/// How a pro's no-show / late-cancel fee is computed. Mirrors DepositType.
+enum NoShowFeeType {
+  FLAT // a fixed dollar amount (feeFlatAmount)
+  PERCENT // a percentage of the booking total (feePercent, 1–100)
+}
+
+/// Which event triggered a booking's no-show / late-cancel fee.
+enum NoShowFeeReason {
+  NO_SHOW // pro marked the booking as a no-show
+  LATE_CANCEL // client cancelled inside the pro's cancel window
+}
+
+/// Outcome of a no-show / late-cancel fee off-session charge. Recorded on the
+/// Booking so the client and pro can see whether the saved card was actually
+/// billed. Phase 2 revenue protection; inert unless ENABLE_NO_SHOW_PROTECTION.
+enum NoShowFeeStatus {
+  // Fee was owed but no charge was attempted (e.g. client had no card on file).
+  SKIPPED
+  CHARGED // off-session PaymentIntent succeeded
+  FAILED // Stripe declined / authentication required off-session
+  WAIVED // pro/admin forgave the fee after the fact
+}
+
+/// Per-pro (account-level) no-show / late-cancel fee policy (Phase 2 revenue
+/// protection). One row per professional; created lazily on first save. Inert
+/// unless ENABLE_NO_SHOW_PROTECTION is on — nothing charges a card while the
+/// flag is dark. The fee is charged off-session against the client's default
+/// saved card and routed to the pro's connected account, mirroring the
+/// destination charge on client checkout.
+model ProNoShowSettings {
+  id             String @id @default(cuid())
+  professionalId String @unique
+
+  // Master opt-in. While false the pro never charges a no-show/late-cancel fee.
+  enabled Boolean @default(false)
+
+  // Fee shape (pro's choice: flat dollar amount or percent of booking total).
+  feeType       NoShowFeeType @default(FLAT)
+  feeFlatAmount Decimal?      @db.Decimal(10, 2)
+  feePercent    Int? // 1–100 when feeType = PERCENT
+
+  // Hours before the scheduled start inside which a client cancellation counts
+  // as a "late cancel" and is billable. Locked to 24 at launch; stored so the
+  // window is configurable later without a migration.
+  cancelWindowHours Int @default(24)
+
+  // Which events actually bill: a pro-marked no-show, and/or a client cancel
+  // inside the window. Both default on when the pro opts in.
+  chargeNoShow     Boolean @default(true)
+  chargeLateCancel Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
 }
 
 // Catalog of membership tiers (Free / Pro / Studio). Pricing + Stripe Billing IDs
@@ -2850,6 +2913,19 @@ model Booking {
   // reverts to "new" and the fee re-charges on a later discovery booking).
   discoveryFeeAmount     Int?
   discoveryFeeRefundedAt DateTime?
+
+  // No-show / late-cancel fee (Phase 2 revenue protection). Charged off-session
+  // against the client's default saved card and routed to the pro's connected
+  // account (its OWN charge, distinct from the final bill's stripe* fields and
+  // the deposit charge). Inert unless ENABLE_NO_SHOW_PROTECTION is on. Set when a
+  // pro marks the booking NO_SHOW or a client cancels inside the pro's window.
+  noShowMarkedAt              DateTime?
+  noShowFeeStatus            NoShowFeeStatus?
+  noShowFeeAmount            Decimal?         @db.Decimal(10, 2)
+  noShowFeeStripePaymentIntentId String?      @unique
+  noShowFeeChargedAt         DateTime?
+  // Why the fee was assessed: a pro-marked no-show vs a late cancellation.
+  noShowFeeReason            NoShowFeeReason?
 
   // Optional client-supplied idempotency key for booking-creation dedupe.
   // Combined with clientId in @@unique below so identical retries return

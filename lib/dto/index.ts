@@ -187,6 +187,13 @@ export type {
   ClientPaymentMethodDeleteResponseDTO,
 } from '@/lib/dto/clientPaymentMethods'
 
+// ── Pro no-show / late-cancel fee settings (Phase 2 no-show protection) ───────
+export type {
+  ProNoShowSettingsDTO,
+  ProNoShowSettingsResponseDTO,
+  ProNoShowSettingsUpdateRequestDTO,
+} from '@/lib/dto/noShowSettings'
+
 // ── Client "Me" aggregate (GET /api/v1/me) ───────────────────────────────────
 export type {
   ClientMeUserDTO,

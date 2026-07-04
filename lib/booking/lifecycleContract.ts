@@ -72,6 +72,9 @@ export const BOOKING_STATUS_TRANSITIONS: Map<
     new Map<BookingStatus, LifecycleActor[]>([
       [BookingStatus.IN_PROGRESS, ['PRO']],
       [BookingStatus.CANCELLED, ['PRO', 'CLIENT', 'ADMIN']],
+      // Client did not attend a confirmed appointment (Phase 2 revenue
+      // protection). Terminal, like CANCELLED. Pro- or admin-driven only.
+      [BookingStatus.NO_SHOW, ['PRO', 'ADMIN']],
     ]),
   ],
   [

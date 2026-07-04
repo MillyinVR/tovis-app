@@ -4,9 +4,11 @@ import ClientProfileSettings from './ClientProfileSettings'
 import ClientPublicProfileSettings from './ClientPublicProfileSettings'
 import ClientLocationSettings from './ClientLocationSettings'
 import ClientAddressesSettings from './ClientAddressesSettings'
+import ClientPaymentMethodsSettings from './ClientPaymentMethodsSettings'
 import NotificationPreferencesForm from '@/app/_components/NotificationPreferencesForm'
 import { getBrandConfig } from '@/lib/brand'
 import ThemeToggle from '@/lib/brand/ThemeToggle'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,6 +30,7 @@ function SectionIntro(props: {
 
 export default function ClientSettingsPage() {
   const brand = getBrandConfig()
+  const showPaymentMethods = noShowProtectionEnabled()
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
       <section className="brand-glass overflow-hidden p-5 sm:p-6">
@@ -101,6 +104,17 @@ export default function ClientSettingsPage() {
           <ClientAddressesSettings />
         </div>
       </section>
+
+      {showPaymentMethods ? (
+        <section className="brand-glass p-5 sm:p-6" id="payment-methods">
+          <SectionIntro
+            title="Payment methods"
+            description="Save a card so a pro can charge a no-show or late-cancellation fee per their booking policy. You stay in control and can remove a card anytime."
+          />
+
+          <ClientPaymentMethodsSettings />
+        </section>
+      ) : null}
 
       <section className="brand-glass p-5 sm:p-6">
         <SectionIntro

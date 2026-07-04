@@ -25,6 +25,13 @@ type Props = {
    * UI policy: do NOT invent a timezone if missing.
    */
   timeZone?: string | null
+
+  /**
+   * Phase 2 revenue protection flag (server-side `noShowProtectionEnabled()`).
+   * Gates the "Mark no-show" action so it stays hidden while the `/no-show`
+   * route is dark (404).
+   */
+  noShowFeatureEnabled?: boolean
 }
 
 function readString(v: unknown): string | null {
@@ -76,6 +83,7 @@ export default function BookingActions({
   startedAt,
   finishedAt,
   timeZone,
+  noShowFeatureEnabled,
 }: Props) {
   const router = useRouter()
 
@@ -100,8 +108,9 @@ export default function BookingActions({
         role: 'PRO',
         startedAt: startedAt ?? null,
         finishedAt: finishedAt ?? null,
+        noShowFeatureEnabled,
       }),
-    [bookingId, status, sessionStep, startedAt, finishedAt],
+    [bookingId, status, sessionStep, startedAt, finishedAt, noShowFeatureEnabled],
   )
 
   const started = useMemo(() => Boolean(parseIso(startedAt)), [startedAt])
