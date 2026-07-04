@@ -2,21 +2,27 @@
 import Link from 'next/link'
 
 import type { ProOverviewPageData } from '@/lib/analytics/proMonthlyAnalytics'
+import type { CreatorLooksAnalyticsDto } from '@/lib/looks/creatorAnalytics'
 
+import ProLooksInsights from './ProLooksInsights'
 import ProPerformanceSections from './ProPerformanceSections'
 
 type ProOverviewDashboardProps = {
   overview: ProOverviewPageData
+  looksAnalytics: CreatorLooksAnalyticsDto
 }
 
 export default function ProOverviewDashboard({
   overview,
+  looksAnalytics,
 }: ProOverviewDashboardProps) {
   return (
     <div className="brand-pro-overview-body no-scroll">
       <MonthScroller months={overview.months} />
 
       <ProPerformanceSections overview={overview} />
+
+      <ProLooksInsights analytics={looksAnalytics} />
     </div>
   )
 }
