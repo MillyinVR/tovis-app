@@ -333,6 +333,35 @@ describe('listClientActivity', () => {
     })
   })
 
+  it('renders a milestone row with the threshold and metric', async () => {
+    db.clientNotification.findMany.mockResolvedValue([
+      {
+        id: 'notif_m1',
+        eventKey: NotificationEventKey.LOOK_MILESTONE_REACHED,
+        data: {
+          lookPostId: 'look_1',
+          metric: 'saves',
+          threshold: 50,
+          count: 51,
+        },
+        body: null,
+        href: '/looks/look_1',
+        readAt: null,
+        createdAt: new Date('2026-06-19T12:00:00.000Z'),
+      },
+    ])
+
+    const feed = await listClientActivity(asDb(db), { clientId: 'client_1' })
+
+    expect(db.clientProfile.findMany).not.toHaveBeenCalled()
+    expect(feed.items[0]).toMatchObject({
+      iconKind: 'milestone',
+      who: 'Your look',
+      action: 'hit 50 saves',
+      href: '/looks/look_1',
+    })
+  })
+
   it('renders a new-look row with the caption highlight', async () => {
     db.clientNotification.findMany.mockResolvedValue([
       {

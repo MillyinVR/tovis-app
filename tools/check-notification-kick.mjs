@@ -40,6 +40,7 @@ const EMIT_SIGNALS = [
   'notifyLookCommentCreated',
   'notifyLookLiked',
   'notifyLookSaved',
+  'notifyLookMilestones',
   'emitAdminVerificationReviewNeeded',
   'emitAdminViralRequestPending',
   // Write-boundary functions that enqueue notifications as part of the mutation.

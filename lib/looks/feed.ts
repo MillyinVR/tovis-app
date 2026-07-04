@@ -207,14 +207,14 @@ export function buildLooksFeedWhere(
   const and: Prisma.LookPostWhereInput[] = [
     buildLooksVisibilityFilter(args.kind),
     // Attribution gate: pro-authored looks (clientAuthorId null) always qualify;
-    // a client-authored look only enters discovery once its author has opted into
-    // a public creator profile, so it's never surfaced anonymized. (Engagement
-    // loop / Share-your-look — see lib/looks/publication/clientLookService.ts.)
+    // a client-authored look only enters discovery once the client opts THAT look
+    // into the feed (publicToFeed) — a per-look choice independent of the author's
+    // profile visibility (social-first C2). Combined with the hard
+    // `moderationStatus: APPROVED` filter below, a client look also can't surface
+    // until a human approves it out of PENDING_REVIEW. (Engagement loop /
+    // Share-your-look — see lib/looks/publication/clientLookService.ts.)
     {
-      OR: [
-        { clientAuthorId: null },
-        { clientAuthor: { is: { isPublicProfile: true } } },
-      ],
+      OR: [{ clientAuthorId: null }, { publicToFeed: true }],
     },
   ]
 

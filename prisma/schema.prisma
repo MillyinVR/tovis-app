@@ -602,6 +602,10 @@ enum NotificationEventKey {
   // A pro you follow published a new look — fanned out to ProFollow followers
   // via the FAN_OUT_NEW_LOOK_NOTIFICATIONS job.
   LOOK_NEW_FROM_FOLLOWED_PRO
+  // "Your look hit N likes / N saves" — a one-time supply-side growth nudge to
+  // the look's author (pro, or client author) each time a like/save threshold is
+  // crossed. Fires once per (look, metric, threshold) via a permanent dedupeKey.
+  LOOK_MILESTONE_REACHED
   REFERRAL_TAP_RECEIVED
   REFERRAL_CONFIRMED
   REFERRAL_CONVERTED
@@ -3921,6 +3925,13 @@ model LookPost {
   status           LookPostStatus     @default(DRAFT)
   visibility       LookPostVisibility @default(PUBLIC)
   moderationStatus ModerationStatus   @default(APPROVED)
+  // Client-authored discovery gate (social-first C2). For client-authored looks
+  // (clientAuthorId set) this must be true before the look enters the public
+  // discovery feed — an explicit per-look opt-in, independent of the author's
+  // ClientProfile.isPublicProfile. Pro-authored looks are admitted by
+  // buildLooksFeedWhere via `clientAuthorId: null` and ignore this flag (it stays
+  // false for them). See lib/looks/feed.ts + clientLookService.ts.
+  publicToFeed     Boolean            @default(false)
 
   publishedAt DateTime?
   archivedAt  DateTime?

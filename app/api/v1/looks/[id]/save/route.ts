@@ -20,6 +20,7 @@ import {
   canViewLookPost,
 } from '@/lib/looks/guards'
 import { notifyLookSaved } from '@/lib/notifications/lookEngagement'
+import { notifyLookMilestones } from '@/lib/notifications/lookMilestones'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
@@ -198,6 +199,21 @@ export async function POST(req: Request, ctx: RouteContext) {
         count: result.saveCount,
       }).catch((error) => {
         console.error('POST /api/v1/looks/[id]/save notify error', error)
+      })
+
+      // One-time "your look hit N saves" nudge to the author when this save
+      // crossed a threshold. Best-effort, outside the mutation — already saved.
+      await notifyLookMilestones({
+        lookPostId,
+        look: {
+          professionalId: access.look.professionalId,
+          clientAuthorId: access.look.clientAuthorId,
+        },
+        metric: 'saves',
+        previous: access.look.saveCount,
+        current: result.saveCount,
+      }).catch((error) => {
+        console.error('POST /api/v1/looks/[id]/save milestone notify error', error)
       })
       kickNotificationDrain()
     }

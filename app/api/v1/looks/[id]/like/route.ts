@@ -16,6 +16,7 @@ import { loadLookAccess } from '@/lib/looks/access'
 import type { LooksLikeResponseDto } from '@/lib/looks/types'
 import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 import { notifyLookLiked } from '@/lib/notifications/lookEngagement'
+import { notifyLookMilestones } from '@/lib/notifications/lookMilestones'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export const dynamic = 'force-dynamic'
@@ -126,6 +127,21 @@ export async function POST(_req: Request, ctx: RouteContext) {
       count: result.likeCount,
     }).catch((error) => {
       console.error('POST /api/v1/looks/[id]/like notify error', error)
+    })
+
+    // One-time "your look hit N likes" nudge to the author when this like
+    // crossed a threshold. Best-effort, outside the tx — the like is committed.
+    await notifyLookMilestones({
+      lookPostId,
+      look: {
+        professionalId: access.look.professionalId,
+        clientAuthorId: access.look.clientAuthorId,
+      },
+      metric: 'likes',
+      previous: access.look.likeCount,
+      current: result.likeCount,
+    }).catch((error) => {
+      console.error('POST /api/v1/looks/[id]/like milestone notify error', error)
     })
     kickNotificationDrain()
 
