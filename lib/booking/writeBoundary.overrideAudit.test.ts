@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => ({
   txBookingServiceItemCreate: vi.fn(),
   txBookingHoldFindMany: vi.fn(),
   txBookingOverrideAuditLogCreateMany: vi.fn(),
+  txProReminderSettingsFindUnique: vi.fn(),
 
   resolveValidatedBookingContext: vi.fn(),
 
@@ -146,6 +147,10 @@ const tx = {
   },
   bookingOverrideAuditLog: {
     createMany: mocks.txBookingOverrideAuditLogCreateMany,
+  },
+  // Appointment-reminder sync reads the pro's cadence; null => default cadence.
+  proReminderSettings: {
+    findUnique: mocks.txProReminderSettingsFindUnique,
   },
 }
 
@@ -352,6 +357,9 @@ describe('lib/booking/writeBoundary override audit', () => {
       liveModes: ['SALON'],
       readyLocationIds: ['loc_1'],
     })
+
+    // No saved reminder row => default cadence; reminder scheduling is stubbed.
+    mocks.txProReminderSettingsFindUnique.mockResolvedValue(null)
 
     mocks.withLockedProfessionalTransaction.mockImplementation(
       async (

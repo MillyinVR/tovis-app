@@ -1712,6 +1712,7 @@ model ProfessionalProfile {
 
   paymentSettings    ProfessionalPaymentSettings?
   noShowSettings     ProNoShowSettings?
+  reminderSettings   ProReminderSettings?
   subscription       ProfessionalSubscription?
   lastMinuteSettings LastMinuteSettings?          @relation("ProLastMinuteSettings")
   lastMinuteOpenings LastMinuteOpening[]          @relation("ProOpenings")
@@ -2080,6 +2081,35 @@ model ProNoShowSettings {
   // inside the window. Both default on when the pro opts in.
   chargeNoShow     Boolean @default(true)
   chargeLateCancel Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
+}
+
+/// Per-pro (account-level) appointment-reminder cadence. One row per pro,
+/// created lazily on first save. Configures WHICH client reminders fire ahead of
+/// a booking; each value in `offsetDays` schedules one reminder that many days
+/// before the appointment (7 = one week, 3 = three days, 1 = day before). The
+/// scheduling spine (lib/notifications/appointmentReminders.ts) reads this to
+/// plan reminders on the shared ScheduledClientNotification queue; quiet-hours
+/// and dedupe are handled downstream by the dispatch layer. Missing row => the
+/// default cadence below applies, so reminders keep working without a saved row.
+model ProReminderSettings {
+  id             String @id @default(cuid())
+  professionalId String @unique
+
+  // Master opt-in. While false, no appointment reminders are scheduled for this
+  // pro's bookings. Reminders default ON so every pro sends them out of the box.
+  enabled Boolean @default(true)
+
+  // Days-before-appointment offsets to send a reminder at. Each maps to one
+  // reminder kind; only values in the supported menu (1 / 3 / 7) are honored.
+  // Default cadence: one week + three days + day before.
+  offsetDays Int[] @default([7, 3, 1])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

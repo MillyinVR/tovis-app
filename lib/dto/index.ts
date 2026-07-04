@@ -194,6 +194,14 @@ export type {
   ProNoShowSettingsUpdateRequestDTO,
 } from '@/lib/dto/noShowSettings'
 
+// ── Pro appointment-reminder cadence (Phase 2.3 configurable reminders) ───────
+export type {
+  ProReminderSettingsDTO,
+  ProReminderSettingsResponseDTO,
+  ProReminderSettingsUpdateRequestDTO,
+  ReminderOffsetOptionDTO,
+} from '@/lib/dto/reminderSettings'
+
 // ── Client "Me" aggregate (GET /api/v1/me) ───────────────────────────────────
 export type {
   ClientMeUserDTO,

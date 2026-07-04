@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { Role } from '@prisma/client'
 
 import NotificationPreferencesForm from '@/app/_components/NotificationPreferencesForm'
+import ReminderCadenceSettings from '@/app/pro/notifications/settings/ReminderCadenceSettings'
 import { getBrandConfig } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/currentUser'
 
@@ -41,6 +42,10 @@ export default async function ProNotificationSettingsPage() {
         >
           Back
         </Link>
+      </div>
+
+      <div className="mb-5">
+        <ReminderCadenceSettings />
       </div>
 
       <NotificationPreferencesForm endpoint="/api/v1/pro/notification-preferences" />

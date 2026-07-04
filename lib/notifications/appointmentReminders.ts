@@ -10,6 +10,7 @@ import {
   cancelScheduledClientNotificationsForBooking,
   scheduleClientNotification,
 } from '@/lib/notifications/clientNotifications'
+import { resolveEnabledReminderOffsetDays } from '@/lib/reminderSettings/settings'
 import {
   DEFAULT_TIME_ZONE,
   formatInTimeZone,
@@ -19,7 +20,7 @@ import {
   zonedTimeToUtc,
 } from '@/lib/time'
 
-export type AppointmentReminderKind = 'ONE_WEEK' | 'DAY_BEFORE'
+export type AppointmentReminderKind = 'ONE_WEEK' | 'THREE_DAYS' | 'DAY_BEFORE'
 
 export type AppointmentReminderPayload = {
   reminderKind: AppointmentReminderKind
@@ -61,8 +62,11 @@ type AppointmentReminderPlanItem = {
   payload: AppointmentReminderPayload
 }
 
+// Canonical order (longest lead first). Iteration order here defines the order
+// reminders are scheduled/validated; keep it stable.
 const APPOINTMENT_REMINDER_KINDS: readonly AppointmentReminderKind[] = [
   'ONE_WEEK',
+  'THREE_DAYS',
   'DAY_BEFORE',
 ]
 
@@ -71,7 +75,23 @@ const APPOINTMENT_REMINDER_OFFSET_DAYS: Record<
   number
 > = {
   ONE_WEEK: 7,
+  THREE_DAYS: 3,
   DAY_BEFORE: 1,
+}
+
+/**
+ * Map a pro's configured day-offsets (from ProReminderSettings) onto the reminder
+ * kinds we actually schedule, in canonical order. Offsets outside the supported
+ * menu are ignored — the settings layer already validates on write, this guards
+ * the read path against drift.
+ */
+function resolveEnabledReminderKinds(
+  offsetDays: readonly number[],
+): AppointmentReminderKind[] {
+  const enabled = new Set(offsetDays)
+  return APPOINTMENT_REMINDER_KINDS.filter((kind) =>
+    enabled.has(APPOINTMENT_REMINDER_OFFSET_DAYS[kind]),
+  )
 }
 
 /**
@@ -86,6 +106,7 @@ const REMINDER_ELIGIBLE_BOOKING_STATUSES = new Set<BookingStatus>([
 const BOOKING_REMINDER_SELECT = {
   id: true,
   clientId: true,
+  professionalId: true,
   scheduledFor: true,
   status: true,
   finishedAt: true,
@@ -240,7 +261,11 @@ export function parseAppointmentReminderPayload(
   if (!isRecord(data)) return null
 
   const reminderKind = readString(data.reminderKind)
-  if (reminderKind !== 'ONE_WEEK' && reminderKind !== 'DAY_BEFORE') {
+  if (
+    reminderKind !== 'ONE_WEEK' &&
+    reminderKind !== 'THREE_DAYS' &&
+    reminderKind !== 'DAY_BEFORE'
+  ) {
     return null
   }
 
@@ -286,6 +311,14 @@ export function buildAppointmentReminderContent(
     return {
       title: 'Appointment reminder',
       body: `Reminder: your appointment${subject} is in one week${onWhen}${withPro}.`,
+      data: payload,
+    }
+  }
+
+  if (payload.reminderKind === 'THREE_DAYS') {
+    return {
+      title: 'Appointment reminder',
+      body: `Reminder: your appointment${subject} is in 3 days${onWhen}${withPro}.`,
       data: payload,
     }
   }
@@ -407,6 +440,7 @@ function buildReminderPlanItem(args: {
 
 export function planBookingAppointmentReminders(args: {
   booking: BookingReminderRecord
+  enabledKinds: readonly AppointmentReminderKind[]
   now?: Date
 }): AppointmentReminderPlanItem[] {
   if (!isBookingEligibleForAppointmentReminders(args.booking)) {
@@ -414,9 +448,12 @@ export function planBookingAppointmentReminders(args: {
   }
 
   const now = normalizeNowOrThrow(args.now, 'now')
+  const enabled = new Set(args.enabledKinds)
   const plan: AppointmentReminderPlanItem[] = []
 
   for (const kind of APPOINTMENT_REMINDER_KINDS) {
+    if (!enabled.has(kind)) continue
+
     const item = buildReminderPlanItem({
       booking: args.booking,
       kind,
@@ -496,8 +533,16 @@ export async function syncBookingAppointmentReminders(args: {
     bookingId: booking.id,
   })
 
+  const enabledKinds = resolveEnabledReminderKinds(
+    await resolveEnabledReminderOffsetDays({
+      professionalId: booking.professionalId,
+      db: args.tx,
+    }),
+  )
+
   const plan = planBookingAppointmentReminders({
     booking,
+    enabledKinds,
     now: args.now,
   })
 
@@ -595,6 +640,23 @@ export async function validateDueAppointmentReminder(args: {
     return {
       action: 'CANCEL',
       reason: 'Scheduled reminder payload bookingId does not match linked booking.',
+    }
+  }
+
+  // The pro may have turned this offset off (or disabled reminders) since the
+  // row was scheduled — drop it rather than send a reminder they no longer want.
+  const enabledKinds = resolveEnabledReminderKinds(
+    await resolveEnabledReminderOffsetDays({
+      professionalId: booking.professionalId,
+      db: args.tx,
+    }),
+  )
+
+  if (!enabledKinds.includes(parsedPayload.reminderKind)) {
+    return {
+      action: 'CANCEL',
+      reason:
+        'Linked pro no longer schedules this appointment reminder offset.',
     }
   }
 
