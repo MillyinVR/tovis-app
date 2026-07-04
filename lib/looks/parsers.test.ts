@@ -425,6 +425,7 @@ describe('lib/looks/parsers.ts', () => {
             comments: 2,
             saves: 3,
             shares: 4,
+            views: 5,
           },
           viewerContext: {
             isAuthenticated: false,
@@ -483,6 +484,7 @@ describe('lib/looks/parsers.ts', () => {
           comments: 2,
           saves: 3,
           shares: 4,
+          views: 5,
         },
         viewerContext: {
           isAuthenticated: false,

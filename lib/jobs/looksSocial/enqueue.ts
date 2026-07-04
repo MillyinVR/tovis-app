@@ -7,6 +7,7 @@ import {
 } from '@prisma/client'
 
 import type {
+  ApplyLookViewsJobPayload,
   FanOutNewLookNotificationsJobPayload,
   FanOutViralRequestApprovalNotificationsJobPayload,
   IndexLookPostDocumentJobPayload,
@@ -16,6 +17,7 @@ import type {
   RecomputeLookRankScoreJobPayload,
   RecomputeLookSpotlightScoreJobPayload,
 } from './contracts'
+import { buildApplyLookViewsUpdate } from './applyLookViews'
 import { normalizeRequiredId } from '@/lib/guards'
 
 type LooksSocialJobDb = PrismaClient | Prisma.TransactionClient
@@ -195,6 +197,27 @@ export function enqueueModerationScanLookPost(
     type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
     dedupeKey: `look:${lookPostId}:moderation-scan`,
     payload: { lookPostId },
+  })
+}
+
+/**
+ * Enqueue a batch of view increments. Unlike the recompute jobs (idempotent,
+ * one row per look), a view batch carries an additive delta, so each flush is
+ * its own job row — a fresh nonce dedupeKey prevents the upsert from collapsing
+ * or resetting an in-flight batch. Returns null when the batch is empty after
+ * normalization (nothing to enqueue).
+ */
+export function enqueueApplyLookViews(
+  db: LooksSocialJobDb,
+  payload: ApplyLookViewsJobPayload,
+): Promise<EnqueuedLooksSocialJob> | null {
+  const { lookPostIds } = buildApplyLookViewsUpdate(payload)
+  if (lookPostIds.length === 0) return null
+
+  return enqueueLooksSocialJob(db, {
+    type: LooksSocialJobType.APPLY_LOOK_VIEWS,
+    dedupeKey: `look-views:${crypto.randomUUID()}`,
+    payload: { lookPostIds },
   })
 }
 

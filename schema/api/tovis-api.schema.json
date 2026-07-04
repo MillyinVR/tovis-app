@@ -108,7 +108,8 @@
         "FAN_OUT_NEW_LOOK_NOTIFICATIONS",
         "INDEX_LOOK_POST_DOCUMENT",
         "MODERATION_SCAN_LOOK_POST",
-        "MODERATION_SCAN_COMMENT"
+        "MODERATION_SCAN_COMMENT",
+        "APPLY_LOOK_VIEWS"
       ],
       "type": "string"
     },
@@ -6204,13 +6205,17 @@
         },
         "shares": {
           "type": "number"
+        },
+        "views": {
+          "type": "number"
         }
       },
       "required": [
         "comments",
         "likes",
         "saves",
-        "shares"
+        "shares",
+        "views"
       ],
       "type": "object"
     },

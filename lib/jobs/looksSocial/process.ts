@@ -9,6 +9,7 @@ import {
   makeEmptyLooksSocialJobPerTypeCounts,
   type LooksSocialJobPerTypeCounts,
 } from '@/lib/jobs/looksSocial/contracts'
+import { processApplyLookViews } from '@/lib/jobs/looksSocial/applyLookViews'
 import { processFanOutNewLookNotifications } from '@/lib/jobs/looksSocial/fanOutNewLook'
 import { processIndexLookPostDocument } from '@/lib/jobs/looksSocial/indexLookPostDocument'
 import {
@@ -124,6 +125,19 @@ function readRequiredString(
   return trimmed
 }
 
+function readStringArray(payload: Prisma.JsonValue, field: string): string[] {
+  if (!isJsonObject(payload)) {
+    throw new Error('Job payload must be an object.')
+  }
+
+  const value = payload[field]
+  if (!Array.isArray(value)) {
+    throw new Error(`Job payload field ${field} must be an array.`)
+  }
+
+  return value.filter((entry): entry is string => typeof entry === 'string')
+}
+
 async function runLooksSocialJob(
   job: DueLooksSocialJob,
   now: Date,
@@ -168,6 +182,12 @@ async function runLooksSocialJob(
     case LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT:
       await processIndexLookPostDocument(prisma, {
         lookPostId: readRequiredString(job.payload, 'lookPostId'),
+      })
+      return
+
+    case LooksSocialJobType.APPLY_LOOK_VIEWS:
+      await processApplyLookViews(prisma, {
+        lookPostIds: readStringArray(job.payload, 'lookPostIds'),
       })
       return
 

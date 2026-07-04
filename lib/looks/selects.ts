@@ -186,6 +186,7 @@ export const looksDetailSelect =
     commentCount: true,
     saveCount: true,
     shareCount: true,
+    viewCount: true,
 
     spotlightScore: true,
     rankScore: true,

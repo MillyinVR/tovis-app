@@ -539,6 +539,9 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
   const comments = pickNumber(countsRaw.comments)
   const saves = pickNumber(countsRaw.saves)
   const shares = pickNumber(countsRaw.shares)
+  // views is additive/newer — tolerate its absence so an older payload still
+  // parses (defaults to 0) rather than nulling the whole detail.
+  const views = pickNumber(countsRaw.views) ?? 0
 
   const isAuthenticated = pickBoolean(viewerContextRaw.isAuthenticated)
   const viewerLiked = pickBoolean(viewerContextRaw.viewerLiked)
@@ -598,6 +601,7 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
       comments,
       saves,
       shares,
+      views,
     },
     viewerContext: {
       isAuthenticated,

@@ -699,6 +699,7 @@ export function mapLooksDetailToDto(args: {
       comments: item.commentCount,
       saves: item.saveCount,
       shares: item.shareCount,
+      views: item.viewCount,
     },
 
     viewerContext: {

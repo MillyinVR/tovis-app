@@ -721,6 +721,10 @@ enum LooksSocialJobType {
   INDEX_LOOK_POST_DOCUMENT
   MODERATION_SCAN_LOOK_POST
   MODERATION_SCAN_COMMENT
+  // Batched, denormalized view-count increments (feed impressions + detail
+  // opens) flushed from the client through /api/v1/looks/views. Social-first
+  // plan B2.
+  APPLY_LOOK_VIEWS
 }
 
 enum LooksSocialJobStatus {
@@ -3931,6 +3935,10 @@ model LookPost {
   commentCount Int @default(0)
   saveCount    Int @default(0)
   shareCount   Int @default(0)
+  // Sampled/denormalized view total (feed impressions + detail opens). Written
+  // only by the APPLY_LOOK_VIEWS LooksSocialJob — never a synchronous insert on
+  // the view hot path. Social-first plan B2.
+  viewCount    Int @default(0)
 
   spotlightScore Float @default(0)
   rankScore      Float @default(0)

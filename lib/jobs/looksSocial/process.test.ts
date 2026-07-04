@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
       },
     },
     processIndexLookPostDocument: vi.fn(),
+    processApplyLookViews: vi.fn(),
     recomputeLookPostCounters: vi.fn(),
     recomputeLookPostSpotlightScore: vi.fn(),
     recomputeLookPostRankScore: vi.fn(),
@@ -35,6 +36,10 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/jobs/looksSocial/indexLookPostDocument', () => ({
   processIndexLookPostDocument: mocks.processIndexLookPostDocument,
+}))
+
+vi.mock('@/lib/jobs/looksSocial/applyLookViews', () => ({
+  processApplyLookViews: mocks.processApplyLookViews,
 }))
 
 vi.mock('@/lib/looks/counters', () => ({
@@ -299,6 +304,39 @@ describe('lib/jobs/looksSocial/process', () => {
         },
       ],
     })
+  })
+
+  it('processes APPLY_LOOK_VIEWS jobs by handing the id list to the view processor', async () => {
+    const now = new Date('2026-04-20T19:00:00.000Z')
+    const job = makeDueJob({
+      id: 'job_views_1',
+      type: LooksSocialJobType.APPLY_LOOK_VIEWS,
+      payload: { lookPostIds: ['look_1', 'look_2'] },
+      dedupeKey: 'look-views:nonce-1',
+      attemptCount: 0,
+      maxAttempts: 5,
+    })
+
+    mocks.prisma.looksSocialJob.findMany.mockResolvedValue([job])
+    mocks.prisma.looksSocialJob.updateMany.mockResolvedValue({ count: 1 })
+    mocks.processApplyLookViews.mockResolvedValue({ appliedCount: 2 })
+    mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: job.id })
+
+    const result = await processLooksSocialJobs({ now })
+
+    expect(mocks.processApplyLookViews).toHaveBeenCalledWith(mocks.prisma, {
+      lookPostIds: ['look_1', 'look_2'],
+    })
+
+    expect(result.completedCount).toBe(1)
+    expect(result.outcomes).toEqual([
+      {
+        jobId: 'job_views_1',
+        type: LooksSocialJobType.APPLY_LOOK_VIEWS,
+        dedupeKey: 'look-views:nonce-1',
+        result: 'COMPLETED',
+      },
+    ])
   })
 
   it('requeues force-enqueued MODERATION_SCAN_LOOK_POST jobs when attempts remain, proving the worker still treats them as deferred', async () => {

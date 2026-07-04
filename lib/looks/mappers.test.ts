@@ -123,6 +123,7 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
     commentCount: 2,
     saveCount: 1,
     shareCount: 0,
+    viewCount: 87,
     spotlightScore: 18,
     rankScore: 27,
     professional: {
@@ -1129,6 +1130,7 @@ describe('lib/looks/mappers.ts', () => {
           comments: 2,
           saves: 1,
           shares: 0,
+          views: 87,
         },
         viewerContext: {
           isAuthenticated: true,
