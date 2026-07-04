@@ -336,6 +336,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   admin_verification_review_needed: 'Review verification',
   admin_support_ticket_created: 'View ticket',
   admin_viral_request_pending: 'Review request',
+  social_digest: 'View activity',
 }
 
 const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = {
@@ -450,6 +451,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   admin_viral_request_pending: buildStandardTemplateRenderer(
     templateCtaLabels.admin_viral_request_pending,
   ),
+  // Fallback only — the social digest email renders its own body (see
+  // lib/notifications/socialDigest) and never calls this renderer.
+  social_digest: buildStandardTemplateRenderer(templateCtaLabels.social_digest),
 }
 
 function getTemplateRenderer(templateKey: NotificationTemplateKey): TemplateRendererSet {
