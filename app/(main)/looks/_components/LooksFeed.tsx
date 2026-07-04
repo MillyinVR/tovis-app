@@ -46,6 +46,11 @@ type FeedCacheEntry = {
 // When the active slide is within this many items of the end, fetch the next page.
 const LOAD_MORE_THRESHOLD = 4
 
+// Cap on the session "seen" list sent to the server. Only the personalized For
+// You feed consumes it (to down-rank already-shown looks); every other feed
+// ignores it. Bounded so the query string can't grow without limit.
+const SEEN_PARAM_CAP = 200
+
 // Always lead with the fixed social tabs (Look · Following · Spotlight), then
 // the dynamic service categories — deduped against the fixed slugs.
 function withFixedTabs(cats: UiCategory[]) {
@@ -176,6 +181,7 @@ export default function LooksFeed() {
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
 
   const hasLoadedOnceRef = useRef(false)
+  const itemsRef = useRef<FeedItem[]>([])
   const feedCacheRef = useRef(new Map<string, FeedCacheEntry>())
   const abortRef = useRef<AbortController | null>(null)
   const loadMoreAbortRef = useRef<AbortController | null>(null)
@@ -353,6 +359,16 @@ export default function LooksFeed() {
         qs.set('q', query.trim())
       }
 
+      // Session seen list — the personalized For You feed uses it to avoid
+      // re-showing looks across pages; other feeds ignore it. Newest-loaded
+      // first, capped.
+      const seen = itemsRef.current
+        .map((item) => item.id)
+        .slice(-SEEN_PARAM_CAP)
+      if (seen.length > 0) {
+        qs.set('seen', seen.join(','))
+      }
+
       const res = await fetch(`/api/v1/looks?${qs.toString()}`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
@@ -395,6 +411,12 @@ export default function LooksFeed() {
       setLoadingMore(false)
     }
   }, [activeCategorySlug, nextCursor, query])
+
+  // Mirror the loaded set into a ref so loadMore can read the current seen
+  // list without being recreated (and re-triggering prefetch) on every append.
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
 
   useEffect(() => {
     void loadCategories()
