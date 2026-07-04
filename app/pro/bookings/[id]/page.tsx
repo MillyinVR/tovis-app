@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from '../BookingActions'
-import RefundButton from './RefundButton'
+import MoneyTrailInspector from '@/app/_components/booking/MoneyTrailInspector'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { moneyToString } from '@/lib/money'
 import {
@@ -242,12 +242,6 @@ export default async function ProBookingDetailPage(props: {
     scheduleTz,
   )
 
-  // A booking is refundable while it has a captured Stripe payment. Once fully
-  // refunded the status becomes REFUNDED, which hides the action automatically.
-  const canRefund =
-    booking.paymentProvider === PaymentProvider.STRIPE &&
-    booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED
-
   const serviceName = booking.service?.name ?? 'Booking'
   const total =
     moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ?? '0.00'
@@ -443,14 +437,6 @@ export default async function ProBookingDetailPage(props: {
             Open session
             <ArrowRightIcon />
           </Link>
-
-          {canRefund ? (
-            <RefundButton
-              bookingId={booking.id}
-              amountTotalCents={booking.stripeAmountTotal}
-              currency={booking.stripeCurrency}
-            />
-          ) : null}
         </div>
 
         <div className="mt-3 border-t border-white/10 pt-3">
@@ -556,6 +542,11 @@ export default async function ProBookingDetailPage(props: {
             </div>
           </div>
         </section>
+      </div>
+
+      {/* money trail — charges, fees, refunds + refund/waive actions */}
+      <div className="mt-3.5">
+        <MoneyTrailInspector bookingId={booking.id} />
       </div>
 
       {/* aftercare snapshot */}
