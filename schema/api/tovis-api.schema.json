@@ -9611,6 +9611,66 @@
       ],
       "type": "object"
     },
+    "ProReminderSettingsDTO": {
+      "description": "A pro's account-level appointment-reminder cadence.",
+      "properties": {
+        "enabled": {
+          "description": "Master opt-in. While false, no reminders are scheduled for this pro.",
+          "type": "boolean"
+        },
+        "offsetDays": {
+          "description": "Days-before-appointment offsets that fire a reminder (sorted, deduped).",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "offsetDays"
+      ],
+      "type": "object"
+    },
+    "ProReminderSettingsResponseDTO": {
+      "description": "Response for GET /api/v1/pro/reminder-settings.",
+      "properties": {
+        "options": {
+          "description": "The full menu of offsets a pro may enable, so the UI need not hardcode it.",
+          "items": {
+            "$ref": "#/definitions/ReminderOffsetOptionDTO"
+          },
+          "type": "array"
+        },
+        "settings": {
+          "$ref": "#/definitions/ProReminderSettingsDTO"
+        }
+      },
+      "required": [
+        "settings",
+        "options"
+      ],
+      "type": "object"
+    },
+    "ProReminderSettingsUpdateRequestDTO": {
+      "description": "Request body for PUT /api/v1/pro/reminder-settings.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "offsetDays": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "offsetDays"
+      ],
+      "type": "object"
+    },
     "ProReviewReplyDTO": {
       "description": "The pro's public response to a review, as rendered on review surfaces.",
       "properties": {
@@ -10289,6 +10349,24 @@
     },
     "ReceiptSource": {
       "$ref": "#/definitions/%24Enums.ReceiptSource"
+    },
+    "ReminderOffsetOptionDTO": {
+      "description": "A single selectable reminder offset, for rendering the cadence menu.",
+      "properties": {
+        "days": {
+          "description": "Days before the appointment this reminder fires (1 / 3 / 7).",
+          "type": "number"
+        },
+        "label": {
+          "description": "Human label for the option, e.g. \"1 week before\".",
+          "type": "string"
+        }
+      },
+      "required": [
+        "days",
+        "label"
+      ],
+      "type": "object"
     },
     "ResolveThreadResponseDTO": {
       "properties": {
