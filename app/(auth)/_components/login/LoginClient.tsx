@@ -10,48 +10,25 @@ import Input from '../Input'
 import PasswordInput from '../PasswordInput'
 import PrimaryButton from '../PrimaryButton'
 import SecondaryLinkButton from '../SecondaryLinkButton'
-import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
+import SocialSignIn from '../social/SocialSignIn'
+import { safeJsonRecord, readErrorMessage } from '@/lib/http'
+import {
+  resolvePostAuthNavigation,
+  roleIntentFromPath,
+  sanitizeInternalPath,
+  sanitizeRedirectTarget,
+} from '../postAuthRedirect'
 
-type UserRole = 'ADMIN' | 'PRO' | 'CLIENT'
 type LoginReason =
   | 'PRO_REQUIRED'
   | 'PRO_SETUP_REQUIRED'
   | 'ADMIN_REQUIRED'
   | 'LOGIN_REQUIRED'
 
-const PRO_HOME = '/pro/calendar'
-
-function sanitizeInternalPath(raw: string | null): string | null {
-  if (!raw) return null
-  const s = raw.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
-}
-
 function sanitizeOptionalText(raw: string | null): string | null {
   if (!raw) return null
   const s = raw.trim()
   return s || null
-}
-
-function isAuthPath(path: string): boolean {
-  return (
-    path === '/login' ||
-    path.startsWith('/login?') ||
-    path === '/signup' ||
-    path.startsWith('/signup?') ||
-    path === '/forgot-password' ||
-    path.startsWith('/forgot-password?')
-  )
-}
-
-function sanitizeRedirectTarget(path: string | null): string | null {
-  if (!path) return null
-  if (isAuthPath(path)) return null
-  return path
 }
 
 function sanitizeReason(raw: string | null): LoginReason | null {
@@ -66,37 +43,6 @@ function sanitizeReason(raw: string | null): LoginReason | null {
     return s
   }
   return null
-}
-
-function readUserRole(data: unknown): UserRole | null {
-  if (!isRecord(data)) return null
-  const user = data.user
-  if (!isRecord(user)) return null
-  const role = user.role
-  return role === 'ADMIN' || role === 'PRO' || role === 'CLIENT' ? role : null
-}
-
-function readBooleanField(data: unknown, key: string): boolean {
-  if (!isRecord(data)) return false
-  return data[key] === true
-}
-
-function roleIntentFromPath(path: string | null): UserRole | null {
-  if (!path) return null
-  if (path === '/admin' || path.startsWith('/admin/')) return 'ADMIN'
-  if (path === '/pro' || path.startsWith('/pro/')) return 'PRO'
-  return null
-}
-
-function normalizeLanding(path: string, role: UserRole): string {
-  if (role === 'PRO') {
-    if (path === '/pro' || path.startsWith('/pro?')) return PRO_HOME
-  }
-  return path
-}
-
-function buildVerificationHref(nextPath: string): string {
-  return `/verify-phone?next=${encodeURIComponent(nextPath)}`
 }
 
 function appendIfPresent(
@@ -257,46 +203,19 @@ export default function LoginClient() {
         return
       }
 
-      const role = readUserRole(data)
-      if (!role) {
+      const nav = resolvePostAuthNavigation(data, { nextSafe, fromSafe })
+      if (nav.kind === 'missing-role') {
         setError(
           'Login succeeded, but your account role is missing. Please contact support.',
         )
         return
       }
-
-      const nextUrlRaw = readStringField(data, 'nextUrl')
-      const nextUrl = sanitizeRedirectTarget(
-        sanitizeInternalPath(nextUrlRaw ?? null),
-      )
-
-      const roleDefault =
-        role === 'ADMIN' ? '/admin' : role === 'PRO' ? PRO_HOME : '/looks'
-
-      const rawDest = nextUrl ?? nextSafe ?? fromSafe ?? roleDefault
-      const dest = normalizeLanding(rawDest, role)
-
-      const isPhoneVerified = readBooleanField(data, 'isPhoneVerified')
-      const isEmailVerified = readBooleanField(data, 'isEmailVerified')
-      const isFullyVerified = readBooleanField(data, 'isFullyVerified')
-
-      if (!isFullyVerified) {
-        if (role === 'ADMIN') {
-          setError(
-            'This account is not fully verified yet. Full app access is blocked until phone and email verification are complete.',
-          )
-          return
-        }
-
-        const verificationDest = buildVerificationHref(dest)
-
-        if (!isPhoneVerified || !isEmailVerified) {
-          window.location.assign(verificationDest)
-          return
-        }
+      if (nav.kind === 'error') {
+        setError(nav.message)
+        return
       }
 
-      window.location.assign(dest)
+      window.location.assign(nav.url)
     } catch (err) {
       console.error(err)
       setError('Network error.')
@@ -402,6 +321,10 @@ export default function LoginClient() {
           </div>
         </div>
       </form>
+
+      <div className="mt-4">
+        <SocialSignIn />
+      </div>
     </AuthShell>
   )
 }

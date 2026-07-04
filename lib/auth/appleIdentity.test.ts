@@ -98,6 +98,30 @@ describe('verifyAppleIdentityToken', () => {
     expect(await verifyAppleIdentityToken(token)).toBeNull()
   })
 
+  it('accepts a web Services-ID audience when APPLE_WEB_CLIENT_ID is set', async () => {
+    process.env.APPLE_WEB_CLIENT_ID = 'me.tovis.web'
+    try {
+      const token = sign(
+        signing.privateKey,
+        { sub: 's', email: 'a@b.com', email_verified: true },
+        { audience: 'me.tovis.web' },
+      )
+      expect(await verifyAppleIdentityToken(token)).not.toBeNull()
+    } finally {
+      delete process.env.APPLE_WEB_CLIENT_ID
+    }
+  })
+
+  it('rejects the web Services-ID audience when APPLE_WEB_CLIENT_ID is unset', async () => {
+    delete process.env.APPLE_WEB_CLIENT_ID
+    const token = sign(
+      signing.privateKey,
+      { sub: 's', email: 'a@b.com', email_verified: true },
+      { audience: 'me.tovis.web' },
+    )
+    expect(await verifyAppleIdentityToken(token)).toBeNull()
+  })
+
   it('rejects a wrong issuer', async () => {
     const token = sign(
       signing.privateKey,

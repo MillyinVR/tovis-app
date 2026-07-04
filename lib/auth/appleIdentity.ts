@@ -10,7 +10,7 @@ import crypto from 'node:crypto'
 import jwt from 'jsonwebtoken'
 
 import { isNonEmptyString, isRecord } from '@/lib/guards'
-import { requireEnv } from '@/lib/env'
+import { readOptionalEnv, requireEnv } from '@/lib/env'
 
 const APPLE_ISSUER = 'https://appleid.apple.com'
 const APPLE_JWKS_URL = 'https://appleid.apple.com/auth/keys'
@@ -89,7 +89,14 @@ export async function verifyAppleIdentityToken(
       if (!jwk) return null
     }
 
-    const audience = requireEnv('APPLE_CLIENT_ID')
+    // Native tokens carry the app bundle id (`APPLE_CLIENT_ID`); the web
+    // "Sign in with Apple JS" flow carries the Services ID (`APPLE_WEB_CLIENT_ID`).
+    // Accept either so one endpoint serves both surfaces. `jsonwebtoken`
+    // accepts a token whose `aud` matches any entry in this (non-empty) list.
+    const webClientId = readOptionalEnv('APPLE_WEB_CLIENT_ID')
+    const audience: [string, ...string[]] = webClientId
+      ? [requireEnv('APPLE_CLIENT_ID'), webClientId]
+      : [requireEnv('APPLE_CLIENT_ID')]
     const payload = jwt.verify(idToken, jwkToPublicKeyPem(jwk), {
       algorithms: ['RS256'],
       issuer: APPLE_ISSUER,
