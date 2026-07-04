@@ -43,6 +43,13 @@ export type NotificationTemplateKey =
   | 'admin_verification_review_needed'
   | 'admin_support_ticket_created'
   | 'admin_viral_request_pending'
+  // Not tied to a single NotificationEventKey — the weekly social digest email
+  // (social-first C3) batches many unread social events and renders its own
+  // body, so it never flows through the per-event render pipeline. It carries a
+  // template key only to satisfy the email content type when reusing
+  // EmailDeliveryProvider.send(); the standard renderer below is a fallback and
+  // is not invoked for the digest.
+  | 'social_digest'
 
 export type NotificationEventDefinition = {
   key: NotificationEventKey
