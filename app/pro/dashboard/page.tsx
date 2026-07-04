@@ -9,6 +9,7 @@ import {
   loadProOverviewPage,
   type ProOverviewSearchParams,
 } from '@/lib/analytics/proMonthlyAnalytics'
+import { loadCreatorLooksAnalytics } from '@/lib/looks/creatorAnalytics'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -33,20 +34,30 @@ export default async function ProDashboardPage({
   }
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined
+  const now = new Date()
 
-  const overview = await loadProOverviewPage({
-    professionalId: professionalProfile.id,
-    professionalTimeZone: professionalProfile.timeZone,
-    searchParams: resolvedSearchParams,
-    now: new Date(),
-  })
+  const [overview, looksAnalytics] = await Promise.all([
+    loadProOverviewPage({
+      professionalId: professionalProfile.id,
+      professionalTimeZone: professionalProfile.timeZone,
+      searchParams: resolvedSearchParams,
+      now,
+    }),
+    loadCreatorLooksAnalytics({
+      professionalId: professionalProfile.id,
+      now,
+    }),
+  ])
 
   return (
     <section
       className="brand-pro-overview-page brand-pro-page-with-fixed-header"
       aria-labelledby="pro-page-title"
     >
-      <ProOverviewDashboard overview={overview} />
+      <ProOverviewDashboard
+        overview={overview}
+        looksAnalytics={looksAnalytics}
+      />
     </section>
   )
 }
