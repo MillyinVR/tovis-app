@@ -107,10 +107,8 @@ describe('lib/looks/feed.ts', () => {
             visibility: LookPostVisibility.PUBLIC,
           },
           {
-            spotlightScore: {
-              gt: 0,
+            OR: [{ spotlightScore: { gt: 0 } }, { featuredAt: { not: null } }],
             },
-          },
         ]),
       )
     })
@@ -173,10 +171,8 @@ describe('lib/looks/feed.ts', () => {
             visibility: LookPostVisibility.PUBLIC,
           },
           {
-            spotlightScore: {
-              gt: 0,
+            OR: [{ spotlightScore: { gt: 0 } }, { featuredAt: { not: null } }],
             },
-          },
         ]),
       )
 
@@ -198,10 +194,8 @@ describe('lib/looks/feed.ts', () => {
             visibility: LookPostVisibility.PUBLIC,
           },
           {
-            spotlightScore: {
-              gt: 0,
+            OR: [{ spotlightScore: { gt: 0 } }, { featuredAt: { not: null } }],
             },
-          },
           {
             service: {
               is: {

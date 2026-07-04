@@ -3931,6 +3931,14 @@ model LookPost {
   adminNotes       String?
   reportCount      Int       @default(0)
 
+  // Admin editorial curation (social-first AM1). featuredAt != null = a
+  // SUPER_ADMIN promoted this look into the Spotlight feed — an honest editorial
+  // signal (see buildLookPostSpotlightEligibilityWhere), never a faked engagement
+  // count. featuredByUserId is a plain admin User id (no relation, #481 audit
+  // convention, matches Review.hiddenByAdminUserId).
+  featuredAt       DateTime?
+  featuredByUserId String?
+
   likeCount    Int @default(0)
   commentCount Int @default(0)
   saveCount    Int @default(0)
@@ -3967,6 +3975,7 @@ model LookPost {
   @@index([spotlightScore, publishedAt])
   @@index([moderationStatus, reportCount, createdAt])
   @@index([reviewedByUserId, reviewedAt])
+  @@index([featuredAt])
   @@index([professionalId, status, updatedAt])
   @@index([professionalId, visibility, updatedAt])
   @@index([clientAuthorId, status, updatedAt])
@@ -4060,6 +4069,12 @@ model LookPostReport {
   userId     String
   reason     ModerationReportReason @default(OTHER)
   createdAt  DateTime               @default(now())
+  // Report resolution (social-first AM1 moderation queue). resolvedAt != null =
+  // a SUPER_ADMIN reviewed this report and dismissed it (kept the look live) or
+  // acted on the look; unresolved reports drive the moderation queue's Reported
+  // view. resolvedByUserId is a plain admin User id (no relation, #481 convention).
+  resolvedAt       DateTime?
+  resolvedByUserId String?
 
   lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -4069,6 +4084,7 @@ model LookPostReport {
   @@index([userId, createdAt])
   @@index([createdAt])
   @@index([reason, createdAt])
+  @@index([resolvedAt, createdAt])
 }
 
 model LookCommentReport {
@@ -4077,6 +4093,10 @@ model LookCommentReport {
   userId        String
   reason        ModerationReportReason @default(OTHER)
   createdAt     DateTime               @default(now())
+  // Report resolution (social-first AM1). Mirrors LookPostReport: unresolved
+  // reports surface the comment in the moderation queue; dismiss/act sets these.
+  resolvedAt       DateTime?
+  resolvedByUserId String?
 
   lookComment LookComment @relation(fields: [lookCommentId], references: [id], onDelete: Cascade)
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -4086,6 +4106,7 @@ model LookCommentReport {
   @@index([userId, createdAt])
   @@index([createdAt])
   @@index([reason, createdAt])
+  @@index([resolvedAt, createdAt])
 }
 
 model ViralServiceRequestReport {

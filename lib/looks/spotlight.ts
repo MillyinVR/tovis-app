@@ -126,9 +126,14 @@ export function computeLookPostSpotlightScore(
 }
 
 export function buildLookPostSpotlightEligibilityWhere(): Prisma.LookPostWhereInput {
+  // A look reaches the Spotlight feed either by earning it (spotlightScore > 0)
+  // or by an admin editorially featuring it (featuredAt != null, social-first
+  // AM1). Featuring is an honest inclusion signal — it never inflates counts or
+  // scores, so a freshly featured look with no engagement still surfaces in
+  // Spotlight (it sorts by its real spotlightScore; top-pinning is deferred).
+  // Inert until an admin features something: every existing look has
+  // featuredAt = null, so this OR is byte-equivalent to the prior filter.
   return {
-    spotlightScore: {
-      gt: 0,
-    },
+    OR: [{ spotlightScore: { gt: 0 } }, { featuredAt: { not: null } }],
   }
 }

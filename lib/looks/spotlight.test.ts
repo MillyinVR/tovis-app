@@ -304,11 +304,11 @@ describe('lib/looks/spotlight.ts', () => {
   })
 
   describe('buildLookPostSpotlightEligibilityWhere', () => {
-    it('builds spotlight eligibility as spotlightScore > 0', () => {
+    it('admits looks that earned spotlight OR were admin-featured', () => {
+      // Earned (spotlightScore > 0) or honestly featured (featuredAt != null) —
+      // featuring never fakes a score, it just guarantees inclusion (AM1).
       expect(buildLookPostSpotlightEligibilityWhere()).toEqual({
-        spotlightScore: {
-          gt: 0,
-        },
+        OR: [{ spotlightScore: { gt: 0 } }, { featuredAt: { not: null } }],
       })
     })
   })
