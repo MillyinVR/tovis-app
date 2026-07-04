@@ -11,14 +11,36 @@ import {
   parseLooksFeedSort,
   resolveLooksFeedKind,
 } from '@/lib/looks/feed'
-import { looksFeedSelect } from '@/lib/looks/selects'
 import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
 import { buildLooksViewerFlagResolver } from '@/lib/looks/viewerFlags'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
+import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
+import { forYouFeedEnabled } from '@/lib/looks/forYouFlag'
+import { buildForYouFeedPage, parseSeenLookIds } from '@/lib/looks/forYouFeed'
+import {
+  logLooksFeedServe,
+  type LooksFeedCohort,
+} from '@/lib/observability/looksFeedEvents'
+import type { LooksFeedKind } from '@/lib/looks/feed'
 
 export const dynamic = 'force-dynamic'
+
+// Instrumentation bucket for the default (non-For-You) serve, so log-based
+// dwell/return comparison can separate the chronological baseline from search,
+// spotlight, following and category browsing.
+function resolveDefaultCohort(args: {
+  kind: LooksFeedKind
+  q: string | null
+  categorySlug: string | null
+}): LooksFeedCohort {
+  if (args.q) return 'search'
+  if (args.kind === 'SPOTLIGHT') return 'spotlight'
+  if (args.kind === 'FOLLOWING') return 'following'
+  if (args.categorySlug) return 'category'
+  return 'recent'
+}
 
 function parseBooleanParam(value: string | null): boolean {
   if (typeof value !== 'string') return false
@@ -87,46 +109,95 @@ export async function GET(req: Request) {
       return jsonFail(400, 'Invalid looks cursor.')
     }
 
-    const followingProfessionalIds =
-      kind === 'FOLLOWING'
-        ? await loadFollowingProfessionalIds({
-            clientId: user?.clientProfile?.id,
-          })
-        : []
-
     const tenant = await resolveTenantContextForRequest(req)
 
-    const where = buildLooksFeedWhere({
-      kind,
-      tenant,
-      categorySlug: rawCategorySlug,
-      q,
-      followingProfessionalIds,
-    })
+    // For You gates the DEFAULT Look tab only: signed-in viewer, no explicit
+    // sort/search/category, flag on. An explicit `sort=recent` (or the flag off)
+    // always falls through to the chronological feed — the capability is never
+    // gated, only the default.
+    const useForYou =
+      forYouFeedEnabled() &&
+      Boolean(user) &&
+      kind === 'ALL' &&
+      !q &&
+      !rawCategorySlug &&
+      !rawSort
 
-    const cursorWhere = buildLooksFeedCursorWhere({
-      kind,
-      sort,
-      cursor,
-    })
+    let items: LooksFeedRow[]
+    let nextCursor: string | null
+    let cohort: LooksFeedCohort
+    let forYouMeta: Awaited<ReturnType<typeof buildForYouFeedPage>>['meta'] | null =
+      null
 
-    const pageWhere = cursorWhere
-      ? {
-          AND: [where, cursorWhere],
-        }
-      : where
+    if (useForYou && user) {
+      const seenLookIds = parseSeenLookIds(searchParams.get('seen'))
 
-    const orderBy = buildLooksFeedOrderBy({ kind, sort })
+      const page = await buildForYouFeedPage({
+        tenant,
+        userId: user.id,
+        clientId: user.clientProfile?.id ?? null,
+        limit,
+        cursor,
+        seenLookIds,
+        now: new Date(),
+      })
 
-    const rows = await prisma.lookPost.findMany({
-      where: pageWhere,
-      orderBy,
-      take: limit + 1,
-      select: looksFeedSelect,
-    })
+      items = page.items
+      nextCursor = page.nextCursor
+      forYouMeta = page.meta
+      cohort = 'for_you'
+    } else {
+      const followingProfessionalIds =
+        kind === 'FOLLOWING'
+          ? await loadFollowingProfessionalIds({
+              clientId: user?.clientProfile?.id,
+            })
+          : []
 
-    const hasMore = rows.length > limit
-    const items = hasMore ? rows.slice(0, limit) : rows
+      const where = buildLooksFeedWhere({
+        kind,
+        tenant,
+        categorySlug: rawCategorySlug,
+        q,
+        followingProfessionalIds,
+      })
+
+      const cursorWhere = buildLooksFeedCursorWhere({
+        kind,
+        sort,
+        cursor,
+      })
+
+      const pageWhere = cursorWhere
+        ? {
+            AND: [where, cursorWhere],
+          }
+        : where
+
+      const orderBy = buildLooksFeedOrderBy({ kind, sort })
+
+      const rows = await prisma.lookPost.findMany({
+        where: pageWhere,
+        orderBy,
+        take: limit + 1,
+        select: looksFeedSelect,
+      })
+
+      const hasMore = rows.length > limit
+      items = hasMore ? rows.slice(0, limit) : rows
+
+      const lastItem = items[items.length - 1]
+      nextCursor =
+        hasMore && lastItem !== undefined
+          ? encodeLooksFeedCursor({
+              kind,
+              sort,
+              row: lastItem,
+            })
+          : null
+
+      cohort = resolveDefaultCohort({ kind, q, categorySlug: rawCategorySlug })
+    }
 
     const resolveViewerFlags = await buildLooksViewerFlagResolver({
       user,
@@ -149,15 +220,18 @@ export async function GET(req: Request) {
       (item): item is NonNullable<typeof item> => item !== null,
     )
 
-    const lastItem = items[items.length - 1]
-    const nextCursor =
-      hasMore && lastItem !== undefined
-        ? encodeLooksFeedCursor({
-            kind,
-            sort,
-            row: lastItem,
-          })
-        : null
+    logLooksFeedServe({
+      cohort,
+      authed: Boolean(user),
+      page: cursor ? 'more' : 'entry',
+      itemCount: payload.length,
+      userId: user?.id ?? null,
+      backboneCount: forYouMeta?.backboneCount ?? null,
+      injectedCount: forYouMeta?.injectedCount ?? null,
+      seenCount: forYouMeta?.seenCount ?? null,
+      followedCount: forYouMeta?.followedCount ?? null,
+      affinityCategoryCount: forYouMeta?.affinityCategoryCount ?? null,
+    })
 
     const body: LooksFeedResponseDto & { ok: true } = {
       ok: true,
