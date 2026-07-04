@@ -23,6 +23,18 @@ import type {
   LooksFeedItemDto,
   LooksFeedResponseDto,
 } from '@/lib/looks/types'
+import type { PairedBeforeDto } from '@/lib/media/pairedBefore'
+
+// Parse an opt-in before/after pairing on the primary asset. Requires an id and
+// at least one usable URL; anything else → null (render the single tile).
+function parsePairedBefore(raw: unknown): PairedBeforeDto | null {
+  if (!isRecord(raw)) return null
+  const id = pickString(raw.id)
+  const thumbUrl = pickString(raw.thumbUrl)
+  const fullUrl = pickString(raw.fullUrl)
+  if (!id || (!thumbUrl && !fullUrl)) return null
+  return { id, thumbUrl, fullUrl }
+}
 
 function parseLooksClientAuthor(raw: unknown): LooksClientAuthorDto | null {
   if (!isRecord(raw)) return null
@@ -209,6 +221,8 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
         : [],
 
       priceStartingAt: pickNumber(item.priceStartingAt),
+
+      before: parsePairedBefore(item.before),
 
       uploadedByRole: isRole(uploadedByRoleRaw) ? uploadedByRoleRaw : null,
       reviewId: pickString(item.reviewId),
@@ -595,6 +609,7 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
     clientAuthor: parseLooksClientAuthor(itemRaw.clientAuthor),
     service,
     primaryMedia,
+    before: parsePairedBefore(itemRaw.before),
     assets,
     _count: {
       likes,

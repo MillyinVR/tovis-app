@@ -17,7 +17,7 @@ export type PairedBeforeDto = {
   fullUrl: string | null
 }
 
-type PairedBeforeAssetInput = {
+export type PairedBeforeAssetInput = {
   id: string
   mediaType: MediaType
   storageBucket: string

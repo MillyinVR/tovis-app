@@ -77,6 +77,10 @@ export type LooksFeedItemDto = {
   reviewRating: number | null
   reviewHeadline: string | null
 
+  // Opt-in before/after pairing on the primary (image) asset → the feed renders
+  // the reveal slider in-pager. Null when there's no pairing or it's a video.
+  before: PairedBeforeDto | null
+
   // Owner-facing publication state. Present only on the pro's own listing
   // (GET /api/v1/pro/looks); public feed surfaces omit both fields.
   status?: LookPostStatus
@@ -171,6 +175,9 @@ export type LooksDetailItemDto = {
   service: LooksDetailServiceDto | null
 
   primaryMedia: LooksDetailMediaDto
+  // Opt-in before/after pairing on the primary (image) asset → the detail page
+  // renders the reveal slider. Null when there's no pairing or it's a video.
+  before: PairedBeforeDto | null
   assets: LooksDetailAssetDto[]
 
   _count: LooksDetailCountsDto

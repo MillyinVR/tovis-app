@@ -39,4 +39,22 @@ describe('BeforeAfterReveal', () => {
     fireEvent.keyDown(slider, { key: 'End' })
     expect(slider).toHaveAttribute('aria-valuenow', '100')
   })
+
+  it('owns every gesture by default (touch-action: none via CSS class)', () => {
+    render(<BeforeAfterReveal {...PROPS} />)
+    // No inline touch-action override → the CSS `touch-action: none` rule wins,
+    // so small tiles claim the whole gesture as before.
+    expect(screen.getByRole('slider').style.touchAction).toBeFalsy()
+  })
+
+  it('lets vertical scroll pass through in passVerticalScroll mode', () => {
+    render(<BeforeAfterReveal {...PROPS} passVerticalScroll />)
+    const slider = screen.getByRole('slider')
+    // pan-y hands vertical panning back to the feed pager; only horizontal
+    // drags engage the wipe.
+    expect(slider.style.touchAction).toBe('pan-y')
+    // Keyboard control is unaffected by the mode.
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+    expect(slider).toHaveAttribute('aria-valuenow', '54')
+  })
 })

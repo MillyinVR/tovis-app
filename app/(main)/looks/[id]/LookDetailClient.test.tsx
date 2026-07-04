@@ -258,6 +258,7 @@ function makeDetailItem(): LooksDetailItemDto {
         helpfulCount: 8,
       },
     },
+    before: null,
     assets: [
       {
         id: 'asset_1',

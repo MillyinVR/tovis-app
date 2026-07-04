@@ -81,6 +81,7 @@ function makeFeedDto(
     category: 'Hair',
     serviceIds: ['service_1'],
     priceStartingAt: null,
+    before: null,
     uploadedByRole: null,
     reviewId: null,
     reviewHelpfulCount: null,
@@ -186,6 +187,7 @@ describe('lib/looks/parsers.ts', () => {
           category: null,
           serviceIds: [],
           priceStartingAt: null,
+          before: null,
           uploadedByRole: null,
           reviewId: null,
           reviewHelpfulCount: null,
@@ -478,6 +480,7 @@ describe('lib/looks/parsers.ts', () => {
           createdAt: '2026-04-18T10:30:00.000Z',
           review: null,
         },
+        before: null,
         assets: [],
         _count: {
           likes: 1,
