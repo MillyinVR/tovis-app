@@ -66,6 +66,15 @@ export type MigrationCopy = {
     bringTitle: string
     cards: { clientsDesc: string; servicesDesc: string; calendarDesc: string }
     notStarted: string
+    imported: string // rendered as "{n} imported" once a stage has data
+    exportGuide: {
+      title: string // rendered as "How to export from {source}"
+      menuLabel: string
+      clientsLabel: string
+      calendarLabel: string
+      feedNote: string
+      fallback: string
+    }
     readyTitle: string
     readySub: string
     cta: string
@@ -216,6 +225,16 @@ export function defaultMigrationCopy(wordmark: string): MigrationCopy {
         calendarDesc: 'Upcoming bookings and your working hours.',
       },
       notStarted: 'Not started',
+      imported: 'imported',
+      exportGuide: {
+        title: 'How to export from',
+        menuLabel: 'Service menu',
+        clientsLabel: 'Clients',
+        calendarLabel: 'Calendar',
+        feedNote: 'Live calendar sync available — keep bookings updated automatically.',
+        fallback:
+          "Can't find an export? Most apps hide it under Settings, Reports, or a ••• menu — or upload a simple CSV with the columns each step shows.",
+      },
       readyTitle: 'Ready when you are.',
       readySub: 'Nothing is shared with your old app — no password needed.',
       cta: 'Start with my service menu',
