@@ -34,6 +34,17 @@ function quotaRedisKey(professionalId: string, now: Date): string {
   return `quota:pro:camera:${professionalId}:${monthKey(now)}`
 }
 
+// Manually-granted bonus images for the month (admin top-up), added on top of
+// the plan quota. A parallel calendar-month counter so it self-retires with the
+// month like the usage counter — the v1 of the deferred paid top-up ledger.
+function bonusRedisKey(professionalId: string, now: Date): string {
+  return `quota:pro:camera:bonus:${professionalId}:${monthKey(now)}`
+}
+
+function toCount(raw: unknown): number {
+  return raw == null ? 0 : Math.max(0, Number(raw) || 0)
+}
+
 /**
  * Whether this pro may analyze `imageCount` more images this month. Called
  * before the Anthropic request; usage is recorded separately AFTER a successful
@@ -52,12 +63,14 @@ export async function enforceCameraImageQuota(args: {
     const redis = getRedis()
     if (redis === null) return { allowed: true }
 
-    const [quota, rawUsed] = await Promise.all([
+    const [baseQuota, rawUsed, rawBonus] = await Promise.all([
       getProCameraImageMonthlyQuota(args.professionalId),
       redis.get(quotaRedisKey(args.professionalId, now)),
+      redis.get(bonusRedisKey(args.professionalId, now)),
     ])
 
-    const used = rawUsed == null ? 0 : Math.max(0, Number(rawUsed) || 0)
+    const used = toCount(rawUsed)
+    const quota = baseQuota + toCount(rawBonus)
     if (used + args.imageCount > quota) {
       return { allowed: false, used, quota }
     }
@@ -91,5 +104,87 @@ export async function recordCameraImageUse(args: {
     }
   } catch (error) {
     console.error('cameraQuota record failed (ignored)', error)
+  }
+}
+
+export type ProCameraUsage = {
+  /** Images analyzed this month (0 while metering is off — nothing is counted). */
+  used: number
+  /** The plan-tier allowance (CAMERA_IMAGES_PER_MONTH). */
+  baseQuota: number
+  /** Admin-granted bonus images for this month. */
+  bonus: number
+  /** Effective allowance = baseQuota + bonus. */
+  quota: number
+  /** max(0, quota - used). */
+  remaining: number
+  /** Whether metering is active (ENABLE_MEMBERSHIP_ENFORCEMENT). */
+  enforced: boolean
+}
+
+/**
+ * This pro's current-month camera usage for a readout (admin panel / pro
+ * status). Fails safe: Redis missing or erroring reports 0 used / 0 bonus so the
+ * number is never scary, and the plan quota still comes through.
+ */
+export async function getProCameraUsage(args: {
+  professionalId: string
+  now?: Date
+}): Promise<ProCameraUsage> {
+  const now = args.now ?? new Date()
+  const baseQuota = await getProCameraImageMonthlyQuota(args.professionalId)
+
+  let used = 0
+  let bonus = 0
+  try {
+    const redis = getRedis()
+    if (redis !== null) {
+      const [rawUsed, rawBonus] = await Promise.all([
+        redis.get(quotaRedisKey(args.professionalId, now)),
+        redis.get(bonusRedisKey(args.professionalId, now)),
+      ])
+      used = toCount(rawUsed)
+      bonus = toCount(rawBonus)
+    }
+  } catch (error) {
+    console.error('cameraQuota usage read failed (defaulting to 0)', error)
+  }
+
+  const quota = baseQuota + bonus
+  return {
+    used,
+    baseQuota,
+    bonus,
+    quota,
+    remaining: Math.max(0, quota - used),
+    enforced: membershipEnforcementEnabled(),
+  }
+}
+
+/**
+ * Grant `count` bonus images for the current month (admin top-up). Increments
+ * this month's bonus counter and returns the new bonus total, or null when
+ * Redis is unavailable (a grant needs a live counter). v1 of the deferred paid
+ * top-up ledger.
+ */
+export async function grantCameraBonusImages(args: {
+  professionalId: string
+  count: number
+  now?: Date
+}): Promise<number | null> {
+  if (args.count <= 0) return null
+  const now = args.now ?? new Date()
+
+  try {
+    const redis = getRedis()
+    if (redis === null) return null
+
+    const key = bonusRedisKey(args.professionalId, now)
+    const total = await redis.incrby(key, args.count)
+    await redis.expire(key, QUOTA_KEY_TTL_SECONDS)
+    return total
+  } catch (error) {
+    console.error('cameraQuota grant bonus failed', error)
+    return null
   }
 }

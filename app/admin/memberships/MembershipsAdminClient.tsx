@@ -4,7 +4,7 @@
 // /api/v1/admin/memberships (search) and .../memberships/[id]/comp
 // (PUT grant / DELETE revoke).
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 
 import {
   DEFAULT_TIME_ZONE,
@@ -27,6 +27,15 @@ type DirectoryRow = {
   compPlanKey: string | null
   compUntil: string | null
   compNote: string | null
+}
+
+type CameraUsage = {
+  used: number
+  baseQuota: number
+  bonus: number
+  quota: number
+  remaining: number
+  enforced: boolean
 }
 
 const COMP_PLANS = ['pro', 'premium', 'studio'] as const
@@ -179,6 +188,62 @@ function MembershipRow({
   const [months, setMonths] = useState<number>(3)
   const [note, setNote] = useState('')
 
+  const [usage, setUsage] = useState<CameraUsage | null>(null)
+  const [bonusInput, setBonusInput] = useState('')
+  const [cameraBusy, setCameraBusy] = useState(false)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/v1/admin/memberships/${item.professionalId}/camera`,
+          { cache: 'no-store' },
+        )
+        if (!res.ok) return
+        const data = (await res.json()) as { usage: CameraUsage }
+        if (!cancelled) setUsage(data.usage)
+      } catch {
+        // best-effort readout
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [item.professionalId])
+
+  async function grantBonus() {
+    const n = Number.parseInt(bonusInput.trim(), 10)
+    if (!Number.isInteger(n) || n <= 0) {
+      setCameraError('Enter a whole number of images.')
+      return
+    }
+    setCameraBusy(true)
+    setCameraError(null)
+    try {
+      const res = await fetch(
+        `/api/v1/admin/memberships/${item.professionalId}/camera`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ count: n }),
+        },
+      )
+      if (!res.ok) {
+        setCameraError(await readError(res))
+        return
+      }
+      const data = (await res.json()) as { usage: CameraUsage }
+      setUsage(data.usage)
+      setBonusInput('')
+    } catch {
+      setCameraError('Something went wrong.')
+    } finally {
+      setCameraBusy(false)
+    }
+  }
+
   const compLabel = formatDate(item.compUntil)
   const renewLabel = formatDate(item.currentPeriodEnd)
 
@@ -267,6 +332,43 @@ function MembershipRow({
             Revoke
           </button>
         ) : null}
+      </div>
+
+      <div className="mt-3 border-t border-white/10 pt-3">
+        <div className="text-[12px] text-textSecondary">
+          AI camera this month:{' '}
+          {usage ? (
+            <span className="text-textPrimary">
+              {usage.used}/{usage.quota} used
+              {usage.bonus > 0 ? ` (incl. +${usage.bonus} bonus)` : ''} ·{' '}
+              {usage.remaining} left
+              {!usage.enforced ? ' · metering off' : ''}
+            </span>
+          ) : (
+            '—'
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            value={bonusInput}
+            onChange={(e) => setBonusInput(e.target.value)}
+            inputMode="numeric"
+            placeholder="Bonus images"
+            aria-label="Bonus images to grant"
+            className="w-32 rounded-card border border-white/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary placeholder:text-textSecondary"
+          />
+          <button
+            type="button"
+            disabled={cameraBusy}
+            onClick={grantBonus}
+            className="rounded-card border border-accentPrimary/60 bg-accentPrimary px-3 py-1.5 text-[12px] font-black text-bgPrimary transition hover:bg-accentPrimaryHover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {cameraBusy ? 'Granting…' : 'Grant images'}
+          </button>
+          {cameraError ? (
+            <span className="text-[12px] text-toneDanger">{cameraError}</span>
+          ) : null}
+        </div>
       </div>
     </div>
   )
