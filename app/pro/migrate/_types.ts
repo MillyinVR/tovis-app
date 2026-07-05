@@ -1,8 +1,9 @@
 // app/pro/migrate/_types.ts
 //
 // View-model types for the pro migration / import flow. These are the agreed
-// presentational contract — the server builds them (mock data for now), the client
-// components render them. Field shapes mirror docs/design/pro-migration-import.md.
+// presentational contract — the server builds them from real import data (see
+// lib/migration/migrationReview.ts and the stage endpoints), the client
+// components render them.
 
 export type MigrationStepKey = 'services' | 'clients' | 'calendar' | 'review'
 

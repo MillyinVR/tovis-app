@@ -9,20 +9,34 @@ import type { MigrationCopy } from '@/lib/brand/defaultMigrationCopy'
 
 import { MigrationStepper } from './_components/MigrationStepper'
 import { SOURCE_APPS } from './_constants'
+import { exportGuideFor } from './_exportInstructions'
 import type { SourceApp } from './_types'
+
+// Per-stage counts the pro already has, so the "what you'll bring over" cards
+// reflect real progress instead of a static "Not started" chip. Same booking-
+// gated numbers the Review page shows (loadMigrationReviewSummary) so the two
+// pages never disagree.
+export type EntryProgress = {
+  services: number
+  clients: number
+  calendar: number
+}
 
 type Props = {
   copy: MigrationCopy['entry']
+  progress: EntryProgress
 }
 
-export function MigrateEntryClient({ copy }: Props) {
+export function MigrateEntryClient({ copy, progress }: Props) {
   const [sourceApp, setSourceApp] = useState<SourceApp | null>(null)
 
-  const cards = [
+  const cards: Array<{ key: keyof EntryProgress; icon: string; title: string; desc: string }> = [
     { key: 'services', icon: '📋', title: 'Service menu', desc: copy.cards.servicesDesc },
     { key: 'clients', icon: '👥', title: 'Clients', desc: copy.cards.clientsDesc },
     { key: 'calendar', icon: '📅', title: 'Calendar', desc: copy.cards.calendarDesc },
   ]
+
+  const guide = sourceApp ? exportGuideFor(sourceApp) : null
 
   return (
     <div className="min-h-screen text-textPrimary">
@@ -70,28 +84,69 @@ export function MigrateEntryClient({ copy }: Props) {
           })}
         </div>
 
+        {/* Per-source export guide — revealed once the pro picks where they're
+            coming from, so the picker actually helps them get their files out. */}
+        {sourceApp && guide ? (
+          <div className="mt-4 rounded-card border border-white/10 bg-bgSurface p-5">
+            <h3 className="font-display text-[16px] font-medium">
+              {copy.exportGuide.title} {sourceApp}
+            </h3>
+            <ul className="mt-3 flex flex-col gap-3">
+              {[
+                { label: copy.exportGuide.menuLabel, step: guide.menu },
+                { label: copy.exportGuide.clientsLabel, step: guide.clients },
+                { label: copy.exportGuide.calendarLabel, step: guide.calendar },
+              ].map((row) => (
+                <li key={row.label} className="flex flex-col gap-1">
+                  <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-textMuted">
+                    {row.label}
+                  </span>
+                  <span className="text-[13px] text-textSecondary">{row.step}</span>
+                </li>
+              ))}
+            </ul>
+            {guide.calendarFeed ? (
+              <p className="mt-3 inline-flex w-fit items-center rounded-full bg-accentPrimary/10 px-3 py-1 text-[12px] text-textPrimary ring-1 ring-accentPrimary/30">
+                {copy.exportGuide.feedNote}
+              </p>
+            ) : null}
+            <p className="mt-3 text-[12px] text-textMuted">{copy.exportGuide.fallback}</p>
+          </div>
+        ) : null}
+
         {/* What you'll bring over */}
         <h2 className="mt-10 font-display text-[18px] font-medium">
           {copy.bringTitle}
         </h2>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {cards.map((c) => (
-            <div
-              key={c.key}
-              className="flex flex-col gap-2 rounded-card border border-white/10 bg-bgSurface p-4"
-            >
-              <span className="text-[22px]" aria-hidden="true">
-                {c.icon}
-              </span>
-              <span className="text-[15px] font-medium text-textPrimary">
-                {c.title}
-              </span>
-              <span className="text-[13px] text-textSecondary">{c.desc}</span>
-              <span className="mt-1 inline-flex w-fit items-center rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-textMuted ring-1 ring-white/10">
-                {copy.notStarted}
-              </span>
-            </div>
-          ))}
+          {cards.map((c) => {
+            const count = progress[c.key]
+            const done = count > 0
+            return (
+              <div
+                key={c.key}
+                className="flex flex-col gap-2 rounded-card border border-white/10 bg-bgSurface p-4"
+              >
+                <span className="text-[22px]" aria-hidden="true">
+                  {c.icon}
+                </span>
+                <span className="text-[15px] font-medium text-textPrimary">
+                  {c.title}
+                </span>
+                <span className="text-[13px] text-textSecondary">{c.desc}</span>
+                <span
+                  className={[
+                    'mt-1 inline-flex w-fit items-center rounded-full px-2.5 py-1 text-[11px] ring-1',
+                    done
+                      ? 'bg-accentPrimary/10 text-textPrimary ring-accentPrimary/30'
+                      : 'bg-white/5 text-textMuted ring-white/10',
+                  ].join(' ')}
+                >
+                  {done ? `${count} ${copy.imported}` : copy.notStarted}
+                </span>
+              </div>
+            )
+          })}
         </div>
 
         {/* CTA */}
