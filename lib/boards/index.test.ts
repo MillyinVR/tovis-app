@@ -101,6 +101,10 @@ function makeDb(): MockDb {
     },
   )
 
+  // Slug resolution scans the client's existing slugs; default to none taken so
+  // create/update use the base slug unless a test overrides this.
+  db.board.findMany.mockResolvedValue([])
+
   return db
 }
 
@@ -214,6 +218,7 @@ describe('lib/boards/index.ts', () => {
           id: true,
           clientId: true,
           name: true,
+          slug: true,
           visibility: true,
           createdAt: true,
           updatedAt: true,
@@ -265,12 +270,14 @@ describe('lib/boards/index.ts', () => {
         data: {
           clientId: 'client_1',
           name: 'Hair ideas',
+          slug: 'hair-ideas',
           visibility: BoardVisibility.PRIVATE,
         },
         select: {
           id: true,
           clientId: true,
           name: true,
+          slug: true,
           visibility: true,
           createdAt: true,
           updatedAt: true,
@@ -325,12 +332,14 @@ describe('lib/boards/index.ts', () => {
         where: { id: 'board_1' },
         data: {
           name: 'Nails later',
+          slug: 'nails-later',
           visibility: BoardVisibility.SHARED,
         },
         select: {
           id: true,
           clientId: true,
           name: true,
+          slug: true,
           visibility: true,
           createdAt: true,
           updatedAt: true,

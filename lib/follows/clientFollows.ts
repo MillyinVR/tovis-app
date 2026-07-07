@@ -102,6 +102,26 @@ export async function requireFollowableClientByHandle(
   return client
 }
 
+/**
+ * The client ids the viewer follows (client→client graph). Powers the Following
+ * tab union (social-first D3) and the "exclude already-followed" set for follow
+ * suggestions. Returns [] for a guest / empty viewer id.
+ */
+export async function listFollowedClientIds(
+  db: FollowsDb,
+  followerClientId: string | null | undefined,
+): Promise<string[]> {
+  const viewerClientId = asTrimmedString(followerClientId)
+  if (!viewerClientId) return []
+
+  const rows = await db.clientFollow.findMany({
+    where: { followerClientId: viewerClientId },
+    select: { followedClientId: true },
+  })
+
+  return rows.map((row) => row.followedClientId)
+}
+
 export async function countClientFollowers(
   db: FollowsDb,
   followedClientId: string,

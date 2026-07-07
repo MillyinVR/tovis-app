@@ -355,6 +355,43 @@ describe('lib/looks/feed.ts', () => {
       })
     })
 
+    it('unions followed clients public looks into the following filter', () => {
+      const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
+        kind: 'FOLLOWING',
+        followingProfessionalIds: ['pro_1'],
+        followingClientIds: ['client_2', 'client_3'],
+      })
+
+      const andFilters = Array.isArray(where.AND) ? where.AND : []
+
+      expect(andFilters).toContainEqual({
+        OR: [
+          { professionalId: { in: ['pro_1'] } },
+          {
+            clientAuthorId: { in: ['client_2', 'client_3'] },
+            publicToFeed: true,
+          },
+        ],
+      })
+    })
+
+    it('keeps the filter flat when only clients are followed', () => {
+      const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
+        kind: 'FOLLOWING',
+        followingProfessionalIds: [],
+        followingClientIds: ['client_2'],
+      })
+
+      const andFilters = Array.isArray(where.AND) ? where.AND : []
+
+      expect(andFilters).toContainEqual({
+        clientAuthorId: { in: ['client_2'] },
+        publicToFeed: true,
+      })
+    })
+
     it('does not scope the professional by tenant for the root context', () => {
       const where = buildLooksFeedWhere({
         kind: 'ALL',

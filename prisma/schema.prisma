@@ -4244,17 +4244,26 @@ model ClientFollow {
 }
 
 model Board {
-  id         String          @id @default(cuid())
-  clientId   String
-  name       String
-  visibility BoardVisibility @default(PRIVATE)
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+  id       String @id @default(cuid())
+  clientId String
+  name     String
+  // URL-safe handle for the public (SHARED) board page /u/[handle]/boards/[slug].
+  // Derived from `name` on write; unique per client (social-first D3).
+  slug           String
+  visibility     BoardVisibility @default(PRIVATE)
+  // Admin moderation flag for a SHARED board: when set, the public board page +
+  // share surfaces 404 (owner keeps their private copy). Plain TEXT admin id —
+  // no FK/back-relation, mirroring LookPost.featuredByUserId (social-first D3).
+  hiddenAt       DateTime?
+  hiddenByUserId String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   client ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
   items  BoardItem[]
 
   @@unique([clientId, name])
+  @@unique([clientId, slug])
   @@index([clientId, createdAt])
 }
 

@@ -32,6 +32,10 @@ export type BuildLooksFeedWhereArgs = {
   categorySlug?: string | null
   q?: string | null
   followingProfessionalIds?: readonly string[] | null
+  // Client→client follows (social-first D3): a followed CLIENT's public looks
+  // join the Following tab alongside followed PROS' looks. Empty/absent → only
+  // pro follows drive the tab (its pre-D3 behaviour).
+  followingClientIds?: readonly string[] | null
   // Restrict to looks carrying this hashtag/style tag (social-first D1). Powers
   // the /looks/tags/[slug] pages; banned tags never match.
   tagSlug?: string | null
@@ -103,20 +107,30 @@ function buildLooksVisibilityFilter(
 
 function buildFollowingFeedFilter(
   followingProfessionalIds: readonly string[],
+  followingClientIds: readonly string[],
 ): Prisma.LookPostWhereInput {
-  if (followingProfessionalIds.length === 0) {
-    return {
-      professionalId: {
-        in: [],
-      },
-    }
+  const or: Prisma.LookPostWhereInput[] = []
+
+  if (followingProfessionalIds.length > 0) {
+    or.push({ professionalId: { in: [...followingProfessionalIds] } })
   }
 
-  return {
-    professionalId: {
-      in: [...followingProfessionalIds],
-    },
+  if (followingClientIds.length > 0) {
+    // A followed client's look only enters the tab once THAT look is opted into
+    // the public feed (publicToFeed) — the same per-look gate discovery uses.
+    // Scoped to their authored looks via clientAuthorId.
+    or.push({
+      clientAuthorId: { in: [...followingClientIds] },
+      publicToFeed: true,
+    })
   }
+
+  // Following nobody (or only empty id sets) → match nothing (unchanged shape).
+  if (or.length === 0) return { professionalId: { in: [] } }
+  // Only one audience followed → keep the where flat (no needless OR wrapper).
+  const [only] = or
+  if (or.length === 1 && only) return only
+  return { OR: or }
 }
 
 function buildCategoryFilter(
@@ -206,6 +220,7 @@ export function buildLooksFeedWhere(
   const followingProfessionalIds = pickDistinctIds(
     args.followingProfessionalIds,
   )
+  const followingClientIds = pickDistinctIds(args.followingClientIds)
 
   const and: Prisma.LookPostWhereInput[] = [
     buildLooksVisibilityFilter(args.kind),
@@ -232,7 +247,9 @@ export function buildLooksFeedWhere(
   }
 
   if (args.kind === 'FOLLOWING') {
-    and.push(buildFollowingFeedFilter(followingProfessionalIds))
+    and.push(
+      buildFollowingFeedFilter(followingProfessionalIds, followingClientIds),
+    )
   }
 
   if (args.kind === 'SPOTLIGHT') {

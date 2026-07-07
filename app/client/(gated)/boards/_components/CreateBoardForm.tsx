@@ -97,8 +97,9 @@ export default function CreateBoardForm({
           </select>
 
           <p className="mt-2 text-[12px] leading-5 text-textSecondary">
-            Private boards are just for you. Shared boards can be surfaced later
-            when that flow is ready.
+            Private boards are just for you. Shared boards get a public link you
+            can send anyone — they’ll see the looks and can book the pros. You
+            can change this anytime.
           </p>
         </div>
 

@@ -14,6 +14,7 @@ import {
 import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
 import { buildLooksViewerFlagResolver } from '@/lib/looks/viewerFlags'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
+import { listFollowedClientIds } from '@/lib/follows/clientFollows'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
@@ -147,12 +148,17 @@ export async function GET(req: Request) {
       forYouMeta = page.meta
       cohort = 'for_you'
     } else {
-      const followingProfessionalIds =
+      const [followingProfessionalIds, followingClientIds] =
         kind === 'FOLLOWING'
-          ? await loadFollowingProfessionalIds({
-              clientId: user?.clientProfile?.id,
-            })
-          : []
+          ? await Promise.all([
+              loadFollowingProfessionalIds({
+                clientId: user?.clientProfile?.id,
+              }),
+              // Followed CLIENTS' public looks join the Following tab too
+              // (social-first D3).
+              listFollowedClientIds(prisma, user?.clientProfile?.id),
+            ])
+          : [[], []]
 
       const where = buildLooksFeedWhere({
         kind,
@@ -160,6 +166,7 @@ export async function GET(req: Request) {
         categorySlug: rawCategorySlug,
         q,
         followingProfessionalIds,
+        followingClientIds,
       })
 
       const cursorWhere = buildLooksFeedCursorWhere({

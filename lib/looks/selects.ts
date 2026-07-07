@@ -308,6 +308,7 @@ export const looksBoardDetailSelect =
     id: true,
     clientId: true,
     name: true,
+    slug: true,
     visibility: true,
     createdAt: true,
     updatedAt: true,

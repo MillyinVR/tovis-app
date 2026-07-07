@@ -5599,6 +5599,10 @@
         "name": {
           "type": "string"
         },
+        "slug": {
+          "description": "URL-safe slug for the public /u/[handle]/boards/[slug] address.",
+          "type": "string"
+        },
         "updatedAt": {
           "type": "string"
         },
@@ -5610,6 +5614,7 @@
         "id",
         "clientId",
         "name",
+        "slug",
         "visibility",
         "createdAt",
         "updatedAt",

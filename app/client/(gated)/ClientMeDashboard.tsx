@@ -11,6 +11,7 @@ import type { ClientLookRemix } from '@/lib/creator/creatorProfileStats'
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import LogoutButton from './components/LogoutButton'
+import FollowSuggestionsRail from './_components/FollowSuggestionsRail'
 import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
 
@@ -794,6 +795,7 @@ export default function ClientMeDashboard({
 
         {tab === 'following' ? (
           <section className="mt-5">
+            <FollowSuggestionsRail />
             {following.length > 0 ? (
               <div className="grid gap-3 md:grid-cols-2">
                 {following.map((item) => (

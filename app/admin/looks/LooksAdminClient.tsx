@@ -85,7 +85,30 @@ type TagRow = {
   createdAt: string
 }
 
-type Tab = 'LOOK' | 'COMMENT' | 'TAG'
+type BoardRow = {
+  boardId: string
+  name: string
+  slug: string
+  ownerHandle: string | null
+  ownerClientId: string
+  itemCount: number
+  hidden: boolean
+  hiddenAt: string | null
+  createdAt: string
+  publicUrl: string | null
+}
+
+type Tab = 'LOOK' | 'COMMENT' | 'TAG' | 'BOARD'
+type BoardVisibilityFilter = 'ALL' | 'VISIBLE' | 'HIDDEN'
+
+const BOARD_VISIBILITY_FILTERS: {
+  value: BoardVisibilityFilter
+  label: string
+}[] = [
+  { value: 'ALL', label: 'All boards' },
+  { value: 'VISIBLE', label: 'Visible' },
+  { value: 'HIDDEN', label: 'Hidden' },
+]
 type StatusFilter =
   | 'REPORTED'
   | 'PENDING'
@@ -158,10 +181,12 @@ export default function LooksAdminClient() {
   const [tab, setTab] = useState<Tab>('LOOK')
   const [status, setStatus] = useState<StatusFilter>('REPORTED')
   const [bannedFilter, setBannedFilter] = useState<BannedFilter>('ALL')
+  const [boardFilter, setBoardFilter] = useState<BoardVisibilityFilter>('ALL')
   const [query, setQuery] = useState('')
   const [looks, setLooks] = useState<LookRow[]>([])
   const [comments, setComments] = useState<CommentRow[]>([])
   const [tags, setTags] = useState<TagRow[]>([])
+  const [boards, setBoards] = useState<BoardRow[]>([])
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
@@ -170,6 +195,7 @@ export default function LooksAdminClient() {
     nextTab: Tab,
     nextStatus: StatusFilter,
     nextBanned: BannedFilter,
+    nextBoard: BoardVisibilityFilter,
     q: string,
   ) {
     setError(null)
@@ -182,6 +208,17 @@ export default function LooksAdminClient() {
         if (!res.ok) throw new Error(await readError(res))
         const data = (await res.json()) as { items: TagRow[] }
         setTags(data.items)
+        setLoaded(true)
+        return
+      }
+
+      if (nextTab === 'BOARD') {
+        const res = await fetch(
+          `/api/v1/admin/boards?visibility=${nextBoard}&q=${encodeURIComponent(q)}`,
+        )
+        if (!res.ok) throw new Error(await readError(res))
+        const data = (await res.json()) as { items: BoardRow[] }
+        setBoards(data.items)
         setLoaded(true)
         return
       }
@@ -207,11 +244,11 @@ export default function LooksAdminClient() {
 
   useEffect(() => {
     // Initial load only; tab/filter/search changes call load() explicitly.
-    startTransition(() => load('LOOK', 'REPORTED', 'ALL', ''))
+    startTransition(() => load('LOOK', 'REPORTED', 'ALL', 'ALL', ''))
   }, [])
 
   function refresh() {
-    startTransition(() => load(tab, status, bannedFilter, query))
+    startTransition(() => load(tab, status, bannedFilter, boardFilter, query))
   }
 
   async function act(run: () => Promise<Response>, failMsg: string) {
@@ -219,7 +256,7 @@ export default function LooksAdminClient() {
     try {
       const res = await run()
       if (!res.ok) throw new Error(await readError(res))
-      await load(tab, status, bannedFilter, query)
+      await load(tab, status, bannedFilter, boardFilter, query)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : failMsg)
     }
@@ -326,24 +363,40 @@ export default function LooksAdminClient() {
     tagAction(slug, { action: 'merge', targetSlug }, 'Merging the tag failed.')
   }
 
+  function hideBoard(boardId: string, hidden: boolean) {
+    startTransition(() =>
+      act(
+        () =>
+          fetch(`/api/v1/admin/boards/${encodeURIComponent(boardId)}/hide`, {
+            method: hidden ? 'PUT' : 'DELETE',
+          }),
+        'Updating the board failed.',
+      ),
+    )
+  }
+
   const empty =
     tab === 'LOOK'
       ? looks.length === 0
       : tab === 'COMMENT'
         ? comments.length === 0
-        : tags.length === 0
+        : tab === 'TAG'
+          ? tags.length === 0
+          : boards.length === 0
 
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-card border border-white/15 p-0.5">
-          {(['LOOK', 'COMMENT', 'TAG'] as const).map((t) => (
+          {(['LOOK', 'COMMENT', 'TAG', 'BOARD'] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => {
                 setTab(t)
-                startTransition(() => load(t, status, bannedFilter, query))
+                startTransition(() =>
+                  load(t, status, bannedFilter, boardFilter, query),
+                )
               }}
               className={`rounded-card px-3 py-1.5 text-[12px] font-black transition ${
                 tab === t
@@ -351,7 +404,13 @@ export default function LooksAdminClient() {
                   : 'text-textSecondary hover:text-textPrimary'
               }`}
             >
-              {t === 'LOOK' ? 'Looks' : t === 'COMMENT' ? 'Comments' : 'Tags'}
+              {t === 'LOOK'
+                ? 'Looks'
+                : t === 'COMMENT'
+                  ? 'Comments'
+                  : t === 'TAG'
+                    ? 'Tags'
+                    : 'Boards'}
             </button>
           ))}
         </div>
@@ -362,11 +421,29 @@ export default function LooksAdminClient() {
             onChange={(e) => {
               const next = e.target.value as BannedFilter
               setBannedFilter(next)
-              startTransition(() => load(tab, status, next, query))
+              startTransition(() => load(tab, status, next, boardFilter, query))
             }}
             className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
           >
             {BANNED_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        ) : tab === 'BOARD' ? (
+          <select
+            value={boardFilter}
+            onChange={(e) => {
+              const next = e.target.value as BoardVisibilityFilter
+              setBoardFilter(next)
+              startTransition(() =>
+                load(tab, status, bannedFilter, next, query),
+              )
+            }}
+            className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
+          >
+            {BOARD_VISIBILITY_FILTERS.map((f) => (
               <option key={f.value} value={f.value}>
                 {f.label}
               </option>
@@ -378,7 +455,9 @@ export default function LooksAdminClient() {
             onChange={(e) => {
               const next = e.target.value as StatusFilter
               setStatus(next)
-              startTransition(() => load(tab, next, bannedFilter, query))
+              startTransition(() =>
+                load(tab, next, bannedFilter, boardFilter, query),
+              )
             }}
             className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
           >
@@ -403,7 +482,9 @@ export default function LooksAdminClient() {
             placeholder={
               tab === 'TAG'
                 ? 'Filter by tag slug or label…'
-                : 'Filter by pro business, name, or handle…'
+                : tab === 'BOARD'
+                  ? 'Filter by board name, slug, or owner handle…'
+                  : 'Filter by pro business, name, or handle…'
             }
             className="min-w-45 flex-1 rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[13px] text-textPrimary placeholder:text-textSecondary focus:border-accentPrimary/60 focus:outline-none"
           />
@@ -447,16 +528,25 @@ export default function LooksAdminClient() {
                   onDismiss={() => dismissCommentReports(item.lookCommentId)}
                 />
               ))
-            : tags.map((item) => (
-                <TagCard
-                  key={item.slug}
-                  item={item}
-                  busy={pending}
-                  onToggleBan={() => setTagBanned(item.slug, !item.banned)}
-                  onRename={() => renameTag(item.slug, item.display)}
-                  onMerge={() => mergeTag(item.slug)}
-                />
-              ))}
+            : tab === 'TAG'
+              ? tags.map((item) => (
+                  <TagCard
+                    key={item.slug}
+                    item={item}
+                    busy={pending}
+                    onToggleBan={() => setTagBanned(item.slug, !item.banned)}
+                    onRename={() => renameTag(item.slug, item.display)}
+                    onMerge={() => mergeTag(item.slug)}
+                  />
+                ))
+              : boards.map((item) => (
+                  <BoardCard
+                    key={item.boardId}
+                    item={item}
+                    busy={pending}
+                    onToggleHide={() => hideBoard(item.boardId, !item.hidden)}
+                  />
+                ))}
 
         {loaded && empty && !error ? (
           <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
@@ -846,6 +936,71 @@ function TagCard({
           tone="neutral"
           busy={busy}
           onClick={onMerge}
+        />
+      </div>
+    </div>
+  )
+}
+
+function BoardCard({
+  item,
+  busy,
+  onToggleHide,
+}: {
+  item: BoardRow
+  busy: boolean
+  onToggleHide: () => void
+}) {
+  const createdLabel = formatDate(item.createdAt)
+
+  return (
+    <div
+      className={`rounded-card border p-4 ${
+        item.hidden
+          ? 'border-toneDanger/40 bg-bgPrimary/20'
+          : 'border-white/10 bg-bgPrimary/40'
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          {item.publicUrl ? (
+            <a
+              href={item.publicUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[15px] font-black text-textPrimary no-underline hover:underline"
+            >
+              {item.name}
+            </a>
+          ) : (
+            <span className="text-[15px] font-black text-textPrimary">
+              {item.name}
+            </span>
+          )}
+          <span className="ml-2 text-[12px] text-textSecondary">
+            {item.ownerHandle ? `@${item.ownerHandle}` : 'no handle'}
+            {' · '}
+            {item.itemCount} look{item.itemCount === 1 ? '' : 's'}
+            {createdLabel ? ` · ${createdLabel}` : ''}
+          </span>
+        </div>
+        {item.hidden ? (
+          <span className="rounded-card border border-toneDanger/50 px-2 py-0.5 text-[11px] font-black uppercase text-toneDanger">
+            Hidden
+          </span>
+        ) : (
+          <span className="rounded-card border border-toneSuccess/50 px-2 py-0.5 text-[11px] font-black uppercase text-toneSuccess">
+            Visible
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <ActionButton
+          label={item.hidden ? 'Unhide' : 'Hide'}
+          tone={item.hidden ? 'neutral' : 'danger'}
+          busy={busy}
+          onClick={onToggleHide}
         />
       </div>
     </div>

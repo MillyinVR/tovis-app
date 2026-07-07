@@ -30,6 +30,9 @@ const mocks = vi.hoisted(() => {
     proFollow: {
       findMany: vi.fn(),
     },
+    clientFollow: {
+      findMany: vi.fn(),
+    },
   }
 
   const getCurrentUser = vi.fn()
@@ -212,6 +215,7 @@ describe('app/api/v1/looks/route.ts', () => {
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
+    mocks.prisma.clientFollow.findMany.mockResolvedValue([])
 
     mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
   })
@@ -243,6 +247,7 @@ describe('app/api/v1/looks/route.ts', () => {
       categorySlug: null,
       q: null,
       followingProfessionalIds: [],
+      followingClientIds: [],
     })
 
     expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
@@ -375,6 +380,9 @@ describe('app/api/v1/looks/route.ts', () => {
       { professionalId: 'pro_1' },
       { professionalId: 'pro_2' },
     ])
+    mocks.prisma.clientFollow.findMany.mockResolvedValue([
+      { followedClientId: 'client_2' },
+    ])
 
     const res = await GET(makeRequest('/api/looks?filter=following'))
 
@@ -395,12 +403,22 @@ describe('app/api/v1/looks/route.ts', () => {
       },
     })
 
+    expect(mocks.prisma.clientFollow.findMany).toHaveBeenCalledWith({
+      where: {
+        followerClientId: 'client_1',
+      },
+      select: {
+        followedClientId: true,
+      },
+    })
+
     expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'FOLLOWING',
       tenant: ROOT_TENANT,
       categorySlug: null,
       q: null,
       followingProfessionalIds: ['pro_1', 'pro_2'],
+      followingClientIds: ['client_2'],
     })
 
     expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
@@ -468,6 +486,7 @@ describe('app/api/v1/looks/route.ts', () => {
       categorySlug: 'spotlight',
       q: 'fade',
       followingProfessionalIds: [],
+      followingClientIds: [],
     })
 
     expect(mocks.buildLooksFeedOrderBy).toHaveBeenCalledWith({
@@ -531,6 +550,7 @@ describe('app/api/v1/looks/route.ts', () => {
       categorySlug: 'nails',
       q: 'fade',
       followingProfessionalIds: [],
+      followingClientIds: [],
     })
 
     expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
