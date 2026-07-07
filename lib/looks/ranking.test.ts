@@ -6,10 +6,13 @@ import {
 } from '@prisma/client'
 
 import {
+  LOOK_POST_RANK_COLD_START,
   LOOK_POST_RANK_PRIOR,
   LOOK_POST_RANK_RECENCY_HALF_LIFE_DAYS,
   LOOK_POST_RANK_SCORE_SCALE,
   LOOK_POST_RANK_WEIGHTS,
+  computeLookPostRankColdStartBoost,
+  computeLookPostRankImpressions,
   computeLookPostRankRecencyMultiplier,
   computeLookPostRankScore,
   computeLookPostRankSmoothedRate,
@@ -297,6 +300,110 @@ describe('lib/looks/ranking.ts', () => {
     })
   })
 
+  describe('computeLookPostRankImpressions', () => {
+    it('returns viewCount when it dominates raw engagement', () => {
+      expect(
+        computeLookPostRankImpressions(
+          makeInput({ likeCount: 3, viewCount: 120 }),
+        ),
+      ).toBe(120)
+    })
+
+    it('floors at the raw engagement total when viewCount is undercounted', () => {
+      expect(
+        computeLookPostRankImpressions(
+          makeInput({ likeCount: 11, commentCount: 6, saveCount: 3 }),
+        ),
+      ).toBe(20)
+    })
+  })
+
+  describe('computeLookPostRankColdStartBoost', () => {
+    const publishedAt = new Date('2026-04-19T00:00:00.000Z')
+
+    it('grants the full boost to a just-published zero-impression look', () => {
+      expect(
+        computeLookPostRankColdStartBoost(
+          makeInput({ publishedAt }),
+          { now: publishedAt },
+        ),
+      ).toBe(LOOK_POST_RANK_COLD_START.maxBoost)
+    })
+
+    it('decays linearly as impressions accrue and hits 0 at the floor', () => {
+      const now = publishedAt
+
+      const half = computeLookPostRankColdStartBoost(
+        makeInput({ publishedAt, viewCount: 25 }),
+        { now },
+      )
+      expect(half).toBe(LOOK_POST_RANK_COLD_START.maxBoost / 2)
+
+      expect(
+        computeLookPostRankColdStartBoost(
+          makeInput({ publishedAt, viewCount: 50 }),
+          { now },
+        ),
+      ).toBe(0)
+
+      expect(
+        computeLookPostRankColdStartBoost(
+          makeInput({ publishedAt, viewCount: 5000 }),
+          { now },
+        ),
+      ).toBe(0)
+    })
+
+    it('counts engagement-floored impressions, so a pre-view-tracking look with real engagement is not "cold"', () => {
+      // 60 likes with zero recorded views: the same undercount protection that
+      // floors the rate denominator also disqualifies cold-start support.
+      expect(
+        computeLookPostRankColdStartBoost(
+          makeInput({ publishedAt, likeCount: 60 }),
+          { now: publishedAt },
+        ),
+      ).toBe(0)
+    })
+
+    it('tapers with age and expires at the window end', () => {
+      const halfWindow = new Date(
+        publishedAt.getTime() + 7 * 24 * 60 * 60 * 1000,
+      )
+      expect(
+        computeLookPostRankColdStartBoost(makeInput({ publishedAt }), {
+          now: halfWindow,
+        }),
+      ).toBe(LOOK_POST_RANK_COLD_START.maxBoost / 2)
+
+      const pastWindow = new Date(
+        publishedAt.getTime() + 15 * 24 * 60 * 60 * 1000,
+      )
+      expect(
+        computeLookPostRankColdStartBoost(makeInput({ publishedAt }), {
+          now: pastWindow,
+        }),
+      ).toBe(0)
+    })
+
+    it('honors an overridden config and disables on non-positive knobs', () => {
+      const boosted = computeLookPostRankColdStartBoost(
+        makeInput({ publishedAt }),
+        {
+          now: publishedAt,
+          coldStart: { maxBoost: 10, impressionFloor: 20, windowDays: 5 },
+        },
+      )
+      expect(boosted).toBe(10)
+
+      expect(
+        computeLookPostRankColdStartBoost(makeInput({ publishedAt }), {
+          now: publishedAt,
+          coldStart: { maxBoost: 0, impressionFloor: 20, windowDays: 5 },
+        }),
+      ).toBe(0)
+    })
+  })
+
   describe('computeLookPostRankScore', () => {
     it('returns 0 for ineligible looks', () => {
       expect(
@@ -391,7 +498,9 @@ describe('lib/looks/ranking.ts', () => {
     it('returns a stable rounded score for a zero-impression look', () => {
       // weighted = 11·1 + 6·2 + 3·5 = 38; raw engagement = 20 floors the zero
       // viewCount → smoothedRate = (38 + 0.08·50)/(20 + 50) = 0.6; recency
-      // (1 day, 7-day half-life) = 7/8; score = 0.6·0.875·200.
+      // (1 day, 7-day half-life) = 7/8; base = 0.6·0.875·200 = 105. Cold start
+      // (§2.1): 20 floored impressions of a 50 floor, 1 day into a 14-day
+      // window → 45·0.6·(13/14) = 25.0714…; total rounds to 130.0714.
       expect(
         computeLookPostRankScore(
           makeInput({
@@ -403,7 +512,76 @@ describe('lib/looks/ranking.ts', () => {
             now: new Date('2026-04-20T00:00:00.000Z'),
           },
         ),
-      ).toBe(105)
+      ).toBe(130.0714)
+    })
+
+    it('lifts a brand-new zero-impression look above a typical established look (spec §2.1)', () => {
+      const now = new Date('2026-04-20T00:00:00.000Z')
+
+      // Established look running at ~2× the prior rate with plenty of evidence
+      // — a solidly "typical" performer.
+      const typical = computeLookPostRankScore(
+        makeInput({
+          publishedAt: new Date('2026-04-13T00:00:00.000Z'),
+          likeCount: 80,
+          viewCount: 500,
+        }),
+        { now },
+      )
+
+      const brandNew = computeLookPostRankScore(
+        makeInput({ publishedAt: now }),
+        { now },
+      )
+
+      expect(brandNew).toBeGreaterThan(typical)
+    })
+
+    it('keeps a hot proven look above a brand-new cold-start look', () => {
+      const now = new Date('2026-04-20T00:00:00.000Z')
+
+      // ~0.5 weighted engagement per impression (6× the prior) on real volume.
+      const hot = computeLookPostRankScore(
+        makeInput({
+          publishedAt: new Date('2026-04-18T00:00:00.000Z'),
+          saveCount: 100,
+          viewCount: 1000,
+        }),
+        { now },
+      )
+
+      const brandNew = computeLookPostRankScore(
+        makeInput({ publishedAt: now }),
+        { now },
+      )
+
+      expect(hot).toBeGreaterThan(brandNew)
+    })
+
+    it('washes the cold-start boost out entirely once the impression floor is met', () => {
+      const now = new Date('2026-04-20T00:00:00.000Z')
+      const publishedAt = new Date('2026-04-19T00:00:00.000Z')
+      const input = makeInput({ publishedAt, saveCount: 4, viewCount: 50 })
+
+      const score = computeLookPostRankScore(input, { now })
+      const scoreWithoutColdStart = computeLookPostRankScore(input, {
+        now,
+        coldStart: { maxBoost: 0, impressionFloor: 0, windowDays: 0 },
+      })
+
+      expect(score).toBe(scoreWithoutColdStart)
+    })
+
+    it('stays below the forYouRanking seen penalty even for pathological cold inputs', () => {
+      // Worst case under the floor: every impression is a save (max weight),
+      // impressions just shy of the floor, published this instant.
+      const now = new Date('2026-04-20T00:00:00.000Z')
+      const score = computeLookPostRankScore(
+        makeInput({ publishedAt: now, saveCount: 49, viewCount: 49 }),
+        { now },
+      )
+
+      expect(score).toBeLessThan(1000)
     })
 
     it('keeps the score scale in the band forYouRanking boosts are calibrated against', () => {
