@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
   const enqueueIndexLookPostDocument = vi.fn()
   const enqueueModerationScanLookPost = vi.fn()
   const enqueueFanOutNewLookNotifications = vi.fn()
+  const enqueueEmbedLookPostImage = vi.fn()
 
   return {
     enqueueRecomputeLookCounts,
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => {
     enqueueIndexLookPostDocument,
     enqueueModerationScanLookPost,
     enqueueFanOutNewLookNotifications,
+    enqueueEmbedLookPostImage,
   }
 })
 
@@ -35,6 +37,7 @@ vi.mock('./enqueue', () => ({
   enqueueIndexLookPostDocument: mocks.enqueueIndexLookPostDocument,
   enqueueModerationScanLookPost: mocks.enqueueModerationScanLookPost,
   enqueueFanOutNewLookNotifications: mocks.enqueueFanOutNewLookNotifications,
+  enqueueEmbedLookPostImage: mocks.enqueueEmbedLookPostImage,
 }))
 
 import {
@@ -79,6 +82,9 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
     mocks.enqueueFanOutNewLookNotifications.mockResolvedValue(
       makeQueuedJob('job_fan_out_new_look_1', 'looks:fan-out-new-look:look_1'),
     )
+    mocks.enqueueEmbedLookPostImage.mockResolvedValue(
+      makeQueuedJob('job_embed_1', 'looks:embed-image:look_1'),
+    )
   })
 
   afterAll(async () => {
@@ -118,6 +124,10 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
       },
       {
         type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+        processorSupport: 'SUPPORTED',
+      },
+      {
+        type: LooksSocialJobType.EMBED_LOOK_POST_IMAGE,
         processorSupport: 'SUPPORTED',
       },
     ])
@@ -171,6 +181,12 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
       lookPostId: 'look_1',
     })
 
+    expect(mocks.enqueueEmbedLookPostImage).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueEmbedLookPostImage.mock.calls[0]?.[0]).toBe(db)
+    expect(mocks.enqueueEmbedLookPostImage.mock.calls[0]?.[1]).toEqual({
+      lookPostId: 'look_1',
+    })
+
     expect(result).toEqual({
       lookPostId: 'look_1',
       mutation: 'PUBLISH',
@@ -197,6 +213,10 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
         },
         {
           type: LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+          processorSupport: 'SUPPORTED',
+        },
+        {
+          type: LooksSocialJobType.EMBED_LOOK_POST_IMAGE,
           processorSupport: 'SUPPORTED',
         },
       ],
@@ -235,6 +255,13 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
           processorSupport: 'SUPPORTED',
           jobId: 'job_fan_out_new_look_1',
           dedupeKey: 'looks:fan-out-new-look:look_1',
+        },
+        {
+          type: LooksSocialJobType.EMBED_LOOK_POST_IMAGE,
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_embed_1',
+          dedupeKey: 'looks:embed-image:look_1',
         },
       ],
       gatedJobs: [
@@ -306,13 +333,15 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
     })
   })
 
-  it('plans only ranking jobs when the mutation changes ranking inputs only', () => {
+  it('plans ranking jobs plus an embed re-check when the mutation changes ranking inputs only', () => {
     const planned = planLookPostMutationJobs({
       lookPostId: 'look_1',
       mutation: 'EDIT',
       rankingRelevantChanged: true,
     })
 
+    // The embed job rides ranking-relevant edits because a primary-image swap
+    // arrives as one; the processor no-ops when the image/model is unchanged.
     expect(planned).toEqual([
       {
         type: LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE,
@@ -320,6 +349,10 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
       },
       {
         type: LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE,
+        processorSupport: 'SUPPORTED',
+      },
+      {
+        type: LooksSocialJobType.EMBED_LOOK_POST_IMAGE,
         processorSupport: 'SUPPORTED',
       },
     ])
@@ -388,6 +421,7 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
     expect(mocks.enqueueRecomputeLookRankScore).not.toHaveBeenCalled()
     expect(mocks.enqueueIndexLookPostDocument).not.toHaveBeenCalled()
     expect(mocks.enqueueModerationScanLookPost).not.toHaveBeenCalled()
+    expect(mocks.enqueueEmbedLookPostImage).not.toHaveBeenCalled()
   })
 
   it('throws when lookPostId is blank', async () => {

@@ -47,11 +47,12 @@ jobs:
 
     services:
       postgres:
-        # postgis/postgis bundles PostGIS 3.x on Postgres 16 and runs
-        # `CREATE EXTENSION postgis` against POSTGRES_DB on init, so
-        # `prisma db push` can create the geography column for the
-        # P2.4a ProfessionalSearchIndex table.
-        image: postgis/postgis:16-3.4
+        # imresamu/postgis "bundle" ships PostGIS 3.x AND pgvector on
+        # Postgres 16. Init enables postgis against POSTGRES_DB (geography
+        # column for P2.4a ProfessionalSearchIndex); pgvector is enabled by
+        # the explicit CREATE EXTENSION step below so `prisma db push` can
+        # create the §6.0 vector(1024) columns.
+        image: imresamu/postgis:16-3.4-bundle0
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -141,6 +142,15 @@ jobs:
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
+
+      - name: Enable pgvector
+        # The bundle image ships vector.control but only auto-enables postgis;
+        # `db push` needs the extension to exist before it can create the
+        # vector(1024) columns (migrate deploy would create it itself).
+        # Connects via the job-level DIRECT_URL so the service password isn't
+        # repeated inline (an inline literal also trips secret scanners).
+        # psql rejects Prisma's ?schema= query parameter, so strip the query.
+        run: psql "${DIRECT_URL%%\?*}" -c "CREATE EXTENSION IF NOT EXISTS vector"
 
       - name: Push Prisma schema
         run: pnpm exec prisma db push --skip-generate

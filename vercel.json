@@ -80,6 +80,10 @@
     {
       "path": "/api/internal/jobs/looks-category-rank-stats",
       "schedule": "45 9 * * *"
+    },
+    {
+      "path": "/api/internal/jobs/taste-vectors",
+      "schedule": "0 10 * * *"
     }
   ]
 }

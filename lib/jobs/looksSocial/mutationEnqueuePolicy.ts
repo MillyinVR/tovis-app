@@ -6,6 +6,7 @@ import {
 } from '@prisma/client'
 
 import {
+  enqueueEmbedLookPostImage,
   enqueueFanOutNewLookNotifications,
   enqueueIndexLookPostDocument,
   enqueueModerationScanLookPost,
@@ -112,6 +113,7 @@ const SUPPORTED_LOOK_POST_JOB_TYPES = new Set<LooksSocialJobType>([
   LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE,
   LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
   LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS,
+  LooksSocialJobType.EMBED_LOOK_POST_IMAGE,
 ])
 
 const DEFERRED_LOOK_POST_JOB_TYPES = new Set<LooksSocialJobType>([
@@ -205,6 +207,14 @@ function buildPlannedLookPostMutationJobTypes(
     addPlannedJob(jobTypes, LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS)
   }
 
+  // Visual embedding (spec §6.0, "embed at upload"): publish is the embed
+  // moment; ranking-relevant edits re-plan it in case the primary image
+  // changed. The processor skips when the stored embedding already matches the
+  // current primary asset + model, so re-planning is a cheap no-op.
+  if (args.mutation === 'PUBLISH' || args.rankingRelevantChanged === true) {
+    addPlannedJob(jobTypes, LooksSocialJobType.EMBED_LOOK_POST_IMAGE)
+  }
+
   return [...jobTypes]
 }
 
@@ -275,6 +285,17 @@ async function enqueuePlannedLookPostJob(
 
     case LooksSocialJobType.FAN_OUT_NEW_LOOK_NOTIFICATIONS: {
       const job = await enqueueFanOutNewLookNotifications(db, { lookPostId })
+      return {
+        type,
+        disposition: 'ENQUEUED',
+        processorSupport: 'SUPPORTED',
+        jobId: job.id,
+        dedupeKey: job.dedupeKey,
+      }
+    }
+
+    case LooksSocialJobType.EMBED_LOOK_POST_IMAGE: {
+      const job = await enqueueEmbedLookPostImage(db, { lookPostId })
       return {
         type,
         disposition: 'ENQUEUED',
