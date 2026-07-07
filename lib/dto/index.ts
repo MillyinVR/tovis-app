@@ -202,6 +202,9 @@ export type {
   ReminderOffsetOptionDTO,
 } from '@/lib/dto/reminderSettings'
 
+// ── Pro AI-camera monthly image usage (GET /api/v1/pro/camera/usage) ──────────
+export type { ProCameraUsage } from '@/lib/pro/cameraQuota'
+
 // ── Client "Me" aggregate (GET /api/v1/me) ───────────────────────────────────
 export type {
   ClientMeUserDTO,
