@@ -14,11 +14,11 @@ jobs:
 
     services:
       postgres:
-        # postgis/postgis bundles PostGIS 3.x on Postgres 16 and runs
-        # `CREATE EXTENSION postgis` against POSTGRES_DB on init, so
-        # `prisma migrate deploy` can apply the P2.4a migration that
-        # creates the geography column on ProfessionalSearchIndex.
-        image: postgis/postgis:16-3.4
+        # imresamu/postgis "bundle" ships PostGIS 3.x AND pgvector on
+        # Postgres 16, so `prisma migrate deploy` can apply both the P2.4a
+        # postgis migration and the §6.0 pgvector migration (which runs its
+        # own CREATE EXTENSION vector).
+        image: imresamu/postgis:16-3.4-bundle0
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

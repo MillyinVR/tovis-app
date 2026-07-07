@@ -10,6 +10,7 @@ import {
   type LooksSocialJobPerTypeCounts,
 } from '@/lib/jobs/looksSocial/contracts'
 import { processApplyLookViews } from '@/lib/jobs/looksSocial/applyLookViews'
+import { processEmbedLookPostImage } from '@/lib/jobs/looksSocial/embedLookPostImage'
 import { processFanOutNewLookNotifications } from '@/lib/jobs/looksSocial/fanOutNewLook'
 import { processIndexLookPostDocument } from '@/lib/jobs/looksSocial/indexLookPostDocument'
 import {
@@ -198,6 +199,13 @@ async function runLooksSocialJob(
       }
       return
     }
+
+    case LooksSocialJobType.EMBED_LOOK_POST_IMAGE:
+      await processEmbedLookPostImage(prisma, {
+        lookPostId: readRequiredString(job.payload, 'lookPostId'),
+        now,
+      })
+      return
 
     case LooksSocialJobType.MODERATION_SCAN_LOOK_POST:
       throw new Error(

@@ -43,12 +43,15 @@ import {
 
 // How many of the viewer's most recent likes / saves feed category affinity.
 // Bounded so the signal query stays cheap regardless of a power user's history.
-const AFFINITY_SAMPLE_SIZE = 200
+// Exported: the taste-vector recompute (lib/personalization/tasteVectors.ts)
+// samples the same signals with the same bound.
+export const AFFINITY_SAMPLE_SIZE = 200
 
 // Saves are a stronger taste signal than likes (mirrors the engagement weights
-// in lib/looks/ranking.ts, scaled down).
-const AFFINITY_LIKE_WEIGHT = 1
-const AFFINITY_SAVE_WEIGHT = 2
+// in lib/looks/ranking.ts, scaled down). Exported: taste vectors weight the
+// same signals identically (spec §2 hierarchy applied to §6.0 embeddings).
+export const AFFINITY_LIKE_WEIGHT = 1
+export const AFFINITY_SAVE_WEIGHT = 2
 
 // Behavioral affinity half-life (spec §6.2 time decay, 60–90 day band): a
 // like/save contributes at full weight today and half as much 75 days from

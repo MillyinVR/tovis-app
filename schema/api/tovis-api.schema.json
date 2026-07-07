@@ -121,7 +121,8 @@
         "INDEX_LOOK_POST_DOCUMENT",
         "MODERATION_SCAN_LOOK_POST",
         "MODERATION_SCAN_COMMENT",
-        "APPLY_LOOK_VIEWS"
+        "APPLY_LOOK_VIEWS",
+        "EMBED_LOOK_POST_IMAGE"
       ],
       "type": "string"
     },

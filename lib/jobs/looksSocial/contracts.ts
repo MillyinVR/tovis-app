@@ -11,6 +11,7 @@ export const LOOKS_SOCIAL_JOB_TYPES = [
   LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
   LooksSocialJobType.MODERATION_SCAN_COMMENT,
   LooksSocialJobType.APPLY_LOOK_VIEWS,
+  LooksSocialJobType.EMBED_LOOK_POST_IMAGE,
 ] as const
 
 export type RecomputeLookCountsJobPayload = {
@@ -52,6 +53,10 @@ export type ApplyLookViewsJobPayload = {
   lookPostIds: string[]
 }
 
+export type EmbedLookPostImageJobPayload = {
+  lookPostId: string
+}
+
 export type LooksSocialJobPayloadByType = {
   [LooksSocialJobType.RECOMPUTE_LOOK_COUNTS]: RecomputeLookCountsJobPayload
   [LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE]: RecomputeLookSpotlightScoreJobPayload
@@ -62,6 +67,7 @@ export type LooksSocialJobPayloadByType = {
   [LooksSocialJobType.MODERATION_SCAN_LOOK_POST]: ModerationScanLookPostJobPayload
   [LooksSocialJobType.MODERATION_SCAN_COMMENT]: ModerationScanCommentJobPayload
   [LooksSocialJobType.APPLY_LOOK_VIEWS]: ApplyLookViewsJobPayload
+  [LooksSocialJobType.EMBED_LOOK_POST_IMAGE]: EmbedLookPostImageJobPayload
 }
 
 export type LooksSocialJobRequest<
@@ -115,6 +121,8 @@ export function makeEmptyLooksSocialJobPerTypeCounts(): LooksSocialJobPerTypeCou
     [LooksSocialJobType.MODERATION_SCAN_COMMENT]:
       makeEmptyLooksSocialJobBatchCounts(),
     [LooksSocialJobType.APPLY_LOOK_VIEWS]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.EMBED_LOOK_POST_IMAGE]:
       makeEmptyLooksSocialJobBatchCounts(),
   }
 }

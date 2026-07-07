@@ -70,6 +70,13 @@ function makePerTypeCounts(): LooksSocialJobPerTypeCounts {
       retryScheduledCount: 0,
       failedCount: 0,
     },
+    [LooksSocialJobType.EMBED_LOOK_POST_IMAGE]: {
+      scannedCount: 0,
+      processedCount: 0,
+      completedCount: 0,
+      retryScheduledCount: 0,
+      failedCount: 0,
+    },
   }
 }
 

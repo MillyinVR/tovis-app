@@ -742,6 +742,10 @@ enum LooksSocialJobType {
   // opens) flushed from the client through /api/v1/looks/views. Social-first
   // plan B2.
   APPLY_LOOK_VIEWS
+  // Visual-embedding pipeline (personalization spec §6.0): embed the look's
+  // primary image via the external embedding API so taste vectors and visual
+  // similarity can rank within tag-retrieved candidates.
+  EMBED_LOOK_POST_IMAGE
 }
 
 enum LooksSocialJobStatus {
@@ -1553,6 +1557,10 @@ model ClientProfile {
   authoredLooks LookPost[]     @relation("ClientAuthoredLooks")
   following     ClientFollow[] @relation("ClientFollowing")
   followers     ClientFollow[] @relation("ClientFollowers")
+
+  // Global visual taste vector (personalization spec §6.0) — decayed,
+  // signal-weighted average of the embeddings of what this client liked/saved.
+  tasteVector ClientTasteVector?
 
   @@index([claimStatus])
   @@index([emailHashKeyVersion])
@@ -4018,6 +4026,9 @@ model LookPost {
   comments         LookComment[]
   reports          LookPostReport[]
   boardItems       BoardItem[]
+  // §6.0 visual embedding of the primary image (written by the
+  // EMBED_LOOK_POST_IMAGE job; absent until the look is embedded).
+  embedding        LookPostEmbedding?
   inspiredBookings Booking[]        @relation("LookInspiredBookings")
   // User-facing hashtags / style tags parsed from the caption at publish
   // (social-first D1). Implicit M2M; banned tags are dropped at publish and
@@ -4316,6 +4327,10 @@ model Board {
   client ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
   items  BoardItem[]
 
+  // Per-board local visual taste vector (personalization spec §6.0/§6.1) —
+  // decayed average of the embeddings of this board's saved looks.
+  tasteVector BoardTasteVector?
+
   @@unique([clientId, name])
   @@unique([clientId, slug])
   @@index([clientId, createdAt])
@@ -4333,6 +4348,69 @@ model BoardItem {
   @@unique([boardId, lookPostId])
   @@index([lookPostId, createdAt])
   @@index([boardId, createdAt])
+}
+
+// ==========================================
+// PERSONALIZATION — VISUAL EMBEDDINGS (§6.0)
+// ==========================================
+//
+// pgvector-backed tables for the visual-taste layer of the personalization
+// spec. All `embedding` columns are Unsupported("vector(1024)") — Prisma's
+// typed client can neither read nor write them (same constraint as
+// ProfessionalSearchIndex.geom); every embedding read/write goes through raw
+// SQL in lib/personalization/lookEmbeddingStore.ts / tasteVectors.ts. The
+// vector dimension is pinned by LOOK_EMBEDDING_DIMENSIONS in
+// lib/personalization/lookEmbedding.ts — the two must move together.
+// `updatedAt`/`computedAt` carry DB defaults instead of @updatedAt because the
+// raw-SQL writers maintain them explicitly.
+
+// One embedding per look — the §6.0 "embed at upload" corpus. `model` records
+// which provider model produced the vector and `mediaAssetId` which asset was
+// embedded, so a model upgrade or primary-image swap makes the row detectably
+// stale (the embed job + backfill re-embed on mismatch).
+model LookPostEmbedding {
+  lookPostId   String                      @id
+  embedding    Unsupported("vector(1024)")
+  model        String
+  mediaAssetId String
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @default(now())
+
+  lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
+
+  @@index([model])
+}
+
+// Global taste vector per client (§6.0/§6.1 global_taste_embedding): the
+// decayed, signal-weighted average of the embeddings of looks the client
+// liked/saved. Recomputed from scratch by the taste-vectors job — never
+// incrementally mutated — so decay stays exact.
+model ClientTasteVector {
+  clientProfileId String                      @id
+  embedding       Unsupported("vector(1024)")
+  model           String
+  // How many embedded like/save signals contributed — a confidence signal for
+  // ranking consumers (a 2-signal vector should steer less than a 50-signal one).
+  signalCount     Int
+  computedAt      DateTime                    @default(now())
+  createdAt       DateTime                    @default(now())
+
+  client ClientProfile @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
+}
+
+// Per-board local taste vector (§6.1 board_contexts.local_taste_embedding):
+// the decayed average of the embeddings of the board's saved looks. Kept
+// separate from the global vector so boards feel personal (spec §6.2 keeps
+// board→global bleed one-directional and small).
+model BoardTasteVector {
+  boardId     String                      @id
+  embedding   Unsupported("vector(1024)")
+  model       String
+  signalCount Int
+  computedAt  DateTime                    @default(now())
+  createdAt   DateTime                    @default(now())
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
 }
 
 // =======================

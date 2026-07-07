@@ -8,6 +8,7 @@ import {
 
 import type {
   ApplyLookViewsJobPayload,
+  EmbedLookPostImageJobPayload,
   FanOutNewLookNotificationsJobPayload,
   FanOutViralRequestApprovalNotificationsJobPayload,
   IndexLookPostDocumentJobPayload,
@@ -218,6 +219,19 @@ export function enqueueApplyLookViews(
     type: LooksSocialJobType.APPLY_LOOK_VIEWS,
     dedupeKey: `look-views:${crypto.randomUUID()}`,
     payload: { lookPostIds },
+  })
+}
+
+export function enqueueEmbedLookPostImage(
+  db: LooksSocialJobDb,
+  payload: EmbedLookPostImageJobPayload,
+) {
+  const lookPostId = normalizeRequiredId('lookPostId', payload.lookPostId)
+
+  return enqueueLooksSocialJob(db, {
+    type: LooksSocialJobType.EMBED_LOOK_POST_IMAGE,
+    dedupeKey: `look:${lookPostId}:embed-image`,
+    payload: { lookPostId },
   })
 }
 
