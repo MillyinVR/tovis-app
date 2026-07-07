@@ -22,6 +22,7 @@ import type {
 } from '@/lib/looks/types'
 import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
+import { resolveAvailableBoardSlug } from '@/lib/boards/slug'
 
 type BoardsDb = PrismaClient | Prisma.TransactionClient
 
@@ -29,6 +30,7 @@ const boardOwnerSelect = Prisma.validator<Prisma.BoardSelect>()({
   id: true,
   clientId: true,
   name: true,
+  slug: true,
   visibility: true,
   createdAt: true,
   updatedAt: true,
@@ -245,12 +247,14 @@ export async function createBoard(
   const clientId = normalizeRequiredId('clientId', args.clientId)
   const name = normalizeBoardName(args.name)
   const visibility = args.visibility ?? BoardVisibility.PRIVATE
+  const slug = await resolveAvailableBoardSlug(db, { clientId, name })
 
   try {
     return await db.board.create({
       data: {
         clientId,
         name,
+        slug,
         visibility,
       },
       select: boardOwnerSelect,
@@ -308,7 +312,15 @@ export async function updateBoard(
   const data: Prisma.BoardUpdateInput = {}
 
   if (args.name !== undefined) {
-    data.name = normalizeBoardName(args.name)
+    const name = normalizeBoardName(args.name)
+    data.name = name
+    // Keep the public slug in step with a rename (excluding this board's own
+    // slug family), so a shared board's URL tracks its current name.
+    data.slug = await resolveAvailableBoardSlug(db, {
+      clientId,
+      name,
+      excludeBoardId: current.id,
+    })
   }
 
   if (args.visibility !== undefined) {

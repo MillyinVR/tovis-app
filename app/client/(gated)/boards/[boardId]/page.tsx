@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { getBoardDetail, getBoardErrorMeta } from '@/lib/boards'
 import type { LooksBoardDetailDto, LooksBoardDetailItemDto } from '@/lib/looks/types'
+import BoardShareControls from './BoardShareControls'
 
 export const dynamic = 'force-dynamic'
 
@@ -102,6 +103,11 @@ export default async function ClientBoardDetailPage(props: {
     throw error
   }
 
+  const owner = await prisma.clientProfile.findUnique({
+    where: { id: user.clientProfile.id },
+    select: { handle: true },
+  })
+
   return (
     <main
       className="mx-auto w-full max-w-5xl px-4 pb-24 text-textPrimary"
@@ -138,6 +144,15 @@ export default async function ClientBoardDetailPage(props: {
           >
             Browse Looks
           </Link>
+        </div>
+
+        <div className="mt-5">
+          <BoardShareControls
+            boardId={board.id}
+            slug={board.slug}
+            initialVisibility={board.visibility}
+            handle={owner?.handle ?? null}
+          />
         </div>
       </header>
 

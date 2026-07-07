@@ -21,9 +21,25 @@ export async function generateMetadata({
   const data = await loadPublicClientProfile(handle)
   if (!data) return { title: 'Profile' }
   const brand = getBrandConfig()
+  const title = `@${data.handle}`
+  const description =
+    data.bio ?? `@${data.handle}'s looks on ${brand.displayName}.`
   return {
-    title: `@${data.handle}`,
-    description: data.bio ?? `@${data.handle}'s looks on ${brand.displayName}.`,
+    title,
+    description,
+    // The co-located opengraph-image.tsx supplies the image; this block gives
+    // the unfurl its title/description/url so shared profiles preview cleanly.
+    openGraph: {
+      title,
+      description,
+      type: 'profile',
+      url: `/u/${data.handle}`,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+    },
   }
 }
 

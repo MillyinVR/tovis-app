@@ -866,6 +866,7 @@ export async function mapLooksBoardDetailToDto(
     id: board.id,
     clientId: board.clientId,
     name: board.name,
+    slug: board.slug,
     visibility: board.visibility,
     createdAt: board.createdAt.toISOString(),
     updatedAt: board.updatedAt.toISOString(),

@@ -367,6 +367,8 @@ export type LooksBoardDetailDto = {
   id: string
   clientId: string
   name: string
+  /** URL-safe slug for the public /u/[handle]/boards/[slug] address. */
+  slug: string
   visibility: BoardVisibility
   createdAt: string
   updatedAt: string
