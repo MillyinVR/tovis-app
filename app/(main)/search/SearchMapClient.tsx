@@ -15,13 +15,15 @@ import { isArray, isRecord } from '@/lib/guards'
 import DiscoverCategoryRail from './_components/DiscoverCategoryRail'
 import DiscoverGridView from './_components/DiscoverGridView'
 import DiscoverViewToggle from './_components/DiscoverViewToggle'
+import DiscoverModeToggle from './_components/DiscoverModeToggle'
 import TrendingProRail from './_components/TrendingProRail'
+import TrendingTagsRail from './_components/TrendingTagsRail'
 import LooksBookableGrid from './_components/LooksBookableGrid'
 import DiscoverProRows from './_components/DiscoverProRows'
 import DiscoverActiveProCard from './_components/DiscoverActiveProCard'
 import { fetchDiscoverCategories } from './_lib/discoverCategoryApi'
 import { preferredProLocation, type ApiLocationPreview, type ApiPro } from './_lib/discoverProTypes'
-import type { DiscoverViewMode } from './_lib/discoverViewTypes'
+import type { DiscoverMode, DiscoverViewMode } from './_lib/discoverViewTypes'
 import type { DiscoverCategoryOption } from '@/lib/discovery/categoryTypes'
 
 type Coords = { lat: number; lng: number }
@@ -360,6 +362,11 @@ export default function SearchMapClient() {
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<DiscoverViewMode>('MAP')
 
+  // Discover is looks-first by default (social-first D2): a Pinterest-style
+  // bookable-looks grid. The pro-finder (list + map) is a deliberate "Find a
+  // pro" mode. Geolocation is only requested when the pro-finder is opened.
+  const [discoverMode, setDiscoverMode] = useState<DiscoverMode>('LOOKS')
+
   // On desktop (lg+) the toggle gives way to a permanent split — results list
   // on the left, live map on the right — so the map must stay mounted there
   // regardless of viewMode. SSR-safe; resolves to mobile-first then reconciles.
@@ -438,6 +445,18 @@ export default function SearchMapClient() {
   }, [radiusMiles])
 
   const displayPros = useMemo(() => sortPros(pros, sortMode), [pros, sortMode])
+
+  // Honest replacement for the old "Trending near you" rail — which was just the
+  // nearest pros mislabeled. This is the best-rated pros within the searched
+  // radius (real rating signal only, no fabricated trending score); pros without
+  // a rating are excluded so the label stays truthful.
+  const topRatedPros = useMemo(
+    () =>
+      sortPros(pros, 'RATING')
+        .filter((pro) => typeof pro.ratingAvg === 'number')
+        .slice(0, 10),
+    [pros],
+  )
 
   // Active category as a slug — looks share the same ServiceCategory source, so
   // the slug filters the bookable-looks grid through the existing feed query.
@@ -611,8 +630,16 @@ export default function SearchMapClient() {
   }, [acOpen])
 
   const didInitialSearchRef = useRef(false)
+  const didGeoRequestRef = useRef(false)
 
   useEffect(() => {
+    // Looks-first by default: don't prompt for location (or run the pro search)
+    // until the viewer opens the "Find a pro" mode. Request geolocation exactly
+    // once, the first time that mode is entered.
+    if (discoverMode !== 'PROS') return
+    if (didGeoRequestRef.current) return
+    didGeoRequestRef.current = true
+
     if (!navigator.geolocation) {
       setGeoDenied(true)
       setMe(null)
@@ -656,7 +683,7 @@ export default function SearchMapClient() {
         timeout: 8000,
       },
     )
-  }, [runSearch])
+  }, [discoverMode, runSearch])
 
   const didRadiusEffectRunRef = useRef(false)
 
@@ -966,15 +993,19 @@ export default function SearchMapClient() {
 
       setActiveCategoryId(nextCategoryId)
 
-      const nextSearch: SearchArgs = {
+      // Keep the pending pro search in sync so a later switch to "Find a pro"
+      // inherits the category — but in looks mode the selection drives the looks
+      // grid (via activeCategorySlug) and no pro query is needed.
+      lastSearchRef.current = {
         ...lastSearchRef.current,
         categoryId: nextCategoryId,
       }
 
-      lastSearchRef.current = nextSearch
-      void runSearch(nextSearch)
+      if (discoverMode !== 'PROS') return
+
+      void runSearch(lastSearchRef.current)
     },
-    [runSearch],
+    [discoverMode, runSearch],
   )
 
   const headerHint = useMemo(() => {
@@ -1069,6 +1100,44 @@ export default function SearchMapClient() {
     [displayPros, handleSelectList],
   )
 
+  // Looks-first inspiration browse (default) — a normal-flow, responsive grid on
+  // every breakpoint. The pro-finder split/map layout below is reserved for the
+  // "Find a pro" mode.
+  if (discoverMode === 'LOOKS') {
+    return (
+      <main
+        className="mx-auto min-h-dvh max-w-6xl px-3 pt-3 lg:px-6 lg:pt-5"
+        style={{ paddingBottom: `calc(${APP_BOTTOM_INSET} + 1.5rem)` }}
+      >
+        <header className="mb-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="font-display text-[26px] font-semibold italic leading-none tracking-tight text-textPrimary">
+              Discover
+            </h1>
+
+            <DiscoverModeToggle value={discoverMode} onChange={setDiscoverMode} />
+          </div>
+
+          <p className="text-[13px] font-semibold text-textSecondary">
+            Tap any look to book the pro who made it.
+          </p>
+
+          {categories.length > 0 ? (
+            <DiscoverCategoryRail
+              categories={categories}
+              activeCategoryId={activeCategoryId}
+              onSelectCategory={handleSelectCategory}
+            />
+          ) : null}
+
+          <TrendingTagsRail />
+        </header>
+
+        <LooksBookableGrid categorySlug={activeCategorySlug} showEmptyState heading={null} />
+      </main>
+    )
+  }
+
   return (
     <main className="mx-auto max-w-240 px-0 pb-0 pt-0 lg:max-w-310">
       <div
@@ -1109,6 +1178,10 @@ export default function SearchMapClient() {
               'shadow-[0_18px_60px_rgba(0,0,0,0.65)] lg:shadow-none',
             )}
           >
+            <div className="mb-3 flex justify-center lg:justify-start">
+              <DiscoverModeToggle value={discoverMode} onChange={setDiscoverMode} />
+            </div>
+
             <div className="flex items-center justify-between gap-3">
               <div className="font-display text-[26px] font-semibold italic leading-none tracking-tight text-textPrimary">
                 Discover
@@ -1521,12 +1594,12 @@ export default function SearchMapClient() {
               </div>
             ) : (
               <div className="space-y-5">
-                {displayPros.length > 0 ? (
+                {topRatedPros.length > 0 ? (
                   <section>
                     <div className="mb-2.5 px-1 font-mono text-[10px] font-black uppercase tracking-[0.14em] text-textMuted">
-                      ◆ Trending near you
+                      ◆ Top rated near you
                     </div>
-                    <TrendingProRail pros={displayPros.slice(0, 10)} onSelectPro={handleSelectGridPro} />
+                    <TrendingProRail pros={topRatedPros} onSelectPro={handleSelectGridPro} />
                   </section>
                 ) : null}
 
