@@ -8537,6 +8537,43 @@
       ],
       "type": "object"
     },
+    "ProCameraUsage": {
+      "properties": {
+        "baseQuota": {
+          "description": "The plan-tier allowance (CAMERA_IMAGES_PER_MONTH).",
+          "type": "number"
+        },
+        "bonus": {
+          "description": "Admin-granted bonus images for this month.",
+          "type": "number"
+        },
+        "enforced": {
+          "description": "Whether metering is active (ENABLE_MEMBERSHIP_ENFORCEMENT).",
+          "type": "boolean"
+        },
+        "quota": {
+          "description": "Effective allowance = baseQuota + bonus.",
+          "type": "number"
+        },
+        "remaining": {
+          "description": "max(0, quota - used).",
+          "type": "number"
+        },
+        "used": {
+          "description": "Images analyzed this month (0 while metering is off — nothing is counted).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "used",
+        "baseQuota",
+        "bonus",
+        "quota",
+        "remaining",
+        "enforced"
+      ],
+      "type": "object"
+    },
     "ProFinanceBlock": {
       "properties": {
         "canExportTaxDocs": {
