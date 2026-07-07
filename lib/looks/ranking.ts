@@ -54,9 +54,52 @@ export const LOOK_POST_RANK_PRIOR: LookPostRankPrior = {
  */
 export const LOOK_POST_RANK_SCORE_SCALE = 200
 
+/**
+ * Cold-start visibility floor (spec §2.1). The Bayesian prior stops a
+ * zero-impression Look from scoring zero, but prior × scale (~16 at publish)
+ * still sits below every moderately-performing Look — so brand-new content
+ * would never earn the impressions the rate formula needs. This additive boost
+ * lifts a new Look into the competitive band until it has earned real
+ * evidence, then gets out of the way:
+ *
+ *   boost = maxBoost
+ *         × (1 − impressions / impressionFloor)   // gone once evidence exists
+ *         × (1 − ageDays / windowDays)            // gone once the intro window ends
+ *
+ * (both factors clamped to [0, 1]; impressions use the same engagement-floored
+ * denominator as the smoothed rate, so an old pre-view-tracking Look with real
+ * engagement never reads as "cold").
+ *
+ * - `maxBoost`        — at publish, a zero-impression Look scores
+ *   prior×scale + maxBoost ≈ 61: above the typical-rate band (~40) so it gets
+ *   shown, below hot content (80+) so it can't bury proven Looks, and far
+ *   below forYouRanking's seen-penalty (1000).
+ * - `impressionFloor` — the guaranteed-impression target; set equal to the
+ *   prior's pseudo-impression `strength` so support ends exactly when the
+ *   Look's real evidence matches the prior's synthetic evidence.
+ * - `windowDays`      — the spec's "first N days"; after this the Look
+ *   competes purely on its rate even if it never reached the floor.
+ *
+ * The boost re-evaluates whenever the score is recomputed — every engagement
+ * event and every APPLY_LOOK_VIEWS batch — so accruing impressions organically
+ * decays it. A Look that gets NO views keeps its publish-time boost, which is
+ * the point: it still needs its floor.
+ */
+export const LOOK_POST_RANK_COLD_START: LookPostRankColdStart = {
+  maxBoost: 45,
+  impressionFloor: 50,
+  windowDays: 14,
+}
+
 export type LookPostRankPrior = {
   rate: number
   strength: number
+}
+
+export type LookPostRankColdStart = {
+  maxBoost: number
+  impressionFloor: number
+  windowDays: number
 }
 
 export type LookPostRankScoreInput = {
@@ -80,6 +123,8 @@ export type LookPostRankScoreOptions = {
   now?: Date
   // Override the Bayesian prior (per-category priors, tests).
   prior?: LookPostRankPrior
+  // Override the cold-start visibility floor (tuning, tests).
+  coldStart?: LookPostRankColdStart
 }
 
 /**
@@ -124,6 +169,28 @@ function normalizePrior(prior: LookPostRankPrior | undefined): LookPostRankPrior
       : LOOK_POST_RANK_PRIOR.strength
 
   return { rate, strength }
+}
+
+function normalizeColdStart(
+  coldStart: LookPostRankColdStart | undefined,
+): LookPostRankColdStart {
+  const source = coldStart ?? LOOK_POST_RANK_COLD_START
+  const maxBoost =
+    Number.isFinite(source.maxBoost) && source.maxBoost > 0
+      ? source.maxBoost
+      : 0
+  // Floor and window must stay strictly positive so the taper fractions never
+  // divide by zero; non-positive overrides mean "no cold-start support".
+  const impressionFloor =
+    Number.isFinite(source.impressionFloor) && source.impressionFloor > 0
+      ? source.impressionFloor
+      : 0
+  const windowDays =
+    Number.isFinite(source.windowDays) && source.windowDays > 0
+      ? source.windowDays
+      : 0
+
+  return { maxBoost, impressionFloor, windowDays }
 }
 
 export function isLookPostRankEligible(
@@ -174,6 +241,21 @@ export function computeLookPostRankWeightedEngagement(
  * otherwise inflate their rates) and makes engagement-without-impressions an
  * impossible-rate anomaly for the anti-gaming check (spec §5.6).
  */
+export function computeLookPostRankImpressions(
+  input: Pick<
+    LookPostRankScoreInput,
+    'likeCount' | 'commentCount' | 'saveCount' | 'shareCount' | 'viewCount'
+  >,
+): number {
+  const rawEngagementCount =
+    normalizeCount(input.likeCount) +
+    normalizeCount(input.commentCount) +
+    normalizeCount(input.saveCount) +
+    normalizeCount(input.shareCount)
+
+  return Math.max(normalizeCount(input.viewCount), rawEngagementCount)
+}
+
 export function computeLookPostRankSmoothedRate(
   input: Pick<
     LookPostRankScoreInput,
@@ -182,15 +264,7 @@ export function computeLookPostRankSmoothedRate(
   prior?: LookPostRankPrior,
 ): number {
   const weightedEngagement = computeLookPostRankWeightedEngagement(input)
-  const rawEngagementCount =
-    normalizeCount(input.likeCount) +
-    normalizeCount(input.commentCount) +
-    normalizeCount(input.saveCount) +
-    normalizeCount(input.shareCount)
-  const impressions = Math.max(
-    normalizeCount(input.viewCount),
-    rawEngagementCount,
-  )
+  const impressions = computeLookPostRankImpressions(input)
   const { rate, strength } = normalizePrior(prior)
 
   return (weightedEngagement + rate * strength) / (impressions + strength)
@@ -207,6 +281,48 @@ export function computeLookPostRankRecencyMultiplier(
   return 1 / (1 + ageDays / LOOK_POST_RANK_RECENCY_HALF_LIFE_DAYS)
 }
 
+/**
+ * Cold-start visibility boost (spec §2.1) — see LOOK_POST_RANK_COLD_START for
+ * the shape and rationale. Returns 0 once the Look has earned its impression
+ * floor OR aged past the intro window, and tapers linearly toward both edges.
+ */
+export function computeLookPostRankColdStartBoost(
+  input: Pick<
+    LookPostRankScoreInput,
+    | 'likeCount'
+    | 'commentCount'
+    | 'saveCount'
+    | 'shareCount'
+    | 'viewCount'
+    | 'publishedAt'
+  >,
+  options?: LookPostRankScoreOptions,
+): number {
+  if (
+    !(input.publishedAt instanceof Date) ||
+    Number.isNaN(input.publishedAt.getTime())
+  ) {
+    return 0
+  }
+
+  const { maxBoost, impressionFloor, windowDays } = normalizeColdStart(
+    options?.coldStart,
+  )
+  if (maxBoost <= 0 || impressionFloor <= 0 || windowDays <= 0) return 0
+
+  const impressions = computeLookPostRankImpressions(input)
+  const evidenceRemaining = Math.max(0, 1 - impressions / impressionFloor)
+  if (evidenceRemaining <= 0) return 0
+
+  const now = normalizeNow(options?.now)
+  const ageDays =
+    Math.max(0, now.getTime() - input.publishedAt.getTime()) / DAY_MS
+  const windowRemaining = Math.max(0, 1 - ageDays / windowDays)
+  if (windowRemaining <= 0) return 0
+
+  return maxBoost * evidenceRemaining * windowRemaining
+}
+
 export function computeLookPostRankScore(
   input: LookPostRankScoreInput,
   options?: LookPostRankScoreOptions,
@@ -218,8 +334,10 @@ export function computeLookPostRankScore(
     input.publishedAt,
     options,
   )
+  const coldStartBoost = computeLookPostRankColdStartBoost(input, options)
 
   return roundScore(
-    smoothedRate * recencyMultiplier * LOOK_POST_RANK_SCORE_SCALE,
+    smoothedRate * recencyMultiplier * LOOK_POST_RANK_SCORE_SCALE +
+      coldStartBoost,
   )
 }
