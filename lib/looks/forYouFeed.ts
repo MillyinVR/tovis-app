@@ -33,6 +33,10 @@ import {
 } from '@/lib/looks/feed'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
 import {
+  normalizeSelfProfile,
+  selfProfileInterestCategorySlugs,
+} from '@/lib/personalization/selfProfile'
+import {
   rankForYouRows,
   type ForYouViewerAffinity,
 } from '@/lib/looks/forYouRanking'
@@ -45,6 +49,39 @@ const AFFINITY_SAMPLE_SIZE = 200
 // in lib/looks/ranking.ts, scaled down).
 const AFFINITY_LIKE_WEIGHT = 1
 const AFFINITY_SAVE_WEIGHT = 2
+
+// Behavioral affinity half-life (spec §6.2 time decay, 60–90 day band): a
+// like/save contributes at full weight today and half as much 75 days from
+// now, so last year's prom obsession stops shaping this year's feed. Event
+// signals decay separately (computeBoardEventProximity's sharp post-event
+// fade); booking-driven affinity should decay slowest (~6–12 months) when
+// bookings become an affinity source.
+export const AFFINITY_HALF_LIFE_DAYS = 75
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// Category weight contributed by each declared self-profile interest (spec
+// §6.6 / §2.1 onboarding chips) — an explicit, editable taste statement, so it
+// matches a board purpose at full proximity and does NOT time-decay.
+const INTEREST_CATEGORY_WEIGHT = 3
+
+/**
+ * Exponential time-decay factor in (0, 1] for a behavioral affinity signal of
+ * the given age (spec §6.2). Missing/invalid timestamps decay as brand-new —
+ * over-weighting is the safe failure for a taste signal. Pure + exported for
+ * unit testing.
+ */
+export function computeAffinityDecayFactor(
+  createdAt: Date | null | undefined,
+  now: Date,
+): number {
+  if (!(createdAt instanceof Date) || Number.isNaN(createdAt.getTime())) {
+    return 1
+  }
+
+  const ageDays = Math.max(0, now.getTime() - createdAt.getTime()) / DAY_MS
+  return 2 ** (-ageDays / AFFINITY_HALF_LIFE_DAYS)
+}
 
 // How many of the viewer's purposed boards feed occasion/category signals.
 // Nobody keeps 24 concurrently-active occasions; this is a cost bound only.
@@ -167,6 +204,8 @@ export function aggregateBoardContextSignals(
 }
 
 const categorySlugSelect = {
+  // When the signal happened — the input to the §6.2 time decay.
+  createdAt: true,
   lookPost: {
     select: {
       service: {
@@ -202,52 +241,77 @@ export async function loadForYouAffinity(args: {
 }): Promise<ForYouViewerAffinity> {
   const clientId = args.clientId ?? null
 
-  const [follows, likes, boardItems, boardContexts] = await Promise.all([
-    clientId
-      ? prisma.proFollow.findMany({
-          where: { clientId },
-          select: { professionalId: true },
-        })
-      : Promise.resolve([]),
-    prisma.lookLike.findMany({
-      where: { userId: args.userId },
-      orderBy: { createdAt: 'desc' },
-      take: AFFINITY_SAMPLE_SIZE,
-      select: categorySlugSelect,
-    }),
-    clientId
-      ? prisma.boardItem.findMany({
-          where: { board: { clientId } },
-          orderBy: { createdAt: 'desc' },
-          take: AFFINITY_SAMPLE_SIZE,
-          select: categorySlugSelect,
-        })
-      : Promise.resolve([]),
-    clientId
-      ? prisma.board.findMany({
-          where: {
-            clientId,
-            type: { not: BoardType.GENERAL },
-          },
-          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-          take: BOARD_CONTEXT_SAMPLE_SIZE,
-          select: { type: true, eventDate: true },
-        })
-      : Promise.resolve([]),
-  ])
+  const [follows, likes, boardItems, boardContexts, selfProfileRow] =
+    await Promise.all([
+      clientId
+        ? prisma.proFollow.findMany({
+            where: { clientId },
+            select: { professionalId: true },
+          })
+        : Promise.resolve([]),
+      prisma.lookLike.findMany({
+        where: { userId: args.userId },
+        orderBy: { createdAt: 'desc' },
+        take: AFFINITY_SAMPLE_SIZE,
+        select: categorySlugSelect,
+      }),
+      clientId
+        ? prisma.boardItem.findMany({
+            where: { board: { clientId } },
+            orderBy: { createdAt: 'desc' },
+            take: AFFINITY_SAMPLE_SIZE,
+            select: categorySlugSelect,
+          })
+        : Promise.resolve([]),
+      clientId
+        ? prisma.board.findMany({
+            where: {
+              clientId,
+              type: { not: BoardType.GENERAL },
+            },
+            orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+            take: BOARD_CONTEXT_SAMPLE_SIZE,
+            select: { type: true, eventDate: true },
+          })
+        : Promise.resolve([]),
+      clientId
+        ? prisma.clientProfile.findUnique({
+            where: { id: clientId },
+            select: { selfProfile: true },
+          })
+        : Promise.resolve(null),
+    ])
 
+  // Behavioral signals decay with age (spec §6.2) so stale taste fades.
   const entries: ForYouCategoryAffinityEntry[] = []
   for (const like of likes) {
     const slug = slugFromCategoryRow(like)
-    if (slug) entries.push({ slug, weight: AFFINITY_LIKE_WEIGHT })
+    if (!slug) continue
+    entries.push({
+      slug,
+      weight:
+        AFFINITY_LIKE_WEIGHT * computeAffinityDecayFactor(like.createdAt, args.now),
+    })
   }
   for (const item of boardItems) {
     const slug = slugFromCategoryRow(item)
-    if (slug) entries.push({ slug, weight: AFFINITY_SAVE_WEIGHT })
+    if (!slug) continue
+    entries.push({
+      slug,
+      weight:
+        AFFINITY_SAVE_WEIGHT * computeAffinityDecayFactor(item.createdAt, args.now),
+    })
   }
 
   const boardSignals = aggregateBoardContextSignals(boardContexts, args.now)
   entries.push(...boardSignals.categoryEntries)
+
+  // Declared self-profile interests (spec §6.6): explicit taste, no decay —
+  // gives a brand-new client a category signal before any like/save history.
+  const selfProfile = normalizeSelfProfile(selfProfileRow?.selfProfile)
+  for (const slug of selfProfileInterestCategorySlugs(selfProfile)) {
+    entries.push({ slug, weight: INTEREST_CATEGORY_WEIGHT })
+  }
 
   return {
     followedProfessionalIds: new Set(

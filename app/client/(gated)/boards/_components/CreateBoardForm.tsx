@@ -13,6 +13,7 @@ import {
   BOARD_TYPE_VALUES,
   boardTypeWantsEventDate,
 } from '@/lib/boards/context'
+import { BOARD_ANSWER_WRITE_THROUGH } from '@/lib/personalization/selfProfile'
 
 type CreateBoardFormProps = {
   action: (formData: FormData) => void | Promise<void>
@@ -83,15 +84,23 @@ export default function CreateBoardForm({
   const [boardType, setBoardType] = useState<BoardType>(BoardType.GENERAL)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [eventDate, setEventDate] = useState('')
+  const [writeThrough, setWriteThrough] = useState(false)
 
   const questions = BOARD_QUESTION_SETS[boardType]
   const wantsEventDate = boardTypeWantsEventDate(boardType)
+  // Offer the self-profile write-through (spec §7.3) only when at least one
+  // answered question describes the PERSON (hair length, skin type, …) rather
+  // than the occasion — and never apply it silently.
+  const hasWriteThroughAnswers = Object.keys(answers).some(
+    (key) => key in BOARD_ANSWER_WRITE_THROUGH,
+  )
 
   function selectBoardType(next: BoardType) {
     setBoardType(next)
     // Answers and the date belong to the type that asked for them.
     setAnswers({})
     setEventDate('')
+    setWriteThrough(false)
   }
 
   function toggleAnswer(key: string, value: string) {
@@ -219,6 +228,25 @@ export default function CreateBoardForm({
             ) : null}
           </div>
         ))}
+
+        {hasWriteThroughAnswers ? (
+          <div>
+            <Chip
+              selected={writeThrough}
+              onClick={() => setWriteThrough((current) => !current)}
+            >
+              Save these details to my profile
+            </Chip>
+            <p className="mt-2 text-[12px] leading-5 text-textSecondary">
+              Answers about you (like hair length or skin type) can be saved to
+              your profile so every board gets better matches. Optional — you
+              can edit or clear them anytime in settings.
+            </p>
+            {writeThrough ? (
+              <input type="hidden" name="writeThroughSelfProfile" value="1" />
+            ) : null}
+          </div>
+        ) : null}
 
         <div>
           <label

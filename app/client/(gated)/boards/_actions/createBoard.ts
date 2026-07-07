@@ -14,8 +14,10 @@ import {
 } from '@/lib/boards'
 import {
   BOARD_QUESTION_SETS,
+  normalizeBoardAnswers,
   parseBoardContextInput,
 } from '@/lib/boards/context'
+import { applyBoardAnswersWriteThrough } from '@/lib/personalization/selfProfileStore'
 
 const CREATE_BOARD_ROUTE = '/client/boards/new'
 const CLIENT_ME_ROUTE = '/client/me'
@@ -100,6 +102,16 @@ export async function createBoardAction(formData: FormData): Promise<void> {
       visibility: visibility ?? BoardVisibility.PRIVATE,
       ...context.value,
     })
+
+    // Self-profile write-through (spec §7.3): only on the client's explicit
+    // opt-in, and only the person-describing subset of the stored answers.
+    if (readTrimmedFormValue(formData, 'writeThroughSelfProfile') === '1') {
+      await applyBoardAnswersWriteThrough(prisma, {
+        clientId: user.clientProfile.id,
+        answers: normalizeBoardAnswers(board.type, board.answers),
+        now: new Date(),
+      })
+    }
 
     revalidatePath(CLIENT_ME_ROUTE)
     revalidatePath(`/client/boards/${board.id}`)

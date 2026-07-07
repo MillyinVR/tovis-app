@@ -22,6 +22,11 @@ import {
   computeLookPostRankScore,
   recomputeLookPostScores,
 } from '@/lib/looks/counters'
+import {
+  refreshLookCategoryRankStats,
+  resolveLookPostRankPrior,
+} from '@/lib/looks/categoryRankStats'
+import type { LookPostRankPrior } from '@/lib/looks/ranking'
 
 const sweepSelect = Prisma.validator<Prisma.LookPostSelect>()({
   id: true,
@@ -34,6 +39,7 @@ const sweepSelect = Prisma.validator<Prisma.LookPostSelect>()({
   shareCount: true,
   viewCount: true,
   rankScore: true,
+  service: { select: { categoryId: true } },
 })
 
 type SweepRow = Prisma.LookPostGetPayload<{ select: typeof sweepSelect }>
@@ -81,6 +87,34 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
   const now = new Date()
 
+  // Scores regress toward the per-category prior, so refresh the aggregates
+  // first — otherwise the sweep bakes stale priors into every score it writes.
+  // A dry run must not write, so it reads the standing rows instead.
+  if (args.dryRun) {
+    console.log(
+      '[dry-run] using standing LookCategoryRankStat rows (no refresh)',
+    )
+  } else {
+    const stats = await refreshLookCategoryRankStats(prisma, now)
+    console.log(
+      `category rank stats refreshed: ${stats.categories} categories`,
+    )
+  }
+
+  // The prior is identical for every look in a category — resolve once each.
+  const priorCache = new Map<string, LookPostRankPrior>()
+  async function priorFor(
+    categoryId: string | null,
+  ): Promise<LookPostRankPrior> {
+    const key = categoryId ?? ''
+    const cached = priorCache.get(key)
+    if (cached) return cached
+
+    const prior = await resolveLookPostRankPrior(prisma, categoryId)
+    priorCache.set(key, prior)
+    return prior
+  }
+
   let cursor: string | null = null
   let scanned = 0
   let changed = 0
@@ -103,7 +137,8 @@ async function main(): Promise<void> {
 
     for (const look of batch) {
       scanned += 1
-      const next = computeLookPostRankScore(look, { now })
+      const prior = await priorFor(look.service?.categoryId ?? null)
+      const next = computeLookPostRankScore(look, { now, prior })
       if (next === look.rankScore) continue
 
       changed += 1
@@ -114,7 +149,7 @@ async function main(): Promise<void> {
         continue
       }
 
-      await recomputeLookPostScores(prisma, look.id, { now })
+      await recomputeLookPostScores(prisma, look.id, { now, prior })
     }
 
     console.log(`…scanned ${scanned} (drifted so far: ${changed})`)
