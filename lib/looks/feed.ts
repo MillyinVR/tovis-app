@@ -32,6 +32,9 @@ export type BuildLooksFeedWhereArgs = {
   categorySlug?: string | null
   q?: string | null
   followingProfessionalIds?: readonly string[] | null
+  // Restrict to looks carrying this hashtag/style tag (social-first D1). Powers
+  // the /looks/tags/[slug] pages; banned tags never match.
+  tagSlug?: string | null
 }
 
 export type BuildLooksMediaFeedWhereArgs = BuildLooksFeedWhereArgs
@@ -221,6 +224,11 @@ export function buildLooksFeedWhere(
   const categoryFilter = buildCategoryFilter(resolvedCategorySlug)
   if (categoryFilter) {
     and.push(categoryFilter)
+  }
+
+  const tagSlug = pickNonEmptyString(args.tagSlug)
+  if (tagSlug) {
+    and.push({ tags: { some: { slug: tagSlug, bannedAt: null } } })
   }
 
   if (args.kind === 'FOLLOWING') {

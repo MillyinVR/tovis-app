@@ -24,6 +24,7 @@ import {
   type UpdateProLookRequestDto,
 } from './contracts'
 import { recomputeLookPostScores } from '@/lib/looks/counters'
+import { parseLookTags, syncLookTagsForPost } from '@/lib/looks/tags'
 import {
   enqueueLookPostMutationPolicy,
   type EnqueueLookPostMutationPolicyArgs,
@@ -786,6 +787,9 @@ export async function createOrUpdateProLookFromMediaAsset(
         select: proLookPublicationSelect,
       })
     }
+
+    // Parse #tags from the caption and sync them (banned tags are dropped).
+    await syncLookTagsForPost(tx, saved.id, parseLookTags(saved.caption))
 
     await recomputeLookPostScores(tx, saved.id)
 
