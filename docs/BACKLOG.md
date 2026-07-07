@@ -13,10 +13,10 @@
 
 ---
 
-## 1. Personalization epoch (current branch `feat/algo-foundation-rate-scoring`)
+## 1. Personalization epoch
 Spec: `docs/launch-readiness/personalization-algorithm-spec-v2.md` (18-step build order).
 Foundation shipped (rate-based Bayesian rank scoring); remaining:
-- [~] Foundation MERGED (#509, 2026-07-07). Remaining: merge `edc6cba8` (impression-floor + one-shot cutover sweep) from `feat/algo-foundation-rate-scoring`, deploy, then run the prod `recompute:look-rank` cutover sweep (`scripts/recompute-look-rank-scores.ts`).
+- [x] Foundation MERGED (#509, 2026-07-07 — the squash included BOTH branch commits, i.e. impression-floor + cutover sweep `edc6cba8` too). Deployed to prod 2026-07-07 (`tovis-keryxnoqs`); prod `recompute:look-rank` sweep run: 1/1 published looks recomputed (2.98 → 8.49), re-run no-op. Branch `feat/algo-foundation-rate-scoring` fully merged → deletable.
 - [ ] `viewer_event_date` + board-creation signals (spec §7–8).
 - [ ] Cold-start fallback for looks with no impressions (§2.1).
 - [ ] Shared-schema pass: board metadata + user self-profile (§6.6) + affinity time-decay (§6.2).
@@ -25,7 +25,7 @@ Foundation shipped (rate-based Bayesian rank scoring); remaining:
 
 ## 2. Outshine launch — step-8 wedges
 - [ ] ServicePermission filter: move legal caveat → staged, then flip `ENABLE_SERVICE_PERMISSION_FILTER` in prod. (`lib/services/allowedServices.ts`; `licenseScope.ts` is the de-facto SSOT — no admin UI for rows.)
-- [~] Camera-usage web endpoint `GET /pro/camera/usage` — PR #508 MERGED (2026-07-07); verify deployed to prod (deploys are manual `vercel --prod`).
+- [x] Camera-usage web endpoint `GET /pro/camera/usage` — PR #508 MERGED + deployed to prod 2026-07-07 (route live, auth-gated 401 confirmed).
 - [ ] Reserve-with-Google integration.
 - [ ] Flag flips when ready: `ENABLE_NO_SHOW_PROTECTION`, `ENABLE_MEMBERSHIP_ENFORCEMENT`, `ENABLE_FOR_YOU_FEED`.
 - [ ] Pro-migration go-live: confirm catalog min prices; Square/Acuity OAuth (Phase 2); flip `ENABLE_PRO_MIGRATION`.
