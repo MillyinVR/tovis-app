@@ -25,7 +25,8 @@ export default async function AdminLooksPage() {
           Reported, pending, and flagged looks &amp; comments across all pros —
           client-authored looks included. Rejecting or removing a look drops it
           out of the public feed; dismissing a report keeps it live. You can also
-          feature a standout look into the Spotlight feed.
+          feature a standout look into the Spotlight feed. The Tags tab bans,
+          renames, or merges the user-facing hashtag/style tags.
         </p>
       </div>
       <LooksAdminClient />

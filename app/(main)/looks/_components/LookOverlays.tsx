@@ -63,6 +63,10 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
   const serviceLabel = pickTrimmed(m.serviceName)
   const caption = pickTrimmed(m.caption)
 
+  // Cap the chips shown inline so the overlay stays legible; the detail page
+  // renders the full set. Order is the DTO's (slug asc, banned already dropped).
+  const tags = (m.tags ?? []).slice(0, 3)
+
   // "From $X" — the attainable half of the daydream. Only for priced looks.
   const priceAmount =
     typeof m.priceStartingAt === 'number' && m.priceStartingAt > 0
@@ -318,6 +322,38 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
               {spotlightMeta}
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* Row 4: tappable hashtag/style tags → SEO tag pages (social-first D1).
+          Capped so the overlay stays legible; pointer-events-auto lets each chip
+          navigate without the tap falling through to the feed's like gesture. */}
+      {tags.length > 0 ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+          {tags.map((tag) => (
+            <Link
+              key={tag.slug}
+              href={`/looks/tags/${encodeURIComponent(tag.slug)}`}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={`Browse #${tag.display} looks`}
+              className="pointer-events-auto no-underline"
+              style={{
+                padding: '4px 10px',
+                background: 'rgb(var(--bg-secondary) / 0.65)',
+                border: '1px solid rgb(var(--accent-primary) / 0.35)',
+                borderRadius: 999,
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                color: 'rgb(var(--text-primary) / 0.9)',
+              }}
+            >
+              #{tag.display}
+            </Link>
+          ))}
         </div>
       ) : null}
     </div>

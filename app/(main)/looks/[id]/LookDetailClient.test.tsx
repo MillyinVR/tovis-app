@@ -259,6 +259,7 @@ function makeDetailItem(): LooksDetailItemDto {
       },
     },
     before: null,
+    tags: [],
     assets: [
       {
         id: 'asset_1',

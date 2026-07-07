@@ -17,11 +17,13 @@ const mocks = vi.hoisted(() => {
   const lookPostAssetCreate = vi.fn()
   const lookPostFindUnique = vi.fn()
   const lookPostUpdate = vi.fn()
+  const lookTagUpsert = vi.fn()
 
   const tx = {
     mediaAsset: { create: mediaAssetCreate },
     lookPost: { create: lookPostCreate, update: lookPostUpdate },
     lookPostAsset: { create: lookPostAssetCreate },
+    lookTag: { upsert: lookTagUpsert },
   }
 
   const prisma = {
@@ -39,6 +41,7 @@ const mocks = vi.hoisted(() => {
     lookPostAssetCreate,
     lookPostFindUnique,
     lookPostUpdate,
+    lookTagUpsert,
     prisma,
     validateUploadSession: vi.fn(),
     consumeUploadSession: vi.fn(),
@@ -99,6 +102,10 @@ beforeEach(() => {
   mocks.mediaAssetCreate.mockImplementation(async () => ({ id: 'media_new' }))
   mocks.lookPostCreate.mockResolvedValue({ id: 'look_1' })
   mocks.lookPostAssetCreate.mockResolvedValue({ id: 'lpa_1' })
+  mocks.lookTagUpsert.mockImplementation(async (args: { create: { slug: string } }) => ({
+    id: `tag_${args.create.slug}`,
+    bannedAt: null,
+  }))
   mocks.validateUploadSession.mockResolvedValue({
     storageBucket: 'media-public',
     storagePath: 'client/client_1/look_public/2026-06/after.jpg',
@@ -320,6 +327,32 @@ describe('createClientLookFromVisit', () => {
       }),
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
   })
+
+  it('ingests #tags from the client caption (name + body)', async () => {
+    await createClientLookFromVisit(mocks.prisma as never, {
+      clientId: CLIENT_ID,
+      bookingId: BOOKING_ID,
+      uploadedByUserId: 'user_1',
+      name: 'Glazed #Blonde',
+      caption: 'zero brass #balayage',
+      isPublic: true,
+      after: { uploadSessionId: 'sess_after' },
+      now: NOW,
+    })
+
+    const upsertedSlugs = mocks.lookTagUpsert.mock.calls.map(
+      (c) => c[0].where.slug,
+    )
+    expect(upsertedSlugs).toEqual(['blonde', 'balayage'])
+    // The look's tag set is replaced with the (non-banned) upserted tag ids.
+    const tagUpdate = mocks.lookPostUpdate.mock.calls.find(
+      (c) => c[0].data?.tags,
+    )
+    expect(tagUpdate?.[0].data.tags.set).toEqual([
+      { id: 'tag_blonde' },
+      { id: 'tag_balayage' },
+    ])
+  })
 })
 
 describe('updateClientLookVisibility', () => {
@@ -327,6 +360,7 @@ describe('updateClientLookVisibility', () => {
     mocks.lookPostFindUnique.mockResolvedValue({
       id: 'look_1',
       clientAuthorId: CLIENT_ID,
+      caption: 'My look',
     })
 
     const result = await updateClientLookVisibility(mocks.prisma as never, {
@@ -340,6 +374,24 @@ describe('updateClientLookVisibility', () => {
       where: { id: 'look_1' },
       data: { visibility: LookPostVisibility.UNLISTED, publicToFeed: false },
     })
+  })
+
+  it('re-syncs #tags from the existing caption on visibility change', async () => {
+    mocks.lookPostFindUnique.mockResolvedValue({
+      id: 'look_1',
+      clientAuthorId: CLIENT_ID,
+      caption: 'Fresh #balayage',
+    })
+
+    await updateClientLookVisibility(mocks.prisma as never, {
+      clientId: CLIENT_ID,
+      lookPostId: 'look_1',
+      isPublic: true,
+    })
+
+    expect(mocks.lookTagUpsert.mock.calls.map((c) => c[0].where.slug)).toEqual([
+      'balayage',
+    ])
   })
 
   it('rejects editing a look the client does not own', async () => {
