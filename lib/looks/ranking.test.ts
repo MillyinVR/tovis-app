@@ -6,11 +6,14 @@ import {
 } from '@prisma/client'
 
 import {
+  LOOK_POST_RANK_PRIOR,
   LOOK_POST_RANK_RECENCY_HALF_LIFE_DAYS,
+  LOOK_POST_RANK_SCORE_SCALE,
   LOOK_POST_RANK_WEIGHTS,
-  computeLookPostRankBaseEngagement,
   computeLookPostRankRecencyMultiplier,
   computeLookPostRankScore,
+  computeLookPostRankSmoothedRate,
+  computeLookPostRankWeightedEngagement,
   isLookPostRankEligible,
 } from './ranking'
 
@@ -23,6 +26,7 @@ function makeInput(
     commentCount: number
     saveCount: number
     shareCount: number
+    viewCount: number
   }>,
 ) {
   return {
@@ -37,6 +41,7 @@ function makeInput(
     commentCount: overrides?.commentCount ?? 0,
     saveCount: overrides?.saveCount ?? 0,
     shareCount: overrides?.shareCount ?? 0,
+    viewCount: overrides?.viewCount ?? 0,
   }
 }
 
@@ -51,9 +56,9 @@ describe('lib/looks/ranking.ts', () => {
       )
     })
 
-    it('keeps shares as the strongest signal, above saves', () => {
-      expect(LOOK_POST_RANK_WEIGHTS.share).toBeGreaterThan(
-        LOOK_POST_RANK_WEIGHTS.save,
+    it('keeps saves as the strongest tracked signal, above shares (spec §2)', () => {
+      expect(LOOK_POST_RANK_WEIGHTS.save).toBeGreaterThan(
+        LOOK_POST_RANK_WEIGHTS.share,
       )
     })
   })
@@ -94,27 +99,28 @@ describe('lib/looks/ranking.ts', () => {
     })
   })
 
-  describe('computeLookPostRankBaseEngagement', () => {
-    it('weights likes, comments, saves, and shares correctly', () => {
-      const result = computeLookPostRankBaseEngagement({
+  describe('computeLookPostRankWeightedEngagement', () => {
+    it('weights likes, comments, saves, and shares by the spec hierarchy', () => {
+      const result = computeLookPostRankWeightedEngagement({
         likeCount: 11,
         commentCount: 6,
         saveCount: 3,
         shareCount: 2,
       })
 
-      expect(result).toBe(51)
+      // like·1 + comment·2 + save·5 + share·3 = 11 + 12 + 15 + 6
+      expect(result).toBe(44)
     })
 
     it('weights saves above likes at the same rough sample size', () => {
-      const saveHeavy = computeLookPostRankBaseEngagement({
+      const saveHeavy = computeLookPostRankWeightedEngagement({
         likeCount: 1,
         commentCount: 1,
         saveCount: 4,
         shareCount: 0,
       })
 
-      const likeHeavy = computeLookPostRankBaseEngagement({
+      const likeHeavy = computeLookPostRankWeightedEngagement({
         likeCount: 4,
         commentCount: 1,
         saveCount: 1,
@@ -124,26 +130,26 @@ describe('lib/looks/ranking.ts', () => {
       expect(saveHeavy).toBeGreaterThan(likeHeavy)
     })
 
-    it('weights shares above saves at the same rough sample size', () => {
-      const shareHeavy = computeLookPostRankBaseEngagement({
-        likeCount: 1,
-        commentCount: 1,
-        saveCount: 1,
-        shareCount: 4,
-      })
-
-      const saveHeavy = computeLookPostRankBaseEngagement({
+    it('weights saves above shares at the same rough sample size (spec §2)', () => {
+      const saveHeavy = computeLookPostRankWeightedEngagement({
         likeCount: 1,
         commentCount: 1,
         saveCount: 4,
         shareCount: 1,
       })
 
-      expect(shareHeavy).toBeGreaterThan(saveHeavy)
+      const shareHeavy = computeLookPostRankWeightedEngagement({
+        likeCount: 1,
+        commentCount: 1,
+        saveCount: 1,
+        shareCount: 4,
+      })
+
+      expect(saveHeavy).toBeGreaterThan(shareHeavy)
     })
 
     it('normalizes negative and non-finite counts to zero', () => {
-      const result = computeLookPostRankBaseEngagement({
+      const result = computeLookPostRankWeightedEngagement({
         likeCount: -4,
         commentCount: Number.NaN,
         saveCount: Number.POSITIVE_INFINITY,
@@ -151,6 +157,58 @@ describe('lib/looks/ranking.ts', () => {
       })
 
       expect(result).toBe(0)
+    })
+  })
+
+  describe('computeLookPostRankSmoothedRate', () => {
+    it('returns exactly the prior rate for a look with no impressions and no engagement', () => {
+      const rate = computeLookPostRankSmoothedRate({
+        likeCount: 0,
+        commentCount: 0,
+        saveCount: 0,
+        shareCount: 0,
+        viewCount: 0,
+      })
+
+      expect(rate).toBeCloseTo(LOOK_POST_RANK_PRIOR.rate, 10)
+    })
+
+    it('regresses a thin lucky spike below a high-volume proven look (kills rich-get-richer)', () => {
+      // 3 saves on 10 impressions — a raw rate of 1.5 that would win on counts.
+      const luckySpike = computeLookPostRankSmoothedRate({
+        likeCount: 0,
+        commentCount: 0,
+        saveCount: 3,
+        shareCount: 0,
+        viewCount: 10,
+      })
+
+      // 300 saves on 2,000 impressions — a lower raw rate but far more evidence.
+      const proven = computeLookPostRankSmoothedRate({
+        likeCount: 0,
+        commentCount: 0,
+        saveCount: 300,
+        shareCount: 0,
+        viewCount: 2000,
+      })
+
+      expect(proven).toBeGreaterThan(luckySpike)
+    })
+
+    it('honors an overridden prior', () => {
+      const weak = computeLookPostRankSmoothedRate(
+        {
+          likeCount: 0,
+          commentCount: 0,
+          saveCount: 1,
+          shareCount: 0,
+          viewCount: 0,
+        },
+        { rate: 0, strength: 10 },
+      )
+
+      // save·5 over strength 10, prior rate 0 → 5 / 10.
+      expect(weak).toBeCloseTo(0.5, 10)
     })
   })
 
@@ -274,7 +332,29 @@ describe('lib/looks/ranking.ts', () => {
       expect(newer).toBeGreaterThan(older)
     })
 
-    it('returns a stable rounded score', () => {
+    it('ranks a proven high-impression look above an identical-engagement thin one', () => {
+      const now = new Date('2026-04-20T00:00:00.000Z')
+      const publishedAt = new Date('2026-04-19T00:00:00.000Z')
+
+      // Same engagement, but one earned it over far more impressions. The
+      // dense-impression look has the lower (more trustworthy) rate and must not
+      // out-rank... rather, the SPARSE look's rate is inflated toward the prior,
+      // so the high-engagement-per-impression look ranks higher.
+      const efficient = computeLookPostRankScore(
+        makeInput({ publishedAt, saveCount: 20, viewCount: 100 }),
+        { now },
+      )
+      const inefficient = computeLookPostRankScore(
+        makeInput({ publishedAt, saveCount: 20, viewCount: 5000 }),
+        { now },
+      )
+
+      expect(efficient).toBeGreaterThan(inefficient)
+    })
+
+    it('returns a stable rounded score for a zero-impression look', () => {
+      // weighted = 11·1 + 6·2 + 3·5 = 38; smoothedRate = (38 + 0.08·50)/50 =
+      // 0.84; recency (1 day, 7-day half-life) = 7/8; score = 0.84·0.875·200.
       expect(
         computeLookPostRankScore(
           makeInput({
@@ -286,7 +366,19 @@ describe('lib/looks/ranking.ts', () => {
             now: new Date('2026-04-20T00:00:00.000Z'),
           },
         ),
-      ).toBe(30.625)
+      ).toBe(147)
+    })
+
+    it('keeps the score scale in the band forYouRanking boosts are calibrated against', () => {
+      // A strongly-engaged fresh look should land in the tens-to-hundreds band,
+      // not below 1, so the additive follow/category/freshness boosts don't bury
+      // the engagement backbone.
+      const score = computeLookPostRankScore(
+        makeInput({ saveCount: 40, viewCount: 200 }),
+        { now: new Date('2026-04-20T00:00:00.000Z') },
+      )
+
+      expect(score).toBeGreaterThan(LOOK_POST_RANK_SCORE_SCALE * 0.1)
     })
   })
 })

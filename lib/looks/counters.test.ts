@@ -28,6 +28,7 @@ function makeScoreEligibleLookRow(overrides?: {
   commentCount?: number
   saveCount?: number
   shareCount?: number
+  viewCount?: number
 }) {
   return {
     id: 'look_1',
@@ -42,6 +43,7 @@ function makeScoreEligibleLookRow(overrides?: {
     commentCount: overrides?.commentCount ?? 0,
     saveCount: overrides?.saveCount ?? 0,
     shareCount: overrides?.shareCount ?? 0,
+    viewCount: overrides?.viewCount ?? 0,
   }
 }
 
@@ -233,7 +235,9 @@ describe('lib/looks/counters.ts', () => {
       expect(result).toBe(0)
     })
 
-    it('computes rank score from recency plus persisted engagement counts', () => {
+    it('computes rank score from recency, persisted engagement, and impressions', () => {
+      // weighted = 11·1 + 6·2 + 3·5 + 2·3 = 44; zero impressions → smoothedRate
+      // = (44 + 0.08·50)/50 = 0.96; recency (1 day) = 7/8; ·scale 200.
       const result = computeLookPostRankScore(
         makeScoreEligibleLookRow({
           likeCount: 11,
@@ -243,7 +247,18 @@ describe('lib/looks/counters.ts', () => {
         }),
       )
 
-      expect(result).toBe(44.625)
+      expect(result).toBe(168)
+    })
+
+    it('lowers rank as impressions accrue without matching engagement', () => {
+      const thin = computeLookPostRankScore(
+        makeScoreEligibleLookRow({ saveCount: 5, viewCount: 20 }),
+      )
+      const dilutedByViews = computeLookPostRankScore(
+        makeScoreEligibleLookRow({ saveCount: 5, viewCount: 4000 }),
+      )
+
+      expect(dilutedByViews).toBeLessThan(thin)
     })
 
     it('weights saves above likes', () => {
@@ -327,6 +342,7 @@ describe('lib/looks/counters.ts', () => {
           commentCount: true,
           saveCount: true,
           shareCount: true,
+          viewCount: true,
         },
       })
 
@@ -335,7 +351,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           likeCount: 7,
           spotlightScore: 69.02,
-          rankScore: 58.625,
+          rankScore: 245,
         },
         select: { id: true },
       })
@@ -375,7 +391,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           commentCount: 4,
           spotlightScore: 69.02,
-          rankScore: 58.625,
+          rankScore: 245,
         },
         select: { id: true },
       })
@@ -463,7 +479,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           saveCount: 9,
           spotlightScore: 69.02,
-          rankScore: 58.625,
+          rankScore: 245,
         },
         select: { id: true },
       })
@@ -554,12 +570,12 @@ describe('lib/looks/counters.ts', () => {
       expect(db.lookPost.update).toHaveBeenCalledWith({
         where: { id: 'look_1' },
         data: {
-          rankScore: 44.625,
+          rankScore: 168,
         },
         select: { id: true },
       })
 
-      expect(result).toBe(44.625)
+      expect(result).toBe(168)
     })
 
     it('uses an explicit now option for deterministic rank recomputes', async () => {
@@ -585,12 +601,12 @@ describe('lib/looks/counters.ts', () => {
       expect(db.lookPost.update).toHaveBeenCalledWith({
         where: { id: 'look_1' },
         data: {
-          rankScore: 39.6667,
+          rankScore: 149.3333,
         },
         select: { id: true },
       })
 
-      expect(result).toBe(39.6667)
+      expect(result).toBe(149.3333)
     })
   })
 
@@ -616,14 +632,14 @@ describe('lib/looks/counters.ts', () => {
         where: { id: 'look_1' },
         data: {
           spotlightScore: 37.5667,
-          rankScore: 44.625,
+          rankScore: 168,
         },
         select: { id: true },
       })
 
       expect(result).toEqual({
         spotlightScore: 37.5667,
-        rankScore: 44.625,
+        rankScore: 168,
       })
     })
   })
@@ -671,7 +687,7 @@ describe('lib/looks/counters.ts', () => {
           commentCount: 6,
           saveCount: 3,
           spotlightScore: 37.5667,
-          rankScore: 44.625,
+          rankScore: 168,
         },
         select: { id: true },
       })
@@ -681,7 +697,7 @@ describe('lib/looks/counters.ts', () => {
         commentCount: 6,
         saveCount: 3,
         spotlightScore: 37.5667,
-        rankScore: 44.625,
+        rankScore: 168,
       })
     })
   })

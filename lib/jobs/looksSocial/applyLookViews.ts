@@ -8,10 +8,11 @@ import type { ApplyLookViewsJobPayload } from '@/lib/jobs/looksSocial/contracts'
 // stub without a type escape.
 export type LookPostViewIncrementDb = {
   lookPost: {
-    updateMany(args: {
+    updateManyAndReturn(args: {
       where: Prisma.LookPostWhereInput
       data: Prisma.LookPostUpdateManyMutationInput
-    }): Promise<{ count: number }>
+      select: { id: true }
+    }): Promise<{ id: string }[]>
   }
 }
 
@@ -43,25 +44,32 @@ export function buildApplyLookViewsUpdate(
 }
 
 /**
- * Apply a batched set of view increments. A single atomic `updateMany` bumps
- * `viewCount` by one for every published, approved look in the list — cheap,
- * contention-light, and idempotent under job retry (the statement is
- * all-or-nothing, so a retried job re-applies the whole batch exactly once).
+ * Apply a batched set of view increments. Resolves the published, approved
+ * looks in the batch, bumps their `viewCount` by one via a single atomic
+ * `updateMany` (cheap, contention-light), and returns exactly those ids so the
+ * caller can refresh their rank scores.
  *
- * Deliberately does NOT recompute spotlight/rank scores: view velocity is not a
- * ranking term yet (social-first plan B2 defers it).
+ * Impressions are now the denominator of rate-based rank scoring (spec §4.1), so
+ * the caller recomputes rank for the returned ids — a Look that keeps accruing
+ * impressions without matching engagement must see its rate (and rank) fall
+ * rather than stay frozen at its last engagement-time value.
+ *
+ * `updateManyAndReturn` increments and hands back exactly the rows it touched in
+ * one atomic statement, so the returned ids are precisely the eligible looks —
+ * unknown/deleted/ineligible ids never reach the recompute path (which reads
+ * each row and would otherwise throw).
  */
 export async function processApplyLookViews(
   db: LookPostViewIncrementDb,
   payload: ApplyLookViewsJobPayload,
-): Promise<{ appliedCount: number }> {
+): Promise<{ appliedCount: number; lookPostIds: string[] }> {
   const { lookPostIds } = buildApplyLookViewsUpdate(payload)
 
   if (lookPostIds.length === 0) {
-    return { appliedCount: 0 }
+    return { appliedCount: 0, lookPostIds: [] }
   }
 
-  const result = await db.lookPost.updateMany({
+  const updated = await db.lookPost.updateManyAndReturn({
     where: {
       id: { in: lookPostIds },
       status: LookPostStatus.PUBLISHED,
@@ -70,7 +78,10 @@ export async function processApplyLookViews(
     data: {
       viewCount: { increment: 1 },
     },
+    select: { id: true },
   })
 
-  return { appliedCount: result.count }
+  const updatedIds = updated.map((row) => row.id)
+
+  return { appliedCount: updatedIds.length, lookPostIds: updatedIds }
 }

@@ -48,6 +48,8 @@ const lookPostScoreSelect =
     commentCount: true,
     saveCount: true,
     shareCount: true,
+    // The rate denominator for rank scoring (spec §4.1).
+    viewCount: true,
   })
 
 type LookPostScoreRow = Prisma.LookPostGetPayload<{
@@ -151,6 +153,7 @@ export function computeLookPostRankScore(
     | 'commentCount'
     | 'saveCount'
     | 'shareCount'
+    | 'viewCount'
   >,
   options?: LookPostScoreComputeOptions,
 ): number {
@@ -163,6 +166,7 @@ export function computeLookPostRankScore(
       commentCount: row.commentCount,
       saveCount: row.saveCount,
       shareCount: row.shareCount,
+      viewCount: row.viewCount,
     },
     options,
   )
@@ -178,6 +182,7 @@ function buildLookPostScoreSnapshot(
     | 'commentCount'
     | 'saveCount'
     | 'shareCount'
+    | 'viewCount'
   >,
   options?: LookPostScoreComputeOptions,
 ): LookPostScoreSnapshot {

@@ -319,7 +319,11 @@ describe('lib/jobs/looksSocial/process', () => {
 
     mocks.prisma.looksSocialJob.findMany.mockResolvedValue([job])
     mocks.prisma.looksSocialJob.updateMany.mockResolvedValue({ count: 1 })
-    mocks.processApplyLookViews.mockResolvedValue({ appliedCount: 2 })
+    mocks.processApplyLookViews.mockResolvedValue({
+      appliedCount: 2,
+      lookPostIds: ['look_1', 'look_2'],
+    })
+    mocks.recomputeLookPostRankScore.mockResolvedValue(0)
     mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: job.id })
 
     const result = await processLooksSocialJobs({ now })
@@ -327,6 +331,19 @@ describe('lib/jobs/looksSocial/process', () => {
     expect(mocks.processApplyLookViews).toHaveBeenCalledWith(mocks.prisma, {
       lookPostIds: ['look_1', 'look_2'],
     })
+
+    // Impressions feed the rate, so each incremented look's rank is refreshed.
+    expect(mocks.recomputeLookPostRankScore).toHaveBeenCalledTimes(2)
+    expect(mocks.recomputeLookPostRankScore).toHaveBeenCalledWith(
+      mocks.prisma,
+      'look_1',
+      { now },
+    )
+    expect(mocks.recomputeLookPostRankScore).toHaveBeenCalledWith(
+      mocks.prisma,
+      'look_2',
+      { now },
+    )
 
     expect(result.completedCount).toBe(1)
     expect(result.outcomes).toEqual([
