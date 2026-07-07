@@ -45,39 +45,57 @@ describe('buildApplyLookViewsUpdate', () => {
 })
 
 describe('processApplyLookViews', () => {
-  function makeDb(count: number) {
-    const updateMany = vi.fn().mockResolvedValue({ count })
+  function makeDb(eligibleIds: string[]) {
+    const updateManyAndReturn = vi
+      .fn()
+      .mockResolvedValue(eligibleIds.map((id) => ({ id })))
     const db: LookPostViewIncrementDb = {
-      lookPost: { updateMany },
+      lookPost: { updateManyAndReturn },
     }
-    return { db, updateMany }
+    return { db, updateManyAndReturn }
   }
 
-  it('increments viewCount for the published, approved looks in the batch', async () => {
-    const { db, updateMany } = makeDb(2)
+  it('increments viewCount for only the eligible looks and returns their ids', async () => {
+    // 'look_2' is not published/approved, so the atomic update never touches it
+    // and it never comes back in the returned rows.
+    const { db, updateManyAndReturn } = makeDb(['look_1'])
 
     const result = await processApplyLookViews(db, {
       lookPostIds: ['look_1', 'look_1', 'look_2'],
     })
 
-    expect(updateMany).toHaveBeenCalledTimes(1)
-    expect(updateMany).toHaveBeenCalledWith({
+    expect(updateManyAndReturn).toHaveBeenCalledTimes(1)
+    expect(updateManyAndReturn).toHaveBeenCalledWith({
       where: {
         id: { in: ['look_1', 'look_2'] },
         status: LookPostStatus.PUBLISHED,
         moderationStatus: ModerationStatus.APPROVED,
       },
       data: { viewCount: { increment: 1 } },
+      select: { id: true },
     })
-    expect(result.appliedCount).toBe(2)
+    expect(result.appliedCount).toBe(1)
+    expect(result.lookPostIds).toEqual(['look_1'])
   })
 
   it('no-ops without touching the database when the batch is empty', async () => {
-    const { db, updateMany } = makeDb(0)
+    const { db, updateManyAndReturn } = makeDb([])
 
     const result = await processApplyLookViews(db, { lookPostIds: [] })
 
-    expect(updateMany).not.toHaveBeenCalled()
+    expect(updateManyAndReturn).not.toHaveBeenCalled()
     expect(result.appliedCount).toBe(0)
+    expect(result.lookPostIds).toEqual([])
+  })
+
+  it('applies nothing when no batch id is eligible', async () => {
+    const { db } = makeDb([])
+
+    const result = await processApplyLookViews(db, {
+      lookPostIds: ['look_gone'],
+    })
+
+    expect(result.appliedCount).toBe(0)
+    expect(result.lookPostIds).toEqual([])
   })
 })

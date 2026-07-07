@@ -92,6 +92,7 @@
     "lookup:booking-override-ids": "tsx prisma/seeds/lookupBookingOverrideIds.ts",
     "jobs:looks-social:run-local": "node scripts/run-looks-social-jobs.mjs",
     "backfill:search-index": "tsx scripts/backfill-search-index.ts",
+    "recompute:look-rank": "tsx scripts/recompute-look-rank-scores.ts",
     "import:license-permissions": "tsx scripts/importLicensePermissions.ts"
   },
   "dependencies": {

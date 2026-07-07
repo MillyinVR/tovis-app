@@ -185,11 +185,19 @@ async function runLooksSocialJob(
       })
       return
 
-    case LooksSocialJobType.APPLY_LOOK_VIEWS:
-      await processApplyLookViews(prisma, {
+    case LooksSocialJobType.APPLY_LOOK_VIEWS: {
+      const { lookPostIds } = await processApplyLookViews(prisma, {
         lookPostIds: readStringArray(job.payload, 'lookPostIds'),
       })
+
+      // Impressions are the rate denominator (spec §4.1): a fresh batch of
+      // views changes each look's rate, so refresh their persisted rank. Only
+      // the eligible ids that were actually incremented come back here.
+      for (const lookPostId of lookPostIds) {
+        await recomputeLookPostRankScore(prisma, lookPostId, { now })
+      }
       return
+    }
 
     case LooksSocialJobType.MODERATION_SCAN_LOOK_POST:
       throw new Error(
