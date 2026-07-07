@@ -43,11 +43,14 @@ export const LOOK_POST_RANK_PRIOR: LookPostRankPrior = {
 }
 
 /**
- * The smoothed rate lives in a small ~[0, 1] band. `rankScore` is consumed
- * alongside the additive per-viewer boosts in `lib/looks/forYouRanking.ts`
- * (follow / category affinity / freshness), which are calibrated against a
- * tens-to-hundreds band. Scale the rate into that band so the engagement
- * backbone stays comparable to those boosts instead of being buried by them.
+ * The smoothed rate typically lives in [0, 1] and is hard-bounded below the
+ * max signal weight (5) by the impression floor, so scores stay strictly
+ * under SCALE × 5 = 1000 — beneath forYouRanking's seen-penalty. `rankScore`
+ * is consumed alongside the additive per-viewer boosts in
+ * `lib/looks/forYouRanking.ts` (follow / category affinity / freshness),
+ * which are calibrated against a tens-to-hundreds band. Scale the rate into
+ * that band so the engagement backbone stays comparable to those boosts
+ * instead of being buried by them.
  */
 export const LOOK_POST_RANK_SCORE_SCALE = 200
 
@@ -163,6 +166,13 @@ export function computeLookPostRankWeightedEngagement(
  * Bayesian-smoothed weighted engagement per impression (spec §4.1). With zero
  * real impressions the result is exactly the prior rate; as impressions grow the
  * Look's own observed rate takes over. Regresses thin evidence to the mean.
+ *
+ * The impression denominator is floored at the raw engagement total: every
+ * like/comment/save/share implies at least one impression, so a recorded
+ * viewCount below that is an undercount, not a signal. This protects looks
+ * whose engagement predates view tracking (undercounted denominators would
+ * otherwise inflate their rates) and makes engagement-without-impressions an
+ * impossible-rate anomaly for the anti-gaming check (spec §5.6).
  */
 export function computeLookPostRankSmoothedRate(
   input: Pick<
@@ -172,7 +182,15 @@ export function computeLookPostRankSmoothedRate(
   prior?: LookPostRankPrior,
 ): number {
   const weightedEngagement = computeLookPostRankWeightedEngagement(input)
-  const impressions = normalizeCount(input.viewCount)
+  const rawEngagementCount =
+    normalizeCount(input.likeCount) +
+    normalizeCount(input.commentCount) +
+    normalizeCount(input.saveCount) +
+    normalizeCount(input.shareCount)
+  const impressions = Math.max(
+    normalizeCount(input.viewCount),
+    rawEngagementCount,
+  )
   const { rate, strength } = normalizePrior(prior)
 
   return (weightedEngagement + rate * strength) / (impressions + strength)

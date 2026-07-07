@@ -207,8 +207,44 @@ describe('lib/looks/ranking.ts', () => {
         { rate: 0, strength: 10 },
       )
 
-      // save·5 over strength 10, prior rate 0 → 5 / 10.
-      expect(weak).toBeCloseTo(0.5, 10)
+      // save·5 over the floored denominator (1 raw engagement + strength 10),
+      // prior rate 0 → 5 / 11.
+      expect(weak).toBeCloseTo(5 / 11, 10)
+    })
+
+    it('floors the denominator at raw engagement when viewCount is undercounted', () => {
+      // A look whose 20 saves predate view tracking: only 8 recorded views.
+      // Every save implies ≥1 impression, so the denominator floors at 20 —
+      // the undercounted viewCount must not inflate the rate.
+      const legacy = computeLookPostRankSmoothedRate({
+        likeCount: 0,
+        commentCount: 0,
+        saveCount: 20,
+        shareCount: 0,
+        viewCount: 8,
+      })
+
+      expect(legacy).toBeCloseTo(
+        (20 * LOOK_POST_RANK_WEIGHTS.save +
+          LOOK_POST_RANK_PRIOR.rate * LOOK_POST_RANK_PRIOR.strength) /
+          (20 + LOOK_POST_RANK_PRIOR.strength),
+        10,
+      )
+    })
+
+    it('keeps the smoothed rate bounded below the max signal weight', () => {
+      // Pathological all-save look with no recorded views: the floor caps the
+      // rate strictly under the save weight (5), so scores stay under
+      // SCALE·5 = 1000 — beneath forYouRanking's seen-penalty.
+      const extreme = computeLookPostRankSmoothedRate({
+        likeCount: 0,
+        commentCount: 0,
+        saveCount: 100_000,
+        shareCount: 0,
+        viewCount: 0,
+      })
+
+      expect(extreme).toBeLessThan(LOOK_POST_RANK_WEIGHTS.save)
     })
   })
 
@@ -353,8 +389,9 @@ describe('lib/looks/ranking.ts', () => {
     })
 
     it('returns a stable rounded score for a zero-impression look', () => {
-      // weighted = 11·1 + 6·2 + 3·5 = 38; smoothedRate = (38 + 0.08·50)/50 =
-      // 0.84; recency (1 day, 7-day half-life) = 7/8; score = 0.84·0.875·200.
+      // weighted = 11·1 + 6·2 + 3·5 = 38; raw engagement = 20 floors the zero
+      // viewCount → smoothedRate = (38 + 0.08·50)/(20 + 50) = 0.6; recency
+      // (1 day, 7-day half-life) = 7/8; score = 0.6·0.875·200.
       expect(
         computeLookPostRankScore(
           makeInput({
@@ -366,7 +403,7 @@ describe('lib/looks/ranking.ts', () => {
             now: new Date('2026-04-20T00:00:00.000Z'),
           },
         ),
-      ).toBe(147)
+      ).toBe(105)
     })
 
     it('keeps the score scale in the band forYouRanking boosts are calibrated against', () => {
