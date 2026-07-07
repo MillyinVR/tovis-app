@@ -22,8 +22,24 @@ import type {
   LooksDetailServiceDto,
   LooksFeedItemDto,
   LooksFeedResponseDto,
+  LooksTagDto,
 } from '@/lib/looks/types'
 import type { PairedBeforeDto } from '@/lib/media/pairedBefore'
+
+// Parse the tag chips list on a feed/detail item (social-first D1). Tolerant of
+// absence (older payloads → []); drops any entry missing a slug or display.
+function parseLooksTagList(raw: unknown): LooksTagDto[] {
+  if (!Array.isArray(raw)) return []
+  const out: LooksTagDto[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const slug = pickString(entry.slug)
+    const display = pickString(entry.display)
+    if (!slug || !display) continue
+    out.push({ slug, display })
+  }
+  return out
+}
 
 // Parse an opt-in before/after pairing on the primary asset. Requires an id and
 // at least one usable URL; anything else → null (render the single tile).
@@ -223,6 +239,8 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
       priceStartingAt: pickNumber(item.priceStartingAt),
 
       before: parsePairedBefore(item.before),
+
+      tags: parseLooksTagList(item.tags),
 
       uploadedByRole: isRole(uploadedByRoleRaw) ? uploadedByRoleRaw : null,
       reviewId: pickString(item.reviewId),
@@ -610,6 +628,7 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
     service,
     primaryMedia,
     before: parsePairedBefore(itemRaw.before),
+    tags: parseLooksTagList(itemRaw.tags),
     assets,
     _count: {
       likes,

@@ -18,6 +18,14 @@ export type LooksCategoryDto = {
   slug: string
 }
 
+// A user-facing hashtag / style tag on a look (social-first D1). slug is the
+// URL key for /looks/tags/[slug]; display is the first-seen human form. Only
+// non-banned tags ever reach a DTO.
+export type LooksTagDto = {
+  slug: string
+  display: string
+}
+
 export type LooksCountsDto = {
   likes: number
   comments: number
@@ -80,6 +88,10 @@ export type LooksFeedItemDto = {
   // Opt-in before/after pairing on the primary (image) asset → the feed renders
   // the reveal slider in-pager. Null when there's no pairing or it's a video.
   before: PairedBeforeDto | null
+
+  // Non-banned user-facing tags (social-first D1) → tappable chips linking to
+  // /looks/tags/[slug]. Empty when the look has no tags.
+  tags: LooksTagDto[]
 
   // Owner-facing publication state. Present only on the pro's own listing
   // (GET /api/v1/pro/looks); public feed surfaces omit both fields.
@@ -178,6 +190,9 @@ export type LooksDetailItemDto = {
   // Opt-in before/after pairing on the primary (image) asset → the detail page
   // renders the reveal slider. Null when there's no pairing or it's a video.
   before: PairedBeforeDto | null
+  // Non-banned user-facing tags (social-first D1) → tappable chips linking to
+  // /looks/tags/[slug]. Empty when the look has no tags.
+  tags: LooksTagDto[]
   assets: LooksDetailAssetDto[]
 
   _count: LooksDetailCountsDto

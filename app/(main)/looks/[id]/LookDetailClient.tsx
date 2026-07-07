@@ -469,6 +469,20 @@ export default function LookDetailClient({
               <div className="text-sm text-textPrimary/90">{item.caption}</div>
             ) : null}
 
+            {item.tags.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {item.tags.map((tag) => (
+                  <Link
+                    key={tag.slug}
+                    href={`/looks/tags/${encodeURIComponent(tag.slug)}`}
+                    className="inline-flex items-center rounded-full border border-accentPrimary/30 bg-accentPrimary/10 px-3 py-1 text-[12px] font-black text-textPrimary no-underline transition hover:border-accentPrimary/60 hover:bg-accentPrimary/15"
+                  >
+                    #{tag.display}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
+
             <div className="flex flex-wrap gap-3 text-[12px] text-textSecondary">
               <span>
                 <span className="font-black text-textPrimary">Views:</span>{' '}

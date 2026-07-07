@@ -82,6 +82,7 @@ function makeFeedDto(
     serviceIds: ['service_1'],
     priceStartingAt: null,
     before: null,
+    tags: [],
     uploadedByRole: null,
     reviewId: null,
     reviewHelpfulCount: null,
@@ -188,6 +189,7 @@ describe('lib/looks/parsers.ts', () => {
           serviceIds: [],
           priceStartingAt: null,
           before: null,
+          tags: [],
           uploadedByRole: null,
           reviewId: null,
           reviewHelpfulCount: null,
@@ -421,6 +423,10 @@ describe('lib/looks/parsers.ts', () => {
             createdAt: '2026-04-18T10:30:00.000Z',
             review: null,
           },
+          tags: [
+            { slug: 'balayage', display: 'Balayage' },
+            { slug: '', display: 'dropped' },
+          ],
           assets: [],
           _count: {
             likes: 1,
@@ -481,6 +487,8 @@ describe('lib/looks/parsers.ts', () => {
           review: null,
         },
         before: null,
+        // The malformed entry (empty slug) is dropped; the valid one survives.
+        tags: [{ slug: 'balayage', display: 'Balayage' }],
         assets: [],
         _count: {
           likes: 1,

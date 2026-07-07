@@ -76,7 +76,16 @@ type CommentRow = {
   reviewedAt: string | null
 }
 
-type Tab = 'LOOK' | 'COMMENT'
+type TagRow = {
+  slug: string
+  display: string
+  lookCount: number
+  banned: boolean
+  bannedAt: string | null
+  createdAt: string
+}
+
+type Tab = 'LOOK' | 'COMMENT' | 'TAG'
 type StatusFilter =
   | 'REPORTED'
   | 'PENDING'
@@ -85,6 +94,14 @@ type StatusFilter =
   | 'REMOVED'
   | 'APPROVED'
   | 'ALL'
+
+type BannedFilter = 'ALL' | 'ACTIVE' | 'BANNED'
+
+const BANNED_FILTERS: { value: BannedFilter; label: string }[] = [
+  { value: 'ALL', label: 'All tags' },
+  { value: 'ACTIVE', label: 'Active' },
+  { value: 'BANNED', label: 'Banned' },
+]
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'REPORTED', label: 'Reported' },
@@ -140,17 +157,35 @@ function moderationBadgeClass(status: ModerationStatus): string {
 export default function LooksAdminClient() {
   const [tab, setTab] = useState<Tab>('LOOK')
   const [status, setStatus] = useState<StatusFilter>('REPORTED')
+  const [bannedFilter, setBannedFilter] = useState<BannedFilter>('ALL')
   const [query, setQuery] = useState('')
   const [looks, setLooks] = useState<LookRow[]>([])
   const [comments, setComments] = useState<CommentRow[]>([])
+  const [tags, setTags] = useState<TagRow[]>([])
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
-  async function load(nextTab: Tab, nextStatus: StatusFilter, q: string) {
+  async function load(
+    nextTab: Tab,
+    nextStatus: StatusFilter,
+    nextBanned: BannedFilter,
+    q: string,
+  ) {
     setError(null)
     setLoaded(false)
     try {
+      if (nextTab === 'TAG') {
+        const res = await fetch(
+          `/api/v1/admin/look-tags?banned=${nextBanned}&q=${encodeURIComponent(q)}`,
+        )
+        if (!res.ok) throw new Error(await readError(res))
+        const data = (await res.json()) as { items: TagRow[] }
+        setTags(data.items)
+        setLoaded(true)
+        return
+      }
+
       const base = nextTab === 'LOOK' ? '/api/v1/admin/looks' : '/api/v1/admin/look-comments'
       const res = await fetch(
         `${base}?status=${nextStatus}&q=${encodeURIComponent(q)}`,
@@ -172,11 +207,11 @@ export default function LooksAdminClient() {
 
   useEffect(() => {
     // Initial load only; tab/filter/search changes call load() explicitly.
-    startTransition(() => load('LOOK', 'REPORTED', ''))
+    startTransition(() => load('LOOK', 'REPORTED', 'ALL', ''))
   }, [])
 
   function refresh() {
-    startTransition(() => load(tab, status, query))
+    startTransition(() => load(tab, status, bannedFilter, query))
   }
 
   async function act(run: () => Promise<Response>, failMsg: string) {
@@ -184,7 +219,7 @@ export default function LooksAdminClient() {
     try {
       const res = await run()
       if (!res.ok) throw new Error(await readError(res))
-      await load(tab, status, query)
+      await load(tab, status, bannedFilter, query)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : failMsg)
     }
@@ -255,19 +290,60 @@ export default function LooksAdminClient() {
     )
   }
 
-  const empty = tab === 'LOOK' ? looks.length === 0 : comments.length === 0
+  function tagAction(slug: string, body: Record<string, unknown>, failMsg: string) {
+    startTransition(() =>
+      act(
+        () =>
+          fetch(`/api/v1/admin/look-tags/${encodeURIComponent(slug)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }),
+        failMsg,
+      ),
+    )
+  }
+
+  function setTagBanned(slug: string, banned: boolean) {
+    tagAction(slug, { action: banned ? 'ban' : 'unban' }, 'Updating the tag failed.')
+  }
+
+  function renameTag(slug: string, currentDisplay: string) {
+    const next = window.prompt(`Rename #${slug} display label`, currentDisplay)
+    if (next === null) return
+    const display = next.trim()
+    if (!display || display === currentDisplay) return
+    tagAction(slug, { action: 'rename', display }, 'Renaming the tag failed.')
+  }
+
+  function mergeTag(slug: string) {
+    const target = window.prompt(
+      `Merge #${slug} INTO which tag? Enter the target tag slug — every look on #${slug} moves to it and #${slug} is deleted.`,
+    )
+    if (target === null) return
+    const targetSlug = target.trim()
+    if (!targetSlug) return
+    tagAction(slug, { action: 'merge', targetSlug }, 'Merging the tag failed.')
+  }
+
+  const empty =
+    tab === 'LOOK'
+      ? looks.length === 0
+      : tab === 'COMMENT'
+        ? comments.length === 0
+        : tags.length === 0
 
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-card border border-white/15 p-0.5">
-          {(['LOOK', 'COMMENT'] as const).map((t) => (
+          {(['LOOK', 'COMMENT', 'TAG'] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => {
                 setTab(t)
-                startTransition(() => load(t, status, query))
+                startTransition(() => load(t, status, bannedFilter, query))
               }}
               className={`rounded-card px-3 py-1.5 text-[12px] font-black transition ${
                 tab === t
@@ -275,26 +351,44 @@ export default function LooksAdminClient() {
                   : 'text-textSecondary hover:text-textPrimary'
               }`}
             >
-              {t === 'LOOK' ? 'Looks' : 'Comments'}
+              {t === 'LOOK' ? 'Looks' : t === 'COMMENT' ? 'Comments' : 'Tags'}
             </button>
           ))}
         </div>
 
-        <select
-          value={status}
-          onChange={(e) => {
-            const next = e.target.value as StatusFilter
-            setStatus(next)
-            startTransition(() => load(tab, next, query))
-          }}
-          className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
-        >
-          {STATUS_FILTERS.map((f) => (
-            <option key={f.value} value={f.value}>
-              {f.label}
-            </option>
-          ))}
-        </select>
+        {tab === 'TAG' ? (
+          <select
+            value={bannedFilter}
+            onChange={(e) => {
+              const next = e.target.value as BannedFilter
+              setBannedFilter(next)
+              startTransition(() => load(tab, status, next, query))
+            }}
+            className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
+          >
+            {BANNED_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <select
+            value={status}
+            onChange={(e) => {
+              const next = e.target.value as StatusFilter
+              setStatus(next)
+              startTransition(() => load(tab, next, bannedFilter, query))
+            }}
+            className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
+          >
+            {STATUS_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        )}
 
         <form
           onSubmit={(e) => {
@@ -306,7 +400,11 @@ export default function LooksAdminClient() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by pro business, name, or handle…"
+            placeholder={
+              tab === 'TAG'
+                ? 'Filter by tag slug or label…'
+                : 'Filter by pro business, name, or handle…'
+            }
             className="min-w-45 flex-1 rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[13px] text-textPrimary placeholder:text-textSecondary focus:border-accentPrimary/60 focus:outline-none"
           />
           <button
@@ -337,17 +435,28 @@ export default function LooksAdminClient() {
                 onFeature={() => featureLook(item.lookPostId, !item.featured)}
               />
             ))
-          : comments.map((item) => (
-              <CommentCard
-                key={item.lookCommentId}
-                item={item}
-                busy={pending}
-                onApprove={() => moderateComment(item.lookCommentId, 'approve')}
-                onReject={() => moderateComment(item.lookCommentId, 'reject')}
-                onRemove={() => moderateComment(item.lookCommentId, 'remove')}
-                onDismiss={() => dismissCommentReports(item.lookCommentId)}
-              />
-            ))}
+          : tab === 'COMMENT'
+            ? comments.map((item) => (
+                <CommentCard
+                  key={item.lookCommentId}
+                  item={item}
+                  busy={pending}
+                  onApprove={() => moderateComment(item.lookCommentId, 'approve')}
+                  onReject={() => moderateComment(item.lookCommentId, 'reject')}
+                  onRemove={() => moderateComment(item.lookCommentId, 'remove')}
+                  onDismiss={() => dismissCommentReports(item.lookCommentId)}
+                />
+              ))
+            : tags.map((item) => (
+                <TagCard
+                  key={item.slug}
+                  item={item}
+                  busy={pending}
+                  onToggleBan={() => setTagBanned(item.slug, !item.banned)}
+                  onRename={() => renameTag(item.slug, item.display)}
+                  onMerge={() => mergeTag(item.slug)}
+                />
+              ))}
 
         {loaded && empty && !error ? (
           <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
@@ -663,6 +772,81 @@ function CommentCard({
             onClick={onDismiss}
           />
         ) : null}
+      </div>
+    </div>
+  )
+}
+
+function TagCard({
+  item,
+  busy,
+  onToggleBan,
+  onRename,
+  onMerge,
+}: {
+  item: TagRow
+  busy: boolean
+  onToggleBan: () => void
+  onRename: () => void
+  onMerge: () => void
+}) {
+  const createdLabel = formatDate(item.createdAt)
+
+  return (
+    <div
+      className={`rounded-card border p-4 ${
+        item.banned
+          ? 'border-toneDanger/40 bg-bgPrimary/20'
+          : 'border-white/10 bg-bgPrimary/40'
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <a
+            href={`/looks/tags/${encodeURIComponent(item.slug)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[15px] font-black text-textPrimary no-underline hover:underline"
+          >
+            #{item.display}
+          </a>
+          <span className="ml-2 text-[12px] text-textSecondary">
+            /{item.slug}
+            {' · '}
+            {item.lookCount} look{item.lookCount === 1 ? '' : 's'}
+            {createdLabel ? ` · ${createdLabel}` : ''}
+          </span>
+        </div>
+        {item.banned ? (
+          <span className="rounded-card border border-toneDanger/50 px-2 py-0.5 text-[11px] font-black uppercase text-toneDanger">
+            Banned
+          </span>
+        ) : (
+          <span className="rounded-card border border-toneSuccess/50 px-2 py-0.5 text-[11px] font-black uppercase text-toneSuccess">
+            Active
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <ActionButton
+          label={item.banned ? 'Unban' : 'Ban'}
+          tone={item.banned ? 'neutral' : 'danger'}
+          busy={busy}
+          onClick={onToggleBan}
+        />
+        <ActionButton
+          label="Rename"
+          tone="neutral"
+          busy={busy}
+          onClick={onRename}
+        />
+        <ActionButton
+          label="Merge…"
+          tone="neutral"
+          busy={busy}
+          onClick={onMerge}
+        />
       </div>
     </div>
   )

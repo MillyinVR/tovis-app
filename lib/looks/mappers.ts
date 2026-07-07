@@ -31,6 +31,7 @@ import type {
   LooksFeedItemDto,
   LooksPortfolioTileDto,
   LooksRenderedMediaDto,
+  LooksTagDto,
 } from '@/lib/looks/types'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
 import {
@@ -179,6 +180,14 @@ export type LooksRenderableDetailMedia = Omit<
 
 function isNonNull<T>(value: T | null): value is T {
   return value !== null
+}
+
+// Non-banned tags are already filtered + ordered by the shared select; this just
+// projects them to the DTO shape (social-first D1).
+function mapLooksTagsToDto(
+  tags: ReadonlyArray<{ slug: string; display: string }>,
+): LooksTagDto[] {
+  return tags.map((tag) => ({ slug: tag.slug, display: tag.display }))
 }
 
 function pickString(value: unknown): string | null {
@@ -460,6 +469,8 @@ export async function mapLooksFeedMediaToDto(args: {
 
     before,
 
+    tags: mapLooksTagsToDto(item.tags),
+
     uploadedByRole: primaryMedia.uploadedByRole ?? null,
     reviewId: primaryMedia.reviewId ?? null,
     reviewHelpfulCount: primaryMedia.review?.helpfulCount ?? null,
@@ -719,6 +730,7 @@ export function mapLooksDetailToDto(args: {
 
     primaryMedia: mapRenderableLooksDetailMediaToDto(item.primaryMediaAsset),
     before: item.primaryMediaAsset.before,
+    tags: mapLooksTagsToDto(item.tags),
 
     assets: item.assets.map((asset): LooksDetailAssetDto => ({
       id: asset.id,

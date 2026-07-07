@@ -6294,6 +6294,12 @@
         "status": {
           "$ref": "#/definitions/LookPostStatus"
         },
+        "tags": {
+          "items": {
+            "$ref": "#/definitions/LooksTagDto"
+          },
+          "type": "array"
+        },
         "updatedAt": {
           "type": "string"
         },
@@ -6318,6 +6324,7 @@
         "service",
         "primaryMedia",
         "before",
+        "tags",
         "assets",
         "_count",
         "viewerContext"
@@ -6573,6 +6580,12 @@
         "status": {
           "$ref": "#/definitions/LookPostStatus"
         },
+        "tags": {
+          "items": {
+            "$ref": "#/definitions/LooksTagDto"
+          },
+          "type": "array"
+        },
         "thumbUrl": {
           "type": [
             "string",
@@ -6628,7 +6641,8 @@
         "reviewHelpfulCount",
         "reviewRating",
         "reviewHeadline",
-        "before"
+        "before",
+        "tags"
       ],
       "type": "object"
     },
@@ -7030,6 +7044,21 @@
     },
     "LooksSocialJobType": {
       "$ref": "#/definitions/%24Enums.LooksSocialJobType"
+    },
+    "LooksTagDto": {
+      "properties": {
+        "display": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug",
+        "display"
+      ],
+      "type": "object"
     },
     "MediaAdminUploadFinalizeDTO": {
       "properties": {

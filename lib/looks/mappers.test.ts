@@ -98,6 +98,7 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
         slug: 'hair',
       },
     },
+    tags: [],
     ...overrides,
   }
 }
@@ -205,6 +206,7 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
         },
       },
     ],
+    tags: [],
     ...overrides,
   }
 }
@@ -397,6 +399,7 @@ describe('lib/looks/mappers.ts', () => {
         serviceIds: ['service_1'],
         priceStartingAt: null,
         before: null,
+        tags: [],
         uploadedByRole: null,
         reviewId: null,
         reviewHelpfulCount: null,
@@ -448,6 +451,7 @@ describe('lib/looks/mappers.ts', () => {
         serviceIds: ['service_1'],
         priceStartingAt: null,
         before: null,
+        tags: [],
         uploadedByRole: null,
         reviewId: null,
         reviewHelpfulCount: null,
@@ -502,6 +506,25 @@ describe('lib/looks/mappers.ts', () => {
         thumbUrl: 'https://cdn.example.com/before-thumb.jpg',
         fullUrl: 'https://cdn.example.com/before.jpg',
       })
+    })
+
+    it('projects non-banned tags onto the feed DTO (social-first D1)', async () => {
+      const result = await mapLooksFeedMediaToDto({
+        item: makeFeedRow({
+          tags: [
+            { slug: 'balayage', display: 'Balayage' },
+            { slug: 'blonde', display: 'Blonde' },
+          ],
+        }),
+        viewerLiked: false,
+        viewerSaved: false,
+        viewerFollows: false,
+      })
+
+      expect(result?.tags).toEqual([
+        { slug: 'balayage', display: 'Balayage' },
+        { slug: 'blonde', display: 'Blonde' },
+      ])
     })
 
     it('leaves before null when the primary asset has no pairing', async () => {
@@ -1158,6 +1181,30 @@ describe('lib/looks/mappers.ts', () => {
       expect(result.before).toBeNull()
     })
 
+    it('projects non-banned tags onto the detail DTO (social-first D1)', async () => {
+      const renderable = await mapLooksDetailMediaToRenderable(
+        makeDetailRow({ tags: [{ slug: 'balayage', display: 'Balayage' }] }),
+      )
+      if (!renderable) {
+        throw new Error('Expected renderable look detail row')
+      }
+
+      const result = mapLooksDetailToDto({
+        item: renderable,
+        viewerContext: {
+          isAuthenticated: true,
+          viewerLiked: false,
+          viewerSaved: false,
+          canComment: true,
+          canSave: true,
+          isOwner: false,
+          canModerate: false,
+        },
+      })
+
+      expect(result.tags).toEqual([{ slug: 'balayage', display: 'Balayage' }])
+    })
+
     it('maps a renderable detail row into the stable detail DTO', async () => {
       const renderable = await mapLooksDetailMediaToRenderable(makeDetailRow())
 
@@ -1224,6 +1271,7 @@ describe('lib/looks/mappers.ts', () => {
           },
         },
         before: null,
+        tags: [],
         assets: [
           {
             id: 'asset_1',

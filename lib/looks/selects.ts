@@ -9,6 +9,15 @@ const looksServiceCategorySelect =
     slug: true,
   })
 
+// User-facing hashtag / style tags on a look (social-first D1). Only non-banned
+// tags surface, alphabetized by slug for a stable render order. Shared by the
+// feed + detail selects so tag chips render identically on both surfaces.
+export const looksTagListSelect = {
+  where: { bannedAt: null },
+  select: { slug: true, display: true },
+  orderBy: { slug: 'asc' },
+} satisfies Prisma.LookPost$tagsArgs
+
 export const looksServicePreviewSelect =
   Prisma.validator<Prisma.ServiceSelect>()({
     id: true,
@@ -173,6 +182,8 @@ export const looksFeedSelect =
     service: {
       select: looksServicePreviewSelect,
     },
+
+    tags: looksTagListSelect,
   })
 
 export type LooksFeedRow = Prisma.LookPostGetPayload<{
@@ -221,6 +232,8 @@ export const looksDetailSelect =
     service: {
       select: looksServicePreviewSelect,
     },
+
+    tags: looksTagListSelect,
 
     primaryMediaAsset: {
       select: looksDetailMediaAssetSelect,

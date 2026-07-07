@@ -289,6 +289,7 @@ function makeFeedItem(
     serviceIds: ['service_1'],
     priceStartingAt: null,
     before: null,
+    tags: [],
     uploadedByRole: null,
     reviewId: null,
     reviewHelpfulCount: null,

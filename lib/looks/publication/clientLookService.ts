@@ -37,6 +37,7 @@ import {
 
 import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 import { recomputeLookPostScores } from '@/lib/looks/counters'
+import { parseLookTags, syncLookTagsForPost } from '@/lib/looks/tags'
 import { mediaTypeFromContentType } from '@/lib/media/contentType'
 import { copyToPublicBucket } from '@/lib/media/copyToPublicBucket'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
@@ -432,6 +433,10 @@ export async function createClientLookFromVisit(
       select: { id: true },
     })
 
+    // Ingest #tags from the client's caption (name + body), matching the pro
+    // publish path — banned tags are dropped inside syncLookTagsForPost.
+    await syncLookTagsForPost(tx, lookPost.id, parseLookTags(lookCaption))
+
     if (beforePhoto) {
       const beforeAssetId = await createLookMediaAsset(tx, {
         photo: beforePhoto,
@@ -482,7 +487,7 @@ export async function updateClientLookVisibility(
 
   const existing = await db.lookPost.findUnique({
     where: { id: lookPostId },
-    select: { id: true, clientAuthorId: true },
+    select: { id: true, clientAuthorId: true, caption: true },
   })
 
   if (!existing) {
@@ -504,6 +509,9 @@ export async function updateClientLookVisibility(
       // (still subject to the APPROVED moderation gate).
       data: { visibility, publicToFeed: args.isPublic },
     })
+    // Idempotent tag re-sync: ensures a look shared before D1 (or whose tags were
+    // never ingested) gets its #tags connected the next time the client edits it.
+    await syncLookTagsForPost(tx, lookPostId, parseLookTags(existing.caption))
     await recomputeLookPostScores(tx, lookPostId)
   })
 
