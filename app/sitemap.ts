@@ -6,6 +6,7 @@
 import type { MetadataRoute } from 'next'
 
 import { buildLooksFeedWhere } from '@/lib/looks/feed'
+import { loadIndexableLookTagSlugs } from '@/lib/looks/tagPage'
 import { prisma } from '@/lib/prisma'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import {
@@ -30,7 +31,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const tenant = rootTenantContext(await getRootTenantId())
 
-  const [pros, looks] = await Promise.all([
+  const [pros, looks, tagSlugs] = await Promise.all([
     prisma.professionalProfile.findMany({
       where: {
         AND: [
@@ -52,6 +53,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       orderBy: { publishedAt: 'desc' },
       take: MAX_ENTRIES_PER_SECTION,
     }),
+    loadIndexableLookTagSlugs({ tenant }),
   ])
 
   const toUrl = (path: string) => new URL(path, base).toString()
@@ -72,6 +74,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: look.updatedAt ?? look.publishedAt ?? undefined,
       changeFrequency: 'weekly' as const,
       priority: 0.5,
+    })),
+    ...tagSlugs.map((slug) => ({
+      url: toUrl(`/looks/tags/${slug}`),
+      changeFrequency: 'daily' as const,
+      priority: 0.6,
     })),
   ]
 }

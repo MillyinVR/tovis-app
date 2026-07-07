@@ -3977,6 +3977,10 @@ model LookPost {
   reports          LookPostReport[]
   boardItems       BoardItem[]
   inspiredBookings Booking[]        @relation("LookInspiredBookings")
+  // User-facing hashtags / style tags parsed from the caption at publish
+  // (social-first D1). Implicit M2M; banned tags are dropped at publish and
+  // their tag pages 404. See lib/looks/tags.ts.
+  tags             LookTag[]        @relation("LookPostTags")
 
   @@index([professionalId, publishedAt])
   @@index([serviceId, publishedAt])
@@ -3991,6 +3995,23 @@ model LookPost {
   @@index([professionalId, visibility, updatedAt])
   @@index([clientAuthorId, status, updatedAt])
   @@index([clientAuthorId, visibility, publishedAt])
+}
+
+// User-facing hashtag / style tag for Looks (social-first D1). `slug` is the
+// normalized key (lowercase, ascii, hyphenless) parsed from a caption's #tags;
+// `display` is the first-seen human form. A banned tag (bannedAt set) is dropped
+// at publish and its /looks/tags/[slug] page 404s. Tag → LookPost is an implicit
+// M2M (join table _LookPostTags). See lib/looks/tags.ts.
+model LookTag {
+  id        String     @id @default(cuid())
+  slug      String     @unique
+  display   String
+  bannedAt  DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  looks     LookPost[] @relation("LookPostTags")
+
+  @@index([bannedAt])
 }
 
 model LookPostAsset {
