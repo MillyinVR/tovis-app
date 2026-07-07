@@ -1502,6 +1502,14 @@ model ClientProfile {
   photoReleaseAt               DateTime?
   photoReleaseByProfessionalId String?
 
+  // Personalization self-profile (spec §6.6): optional, fully user-entered chip
+  // answers (hair type/length/color, skin type/concern) plus declared category
+  // interests. Validated by lib/personalization/selfProfile.ts (the SSOT) on
+  // write AND read — same pattern as Board.answers. Explicit-only by guardrail:
+  // never inferred from photos or behavior; editable and clearable anytime.
+  selfProfile          Json?
+  selfProfileUpdatedAt DateTime?
+
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   addresses ClientAddress[]
@@ -2392,6 +2400,27 @@ model ServiceCategory {
   viralRequests   ViralServiceRequest[]
   services        Service[]
   adminActionLogs AdminActionLog[]      @relation("CategoryLogs")
+  lookRankStat    LookCategoryRankStat?
+}
+
+// Per-service-category engagement-rate aggregate — the data source for the
+// per-category Bayesian prior in Look rank scoring (personalization spec §4.1:
+// regress thin-evidence looks toward "typical for THIS category", not the
+// global constant). One row per category with eligible looks, refreshed by the
+// daily looks-category-rank-stats job and the recompute sweep script; consumed
+// via lib/looks/categoryRankStats.ts.
+model LookCategoryRankStat {
+  categoryId String @id
+  // Sums over eligible (published + approved) looks in the category:
+  // intent-weighted engagement (the rate numerator) and floored impressions
+  // (the denominator — per-look GREATEST(viewCount, raw engagement), the same
+  // floor the live smoothed rate uses).
+  weightedEngagement Float
+  impressions        Int
+  lookCount          Int
+  computedAt         DateTime
+
+  category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 }
 
 model ProfessionalFavorite {

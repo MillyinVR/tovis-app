@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
   const getBoardErrorMeta = vi.fn()
   const getBoardSummaries = vi.fn()
   const parseBoardVisibility = vi.fn()
+  const applyBoardAnswersWriteThrough = vi.fn()
 
   return {
     jsonOk,
@@ -54,6 +55,7 @@ const mocks = vi.hoisted(() => {
     getBoardErrorMeta,
     getBoardSummaries,
     parseBoardVisibility,
+    applyBoardAnswersWriteThrough,
   }
 })
 
@@ -80,6 +82,10 @@ vi.mock('@/lib/boards', () => ({
   getBoardErrorMeta: mocks.getBoardErrorMeta,
   getBoardSummaries: mocks.getBoardSummaries,
   parseBoardVisibility: mocks.parseBoardVisibility,
+}))
+
+vi.mock('@/lib/personalization/selfProfileStore', () => ({
+  applyBoardAnswersWriteThrough: mocks.applyBoardAnswersWriteThrough,
 }))
 
 import { GET, POST } from './route'
@@ -289,6 +295,77 @@ describe('app/api/v1/boards/route.ts', () => {
   })
 
   describe('POST', () => {
+    it('applies the self-profile write-through only on explicit opt-in', async () => {
+      const created = {
+        id: 'board_1',
+        clientId: 'client_1',
+        name: 'Big change',
+        visibility: BoardVisibility.PRIVATE,
+        type: BoardType.COLOR_TRANSFORMATION,
+        answers: { current_color: 'brunette', dream_color: 'blonde' },
+        createdAt: new Date('2026-04-18T10:00:00.000Z'),
+        updatedAt: new Date('2026-04-18T10:00:00.000Z'),
+      }
+      mocks.createBoard.mockResolvedValueOnce(created)
+      mocks.getBoardDetail.mockResolvedValueOnce(makeBoardDetail())
+
+      const res = await POST(
+        new Request('http://localhost/api/v1/boards', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'Big change',
+            type: 'COLOR_TRANSFORMATION',
+            answers: { current_color: 'brunette', dream_color: 'blonde' },
+            writeThroughSelfProfile: true,
+          }),
+        }),
+      )
+
+      expect(res.status).toBe(201)
+      expect(mocks.applyBoardAnswersWriteThrough).toHaveBeenCalledTimes(1)
+      const call = mocks.applyBoardAnswersWriteThrough.mock.calls[0] as [
+        unknown,
+        { clientId: string; answers: unknown; now: Date },
+      ]
+      expect(call[0]).toBe(mocks.prisma)
+      expect(call[1].clientId).toBe('client_1')
+      // The route hands over the STORED answers re-normalized for the board's
+      // type — the person-describing filtering happens inside the store.
+      expect(call[1].answers).toEqual({
+        current_color: 'brunette',
+        dream_color: 'blonde',
+      })
+      expect(call[1].now).toBeInstanceOf(Date)
+    })
+
+    it('never writes through without the opt-in flag', async () => {
+      mocks.createBoard.mockResolvedValueOnce({
+        id: 'board_1',
+        clientId: 'client_1',
+        name: 'Big change',
+        visibility: BoardVisibility.PRIVATE,
+        type: BoardType.COLOR_TRANSFORMATION,
+        answers: { current_color: 'brunette' },
+        createdAt: new Date('2026-04-18T10:00:00.000Z'),
+        updatedAt: new Date('2026-04-18T10:00:00.000Z'),
+      })
+      mocks.getBoardDetail.mockResolvedValueOnce(makeBoardDetail())
+
+      const res = await POST(
+        new Request('http://localhost/api/v1/boards', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'Big change',
+            type: 'COLOR_TRANSFORMATION',
+            answers: { current_color: 'brunette' },
+          }),
+        }),
+      )
+
+      expect(res.status).toBe(201)
+      expect(mocks.applyBoardAnswersWriteThrough).not.toHaveBeenCalled()
+    })
+
     it('creates a board and returns the hydrated board detail response', async () => {
       const created = {
         id: 'board_1',

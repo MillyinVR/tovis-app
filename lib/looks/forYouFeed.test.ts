@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     boardItem: { findMany: vi.fn() },
     board: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
+    clientProfile: { findUnique: vi.fn() },
   },
 }))
 
@@ -18,9 +19,11 @@ import { BoardType } from '@prisma/client'
 import { rootTenantContext } from '@/lib/tenant/context'
 import { BOARD_EVENT_PROXIMITY } from '@/lib/boards/context'
 import {
+  AFFINITY_HALF_LIFE_DAYS,
   aggregateBoardContextSignals,
   aggregateCategoryWeights,
   buildForYouFeedPage,
+  computeAffinityDecayFactor,
   loadForYouAffinity,
   parseSeenLookIds,
 } from './forYouFeed'
@@ -52,6 +55,7 @@ describe('lib/looks/forYouFeed', () => {
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.board.findMany.mockResolvedValue([])
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
   })
 
   describe('aggregateCategoryWeights', () => {
@@ -195,8 +199,70 @@ describe('lib/looks/forYouFeed', () => {
       expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.boardItem.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.board.findMany).not.toHaveBeenCalled()
+      expect(mocks.prisma.clientProfile.findUnique).not.toHaveBeenCalled()
       // Likes are keyed on userId, so they still run.
       expect(mocks.prisma.lookLike.findMany).toHaveBeenCalledTimes(1)
+    })
+
+    it('time-decays like/save signals by age (spec §6.2)', async () => {
+      const halfLifeAgo = new Date(
+        NOW.getTime() - AFFINITY_HALF_LIFE_DAYS * 24 * 60 * 60 * 1000,
+      )
+      mocks.prisma.lookLike.findMany.mockResolvedValue([
+        { ...catRow('balayage'), createdAt: NOW },
+      ])
+      mocks.prisma.boardItem.findMany.mockResolvedValue([
+        { ...catRow('balayage'), createdAt: halfLifeAgo },
+      ])
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      // fresh like (1 × 1) + half-life-old save (2 × 0.5)
+      expect(affinity.categoryWeights.get('balayage')).toBeCloseTo(2, 5)
+    })
+
+    it('folds declared self-profile interests in undecayed (spec §6.6)', async () => {
+      mocks.prisma.clientProfile.findUnique.mockResolvedValue({
+        selfProfile: { interests: ['nails'] },
+      })
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.categoryWeights.get('nails')).toBe(3)
+      expect(affinity.categoryWeights.get('nails-enhancements')).toBe(3)
+    })
+  })
+
+  describe('computeAffinityDecayFactor', () => {
+    it('is 1 for fresh or missing timestamps and halves per half-life', () => {
+      expect(computeAffinityDecayFactor(NOW, NOW)).toBe(1)
+      expect(computeAffinityDecayFactor(null, NOW)).toBe(1)
+      expect(computeAffinityDecayFactor(new Date(Number.NaN), NOW)).toBe(1)
+
+      const oneHalfLife = new Date(
+        NOW.getTime() - AFFINITY_HALF_LIFE_DAYS * 24 * 60 * 60 * 1000,
+      )
+      expect(computeAffinityDecayFactor(oneHalfLife, NOW)).toBeCloseTo(0.5, 10)
+
+      const twoHalfLives = new Date(
+        NOW.getTime() - 2 * AFFINITY_HALF_LIFE_DAYS * 24 * 60 * 60 * 1000,
+      )
+      expect(computeAffinityDecayFactor(twoHalfLives, NOW)).toBeCloseTo(
+        0.25,
+        10,
+      )
+
+      // A clock skewed into the future never boosts past full weight.
+      const future = new Date(NOW.getTime() + 24 * 60 * 60 * 1000)
+      expect(computeAffinityDecayFactor(future, NOW)).toBe(1)
     })
   })
 

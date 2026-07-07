@@ -2,6 +2,7 @@
 import Image from 'next/image'
 import ClientProfileSettings from './ClientProfileSettings'
 import ClientPublicProfileSettings from './ClientPublicProfileSettings'
+import ClientSelfProfileSettings from './ClientSelfProfileSettings'
 import ClientLocationSettings from './ClientLocationSettings'
 import ClientAddressesSettings from './ClientAddressesSettings'
 import ClientPaymentMethodsSettings from './ClientPaymentMethodsSettings'
@@ -82,6 +83,8 @@ export default function ClientSettingsPage() {
       </section>
 
       <ClientProfileSettings />
+
+      <ClientSelfProfileSettings />
 
       <ClientPublicProfileSettings />
 

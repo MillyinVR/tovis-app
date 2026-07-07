@@ -66,6 +66,9 @@ function makeDb() {
     boardItem: {
       count: vi.fn(),
     },
+    lookCategoryRankStat: {
+      findUnique: vi.fn(),
+    },
   }
 }
 
@@ -345,6 +348,7 @@ describe('lib/looks/counters.ts', () => {
           saveCount: true,
           shareCount: true,
           viewCount: true,
+          service: { select: { categoryId: true } },
         },
       })
 
@@ -578,6 +582,74 @@ describe('lib/looks/counters.ts', () => {
       })
 
       expect(result).toBe(140.0667)
+    })
+
+    it('resolves the per-category prior for a categorized look', async () => {
+      const db = makeDb()
+      const row = {
+        ...makeScoreEligibleLookRow({
+          likeCount: 2,
+          viewCount: 100,
+        }),
+        service: { categoryId: 'cat_hair' },
+      }
+      db.lookPost.findUnique.mockResolvedValue(row)
+      db.lookPost.update.mockResolvedValue({ id: 'look_1' })
+      // A category whose typical rate is much higher than the global 0.08.
+      db.lookCategoryRankStat.findUnique.mockResolvedValue({
+        weightedEngagement: 400,
+        impressions: 1_000,
+      })
+
+      const now = new Date('2026-04-20T00:00:00.000Z')
+      const result = await recomputeLookPostRankScore(
+        asTransactionClient(db),
+        'look_1',
+        { now },
+      )
+
+      expect(db.lookCategoryRankStat.findUnique).toHaveBeenCalledWith({
+        where: { categoryId: 'cat_hair' },
+        select: { weightedEngagement: true, impressions: true },
+      })
+      expect(result).toBe(
+        computeLookPostRankScore(row, {
+          now,
+          prior: { rate: 0.4, strength: 50 },
+        }),
+      )
+      // Sanity: the category prior actually moved the score off the
+      // global-prior value.
+      expect(result).not.toBe(computeLookPostRankScore(row, { now }))
+    })
+
+    it('skips the stat lookup when the caller pins an explicit prior', async () => {
+      const db = makeDb()
+      db.lookPost.findUnique.mockResolvedValue(
+        makeScoreEligibleLookRow({ likeCount: 2, viewCount: 100 }),
+      )
+      db.lookPost.update.mockResolvedValue({ id: 'look_1' })
+
+      await recomputeLookPostRankScore(asTransactionClient(db), 'look_1', {
+        now: new Date('2026-04-20T00:00:00.000Z'),
+        prior: { rate: 0.2, strength: 50 },
+      })
+
+      expect(db.lookCategoryRankStat.findUnique).not.toHaveBeenCalled()
+    })
+
+    it('uses the global prior for uncategorized looks without a stat lookup', async () => {
+      const db = makeDb()
+      db.lookPost.findUnique.mockResolvedValue(
+        makeScoreEligibleLookRow({ likeCount: 2, viewCount: 100 }),
+      )
+      db.lookPost.update.mockResolvedValue({ id: 'look_1' })
+
+      await recomputeLookPostRankScore(asTransactionClient(db), 'look_1', {
+        now: new Date('2026-04-20T00:00:00.000Z'),
+      })
+
+      expect(db.lookCategoryRankStat.findUnique).not.toHaveBeenCalled()
     })
 
     it('uses an explicit now option for deterministic rank recomputes', async () => {

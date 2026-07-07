@@ -14,7 +14,11 @@ import {
   getBoardSummaries,
   parseBoardVisibility,
 } from '@/lib/boards'
-import { parseBoardContextInput } from '@/lib/boards/context'
+import {
+  normalizeBoardAnswers,
+  parseBoardContextInput,
+} from '@/lib/boards/context'
+import { applyBoardAnswersWriteThrough } from '@/lib/personalization/selfProfileStore'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import type {
   LooksBoardDetailResponseDto,
@@ -86,6 +90,16 @@ export async function POST(req: Request) {
       ...(visibility ? { visibility } : {}),
       ...context.value,
     })
+
+    // Self-profile write-through (spec §7.3): only on the client's explicit
+    // opt-in, and only the person-describing subset of the stored answers.
+    if (body.writeThroughSelfProfile === true) {
+      await applyBoardAnswersWriteThrough(prisma, {
+        clientId: auth.clientId,
+        answers: normalizeBoardAnswers(created.type, created.answers),
+        now: new Date(),
+      })
+    }
 
     const board = await getBoardDetail(prisma, {
       boardId: created.id,
