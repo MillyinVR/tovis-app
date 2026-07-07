@@ -1,6 +1,18 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "$Enums.BoardType": {
+      "enum": [
+        "GENERAL",
+        "BRIDAL",
+        "PROM",
+        "SKINCARE",
+        "PERMANENT_MAKEUP",
+        "COLOR_TRANSFORMATION",
+        "NAILS"
+      ],
+      "type": "string"
+    },
     "$Enums.BoardVisibility": {
       "enum": [
         "PRIVATE",
@@ -1660,6 +1672,9 @@
         }
       },
       "type": "object"
+    },
+    "BoardType": {
+      "$ref": "#/definitions/%24Enums.BoardType"
     },
     "BoardVisibility": {
       "$ref": "#/definitions/%24Enums.BoardVisibility"
@@ -5578,11 +5593,32 @@
     },
     "LooksBoardDetailDto": {
       "properties": {
+        "answers": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Creation-question chip answers (question key → chosen option value), validated against the type's question set in lib/boards/context.ts. Owner-only — never exposed on the public board page."
+        },
         "clientId": {
           "type": "string"
         },
         "createdAt": {
           "type": "string"
+        },
+        "eventDate": {
+          "description": "Calendar date the board counts down to (`YYYY-MM-DD`), bridal/prom only.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
           "type": "string"
@@ -5603,6 +5639,10 @@
           "description": "URL-safe slug for the public /u/[handle]/boards/[slug] address.",
           "type": "string"
         },
+        "type": {
+          "$ref": "#/definitions/BoardType",
+          "description": "What the board is for (creation-context, personalization spec §7)."
+        },
         "updatedAt": {
           "type": "string"
         },
@@ -5616,6 +5656,9 @@
         "name",
         "slug",
         "visibility",
+        "type",
+        "eventDate",
+        "answers",
         "createdAt",
         "updatedAt",
         "itemCount",
@@ -5689,6 +5732,13 @@
         "createdAt": {
           "type": "string"
         },
+        "eventDate": {
+          "description": "Calendar date the board counts down to (`YYYY-MM-DD`), bridal/prom only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -5704,6 +5754,10 @@
         "name": {
           "type": "string"
         },
+        "type": {
+          "$ref": "#/definitions/BoardType",
+          "description": "What the board is for (creation-context, personalization spec §7)."
+        },
         "updatedAt": {
           "type": "string"
         },
@@ -5716,6 +5770,8 @@
         "clientId",
         "name",
         "visibility",
+        "type",
+        "eventDate",
         "createdAt",
         "updatedAt",
         "itemCount",

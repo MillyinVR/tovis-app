@@ -9,6 +9,10 @@
 //   score = rankScore * BASE_WEIGHT
 //         + followBoost          (look is from a pro the viewer follows)
 //         + categoryAffinityBoost(viewer has liked/saved this look's category)
+//         + occasionBoost        (look's tags match a declared board occasion,
+//                                 e.g. a bridal board with an upcoming wedding
+//                                 — spec §7–8; weight is event-proximity-scaled
+//                                 at load time in forYouFeed.ts)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
 //
@@ -32,6 +36,11 @@ export const FOR_YOU_RANK_WEIGHTS = {
   // capped so a single hobby-horse category can't bury everything else.
   categoryUnit: 3,
   categoryWeightCap: 5,
+  // Peak boost for a look whose tags match a declared board occasion at full
+  // event proximity (weight 1.0). Sits between the category cap (15) and the
+  // follow boost (25): an imminent wedding should out-pull accumulated
+  // category taste but not bury the people you chose to follow.
+  occasionMax: 20,
   // Peak nudge for a brand-new look; decays with a 1-day half-life.
   freshnessMax: 6,
   freshnessHalfLifeDays: 1,
@@ -44,6 +53,11 @@ export type ForYouViewerAffinity = {
   // slug → affinity weight (raw count of the viewer's likes/saves in that
   // category; capped inside the ranker).
   categoryWeights: ReadonlyMap<string, number>
+  // LookTag slug → occasion weight in [0, 1], derived from the viewer's
+  // declared board purposes and scaled by event proximity at load time
+  // (lib/looks/forYouFeed.ts + lib/boards/context.ts). A look matching any of
+  // these tags gets occasionMax × the strongest matched weight.
+  occasionTagWeights: ReadonlyMap<string, number>
 }
 
 export type ForYouRankableRow = {
@@ -56,6 +70,7 @@ export type ForYouRankableRow = {
       slug?: string | null
     } | null
   } | null
+  tags?: ReadonlyArray<{ slug?: string | null }> | null
 }
 
 export type ForYouRankContext = {
@@ -113,6 +128,10 @@ export function computeForYouScore(
       FOR_YOU_RANK_WEIGHTS.categoryWeightCap,
     ) * FOR_YOU_RANK_WEIGHTS.categoryUnit
 
+  const occasionBoost =
+    FOR_YOU_RANK_WEIGHTS.occasionMax *
+    strongestOccasionMatch(row, context.affinity.occasionTagWeights)
+
   const freshnessBoost = computeForYouFreshnessBoost(
     row.publishedAt,
     context.now,
@@ -122,7 +141,37 @@ export function computeForYouScore(
     ? FOR_YOU_RANK_WEIGHTS.seen
     : 0
 
-  return base + followBoost + categoryBoost + freshnessBoost - seenPenalty
+  return (
+    base +
+    followBoost +
+    categoryBoost +
+    occasionBoost +
+    freshnessBoost -
+    seenPenalty
+  )
+}
+
+// Strongest single tag match wins (clamped to [0, 1]) — matching both #bridal
+// and #wedding on one look is the same occasion said twice, not double the
+// signal, so weights are NOT summed across tags.
+function strongestOccasionMatch(
+  row: ForYouRankableRow,
+  occasionTagWeights: ReadonlyMap<string, number>,
+): number {
+  if (occasionTagWeights.size === 0) return 0
+
+  const tags = row.tags
+  if (!Array.isArray(tags) || tags.length === 0) return 0
+
+  let strongest = 0
+  for (const tag of tags) {
+    const slug = typeof tag?.slug === 'string' ? tag.slug.trim() : ''
+    if (!slug) continue
+    const weight = safeNumber(occasionTagWeights.get(slug) ?? 0)
+    if (weight > strongest) strongest = weight
+  }
+
+  return Math.min(Math.max(strongest, 0), 1)
 }
 
 // Deterministic tie-break mirrors the DB RANKED order (rankScore desc,

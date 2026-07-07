@@ -17,9 +17,13 @@
 // rankScore; injected looks appear once (they land in the viewer's session seen
 // set and are excluded thereafter).
 
-import { Prisma } from '@prisma/client'
+import { BoardType, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { TenantContext } from '@/lib/tenant'
+import {
+  BOARD_TYPE_FEED_SIGNALS,
+  computeBoardEventProximity,
+} from '@/lib/boards/context'
 import {
   buildLooksFeedCursorWhere,
   buildLooksFeedOrderBy,
@@ -41,6 +45,14 @@ const AFFINITY_SAMPLE_SIZE = 200
 // in lib/looks/ranking.ts, scaled down).
 const AFFINITY_LIKE_WEIGHT = 1
 const AFFINITY_SAVE_WEIGHT = 2
+
+// How many of the viewer's purposed boards feed occasion/category signals.
+// Nobody keeps 24 concurrently-active occasions; this is a cost bound only.
+const BOARD_CONTEXT_SAMPLE_SIZE = 24
+
+// Category weight contributed by a declared board purpose at full event
+// proximity — comparable to 1.5 saves in that category, before scaling.
+const BOARD_TYPE_CATEGORY_WEIGHT = 3
 
 // Max fresh followed-pro looks injected at entry. Kept small so the feed stays
 // discovery-led rather than a followed-only timeline (that is the Following tab).
@@ -94,6 +106,66 @@ export function parseSeenLookIds(
   return seen
 }
 
+export type BoardContextSignalRow = {
+  type: BoardType
+  eventDate: Date | null
+}
+
+export type BoardContextSignals = {
+  categoryEntries: ForYouCategoryAffinityEntry[]
+  occasionTagWeights: Map<string, number>
+}
+
+/**
+ * Fold the viewer's declared board purposes (type + event date, spec §7–8)
+ * into feed signals: category-affinity entries (added alongside like/save
+ * entries) and occasion tag weights (the new boost term in forYouRanking).
+ * Each board's contribution is scaled by its event proximity — an imminent
+ * wedding shapes the feed at full strength, a passed one not at all. Multiple
+ * boards mapping to the same tag/category keep the STRONGEST weight (the same
+ * occasion declared twice isn't double the interest). Pure + exported for
+ * unit testing.
+ */
+export function aggregateBoardContextSignals(
+  boards: readonly BoardContextSignalRow[],
+  now: Date,
+): BoardContextSignals {
+  const occasionTagWeights = new Map<string, number>()
+  const categoryWeights = new Map<string, number>()
+
+  for (const board of boards) {
+    const signals = BOARD_TYPE_FEED_SIGNALS[board.type]
+    if (
+      signals.tagSlugs.length === 0 &&
+      signals.categorySlugs.length === 0
+    ) {
+      continue
+    }
+
+    const proximity = computeBoardEventProximity(board.eventDate, now)
+    if (proximity <= 0) continue
+
+    for (const slug of signals.tagSlugs) {
+      const current = occasionTagWeights.get(slug) ?? 0
+      if (proximity > current) occasionTagWeights.set(slug, proximity)
+    }
+
+    const categoryWeight = BOARD_TYPE_CATEGORY_WEIGHT * proximity
+    for (const slug of signals.categorySlugs) {
+      const current = categoryWeights.get(slug) ?? 0
+      if (categoryWeight > current) categoryWeights.set(slug, categoryWeight)
+    }
+  }
+
+  return {
+    categoryEntries: [...categoryWeights.entries()].map(([slug, weight]) => ({
+      slug,
+      weight,
+    })),
+    occasionTagWeights,
+  }
+}
+
 const categorySlugSelect = {
   lookPost: {
     select: {
@@ -118,17 +190,19 @@ function slugFromCategoryRow(row: {
 }
 
 /**
- * Load the viewer's For You signals: which pros they follow, and how strongly
- * they lean toward each service category (from their likes + saved-board items).
+ * Load the viewer's For You signals: which pros they follow, how strongly they
+ * lean toward each service category (from their likes + saved-board items),
+ * and their declared board purposes/event dates (occasion signals, spec §7–8).
  * Every query is bounded; missing signals just yield an empty affinity.
  */
 export async function loadForYouAffinity(args: {
   userId: string
   clientId: string | null | undefined
+  now: Date
 }): Promise<ForYouViewerAffinity> {
   const clientId = args.clientId ?? null
 
-  const [follows, likes, boardItems] = await Promise.all([
+  const [follows, likes, boardItems, boardContexts] = await Promise.all([
     clientId
       ? prisma.proFollow.findMany({
           where: { clientId },
@@ -149,6 +223,17 @@ export async function loadForYouAffinity(args: {
           select: categorySlugSelect,
         })
       : Promise.resolve([]),
+    clientId
+      ? prisma.board.findMany({
+          where: {
+            clientId,
+            type: { not: BoardType.GENERAL },
+          },
+          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+          take: BOARD_CONTEXT_SAMPLE_SIZE,
+          select: { type: true, eventDate: true },
+        })
+      : Promise.resolve([]),
   ])
 
   const entries: ForYouCategoryAffinityEntry[] = []
@@ -161,11 +246,15 @@ export async function loadForYouAffinity(args: {
     if (slug) entries.push({ slug, weight: AFFINITY_SAVE_WEIGHT })
   }
 
+  const boardSignals = aggregateBoardContextSignals(boardContexts, args.now)
+  entries.push(...boardSignals.categoryEntries)
+
   return {
     followedProfessionalIds: new Set(
       follows.map((follow) => follow.professionalId),
     ),
     categoryWeights: aggregateCategoryWeights(entries),
+    occasionTagWeights: boardSignals.occasionTagWeights,
   }
 }
 
@@ -179,6 +268,7 @@ export type ForYouFeedPage = {
     seenCount: number
     followedCount: number
     affinityCategoryCount: number
+    occasionTagCount: number
   }
 }
 
@@ -199,6 +289,7 @@ export async function buildForYouFeedPage(args: {
   const affinity = await loadForYouAffinity({
     userId: args.userId,
     clientId: args.clientId,
+    now: args.now,
   })
 
   const baseWhere = buildLooksFeedWhere({
@@ -289,6 +380,7 @@ export async function buildForYouFeedPage(args: {
       seenCount: seenIds.length,
       followedCount: followedIds.length,
       affinityCategoryCount: affinity.categoryWeights.size,
+      occasionTagCount: affinity.occasionTagWeights.size,
     },
   }
 }

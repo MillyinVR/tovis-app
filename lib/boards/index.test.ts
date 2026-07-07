@@ -1,6 +1,6 @@
 // lib/boards/index.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BoardVisibility, Prisma, PrismaClient } from '@prisma/client'
+import { BoardType, BoardVisibility, Prisma, PrismaClient } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   return {
@@ -54,6 +54,9 @@ type BoardOwnerRow = {
   clientId: string
   name: string
   visibility: BoardVisibility
+  type: BoardType
+  eventDate: Date | null
+  answers: Record<string, string> | null
   createdAt: Date
   updatedAt: Date
 }
@@ -124,6 +127,9 @@ function makeOwnedBoard(
     clientId: 'client_1',
     name: 'Hair ideas',
     visibility: BoardVisibility.PRIVATE,
+    type: BoardType.GENERAL,
+    eventDate: null,
+    answers: null,
     createdAt: new Date('2026-04-18T10:00:00.000Z'),
     updatedAt: new Date('2026-04-18T10:00:00.000Z'),
     ...overrides,
@@ -220,6 +226,9 @@ describe('lib/boards/index.ts', () => {
           name: true,
           slug: true,
           visibility: true,
+          type: true,
+          eventDate: true,
+          answers: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -272,6 +281,8 @@ describe('lib/boards/index.ts', () => {
           name: 'Hair ideas',
           slug: 'hair-ideas',
           visibility: BoardVisibility.PRIVATE,
+          type: BoardType.GENERAL,
+          eventDate: null,
         },
         select: {
           id: true,
@@ -279,12 +290,63 @@ describe('lib/boards/index.ts', () => {
           name: true,
           slug: true,
           visibility: true,
+          type: true,
+          eventDate: true,
+          answers: true,
           createdAt: true,
           updatedAt: true,
         },
       })
 
       expect(result).toEqual(board)
+    })
+
+    it('captures type, event date and validated answers', async () => {
+      const db = makeDb()
+      db.board.create.mockResolvedValue(makeOwnedBoard())
+
+      await createBoard(asTx(db), {
+        clientId: 'client_1',
+        name: 'Big day',
+        type: BoardType.BRIDAL,
+        eventDate: new Date('2026-09-14T00:00:00.000Z'),
+        answers: {
+          hair_length: 'long',
+          rogue_key: 'dropped',
+          trial_timeline: 'not-an-option',
+        },
+      })
+
+      expect(db.board.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: BoardType.BRIDAL,
+            eventDate: new Date('2026-09-14T00:00:00.000Z'),
+            answers: { hair_length: 'long' },
+          }),
+        }),
+      )
+    })
+
+    it('drops an event date for a type without event semantics', async () => {
+      const db = makeDb()
+      db.board.create.mockResolvedValue(makeOwnedBoard())
+
+      await createBoard(asTx(db), {
+        clientId: 'client_1',
+        name: 'Nail inspo',
+        type: BoardType.NAILS,
+        eventDate: new Date('2026-09-14T00:00:00.000Z'),
+      })
+
+      expect(db.board.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: BoardType.NAILS,
+            eventDate: null,
+          }),
+        }),
+      )
     })
 
     it('translates duplicate board names into a stable error', async () => {
@@ -341,6 +403,9 @@ describe('lib/boards/index.ts', () => {
           name: true,
           slug: true,
           visibility: true,
+          type: true,
+          eventDate: true,
+          answers: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -364,6 +429,111 @@ describe('lib/boards/index.ts', () => {
 
       expect(db.board.update).not.toHaveBeenCalled()
       expect(result).toEqual(current)
+    })
+
+    it('sets and clears the event date on an event-typed board', async () => {
+      const db = makeDb()
+      const current = makeOwnedBoard({
+        type: BoardType.BRIDAL,
+        eventDate: new Date('2026-09-14T00:00:00.000Z'),
+      })
+      db.board.findUnique.mockResolvedValue(current)
+      db.board.update.mockResolvedValue(current)
+
+      await updateBoard(asTx(db), {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        eventDate: new Date('2026-10-01T00:00:00.000Z'),
+      })
+      expect(db.board.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { eventDate: new Date('2026-10-01T00:00:00.000Z') },
+        }),
+      )
+
+      await updateBoard(asTx(db), {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        eventDate: null,
+      })
+      expect(db.board.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          data: { eventDate: null },
+        }),
+      )
+    })
+
+    it('re-purposing a board re-validates answers and drops a stale event date', async () => {
+      const db = makeDb()
+      const current = makeOwnedBoard({
+        type: BoardType.BRIDAL,
+        eventDate: new Date('2026-09-14T00:00:00.000Z'),
+        answers: { hair_length: 'long' },
+      })
+      db.board.findUnique.mockResolvedValue(current)
+      db.board.update.mockResolvedValue(current)
+
+      await updateBoard(asTx(db), {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        type: BoardType.NAILS,
+        answers: { occasion: 'vacation', hair_length: 'long' },
+      })
+
+      expect(db.board.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            type: BoardType.NAILS,
+            // hair_length is not a NAILS question → dropped.
+            answers: { occasion: 'vacation' },
+            eventDate: null,
+          },
+        }),
+      )
+    })
+
+    it('re-purposing without new answers clears the old ones', async () => {
+      const db = makeDb()
+      const current = makeOwnedBoard({
+        type: BoardType.BRIDAL,
+        answers: { hair_length: 'long' },
+      })
+      db.board.findUnique.mockResolvedValue(current)
+      db.board.update.mockResolvedValue(current)
+
+      await updateBoard(asTx(db), {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        type: BoardType.SKINCARE,
+      })
+
+      expect(db.board.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: BoardType.SKINCARE,
+            answers: Prisma.DbNull,
+          }),
+        }),
+      )
+    })
+
+    it('updates answers in place against the current type', async () => {
+      const db = makeDb()
+      const current = makeOwnedBoard({ type: BoardType.NAILS })
+      db.board.findUnique.mockResolvedValue(current)
+      db.board.update.mockResolvedValue(current)
+
+      await updateBoard(asTx(db), {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        answers: { length_preference: 'short' },
+      })
+
+      expect(db.board.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { answers: { length_preference: 'short' } },
+        }),
+      )
     })
   })
 

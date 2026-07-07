@@ -1,6 +1,6 @@
 // app/api/v1/boards/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BoardVisibility, Role } from '@prisma/client'
+import { BoardType, BoardVisibility, Role } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn((data: unknown, status = 200) => {
@@ -377,6 +377,72 @@ describe('app/api/v1/boards/route.ts', () => {
         clientId: 'client_1',
         name: '',
       })
+    })
+
+    it('passes parsed context fields (type, eventDate, answers) to createBoard', async () => {
+      const res = await POST(
+        new Request('http://localhost/api/v1/boards', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'Big day',
+            type: 'bridal',
+            eventDate: '2026-09-14',
+            answers: { hair_length: 'long' },
+          }),
+        }),
+      )
+
+      expect(res.status).toBe(201)
+      expect(mocks.createBoard).toHaveBeenCalledWith(mocks.prisma, {
+        clientId: 'client_1',
+        name: 'Big day',
+        type: BoardType.BRIDAL,
+        eventDate: new Date('2026-09-14T00:00:00.000Z'),
+        answers: { hair_length: 'long' },
+      })
+    })
+
+    it('returns 400 when the board type is unknown', async () => {
+      const res = await POST(
+        new Request('http://localhost/api/v1/boards', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'Big day',
+            type: 'WEDDING',
+          }),
+        }),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Invalid board type.',
+        code: 'INVALID_BOARD_TYPE',
+      })
+      expect(mocks.createBoard).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 when the event date is malformed', async () => {
+      const res = await POST(
+        new Request('http://localhost/api/v1/boards', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'Big day',
+            type: 'bridal',
+            eventDate: 'next fall',
+          }),
+        }),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Invalid event date — use YYYY-MM-DD.',
+        code: 'INVALID_BOARD_EVENT_DATE',
+      })
+      expect(mocks.createBoard).not.toHaveBeenCalled()
     })
 
     it('returns 400 when visibility is invalid', async () => {

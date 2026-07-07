@@ -35,6 +35,10 @@ import type {
 } from '@/lib/looks/types'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
 import {
+  boardEventDateToYmd,
+  normalizeBoardAnswers,
+} from '@/lib/boards/context'
+import {
   EMPTY_CLIENT_LINK_VIEWER,
   professionalProfileHref,
   resolveClientProfileHref,
@@ -818,6 +822,8 @@ export async function mapLooksBoardPreviewToDto(
     clientId: board.clientId,
     name: board.name,
     visibility: board.visibility,
+    type: board.type,
+    eventDate: board.eventDate ? boardEventDateToYmd(board.eventDate) : null,
     createdAt: board.createdAt.toISOString(),
     updatedAt: board.updatedAt.toISOString(),
     itemCount: board._count.items,
@@ -868,6 +874,11 @@ export async function mapLooksBoardDetailToDto(
     name: board.name,
     slug: board.slug,
     visibility: board.visibility,
+    type: board.type,
+    eventDate: board.eventDate ? boardEventDateToYmd(board.eventDate) : null,
+    // Re-validated on read so a stale stored answer can never leak past the
+    // question-set definitions.
+    answers: normalizeBoardAnswers(board.type, board.answers),
     createdAt: board.createdAt.toISOString(),
     updatedAt: board.updatedAt.toISOString(),
     itemCount: board._count.items,

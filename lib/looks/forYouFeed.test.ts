@@ -6,14 +6,19 @@ const mocks = vi.hoisted(() => ({
     proFollow: { findMany: vi.fn() },
     lookLike: { findMany: vi.fn() },
     boardItem: { findMany: vi.fn() },
+    board: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
   },
 }))
 
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }))
 
+import { BoardType } from '@prisma/client'
+
 import { rootTenantContext } from '@/lib/tenant/context'
+import { BOARD_EVENT_PROXIMITY } from '@/lib/boards/context'
 import {
+  aggregateBoardContextSignals,
   aggregateCategoryWeights,
   buildForYouFeedPage,
   loadForYouAffinity,
@@ -45,6 +50,7 @@ describe('lib/looks/forYouFeed', () => {
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
+    mocks.prisma.board.findMany.mockResolvedValue([])
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
   })
 
@@ -82,7 +88,83 @@ describe('lib/looks/forYouFeed', () => {
     })
   })
 
+  describe('aggregateBoardContextSignals', () => {
+    it('maps a dated occasion board onto tag + category weights at full proximity', () => {
+      const signals = aggregateBoardContextSignals(
+        [
+          {
+            type: BoardType.BRIDAL,
+            eventDate: new Date('2026-07-20T00:00:00.000Z'),
+          },
+        ],
+        NOW,
+      )
+
+      expect(signals.occasionTagWeights.get('bridal')).toBe(1)
+      expect(signals.occasionTagWeights.get('wedding')).toBe(1)
+      expect(
+        signals.categoryEntries.find((entry) => entry.slug === 'hair')?.weight,
+      ).toBe(3)
+    })
+
+    it('keeps the strongest weight when boards overlap and drops passed events', () => {
+      const signals = aggregateBoardContextSignals(
+        [
+          // Wedding long past → contributes nothing.
+          {
+            type: BoardType.BRIDAL,
+            eventDate: new Date('2026-01-01T00:00:00.000Z'),
+          },
+          // Undated prom board → baseline factor; shares the 'updo' tag with
+          // the imminent bridal board below.
+          { type: BoardType.PROM, eventDate: null },
+          {
+            type: BoardType.BRIDAL,
+            eventDate: new Date('2026-07-10T00:00:00.000Z'),
+          },
+        ],
+        NOW,
+      )
+
+      expect(signals.occasionTagWeights.get('updo')).toBe(1)
+      expect(signals.occasionTagWeights.get('prom')).toBe(
+        BOARD_EVENT_PROXIMITY.noDateFactor,
+      )
+    })
+
+    it('ignores GENERAL boards entirely', () => {
+      const signals = aggregateBoardContextSignals(
+        [{ type: BoardType.GENERAL, eventDate: null }],
+        NOW,
+      )
+      expect(signals.occasionTagWeights.size).toBe(0)
+      expect(signals.categoryEntries).toEqual([])
+    })
+  })
+
   describe('loadForYouAffinity', () => {
+    it('folds declared board purposes into category + occasion weights', async () => {
+      mocks.prisma.board.findMany.mockResolvedValue([
+        {
+          type: BoardType.NAILS,
+          eventDate: null,
+        },
+      ])
+      mocks.prisma.boardItem.findMany.mockResolvedValue([catRow('nails')])
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      // save(2) + board-purpose (3 × noDateFactor 0.5 = 1.5)
+      expect(affinity.categoryWeights.get('nails')).toBeCloseTo(3.5, 5)
+      expect(affinity.occasionTagWeights.get('nails')).toBe(
+        BOARD_EVENT_PROXIMITY.noDateFactor,
+      )
+    })
+
     it('weights saves above likes and collects followed pros', async () => {
       mocks.prisma.proFollow.findMany.mockResolvedValue([
         { professionalId: 'pro_a' },
@@ -97,6 +179,7 @@ describe('lib/looks/forYouFeed', () => {
       const affinity = await loadForYouAffinity({
         userId: 'user_1',
         clientId: 'client_1',
+        now: NOW,
       })
 
       expect([...affinity.followedProfessionalIds].sort()).toEqual([
@@ -108,9 +191,10 @@ describe('lib/looks/forYouFeed', () => {
     })
 
     it('skips client-scoped queries for a viewer without a client profile', async () => {
-      await loadForYouAffinity({ userId: 'user_1', clientId: null })
+      await loadForYouAffinity({ userId: 'user_1', clientId: null, now: NOW })
       expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.boardItem.findMany).not.toHaveBeenCalled()
+      expect(mocks.prisma.board.findMany).not.toHaveBeenCalled()
       // Likes are keyed on userId, so they still run.
       expect(mocks.prisma.lookLike.findMany).toHaveBeenCalledTimes(1)
     })

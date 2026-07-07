@@ -12,6 +12,10 @@ import {
   getBoardErrorMeta,
   parseBoardVisibility,
 } from '@/lib/boards'
+import {
+  BOARD_QUESTION_SETS,
+  parseBoardContextInput,
+} from '@/lib/boards/context'
 
 const CREATE_BOARD_ROUTE = '/client/boards/new'
 const CLIENT_ME_ROUTE = '/client/me'
@@ -66,11 +70,35 @@ export async function createBoardAction(formData: FormData): Promise<void> {
     redirect(buildCreateBoardErrorHref('Invalid board visibility.'))
   }
 
+  // Optional creation-context fields (personalization spec §7): board type,
+  // event date, and per-question chip answers submitted as `answer.<key>`.
+  // All skippable — absent/blank fields simply aren't captured.
+  const contextBody: Record<string, unknown> = {}
+  const rawType = readTrimmedFormValue(formData, 'type')
+  if (rawType) contextBody.type = rawType
+  const rawEventDate = readTrimmedFormValue(formData, 'eventDate')
+  if (rawEventDate) contextBody.eventDate = rawEventDate
+
+  const answers: Record<string, string> = {}
+  for (const questions of Object.values(BOARD_QUESTION_SETS)) {
+    for (const def of questions) {
+      const value = readTrimmedFormValue(formData, `answer.${def.key}`)
+      if (value) answers[def.key] = value
+    }
+  }
+  if (Object.keys(answers).length > 0) contextBody.answers = answers
+
+  const context = parseBoardContextInput(contextBody)
+  if (!context.ok) {
+    redirect(buildCreateBoardErrorHref(context.error.message))
+  }
+
   try {
     const board = await createBoard(prisma, {
       clientId: user.clientProfile.id,
       name,
       visibility: visibility ?? BoardVisibility.PRIVATE,
+      ...context.value,
     })
 
     revalidatePath(CLIENT_ME_ROUTE)

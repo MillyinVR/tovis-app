@@ -19,6 +19,7 @@ function row(overrides: Partial<ForYouRankableRow> = {}): ForYouRankableRow {
     publishedAt: overrides.publishedAt ?? new Date('2026-07-01T12:00:00.000Z'),
     rankScore: overrides.rankScore ?? 10,
     service: overrides.service ?? { category: { slug: 'balayage' } },
+    tags: overrides.tags ?? null,
   }
 }
 
@@ -26,11 +27,13 @@ function affinity(
   overrides: Partial<{
     followed: string[]
     categories: Array<[string, number]>
+    occasions: Array<[string, number]>
   }> = {},
 ): ForYouViewerAffinity {
   return {
     followedProfessionalIds: new Set(overrides.followed ?? []),
     categoryWeights: new Map(overrides.categories ?? []),
+    occasionTagWeights: new Map(overrides.occasions ?? []),
   }
 }
 
@@ -138,6 +141,70 @@ describe('lib/looks/forYouRanking', () => {
         },
       )
       expect(Number.isFinite(score)).toBe(true)
+    })
+
+    it('boosts a look whose tags match a declared occasion', () => {
+      const context = {
+        affinity: affinity({ occasions: [['bridal', 1]] }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+
+      const bridal = computeForYouScore(
+        row({ id: 'a', tags: [{ slug: 'bridal' }, { slug: 'balayage' }] }),
+        context,
+      )
+      const plain = computeForYouScore(
+        row({ id: 'a', tags: [{ slug: 'balayage' }] }),
+        context,
+      )
+
+      expect(bridal - plain).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.occasionMax, 5)
+    })
+
+    it('scales the occasion boost by the tag weight and takes the strongest match, not the sum', () => {
+      const context = {
+        affinity: affinity({
+          occasions: [
+            ['bridal', 0.5],
+            ['wedding', 0.4],
+          ],
+        }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+
+      const both = computeForYouScore(
+        row({ id: 'a', tags: [{ slug: 'bridal' }, { slug: 'wedding' }] }),
+        context,
+      )
+      const none = computeForYouScore(row({ id: 'a', tags: [] }), context)
+
+      // strongest (0.5), NOT 0.5 + 0.4
+      expect(both - none).toBeCloseTo(
+        FOR_YOU_RANK_WEIGHTS.occasionMax * 0.5,
+        5,
+      )
+    })
+
+    it('tolerates missing tags and clamps out-of-range weights', () => {
+      const context = {
+        affinity: affinity({ occasions: [['bridal', 7]] }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+
+      const untagged = computeForYouScore(row({ id: 'a' }), context)
+      expect(Number.isFinite(untagged)).toBe(true)
+
+      const clamped = computeForYouScore(
+        row({ id: 'a', tags: [{ slug: 'bridal' }] }),
+        context,
+      )
+      expect(clamped - untagged).toBeCloseTo(
+        FOR_YOU_RANK_WEIGHTS.occasionMax,
+        5,
+      )
     })
   })
 

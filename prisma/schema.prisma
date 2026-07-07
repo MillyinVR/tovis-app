@@ -714,6 +714,19 @@ enum BoardVisibility {
   SHARED
 }
 
+// What a board is for (personalization spec §7.3). Drives the creation-time
+// question set (lib/boards/context.ts) and the For You occasion boost.
+// GENERAL = no declared purpose (the default; asks no questions).
+enum BoardType {
+  GENERAL
+  BRIDAL
+  PROM
+  SKINCARE
+  PERMANENT_MAKEUP
+  COLOR_TRANSFORMATION
+  NAILS
+}
+
 enum LooksSocialJobType {
   RECOMPUTE_LOOK_COUNTS
   RECOMPUTE_LOOK_SPOTLIGHT_SCORE
@@ -4251,6 +4264,18 @@ model Board {
   // Derived from `name` on write; unique per client (social-first D3).
   slug           String
   visibility     BoardVisibility @default(PRIVATE)
+  // Personalization context, captured once at board creation and freely
+  // editable after (personalization spec §7–8). `type` says what the board is
+  // for; `eventDate` is the calendar date it counts down to (bridal/prom — a
+  // Postgres DATE, so no time-of-day/timezone semantics); `answers` holds the
+  // skippable creation-question chips, validated against the question sets in
+  // lib/boards/context.ts. type + eventDate feed the For You occasion boost;
+  // answers are stored for the board-feed scoring pass (§4.4) and the
+  // self-profile write-through (§6.6). Owner-only — never exposed on the
+  // public board page.
+  type           BoardType       @default(GENERAL)
+  eventDate      DateTime?       @db.Date
+  answers        Json?
   // Admin moderation flag for a SHARED board: when set, the public board page +
   // share surfaces 404 (owner keeps their private copy). Plain TEXT admin id —
   // no FK/back-relation, mirroring LookPost.featuredByUserId (social-first D3).
