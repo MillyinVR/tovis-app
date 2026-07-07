@@ -16,8 +16,9 @@ Record the prelaunch staging signup load-test result here before launch approval
 > Postgres container — it fills this template with real recorded numbers and
 > surfaces a real finding (below), but it does **not** satisfy the deployed
 > staging/dashboard requirement in
-> [`docs/launch-readiness/load-test-plan.md`](launch-readiness/load-test-plan.md).
-> Deployed-staging signup proof with a runtime dashboard link remains **OPEN**.
+> the deployed-load-proof runbook
+> ([`docs/launch-readiness/deployed-load-proof-runbook.md`](launch-readiness/deployed-load-proof-runbook.md)).
+> Deployed-staging signup proof with a runtime dashboard link remains **OPEN** (tracked in [`docs/BACKLOG.md`](BACKLOG.md) §8).
 
 - Environment tested: local-dev — `next dev` (Turbopack, `NODE_ENV=development`, single Node process) on `http://localhost:3000`, backed by local Postgres (Docker, `localhost:5434/tovis_dev`). Production DB was **not** touched (verified: signups landed in the local DB only).
 - Date: 2026-06-22

@@ -23,7 +23,6 @@ If any of those are missing, the item is not closed.
 | File | Purpose |
 |---|---|
 | `checklist.md` | Master launch-readiness checklist across all phases. |
-| `sprint-index.md` | Sprint-level status summary and completion tracking. |
 | `status-rubric.md` | Shared definitions for TODO, IN PROGRESS, BLOCKED, DONE, and VERIFIED. |
 | `rollback-template.md` | Template for rollback plans. |
 | `test-evidence-template.md` | Template for recording test proof. |
@@ -39,4 +38,4 @@ Do not mark an item as `VERIFIED` unless there is test evidence, manual verifica
 
 TOVIS has a strong core booking/session flow, but launch readiness still depends on completing operational, security, compliance, testing, and rollout work.
 
-The remaining work should be tracked here so launch decisions are based on evidence, not memory.
+Remaining open work is consolidated in [`docs/BACKLOG.md`](../BACKLOG.md) (single source of truth for the to-do queue); this directory holds the reference checklists, rubrics, templates, and policies.
