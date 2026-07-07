@@ -37,6 +37,10 @@ export type LooksFeedServeEvent = {
   followedCount?: number | null
   affinityCategoryCount?: number | null
   occasionTagCount?: number | null
+  // Visual layer (spec §6.0): signals behind the viewer's taste vector and how
+  // many candidates on the page had an embedding to score against.
+  tasteSignalCount?: number | null
+  candidateEmbeddingCount?: number | null
 }
 
 export function hashViewerId(userId: string | null | undefined): string | null {
@@ -62,6 +66,8 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     followedCount: input.followedCount ?? null,
     affinityCategoryCount: input.affinityCategoryCount ?? null,
     occasionTagCount: input.occasionTagCount ?? null,
+    tasteSignalCount: input.tasteSignalCount ?? null,
+    candidateEmbeddingCount: input.candidateEmbeddingCount ?? null,
   })
 
   console.info(line)

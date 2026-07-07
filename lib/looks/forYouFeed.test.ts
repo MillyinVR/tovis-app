@@ -9,8 +9,16 @@ const mocks = vi.hoisted(() => ({
     board: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
     clientProfile: { findUnique: vi.fn() },
+    // Raw-SQL surface for the pgvector store (taste vector + candidate
+    // embeddings). Routed by SQL text in beforeEach; default returns nothing.
+    $queryRaw: vi.fn(),
   },
 }))
+
+// pgvector text literal of the expected dimension, all components = `fill`.
+function dimVecText(fill: number): string {
+  return `[${Array.from({ length: 1024 }, () => fill).join(',')}]`
+}
 
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }))
 
@@ -56,7 +64,27 @@ describe('lib/looks/forYouFeed', () => {
     mocks.prisma.board.findMany.mockResolvedValue([])
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
+    // No taste vector and no candidate embeddings by default.
+    mocks.prisma.$queryRaw.mockResolvedValue([])
   })
+
+  // Route a raw-SQL call by its text: the taste-vector read vs the
+  // candidate-embedding read hit the same $queryRaw mock.
+  function routeRawSql(handlers: {
+    tasteVector?: unknown[]
+    candidateEmbeddings?: unknown[]
+  }) {
+    mocks.prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+      const sql = Array.isArray(strings) ? strings.join(' ') : String(strings)
+      if (sql.includes('ClientTasteVector')) {
+        return Promise.resolve(handlers.tasteVector ?? [])
+      }
+      if (sql.includes('LookPostEmbedding')) {
+        return Promise.resolve(handlers.candidateEmbeddings ?? [])
+      }
+      return Promise.resolve([])
+    })
+  }
 
   describe('aggregateCategoryWeights', () => {
     it('sums weights per slug and drops empty / non-positive entries', () => {
@@ -239,6 +267,37 @@ describe('lib/looks/forYouFeed', () => {
       expect(affinity.categoryWeights.get('nails')).toBe(3)
       expect(affinity.categoryWeights.get('nails-enhancements')).toBe(3)
     })
+
+    it('loads the viewer taste vector + signal count (spec §6.0)', async () => {
+      routeRawSql({
+        tasteVector: [{ embeddingText: dimVecText(0.02), signalCount: 12 }],
+      })
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.tasteVector).toHaveLength(1024)
+      expect(affinity.tasteSignalCount).toBe(12)
+    })
+
+    it('leaves the taste vector null when none is stored', async () => {
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.tasteVector).toBeNull()
+      expect(affinity.tasteSignalCount).toBe(0)
+    })
+
+    it('does not read a taste vector for a viewer without a client profile', async () => {
+      await loadForYouAffinity({ userId: 'user_1', clientId: null, now: NOW })
+      expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled()
+    })
   })
 
   describe('computeAffinityDecayFactor', () => {
@@ -336,5 +395,72 @@ describe('lib/looks/forYouFeed', () => {
       expect(page.meta.injectedCount).toBe(0)
       expect(page.nextCursor).toBeNull()
     })
+
+    it('skips the candidate-embedding query when the viewer has no taste vector', async () => {
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b1', rankScore: 5 }),
+      ])
+
+      const page = await buildForYouFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: { rankScore: 8, publishedAt: NOW, id: 'prev' },
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // Only the taste-vector read hit $queryRaw; no candidate-embedding read.
+      const sqlCalls = mocks.prisma.$queryRaw.mock.calls.map((call) =>
+        Array.isArray(call[0]) ? call[0].join(' ') : String(call[0]),
+      )
+      expect(sqlCalls.some((s) => s.includes('LookPostEmbedding'))).toBe(false)
+      expect(page.meta.candidateEmbeddingCount).toBe(0)
+      expect(page.meta.tasteSignalCount).toBe(0)
+    })
+
+    it('reorders the page by visual similarity and reports visual meta', async () => {
+      // Taste vector points "one way"; b_match aligns with it, b_miss is
+      // orthogonal. Both share the same rankScore, so the visual boost is the
+      // tie-breaker that lifts the aligned look to the top.
+      routeRawSql({
+        tasteVector: [{ embeddingText: unitFirstAxis(), signalCount: 50 }],
+        candidateEmbeddings: [
+          { lookPostId: 'b_match', embeddingText: unitFirstAxis() },
+          { lookPostId: 'b_miss', embeddingText: unitSecondAxis() },
+        ],
+      })
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_miss', professionalId: 'pro_x', rankScore: 5 }),
+        feedRow({ id: 'b_match', professionalId: 'pro_y', rankScore: 5 }),
+      ])
+
+      const page = await buildForYouFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 5,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      expect(page.items.map((i) => i.id)).toEqual(['b_match', 'b_miss'])
+      expect(page.meta.candidateEmbeddingCount).toBe(2)
+      expect(page.meta.tasteSignalCount).toBe(50)
+    })
   })
 })
+
+// Unit vectors along the 1st / 2nd axis (orthogonal), for the visual-order test.
+function unitFirstAxis(): string {
+  const parts = Array.from({ length: 1024 }, () => 0)
+  parts[0] = 1
+  return `[${parts.join(',')}]`
+}
+function unitSecondAxis(): string {
+  const parts = Array.from({ length: 1024 }, () => 0)
+  parts[1] = 1
+  return `[${parts.join(',')}]`
+}

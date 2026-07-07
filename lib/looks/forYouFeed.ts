@@ -37,6 +37,10 @@ import {
   selfProfileInterestCategorySlugs,
 } from '@/lib/personalization/selfProfile'
 import {
+  fetchClientTasteVector,
+  fetchLookPostEmbeddings,
+} from '@/lib/personalization/lookEmbeddingStore'
+import {
   rankForYouRows,
   type ForYouViewerAffinity,
 } from '@/lib/looks/forYouRanking'
@@ -244,8 +248,14 @@ export async function loadForYouAffinity(args: {
 }): Promise<ForYouViewerAffinity> {
   const clientId = args.clientId ?? null
 
-  const [follows, likes, boardItems, boardContexts, selfProfileRow] =
-    await Promise.all([
+  const [
+    follows,
+    likes,
+    boardItems,
+    boardContexts,
+    selfProfileRow,
+    tasteVectorRow,
+  ] = await Promise.all([
       clientId
         ? prisma.proFollow.findMany({
             where: { clientId },
@@ -282,6 +292,12 @@ export async function loadForYouAffinity(args: {
             where: { id: clientId },
             select: { selfProfile: true },
           })
+        : Promise.resolve(null),
+      // The viewer's visual taste vector (spec §6.0/§6.1). null pre-backfill or
+      // before any embedded signal — the ranking layer then skips visual scoring
+      // entirely (missing vector = no boost).
+      clientId
+        ? fetchClientTasteVector(prisma, clientId)
         : Promise.resolve(null),
     ])
 
@@ -322,6 +338,8 @@ export async function loadForYouAffinity(args: {
     ),
     categoryWeights: aggregateCategoryWeights(entries),
     occasionTagWeights: boardSignals.occasionTagWeights,
+    tasteVector: tasteVectorRow?.embedding ?? null,
+    tasteSignalCount: tasteVectorRow?.signalCount ?? 0,
   }
 }
 
@@ -336,6 +354,11 @@ export type ForYouFeedPage = {
     followedCount: number
     affinityCategoryCount: number
     occasionTagCount: number
+    // Visual layer (spec §6.0): how many embedded signals built the viewer's
+    // taste vector (0 = no vector, visual scoring off) and how many candidate
+    // looks on this page had an embedding to score against.
+    tasteSignalCount: number
+    candidateEmbeddingCount: number
   }
 }
 
@@ -432,10 +455,24 @@ export async function buildForYouFeedPage(args: {
     })
   }
 
-  const items = rankForYouRows([...backbonePage, ...injectedRows], {
+  // Fetch candidate embeddings by PK for the page's rows — only when the viewer
+  // actually has a taste vector to compare against (otherwise every row scores 0
+  // visually, so the query would be pure overhead). No corpus-wide ANN: the set
+  // is just this page's ids, and no vector index exists yet by design.
+  const candidateRows = [...backbonePage, ...injectedRows]
+  const candidateEmbeddings =
+    affinity.tasteVector && candidateRows.length > 0
+      ? await fetchLookPostEmbeddings(
+          prisma,
+          candidateRows.map((row) => row.id),
+        )
+      : new Map<string, number[]>()
+
+  const items = rankForYouRows(candidateRows, {
     affinity,
     seenLookIds: args.seenLookIds,
     now: args.now,
+    candidateEmbeddings,
   })
 
   return {
@@ -448,6 +485,8 @@ export async function buildForYouFeedPage(args: {
       followedCount: followedIds.length,
       affinityCategoryCount: affinity.categoryWeights.size,
       occasionTagCount: affinity.occasionTagWeights.size,
+      tasteSignalCount: affinity.tasteSignalCount ?? 0,
+      candidateEmbeddingCount: candidateEmbeddings.size,
     },
   }
 }

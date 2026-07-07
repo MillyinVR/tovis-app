@@ -5,6 +5,8 @@ import {
   FOR_YOU_RANK_WEIGHTS,
   computeForYouFreshnessBoost,
   computeForYouScore,
+  computeVisualSimilarityBoost,
+  cosineSimilarity,
   rankForYouRows,
   type ForYouRankableRow,
   type ForYouViewerAffinity,
@@ -28,12 +30,16 @@ function affinity(
     followed: string[]
     categories: Array<[string, number]>
     occasions: Array<[string, number]>
+    tasteVector: number[] | null
+    tasteSignalCount: number
   }> = {},
 ): ForYouViewerAffinity {
   return {
     followedProfessionalIds: new Set(overrides.followed ?? []),
     categoryWeights: new Map(overrides.categories ?? []),
     occasionTagWeights: new Map(overrides.occasions ?? []),
+    tasteVector: overrides.tasteVector ?? null,
+    tasteSignalCount: overrides.tasteSignalCount ?? 0,
   }
 }
 
@@ -205,6 +211,174 @@ describe('lib/looks/forYouRanking', () => {
         FOR_YOU_RANK_WEIGHTS.occasionMax,
         5,
       )
+    })
+  })
+
+  describe('cosineSimilarity', () => {
+    it('is 1 for identical, 0 for orthogonal, -1 for opposite vectors', () => {
+      expect(cosineSimilarity([1, 0, 0], [1, 0, 0])).toBeCloseTo(1, 10)
+      expect(cosineSimilarity([1, 0, 0], [0, 1, 0])).toBeCloseTo(0, 10)
+      expect(cosineSimilarity([1, 0, 0], [-1, 0, 0])).toBeCloseTo(-1, 10)
+    })
+
+    it('is scale-invariant (true cosine, not a raw dot product)', () => {
+      // A taste vector is L2-normalized at write; look embeddings are raw. The
+      // similarity must not change when one side is un-normalized.
+      const normalized = cosineSimilarity([0.6, 0.8], [1, 0])
+      const scaled = cosineSimilarity([0.6, 0.8], [7, 0])
+      expect(scaled).toBeCloseTo(normalized, 10)
+      expect(scaled).toBeCloseTo(0.6, 10)
+    })
+
+    it('returns 0 for a length mismatch or a zero-norm input', () => {
+      expect(cosineSimilarity([1, 0], [1, 0, 0])).toBe(0)
+      expect(cosineSimilarity([], [])).toBe(0)
+      expect(cosineSimilarity([0, 0], [1, 1])).toBe(0)
+    })
+  })
+
+  describe('computeVisualSimilarityBoost', () => {
+    const FULL = FOR_YOU_RANK_WEIGHTS.visualConfidenceFullSignals
+
+    it('peaks at visualMax for a cosine-1 match at full confidence', () => {
+      expect(
+        computeVisualSimilarityBoost({
+          tasteVector: [1, 0, 0],
+          tasteSignalCount: FULL,
+          candidateEmbedding: [5, 0, 0], // un-normalized, same direction
+        }),
+      ).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax, 6)
+    })
+
+    it('scales linearly with clamped cosine', () => {
+      expect(
+        computeVisualSimilarityBoost({
+          tasteVector: [1, 0],
+          tasteSignalCount: FULL,
+          candidateEmbedding: [0.6, 0.8], // cosine 0.6
+        }),
+      ).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax * 0.6, 6)
+    })
+
+    it('clamps a negative cosine to 0 (dissimilar looks are not penalized here)', () => {
+      expect(
+        computeVisualSimilarityBoost({
+          tasteVector: [1, 0],
+          tasteSignalCount: FULL,
+          candidateEmbedding: [-1, 0],
+        }),
+      ).toBe(0)
+    })
+
+    it('ramps confidence with signal count so a thin vector barely steers', () => {
+      const halfConfidence = computeVisualSimilarityBoost({
+        tasteVector: [1, 0],
+        tasteSignalCount: FULL / 2,
+        candidateEmbedding: [1, 0],
+      })
+      expect(halfConfidence).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax * 0.5, 6)
+
+      // A 1-signal vector is heavily discounted.
+      const oneSignal = computeVisualSimilarityBoost({
+        tasteVector: [1, 0],
+        tasteSignalCount: 1,
+        candidateEmbedding: [1, 0],
+      })
+      expect(oneSignal).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax / FULL, 6)
+    })
+
+    it('caps confidence at 1 beyond the full-signal threshold', () => {
+      expect(
+        computeVisualSimilarityBoost({
+          tasteVector: [1, 0],
+          tasteSignalCount: FULL * 10,
+          candidateEmbedding: [1, 0],
+        }),
+      ).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax, 6)
+    })
+
+    it('returns 0 when any input is missing or degenerate', () => {
+      const candidate = [1, 0]
+      expect(
+        computeVisualSimilarityBoost({
+          tasteVector: null,
+          tasteSignalCount: FULL,
+          candidateEmbedding: candidate,
+        }),
+      ).toBe(0)
+      expect(
+        computeVisualSimilarityBoost({
+          tasteVector: [1, 0],
+          tasteSignalCount: FULL,
+          candidateEmbedding: null,
+        }),
+      ).toBe(0)
+      expect(
+        computeVisualSimilarityBoost({
+          tasteVector: [1, 0],
+          tasteSignalCount: 0,
+          candidateEmbedding: candidate,
+        }),
+      ).toBe(0)
+      expect(
+        computeVisualSimilarityBoost({
+          tasteVector: [],
+          tasteSignalCount: FULL,
+          candidateEmbedding: candidate,
+        }),
+      ).toBe(0)
+    })
+  })
+
+  describe('computeForYouScore visual boost', () => {
+    it('lifts a visually-similar candidate above a dissimilar one', () => {
+      const context = {
+        affinity: affinity({
+          tasteVector: [1, 0, 0],
+          tasteSignalCount: FOR_YOU_RANK_WEIGHTS.visualConfidenceFullSignals,
+        }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        candidateEmbeddings: new Map<string, readonly number[]>([
+          ['match', [1, 0, 0]],
+          ['miss', [0, 1, 0]],
+        ]),
+      }
+
+      const match = computeForYouScore(row({ id: 'match' }), context)
+      const miss = computeForYouScore(row({ id: 'miss' }), context)
+
+      expect(match - miss).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax, 5)
+    })
+
+    it('adds no visual boost when the candidate has no embedding on the page', () => {
+      const context = {
+        affinity: affinity({
+          tasteVector: [1, 0, 0],
+          tasteSignalCount: FOR_YOU_RANK_WEIGHTS.visualConfidenceFullSignals,
+        }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        candidateEmbeddings: new Map<string, readonly number[]>(),
+      }
+      const withoutEmbedding = computeForYouScore(row({ id: 'x' }), context)
+      const noVisualContext = {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+      const baseline = computeForYouScore(row({ id: 'x' }), noVisualContext)
+
+      expect(withoutEmbedding).toBeCloseTo(baseline, 5)
+    })
+
+    it('is null-safe when the context omits candidateEmbeddings entirely', () => {
+      const score = computeForYouScore(row({ id: 'x' }), {
+        affinity: affinity({ tasteVector: [1, 0], tasteSignalCount: 20 }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(Number.isFinite(score)).toBe(true)
     })
   })
 
