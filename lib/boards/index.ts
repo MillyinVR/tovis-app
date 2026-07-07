@@ -1,5 +1,6 @@
 // lib/boards/index.ts
 import {
+  BoardType,
   BoardVisibility,
   Prisma,
   PrismaClient,
@@ -23,6 +24,10 @@ import type {
 import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 import { resolveAvailableBoardSlug } from '@/lib/boards/slug'
+import {
+  boardTypeWantsEventDate,
+  normalizeBoardAnswers,
+} from '@/lib/boards/context'
 
 type BoardsDb = PrismaClient | Prisma.TransactionClient
 
@@ -32,6 +37,9 @@ const boardOwnerSelect = Prisma.validator<Prisma.BoardSelect>()({
   name: true,
   slug: true,
   visibility: true,
+  type: true,
+  eventDate: true,
+  answers: true,
   createdAt: true,
   updatedAt: true,
 })
@@ -242,11 +250,19 @@ export async function createBoard(
     clientId: string
     name: string
     visibility?: BoardVisibility
+    type?: BoardType
+    /** Calendar event date (UTC-midnight `@db.Date` value) — bridal/prom only. */
+    eventDate?: Date | null
+    /** Raw creation-question answers; validated against the type's question set. */
+    answers?: unknown
   },
 ): Promise<BoardOwnerRow> {
   const clientId = normalizeRequiredId('clientId', args.clientId)
   const name = normalizeBoardName(args.name)
   const visibility = args.visibility ?? BoardVisibility.PRIVATE
+  const type = args.type ?? BoardType.GENERAL
+  const eventDate = boardTypeWantsEventDate(type) ? args.eventDate ?? null : null
+  const answers = normalizeBoardAnswers(type, args.answers)
   const slug = await resolveAvailableBoardSlug(db, { clientId, name })
 
   try {
@@ -256,6 +272,9 @@ export async function createBoard(
         name,
         slug,
         visibility,
+        type,
+        eventDate,
+        ...(answers ? { answers } : {}),
       },
       select: boardOwnerSelect,
     })
@@ -302,6 +321,11 @@ export async function updateBoard(
     clientId: string
     name?: string
     visibility?: BoardVisibility
+    type?: BoardType
+    /** Calendar event date (UTC-midnight `@db.Date` value); null clears it. */
+    eventDate?: Date | null
+    /** Raw answers, re-validated against the board's (possibly new) type. */
+    answers?: unknown
   },
 ): Promise<BoardOwnerRow> {
   const boardId = normalizeRequiredId('boardId', args.boardId)
@@ -325,6 +349,29 @@ export async function updateBoard(
 
   if (args.visibility !== undefined) {
     data.visibility = args.visibility
+  }
+
+  // Context follows the type: re-purposing a board re-validates answers
+  // against the NEW type's question set (stale answers never survive) and
+  // drops the event date when the new type has no event semantics.
+  const effectiveType = args.type ?? current.type
+
+  if (args.type !== undefined && args.type !== current.type) {
+    data.type = args.type
+    const answers = normalizeBoardAnswers(args.type, args.answers)
+    data.answers = answers ?? Prisma.DbNull
+    if (!boardTypeWantsEventDate(args.type)) {
+      data.eventDate = null
+    }
+  } else if (args.answers !== undefined) {
+    const answers = normalizeBoardAnswers(effectiveType, args.answers)
+    data.answers = answers ?? Prisma.DbNull
+  }
+
+  if (args.eventDate !== undefined) {
+    data.eventDate = boardTypeWantsEventDate(effectiveType)
+      ? args.eventDate
+      : null
   }
 
   if (Object.keys(data).length === 0) {

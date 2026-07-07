@@ -14,6 +14,7 @@ import {
   getBoardSummaries,
   parseBoardVisibility,
 } from '@/lib/boards'
+import { parseBoardContextInput } from '@/lib/boards/context'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import type {
   LooksBoardDetailResponseDto,
@@ -72,10 +73,18 @@ export async function POST(req: Request) {
       })
     }
 
+    const context = parseBoardContextInput(body)
+    if (!context.ok) {
+      return jsonFail(400, context.error.message, {
+        code: context.error.code,
+      })
+    }
+
     const created = await createBoard(prisma, {
       clientId: auth.clientId,
       name,
       ...(visibility ? { visibility } : {}),
+      ...context.value,
     })
 
     const board = await getBoardDetail(prisma, {

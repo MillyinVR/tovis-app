@@ -7,7 +7,10 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { getBoardDetail, getBoardErrorMeta } from '@/lib/boards'
 import type { LooksBoardDetailDto, LooksBoardDetailItemDto } from '@/lib/looks/types'
+import { BOARD_TYPE_LABELS } from '@/lib/boards/context'
+import { BoardType } from '@prisma/client'
 import BoardShareControls from './BoardShareControls'
+import BoardEventCountdown from './BoardEventCountdown'
 
 export const dynamic = 'force-dynamic'
 
@@ -135,6 +138,12 @@ export default async function ClientBoardDetailPage(props: {
               <span>{countLabel(board.itemCount, 'saved look', 'saved looks')}</span>
               <span>·</span>
               <span className="capitalize">{visibilityLabel(board)}</span>
+              {board.type !== BoardType.GENERAL ? (
+                <>
+                  <span>·</span>
+                  <span>{BOARD_TYPE_LABELS[board.type]}</span>
+                </>
+              ) : null}
             </div>
           </div>
 
@@ -152,6 +161,11 @@ export default async function ClientBoardDetailPage(props: {
             slug={board.slug}
             initialVisibility={board.visibility}
             handle={owner?.handle ?? null}
+          />
+          <BoardEventCountdown
+            boardId={board.id}
+            type={board.type}
+            initialEventDate={board.eventDate}
           />
         </div>
       </header>

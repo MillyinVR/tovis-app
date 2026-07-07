@@ -1,6 +1,6 @@
 // app/api/v1/boards/[id]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BoardVisibility, Role } from '@prisma/client'
+import { BoardType, BoardVisibility, Role } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn((data: unknown, status = 200) => {
@@ -376,6 +376,93 @@ describe('app/api/v1/boards/[id]/route.ts', () => {
         name: 'Shared inspo',
         visibility: BoardVisibility.SHARED,
       })
+    })
+
+    it('accepts a context-only PATCH and passes the parsed event date through', async () => {
+      const detail = makeBoardDetail()
+      mocks.getBoardDetail.mockResolvedValueOnce(detail)
+
+      const res = await PATCH(
+        new Request('http://localhost/api/v1/boards/board_1', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            eventDate: '2026-09-14',
+          }),
+        }),
+        makeCtx('board_1'),
+      )
+
+      expect(res.status).toBe(200)
+      expect(mocks.updateBoard).toHaveBeenCalledWith(mocks.prisma, {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        eventDate: new Date('2026-09-14T00:00:00.000Z'),
+      })
+    })
+
+    it('treats eventDate: null as an explicit clear', async () => {
+      mocks.getBoardDetail.mockResolvedValueOnce(makeBoardDetail())
+
+      const res = await PATCH(
+        new Request('http://localhost/api/v1/boards/board_1', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            eventDate: null,
+          }),
+        }),
+        makeCtx('board_1'),
+      )
+
+      expect(res.status).toBe(200)
+      expect(mocks.updateBoard).toHaveBeenCalledWith(mocks.prisma, {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        eventDate: null,
+      })
+    })
+
+    it('passes type and answers updates through to updateBoard', async () => {
+      mocks.getBoardDetail.mockResolvedValueOnce(makeBoardDetail())
+
+      const res = await PATCH(
+        new Request('http://localhost/api/v1/boards/board_1', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            type: 'nails',
+            answers: { occasion: 'vacation' },
+          }),
+        }),
+        makeCtx('board_1'),
+      )
+
+      expect(res.status).toBe(200)
+      expect(mocks.updateBoard).toHaveBeenCalledWith(mocks.prisma, {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        type: BoardType.NAILS,
+        answers: { occasion: 'vacation' },
+      })
+    })
+
+    it('returns 400 when the event date is malformed', async () => {
+      const res = await PATCH(
+        new Request('http://localhost/api/v1/boards/board_1', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            eventDate: 'someday',
+          }),
+        }),
+        makeCtx('board_1'),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Invalid event date — use YYYY-MM-DD.',
+        code: 'INVALID_BOARD_EVENT_DATE',
+      })
+      expect(mocks.updateBoard).not.toHaveBeenCalled()
     })
 
     it('returns 400 when the route param is blank', async () => {

@@ -36,6 +36,7 @@ export type LooksFeedServeEvent = {
   seenCount?: number | null
   followedCount?: number | null
   affinityCategoryCount?: number | null
+  occasionTagCount?: number | null
 }
 
 export function hashViewerId(userId: string | null | undefined): string | null {
@@ -60,6 +61,7 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     seenCount: input.seenCount ?? null,
     followedCount: input.followedCount ?? null,
     affinityCategoryCount: input.affinityCategoryCount ?? null,
+    occasionTagCount: input.occasionTagCount ?? null,
   })
 
   console.info(line)

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('server-only', () => ({}))
 
 import {
+  BoardType,
   BoardVisibility,
   LookPostStatus,
   LookPostVisibility,
@@ -219,6 +220,8 @@ function makeBoardPreviewRow(
     clientId: 'client_1',
     name: 'Hair ideas',
     visibility: BoardVisibility.PRIVATE,
+    type: BoardType.GENERAL,
+    eventDate: null,
     createdAt: new Date('2026-04-18T10:00:00.000Z'),
     updatedAt: new Date('2026-04-18T11:00:00.000Z'),
     _count: {
@@ -264,6 +267,9 @@ function makeBoardDetailRow(
     name: 'Hair ideas',
     slug: 'hair-ideas',
     visibility: BoardVisibility.PRIVATE,
+    type: BoardType.GENERAL,
+    eventDate: null,
+    answers: null,
     createdAt: new Date('2026-04-18T10:00:00.000Z'),
     updatedAt: new Date('2026-04-18T11:00:00.000Z'),
     _count: {
@@ -1358,6 +1364,8 @@ describe('lib/looks/mappers.ts', () => {
         clientId: 'client_1',
         name: 'Hair ideas',
         visibility: BoardVisibility.PRIVATE,
+        type: BoardType.GENERAL,
+        eventDate: null,
         createdAt: '2026-04-18T10:00:00.000Z',
         updatedAt: '2026-04-18T11:00:00.000Z',
         itemCount: 1,
@@ -1398,6 +1406,9 @@ describe('lib/looks/mappers.ts', () => {
         name: 'Hair ideas',
         slug: 'hair-ideas',
         visibility: BoardVisibility.PRIVATE,
+        type: BoardType.GENERAL,
+        eventDate: null,
+        answers: null,
         createdAt: '2026-04-18T10:00:00.000Z',
         updatedAt: '2026-04-18T11:00:00.000Z',
         itemCount: 2,
@@ -1442,6 +1453,20 @@ describe('lib/looks/mappers.ts', () => {
           },
         ],
       })
+    })
+
+    it('serializes the event date as YYYY-MM-DD and re-validates answers on read', async () => {
+      const row = makeBoardDetailRow({
+        type: BoardType.BRIDAL,
+        eventDate: new Date('2026-09-14T00:00:00.000Z'),
+        answers: { hair_length: 'long', stale_key: 'dropped' },
+      })
+
+      const result = await mapLooksBoardDetailToDto(row)
+
+      expect(result.type).toBe(BoardType.BRIDAL)
+      expect(result.eventDate).toBe('2026-09-14')
+      expect(result.answers).toEqual({ hair_length: 'long' })
     })
   })
 

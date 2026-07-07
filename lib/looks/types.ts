@@ -1,5 +1,6 @@
 // lib/looks/types.ts
 import type {
+  BoardType,
   BoardVisibility,
   LookPostStatus,
   LookPostVisibility,
@@ -339,6 +340,10 @@ export type LooksBoardPreviewDto = {
   clientId: string
   name: string
   visibility: BoardVisibility
+  /** What the board is for (creation-context, personalization spec §7). */
+  type: BoardType
+  /** Calendar date the board counts down to (`YYYY-MM-DD`), bridal/prom only. */
+  eventDate: string | null
   createdAt: string
   updatedAt: string
   itemCount: number
@@ -370,6 +375,16 @@ export type LooksBoardDetailDto = {
   /** URL-safe slug for the public /u/[handle]/boards/[slug] address. */
   slug: string
   visibility: BoardVisibility
+  /** What the board is for (creation-context, personalization spec §7). */
+  type: BoardType
+  /** Calendar date the board counts down to (`YYYY-MM-DD`), bridal/prom only. */
+  eventDate: string | null
+  /**
+   * Creation-question chip answers (question key → chosen option value),
+   * validated against the type's question set in lib/boards/context.ts.
+   * Owner-only — never exposed on the public board page.
+   */
+  answers: Record<string, string> | null
   createdAt: string
   updatedAt: string
   itemCount: number

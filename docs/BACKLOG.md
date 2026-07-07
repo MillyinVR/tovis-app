@@ -17,7 +17,7 @@
 Spec: `docs/launch-readiness/personalization-algorithm-spec-v2.md` (18-step build order).
 Foundation shipped (rate-based Bayesian rank scoring); remaining:
 - [x] Foundation MERGED (#509, 2026-07-07 — the squash included BOTH branch commits, i.e. impression-floor + cutover sweep `edc6cba8` too). Deployed to prod 2026-07-07 (`tovis-keryxnoqs`); prod `recompute:look-rank` sweep run: 1/1 published looks recomputed (2.98 → 8.49), re-run no-op. Branch `feat/algo-foundation-rate-scoring` fully merged → deletable.
-- [ ] `viewer_event_date` + board-creation signals (spec §7–8).
+- [~] `viewer_event_date` + board-creation signals (spec §7–8) — **PR #511** (2026-07-07): BoardType/eventDate/answers capture + For You occasion boost + countdown UI. After merge: deploy applies migration `20260708000000_add_board_context`. Deferred to later steps: §6.6 self-profile write-through, §8.1 countdown notifications + budget, §7.5 auto-archive, §4.4 board-feed scoring, iOS parity (tovis-ios/BACKLOG.md).
 - [ ] Cold-start fallback for looks with no impressions (§2.1).
 - [ ] Shared-schema pass: board metadata + user self-profile (§6.6) + affinity time-decay (§6.2).
 - [ ] Visual-embedding pgvector pipeline (§6.0).

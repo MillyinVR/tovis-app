@@ -238,6 +238,7 @@ export async function GET(req: Request) {
       seenCount: forYouMeta?.seenCount ?? null,
       followedCount: forYouMeta?.followedCount ?? null,
       affinityCategoryCount: forYouMeta?.affinityCategoryCount ?? null,
+      occasionTagCount: forYouMeta?.occasionTagCount ?? null,
     })
 
     const body: LooksFeedResponseDto & { ok: true } = {

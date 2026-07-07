@@ -14,6 +14,7 @@ import {
   updateBoard,
 } from '@/lib/boards'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { parseBoardContextInput } from '@/lib/boards/context'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import type {
   LooksBoardDeleteResponseDto,
@@ -80,8 +81,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
 
     const hasName = Object.prototype.hasOwnProperty.call(body, 'name')
     const hasVisibility = Object.prototype.hasOwnProperty.call(body, 'visibility')
+    const hasContext = ['type', 'eventDate', 'answers'].some((key) =>
+      Object.prototype.hasOwnProperty.call(body, key),
+    )
 
-    if (!hasName && !hasVisibility) {
+    if (!hasName && !hasVisibility && !hasContext) {
       return jsonFail(400, 'Nothing to update.', {
         code: 'NOTHING_TO_UPDATE',
       })
@@ -115,6 +119,13 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       nextVisibility = parsedVisibility
     }
 
+    const context = parseBoardContextInput(body)
+    if (!context.ok) {
+      return jsonFail(400, context.error.message, {
+        code: context.error.code,
+      })
+    }
+
     await updateBoard(prisma, {
       boardId,
       clientId: auth.clientId,
@@ -122,6 +133,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       ...(nextVisibility !== undefined
         ? { visibility: nextVisibility }
         : {}),
+      ...context.value,
     })
 
     const board = await getBoardDetail(prisma, {

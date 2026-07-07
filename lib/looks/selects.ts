@@ -264,6 +264,8 @@ export const looksBoardPreviewSelect =
     clientId: true,
     name: true,
     visibility: true,
+    type: true,
+    eventDate: true,
     createdAt: true,
     updatedAt: true,
 
@@ -310,6 +312,9 @@ export const looksBoardDetailSelect =
     name: true,
     slug: true,
     visibility: true,
+    type: true,
+    eventDate: true,
+    answers: true,
     createdAt: true,
     updatedAt: true,
 

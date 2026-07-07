@@ -2,9 +2,17 @@
 'use client'
 
 import Link from 'next/link'
+import { useState } from 'react'
 import { useFormStatus } from 'react-dom'
+import { BoardType } from '@prisma/client'
 
 import { cn } from '@/lib/utils'
+import {
+  BOARD_QUESTION_SETS,
+  BOARD_TYPE_LABELS,
+  BOARD_TYPE_VALUES,
+  boardTypeWantsEventDate,
+} from '@/lib/boards/context'
 
 type CreateBoardFormProps = {
   action: (formData: FormData) => void | Promise<void>
@@ -31,12 +39,73 @@ function SubmitButton() {
   )
 }
 
+const CHIP_BASE_CLASS = cn(
+  'inline-flex min-h-9 items-center rounded-full border px-3 py-1.5',
+  'text-[12px] font-bold transition',
+)
+
+function Chip({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
+      className={cn(
+        CHIP_BASE_CLASS,
+        selected
+          ? 'border-white/40 bg-bgPrimary text-textPrimary'
+          : 'border-white/10 bg-bgPrimary/60 text-textSecondary hover:border-white/20 hover:text-textPrimary',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function CreateBoardForm({
   action,
   errorMessage = null,
   cancelHref = '/client/me',
   className,
 }: CreateBoardFormProps) {
+  // Creation-context capture (personalization spec §7): a board type chip row,
+  // an event date for bridal/prom, and 2–3 chip questions per type. Everything
+  // is skippable, and chips toggle off on a second tap. Values ride the form
+  // as hidden inputs so the server action stays a plain-form submit.
+  const [boardType, setBoardType] = useState<BoardType>(BoardType.GENERAL)
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [eventDate, setEventDate] = useState('')
+
+  const questions = BOARD_QUESTION_SETS[boardType]
+  const wantsEventDate = boardTypeWantsEventDate(boardType)
+
+  function selectBoardType(next: BoardType) {
+    setBoardType(next)
+    // Answers and the date belong to the type that asked for them.
+    setAnswers({})
+    setEventDate('')
+  }
+
+  function toggleAnswer(key: string, value: string) {
+    setAnswers((current) => {
+      const next = { ...current }
+      if (next[key] === value) {
+        delete next[key]
+      } else {
+        next[key] = value
+      }
+      return next
+    })
+  }
+
   return (
     <section
       className={cn(
@@ -73,6 +142,83 @@ export default function CreateBoardForm({
             )}
           />
         </div>
+
+        <div>
+          <div className="mb-2 text-[12px] font-bold uppercase tracking-wide text-textSecondary">
+            What&apos;s this board for?
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {BOARD_TYPE_VALUES.map((type) => (
+              <Chip
+                key={type}
+                selected={boardType === type}
+                onClick={() => selectBoardType(type)}
+              >
+                {BOARD_TYPE_LABELS[type]}
+              </Chip>
+            ))}
+          </div>
+          <input type="hidden" name="type" value={boardType} />
+        </div>
+
+        {wantsEventDate ? (
+          <div>
+            <label
+              htmlFor="board-event-date"
+              className="mb-2 block text-[12px] font-bold uppercase tracking-wide text-textSecondary"
+            >
+              {boardType === BoardType.BRIDAL ? 'Wedding date' : 'Prom date'}
+              <span className="ml-2 font-normal normal-case tracking-normal text-textMuted">
+                optional
+              </span>
+            </label>
+            <input
+              id="board-event-date"
+              name="eventDate"
+              type="date"
+              value={eventDate}
+              onChange={(event) => setEventDate(event.target.value)}
+              className={cn(
+                'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-3',
+                'text-[14px] text-textPrimary outline-none transition',
+                'focus:border-white/20',
+              )}
+            />
+            <p className="mt-2 text-[12px] leading-5 text-textSecondary">
+              We&apos;ll count down with you and time suggestions around the big
+              day. You can change or clear it anytime.
+            </p>
+          </div>
+        ) : null}
+
+        {questions.map((question) => (
+          <div key={question.key}>
+            <div className="mb-2 text-[12px] font-bold uppercase tracking-wide text-textSecondary">
+              {question.label}
+              <span className="ml-2 font-normal normal-case tracking-normal text-textMuted">
+                optional
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {question.options.map((option) => (
+                <Chip
+                  key={option.value}
+                  selected={answers[question.key] === option.value}
+                  onClick={() => toggleAnswer(question.key, option.value)}
+                >
+                  {option.label}
+                </Chip>
+              ))}
+            </div>
+            {answers[question.key] ? (
+              <input
+                type="hidden"
+                name={`answer.${question.key}`}
+                value={answers[question.key]}
+              />
+            ) : null}
+          </div>
+        ))}
 
         <div>
           <label
