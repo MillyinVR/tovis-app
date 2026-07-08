@@ -1424,6 +1424,7 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
   professionalId: true,
   finishedAt: true,
   checkoutStatus: true,
+  paymentAuthorizedAt: true,
   paymentCollectedAt: true,
   aftercareSummary: {
     select: {
@@ -11925,16 +11926,23 @@ function assertCanCreateRebookFromSourceBooking(args: {
     })
   }
 
-  if (!isCheckoutCloseoutComplete(args.source.checkoutStatus)) {
-    throw bookingError('AFTERCARE_NOT_COMPLETED', {
-      message: 'Rebooking requires completed checkout.',
-      userMessage: 'This appointment is not ready to rebook yet.',
-    })
-  }
+  // Rebooking normally requires a fully-closed checkout (PAID/WAIVED + collected
+  // payment). The one exception is an off-platform payment awaiting the pro's
+  // confirmation of receipt: the client has attested payment
+  // (paymentAuthorizedAt stamped) and may rebook immediately while the current
+  // appointment's payment stays pending — an aftercare-sourced rebook then gets
+  // coupled to that confirmation downstream (PF2).
+  const checkoutClosed =
+    isCheckoutCloseoutComplete(args.source.checkoutStatus) &&
+    Boolean(args.source.paymentCollectedAt)
 
-  if (!args.source.paymentCollectedAt) {
+  const paymentAwaitingConfirmation =
+    args.source.checkoutStatus === BookingCheckoutStatus.AWAITING_CONFIRMATION &&
+    Boolean(args.source.paymentAuthorizedAt)
+
+  if (!checkoutClosed && !paymentAwaitingConfirmation) {
     throw bookingError('AFTERCARE_NOT_COMPLETED', {
-      message: 'Rebooking requires collected payment.',
+      message: 'Rebooking requires completed or pending-confirmation checkout.',
       userMessage: 'This appointment is not ready to rebook yet.',
     })
   }

@@ -382,6 +382,63 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
     })
   })
 
+  it('holds an unverifiable payment in AWAITING_CONFIRMATION without stamping collection or completing closeout', async () => {
+    const booking = makeClientCheckoutBooking({
+      status: BookingStatus.ACCEPTED,
+      sessionStep: SessionStep.AFTER_PHOTOS,
+      finishedAt: FINISHED_AT,
+      selectedPaymentMethod: null,
+    })
+
+    mocks.txBookingFindUnique
+      .mockResolvedValueOnce(booking)
+      .mockResolvedValueOnce(booking)
+
+    mocks.txBookingUpdate.mockResolvedValueOnce({
+      id: 'booking_1',
+      checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
+      selectedPaymentMethod: PaymentMethod.VENMO,
+      serviceSubtotalSnapshot: new Prisma.Decimal(100),
+      productSubtotalSnapshot: new Prisma.Decimal(20),
+      subtotalSnapshot: new Prisma.Decimal(120),
+      tipAmount: new Prisma.Decimal(0),
+      taxAmount: new Prisma.Decimal(0),
+      discountAmount: new Prisma.Decimal(0),
+      totalAmount: new Prisma.Decimal(120),
+      paymentAuthorizedAt: TEST_NOW,
+      paymentCollectedAt: null,
+    })
+
+    const result = await updateClientBookingCheckout({
+      bookingId: 'booking_1',
+      clientId: 'client_1',
+      selectedPaymentMethod: PaymentMethod.VENMO,
+      checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
+      markPaymentAuthorized: true,
+      markPaymentCollected: false,
+    })
+
+    // Only the checkout write happens — closeout keys on paymentCollectedAt, so a
+    // null collection short-circuits before any completion update / media count.
+    expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(1)
+    expect(mocks.txMediaAssetCount).not.toHaveBeenCalled()
+    expect(mocks.recordStatusTransition).not.toHaveBeenCalled()
+
+    const updateArgs = mocks.txBookingUpdate.mock.calls[0]?.[0]
+    expect(updateArgs.data.checkoutStatus).toBe(
+      BookingCheckoutStatus.AWAITING_CONFIRMATION,
+    )
+    expect(updateArgs.data.selectedPaymentMethod).toBe(PaymentMethod.VENMO)
+    expect(updateArgs.data.paymentAuthorizedAt).toEqual(TEST_NOW)
+    expect(updateArgs.data.paymentCollectedAt).toBeUndefined()
+
+    expect(result.booking.checkoutStatus).toBe(
+      BookingCheckoutStatus.AWAITING_CONFIRMATION,
+    )
+    expect(result.booking.paymentAuthorizedAt).toEqual(TEST_NOW)
+    expect(result.booking.paymentCollectedAt).toBeNull()
+  })
+
   it('does not complete booking closeout when after photos are missing', async () => {
     const booking = makeClientCheckoutBooking({
       status: BookingStatus.ACCEPTED,

@@ -85,6 +85,7 @@ function makeSourceBooking(
     status: BookingStatus
     finishedAt: Date | null
     checkoutStatus: BookingCheckoutStatus
+    paymentAuthorizedAt: Date | null
     paymentCollectedAt: Date | null
     aftercareSummary: { id: string; sentToClientAt: Date | null } | null
     locationId: string | null
@@ -100,6 +101,10 @@ function makeSourceBooking(
         ? (overrides.finishedAt ?? null)
         : FINISHED_AT,
     checkoutStatus: overrides?.checkoutStatus ?? BookingCheckoutStatus.PAID,
+    paymentAuthorizedAt:
+      overrides && 'paymentAuthorizedAt' in overrides
+        ? (overrides.paymentAuthorizedAt ?? null)
+        : PAYMENT_COLLECTED_AT,
     paymentCollectedAt:
       overrides && 'paymentCollectedAt' in overrides
         ? (overrides.paymentCollectedAt ?? null)
@@ -363,6 +368,55 @@ describe('lib/booking/writeBoundary createClientRebookedBookingFromAftercare lif
 
     mocks.txBookingFindFirst.mockResolvedValueOnce(
       makeSourceBooking({
+        paymentCollectedAt: null,
+      }),
+    )
+
+    await expect(
+      createClientRebookedBookingFromAftercare(makeArgs()),
+    ).rejects.toMatchObject({
+      code: 'AFTERCARE_NOT_COMPLETED',
+    })
+  })
+
+  it('allows rebook while the source payment awaits pro confirmation', async () => {
+    // Off-platform payment attested but not yet confirmed: checkout sits in
+    // AWAITING_CONFIRMATION with paymentAuthorizedAt stamped and no collection.
+    // The client can still rebook from aftercare while confirmation is pending.
+    mockAftercareLockSequence()
+
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(
+        makeSourceBooking({
+          checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
+          paymentAuthorizedAt: PAYMENT_COLLECTED_AT,
+          paymentCollectedAt: null,
+        }),
+      )
+      .mockResolvedValueOnce(makeExistingRebook())
+
+    mocks.txAftercareSummaryFindUnique.mockResolvedValueOnce(
+      makeExistingAftercare(),
+    )
+
+    const result = await createClientRebookedBookingFromAftercare(makeArgs())
+
+    // Gate passed (no AFTERCARE_NOT_COMPLETED throw) — the idempotent existing
+    // rebook comes back, proving the pending-confirmation source is rebookable.
+    expect(result.booking).toEqual({
+      id: 'booking_rebook_1',
+      status: BookingStatus.PENDING,
+      scheduledFor: REBOOKED_FOR,
+    })
+  })
+
+  it('rejects a pending-confirmation source that was never authorized', async () => {
+    mockAftercareLockSequence()
+
+    mocks.txBookingFindFirst.mockResolvedValueOnce(
+      makeSourceBooking({
+        checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
+        paymentAuthorizedAt: null,
         paymentCollectedAt: null,
       }),
     )
