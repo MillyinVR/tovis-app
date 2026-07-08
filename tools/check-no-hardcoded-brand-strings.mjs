@@ -34,6 +34,7 @@ const IGNORED_TOKEN_PATTERNS = [
   /(?:www\.)?tovis\.app/g, // platform domain in links (own WS-6 follow-up)
   /tovis-root/g, // reserved tenant slug
   /tovis-app/g, // repo/package name
+  /(?:[A-Za-z0-9]+\.)?app\.tovis\.Tovis/g, // iOS reverse-DNS bundle id (optionally TeamID-prefixed) — an identifier, not copy
   /TOVIS_[A-Z0-9_]+/g, // env var / constant identifiers
   /Tovis[A-Z][A-Za-z0-9]*/g, // PascalCase brand component identifiers (e.g. TovisEye from lib/brand) — not user-facing copy
 ]
