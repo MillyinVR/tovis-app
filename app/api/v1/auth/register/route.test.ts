@@ -326,6 +326,21 @@ function makeRequest(body: unknown) {
   })
 }
 
+// A native (iOS) request — routes to the App Attest gate instead of Turnstile.
+function makeNativeRequest(body: unknown) {
+  return new Request('http://localhost/api/v1/auth/register', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      host: 'localhost:3000',
+      'user-agent': 'vitest',
+      'x-forwarded-for': '198.51.100.10',
+      'x-tovis-native': 'ios',
+    },
+    body: JSON.stringify(body),
+  })
+}
+
 function expectedEmailLookupData(email: string) {
   const emailHashV2 = emailLookupHashV2(email)
 
@@ -800,6 +815,58 @@ describe('app/api/v1/auth/register/route', () => {
       meta: {
         captchaEvent: 'auth.turnstile.fail_open',
         reason: 'turnstile_network_or_timeout',
+        role: 'CLIENT',
+      },
+    })
+  })
+
+  it('native: rejects when there is no attestation and no dev fail-open', async () => {
+    delete process.env.AUTH_APP_ATTEST_FAIL_OPEN
+
+    const result = await POST(makeNativeRequest(makeClientSignupBody()))
+    const data = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(data).toMatchObject({ ok: false, code: 'APP_ATTEST_REQUIRED' })
+    // The web captcha path must not run for a native request.
+    expect(mockVerifyTurnstileOrFailOpen).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('native: fails open (dev) and uses the base bucket when the escape hatch is set', async () => {
+    process.env.AUTH_APP_ATTEST_FAIL_OPEN = '1'
+
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_native_failopen',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+    }
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    const result = await POST(makeNativeRequest(makeClientSignupBody()))
+    expect(result.status).toBe(201)
+
+    expect(mockVerifyTurnstileOrFailOpen).not.toHaveBeenCalled()
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth:register',
+      identity: { kind: 'ip', id: '198.51.100.10' },
+    })
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.register.native_attest_fail_open',
+      route: 'auth.register',
+      email: 'client@example.com',
+      phone: '+15551234567',
+      meta: {
+        reason: 'no_attestation_dev',
         role: 'CLIENT',
       },
     })
