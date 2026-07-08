@@ -28,17 +28,41 @@ describe('POST /api/v1/looks/views', () => {
     mocks.enqueueApplyLookViews.mockResolvedValue({ id: 'job_1' })
   })
 
-  it('enqueues a deduped batch and reports the accepted count', async () => {
+  it('enqueues a legacy id batch as FEED-sourced impressions and reports the accepted count', async () => {
     const res = await POST(
       makeRequest({ lookPostIds: ['look_1', ' look_1 ', 'look_2'] }),
     )
 
     expect(res.status).toBe(202)
     expect(mocks.enqueueApplyLookViews).toHaveBeenCalledTimes(1)
-    expect(mocks.enqueueApplyLookViews).toHaveBeenCalledWith(
-      expect.anything(),
-      { lookPostIds: ['look_1', 'look_2'] },
+    expect(mocks.enqueueApplyLookViews).toHaveBeenCalledWith(expect.anything(), {
+      impressions: [
+        { lookPostId: 'look_1', source: 'FEED' },
+        { lookPostId: 'look_2', source: 'FEED' },
+      ],
+    })
+
+    const body = (await res.json()) as { accepted: number }
+    expect(body.accepted).toBe(2)
+  })
+
+  it('enqueues a source-tagged batch, coercing an unknown source to FEED', async () => {
+    const res = await POST(
+      makeRequest({
+        impressions: [
+          { lookPostId: 'look_1', source: 'DETAIL' },
+          { lookPostId: 'look_2', source: 'bogus' },
+        ],
+      }),
     )
+
+    expect(res.status).toBe(202)
+    expect(mocks.enqueueApplyLookViews).toHaveBeenCalledWith(expect.anything(), {
+      impressions: [
+        { lookPostId: 'look_1', source: 'DETAIL' },
+        { lookPostId: 'look_2', source: 'FEED' },
+      ],
+    })
 
     const body = (await res.json()) as { accepted: number }
     expect(body.accepted).toBe(2)

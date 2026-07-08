@@ -212,13 +212,16 @@ export function enqueueApplyLookViews(
   db: LooksSocialJobDb,
   payload: ApplyLookViewsJobPayload,
 ): Promise<EnqueuedLooksSocialJob> | null {
-  const { lookPostIds } = buildApplyLookViewsUpdate(payload)
+  const { impressions, lookPostIds } = buildApplyLookViewsUpdate(payload)
   if (lookPostIds.length === 0) return null
 
   return enqueueLooksSocialJob(db, {
     type: LooksSocialJobType.APPLY_LOOK_VIEWS,
     dedupeKey: `look-views:${crypto.randomUUID()}`,
-    payload: { lookPostIds },
+    // Persist the normalized, source-tagged form (spec §5.6). The job reader
+    // still tolerates a legacy `lookPostIds` payload for anything queued before
+    // this deploy.
+    payload: { impressions },
   })
 }
 

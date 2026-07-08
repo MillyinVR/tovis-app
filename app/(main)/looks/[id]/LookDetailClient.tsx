@@ -79,7 +79,7 @@ export default function LookDetailClient({
   // Record the detail open as a sampled view (B2). The tracker dedupes per
   // session, so a back-and-forth to the same look only counts once.
   useEffect(() => {
-    trackLookView(initialItem.id)
+    trackLookView(initialItem.id, 'detail')
   }, [initialItem.id])
 
   const [commentsOpen, setCommentsOpen] = useState(false)

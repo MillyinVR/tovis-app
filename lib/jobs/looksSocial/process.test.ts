@@ -38,9 +38,16 @@ vi.mock('@/lib/jobs/looksSocial/indexLookPostDocument', () => ({
   processIndexLookPostDocument: mocks.processIndexLookPostDocument,
 }))
 
-vi.mock('@/lib/jobs/looksSocial/applyLookViews', () => ({
-  processApplyLookViews: mocks.processApplyLookViews,
-}))
+vi.mock('@/lib/jobs/looksSocial/applyLookViews', async (importOriginal) => {
+  // Keep the real pure helpers (coerceLookImpressionSource is used by the JSON
+  // payload reader); only the DB-touching processor is stubbed.
+  const actual =
+    await importOriginal<typeof import('./applyLookViews')>()
+  return {
+    ...actual,
+    processApplyLookViews: mocks.processApplyLookViews,
+  }
+})
 
 vi.mock('@/lib/looks/counters', () => ({
   recomputeLookPostCounters: mocks.recomputeLookPostCounters,
@@ -328,9 +335,11 @@ describe('lib/jobs/looksSocial/process', () => {
 
     const result = await processLooksSocialJobs({ now })
 
-    expect(mocks.processApplyLookViews).toHaveBeenCalledWith(mocks.prisma, {
-      lookPostIds: ['look_1', 'look_2'],
-    })
+    expect(mocks.processApplyLookViews).toHaveBeenCalledWith(
+      mocks.prisma,
+      { lookPostIds: ['look_1', 'look_2'] },
+      { now },
+    )
 
     // Impressions feed the rate, so each incremented look's rank is refreshed.
     expect(mocks.recomputeLookPostRankScore).toHaveBeenCalledTimes(2)
@@ -354,6 +363,45 @@ describe('lib/jobs/looksSocial/process', () => {
         result: 'COMPLETED',
       },
     ])
+  })
+
+  it('reads a source-tagged APPLY_LOOK_VIEWS payload into the view processor', async () => {
+    const now = new Date('2026-04-20T19:00:00.000Z')
+    const job = makeDueJob({
+      id: 'job_views_2',
+      type: LooksSocialJobType.APPLY_LOOK_VIEWS,
+      payload: {
+        impressions: [
+          { lookPostId: 'look_1', source: 'FEED' },
+          { lookPostId: 'look_1', source: 'DETAIL' },
+          // malformed entries are dropped at the JSON boundary
+          { lookPostId: 42, source: 'FEED' },
+        ],
+      },
+      dedupeKey: 'look-views:nonce-2',
+    })
+
+    mocks.prisma.looksSocialJob.findMany.mockResolvedValue([job])
+    mocks.prisma.looksSocialJob.updateMany.mockResolvedValue({ count: 1 })
+    mocks.processApplyLookViews.mockResolvedValue({
+      appliedCount: 1,
+      lookPostIds: ['look_1'],
+    })
+    mocks.recomputeLookPostRankScore.mockResolvedValue(0)
+    mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: job.id })
+
+    await processLooksSocialJobs({ now })
+
+    expect(mocks.processApplyLookViews).toHaveBeenCalledWith(
+      mocks.prisma,
+      {
+        impressions: [
+          { lookPostId: 'look_1', source: 'FEED' },
+          { lookPostId: 'look_1', source: 'DETAIL' },
+        ],
+      },
+      { now },
+    )
   })
 
   it('requeues force-enqueued MODERATION_SCAN_LOOK_POST jobs when attempts remain, proving the worker still treats them as deferred', async () => {

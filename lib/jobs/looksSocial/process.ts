@@ -7,9 +7,14 @@ import {
 
 import {
   makeEmptyLooksSocialJobPerTypeCounts,
+  type ApplyLookViewsJobPayload,
   type LooksSocialJobPerTypeCounts,
+  type LookViewImpression,
 } from '@/lib/jobs/looksSocial/contracts'
-import { processApplyLookViews } from '@/lib/jobs/looksSocial/applyLookViews'
+import {
+  coerceLookImpressionSource,
+  processApplyLookViews,
+} from '@/lib/jobs/looksSocial/applyLookViews'
 import { processEmbedLookPostImage } from '@/lib/jobs/looksSocial/embedLookPostImage'
 import { processFanOutNewLookNotifications } from '@/lib/jobs/looksSocial/fanOutNewLook'
 import { processIndexLookPostDocument } from '@/lib/jobs/looksSocial/indexLookPostDocument'
@@ -126,17 +131,45 @@ function readRequiredString(
   return trimmed
 }
 
-function readStringArray(payload: Prisma.JsonValue, field: string): string[] {
-  if (!isJsonObject(payload)) {
-    throw new Error('Job payload must be an object.')
+/**
+ * JSON boundary: turn a persisted APPLY_LOOK_VIEWS payload into the typed shape
+ * the pure builder normalizes. Reads the source-tagged `impressions` list and
+ * the legacy `lookPostIds` list; the builder folds legacy ids into FEED, dedupes
+ * and caps. Malformed entries are dropped rather than thrown — a best-effort
+ * view flush must never fail the whole job batch.
+ */
+function readApplyLookViewsPayload(
+  payload: Prisma.JsonValue,
+): ApplyLookViewsJobPayload {
+  if (!isJsonObject(payload)) return {}
+
+  const result: ApplyLookViewsJobPayload = {}
+
+  const rawImpressions = payload.impressions
+  if (Array.isArray(rawImpressions)) {
+    const impressions: LookViewImpression[] = []
+    for (const entry of rawImpressions) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+      const lookPostId = (entry as { lookPostId?: unknown }).lookPostId
+      if (typeof lookPostId !== 'string') continue
+      impressions.push({
+        lookPostId,
+        source: coerceLookImpressionSource(
+          (entry as { source?: unknown }).source,
+        ),
+      })
+    }
+    result.impressions = impressions
   }
 
-  const value = payload[field]
-  if (!Array.isArray(value)) {
-    throw new Error(`Job payload field ${field} must be an array.`)
+  const rawIds = payload.lookPostIds
+  if (Array.isArray(rawIds)) {
+    result.lookPostIds = rawIds.filter(
+      (entry): entry is string => typeof entry === 'string',
+    )
   }
 
-  return value.filter((entry): entry is string => typeof entry === 'string')
+  return result
 }
 
 async function runLooksSocialJob(
@@ -187,9 +220,11 @@ async function runLooksSocialJob(
       return
 
     case LooksSocialJobType.APPLY_LOOK_VIEWS: {
-      const { lookPostIds } = await processApplyLookViews(prisma, {
-        lookPostIds: readStringArray(job.payload, 'lookPostIds'),
-      })
+      const { lookPostIds } = await processApplyLookViews(
+        prisma,
+        readApplyLookViewsPayload(job.payload),
+        { now },
+      )
 
       // Impressions are the rate denominator (spec §4.1): a fresh batch of
       // views changes each look's rate, so refresh their persisted rank. Only

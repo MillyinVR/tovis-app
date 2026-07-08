@@ -432,7 +432,7 @@ export default function LooksFeed() {
   // active-slide change is cheap. Piggybacks the IntersectionObserver signal
   // above; independent of the pagination `seen` list (which B1 consumes).
   useEffect(() => {
-    trackLookView(items[activeIndex]?.id)
+    trackLookView(items[activeIndex]?.id, 'feed')
   }, [activeIndex, items])
 
   // Prefetch the next page as the active slide nears the end of the loaded set.
