@@ -20,6 +20,7 @@ import {
 
 import { zClass } from '@/lib/zIndex'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
+import { clientSignOut } from '@/lib/auth/clientSignOut'
 import SwitchAccountSheet from '@/app/_components/AdminSessionFooter/SwitchAccountSheet'
 
 type Props = {
@@ -91,10 +92,6 @@ function useOnClickOutside<T extends HTMLElement>(
       document.removeEventListener('touchstart', onTouchStart, touchOpts)
     }
   }, [ref])
-}
-
-async function logout(): Promise<void> {
-  await fetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => null)
 }
 
 const ROW_BASE =
@@ -212,7 +209,7 @@ export default function ProAccountMenu(props: Props) {
 
   async function handleLogout(): Promise<void> {
     setOpen(false)
-    await logout()
+    await clientSignOut()
     router.replace('/login?from=/pro')
     router.refresh()
   }

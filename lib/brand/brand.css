@@ -999,6 +999,105 @@ button {
   font-size: 13px;
 }
 
+/* Account section — ports the iOS pro Profile tab's Workspace / Business /
+   Growth / Appearance groups + Sign out that sit below the portfolio tabs. */
+.brand-pro-profile-account {
+  display: grid;
+  gap: 20px;
+  padding: 24px 16px 16px;
+  border-top: 1px solid rgb(var(--surface-glass) / 0.08);
+}
+
+.brand-pro-profile-account-group {
+  display: grid;
+  gap: 8px;
+}
+
+.brand-pro-profile-account-label {
+  color: rgb(var(--text-muted));
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.brand-pro-profile-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-card);
+  background: rgb(var(--surface-glass) / 0.015);
+  color: rgb(var(--text-primary));
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.brand-pro-profile-nav-row:hover {
+  border-color: rgb(var(--surface-glass) / 0.24);
+  background: rgb(var(--surface-glass) / 0.05);
+}
+
+.brand-pro-profile-nav-row-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: rgb(var(--accent-primary-hover));
+}
+
+.brand-pro-profile-nav-row-body {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+
+.brand-pro-profile-nav-row-label {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.brand-pro-profile-nav-row-hint {
+  color: rgb(var(--text-muted));
+  font-size: 12px;
+}
+
+.brand-pro-profile-nav-row-chev {
+  flex-shrink: 0;
+  color: rgb(var(--text-muted));
+  font-size: 17px;
+}
+
+.brand-pro-profile-appearance {
+  display: flex;
+}
+
+.brand-pro-profile-signout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 15px;
+  border: 1px solid rgb(var(--tone-danger) / 0.4);
+  border-radius: 14px;
+  background: transparent;
+  color: rgb(var(--tone-danger));
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 650;
+  transition: background 0.15s ease;
+}
+
+.brand-pro-profile-signout:hover {
+  background: rgb(var(--tone-danger) / 0.06);
+}
+
 /* ──────────────────────────────────────────────────────────────────
    Shared sheets / dialogs
 ────────────────────────────────────────────────────────────────── */
