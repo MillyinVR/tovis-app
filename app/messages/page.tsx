@@ -1,14 +1,7 @@
 // app/messages/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import {
-  MessageThreadContextType,
-  Role,
-  WaitlistPreferenceType,
-  WaitlistStatus,
-  WaitlistTimeOfDay,
-  type Prisma,
-} from '@prisma/client'
+import { MessageThreadContextType, Role } from '@prisma/client'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { LiveRefresh } from '@/app/_components/live/LiveRefresh'
@@ -16,11 +9,16 @@ import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
 import { liveChannelForUser } from '@/lib/live/broadcast'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { formatInTimeZone, formatRelativeTimeCompact } from '@/lib/time'
+import { formatRelativeTimeCompact } from '@/lib/time'
 import { initialsForName } from '@/lib/initials'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
-import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
-import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
+import {
+  parseInboxFilter,
+  resolveInboxEyebrows,
+  whereForInboxFilter,
+  type InboxEyebrow,
+  type InboxFilter,
+} from '@/lib/messages/inboxContext'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,8 +27,6 @@ type SearchParamsShape = Record<string, string | string[] | undefined>
 type PageProps = {
   searchParams?: SearchParamsShape | Promise<SearchParamsShape>
 }
-
-type InboxFilter = 'all' | 'bookings' | 'waitlists' | 'pros'
 
 type InboxThread = {
   id: string
@@ -61,41 +57,6 @@ type InboxThread = {
   participants: {
     lastReadAt: Date | null
   }[]
-}
-
-type BookingLookup = {
-  id: string
-  scheduledFor: Date | null
-  locationTimeZone: string | null
-  service: {
-    name: string | null
-  } | null
-}
-
-type ServiceLookup = {
-  id: string
-  name: string | null
-}
-
-type OfferingLookup = {
-  id: string
-  title: string | null
-  service: {
-    name: string | null
-  } | null
-}
-
-type WaitlistLookup = {
-  id: string
-  status: WaitlistStatus
-  preferenceType: WaitlistPreferenceType
-  specificDate: Date | null
-  timeOfDay: WaitlistTimeOfDay | null
-  windowStartMin: number | null
-  windowEndMin: number | null
-  service: {
-    name: string | null
-  } | null
 }
 
 type ThreadPresentation = {
@@ -142,32 +103,8 @@ function buildStartRedirectQuery(sp: SearchParamsShape): string | null {
   return query.toString()
 }
 
-function readFilter(sp: SearchParamsShape): InboxFilter {
-  const raw = pickOne(sp.filter).trim().toLowerCase()
-
-  if (raw === 'bookings') return 'bookings'
-  if (raw === 'waitlists') return 'waitlists'
-  if (raw === 'pros') return 'pros'
-
-  return 'all'
-}
-
 function hrefForFilter(filter: InboxFilter): string {
   return filter === 'all' ? '/messages' : `/messages?filter=${filter}`
-}
-
-function isPresentString(value: string | null | undefined): value is string {
-  return typeof value === 'string' && value.trim().length > 0
-}
-
-function mapById<TItem extends { id: string }>(items: TItem[]): Map<string, TItem> {
-  const map = new Map<string, TItem>()
-
-  for (const item of items) {
-    map.set(item.id, item)
-  }
-
-  return map
 }
 
 function classNames(values: (string | false | null | undefined)[]): string {
@@ -204,20 +141,6 @@ function avatarGradientStyle(seed: string): { background: string } {
   }
 }
 
-function formatBookingTime(
-  date: Date | null | undefined,
-  timeZone: string | null | undefined,
-): string | null {
-  if (!date) return null
-
-  // Snapshot timezone first; formatInTimeZone sanitizes null/invalid to UTC.
-  return formatInTimeZone(date, timeZone ?? 'UTC', {
-    weekday: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
-
 function previewText(value: string | null): string {
   const trimmed = value?.trim() ?? ''
   return trimmed.length > 0 ? trimmed : 'Say hi…'
@@ -239,79 +162,12 @@ function isThreadUnread(thread: InboxThread): boolean {
   return lastReadAt.getTime() < lastMessageAt.getTime()
 }
 
-function buildEyebrow(params: {
-  thread: InboxThread
-  bookingMap: Map<string, BookingLookup>
-  serviceMap: Map<string, ServiceLookup>
-  offeringMap: Map<string, OfferingLookup>
-  waitlistMap: Map<string, WaitlistLookup>
-}): string {
-  const { thread, bookingMap, serviceMap, offeringMap, waitlistMap } = params
-
-  if (thread.contextType === MessageThreadContextType.BOOKING) {
-    const booking = thread.bookingId ? bookingMap.get(thread.bookingId) ?? null : null
-    const serviceName = booking?.service?.name ?? null
-    const when = formatBookingTime(booking?.scheduledFor, booking?.locationTimeZone)
-
-    return ['BOOKING CONFIRMED', serviceName, when]
-      .filter(isPresentString)
-      .join(' — ')
-  }
-
-  if (thread.contextType === MessageThreadContextType.WAITLIST) {
-    const waitlist = thread.waitlistEntryId
-      ? waitlistMap.get(thread.waitlistEntryId) ?? null
-      : null
-
-    if (!waitlist) {
-      return 'Waitlist'
-    }
-
-    const serviceName = waitlist.service?.name ?? null
-    const status = labelForWaitlistStatus(waitlist.status)
-    const preference = formatWaitlistPreferenceLabel(waitlist)
-
-    return ['Waitlist', status, serviceName, preference]
-      .filter(isPresentString)
-      .join(' — ')
-  }
-
-  if (thread.contextType === MessageThreadContextType.OFFERING) {
-    const offering = thread.offeringId ? offeringMap.get(thread.offeringId) ?? null : null
-    const name = offering?.title ?? offering?.service?.name ?? null
-
-    return ['Service', name].filter(isPresentString).join(' — ')
-  }
-
-  if (thread.contextType === MessageThreadContextType.SERVICE) {
-    const service = thread.serviceId ? serviceMap.get(thread.serviceId) ?? null : null
-
-    return ['Service', service?.name].filter(isPresentString).join(' — ')
-  }
-
-  if (thread.contextType === MessageThreadContextType.PRO_PROFILE) {
-    return 'Pro'
-  }
-
-  return 'Message'
-}
-
 function buildThreadPresentation(params: {
   thread: InboxThread
   viewerUserId: string
-  bookingMap: Map<string, BookingLookup>
-  serviceMap: Map<string, ServiceLookup>
-  offeringMap: Map<string, OfferingLookup>
-  waitlistMap: Map<string, WaitlistLookup>
+  eyebrow: InboxEyebrow
 }): ThreadPresentation {
-  const {
-    thread,
-    viewerUserId,
-    bookingMap,
-    serviceMap,
-    offeringMap,
-    waitlistMap,
-  } = params
+  const { thread, viewerUserId, eyebrow } = params
 
   // Counterparty = the participant the viewer is NOT. Derive it from the
   // viewer's user id rather than their acting role, so a dual-role user (a pro
@@ -328,59 +184,17 @@ function buildThreadPresentation(params: {
   })
 
   const lastActivityAt = thread.lastMessageAt ?? thread.updatedAt
-  const eyebrow = buildEyebrow({
-    thread,
-    bookingMap,
-    serviceMap,
-    offeringMap,
-    waitlistMap,
-  })
 
   return {
     title,
     avatarUrl,
     initials: initialsForName(title, '?'),
-    eyebrow,
+    eyebrow: eyebrow.eyebrow,
     preview: previewText(thread.lastMessagePreview),
     timeLabel: formatRelativeTimeCompact(lastActivityAt),
     isUnread: isThreadUnread(thread),
-    isAccent:
-      thread.contextType === MessageThreadContextType.BOOKING ||
-      thread.contextType === MessageThreadContextType.OFFERING ||
-      thread.contextType === MessageThreadContextType.WAITLIST,
+    isAccent: eyebrow.isAccentContext,
   }
-}
-
-function whereForInboxFilter(params: {
-  userId: string
-  filter: InboxFilter
-}): Prisma.MessageThreadWhereInput {
-  const { userId, filter } = params
-
-  const where: Prisma.MessageThreadWhereInput = {
-    participants: { some: { userId } },
-    lastMessageAt: { not: null },
-  }
-
-  if (filter === 'bookings') {
-    where.contextType = MessageThreadContextType.BOOKING
-  }
-
-  if (filter === 'waitlists') {
-    where.contextType = MessageThreadContextType.WAITLIST
-  }
-
-  if (filter === 'pros') {
-    where.contextType = {
-      in: [
-        MessageThreadContextType.PRO_PROFILE,
-        MessageThreadContextType.SERVICE,
-        MessageThreadContextType.OFFERING,
-      ],
-    }
-  }
-
-  return where
 }
 
 async function findInboxThreads(params: {
@@ -432,67 +246,6 @@ async function findInboxThreads(params: {
   return threads
 }
 
-async function findBookingLookups(bookingIds: string[]): Promise<BookingLookup[]> {
-  if (bookingIds.length === 0) return []
-
-  return await prisma.booking.findMany({
-    where: { id: { in: bookingIds } },
-    select: {
-      id: true,
-      scheduledFor: true,
-      locationTimeZone: true,
-      service: { select: { name: true } },
-    },
-  })
-}
-
-async function findServiceLookups(serviceIds: string[]): Promise<ServiceLookup[]> {
-  if (serviceIds.length === 0) return []
-
-  return await prisma.service.findMany({
-    where: { id: { in: serviceIds } },
-    select: {
-      id: true,
-      name: true,
-    },
-  })
-}
-
-async function findOfferingLookups(
-  offeringIds: string[],
-): Promise<OfferingLookup[]> {
-  if (offeringIds.length === 0) return []
-
-  return await prisma.professionalServiceOffering.findMany({
-    where: { id: { in: offeringIds } },
-    select: {
-      id: true,
-      title: true,
-      service: { select: { name: true } },
-    },
-  })
-}
-
-async function findWaitlistLookups(
-  waitlistEntryIds: string[],
-): Promise<WaitlistLookup[]> {
-  if (waitlistEntryIds.length === 0) return []
-
-  return await prisma.waitlistEntry.findMany({
-    where: { id: { in: waitlistEntryIds } },
-    select: {
-      id: true,
-      status: true,
-      preferenceType: true,
-      specificDate: true,
-      timeOfDay: true,
-      windowStartMin: true,
-      windowEndMin: true,
-      service: { select: { name: true } },
-    },
-  })
-}
-
 export default async function MessagesInboxPage(props: PageProps) {
   const user = await getCurrentUser().catch(() => null)
 
@@ -508,41 +261,14 @@ export default async function MessagesInboxPage(props: PageProps) {
     redirect(`/messages/start?${startQuery}`)
   }
 
-  const activeFilter = readFilter(sp)
+  const activeFilter = parseInboxFilter(pickOne(sp.filter))
 
   const threads = await findInboxThreads({
     userId: user.id,
     filter: activeFilter,
   })
 
-  const bookingIds = threads
-    .map((thread) => thread.bookingId)
-    .filter(isPresentString)
-
-  const serviceIds = threads
-    .map((thread) => thread.serviceId)
-    .filter(isPresentString)
-
-  const offeringIds = threads
-    .map((thread) => thread.offeringId)
-    .filter(isPresentString)
-
-  const waitlistEntryIds = threads
-    .map((thread) => thread.waitlistEntryId)
-    .filter(isPresentString)
-
-  const [bookingRows, serviceRows, offeringRows, waitlistRows] =
-    await Promise.all([
-      findBookingLookups(bookingIds),
-      findServiceLookups(serviceIds),
-      findOfferingLookups(offeringIds),
-      findWaitlistLookups(waitlistEntryIds),
-    ])
-
-  const bookingMap = mapById(bookingRows)
-  const serviceMap = mapById(serviceRows)
-  const offeringMap = mapById(offeringRows)
-  const waitlistMap = mapById(waitlistRows)
+  const eyebrowById = await resolveInboxEyebrows(threads)
 
   const viewerLabel = user.role === Role.PRO ? 'Pro' : 'Client'
 
@@ -617,10 +343,10 @@ export default async function MessagesInboxPage(props: PageProps) {
                 const item = buildThreadPresentation({
                   thread,
                   viewerUserId: user.id,
-                  bookingMap,
-                  serviceMap,
-                  offeringMap,
-                  waitlistMap,
+                  eyebrow: eyebrowById.get(thread.id) ?? {
+                    eyebrow: 'Message',
+                    isAccentContext: false,
+                  },
                 })
 
                 return (
