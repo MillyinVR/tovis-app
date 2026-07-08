@@ -7,6 +7,7 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import { useLiveChannels } from '@/app/_components/live/useLiveChannels'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
 import { THREAD_MESSAGE_PAGE_SIZE } from '@/lib/messages/paging'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { isRecord } from '@/lib/guards'
 
 type Attachment = {
@@ -29,7 +30,15 @@ type Msg = {
    */
   status?: 'sending' | 'failed'
   clientId?: string
+  /**
+   * On an optimistic message that carries image attachments, the media-private
+   * storage paths already uploaded for them — so a retry re-POSTs without having
+   * to re-upload the bytes. Server messages omit it.
+   */
+  retryAttachmentPaths?: string[]
 }
+
+const MAX_ATTACHMENT_BYTES = 30 * 1024 * 1024
 
 type ThreadClientProps = {
   threadId: string
@@ -294,6 +303,14 @@ export default function ThreadClient(props: ThreadClientProps) {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  // A single image staged in the composer, previewed via a local object URL
+  // until it's uploaded + sent. (One attachment per message for now.)
+  const [pendingImage, setPendingImage] = useState<{
+    file: File
+    previewUrl: string
+  } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
   // "Load earlier" cursor paging. `olderCursor` is the oldest loaded message's
   // id; the latest-poll never touches it (it only fetches the newest page).
   const [olderCursor, setOlderCursor] = useState<string | null>(initialNextCursor)
@@ -443,15 +460,27 @@ export default function ThreadClient(props: ThreadClientProps) {
   // Post one message body under a stable clientId. Shows the bubble immediately
   // (status 'sending'); on success swaps in the server message, on failure marks
   // it 'failed' so the user can retry. Returns nothing — state carries the result.
-  const postBody = useCallback(
-    async (bodyText: string, clientId: string) => {
+  // POST a message (text and/or already-uploaded attachment paths) under a
+  // stable clientId. Returns whether the send succeeded; state carries the
+  // result (swap the optimistic row for the server message, or mark it failed).
+  const postMessage = useCallback(
+    async (
+      bodyText: string,
+      attachmentPaths: string[],
+      clientId: string,
+    ): Promise<boolean> => {
       try {
         const res = await fetch(
           `/api/v1/messages/threads/${encodeURIComponent(threadId)}`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ body: bodyText }),
+            body: JSON.stringify({
+              body: bodyText,
+              ...(attachmentPaths.length
+                ? { attachments: attachmentPaths }
+                : {}),
+            }),
           },
         )
 
@@ -467,7 +496,7 @@ export default function ThreadClient(props: ThreadClientProps) {
                 : message,
             ),
           )
-          return
+          return false
         }
 
         setErr(null)
@@ -481,6 +510,7 @@ export default function ThreadClient(props: ThreadClientProps) {
           return [...withoutOptimistic, sentMessage]
         })
         void markRead()
+        return true
       } catch {
         setErr('Send failed.')
         setMessages((current) =>
@@ -490,13 +520,61 @@ export default function ThreadClient(props: ThreadClientProps) {
               : message,
           ),
         )
+        return false
       }
     },
     [markRead, threadId],
   )
 
+  // Presign → signed PUT the image bytes to media-private; returns the storage
+  // path to send with the message, or null on any failure.
+  const uploadAttachment = useCallback(
+    async (file: File): Promise<string | null> => {
+      const contentType = file.type || 'image/jpeg'
+      try {
+        const res = await fetch(
+          `/api/v1/messages/threads/${encodeURIComponent(threadId)}/uploads`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ contentType, size: file.size }),
+          },
+        )
+        const data = await readJsonResponse(res)
+        if (!res.ok || !isRecord(data)) return null
+
+        const bucket = data.bucket
+        const path = data.path
+        const token = data.token
+        if (
+          typeof bucket !== 'string' ||
+          typeof path !== 'string' ||
+          typeof token !== 'string'
+        ) {
+          return null
+        }
+
+        const controller = new AbortController()
+        const { error } = await uploadWithProgress({
+          bucket,
+          path,
+          token,
+          file,
+          contentType,
+          onProgress: () => {},
+          signal: controller.signal,
+        })
+        return error ? null : path
+      } catch {
+        return null
+      }
+    },
+    [threadId],
+  )
+
   const send = useCallback(async () => {
-    if (!trimmedText || sending) return
+    const image = pendingImage
+    if ((!trimmedText && !image) || sending) return
 
     const clientId =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -506,40 +584,107 @@ export default function ThreadClient(props: ThreadClientProps) {
     const optimistic: Msg = {
       id: clientId,
       clientId,
-      body,
+      body: body || null,
       createdAt: new Date().toISOString(),
       senderUserId: myUserId,
-      attachments: [],
+      attachments: image
+        ? [{ id: `${clientId}-att`, url: image.previewUrl, mediaType: 'IMAGE' }]
+        : [],
       status: 'sending',
     }
 
     setSending(true)
     setErr(null)
     setText('')
+    setPendingImage(null)
     setMessages((current) => [...current, optimistic])
     queueMicrotask(() => scrollToBottom('auto'))
 
     try {
-      await postBody(body, clientId)
+      let attachmentPaths: string[] = []
+      if (image) {
+        const path = await uploadAttachment(image.file)
+        if (!path) {
+          // Upload failed before the message was created — drop the optimistic
+          // row and restore the composer so the user can retry the whole send.
+          setMessages((current) =>
+            current.filter((m) => m.clientId !== clientId),
+          )
+          setText(body)
+          setPendingImage(image)
+          setErr('Could not upload image.')
+          return
+        }
+        attachmentPaths = [path]
+        // Stash the uploaded path so a POST failure retries without re-uploading.
+        setMessages((current) =>
+          current.map((m) =>
+            m.clientId === clientId
+              ? { ...m, retryAttachmentPaths: attachmentPaths }
+              : m,
+          ),
+        )
+      }
+
+      const ok = await postMessage(body, attachmentPaths, clientId)
+      if (ok && image) URL.revokeObjectURL(image.previewUrl)
     } finally {
       setSending(false)
     }
-  }, [myUserId, postBody, scrollToBottom, sending, trimmedText])
+  }, [
+    myUserId,
+    pendingImage,
+    postMessage,
+    scrollToBottom,
+    sending,
+    trimmedText,
+    uploadAttachment,
+  ])
 
   const retry = useCallback(
     async (message: Msg) => {
       const clientId = message.clientId
-      if (!clientId || !message.body) return
+      const paths = message.retryAttachmentPaths ?? []
+      if (!clientId) return
+      if (!message.body && paths.length === 0) return
 
       setMessages((current) =>
         current.map((m) =>
           m.clientId === clientId ? { ...m, status: 'sending' } : m,
         ),
       )
-      await postBody(message.body, clientId)
+      await postMessage(message.body ?? '', paths, clientId)
     },
-    [postBody],
+    [postMessage],
   )
+
+  // Stage a picked image into the composer (revoking any prior preview).
+  const onPickImage = useCallback(
+    (file: File | null) => {
+      if (!file) return
+      if (!file.type.startsWith('image/')) {
+        setErr('Only images can be attached.')
+        return
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setErr('Image too large (max 30MB).')
+        return
+      }
+      setErr(null)
+      setPendingImage((prev) => {
+        if (prev) URL.revokeObjectURL(prev.previewUrl)
+        return { file, previewUrl: URL.createObjectURL(file) }
+      })
+    },
+    [],
+  )
+
+  const clearPendingImage = useCallback(() => {
+    setPendingImage((prev) => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl)
+      return null
+    })
+  }, [])
 
   useEffect(() => {
     cancelledRef.current = false
@@ -735,7 +880,66 @@ export default function ThreadClient(props: ThreadClientProps) {
         </div>
 
         <div className="border-t border-textPrimary/10 p-3">
+          {pendingImage ? (
+            <div className="mb-2 flex items-center gap-2">
+              <div className="relative">
+                <RemoteImage
+                  src={pendingImage.previewUrl}
+                  alt="Attachment preview"
+                  width={64}
+                  height={64}
+                  className="h-16 w-16 rounded-[10px] border border-textPrimary/10 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={clearPendingImage}
+                  aria-label="Remove image"
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-bgPrimary text-[11px] font-bold leading-none text-textSecondary shadow ring-1 ring-textPrimary/10 hover:text-textPrimary"
+                >
+                  ×
+                </button>
+              </div>
+              <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-textMuted">
+                Image ready
+              </span>
+            </div>
+          ) : null}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => {
+              onPickImage(event.target.files?.[0] ?? null)
+              // Reset so re-picking the same file still fires onChange.
+              event.target.value = ''
+            }}
+          />
+
           <div className="flex items-end gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending}
+              aria-label="Attach image"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary text-textSecondary transition hover:text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
+
             <textarea
               value={text}
               rows={1}
@@ -753,7 +957,7 @@ export default function ThreadClient(props: ThreadClientProps) {
             <button
               type="button"
               onClick={() => void send()}
-              disabled={!trimmedText || sending}
+              disabled={(!trimmedText && !pendingImage) || sending}
               className="h-11 shrink-0 rounded-full bg-accentPrimary px-5 text-[13px] font-bold text-onAccent transition hover:bg-accentPrimaryHover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {sending ? 'Sending' : 'Send'}

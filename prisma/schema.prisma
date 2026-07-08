@@ -4627,9 +4627,18 @@ model Message {
 }
 
 model MessageAttachment {
-  id        String    @id @default(cuid())
+  id        String @id @default(cuid())
   messageId String
-  url       String
+
+  // Storage pointer for a private (media-private) attachment. The bytes are
+  // never world-readable; the thread read routes sign a short-lived URL from
+  // (storageBucket, storagePath) at fetch time. `url` is a legacy/optional
+  // fallback for any directly-renderable (public) URL — private attachments
+  // leave it null and rely on the pointer above.
+  url           String?
+  storageBucket String?
+  storagePath   String?
+
   mediaType MediaType @default(IMAGE)
   createdAt DateTime  @default(now())
 

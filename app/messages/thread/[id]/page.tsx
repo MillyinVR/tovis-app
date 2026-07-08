@@ -11,6 +11,10 @@ import { liveChannelForUser } from '@/lib/live/broadcast'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import { THREAD_MESSAGE_PAGE_SIZE, nextOlderCursor } from '@/lib/messages/paging'
+import {
+  MESSAGE_ATTACHMENT_BUCKET,
+  signMessageAttachmentUrls,
+} from '@/lib/messages/attachments'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, pickTimeZoneOrNull } from '@/lib/time'
@@ -260,6 +264,8 @@ export default async function MessageThreadPage(props: PageProps) {
           id: true,
           url: true,
           mediaType: true,
+          storageBucket: true,
+          storagePath: true,
         },
       },
     },
@@ -272,16 +278,44 @@ export default async function MessageThreadPage(props: PageProps) {
   )
   const initialHasMore = Boolean(initialNextCursor)
 
+  // Sign every private attachment across the page in one batch (same treatment
+  // as the GET route); drop any that can't be signed rather than render broken.
+  const signedAttachmentUrls = await signMessageAttachmentUrls(
+    messageRows
+      .flatMap((m) => m.attachments)
+      .filter(
+        (a) => a.storageBucket === MESSAGE_ATTACHMENT_BUCKET && a.storagePath,
+      )
+      .map((a) => a.storagePath as string),
+  )
+
+  function resolveAttachmentUrl(attachment: {
+    url: string | null
+    storageBucket: string | null
+    storagePath: string | null
+  }): string | null {
+    if (attachment.storageBucket === MESSAGE_ATTACHMENT_BUCKET && attachment.storagePath) {
+      return signedAttachmentUrls.get(attachment.storagePath) ?? null
+    }
+    return attachment.url
+  }
+
   const initialMessages: InitialMessage[] = messageRows.map((message) => ({
     id: message.id,
     body: message.body,
     createdAt: message.createdAt.toISOString(),
     senderUserId: message.senderUserId,
-    attachments: message.attachments.map((attachment) => ({
-      id: attachment.id,
-      url: attachment.url,
-      mediaType: toInitialMessageMediaType(attachment.mediaType),
-    })),
+    attachments: message.attachments.flatMap((attachment) => {
+      const url = resolveAttachmentUrl(attachment)
+      if (!url) return []
+      return [
+        {
+          id: attachment.id,
+          url,
+          mediaType: toInitialMessageMediaType(attachment.mediaType),
+        },
+      ]
+    }),
   }))
 
   // Counterparty = the participant the viewer is NOT, derived from the viewer's
