@@ -28,6 +28,12 @@ type Props = {
   confirmedBookingId: string | null
   /** True once the client has declined this proposed time. */
   declined: boolean
+  /**
+   * The confirmed next booking is an aftercare rebook coupled to a payment the
+   * pro hasn't confirmed yet, so it stays PENDING until they do (PF2). Surface
+   * that instead of a plain "confirmed" so the client understands the wait.
+   */
+  pendingPaymentConfirmation?: boolean
 }
 
 type Action = 'CONFIRM' | 'DECLINE'
@@ -62,6 +68,7 @@ export default function AftercareNextAppointmentCard({
   serviceId,
   confirmedBookingId,
   declined,
+  pendingPaymentConfirmation = false,
 }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState<Action | null>(null)
@@ -121,13 +128,27 @@ export default function AftercareNextAppointmentCard({
 
   if (confirmedBookingId) {
     return (
-      <div className="mt-3 rounded-card border border-toneSuccess/20 bg-toneSuccess/5 p-4">
+      <div
+        className={[
+          'mt-3 rounded-card border p-4',
+          pendingPaymentConfirmation
+            ? 'border-accentPrimary/30 bg-accentPrimary/10'
+            : 'border-toneSuccess/20 bg-toneSuccess/5',
+        ].join(' ')}
+      >
         <div className="text-sm font-black text-textPrimary">
-          {COPY.bookings.aftercare.nextAppointmentConfirmedLabel}
+          {pendingPaymentConfirmation
+            ? COPY.bookings.aftercare.nextAppointmentPendingPayment
+            : COPY.bookings.aftercare.nextAppointmentConfirmedLabel}
         </div>
         <div className="mt-1 text-sm text-textSecondary">
           {whenLabel} · {friendlyTimeZoneLabel(timeZone) ?? timeZone}
         </div>
+        {pendingPaymentConfirmation ? (
+          <div className="mt-2 text-[13px] text-textSecondary">
+            {COPY.bookings.aftercare.nextAppointmentPendingPaymentBody}
+          </div>
+        ) : null}
         <Link
           href={`/client/bookings/${encodeURIComponent(confirmedBookingId)}`}
           className="mt-3 inline-flex items-center gap-1 rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"

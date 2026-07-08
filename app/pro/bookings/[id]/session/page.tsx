@@ -20,8 +20,10 @@ import ConsultationForm, {
 import PendingActionButton from './PendingActionButton'
 import ElapsedTimer from './_components/ElapsedTimer'
 import MarkPaidButton from './MarkPaidButton'
+import ConfirmPaymentReceivedButton from '../ConfirmPaymentReceivedButton'
 
 import { getCurrentUser } from '@/lib/currentUser'
+import { COPY } from '@/lib/copy'
 import { prisma } from '@/lib/prisma'
 import { formatInTimeZone, resolveApptTimeZoneFromValues } from '@/lib/time'
 import {
@@ -1096,6 +1098,7 @@ function WrapUpView({
   hasFinalizedAftercare,
   aftercareLastEditedAt,
   hasPaymentCollected,
+  awaitingPaymentConfirmation,
   hasCheckoutClosed,
   hasConsultationApproved,
   markPaidMethods,
@@ -1111,6 +1114,7 @@ function WrapUpView({
   hasFinalizedAftercare: boolean
   aftercareLastEditedAt: Date | null
   hasPaymentCollected: boolean
+  awaitingPaymentConfirmation: boolean
   hasCheckoutClosed: boolean
   hasConsultationApproved: boolean
   markPaidMethods: ManualCollectablePaymentMethod[]
@@ -1212,9 +1216,18 @@ function WrapUpView({
                 Payment collected
               </div>
               <div className="brand-pro-session-check-sub">
-                {paymentItem?.subtitle ?? 'not collected'}
+                {awaitingPaymentConfirmation
+                  ? COPY.proBookingCheckout.awaitingConfirmationBody
+                  : (paymentItem?.subtitle ?? 'not collected')}
               </div>
-              {!hasPaymentCollected ? (
+              {awaitingPaymentConfirmation ? (
+                <div className="mt-2 flex flex-col gap-1">
+                  <ConfirmPaymentReceivedButton bookingId={bookingId} size="xs" />
+                  <p className="text-[11px] text-textSecondary">
+                    {COPY.proBookingCheckout.approvesNextNote}
+                  </p>
+                </div>
+              ) : !hasPaymentCollected ? (
                 <MarkPaidButton
                   bookingId={bookingId}
                   methods={markPaidMethods}
@@ -1659,6 +1672,10 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const hasAftercareDraft = Boolean(aftercare?.id)
   const hasFinalizedAftercare = Boolean(aftercare?.sentToClientAt)
   const hasPaymentCollected = Boolean(booking.paymentCollectedAt)
+  // Off-platform payment the client marked as sent (PF1): the pro confirms
+  // receipt to close it out, rather than "marking" it paid themselves.
+  const awaitingPaymentConfirmation =
+    booking.checkoutStatus === BookingCheckoutStatus.AWAITING_CONFIRMATION
   const hasCheckoutClosed =
     booking.checkoutStatus === BookingCheckoutStatus.PAID ||
     booking.checkoutStatus === BookingCheckoutStatus.WAIVED
@@ -1811,6 +1828,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
         hasFinalizedAftercare={hasFinalizedAftercare}
         aftercareLastEditedAt={aftercare?.lastEditedAt ?? null}
         hasPaymentCollected={hasPaymentCollected}
+        awaitingPaymentConfirmation={awaitingPaymentConfirmation}
         hasCheckoutClosed={hasCheckoutClosed}
         hasConsultationApproved={hasConsultationApproved}
         markPaidMethods={markPaidMethods}

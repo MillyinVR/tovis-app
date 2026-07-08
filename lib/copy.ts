@@ -80,6 +80,22 @@ export const COPY = {
       mediaConsentDescription:
         'Lets your pro share this session’s before & after on their portfolio. You can turn this off anytime.',
       mediaConsentError: 'Couldn’t update that. Please try again.',
+
+      // A coupled next booking (booked through aftercare) that can't be approved
+      // until the pro confirms they received payment for this appointment.
+      nextAppointmentPendingPayment: 'Pending confirmation',
+      nextAppointmentPendingPaymentBody:
+        'Your pro will confirm this booking once they’ve confirmed your payment.',
+    },
+
+    // Client checkout — the AWAITING_CONFIRMATION state after the client marks an
+    // off-platform payment (cash / Venmo / Zelle / Apple Cash / PayPal) as sent.
+    // Payment is authorized on the client's word; the booking closes out only once
+    // the pro confirms they received it.
+    checkout: {
+      awaitingConfirmationTitle: 'Payment sent — waiting on your pro',
+      awaitingConfirmationBody:
+        'Once your pro confirms they received payment, your booking will close out. There’s nothing else you need to do.',
     },
 
     status: {
@@ -196,5 +212,27 @@ export const COPY = {
 
     sendError: 'Couldn’t send that aftercare. Please try again.',
     nudgeError: 'Couldn’t send that nudge. Please try again.',
+  },
+
+  // Pro-side "Confirm payment received" action — closes out a booking whose
+  // checkout is AWAITING_CONFIRMATION (client paid off-platform). Confirming
+  // also auto-approves any aftercare next booking coupled to this payment.
+  proBookingCheckout: {
+    awaitingConfirmationTitle: 'Confirm payment received',
+    awaitingConfirmationBody:
+      'The client marked this payment as sent. Confirm once you’ve received it to close out the booking.',
+    confirmCta: 'Confirm payment received',
+    confirmCtaPending: 'Confirming…',
+    confirmError:
+      'Could not confirm payment. Check your connection and try again.',
+    approvesNextNote:
+      'This also approves the next booking the client requested.',
+
+    // Card shown on a coupled next booking's detail page (the destination of the
+    // PAYMENT_CONFIRMATION_REQUIRED notification): it stays pending until the pro
+    // confirms payment for the previous appointment.
+    coupledPendingTitle: 'Waiting on payment confirmation',
+    coupledPendingBody:
+      'This booking stays pending until you confirm you received payment for the previous appointment. Confirming that payment approves this booking automatically.',
   },
 } as const
