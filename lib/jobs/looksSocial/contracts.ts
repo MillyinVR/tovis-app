@@ -1,5 +1,5 @@
 // lib/jobs/looksSocial/contracts.ts
-import { LooksSocialJobType } from '@prisma/client'
+import { LookImpressionSource, LooksSocialJobType } from '@prisma/client'
 
 export const LOOKS_SOCIAL_JOB_TYPES = [
   LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
@@ -46,11 +46,22 @@ export type ModerationScanCommentJobPayload = {
   commentId: string
 }
 
+// A single sampled view impression: the look plus where it was surfaced
+// (spec §5.6). Source drives the per-source, per-day windowed aggregate that
+// backs the anti-gaming velocity check.
+export type LookViewImpression = {
+  lookPostId: string
+  source: LookImpressionSource
+}
+
 export type ApplyLookViewsJobPayload = {
-  // Look ids that received a view since the last flush. Each id is incremented
-  // by one (the client already dedupes per session), so a repeated id in the
-  // list still counts once — see buildApplyLookViewsUpdate.
-  lookPostIds: string[]
+  // Source-tagged impressions since the last flush (web feed→FEED, detail→
+  // DETAIL). Each (look, source) pair counts once per flush — the client already
+  // dedupes per session — so repeats collapse; see buildApplyLookViewsUpdate.
+  impressions?: LookViewImpression[]
+  // Legacy unsourced list (iOS + pre-§5.6 web, plus jobs already queued at
+  // deploy time). Read as FEED-sourced impressions for back-compat.
+  lookPostIds?: string[]
 }
 
 export type EmbedLookPostImageJobPayload = {

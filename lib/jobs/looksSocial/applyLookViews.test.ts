@@ -1,38 +1,103 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LookPostStatus, ModerationStatus } from '@prisma/client'
+import {
+  LookImpressionSource,
+  LookPostStatus,
+  ModerationStatus,
+} from '@prisma/client'
 
 import {
   buildApplyLookViewsUpdate,
+  coerceLookImpressionSource,
+  impressionWindowDate,
   MAX_APPLY_LOOK_VIEWS_BATCH,
   processApplyLookViews,
-  type LookPostViewIncrementDb,
+  type LookPostViewIngestDb,
 } from './applyLookViews'
+import type { LookViewImpression } from './contracts'
+
+describe('coerceLookImpressionSource', () => {
+  it('passes through valid enum values', () => {
+    expect(coerceLookImpressionSource('DETAIL')).toBe(
+      LookImpressionSource.DETAIL,
+    )
+    expect(coerceLookImpressionSource('BOARD')).toBe(LookImpressionSource.BOARD)
+  })
+
+  it('falls back to FEED for unknown, missing, or non-string sources', () => {
+    expect(coerceLookImpressionSource('feed')).toBe(LookImpressionSource.FEED)
+    expect(coerceLookImpressionSource(undefined)).toBe(LookImpressionSource.FEED)
+    expect(coerceLookImpressionSource(42)).toBe(LookImpressionSource.FEED)
+  })
+})
 
 describe('buildApplyLookViewsUpdate', () => {
-  it('dedupes and trims ids so each look counts once per batch', () => {
+  it('dedupes and trims legacy ids into FEED impressions', () => {
     const result = buildApplyLookViewsUpdate({
       lookPostIds: ['look_1', ' look_1 ', 'look_2', 'look_2', 'look_3'],
     })
 
     expect(result.lookPostIds).toEqual(['look_1', 'look_2', 'look_3'])
+    expect(result.impressions).toEqual([
+      { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+      { lookPostId: 'look_2', source: LookImpressionSource.FEED },
+      { lookPostId: 'look_3', source: LookImpressionSource.FEED },
+    ])
   })
 
-  it('drops blank and non-string entries', () => {
+  it('keeps the same look under distinct sources but collapses repeats', () => {
     const result = buildApplyLookViewsUpdate({
-      // Simulate a loosely-parsed payload with junk entries.
+      impressions: [
+        { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+        { lookPostId: 'look_1', source: LookImpressionSource.DETAIL },
+        // duplicate (look_1, FEED) — collapses
+        { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+        { lookPostId: 'look_2', source: LookImpressionSource.DETAIL },
+      ],
+    })
+
+    // Distinct-look denominator counts look_1 once.
+    expect(result.lookPostIds).toEqual(['look_1', 'look_2'])
+    expect(result.impressions).toEqual([
+      { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+      { lookPostId: 'look_1', source: LookImpressionSource.DETAIL },
+      { lookPostId: 'look_2', source: LookImpressionSource.DETAIL },
+    ])
+  })
+
+  it('merges a legacy FEED id into an explicit FEED impression for the same look', () => {
+    const result = buildApplyLookViewsUpdate({
+      impressions: [{ lookPostId: 'look_1', source: LookImpressionSource.FEED }],
+      // The legacy FEED id for the same look collapses into the pair above.
+      lookPostIds: ['look_1'],
+    })
+
+    expect(result.impressions).toEqual([
+      { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+    ])
+    expect(result.lookPostIds).toEqual(['look_1'])
+  })
+
+  it('drops blank, non-string, and malformed entries', () => {
+    const result = buildApplyLookViewsUpdate({
+      impressions: [
+        { lookPostId: '', source: LookImpressionSource.FEED },
+        { lookPostId: '   ', source: LookImpressionSource.DETAIL },
+        // @ts-expect-error deliberately malformed runtime entry
+        { source: LookImpressionSource.FEED },
+      ],
       lookPostIds: ['look_1', '', '   ', 'look_2'],
     })
 
     expect(result.lookPostIds).toEqual(['look_1', 'look_2'])
   })
 
-  it('returns an empty list for an empty batch', () => {
-    expect(buildApplyLookViewsUpdate({ lookPostIds: [] }).lookPostIds).toEqual(
-      [],
-    )
+  it('returns empty work for an empty batch', () => {
+    const result = buildApplyLookViewsUpdate({})
+    expect(result.lookPostIds).toEqual([])
+    expect(result.impressions).toEqual([])
   })
 
-  it('caps the batch at the maximum size', () => {
+  it('caps distinct looks at the maximum size', () => {
     const ids = Array.from(
       { length: MAX_APPLY_LOOK_VIEWS_BATCH + 50 },
       (_v, i) => `look_${i}`,
@@ -42,6 +107,43 @@ describe('buildApplyLookViewsUpdate', () => {
 
     expect(result.lookPostIds).toHaveLength(MAX_APPLY_LOOK_VIEWS_BATCH)
   })
+
+  it('lets an already-admitted look keep a second source past the cap', () => {
+    // Admit the cap's worth of distinct looks, then re-offer the first one under
+    // a new source: the pair is admitted (no new distinct look), a brand-new
+    // look past the cap is not.
+    const impressions: LookViewImpression[] = Array.from(
+      { length: MAX_APPLY_LOOK_VIEWS_BATCH },
+      (_v, i) => ({
+        lookPostId: `look_${i}`,
+        source: LookImpressionSource.FEED,
+      }),
+    )
+    impressions.push({
+      lookPostId: 'look_0',
+      source: LookImpressionSource.DETAIL,
+    })
+    impressions.push({
+      lookPostId: 'look_overflow',
+      source: LookImpressionSource.FEED,
+    })
+
+    const result = buildApplyLookViewsUpdate({ impressions })
+
+    expect(result.lookPostIds).toHaveLength(MAX_APPLY_LOOK_VIEWS_BATCH)
+    expect(result.lookPostIds).not.toContain('look_overflow')
+    expect(result.impressions).toContainEqual({
+      lookPostId: 'look_0',
+      source: LookImpressionSource.DETAIL,
+    })
+  })
+})
+
+describe('impressionWindowDate', () => {
+  it('truncates to the UTC day (midnight)', () => {
+    const window = impressionWindowDate(new Date('2026-07-08T23:59:59.500Z'))
+    expect(window.toISOString()).toBe('2026-07-08T00:00:00.000Z')
+  })
 })
 
 describe('processApplyLookViews', () => {
@@ -49,20 +151,30 @@ describe('processApplyLookViews', () => {
     const updateManyAndReturn = vi
       .fn()
       .mockResolvedValue(eligibleIds.map((id) => ({ id })))
-    const db: LookPostViewIncrementDb = {
+    const upsert = vi
+      .fn()
+      .mockImplementation((args: { create: { lookPostId: string } }) =>
+        Promise.resolve({ lookPostId: args.create.lookPostId }),
+      )
+    const db: LookPostViewIngestDb = {
       lookPost: { updateManyAndReturn },
+      lookPostImpressionStat: { upsert },
     }
-    return { db, updateManyAndReturn }
+    return { db, updateManyAndReturn, upsert }
   }
+
+  const now = new Date('2026-07-08T12:00:00.000Z')
 
   it('increments viewCount for only the eligible looks and returns their ids', async () => {
     // 'look_2' is not published/approved, so the atomic update never touches it
     // and it never comes back in the returned rows.
     const { db, updateManyAndReturn } = makeDb(['look_1'])
 
-    const result = await processApplyLookViews(db, {
-      lookPostIds: ['look_1', 'look_1', 'look_2'],
-    })
+    const result = await processApplyLookViews(
+      db,
+      { lookPostIds: ['look_1', 'look_1', 'look_2'] },
+      { now },
+    )
 
     expect(updateManyAndReturn).toHaveBeenCalledTimes(1)
     expect(updateManyAndReturn).toHaveBeenCalledWith({
@@ -78,23 +190,76 @@ describe('processApplyLookViews', () => {
     expect(result.lookPostIds).toEqual(['look_1'])
   })
 
-  it('no-ops without touching the database when the batch is empty', async () => {
-    const { db, updateManyAndReturn } = makeDb([])
+  it('upserts a windowed per-source row for each eligible impression', async () => {
+    const { db, upsert } = makeDb(['look_1'])
 
-    const result = await processApplyLookViews(db, { lookPostIds: [] })
+    await processApplyLookViews(
+      db,
+      {
+        impressions: [
+          { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+          { lookPostId: 'look_1', source: LookImpressionSource.DETAIL },
+          // ineligible look — no impression row
+          { lookPostId: 'look_gone', source: LookImpressionSource.FEED },
+        ],
+      },
+      { now },
+    )
 
-    expect(updateManyAndReturn).not.toHaveBeenCalled()
+    expect(upsert).toHaveBeenCalledTimes(2)
+    const windowDate = new Date('2026-07-08T00:00:00.000Z')
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        lookPostId_source_windowDate: {
+          lookPostId: 'look_1',
+          source: LookImpressionSource.FEED,
+          windowDate,
+        },
+      },
+      create: {
+        lookPostId: 'look_1',
+        source: LookImpressionSource.FEED,
+        windowDate,
+        count: 1,
+      },
+      update: { count: { increment: 1 } },
+      select: { lookPostId: true },
+    })
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          lookPostId: 'look_1',
+          source: LookImpressionSource.DETAIL,
+        }),
+      }),
+    )
+  })
+
+  it('records no impression rows when no look is eligible', async () => {
+    const { db, upsert } = makeDb([])
+
+    const result = await processApplyLookViews(
+      db,
+      {
+        impressions: [
+          { lookPostId: 'look_gone', source: LookImpressionSource.FEED },
+        ],
+      },
+      { now },
+    )
+
+    expect(upsert).not.toHaveBeenCalled()
     expect(result.appliedCount).toBe(0)
     expect(result.lookPostIds).toEqual([])
   })
 
-  it('applies nothing when no batch id is eligible', async () => {
-    const { db } = makeDb([])
+  it('no-ops without touching the database when the batch is empty', async () => {
+    const { db, updateManyAndReturn, upsert } = makeDb([])
 
-    const result = await processApplyLookViews(db, {
-      lookPostIds: ['look_gone'],
-    })
+    const result = await processApplyLookViews(db, {}, { now })
 
+    expect(updateManyAndReturn).not.toHaveBeenCalled()
+    expect(upsert).not.toHaveBeenCalled()
     expect(result.appliedCount).toBe(0)
     expect(result.lookPostIds).toEqual([])
   })

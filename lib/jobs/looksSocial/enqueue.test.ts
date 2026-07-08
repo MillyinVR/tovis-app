@@ -268,7 +268,7 @@ describe('lib/jobs/looksSocial/enqueue', () => {
       )
     })
 
-    it('enqueueApplyLookViews enqueues a nonce-keyed job with the deduped id list', async () => {
+    it('enqueueApplyLookViews enqueues a nonce-keyed job with normalized source-tagged impressions', async () => {
       const db = makeDb()
       const prismaDb = asLooksSocialJobDb(db)
 
@@ -281,6 +281,9 @@ describe('lib/jobs/looksSocial/enqueue', () => {
       )
 
       const result = await enqueueApplyLookViews(prismaDb, {
+        // Mix a source-tagged detail impression with legacy feed ids — the
+        // legacy ids fold into FEED and dedupe.
+        impressions: [{ lookPostId: 'look_1', source: 'DETAIL' }],
         lookPostIds: ['look_1', ' look_1 ', 'look_2'],
       })
 
@@ -290,7 +293,11 @@ describe('lib/jobs/looksSocial/enqueue', () => {
       expect(call.where.dedupeKey).toMatch(/^look-views:/)
       expect(call.create.type).toBe(LooksSocialJobType.APPLY_LOOK_VIEWS)
       expect(call.create.payload).toEqual({
-        lookPostIds: ['look_1', 'look_2'],
+        impressions: [
+          { lookPostId: 'look_1', source: 'DETAIL' },
+          { lookPostId: 'look_1', source: 'FEED' },
+          { lookPostId: 'look_2', source: 'FEED' },
+        ],
       })
       expect(result?.type).toBe(LooksSocialJobType.APPLY_LOOK_VIEWS)
     })

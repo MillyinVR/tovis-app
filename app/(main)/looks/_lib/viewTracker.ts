@@ -2,12 +2,24 @@
 //
 // Sampled, debounced client-side view tracking (social-first plan B2). Both the
 // feed (active-slide impressions) and the detail page (opens) call
-// trackLookView; this module dedupes per session, batches, and flushes the id
-// list to POST /api/v1/looks/views — which enqueues a job that denormalizes
-// viewCount. Best-effort throughout: a view must never surface an error or
-// block UX, and a dropped flush just means a slightly low (approximate) count.
+// trackLookView with where the view happened; this module dedupes per session,
+// batches, and flushes source-tagged impressions to POST /api/v1/looks/views —
+// which enqueues a job that denormalizes viewCount and records the §5.6
+// per-source, per-day windowed aggregate. Best-effort throughout: a view must
+// never surface an error or block UX, and a dropped flush just means a slightly
+// low (approximate) count.
 
 const ENDPOINT = '/api/v1/looks/views'
+
+// Where a view was surfaced. Maps to the server LookImpressionSource enum at
+// flush time (feed→FEED, detail→DETAIL); BOARD is reserved for the owner-only
+// board recommendation feed, which does not yet track views.
+export type LookViewSource = 'feed' | 'detail'
+
+const SOURCE_WIRE: Record<LookViewSource, 'FEED' | 'DETAIL'> = {
+  feed: 'FEED',
+  detail: 'DETAIL',
+}
 
 // Debounce window before a partial batch flushes.
 const FLUSH_INTERVAL_MS = 5_000
@@ -17,12 +29,20 @@ const MAX_PENDING = 24
 // pass this; clearing past it trades a little re-counting for bounded memory.
 const MAX_SEEN = 4_000
 
-// Look ids already counted this session (pending or sent) — the sampling that
-// keeps write volume down: each look pings at most once per session.
+type PendingImpression = { lookPostId: string; source: LookViewSource }
+
+// (source, look) pairs already counted this session (pending or sent) — the
+// sampling that keeps write volume down: each look pings at most once per
+// source per session. Keyed so the same look seen in the feed and on its detail
+// page counts as two distinct source impressions.
 const seen = new Set<string>()
-let pending: string[] = []
+let pending: PendingImpression[] = []
 let timer: ReturnType<typeof setTimeout> | null = null
 let unloadListenersBound = false
+
+function seenKey(source: LookViewSource, lookPostId: string): string {
+  return `${source}:${lookPostId}`
+}
 
 function clearTimer() {
   if (timer != null) {
@@ -38,7 +58,12 @@ function flush(useBeacon = false) {
   const batch = pending
   pending = []
 
-  const body = JSON.stringify({ lookPostIds: batch })
+  const body = JSON.stringify({
+    impressions: batch.map((entry) => ({
+      lookPostId: entry.lookPostId,
+      source: SOURCE_WIRE[entry.source],
+    })),
+  })
 
   try {
     if (
@@ -80,20 +105,26 @@ function bindUnloadListeners() {
 }
 
 /**
- * Record that the given look was viewed (a feed impression or a detail open).
- * No-ops on the server, for a blank id, or for a look already counted this
- * session.
+ * Record that the given look was viewed from `source` (a feed impression or a
+ * detail open). No-ops on the server, for a blank id, or for a look already
+ * counted from that source this session.
  */
-export function trackLookView(lookPostId: string | null | undefined): void {
+export function trackLookView(
+  lookPostId: string | null | undefined,
+  source: LookViewSource,
+): void {
   if (typeof window === 'undefined') return
   if (!lookPostId) return
 
   const id = lookPostId.trim()
-  if (!id || seen.has(id)) return
+  if (!id) return
+
+  const key = seenKey(source, id)
+  if (seen.has(key)) return
 
   if (seen.size >= MAX_SEEN) seen.clear()
-  seen.add(id)
-  pending.push(id)
+  seen.add(key)
+  pending.push({ lookPostId: id, source })
 
   bindUnloadListeners()
 

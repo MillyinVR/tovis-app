@@ -691,6 +691,17 @@ enum LookPostVisibility {
   UNLISTED
 }
 
+// Where a sampled view impression originated (spec §5.6 anti-gaming groundwork).
+// Logged per-source, per-day alongside the lifetime viewCount so a velocity-
+// anomaly check (step 14) can cheaply spot engagement that outruns its matching
+// impressions. BOARD is reserved for the owner-only board recommendation feed
+// (§4.4), which does not yet track views.
+enum LookImpressionSource {
+  FEED
+  DETAIL
+  BOARD
+}
+
 enum ModerationStatus {
   PENDING_REVIEW
   APPROVED
@@ -2418,7 +2429,7 @@ model ServiceCategory {
 // daily looks-category-rank-stats job and the recompute sweep script; consumed
 // via lib/looks/categoryRankStats.ts.
 model LookCategoryRankStat {
-  categoryId String @id
+  categoryId         String   @id
   // Sums over eligible (published + approved) looks in the category:
   // intent-weighted engagement (the rate numerator) and floored impressions
   // (the denominator — per-look GREATEST(viewCount, raw engagement), the same
@@ -3010,13 +3021,13 @@ model Booking {
   // account (its OWN charge, distinct from the final bill's stripe* fields and
   // the deposit charge). Inert unless ENABLE_NO_SHOW_PROTECTION is on. Set when a
   // pro marks the booking NO_SHOW or a client cancels inside the pro's window.
-  noShowMarkedAt              DateTime?
-  noShowFeeStatus            NoShowFeeStatus?
-  noShowFeeAmount            Decimal?         @db.Decimal(10, 2)
-  noShowFeeStripePaymentIntentId String?      @unique
-  noShowFeeChargedAt         DateTime?
+  noShowMarkedAt                 DateTime?
+  noShowFeeStatus                NoShowFeeStatus?
+  noShowFeeAmount                Decimal?         @db.Decimal(10, 2)
+  noShowFeeStripePaymentIntentId String?          @unique
+  noShowFeeChargedAt             DateTime?
   // Why the fee was assessed: a pro-marked no-show vs a late cancellation.
-  noShowFeeReason            NoShowFeeReason?
+  noShowFeeReason                NoShowFeeReason?
 
   // Optional client-supplied idempotency key for booking-creation dedupe.
   // Combined with clientId in @@unique below so identical retries return
@@ -4029,11 +4040,14 @@ model LookPost {
   // §6.0 visual embedding of the primary image (written by the
   // EMBED_LOOK_POST_IMAGE job; absent until the look is embedded).
   embedding        LookPostEmbedding?
-  inspiredBookings Booking[]        @relation("LookInspiredBookings")
+  // §5.6 per-source, per-day impression aggregates (written by the
+  // APPLY_LOOK_VIEWS job); the anti-gaming velocity-check denominator breakdown.
+  impressionStats  LookPostImpressionStat[]
+  inspiredBookings Booking[]                @relation("LookInspiredBookings")
   // User-facing hashtags / style tags parsed from the caption at publish
   // (social-first D1). Implicit M2M; banned tags are dropped at publish and
   // their tag pages 404. See lib/looks/tags.ts.
-  tags             LookTag[]        @relation("LookPostTags")
+  tags             LookTag[]                @relation("LookPostTags")
 
   @@index([professionalId, publishedAt])
   @@index([serviceId, publishedAt])
@@ -4149,11 +4163,11 @@ model LookCommentLike {
 }
 
 model LookPostReport {
-  id         String                 @id @default(cuid())
-  lookPostId String
-  userId     String
-  reason     ModerationReportReason @default(OTHER)
-  createdAt  DateTime               @default(now())
+  id               String                 @id @default(cuid())
+  lookPostId       String
+  userId           String
+  reason           ModerationReportReason @default(OTHER)
+  createdAt        DateTime               @default(now())
   // Report resolution (social-first AM1 moderation queue). resolvedAt != null =
   // a SUPER_ADMIN reviewed this report and dismissed it (kept the look live) or
   // acted on the look; unresolved reports drive the moderation queue's Reported
@@ -4173,11 +4187,11 @@ model LookPostReport {
 }
 
 model LookCommentReport {
-  id            String                 @id @default(cuid())
-  lookCommentId String
-  userId        String
-  reason        ModerationReportReason @default(OTHER)
-  createdAt     DateTime               @default(now())
+  id               String                 @id @default(cuid())
+  lookCommentId    String
+  userId           String
+  reason           ModerationReportReason @default(OTHER)
+  createdAt        DateTime               @default(now())
   // Report resolution (social-first AM1). Mirrors LookPostReport: unresolved
   // reports surface the comment in the moderation queue; dismiss/act sets these.
   resolvedAt       DateTime?
@@ -4297,9 +4311,9 @@ model ClientFollow {
 }
 
 model Board {
-  id       String @id @default(cuid())
-  clientId String
-  name     String
+  id             String          @id @default(cuid())
+  clientId       String
+  name           String
   // URL-safe handle for the public (SHARED) board page /u/[handle]/boards/[slug].
   // Derived from `name` on write; unique per client (social-first D3).
   slug           String
@@ -4379,6 +4393,31 @@ model LookPostEmbedding {
   lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
 
   @@index([model])
+}
+
+// Per-look, per-source, per-day impression aggregate (spec §5.6 anti-gaming
+// groundwork). LookPost.viewCount stays the lifetime rate denominator (§4.1);
+// this table breaks the same sampled impressions down by source and daily
+// window so a velocity-anomaly check (step 14) can spot engagement that spikes
+// far outside its matching impression baseline. Written only by the
+// APPLY_LOOK_VIEWS job — one upsert per (look, source) it touches, incrementing
+// `count`. `windowDate` is stamped server-side from job-run time (UTC day):
+// impressions are sampled/best-effort so the client is never trusted with the
+// window. This data is time-sensitive and cannot be backfilled — hence captured
+// now, ahead of its step-14 reader.
+model LookPostImpressionStat {
+  lookPostId String
+  source     LookImpressionSource
+  windowDate DateTime             @db.Date
+  count      Int                  @default(0)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
+
+  @@id([lookPostId, source, windowDate])
+  @@index([windowDate])
+  @@index([lookPostId, windowDate])
 }
 
 // Global taste vector per client (§6.0/§6.1 global_taste_embedding): the
