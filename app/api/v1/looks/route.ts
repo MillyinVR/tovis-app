@@ -241,6 +241,7 @@ export async function GET(req: Request) {
       occasionTagCount: forYouMeta?.occasionTagCount ?? null,
       tasteSignalCount: forYouMeta?.tasteSignalCount ?? null,
       candidateEmbeddingCount: forYouMeta?.candidateEmbeddingCount ?? null,
+      sessionVisualSignalCount: forYouMeta?.sessionVisualSignalCount ?? null,
     })
 
     const body: LooksFeedResponseDto & { ok: true } = {

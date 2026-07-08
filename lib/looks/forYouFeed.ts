@@ -41,6 +41,10 @@ import {
   fetchLookPostEmbeddings,
 } from '@/lib/personalization/lookEmbeddingStore'
 import {
+  blendSessionTasteVector,
+  type TasteVectorSignal,
+} from '@/lib/personalization/tasteVectorMath'
+import {
   rankForYouRows,
   type ForYouViewerAffinity,
 } from '@/lib/looks/forYouRanking'
@@ -66,6 +70,21 @@ export const AFFINITY_SAVE_WEIGHT = 2
 export const AFFINITY_HALF_LIFE_DAYS = 75
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+// §6.3 in-session responsiveness: a like/save created within this window of the
+// request is treated as belonging to "this sitting" and folds into an in-request
+// visual taste delta, so the feed leans toward what the viewer just engaged with
+// before the daily taste-vector cron catches up. Category/occasion affinity is
+// already live (loadForYouAffinity re-queries likes/saves every page); the
+// visual taste vector is the one signal that lagged a full day, so this overlay
+// targets it. Two hours comfortably spans a single scroll session without
+// treating yesterday's browsing as "now".
+const SESSION_RESPONSIVENESS_WINDOW_MS = 2 * 60 * 60 * 1000
+
+// Cost bound on the extra in-session embedding fetch: only the freshest few
+// signals of a sitting steer the visual delta, and nobody saves more than a
+// handful of Looks in one window that actually matters.
+const SESSION_SIGNAL_CAP = 20
 
 // Category weight contributed by each declared self-profile interest (spec
 // §6.6 / §2.1 onboarding chips) — an explicit, editable taste statement, so it
@@ -211,7 +230,10 @@ export function aggregateBoardContextSignals(
 }
 
 const categorySlugSelect = {
-  // When the signal happened — the input to the §6.2 time decay.
+  // Which look the signal is on — feeds the §6.3 in-session visual delta.
+  lookPostId: true,
+  // When the signal happened — the input to the §6.2 time decay and the §6.3
+  // in-session freshness window.
   createdAt: true,
   lookPost: {
     select: {
@@ -233,6 +255,61 @@ function slugFromCategoryRow(row: {
 }): string | null {
   const slug = row.lookPost.service?.category?.slug
   return typeof slug === 'string' && slug.trim().length > 0 ? slug.trim() : null
+}
+
+type AffinitySignalRow = {
+  lookPostId?: string | null
+  createdAt?: Date | null
+}
+
+/**
+ * Collect the freshest same-session (spec §6.3) like/save signals as
+ * (lookPostId, weight) pairs: a signal counts when its look id is present and it
+ * landed inside SESSION_RESPONSIVENESS_WINDOW_MS of `now`. Rows arrive newest
+ * first (the queries order by createdAt desc), so the window subset is a prefix;
+ * the combined set is capped for the downstream embedding fetch. Pure.
+ */
+function collectSessionSignals(
+  likes: readonly AffinitySignalRow[],
+  saves: readonly AffinitySignalRow[],
+  now: Date,
+): Array<{ lookPostId: string; weight: number }> {
+  const windowStart = now.getTime() - SESSION_RESPONSIVENESS_WINDOW_MS
+
+  const inWindow = (
+    rows: readonly AffinitySignalRow[],
+    baseWeight: number,
+  ): Array<{ lookPostId: string; createdAt: Date; weight: number }> => {
+    const collected: Array<{
+      lookPostId: string
+      createdAt: Date
+      weight: number
+    }> = []
+    for (const row of rows) {
+      const lookPostId =
+        typeof row.lookPostId === 'string' ? row.lookPostId.trim() : ''
+      if (!lookPostId) continue
+      const createdAt = row.createdAt
+      if (!(createdAt instanceof Date) || Number.isNaN(createdAt.getTime())) {
+        continue
+      }
+      if (createdAt.getTime() < windowStart) continue
+      collected.push({
+        lookPostId,
+        createdAt,
+        weight: baseWeight * computeAffinityDecayFactor(createdAt, now),
+      })
+    }
+    return collected
+  }
+
+  return [
+    ...inWindow(likes, AFFINITY_LIKE_WEIGHT),
+    ...inWindow(saves, AFFINITY_SAVE_WEIGHT),
+  ]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, SESSION_SIGNAL_CAP)
+    .map(({ lookPostId, weight }) => ({ lookPostId, weight }))
 }
 
 /**
@@ -332,14 +409,42 @@ export async function loadForYouAffinity(args: {
     entries.push({ slug, weight: INTEREST_CATEGORY_WEIGHT })
   }
 
+  // §6.3 in-session responsiveness: fold this sitting's freshest like/save
+  // embeddings into the (daily-cron) taste vector at request time. Client-gated
+  // so a viewer without a client profile stays on today's exact path (no taste
+  // vector, no extra query). Byte-identical to the pre-§6.3 feed whenever the
+  // sitting produced no fresh embedded signal.
+  const sessionSignalRefs =
+    clientId !== null ? collectSessionSignals(likes, boardItems, args.now) : []
+  const sessionEmbeddings =
+    sessionSignalRefs.length > 0
+      ? await fetchLookPostEmbeddings(
+          prisma,
+          sessionSignalRefs.map((ref) => ref.lookPostId),
+        )
+      : new Map<string, number[]>()
+  const sessionSignals: TasteVectorSignal[] = []
+  for (const ref of sessionSignalRefs) {
+    const embedding = sessionEmbeddings.get(ref.lookPostId)
+    if (!embedding) continue
+    sessionSignals.push({ embedding, weight: ref.weight })
+  }
+
+  const tasteBlend = blendSessionTasteVector({
+    storedVector: tasteVectorRow?.embedding ?? null,
+    storedSignalCount: tasteVectorRow?.signalCount ?? 0,
+    sessionSignals,
+  })
+
   return {
     followedProfessionalIds: new Set(
       follows.map((follow) => follow.professionalId),
     ),
     categoryWeights: aggregateCategoryWeights(entries),
     occasionTagWeights: boardSignals.occasionTagWeights,
-    tasteVector: tasteVectorRow?.embedding ?? null,
-    tasteSignalCount: tasteVectorRow?.signalCount ?? 0,
+    tasteVector: tasteBlend.vector,
+    tasteSignalCount: tasteBlend.signalCount,
+    sessionVisualSignalCount: sessionSignals.length,
   }
 }
 
@@ -359,6 +464,10 @@ export type ForYouFeedPage = {
     // looks on this page had an embedding to score against.
     tasteSignalCount: number
     candidateEmbeddingCount: number
+    // §6.3 in-session responsiveness: how many fresh same-session like/save
+    // embeddings folded into the taste vector for this request (0 = the vector
+    // is the stored one unchanged).
+    sessionVisualSignalCount: number
   }
 }
 
@@ -487,6 +596,7 @@ export async function buildForYouFeedPage(args: {
       occasionTagCount: affinity.occasionTagWeights.size,
       tasteSignalCount: affinity.tasteSignalCount ?? 0,
       candidateEmbeddingCount: candidateEmbeddings.size,
+      sessionVisualSignalCount: affinity.sessionVisualSignalCount ?? 0,
     },
   }
 }
