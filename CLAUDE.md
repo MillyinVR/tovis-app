@@ -41,6 +41,27 @@ npm run typecheck && npm run lint && npm run check:static-guards
 
 plus the relevant `vitest` suites for the code you touched.
 
+## Ship cadence & deploys (standing rule — Tori, 2026-07-08)
+
+Default workflow for every session, no need to ask each time:
+
+- **Commit + open a PR after each session's work.** Branch off `origin/main`,
+  one focused PR per repo touched (this repo + `~/Dev/tovis-ios` when the change
+  spans both). Commit **only your own files** — sibling sessions share these
+  trees, so never stage another session's changes (e.g. a `BACKLOG.md` you didn't
+  edit).
+- **Watch CI and merge when green.** Keep an eye on the checks; once they pass,
+  merge the PR. If CI fails, fix it (or surface it) — don't leave a red PR.
+- **Keep everything aligned.** When a feature spans web + iOS, land both sides
+  together; after merge, fast-forward local `main` to `origin/main` in each repo
+  so the next session starts clean (the session-sync rule below still holds).
+- **🚫 NEVER deploy to Vercel until Tori explicitly says so.** Do **not** run
+  `npx vercel --prod` (or any prod deploy) after a merge, even though merged web
+  changes won't be live until then. Merging is fine; deploying is Tori's call.
+  Auto-deploy is off by design (`vercel.json` `git.deploymentEnabled: false`,
+  PR #237) — leave it off. When web work merges, note that a prod deploy is
+  pending Tori's go-ahead and stop there.
+
 ## Session sync with `origin/main`
 
 The local checkout must be **in sync with `origin/main`** at both the start and
