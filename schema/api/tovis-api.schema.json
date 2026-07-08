@@ -5155,6 +5155,12 @@
     },
     "CreatedMessageDTO": {
       "properties": {
+        "attachments": {
+          "items": {
+            "$ref": "#/definitions/MessageAttachmentDTO"
+          },
+          "type": "array"
+        },
         "body": {
           "type": [
             "string",
@@ -5175,7 +5181,8 @@
         "id",
         "body",
         "createdAt",
-        "senderUserId"
+        "senderUserId",
+        "attachments"
       ],
       "type": "object"
     },

@@ -102,12 +102,27 @@ export type MessageThreadMessagesResponseDTO = {
   take: number
 }
 
-// POST /api/v1/messages/threads/[id] — created message (no attachments projected).
+// POST /api/v1/messages/threads/[id] — the created message. Carries its
+// attachments (with freshly-signed render URLs) so the sender can render an
+// image message immediately without waiting for the next poll.
 export type CreatedMessageDTO = {
   id: string
   body: string | null
   createdAt: string // ISO-8601
   senderUserId: string
+  attachments: MessageAttachmentDTO[]
+}
+
+// POST /api/v1/messages/threads/[id]/uploads — a presigned, thread-scoped,
+// media-private upload target for a message image attachment. The client PUTs
+// the bytes to `signedUrl` (Supabase signed upload), then POSTs the message
+// with `path` in its `attachments`. `path` is namespaced under the thread so the
+// send route can prove the attachment belongs to this conversation.
+export type MessageUploadInitDTO = {
+  bucket: string
+  path: string
+  token: string
+  signedUrl: string | null
 }
 
 export type CreateMessageResponseDTO = {
