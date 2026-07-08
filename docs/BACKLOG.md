@@ -166,6 +166,10 @@ items (A2), since they're social surfaces (looks/stats/follow), not SEO mirrors.
   day-grouping + filter chips.
 
 ## 10. Post-appointment payment confirmation + aftercare rebooking (audit 2026-07-08)
+> ✅ **COMPLETE (2026-07-08).** PF1 #527 · PF2 #528 · PF3 #529 (web) · PF4 iOS #10 all
+> merged. Deferred niceties (need read-endpoint fields) tracked in `tovis-ios/BACKLOG.md §6`.
+> ⚠️ Web prod deploy still pending Tori's go-ahead.
+
 Audit of the client post-appointment checkout → aftercare rebooking flow (3 parallel
 agents). **Gap:** for off-platform / unverifiable methods (Venmo / Zelle / Cash /
 Apple Cash / PayPal) the client checkout route drives the booking straight to `PAID` +
@@ -247,12 +251,12 @@ booking/checkout writes must stay inside `lib/booking/writeBoundary.ts` (respect
   utilities only (no raw colors).
 
 ### iOS workstream (detail in `tovis-ios/BACKLOG.md §6`)
-- [ ] **PF4 — iOS parity.** Mirror the flow in the SwiftUI app (`~/Dev/tovis-ios`): client
-  checkout renders the pending / awaiting-confirmation state and still exposes aftercare
-  rebooking; pro gains a "Confirm payment received" action hitting
-  `POST /api/v1/pro/bookings/[id]/checkout/confirm-payment`; decode the new `checkoutStatus`
-  value + the `PAYMENT_CONFIRMATION_REQUIRED` notification key. Ships after PF1–PF3 land the
-  additive backend. Follow the web↔iOS parity rule.
+- [x] **PF4 — iOS parity** — SHIPPED (tovis-ios PR #10). Client AWAITING_CONFIRMATION banner;
+  pro session wrap-up "Confirm payment received" → confirm-payment route (auto-approves the
+  coupled next booking); PAYMENT_CONFIRMATION_REQUIRED labelled. Used the repo's stringly-typed
+  checkout-status/event-key convention (no new enum). Deferred: pro booking-detail confirm
+  button + coupled next-booking card + client "Pending confirmation" label (need `checkoutStatus`
+  + `rebookOfBookingId` on the pro/client read endpoints — a future backend PR).
 
 ## 11. Custom appointment-reminder timing for pros (design 2026-07-08)
 Today a pro's client-reminder cadence is three on/off switches — **7 / 3 / 1 days** before
@@ -394,6 +398,30 @@ channel policy in `lib/notifications/eventKeys.ts`. Two auth emails (`lib/auth/{
   fee) and capture explicit acknowledgment (policy snapshot/version + timestamp, persisted
   per booking) for chargeback defense. Web booking finalize + iOS booking flow. Only
   meaningful when the pro has a policy enabled — ties to NC-C1 / `ENABLE_NO_SHOW_PROTECTION`.
+
+## 13. Messaging refinement epic (2026-07-08)
+Refine the shared `/messages` inbox + thread for BOTH roles, web + iOS in parity. Kicked off
+after Tori flagged the Inbox "feels off" — the root cause was a real bug: iOS showed the wrong
+counterparty (a pro saw their own name) because the thread list DTO omitted participant user
+ids. iOS side tracked in `tovis-ios/BACKLOG.md §7`. 5 increments, one PR-pair each:
+- [x] **M1 — role-aware counterparty + thread polish** — SHIPPED (web #531 + iOS #11). DTO gained
+  `isViewerPro` (thread list) + `counterpartyLastReadAt` (thread detail); server derives the
+  role from the viewer's user id (dual-role/admin safe). Extracted shared
+  `lib/messages/counterparty.ts` (removed the two inlined copies). ThreadClient: read receipts,
+  day separators (Today/Yesterday/date), optimistic send + failed/retry. iOS mirrors all of it.
+- [ ] **M2 — realtime on the messages screens.** Web's `LiveRefresh` is NOT mounted on
+  `app/messages/*` (no layout there) — so the inbox never live-updates and the thread relies on
+  10s polling. Mount a subscriber on the messages routes; iOS keeps its `user:{id}` channel
+  live in-thread. The send route already broadcasts to the other participants.
+- [ ] **M3 — inbox polish parity.** iOS gains web's 4 filter tabs + context eyebrows (M3 also
+  clears the A6/§7 inbox-filter item on iOS). Consider adding search + a numeric per-row unread
+  count (both platforms only show a binary dot) + surfacing zero-message threads.
+- [ ] **M4 — richer thread + composer.** Attachment/media composer (both platforms only RENDER
+  attachments — can't send) + "load older" history paging (server cursor `nextCursor`/`hasMore`
+  exists but neither UI uses it). A message deep-link/push target so a notification opens the thread.
+- [ ] **M5 — dedup + hardening.** Extract the remaining duplicated eyebrow/context logic across
+  `app/messages/page.tsx` + `thread/[id]/page.tsx`; reconcile the inbox `take` mismatch (SSR 60 vs
+  `/threads` API 50); add route-level tests for the messaging endpoints (currently none).
 
 ---
 
