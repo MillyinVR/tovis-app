@@ -17,6 +17,7 @@ const NAMESPACE = 'looks_feed'
 
 export type LooksFeedCohort =
   | 'for_you'
+  | 'board_feed'
   | 'recent'
   | 'spotlight'
   | 'following'
@@ -41,6 +42,10 @@ export type LooksFeedServeEvent = {
   // many candidates on the page had an embedding to score against.
   tasteSignalCount?: number | null
   candidateEmbeddingCount?: number | null
+  // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
+  answerTagCount?: number | null
+  feasibilityTagCount?: number | null
+  savedExcludedCount?: number | null
 }
 
 export function hashViewerId(userId: string | null | undefined): string | null {
@@ -68,6 +73,9 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     occasionTagCount: input.occasionTagCount ?? null,
     tasteSignalCount: input.tasteSignalCount ?? null,
     candidateEmbeddingCount: input.candidateEmbeddingCount ?? null,
+    answerTagCount: input.answerTagCount ?? null,
+    feasibilityTagCount: input.feasibilityTagCount ?? null,
+    savedExcludedCount: input.savedExcludedCount ?? null,
   })
 
   console.info(line)

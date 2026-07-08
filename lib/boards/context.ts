@@ -460,6 +460,104 @@ export const BOARD_TYPE_FEED_SIGNALS: Record<BoardType, BoardTypeFeedSignals> =
   }
 
 // ---------------------------------------------------------------------------
+// Answer feed signals (spec §4.4 service_specific_match) — how a board's chip
+// answers boost the board feed. Same best-effort philosophy as
+// BOARD_TYPE_FEED_SIGNALS: an answer value maps to LookTag slugs that read as
+// that answer, matched against a candidate look's caption hashtags. Only the
+// clearly-VISUAL answers map (a dress color, a dream hair color, a skin
+// concern) — timeline/"had it before?"/hesitation answers describe the person's
+// context, not the look, so they contribute nothing here. A slug that never
+// appears in the tag corpus simply never matches (harmless). True structured
+// attribute matching (hair length ↔ a look's actual hair length) needs
+// look-side attributes we don't have yet (§6.6 deferral) — this tag-level match
+// is the buildable approximation, consistent with how occasion_tag_match works.
+// ---------------------------------------------------------------------------
+
+/**
+ * Per board type: answer key → answer value → LookTag slugs that value implies.
+ * Values are the validated option values from BOARD_QUESTION_SETS; anything
+ * not listed here (or an answer key absent from a type) contributes no signal.
+ */
+export const BOARD_ANSWER_FEED_SIGNALS: Partial<
+  Record<BoardType, Record<string, Record<string, readonly string[]>>>
+> = {
+  PROM: {
+    dress_color: {
+      red: ['red'],
+      pink: ['pink'],
+      blue: ['blue'],
+      green: ['green'],
+      black: ['black'],
+      white: ['white'],
+      metallic: ['gold', 'silver', 'metallic'],
+      // "undecided" carries no color signal.
+    },
+  },
+  SKINCARE: {
+    main_concern: {
+      acne: ['acne', 'acnetreatment'],
+      aging: ['antiaging', 'antiageing'],
+      dullness: ['glow', 'brightening'],
+      redness: ['redness', 'rosacea'],
+      texture: ['texture', 'resurfacing'],
+    },
+  },
+  COLOR_TRANSFORMATION: {
+    current_color: {
+      blonde: ['blonde'],
+      brunette: ['brunette'],
+      black: ['blackhair'],
+      red: ['redhair', 'copper'],
+      gray: ['grayhair', 'silverhair'],
+      // "other" carries no reliable color signal.
+    },
+    dream_color: {
+      blonde: ['blonde', 'blondehair'],
+      brunette: ['brunette'],
+      black: ['blackhair'],
+      red: ['redhair', 'copper'],
+      fantasy: ['vivid', 'fantasycolor', 'vividhair'],
+      // "not-sure" carries no color signal.
+    },
+    change_scale: {
+      total: ['transformation', 'hairtransformation'],
+      // subtle / noticeable are too weak to tag-match reliably.
+    },
+  },
+  NAILS: {
+    occasion: {
+      event: ['eventnails'],
+      vacation: ['vacationnails'],
+      // "everyday" is too generic to tag-match.
+    },
+  },
+}
+
+/**
+ * The LookTag slugs a board's (validated) answers imply — the retrieval +
+ * scoring signal for §4.4's service_specific_match. Deduped, order-stable.
+ * Empty when the board carries no answers or none of them are visual. Pure.
+ */
+export function boardAnswerFeedTagSlugs(
+  type: BoardType,
+  answers: BoardAnswers | null | undefined,
+): string[] {
+  if (!answers) return []
+
+  const perType = BOARD_ANSWER_FEED_SIGNALS[type]
+  if (!perType) return []
+
+  const slugs = new Set<string>()
+  for (const [answerKey, byValue] of Object.entries(perType)) {
+    const value = answers[answerKey]
+    if (typeof value !== 'string') continue
+    for (const slug of byValue[value] ?? []) slugs.add(slug)
+  }
+
+  return [...slugs]
+}
+
+// ---------------------------------------------------------------------------
 // Event proximity (spec §8 countdown + §6.2 sharp post-event decay)
 // ---------------------------------------------------------------------------
 

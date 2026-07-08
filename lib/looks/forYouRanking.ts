@@ -230,7 +230,7 @@ export function computeForYouScore(
 
   const occasionBoost =
     FOR_YOU_RANK_WEIGHTS.occasionMax *
-    strongestOccasionMatch(row, context.affinity.occasionTagWeights)
+    strongestTagWeightMatch(row, context.affinity.occasionTagWeights)
 
   const visualBoost = computeVisualSimilarityBoost({
     tasteVector: context.affinity.tasteVector,
@@ -258,14 +258,17 @@ export function computeForYouScore(
   )
 }
 
-// Strongest single tag match wins (clamped to [0, 1]) — matching both #bridal
-// and #wedding on one look is the same occasion said twice, not double the
-// signal, so weights are NOT summed across tags.
-function strongestOccasionMatch(
-  row: ForYouRankableRow,
-  occasionTagWeights: ReadonlyMap<string, number>,
+/**
+ * Strongest single tag match wins (clamped to [0, 1]) — matching both #bridal
+ * and #wedding on one look is the same occasion said twice, not double the
+ * signal, so weights are NOT summed across tags. Generic over any slug→weight
+ * map, so the §4.4 board feed reuses it for its occasion term. Pure + exported.
+ */
+export function strongestTagWeightMatch(
+  row: Pick<ForYouRankableRow, 'tags'>,
+  tagWeights: ReadonlyMap<string, number>,
 ): number {
-  if (occasionTagWeights.size === 0) return 0
+  if (tagWeights.size === 0) return 0
 
   const tags = row.tags
   if (!Array.isArray(tags) || tags.length === 0) return 0
@@ -274,7 +277,7 @@ function strongestOccasionMatch(
   for (const tag of tags) {
     const slug = typeof tag?.slug === 'string' ? tag.slug.trim() : ''
     if (!slug) continue
-    const weight = safeNumber(occasionTagWeights.get(slug) ?? 0)
+    const weight = safeNumber(tagWeights.get(slug) ?? 0)
     if (weight > strongest) strongest = weight
   }
 
