@@ -164,3 +164,36 @@ export async function fetchClientTasteVector(
     signalCount: Number(row.signalCount),
   }
 }
+
+/**
+ * Fetch a board's local taste vector (§6.1 local_taste_embedding) — the
+ * board-scoped sibling of fetchClientTasteVector, consumed by the §4.4 board
+ * feed's visual_similarity term. Returns null when the board has no stored
+ * vector yet (pre-backfill, an empty board, or every saved look unembedded),
+ * which the ranking layer reads as "no visual signal, no boost". The row is
+ * recomputed daily by the taste-vectors cron (lib/personalization/tasteVectors).
+ */
+export async function fetchBoardTasteVector(
+  db: EmbeddingSqlDb,
+  boardId: string,
+): Promise<ClientTasteVectorRow | null> {
+  if (boardId.length === 0) return null
+
+  const rows = await db.$queryRaw<
+    Array<{ embeddingText: string; signalCount: number }>
+  >`
+    SELECT "embedding"::text AS "embeddingText", "signalCount"
+    FROM "BoardTasteVector"
+    WHERE "boardId" = ${boardId}
+    LIMIT 1
+  `
+
+  const row = rows[0]
+  if (!row) return null
+
+  return {
+    embedding: parseEmbeddingVectorText(row.embeddingText),
+    // Raw-SQL int columns can surface as bigint; normalize to a JS number.
+    signalCount: Number(row.signalCount),
+  }
+}

@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { BoardType } from '@prisma/client'
 
 import {
+  BOARD_ANSWER_FEED_SIGNALS,
   BOARD_EVENT_PROXIMITY,
   BOARD_QUESTION_SETS,
   BOARD_TYPE_FEED_SIGNALS,
   BOARD_TYPE_VALUES,
+  boardAnswerFeedTagSlugs,
   boardEventDateToYmd,
   boardTypeWantsEventDate,
   computeBoardEventProximity,
@@ -227,6 +229,59 @@ describe('lib/boards/context', () => {
     it('returns null for malformed input', () => {
       expect(daysUntilEvent('July 8', NOW)).toBeNull()
       expect(daysUntilEvent('', NOW)).toBeNull()
+    })
+  })
+
+  describe('boardAnswerFeedTagSlugs (§4.4 service_specific_match)', () => {
+    it('maps a validated answer value to its look tag slugs', () => {
+      expect(
+        boardAnswerFeedTagSlugs(BoardType.PROM, { dress_color: 'red' }),
+      ).toEqual(['red'])
+      expect(
+        boardAnswerFeedTagSlugs(BoardType.COLOR_TRANSFORMATION, {
+          dream_color: 'fantasy',
+        }),
+      ).toEqual(['vivid', 'fantasycolor', 'vividhair'])
+    })
+
+    it('dedupes across multiple answers that share a slug', () => {
+      const slugs = boardAnswerFeedTagSlugs(BoardType.COLOR_TRANSFORMATION, {
+        current_color: 'blonde',
+        dream_color: 'blonde',
+      })
+      // "blonde" appears from both keys but only once in the output.
+      expect(slugs.filter((s) => s === 'blonde')).toHaveLength(1)
+    })
+
+    it('contributes nothing for non-visual or unmapped answer values', () => {
+      expect(
+        boardAnswerFeedTagSlugs(BoardType.PROM, { dress_color: 'undecided' }),
+      ).toEqual([])
+      expect(
+        boardAnswerFeedTagSlugs(BoardType.BRIDAL, { hair_length: 'long' }),
+      ).toEqual([])
+    })
+
+    it('is null-safe for missing answers or a type with no answer signals', () => {
+      expect(boardAnswerFeedTagSlugs(BoardType.PROM, null)).toEqual([])
+      expect(boardAnswerFeedTagSlugs(BoardType.GENERAL, { x: 'y' })).toEqual([])
+    })
+
+    it('only references validated option values in the signal map', () => {
+      for (const [type, byKey] of Object.entries(BOARD_ANSWER_FEED_SIGNALS)) {
+        const questionSet = BOARD_QUESTION_SETS[type as BoardType]
+        for (const [answerKey, byValue] of Object.entries(byKey)) {
+          const question = questionSet.find((q) => q.key === answerKey)
+          expect(question, `${type}.${answerKey} must be a real question`).toBeTruthy()
+          const validValues = new Set(question?.options.map((o) => o.value))
+          for (const value of Object.keys(byValue)) {
+            expect(
+              validValues.has(value),
+              `${type}.${answerKey}.${value} must be a valid option`,
+            ).toBe(true)
+          }
+        }
+      }
     })
   })
 })

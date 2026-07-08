@@ -6,7 +6,9 @@ import {
   extractSelfProfileWriteThrough,
   normalizeSelfProfile,
   parseSelfProfileInput,
+  selfProfileFeasibilityTagSlugs,
   selfProfileInterestCategorySlugs,
+  SELF_PROFILE_FEASIBILITY_SIGNALS,
   SELF_PROFILE_INTEREST_OPTIONS,
   SELF_PROFILE_QUESTIONS,
 } from './selfProfile'
@@ -187,5 +189,52 @@ describe('lib/personalization/selfProfile', () => {
     for (const option of SELF_PROFILE_INTEREST_OPTIONS) {
       expect(option.categorySlugs.length).toBeGreaterThan(0)
     }
+  })
+
+  describe('selfProfileFeasibilityTagSlugs (§4.4 feasibility_match)', () => {
+    it('maps person-attributes to representation tag slugs', () => {
+      expect(
+        selfProfileFeasibilityTagSlugs({ hair_type: 'curly' }),
+      ).toEqual(['curlyhair', 'curls'])
+      expect(
+        selfProfileFeasibilityTagSlugs({ skin_concern: 'acne' }),
+      ).toEqual(['acne', 'acnetreatment'])
+    })
+
+    it('combines multiple attributes and dedupes', () => {
+      const slugs = selfProfileFeasibilityTagSlugs({
+        hair_color: 'red',
+        skin_concern: 'redness',
+      })
+      expect(slugs).toContain('copper')
+      expect(slugs).toContain('rosacea')
+      // No accidental duplicates.
+      expect(new Set(slugs).size).toBe(slugs.length)
+    })
+
+    it('is null-safe and ignores unmapped values', () => {
+      expect(selfProfileFeasibilityTagSlugs(null)).toEqual([])
+      expect(selfProfileFeasibilityTagSlugs({})).toEqual([])
+      // "normal" skin / "other" hair color intentionally carry no signal.
+      expect(
+        selfProfileFeasibilityTagSlugs({ skin_type: 'normal', hair_color: 'other' }),
+      ).toEqual([])
+    })
+
+    it('only references validated self-profile option values', () => {
+      for (const [fieldKey, byValue] of Object.entries(
+        SELF_PROFILE_FEASIBILITY_SIGNALS,
+      )) {
+        const question = SELF_PROFILE_QUESTIONS.find((q) => q.key === fieldKey)
+        expect(question, `${fieldKey} must be a real question`).toBeTruthy()
+        const validValues = new Set(question?.options.map((o) => o.value))
+        for (const value of Object.keys(byValue)) {
+          expect(
+            validValues.has(value),
+            `${fieldKey}.${value} must be a valid option`,
+          ).toBe(true)
+        }
+      }
+    })
   })
 })

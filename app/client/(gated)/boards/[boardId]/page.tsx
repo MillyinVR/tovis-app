@@ -11,6 +11,7 @@ import { BOARD_TYPE_LABELS } from '@/lib/boards/context'
 import { BoardType } from '@prisma/client'
 import BoardShareControls from './BoardShareControls'
 import BoardEventCountdown from './BoardEventCountdown'
+import BoardRecommendations from './BoardRecommendations'
 
 export const dynamic = 'force-dynamic'
 
@@ -230,6 +231,8 @@ export default async function ClientBoardDetailPage(props: {
           })}
         </section>
       )}
+
+      <BoardRecommendations boardId={board.id} boardName={board.name} />
     </main>
   )
 }

@@ -369,3 +369,71 @@ export function selfProfileInterestCategorySlugs(
 
   return [...slugs]
 }
+
+// ---------------------------------------------------------------------------
+// Feasibility / representation signals (spec §4.4 feasibility_match + §6.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Best-effort LookTag slugs a self-profile's person-attributes imply — the
+ * board feed's feasibility_match signal (spec §4.4). Maps the viewer's stated
+ * hair/skin attributes onto caption hashtags that read as "hair like mine" /
+ * "skin like mine" (representation matching, spec §6.6 use #1), matched against
+ * a candidate look's tags. Only attributes that plausibly appear as organic
+ * hashtags map; a slug absent from the corpus never matches (harmless).
+ *
+ * This is the buildable tag-level approximation. True feasibility scoring —
+ * "you're a level-2 brunette, this platinum look starts from dark hair and
+ * takes 2–3 sessions" (spec §6.6 use #2) — needs look-side before/after start
+ * state attributes we don't capture yet (the §6.6/§4.4 deferral); it lands with
+ * that content-attribute schema, reusing this same feasibility term/weight.
+ */
+export const SELF_PROFILE_FEASIBILITY_SIGNALS: Partial<
+  Record<SelfProfileFieldKey, Record<string, readonly string[]>>
+> = {
+  hair_type: {
+    straight: ['straighthair'],
+    wavy: ['wavyhair', 'waves'],
+    curly: ['curlyhair', 'curls'],
+    coily: ['coilyhair', 'naturalhair'],
+  },
+  hair_color: {
+    blonde: ['blonde'],
+    brunette: ['brunette'],
+    black: ['blackhair'],
+    red: ['redhair', 'copper'],
+    gray: ['grayhair', 'silverhair'],
+    // "other" carries no reliable representation signal.
+  },
+  skin_type: {
+    oily: ['oilyskin'],
+    dry: ['dryskin'],
+    combination: ['combinationskin'],
+    sensitive: ['sensitiveskin'],
+    // "normal" is too generic to tag-match.
+  },
+  skin_concern: {
+    acne: ['acne', 'acnetreatment'],
+    aging: ['antiaging', 'antiageing'],
+    dullness: ['glow', 'brightening'],
+    redness: ['redness', 'rosacea'],
+    texture: ['texture', 'resurfacing'],
+  },
+}
+
+export function selfProfileFeasibilityTagSlugs(
+  profile: ClientSelfProfile | null,
+): string[] {
+  if (!profile) return []
+
+  const slugs = new Set<string>()
+  for (const [fieldKey, byValue] of Object.entries(
+    SELF_PROFILE_FEASIBILITY_SIGNALS,
+  )) {
+    const value = profile[fieldKey as SelfProfileFieldKey]
+    if (typeof value !== 'string') continue
+    for (const slug of byValue[value] ?? []) slugs.add(slug)
+  }
+
+  return [...slugs]
+}
