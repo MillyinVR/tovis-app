@@ -19,12 +19,21 @@ type Msg = {
   createdAt: string
   senderUserId: string
   attachments: Attachment[]
+  /**
+   * Set only on locally-created (optimistic) messages the server hasn't yet
+   * acked. `sending` = POST in flight; `failed` = POST failed, offer a retry.
+   * Server messages omit it. `clientId` correlates the optimistic row with its
+   * eventual server message so polling never duplicates it.
+   */
+  status?: 'sending' | 'failed'
+  clientId?: string
 }
 
 type ThreadClientProps = {
   threadId: string
   myUserId: string
   initialMessages: Msg[]
+  initialCounterpartyLastReadAt: string | null
 }
 
 function isAttachmentMediaType(value: unknown): value is Attachment['mediaType'] {
@@ -111,11 +120,19 @@ function parseErrorMessage(value: unknown, fallback: string): string {
   return fallback
 }
 
-function parseFetchMessagesResponse(value: unknown): Msg[] | null {
+function parseFetchMessagesResponse(
+  value: unknown,
+): { messages: Msg[]; counterpartyLastReadAt: string | null } | null {
   if (!isRecord(value)) return null
   if (value.ok !== true) return null
 
-  return parseMessages(value.messages)
+  const thread = isRecord(value.thread) ? value.thread : null
+  const counterpartyLastReadAt =
+    thread && typeof thread.counterpartyLastReadAt === 'string'
+      ? thread.counterpartyLastReadAt
+      : null
+
+  return { messages: parseMessages(value.messages), counterpartyLastReadAt }
 }
 
 function parseSendMessageResponse(value: unknown): Msg | null {
@@ -139,6 +156,36 @@ function formatTime(value: string): string {
   return formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
     hour: 'numeric',
     minute: '2-digit',
+  })
+}
+
+// Stable per-day key (viewer TZ) for grouping — locale-formatted but only ever
+// compared for equality, never displayed.
+function dayKey(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+}
+
+// Human day-separator label: "Today" / "Yesterday" / "Mon, Jul 7".
+function dayLabel(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  const key = dayKey(value)
+  const now = new Date()
+  if (key === dayKey(now.toISOString())) return 'Today'
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  if (key === dayKey(yesterday.toISOString())) return 'Yesterday'
+
+  return formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
   })
 }
 
@@ -185,9 +232,13 @@ function AttachmentPreview(props: { attachment: Attachment }) {
 }
 
 export default function ThreadClient(props: ThreadClientProps) {
-  const { threadId, myUserId, initialMessages } = props
+  const { threadId, myUserId, initialMessages, initialCounterpartyLastReadAt } =
+    props
 
   const [messages, setMessages] = useState<Msg[]>(initialMessages)
+  const [counterpartyLastReadAt, setCounterpartyLastReadAt] = useState<
+    string | null
+  >(initialCounterpartyLastReadAt)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -236,20 +287,34 @@ export default function ThreadClient(props: ThreadClientProps) {
       )
 
       const data = await readJsonResponse(res)
-      const nextMessages = parseFetchMessagesResponse(data)
+      const fetched = parseFetchMessagesResponse(data)
 
-      if (!res.ok || !nextMessages) {
+      if (!res.ok || !fetched) {
         setErr(parseErrorMessage(data, 'Could not refresh messages.'))
         return
       }
 
+      setCounterpartyLastReadAt(fetched.counterpartyLastReadAt)
+
       setMessages((current) => {
-        if (messageListsHaveSameTail(current, nextMessages)) {
+        // Keep locally-pending/failed sends (not yet on the server) tacked on
+        // the end so a poll never drops an in-flight or failed bubble.
+        const localPending = current.filter((message) => message.status)
+        const serverOnly = current.filter((message) => !message.status)
+        const serverTailChanged = !messageListsHaveSameTail(
+          serverOnly,
+          fetched.messages,
+        )
+
+        if (localPending.length === 0 && !serverTailChanged) {
           return current
         }
 
-        queueMicrotask(() => scrollToBottom('auto'))
-        return nextMessages
+        if (serverTailChanged) {
+          queueMicrotask(() => scrollToBottom('auto'))
+        }
+
+        return [...fetched.messages, ...localPending]
       })
 
       void markRead()
@@ -260,47 +325,106 @@ export default function ThreadClient(props: ThreadClientProps) {
     }
   }, [markRead, scrollToBottom, threadId])
 
+  // Post one message body under a stable clientId. Shows the bubble immediately
+  // (status 'sending'); on success swaps in the server message, on failure marks
+  // it 'failed' so the user can retry. Returns nothing — state carries the result.
+  const postBody = useCallback(
+    async (bodyText: string, clientId: string) => {
+      try {
+        const res = await fetch(
+          `/api/v1/messages/threads/${encodeURIComponent(threadId)}`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ body: bodyText }),
+          },
+        )
+
+        const data = await readJsonResponse(res)
+        const sentMessage = parseSendMessageResponse(data)
+
+        if (!res.ok || !sentMessage) {
+          setErr(parseErrorMessage(data, 'Send failed.'))
+          setMessages((current) =>
+            current.map((message) =>
+              message.clientId === clientId
+                ? { ...message, status: 'failed' }
+                : message,
+            ),
+          )
+          return
+        }
+
+        setErr(null)
+        setMessages((current) => {
+          // Replace the optimistic row with the server message; guard against a
+          // poll that already inserted it by id.
+          const withoutOptimistic = current.filter(
+            (message) =>
+              message.clientId !== clientId && message.id !== sentMessage.id,
+          )
+          return [...withoutOptimistic, sentMessage]
+        })
+        void markRead()
+      } catch {
+        setErr('Send failed.')
+        setMessages((current) =>
+          current.map((message) =>
+            message.clientId === clientId
+              ? { ...message, status: 'failed' }
+              : message,
+          ),
+        )
+      }
+    },
+    [markRead, threadId],
+  )
+
   const send = useCallback(async () => {
     if (!trimmedText || sending) return
 
+    const clientId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `c_${Date.now()}_${Math.round(Math.random() * 1e9)}`
+    const body = trimmedText
+    const optimistic: Msg = {
+      id: clientId,
+      clientId,
+      body,
+      createdAt: new Date().toISOString(),
+      senderUserId: myUserId,
+      attachments: [],
+      status: 'sending',
+    }
+
     setSending(true)
     setErr(null)
+    setText('')
+    setMessages((current) => [...current, optimistic])
+    queueMicrotask(() => scrollToBottom('auto'))
 
     try {
-      const res = await fetch(
-        `/api/v1/messages/threads/${encodeURIComponent(threadId)}`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ body: trimmedText }),
-        },
-      )
-
-      const data = await readJsonResponse(res)
-      const sentMessage = parseSendMessageResponse(data)
-
-      if (!res.ok || !sentMessage) {
-        setErr(parseErrorMessage(data, 'Send failed.'))
-        return
-      }
-
-      setText('')
-      setMessages((current) => {
-        const alreadyExists = current.some((message) => message.id === sentMessage.id)
-
-        if (alreadyExists) {
-          return current
-        }
-
-        return [...current, sentMessage]
-      })
-
-      queueMicrotask(() => scrollToBottom('auto'))
-      void markRead()
+      await postBody(body, clientId)
     } finally {
       setSending(false)
     }
-  }, [markRead, scrollToBottom, sending, threadId, trimmedText])
+  }, [myUserId, postBody, scrollToBottom, sending, trimmedText])
+
+  const retry = useCallback(
+    async (message: Msg) => {
+      const clientId = message.clientId
+      if (!clientId || !message.body) return
+
+      setMessages((current) =>
+        current.map((m) =>
+          m.clientId === clientId ? { ...m, status: 'sending' } : m,
+        ),
+      )
+      await postBody(message.body, clientId)
+    },
+    [postBody],
+  )
 
   useEffect(() => {
     cancelledRef.current = false
@@ -359,6 +483,21 @@ export default function ThreadClient(props: ThreadClientProps) {
     }
   }, [fetchLatest, lastId])
 
+  // The last of my confirmed messages the counterparty has read — the only one
+  // that shows a "Read" receipt (iMessage-style).
+  const lastReadMineId = useMemo(() => {
+    if (!counterpartyLastReadAt) return null
+    const readTs = new Date(counterpartyLastReadAt).getTime()
+    if (Number.isNaN(readTs)) return null
+
+    let id: string | null = null
+    for (const message of messages) {
+      if (message.senderUserId !== myUserId || message.status) continue
+      if (new Date(message.createdAt).getTime() <= readTs) id = message.id
+    }
+    return id
+  }, [counterpartyLastReadAt, messages, myUserId])
+
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col">
       {err ? (
@@ -375,51 +514,80 @@ export default function ThreadClient(props: ThreadClientProps) {
             </div>
           ) : (
             <div className="grid gap-[14px]">
-              {messages.map((message) => {
+              {messages.map((message, index) => {
                 const mine = message.senderUserId === myUserId
+                const showDaySeparator =
+                  index === 0 ||
+                  dayKey(messages[index - 1]!.createdAt) !==
+                    dayKey(message.createdAt)
 
                 return (
-                  <div
-                    key={message.id}
-                    className={classNames([
-                      'flex',
-                      mine ? 'justify-end' : 'justify-start',
-                    ])}
-                  >
-                    <div className="max-w-[80%]">
-                      <div
-                        className={classNames([
-                          'px-[14px] py-[11px] text-[13.5px] font-medium leading-[1.45]',
-                          mine
-                            ? 'rounded-[16px] rounded-br-[5px] bg-accentPrimary text-onAccent'
-                            : 'rounded-[16px] rounded-bl-[5px] border border-textPrimary/10 bg-bgPrimary/45 text-textPrimary',
-                        ])}
-                      >
-                        {message.body ? (
-                          <div className="whitespace-pre-wrap break-words">
-                            {message.body}
-                          </div>
-                        ) : null}
-
-                        {message.attachments.length > 0 ? (
-                          <div className="mt-2 grid gap-2">
-                            {message.attachments.map((attachment) => (
-                              <AttachmentPreview
-                                key={attachment.id}
-                                attachment={attachment}
-                              />
-                            ))}
-                          </div>
-                        ) : null}
+                  <div key={message.clientId ?? message.id} className="grid gap-[14px]">
+                    {showDaySeparator ? (
+                      <div className="flex items-center justify-center pt-1">
+                        <span className="rounded-full bg-bgPrimary/70 px-3 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-textMuted">
+                          {dayLabel(message.createdAt)}
+                        </span>
                       </div>
+                    ) : null}
 
-                      <div
-                        className={classNames([
-                          'mt-[5px] px-1 font-mono text-[9px] text-textMuted',
-                          mine ? 'text-right' : 'text-left',
-                        ])}
-                      >
-                        {formatTime(message.createdAt)}
+                    <div
+                      className={classNames([
+                        'flex',
+                        mine ? 'justify-end' : 'justify-start',
+                      ])}
+                    >
+                      <div className="max-w-[80%]">
+                        <div
+                          className={classNames([
+                            'px-[14px] py-[11px] text-[13.5px] font-medium leading-[1.45]',
+                            mine
+                              ? 'rounded-[16px] rounded-br-[5px] bg-accentPrimary text-onAccent'
+                              : 'rounded-[16px] rounded-bl-[5px] border border-textPrimary/10 bg-bgPrimary/45 text-textPrimary',
+                            message.status === 'sending' && 'opacity-60',
+                            message.status === 'failed' &&
+                              'ring-1 ring-ember/50',
+                          ])}
+                        >
+                          {message.body ? (
+                            <div className="whitespace-pre-wrap break-words">
+                              {message.body}
+                            </div>
+                          ) : null}
+
+                          {message.attachments.length > 0 ? (
+                            <div className="mt-2 grid gap-2">
+                              {message.attachments.map((attachment) => (
+                                <AttachmentPreview
+                                  key={attachment.id}
+                                  attachment={attachment}
+                                />
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div
+                          className={classNames([
+                            'mt-[5px] flex items-center gap-1.5 px-1 font-mono text-[9px] text-textMuted',
+                            mine ? 'justify-end' : 'justify-start',
+                          ])}
+                        >
+                          <span>{formatTime(message.createdAt)}</span>
+                          {mine && message.status === 'sending' ? (
+                            <span>· Sending…</span>
+                          ) : mine && message.status === 'failed' ? (
+                            <button
+                              type="button"
+                              onClick={() => void retry(message)}
+                              className="font-semibold text-ember hover:opacity-80"
+                            >
+                              · Failed · Retry
+                            </button>
+                          ) : mine && message.id === lastReadMineId ? (
+                            <span className="text-accentPrimary">· Read</span>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </div>
