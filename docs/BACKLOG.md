@@ -409,10 +409,12 @@ ids. iOS side tracked in `tovis-ios/BACKLOG.md §7`. 5 increments, one PR-pair e
   role from the viewer's user id (dual-role/admin safe). Extracted shared
   `lib/messages/counterparty.ts` (removed the two inlined copies). ThreadClient: read receipts,
   day separators (Today/Yesterday/date), optimistic send + failed/retry. iOS mirrors all of it.
-- [ ] **M2 — realtime on the messages screens.** Web's `LiveRefresh` is NOT mounted on
-  `app/messages/*` (no layout there) — so the inbox never live-updates and the thread relies on
-  10s polling. Mount a subscriber on the messages routes; iOS keeps its `user:{id}` channel
-  live in-thread. The send route already broadcasts to the other participants.
+- [x] **M2 — realtime on the messages screens** — SHIPPED web (#533). Extracted a shared
+  `useLiveChannels` hook out of `LiveRefresh` (subscribe/debounce/visibility, no dup logic);
+  mounted `RefreshOnFocus` + `LiveRefresh` on the inbox and wired the thread to `fetchLatest()`
+  on a `user:{id}` broadcast (poll/focus stay as a fail-open safety net). iOS was already at
+  parity: its app-global `user:{id}` subscriber (iOS commit `5033dc0`) bumps `refreshTick`, which
+  the inbox + thread both observe — so M2 was web catching up, no iOS PR.
 - [ ] **M3 — inbox polish parity.** iOS gains web's 4 filter tabs + context eyebrows (M3 also
   clears the A6/§7 inbox-filter item on iOS). Consider adding search + a numeric per-row unread
   count (both platforms only show a binary dot) + surfacing zero-message threads.
