@@ -3,17 +3,26 @@ import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import type { MessagesThreadsListResponseDTO } from '@/lib/dto/messaging'
+import {
+  parseInboxFilter,
+  resolveInboxEyebrows,
+  whereForInboxFilter,
+} from '@/lib/messages/inboxContext'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
     const user = auth.user
 
+    // Mirror the SSR inbox's filter tabs (All / Bookings / Waitlists / Pros) so
+    // the native app and the web page return the same filtered set.
+    const filter = parseInboxFilter(new URL(req.url).searchParams.get('filter'))
+
     const threads = await prisma.messageThread.findMany({
-      where: { participants: { some: { userId: user.id } } },
+      where: whereForInboxFilter({ userId: user.id, filter }),
       orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
       take: 50,
       select: {
@@ -23,6 +32,7 @@ export async function GET() {
         bookingId: true,
         serviceId: true,
         offeringId: true,
+        waitlistEntryId: true,
         lastMessageAt: true,
         lastMessagePreview: true,
         updatedAt: true,
@@ -37,6 +47,10 @@ export async function GET() {
       },
     })
 
+    // Resolve each row's context eyebrow once, server-side (booking time /
+    // waitlist status / service name), so web + iOS render identical copy.
+    const eyebrowById = await resolveInboxEyebrows(threads)
+
     return jsonOk({
       threads: threads.map((t) => {
         // Counterparty is derived from the viewer's user id, not their acting
@@ -44,6 +58,10 @@ export async function GET() {
         // this boolean is the client's only signal for whose name to show.
         const { userId: proUserId, ...professional } = t.professional
         const isViewerPro = proUserId != null && proUserId === user.id
+        const eyebrow = eyebrowById.get(t.id) ?? {
+          eyebrow: 'Message',
+          isAccentContext: false,
+        }
         return {
           id: t.id,
           contextType: t.contextType,
@@ -51,6 +69,7 @@ export async function GET() {
           bookingId: t.bookingId,
           serviceId: t.serviceId,
           offeringId: t.offeringId,
+          waitlistEntryId: t.waitlistEntryId,
           lastMessageAt: t.lastMessageAt?.toISOString() ?? null,
           lastMessagePreview: t.lastMessagePreview,
           updatedAt: t.updatedAt.toISOString(),
@@ -60,6 +79,8 @@ export async function GET() {
             lastReadAt: p.lastReadAt?.toISOString() ?? null,
           })),
           isViewerPro,
+          eyebrow: eyebrow.eyebrow,
+          isAccentContext: eyebrow.isAccentContext,
           _count: t._count,
         }
       }),

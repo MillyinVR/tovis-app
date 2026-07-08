@@ -7349,8 +7349,16 @@
         "contextType": {
           "$ref": "#/definitions/MessageThreadContextType"
         },
+        "eyebrow": {
+          "description": "Server-computed context label for the row's eyebrow, e.g. \"BOOKING CONFIRMED — Balayage — Fri 2:00 PM\", \"Waitlist — Position active\", \"Service — Color\". Always present (falls back to \"Message\"). Computed once server-side so web + iOS render identical copy without duplicating the booking/waitlist/service lookups.",
+          "type": "string"
+        },
         "id": {
           "type": "string"
+        },
+        "isAccentContext": {
+          "description": "Whether the eyebrow renders in the accent tone (actionable context).",
+          "type": "boolean"
         },
         "isViewerPro": {
           "description": "Whether the viewer is this thread's professional (derived from the viewer's user id, not their acting role — so dual-role users and admins never resolve to their own name). The counterparty is the client when true, the pro when false. The list payload omits participant user ids, so this is the client's only signal for picking whose name/avatar to show.",
@@ -7391,6 +7399,12 @@
         },
         "updatedAt": {
           "type": "string"
+        },
+        "waitlistEntryId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -7400,6 +7414,7 @@
         "bookingId",
         "serviceId",
         "offeringId",
+        "waitlistEntryId",
         "lastMessageAt",
         "lastMessagePreview",
         "updatedAt",
@@ -7407,6 +7422,8 @@
         "professional",
         "participants",
         "isViewerPro",
+        "eyebrow",
+        "isAccentContext",
         "_count"
       ],
       "type": "object"

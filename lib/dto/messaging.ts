@@ -36,6 +36,7 @@ export type MessageThreadListItemDTO = {
   bookingId: string | null
   serviceId: string | null
   offeringId: string | null
+  waitlistEntryId: string | null
   lastMessageAt: string | null // ISO-8601
   lastMessagePreview: string | null
   updatedAt: string // ISO-8601
@@ -50,6 +51,16 @@ export type MessageThreadListItemDTO = {
    * only signal for picking whose name/avatar to show.
    */
   isViewerPro: boolean
+  /**
+   * Server-computed context label for the row's eyebrow, e.g.
+   * "BOOKING CONFIRMED — Balayage — Fri 2:00 PM", "Waitlist — Position active",
+   * "Service — Color". Always present (falls back to "Message"). Computed once
+   * server-side so web + iOS render identical copy without duplicating the
+   * booking/waitlist/service lookups.
+   */
+  eyebrow: string
+  /** Whether the eyebrow renders in the accent tone (actionable context). */
+  isAccentContext: boolean
   _count: { messages: number }
 }
 
