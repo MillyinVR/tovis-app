@@ -583,6 +583,11 @@ enum NotificationEventKey {
   VIRAL_REQUEST_APPROVED
   PAYMENT_COLLECTED
   PAYMENT_ACTION_REQUIRED
+  // An off-platform payment (cash / Venmo / Zelle / Apple Cash / PayPal) is
+  // awaiting the pro's confirmation of receipt. Pro-facing: confirming it both
+  // closes out the current booking's payment AND approves any aftercare-sourced
+  // next appointment coupled to it (see confirmProBookingPaymentReceived).
+  PAYMENT_CONFIRMATION_REQUIRED
   // Refund receipt (final-bill or deposit refund) — emitted from the refund
   // reconcile paths.
   PAYMENT_REFUNDED

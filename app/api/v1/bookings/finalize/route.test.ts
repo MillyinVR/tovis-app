@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AftercareRebookMode,
+  BookingCheckoutStatus,
   BookingSource,
   BookingStatus,
   NotificationEventKey,
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
 
   professionalServiceOfferingFindUnique: vi.fn(),
+  bookingFindUnique: vi.fn(),
 
   resolveAftercareAccessTokenForMutation: vi.fn(),
   markAftercareAccessTokenUsed: vi.fn(),
@@ -73,6 +75,9 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     professionalServiceOffering: {
       findUnique: mocks.professionalServiceOfferingFindUnique,
+    },
+    booking: {
+      findUnique: mocks.bookingFindUnique,
     },
   },
 }))
@@ -489,6 +494,12 @@ describe('POST /api/v1/bookings/finalize', () => {
     }))
 
     mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
+
+    // Source booking lookup for payment-confirmation coupling. Default: source
+    // is not awaiting confirmation, so a rebook uses the standard request flow.
+    mocks.bookingFindUnique.mockResolvedValue({
+      checkoutStatus: BookingCheckoutStatus.PAID,
+    })
 
     mocks.resolveDiscoveryFinalize.mockResolvedValue({
       provenance: 'DIRECT_PROFILE',
@@ -1474,6 +1485,45 @@ describe('POST /api/v1/bookings/finalize', () => {
     expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
       tokenId: 'token_row_1',
     })
+  })
+
+  it('emits PAYMENT_CONFIRMATION_REQUIRED (not a booking request) when the aftercare source payment is awaiting confirmation', async () => {
+    // Source booking's off-platform payment is still pending confirmation, so the
+    // PENDING rebook is coupled to it — payment confirmation is the sole approval
+    // surface. The finalize pro-notification switches accordingly.
+    mocks.bookingFindUnique.mockResolvedValue({
+      checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
+    })
+
+    await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'AFTERCARE',
+        aftercareToken: 'token_1',
+      }),
+    )
+
+    expect(mocks.bookingFindUnique).toHaveBeenCalledWith({
+      where: { id: 'booking_old' },
+      select: { checkoutStatus: true },
+    })
+
+    expect(mocks.createProNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        professionalId: 'pro_123',
+        eventKey: NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED,
+        title: 'Confirm payment to approve the next appointment',
+        dedupeKey:
+          'PRO_NOTIF:PAYMENT_CONFIRMATION_REQUIRED:booking_1',
+      }),
+    )
+    expect(mocks.createProNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
+      }),
+    )
   })
 
   it('uses booking confirmed event when booking is auto-confirmed', async () => {

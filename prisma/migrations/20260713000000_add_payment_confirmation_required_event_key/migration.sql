@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "NotificationEventKey" ADD VALUE 'PAYMENT_CONFIRMATION_REQUIRED';

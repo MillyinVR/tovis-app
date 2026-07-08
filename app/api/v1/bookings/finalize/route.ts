@@ -1,6 +1,7 @@
 // app/api/v1/bookings/finalize/route.ts
 
 import {
+  BookingCheckoutStatus,
   BookingSource,
   BookingStatus,
   NotificationEventKey,
@@ -321,11 +322,25 @@ function toFinalizeOffering(
   }
 }
 
-function getFinalizeProNotificationMeta(status: BookingStatus): {
+function getFinalizeProNotificationMeta(args: {
+  status: BookingStatus
+  // A PENDING aftercare rebook whose source booking's payment is still
+  // AWAITING_CONFIRMATION: payment confirmation is the single approval surface,
+  // so suppress the standard booking-request ask and tell the pro to confirm
+  // payment (which also approves this appointment).
+  coupledToPendingPaymentConfirmation: boolean
+}): {
   eventKey: NotificationEventKey
   title: string
 } {
-  if (status === BookingStatus.PENDING) {
+  if (args.status === BookingStatus.PENDING) {
+    if (args.coupledToPendingPaymentConfirmation) {
+      return {
+        eventKey: NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED,
+        title: 'Confirm payment to approve the next appointment',
+      }
+    }
+
     return {
       eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
       title: 'New booking request',
@@ -345,8 +360,13 @@ async function createFinalizeProNotification(args: {
   bookingStatus: BookingStatus
   source: BookingSource
   locationType: ServiceLocationType
+  coupledToPendingPaymentConfirmation: boolean
 }): Promise<void> {
-  const meta = getFinalizeProNotificationMeta(args.bookingStatus)
+  const meta = getFinalizeProNotificationMeta({
+    status: args.bookingStatus,
+    coupledToPendingPaymentConfirmation:
+      args.coupledToPendingPaymentConfirmation,
+  })
 
   await createProNotification({
     professionalId: args.professionalId,
@@ -364,6 +384,35 @@ async function createFinalizeProNotification(args: {
       locationType: args.locationType,
     },
   })
+}
+
+/**
+ * True when this finalized booking is a PENDING aftercare rebook coupled to a
+ * source booking whose off-platform payment is still AWAITING_CONFIRMATION. In
+ * that case the appointment stays PENDING and its approval is deferred to the
+ * pro confirming payment (confirmProBookingPaymentReceived), so the finalize
+ * pro-notification switches from BOOKING_REQUEST_CREATED to
+ * PAYMENT_CONFIRMATION_REQUIRED — the single approval surface.
+ */
+async function isCoupledToPendingPaymentConfirmation(args: {
+  source: BookingSource
+  bookingStatus: BookingStatus
+  rebookOfBookingId: string | null
+}): Promise<boolean> {
+  if (
+    args.source !== BookingSource.AFTERCARE ||
+    args.bookingStatus !== BookingStatus.PENDING ||
+    !args.rebookOfBookingId
+  ) {
+    return false
+  }
+
+  const source = await prisma.booking.findUnique({
+    where: { id: args.rebookOfBookingId },
+    select: { checkoutStatus: true },
+  })
+
+  return source?.checkoutStatus === BookingCheckoutStatus.AWAITING_CONFIRMATION
 }
 
 async function getOfferingOrFail(
@@ -654,6 +703,13 @@ export async function POST(request: Request) {
         })
 
         try {
+          const coupledToPendingPaymentConfirmation =
+            await isCoupledToPendingPaymentConfirmation({
+              source: body.source,
+              bookingStatus: result.booking.status,
+              rebookOfBookingId: ownership.rebookOfBookingId,
+            })
+
           await createFinalizeProNotification({
             professionalId: result.booking.professionalId,
             bookingId: result.booking.id,
@@ -661,6 +717,7 @@ export async function POST(request: Request) {
             bookingStatus: result.booking.status,
             source: body.source,
             locationType: body.locationType,
+            coupledToPendingPaymentConfirmation,
           })
         } catch (notificationError: unknown) {
           console.error('POST /api/v1/bookings/finalize pro notification error', {
