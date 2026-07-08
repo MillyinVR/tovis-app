@@ -133,6 +133,21 @@ items (A2), since they're social surfaces (looks/stats/follow), not SEO mirrors.
 - [ ] **A1 — native auth** (decision 6, biggest structural gap): role chooser →
   client signup → pro 3-step signup → phone+email verify → forgot/reset password →
   pro onboarding checklist → license/document verification. App-Store hygiene.
+  - **pt1 SHIPPED (iOS PR #4, branch `native/client-auth-signup`):** role chooser
+    (Client / Pro) + client signup screen (name · geocoded ZIP · phone · SMS
+    consent · email · password · TOS), wired to `POST /api/v1/auth/register` +
+    `PlacesService.resolveClientZip` (geocode + timezone). Pro card points to web
+    for now. Routes into the existing phone-verification screen (opens at the code
+    step post-signup). swift test 103 pass; xcodebuild green.
+  - ⚠️ **BLOCKED end-to-end on the captcha gate — needs an App Attest PR next.**
+    `POST /auth/register` hard-requires a Turnstile token (`lib/auth/turnstile.ts`:
+    no token → `CAPTCHA_REQUIRED`, even locally) — the reason signup was web-only.
+    **Decision (Tori, 2026-07-08): Apple App Attest** is the durable answer (native
+    threat model > captcha, no Cloudflare-in-app, reusable for other native-only
+    sensitive endpoints — beats WKWebView-Turnstile or a shared-secret bypass).
+    Next PR: `lib/auth/appAttest.ts` verify helper + a register-route native branch
+    that accepts a valid attestation *in lieu of* `turnstileToken`, plus the iOS
+    `DCAppAttestService` provider feeding `registerClient`. That PR flips signup on.
 - [ ] **A2 — client screens** (decision 4): Settings hub (biggest) · Activity ·
   Aftercare inbox · Offers · Openings feed · Referrals activity · Boards
   detail/create/share · **public client profile `/u/[handle]` viewer** (looks /
