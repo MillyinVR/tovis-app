@@ -82,9 +82,14 @@ export type ForYouViewerAffinity = {
   // embedded signals built it. null/absent when the viewer has no stored vector
   // (pre-backfill, no signals, or signals only on unembedded looks): the visual
   // boost is then 0. Optional so non-visual callers (unit tests, the follow-only
-  // paths) can omit them without churn.
+  // paths) can omit them without churn. Note: from §6.3 this vector is the stored
+  // vector already blended with this sitting's fresh likes/saves at load time
+  // (lib/looks/forYouFeed.ts), and tasteSignalCount its blended confidence.
   tasteVector?: readonly number[] | null
   tasteSignalCount?: number
+  // Observability only (ignored by scoring): how many fresh same-session
+  // like/save embeddings folded into the taste vector this request (spec §6.3).
+  sessionVisualSignalCount?: number
 }
 
 export type ForYouRankableRow = {

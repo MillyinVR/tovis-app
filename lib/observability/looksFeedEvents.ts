@@ -42,6 +42,9 @@ export type LooksFeedServeEvent = {
   // many candidates on the page had an embedding to score against.
   tasteSignalCount?: number | null
   candidateEmbeddingCount?: number | null
+  // §6.3 in-session responsiveness: fresh same-session like/save embeddings
+  // folded into the taste vector for this serve (0 = stored vector unchanged).
+  sessionVisualSignalCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -73,6 +76,7 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     occasionTagCount: input.occasionTagCount ?? null,
     tasteSignalCount: input.tasteSignalCount ?? null,
     candidateEmbeddingCount: input.candidateEmbeddingCount ?? null,
+    sessionVisualSignalCount: input.sessionVisualSignalCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

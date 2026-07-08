@@ -39,6 +39,7 @@ import {
   type ForYouRankableRow,
   type ForYouViewerAffinity,
 } from '@/lib/looks/forYouRanking'
+import { loadForYouAffinity } from '@/lib/looks/forYouFeed'
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -392,5 +393,84 @@ describe('ranking consumption: saved-look taste steers page order (real pgvector
     expect(ranked.map((row) => row.id)).toEqual([lookAId, lookBId])
 
     await db.lookLike.deleteMany({ where: { userId: clientUser.userId! } })
+  })
+})
+
+describe('§6.3 in-session responsiveness: a fresh save steers the feed now (real pgvector)', () => {
+  it('seeds a taste lean from this sitting before any cron recompute', async () => {
+    const clientUser = await db.clientProfile.findUniqueOrThrow({
+      where: { id: clientId },
+      select: { userId: true },
+    })
+
+    // Known orthogonal embeddings: look A on axis 0, look B on axis 1.
+    await upsertLookPostEmbedding(db, {
+      lookPostId: lookAId,
+      mediaAssetId: 'asset_session_a',
+      model: MODEL,
+      embedding: basisVector(0),
+      now: NOW,
+    })
+    await upsertLookPostEmbedding(db, {
+      lookPostId: lookBId,
+      mediaAssetId: 'asset_session_b',
+      model: MODEL,
+      embedding: basisVector(1),
+      now: NOW,
+    })
+
+    // No cron recompute for this sitting → clear any vector a prior test stored
+    // so we exercise the session-seed path (empty stored vector).
+    await db.clientTasteVector.deleteMany({
+      where: { clientProfileId: clientId },
+    })
+    expect(await fetchClientTasteVector(db, clientId)).toBeNull()
+
+    // The viewer saves look B (axis 1) THIS sitting.
+    const now = new Date()
+    await db.boardItem.create({
+      data: { boardId, lookPostId: lookBId },
+    })
+
+    // loadForYouAffinity reads via the shared prisma singleton (same test DB):
+    // it must derive a session-seeded taste vector aligned with look B even
+    // though the daily taste-vector cron has not run.
+    const affinity = await loadForYouAffinity({
+      userId: clientUser.userId!,
+      clientId,
+      now,
+    })
+
+    expect(affinity.sessionVisualSignalCount).toBe(1)
+    expect(affinity.tasteSignalCount).toBe(1)
+    expect(affinity.tasteVector).not.toBeNull()
+
+    const candidateEmbeddings = await fetchLookPostEmbeddings(db, [
+      lookAId,
+      lookBId,
+    ])
+    function candidateRow(id: string): ForYouRankableRow {
+      return {
+        id,
+        professionalId: 'pro',
+        publishedAt: now,
+        rankScore: 10,
+        service: null,
+        tags: null,
+      }
+    }
+    const context = {
+      affinity,
+      seenLookIds: new Set<string>(),
+      now,
+      candidateEmbeddings,
+    }
+
+    // The just-saved look B (viewer's in-session aesthetic) now outscores A.
+    expect(computeForYouScore(candidateRow(lookBId), context)).toBeGreaterThan(
+      computeForYouScore(candidateRow(lookAId), context),
+    )
+
+    await db.boardItem.deleteMany({ where: { boardId } })
   })
 })

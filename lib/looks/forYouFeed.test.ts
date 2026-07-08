@@ -300,6 +300,125 @@ describe('lib/looks/forYouFeed', () => {
     })
   })
 
+  describe('loadForYouAffinity — §6.3 in-session visual responsiveness', () => {
+    // A like/save row carrying the fields the §6.3 delta reads.
+    function sessionRow(args: {
+      lookPostId: string
+      createdAt: Date
+      slug?: string | null
+    }) {
+      return {
+        lookPostId: args.lookPostId,
+        createdAt: args.createdAt,
+        lookPost: {
+          service: args.slug ? { category: { slug: args.slug } } : null,
+        },
+      }
+    }
+
+    function lookPostEmbeddingSqlCalls(): string[] {
+      return mocks.prisma.$queryRaw.mock.calls
+        .map((call) =>
+          Array.isArray(call[0]) ? call[0].join(' ') : String(call[0]),
+        )
+        .filter((sql) => sql.includes('LookPostEmbedding'))
+    }
+
+    it('folds a fresh in-session save embedding into the taste vector', async () => {
+      // Mature taste points along axis 0; the just-saved look points along axis
+      // 1, so the blended vector must gain an axis-1 component this request.
+      routeRawSql({
+        tasteVector: [{ embeddingText: unitFirstAxis(), signalCount: 30 }],
+        candidateEmbeddings: [
+          { lookPostId: 'saved_now', embeddingText: unitSecondAxis() },
+        ],
+      })
+      mocks.prisma.boardItem.findMany.mockResolvedValue([
+        sessionRow({ lookPostId: 'saved_now', createdAt: NOW, slug: 'bridal' }),
+      ])
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.sessionVisualSignalCount).toBe(1)
+      // Confidence rose by the fresh signal (30 + 1).
+      expect(affinity.tasteSignalCount).toBe(31)
+      expect(affinity.tasteVector).not.toBeNull()
+      const vector = affinity.tasteVector!
+      expect(vector[1] ?? 0).toBeGreaterThan(0)
+      // Mature direction still dominant.
+      expect(vector[0] ?? 0).toBeGreaterThan(vector[1] ?? Number.NaN)
+    })
+
+    it('ignores a like/save outside the session window', async () => {
+      const threeHoursAgo = new Date(NOW.getTime() - 3 * 60 * 60 * 1000)
+      routeRawSql({
+        tasteVector: [{ embeddingText: unitFirstAxis(), signalCount: 30 }],
+      })
+      mocks.prisma.boardItem.findMany.mockResolvedValue([
+        sessionRow({
+          lookPostId: 'saved_stale',
+          createdAt: threeHoursAgo,
+          slug: 'bridal',
+        }),
+      ])
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.sessionVisualSignalCount).toBe(0)
+      expect(affinity.tasteSignalCount).toBe(30)
+      // No embedding fetch when nothing is in-window.
+      expect(lookPostEmbeddingSqlCalls()).toHaveLength(0)
+      // Stored vector unchanged (unit along axis 0).
+      expect(affinity.tasteVector![0] ?? Number.NaN).toBeCloseTo(1)
+    })
+
+    it('seeds a session-only taste vector for a viewer with no stored vector', async () => {
+      routeRawSql({
+        tasteVector: [], // no mature vector
+        candidateEmbeddings: [
+          { lookPostId: 'liked_now', embeddingText: unitSecondAxis() },
+        ],
+      })
+      mocks.prisma.lookLike.findMany.mockResolvedValue([
+        sessionRow({ lookPostId: 'liked_now', createdAt: NOW, slug: 'bridal' }),
+      ])
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.sessionVisualSignalCount).toBe(1)
+      expect(affinity.tasteSignalCount).toBe(1)
+      expect(affinity.tasteVector).not.toBeNull()
+      expect(affinity.tasteVector![1] ?? Number.NaN).toBeCloseTo(1)
+    })
+
+    it('does not fetch session embeddings for a viewer without a client profile', async () => {
+      mocks.prisma.lookLike.findMany.mockResolvedValue([
+        sessionRow({ lookPostId: 'liked_now', createdAt: NOW }),
+      ])
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: null,
+        now: NOW,
+      })
+
+      expect(affinity.sessionVisualSignalCount).toBe(0)
+      expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled()
+    })
+  })
+
   describe('computeAffinityDecayFactor', () => {
     it('is 1 for fresh or missing timestamps and halves per half-life', () => {
       expect(computeAffinityDecayFactor(NOW, NOW)).toBe(1)

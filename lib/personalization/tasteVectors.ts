@@ -26,59 +26,26 @@ import {
   AFFINITY_SAVE_WEIGHT,
   computeAffinityDecayFactor,
 } from '@/lib/looks/forYouFeed'
-import { LOOK_EMBEDDING_DIMENSIONS } from '@/lib/personalization/lookEmbedding'
 import {
   fetchLookPostEmbeddings,
   serializeEmbeddingVector,
 } from '@/lib/personalization/lookEmbeddingStore'
 
+// The pure vector math lives in tasteVectorMath (no server imports) so both
+// this writer and the For You loader can share it without a circular import.
+import {
+  computeWeightedTasteVector,
+  type TasteVectorSignal,
+} from '@/lib/personalization/tasteVectorMath'
+
+// Re-exported so existing importers of these symbols (and their tests) are
+// unaffected by the move.
+export {
+  computeWeightedTasteVector,
+  type TasteVectorSignal,
+} from '@/lib/personalization/tasteVectorMath'
+
 type TasteVectorDb = PrismaClient | Prisma.TransactionClient
-
-export type TasteVectorSignal = {
-  embedding: readonly number[]
-  weight: number
-}
-
-/**
- * Weighted mean of the signal embeddings, L2-normalized so downstream cosine
- * similarity is a plain dot product against unit vectors. Returns null when
- * there is no usable signal (no entries, all weights zero, or a degenerate
- * zero-sum) — callers translate null into "delete any stored vector".
- * Pure + exported for unit testing.
- */
-export function computeWeightedTasteVector(
-  signals: readonly TasteVectorSignal[],
-): number[] | null {
-  const sum = new Array<number>(LOOK_EMBEDDING_DIMENSIONS).fill(0)
-  let totalWeight = 0
-
-  for (const signal of signals) {
-    if (!Number.isFinite(signal.weight) || signal.weight <= 0) continue
-    if (signal.embedding.length !== LOOK_EMBEDDING_DIMENSIONS) continue
-
-    totalWeight += signal.weight
-    for (let i = 0; i < LOOK_EMBEDDING_DIMENSIONS; i += 1) {
-      sum[i] = (sum[i] ?? 0) + (signal.embedding[i] ?? 0) * signal.weight
-    }
-  }
-
-  if (totalWeight <= 0) return null
-
-  let normSquared = 0
-  for (let i = 0; i < LOOK_EMBEDDING_DIMENSIONS; i += 1) {
-    const mean = (sum[i] ?? 0) / totalWeight
-    sum[i] = mean
-    normSquared += mean * mean
-  }
-  if (normSquared <= 0) return null
-
-  const norm = Math.sqrt(normSquared)
-  for (let i = 0; i < LOOK_EMBEDDING_DIMENSIONS; i += 1) {
-    sum[i] = (sum[i] ?? 0) / norm
-  }
-
-  return sum
-}
 
 export type RecomputeTasteVectorResult = {
   status: 'STORED' | 'CLEARED' | 'SKIPPED_NOT_FOUND'
