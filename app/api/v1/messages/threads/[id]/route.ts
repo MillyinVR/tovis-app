@@ -74,12 +74,23 @@ export async function GET(req: Request, ctx: RouteContext) {
       where: { id: threadId },
       select: {
         id: true,
-        participants: { where: { userId: user.id }, select: { userId: true }, take: 1 },
+        professional: { select: { userId: true } },
+        // Both participant rows (max 2): the viewer's for the membership check,
+        // the counterparty's read timestamp for the sender's read receipt.
+        participants: { select: { userId: true, lastReadAt: true } },
       },
     })
 
     if (!thread) return jsonFail(404, 'Thread not found.')
-    if (!thread.participants.length) return jsonFail(403, 'Forbidden.')
+    if (!thread.participants.some((p) => p.userId === user.id)) {
+      return jsonFail(403, 'Forbidden.')
+    }
+
+    const isViewerPro =
+      thread.professional?.userId != null && thread.professional.userId === user.id
+    const counterpartyLastReadAt =
+      thread.participants.find((p) => p.userId !== user.id)?.lastReadAt?.toISOString() ??
+      null
 
     // newest -> oldest
     const pageDesc = await prisma.message.findMany({
@@ -103,7 +114,7 @@ export async function GET(req: Request, ctx: RouteContext) {
     const hasMore = Boolean(nextCursor)
 
     return jsonOk({
-      thread: { id: threadId },
+      thread: { id: threadId, isViewerPro, counterpartyLastReadAt },
       messages: messages.map((m) => ({
         id: m.id,
         body: m.body,

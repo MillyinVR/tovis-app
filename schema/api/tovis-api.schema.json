@@ -7352,6 +7352,10 @@
         "id": {
           "type": "string"
         },
+        "isViewerPro": {
+          "description": "Whether the viewer is this thread's professional (derived from the viewer's user id, not their acting role — so dual-role users and admins never resolve to their own name). The counterparty is the client when true, the pro when false. The list payload omits participant user ids, so this is the client's only signal for picking whose name/avatar to show.",
+          "type": "boolean"
+        },
         "lastMessageAt": {
           "type": [
             "string",
@@ -7402,6 +7406,7 @@
         "client",
         "professional",
         "participants",
+        "isViewerPro",
         "_count"
       ],
       "type": "object"
@@ -7428,12 +7433,25 @@
         },
         "thread": {
           "properties": {
+            "counterpartyLastReadAt": {
+              "description": "The counterparty's last-read timestamp (ISO-8601), or null if they haven't read the thread. Drives the sender's read receipt: an outgoing message is \"Read\" once this is >= the message's createdAt. Updated on each poll.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "id": {
               "type": "string"
+            },
+            "isViewerPro": {
+              "description": "See MessageThreadListItemDTO.isViewerPro.",
+              "type": "boolean"
             }
           },
           "required": [
-            "id"
+            "id",
+            "isViewerPro",
+            "counterpartyLastReadAt"
           ],
           "type": "object"
         }

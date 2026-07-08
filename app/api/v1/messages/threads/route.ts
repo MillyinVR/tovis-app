@@ -27,7 +27,7 @@ export async function GET() {
         lastMessagePreview: true,
         updatedAt: true,
         client: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
-        professional: { select: { id: true, businessName: true, avatarUrl: true } },
+        professional: { select: { id: true, userId: true, businessName: true, avatarUrl: true } },
         participants: {
           where: { userId: user.id },
           select: { lastReadAt: true },
@@ -38,23 +38,31 @@ export async function GET() {
     })
 
     return jsonOk({
-      threads: threads.map((t) => ({
-        id: t.id,
-        contextType: t.contextType,
-        contextId: t.contextId,
-        bookingId: t.bookingId,
-        serviceId: t.serviceId,
-        offeringId: t.offeringId,
-        lastMessageAt: t.lastMessageAt?.toISOString() ?? null,
-        lastMessagePreview: t.lastMessagePreview,
-        updatedAt: t.updatedAt.toISOString(),
-        client: t.client,
-        professional: t.professional,
-        participants: t.participants.map((p) => ({
-          lastReadAt: p.lastReadAt?.toISOString() ?? null,
-        })),
-        _count: t._count,
-      })),
+      threads: threads.map((t) => {
+        // Counterparty is derived from the viewer's user id, not their acting
+        // role — the list payload deliberately omits participant user ids, so
+        // this boolean is the client's only signal for whose name to show.
+        const { userId: proUserId, ...professional } = t.professional
+        const isViewerPro = proUserId != null && proUserId === user.id
+        return {
+          id: t.id,
+          contextType: t.contextType,
+          contextId: t.contextId,
+          bookingId: t.bookingId,
+          serviceId: t.serviceId,
+          offeringId: t.offeringId,
+          lastMessageAt: t.lastMessageAt?.toISOString() ?? null,
+          lastMessagePreview: t.lastMessagePreview,
+          updatedAt: t.updatedAt.toISOString(),
+          client: t.client,
+          professional,
+          participants: t.participants.map((p) => ({
+            lastReadAt: p.lastReadAt?.toISOString() ?? null,
+          })),
+          isViewerPro,
+          _count: t._count,
+        }
+      }),
     } satisfies MessagesThreadsListResponseDTO)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Internal error'

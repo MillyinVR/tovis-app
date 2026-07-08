@@ -8,7 +8,7 @@ import {
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
-import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, pickTimeZoneOrNull } from '@/lib/time'
@@ -46,13 +46,6 @@ function isPresentString(value: string | null | undefined): value is string {
 
 function joinParts(parts: (string | null | undefined)[]): string {
   return parts.filter(isPresentString).join(' · ')
-}
-
-function formatPersonName(
-  firstName: string | null | undefined,
-  lastName: string | null | undefined,
-): string {
-  return [firstName, lastName].filter(isPresentString).join(' ').trim()
 }
 
 function formatDayTime(date: Date, timeZone: string): string {
@@ -234,9 +227,7 @@ export default async function MessageThreadPage(props: PageProps) {
         },
       },
       participants: {
-        where: { userId: user.id },
-        select: { userId: true },
-        take: 1,
+        select: { userId: true, lastReadAt: true },
       },
     },
   })
@@ -245,7 +236,7 @@ export default async function MessageThreadPage(props: PageProps) {
     notFound()
   }
 
-  if (thread.participants.length === 0) {
+  if (!thread.participants.some((p) => p.userId === user.id)) {
     notFound()
   }
 
@@ -287,14 +278,16 @@ export default async function MessageThreadPage(props: PageProps) {
     thread.professional?.userId != null &&
     thread.professional.userId === user.id
 
-  const title = viewerIsThreadPro
-    ? formatPersonName(thread.client?.firstName, thread.client?.lastName) || 'Client'
-    : formatPublicProfileDisplayName({
-        businessName: thread.professional?.businessName,
-        firstName: thread.professional?.firstName,
-        lastName: thread.professional?.lastName,
-        fallback: 'Professional',
-      })
+  const { title } = resolveThreadCounterparty({
+    viewerIsThreadPro,
+    client: thread.client,
+    professional: thread.professional,
+  })
+
+  // Seed the sender's read receipt so it doesn't flash in on the first poll.
+  const initialCounterpartyLastReadAt =
+    thread.participants.find((p) => p.userId !== user.id)?.lastReadAt?.toISOString() ??
+    null
 
   // When the pro is viewing, offer a jump into the client's chart (the pro-only
   // record), but only when the visibility SSOT actually grants access — so the
@@ -368,6 +361,7 @@ export default async function MessageThreadPage(props: PageProps) {
           threadId={thread.id}
           myUserId={user.id}
           initialMessages={initialMessages}
+          initialCounterpartyLastReadAt={initialCounterpartyLastReadAt}
         />
       </section>
     </main>

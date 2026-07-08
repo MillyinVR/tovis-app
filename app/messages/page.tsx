@@ -15,7 +15,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { formatInTimeZone, formatRelativeTimeCompact } from '@/lib/time'
 import { initialsForName } from '@/lib/initials'
-import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 
@@ -201,13 +201,6 @@ function avatarGradientStyle(seed: string): { background: string } {
   }
 }
 
-function formatPersonName(
-  firstName: string | null | undefined,
-  lastName: string | null | undefined,
-): string {
-  return [firstName, lastName].filter(isPresentString).join(' ').trim()
-}
-
 function formatBookingTime(
   date: Date | null | undefined,
   timeZone: string | null | undefined,
@@ -325,19 +318,11 @@ function buildThreadPresentation(params: {
     thread.professional?.userId != null &&
     thread.professional.userId === viewerUserId
 
-  const title = viewerIsThreadPro
-    ? formatPersonName(thread.client?.firstName, thread.client?.lastName) ||
-      'Client'
-    : formatPublicProfileDisplayName({
-        businessName: thread.professional?.businessName,
-        firstName: thread.professional?.firstName,
-        lastName: thread.professional?.lastName,
-        fallback: 'Professional',
-      })
-
-  const avatarUrl = viewerIsThreadPro
-    ? thread.client?.avatarUrl ?? null
-    : thread.professional?.avatarUrl ?? null
+  const { title, avatarUrl } = resolveThreadCounterparty({
+    viewerIsThreadPro,
+    client: thread.client,
+    professional: thread.professional,
+  })
 
   const lastActivityAt = thread.lastMessageAt ?? thread.updatedAt
   const eyebrow = buildEyebrow({
