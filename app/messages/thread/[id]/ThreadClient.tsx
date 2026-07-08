@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { useLiveChannels } from '@/app/_components/live/useLiveChannels'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
+import { THREAD_MESSAGE_PAGE_SIZE } from '@/lib/messages/paging'
 import { isRecord } from '@/lib/guards'
 
 type Attachment = {
@@ -42,6 +43,13 @@ type ThreadClientProps = {
   liveChannel: string | null
   initialMessages: Msg[]
   initialCounterpartyLastReadAt: string | null
+  /**
+   * Cursor for the next-older page (the oldest loaded message's id), or null
+   * when the whole history fit in the initial page. Seeds "load earlier".
+   */
+  initialNextCursor: string | null
+  /** Whether there are older messages to page back through. */
+  initialHasMore: boolean
 }
 
 function isAttachmentMediaType(value: unknown): value is Attachment['mediaType'] {
@@ -141,6 +149,33 @@ function parseFetchMessagesResponse(
       : null
 
   return { messages: parseMessages(value.messages), counterpartyLastReadAt }
+}
+
+function parseOlderPageResponse(
+  value: unknown,
+): { messages: Msg[]; nextCursor: string | null; hasMore: boolean } | null {
+  if (!isRecord(value)) return null
+  if (value.ok !== true) return null
+
+  const nextCursor = typeof value.nextCursor === 'string' ? value.nextCursor : null
+  const hasMore = value.hasMore === true
+
+  return { messages: parseMessages(value.messages), nextCursor, hasMore }
+}
+
+// Union two server-message lists by id (fresh wins) and sort ascending by
+// createdAt, id as a stable tiebreak. Used to fold a freshly-fetched page
+// (latest poll or an older page) into the loaded set without dropping either
+// end — so paging back and then polling never discards loaded history.
+function mergeServerMessages(existing: Msg[], incoming: Msg[]): Msg[] {
+  const byId = new Map<string, Msg>()
+  for (const message of existing) byId.set(message.id, message)
+  for (const message of incoming) byId.set(message.id, message)
+
+  return Array.from(byId.values()).sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+  })
 }
 
 function parseSendMessageResponse(value: unknown): Msg | null {
@@ -246,6 +281,8 @@ export default function ThreadClient(props: ThreadClientProps) {
     liveChannel,
     initialMessages,
     initialCounterpartyLastReadAt,
+    initialNextCursor,
+    initialHasMore,
   } = props
 
   const [messages, setMessages] = useState<Msg[]>(initialMessages)
@@ -257,7 +294,14 @@ export default function ThreadClient(props: ThreadClientProps) {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  // "Load earlier" cursor paging. `olderCursor` is the oldest loaded message's
+  // id; the latest-poll never touches it (it only fetches the newest page).
+  const [olderCursor, setOlderCursor] = useState<string | null>(initialNextCursor)
+  const [hasMoreOlder, setHasMoreOlder] = useState(initialHasMore)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   const cancelledRef = useRef(false)
   const inFlightRef = useRef(false)
 
@@ -314,12 +358,16 @@ export default function ThreadClient(props: ThreadClientProps) {
         // the end so a poll never drops an in-flight or failed bubble.
         const localPending = current.filter((message) => message.status)
         const serverOnly = current.filter((message) => !message.status)
-        const serverTailChanged = !messageListsHaveSameTail(
-          serverOnly,
-          fetched.messages,
-        )
+        // Fold the latest page into the loaded set instead of replacing it, so
+        // any older pages the user loaded via "load earlier" survive the poll.
+        const merged = mergeServerMessages(serverOnly, fetched.messages)
+        const serverTailChanged = !messageListsHaveSameTail(serverOnly, merged)
 
-        if (localPending.length === 0 && !serverTailChanged) {
+        if (
+          localPending.length === 0 &&
+          !serverTailChanged &&
+          merged.length === serverOnly.length
+        ) {
           return current
         }
 
@@ -327,7 +375,7 @@ export default function ThreadClient(props: ThreadClientProps) {
           queueMicrotask(() => scrollToBottom('auto'))
         }
 
-        return [...fetched.messages, ...localPending]
+        return [...merged, ...localPending]
       })
 
       void markRead()
@@ -337,6 +385,60 @@ export default function ThreadClient(props: ThreadClientProps) {
       setLoading(false)
     }
   }, [markRead, scrollToBottom, threadId])
+
+  // Page backwards through history. Fetches the messages older than the current
+  // oldest-loaded cursor and prepends them, preserving the scroll position so
+  // the view doesn't jump (the container grows upward). Never scrolls to bottom.
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || !hasMoreOlder || !olderCursor) return
+
+    setLoadingOlder(true)
+
+    const container = scrollRef.current
+    const prevHeight = container?.scrollHeight ?? 0
+    const prevTop = container?.scrollTop ?? 0
+
+    try {
+      const res = await fetch(
+        `/api/v1/messages/threads/${encodeURIComponent(threadId)}?cursor=${encodeURIComponent(
+          olderCursor,
+        )}&take=${THREAD_MESSAGE_PAGE_SIZE}`,
+        { method: 'GET', cache: 'no-store' },
+      )
+
+      const data = await readJsonResponse(res)
+      const page = parseOlderPageResponse(data)
+
+      if (!res.ok || !page) {
+        setErr(parseErrorMessage(data, 'Could not load earlier messages.'))
+        return
+      }
+
+      setHasMoreOlder(page.hasMore)
+      setOlderCursor(page.nextCursor)
+      setErr(null)
+
+      if (page.messages.length === 0) return
+
+      setMessages((current) => {
+        const localPending = current.filter((message) => message.status)
+        const serverOnly = current.filter((message) => !message.status)
+        return [...mergeServerMessages(serverOnly, page.messages), ...localPending]
+      })
+
+      // Restore the scroll offset after the prepended rows lay out, so the
+      // message the user was reading stays put instead of jumping to the top.
+      requestAnimationFrame(() => {
+        const el = scrollRef.current
+        if (!el) return
+        el.scrollTop = el.scrollHeight - prevHeight + prevTop
+      })
+    } catch {
+      setErr('Could not load earlier messages.')
+    } finally {
+      setLoadingOlder(false)
+    }
+  }, [hasMoreOlder, loadingOlder, olderCursor, threadId])
 
   // Post one message body under a stable clientId. Shows the bubble immediately
   // (status 'sending'); on success swaps in the server message, on failure marks
@@ -527,13 +629,26 @@ export default function ThreadClient(props: ThreadClientProps) {
       ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[26px] border border-textPrimary/10 bg-bgSecondary/30">
-        <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto px-4 py-4">
           {messages.length === 0 ? (
             <div className="py-12 text-center font-mono text-[11px] uppercase tracking-[0.08em] text-textMuted">
               No messages yet — start it off.
             </div>
           ) : (
             <div className="grid gap-[14px]">
+              {hasMoreOlder ? (
+                <div className="flex justify-center pb-1">
+                  <button
+                    type="button"
+                    onClick={() => void loadOlder()}
+                    disabled={loadingOlder}
+                    className="rounded-full border border-textPrimary/10 bg-bgPrimary/70 px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-textSecondary transition hover:text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {loadingOlder ? 'Loading…' : 'Load earlier messages'}
+                  </button>
+                </div>
+              ) : null}
+
               {messages.map((message, index) => {
                 const mine = message.senderUserId === myUserId
                 const showDaySeparator =

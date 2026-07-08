@@ -10,6 +10,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { liveChannelForUser } from '@/lib/live/broadcast'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
+import { THREAD_MESSAGE_PAGE_SIZE, nextOlderCursor } from '@/lib/messages/paging'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, pickTimeZoneOrNull } from '@/lib/time'
@@ -241,10 +242,14 @@ export default async function MessageThreadPage(props: PageProps) {
     notFound()
   }
 
-  const messageRows = await prisma.message.findMany({
+  // Load the LATEST page (newest → oldest), then reverse to ascending for
+  // display. `initialNextCursor` points at the oldest of this page so
+  // ThreadClient can page backwards ("load earlier") from the same boundary the
+  // GET route uses; null when the whole history fit in one page.
+  const messageRowsDesc = await prisma.message.findMany({
     where: { threadId: thread.id },
-    orderBy: { createdAt: 'asc' },
-    take: 60,
+    orderBy: { createdAt: 'desc' },
+    take: THREAD_MESSAGE_PAGE_SIZE,
     select: {
       id: true,
       body: true,
@@ -259,6 +264,13 @@ export default async function MessageThreadPage(props: PageProps) {
       },
     },
   })
+
+  const messageRows = messageRowsDesc.slice().reverse()
+  const initialNextCursor = nextOlderCursor(
+    messageRowsDesc.map((m) => m.id),
+    THREAD_MESSAGE_PAGE_SIZE,
+  )
+  const initialHasMore = Boolean(initialNextCursor)
 
   const initialMessages: InitialMessage[] = messageRows.map((message) => ({
     id: message.id,
@@ -364,6 +376,8 @@ export default async function MessageThreadPage(props: PageProps) {
           liveChannel={liveChannelForUser(user.id)}
           initialMessages={initialMessages}
           initialCounterpartyLastReadAt={initialCounterpartyLastReadAt}
+          initialNextCursor={initialNextCursor}
+          initialHasMore={initialHasMore}
         />
       </section>
     </main>

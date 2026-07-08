@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
 import { broadcastLive, liveChannelForUser } from '@/lib/live/broadcast'
+import { THREAD_MESSAGE_PAGE_SIZE, nextOlderCursor } from '@/lib/messages/paging'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
   resolveRouteParams,
@@ -66,7 +67,7 @@ export async function GET(req: Request, ctx: RouteContext) {
     const url = new URL(req.url)
     const sp = url.searchParams
 
-    const take = clampInt(parseTake(sp, 40), 1, 100)
+    const take = clampInt(parseTake(sp, THREAD_MESSAGE_PAGE_SIZE), 1, 100)
     const cursorRaw = pickString(sp.get('cursor')) ?? null
     const cursor = await validateCursorForThread(threadId, cursorRaw)
 
@@ -109,8 +110,12 @@ export async function GET(req: Request, ctx: RouteContext) {
 
     const messages = pageDesc.slice().reverse()
 
-    // Cursor points to the oldest item in this DESC page (last element).
-    const nextCursor = pageDesc.length === take ? pageDesc[pageDesc.length - 1]?.id ?? null : null
+    // Cursor points to the oldest item in this DESC page (last element), present
+    // only when the page filled — a partial page means there's nothing older.
+    const nextCursor = nextOlderCursor(
+      pageDesc.map((m) => m.id),
+      take,
+    )
     const hasMore = Boolean(nextCursor)
 
     return jsonOk({
