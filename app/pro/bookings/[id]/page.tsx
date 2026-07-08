@@ -8,10 +8,15 @@ import MoneyTrailInspector from '@/app/_components/booking/MoneyTrailInspector'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { moneyToString } from '@/lib/money'
 import {
+  BookingCheckoutStatus,
+  BookingSource,
+  BookingStatus,
   PaymentProvider,
   Prisma,
   StripePaymentStatus,
 } from '@prisma/client'
+import { COPY } from '@/lib/copy'
+import ConfirmPaymentReceivedButton from './ConfirmPaymentReceivedButton'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { Avatar } from '@/app/_components/ui'
 import { getProClientVisibility } from '@/lib/clientVisibility'
@@ -229,6 +234,33 @@ export default async function ProBookingDetailPage(props: {
   })
 
   if (!booking) redirect('/pro/bookings')
+
+  // Off-platform payment the client marked as sent (PF1) — the pro confirms
+  // receipt here to close it out.
+  const awaitingPaymentConfirmation =
+    booking.checkoutStatus === BookingCheckoutStatus.AWAITING_CONFIRMATION
+
+  // This booking is an aftercare next appointment coupled to a previous
+  // appointment whose payment is still awaiting confirmation (PF2): it stays
+  // PENDING until the pro confirms that payment, which approves this one. This
+  // page is where the PAYMENT_CONFIRMATION_REQUIRED notification lands, so surface
+  // the confirm action for the source booking.
+  let coupledSourceBookingId: string | null = null
+  if (
+    booking.source === BookingSource.AFTERCARE &&
+    booking.status === BookingStatus.PENDING &&
+    booking.rebookOfBookingId
+  ) {
+    const sourceBooking = await prisma.booking.findFirst({
+      where: { id: booking.rebookOfBookingId, professionalId: proId },
+      select: { id: true, checkoutStatus: true },
+    })
+    if (
+      sourceBooking?.checkoutStatus === BookingCheckoutStatus.AWAITING_CONFIRMATION
+    ) {
+      coupledSourceBookingId = sourceBooking.id
+    }
+  }
 
   const visibility = await getProClientVisibility(proId, booking.clientId)
   const canLinkClient = visibility.canViewClient
@@ -454,6 +486,21 @@ export default async function ProBookingDetailPage(props: {
         </div>
       </section>
 
+      {/* coupled next appointment — pending until the previous payment is confirmed */}
+      {coupledSourceBookingId ? (
+        <section className="tovis-glass mb-3.5 rounded-card border border-accentPrimary/30 bg-accentPrimary/10 p-4">
+          <h2 className="font-display text-[14px] font-bold text-textPrimary">
+            {COPY.proBookingCheckout.coupledPendingTitle}
+          </h2>
+          <div className="mt-1 text-[12.5px] text-textSecondary">
+            {COPY.proBookingCheckout.coupledPendingBody}
+          </div>
+          <div className="mt-3">
+            <ConfirmPaymentReceivedButton bookingId={coupledSourceBookingId} />
+          </div>
+        </section>
+      ) : null}
+
       {/* timing + payment */}
       <div className="grid gap-3.5 lg:grid-cols-2">
         <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
@@ -500,7 +547,11 @@ export default async function ProBookingDetailPage(props: {
             Payment
           </h2>
           <div className="mt-0.5 text-[12px] text-textMuted">
-            {isPaid ? 'Collected and reconciled.' : 'Not collected yet.'}
+            {isPaid
+              ? 'Collected and reconciled.'
+              : awaitingPaymentConfirmation
+                ? COPY.proBookingCheckout.awaitingConfirmationBody
+                : 'Not collected yet.'}
           </div>
 
           <div
@@ -541,6 +592,15 @@ export default async function ProBookingDetailPage(props: {
               <MoneyRow label="Total" value={total} strong />
             </div>
           </div>
+
+          {awaitingPaymentConfirmation ? (
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <ConfirmPaymentReceivedButton bookingId={booking.id} fullWidth />
+              <p className="mt-2 text-[11.5px] text-textMuted">
+                {COPY.proBookingCheckout.approvesNextNote}
+              </p>
+            </div>
+          ) : null}
         </section>
       </div>
 

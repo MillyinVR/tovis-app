@@ -11,11 +11,13 @@ import {
 } from '@/lib/idempotency/client'
 import { buildPaymentDeepLink } from '@/lib/payments/paymentDeepLink'
 import { useBrand } from '@/lib/brand/BrandProvider'
+import { COPY } from '@/lib/copy'
 
 type CheckoutStatus =
   | 'NOT_READY'
   | 'READY'
   | 'PARTIALLY_PAID'
+  | 'AWAITING_CONFIRMATION'
   | 'PAID'
   | 'WAIVED'
   | string
@@ -363,6 +365,12 @@ export default function ClientCheckoutCard(props: Props) {
     checkoutStatus === 'PAID' ||
     checkoutStatus === 'WAIVED'
 
+  // Off-platform payment the client already marked as sent — now waiting on the
+  // pro to confirm receipt (PF1 AWAITING_CONFIRMATION). The client can't re-confirm
+  // or edit the tip, so freeze the mutating controls, but keep the summary visible.
+  const awaitingConfirmation = checkoutStatus === 'AWAITING_CONFIRMATION'
+  const controlsFrozen = checkoutLocked || awaitingConfirmation
+
   const tipsEnabled = props.tipsEnabled !== false
   const allowCustomTip = props.allowCustomTip !== false
 
@@ -450,7 +458,7 @@ export default function ClientCheckoutCard(props: Props) {
   }, [configuredTipSuggestions, serviceSubtotal, tipsEnabled])
 
   const ctaDisabled =
-    checkoutLocked ||
+    controlsFrozen ||
     isPending ||
     props.acceptedMethods.length === 0 ||
     !selectedMethod
@@ -549,7 +557,7 @@ export default function ClientCheckoutCard(props: Props) {
   }
 
   function handleSaveTip() {
-    if (checkoutLocked || isPending) return
+    if (controlsFrozen || isPending) return
 
     setError(null)
     setSuccess(null)
@@ -618,6 +626,20 @@ export default function ClientCheckoutCard(props: Props) {
           </div>
         ) : null}
 
+        {awaitingConfirmation ? (
+          <div
+            role="status"
+            className="mt-3 rounded-card border border-accentPrimary/30 bg-accentPrimary/10 p-3"
+          >
+            <div className="text-[12px] font-black text-textPrimary">
+              {COPY.bookings.checkout.awaitingConfirmationTitle}
+            </div>
+            <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+              {COPY.bookings.checkout.awaitingConfirmationBody}
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-3 grid gap-1">
           <SummaryRow
             label="Services subtotal"
@@ -671,7 +693,7 @@ export default function ClientCheckoutCard(props: Props) {
                       key={percent}
                       type="button"
                       onClick={() => selectPreset(percent)}
-                      disabled={checkoutLocked || isPending}
+                      disabled={controlsFrozen || isPending}
                       className={[
                         'inline-flex items-center rounded-full border px-4 py-2 text-[12px] font-black disabled:cursor-not-allowed disabled:opacity-50',
                         active
@@ -699,7 +721,7 @@ export default function ClientCheckoutCard(props: Props) {
                   inputMode="decimal"
                   value={tipInput}
                   onChange={(event) => onTipInputChange(event.target.value)}
-                  disabled={checkoutLocked || isPending || !allowCustomTip}
+                  disabled={controlsFrozen || isPending || !allowCustomTip}
                   placeholder="0.00"
                   className="h-10 w-28 rounded-full border border-white/10 bg-bgSecondary px-4 text-[13px] font-black text-textPrimary outline-none placeholder:text-textSecondary disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label="Custom tip amount"
@@ -739,7 +761,7 @@ export default function ClientCheckoutCard(props: Props) {
                   key={method.key}
                   type="button"
                   onClick={() => handleMethodSelect(method.key)}
-                  disabled={checkoutLocked || isPending}
+                  disabled={controlsFrozen || isPending}
                   className={[
                     'flex w-full items-start justify-between gap-3 rounded-card border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-50',
                     active
@@ -779,48 +801,54 @@ export default function ClientCheckoutCard(props: Props) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="text-[12px] font-black text-textPrimary">
-              {selectedMethodIsStripe
-                ? 'Pay securely with card'
-                : 'Confirm payment'}
+              {awaitingConfirmation
+                ? COPY.bookings.checkout.awaitingConfirmationTitle
+                : selectedMethodIsStripe
+                  ? 'Pay securely with card'
+                  : 'Confirm payment'}
             </div>
             <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-              {selectedMethodIsStripe
-                ? 'Card payment opens Stripe Checkout. Tips are saved before redirect.'
-                : 'Once your pro confirms they received payment, your booking will close out.'}
+              {awaitingConfirmation
+                ? COPY.bookings.checkout.awaitingConfirmationBody
+                : selectedMethodIsStripe
+                  ? 'Card payment opens Stripe Checkout. Tips are saved before redirect.'
+                  : 'Once your pro confirms they received payment, your booking will close out.'}
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {tipsEnabled ? (
+          {awaitingConfirmation ? null : (
+            <div className="flex flex-wrap gap-2">
+              {tipsEnabled ? (
+                <button
+                  type="button"
+                  onClick={handleSaveTip}
+                  disabled={controlsFrozen || isPending}
+                  className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="Save tip without confirming payment"
+                >
+                  {isPending ? 'Saving…' : 'Save tip'}
+                </button>
+              ) : null}
+
               <button
                 type="button"
-                onClick={handleSaveTip}
-                disabled={checkoutLocked || isPending}
-                className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
-                aria-label="Save tip without confirming payment"
+                onClick={handlePrimaryCta}
+                disabled={ctaDisabled}
+                className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isPending ? 'Saving…' : 'Save tip'}
+                {ctaLabel}
               </button>
-            ) : null}
-
-            <button
-              type="button"
-              onClick={handlePrimaryCta}
-              disabled={ctaDisabled}
-              className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {ctaLabel}
-            </button>
-          </div>
+            </div>
+          )}
         </div>
 
-        {selectedMethod ? (
+        {selectedMethod && !awaitingConfirmation ? (
           <div className="mt-3 text-[12px] font-semibold text-textSecondary">
             Paying with {selectedMethod.label}.
           </div>
         ) : null}
 
-        {payAction ? (
+        {payAction && !awaitingConfirmation ? (
           <div className="mt-3">
             {payAction.kind === 'link' ? (
               <>

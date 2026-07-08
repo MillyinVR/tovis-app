@@ -1713,6 +1713,12 @@ export default async function ClientBookingPage(props: {
                                           : null
                                       }
                                       declined={Boolean(aftercare.rebookDeclinedAt)}
+                                      pendingPaymentConfirmation={
+                                        upper(booking.checkout.checkoutStatus) ===
+                                          'AWAITING_CONFIRMATION' &&
+                                        rebookedNextBooking != null &&
+                                        upper(rebookedNextBooking.status) === 'PENDING'
+                                      }
                                     />
                                   ) : showRebookCTA ? (
                                     <AftercareRebookButton

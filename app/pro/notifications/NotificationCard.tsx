@@ -20,6 +20,10 @@ function eventKeyLabel(eventKey: NotificationEventKey): string {
     return 'Booking request'
   }
 
+  if (eventKey === NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED) {
+    return 'Confirm payment'
+  }
+
   if (
     eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT ||
     eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_PRO ||
@@ -47,7 +51,10 @@ function eventKeyLabel(eventKey: NotificationEventKey): string {
 }
 
 function eventKeyBadgeClass(eventKey: NotificationEventKey): string {
-  if (eventKey === NotificationEventKey.BOOKING_REQUEST_CREATED) {
+  if (
+    eventKey === NotificationEventKey.BOOKING_REQUEST_CREATED ||
+    eventKey === NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED
+  ) {
     return 'border-accentPrimary/35 bg-accentPrimary/12 text-textPrimary'
   }
 
