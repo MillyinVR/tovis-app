@@ -165,6 +165,236 @@ items (A2), since they're social surfaces (looks/stats/follow), not SEO mirrors.
   filter tabs/eyebrows · Home InviteFriendCard + two-column · Notifications
   day-grouping + filter chips.
 
+## 10. Post-appointment payment confirmation + aftercare rebooking (audit 2026-07-08)
+Audit of the client post-appointment checkout → aftercare rebooking flow (3 parallel
+agents). **Gap:** for off-platform / unverifiable methods (Venmo / Zelle / Cash /
+Apple Cash / PayPal) the client checkout route drives the booking straight to `PAID` +
+stamps `paymentCollectedAt` on the client's word alone
+([checkout/route.ts:327-332](../app/api/v1/client/bookings/%5Bid%5D/checkout/route.ts#L327-L332)),
+yet the UI already *promises* pro confirmation
+([ClientCheckoutCard.tsx:789](../app/client/(gated)/bookings/%5Bid%5D/ClientCheckoutCard.tsx#L789):
+"Once your pro confirms they received payment, your booking will close out") — backend
+contradicts UI. There is **no "awaiting pro confirmation of receipt" checkout state**.
+Stripe card already correctly waits for the webhook. (Rebooking itself already lives in
+aftercare and the session-authenticated path is NOT payment-gated — that half of the ask
+already works; no change there.)
+
+**Locked decisions (Tori, 2026-07-08):** (1) **payment-only pending** — the CURRENT
+appointment's checkout enters a new `AWAITING_CONFIRMATION` state, not the next
+appointment; (2) the client can still book the next appointment **immediately** through the
+aftercare summary, but for **aftercare-sourced** next appointments approval is **coupled to
+payment confirmation**: the appointment stays `PENDING` until the pro approves the payment,
+and approving the payment auto-approves it (`ACCEPTED`) — non-aftercare bookings keep the
+normal pro-accept flow; (3) a **new dedicated pro "Confirm payment received" action**
+(separate from Mark-paid); (4) ship **web + iOS in parity**.
+**Definitions:** "unverifiable" = off-platform set `CASH / VENMO / ZELLE / APPLE_CASH /
+PAYPAL`; card rails (`STRIPE_CARD` / `CARD_ON_FILE` / `TAP_TO_PAY`) stay verifiable and
+unchanged. **Open Q:** fold `CARD_ON_FILE`/`TAP_TO_PAY` (currently accepted in the client
+manual-confirm path) into the pending flow? Left as-is for now — flag before PF1.
+**Coupling linkage** = `Booking.rebookOfBookingId` (the `RebookChain` self-relation,
+[schema.prisma:2992/3050](../prisma/schema.prisma#L2992)) + `source = AFTERCARE`. All
+booking/checkout writes must stay inside `lib/booking/writeBoundary.ts` (respect
+`check:booking-boundary` + `check:lifecycle-field-writes`). One PR/session.
+
+### Web workstreams
+- [ ] **PF1 — backend foundation: pending-payment state.** Add
+  `AWAITING_CONFIRMATION` to `enum BookingCheckoutStatus`
+  ([schema.prisma:396-402](../prisma/schema.prisma#L396-L402)) + a Prisma migration
+  (additive; **never `db push`** — prod = Supabase "tovis-dev"). Add
+  `isUnverifiablePaymentMethod(method)` to `lib/payments/acceptedMethods.ts` (off-platform
+  set above). In [checkout/route.ts:322-332](../app/api/v1/client/bookings/%5Bid%5D/checkout/route.ts#L322-L332),
+  when `confirmPayment` and the effective method is unverifiable, call
+  `updateClientBookingCheckout` with `checkoutStatus: AWAITING_CONFIRMATION`,
+  `markPaymentAuthorized: true`, `markPaymentCollected: false` (stamp `paymentAuthorizedAt`
+  only, NOT `paymentCollectedAt`; verifiable methods keep the `PAID` path; STRIPE_CARD still
+  rejected here). Teach `performLockedUpdateClientBookingCheckout`
+  ([writeBoundary.ts ~11943](../lib/booking/writeBoundary.ts)) to accept the new status
+  (closeout keys on `paymentCollectedAt`, so it correctly waits). Relax the token-rebook gate
+  (`writeBoundary.ts ~11928-11940`) to accept `AWAITING_CONFIRMATION` so the client can rebook
+  while payment is pending. Update `lib/dto/checkout.ts` then `npm run gen:api-schema`.
+  Tests: unverifiable confirm → `AWAITING_CONFIRMATION` with no `paymentCollectedAt`;
+  verifiable path unchanged; rebook allowed while pending.
+- [ ] **PF2 — pro confirm action + payment↔appointment coupling.** New write-boundary fn
+  `confirmProBookingPaymentReceived(...)` (distinct from `markProBookingCheckoutPaid`
+  ~12988): in one locked tx — (a) require `checkoutStatus = AWAITING_CONFIRMATION`, set
+  `PAID` + `paymentCollectedAt`, run `maybeCompleteBookingCloseout` + closeout audit
+  (`PAYMENT_COLLECTED`); (b) find coupled next appointments
+  (`rebookOfBookingId = <this booking>` AND `source = AFTERCARE` AND `status = PENDING`) and
+  transition each `PENDING → ACCEPTED` via `recordStatusTransition` (actor PRO/SYSTEM — legal
+  per [lifecycleContract.ts:59-87](../lib/booking/lifecycleContract.ts#L59-L87)), emitting
+  `BOOKING_CONFIRMED`; (c) emit `PAYMENT_COLLECTED` to the client. New route
+  `POST /api/v1/pro/bookings/[id]/checkout/confirm-payment` mirroring
+  [mark-paid/route.ts](../app/api/v1/pro/bookings/%5Bid%5D/checkout/mark-paid/route.ts)
+  (auth + rate limit + new `IDEMPOTENCY_ROUTES` entry). In
+  [finalize/route.ts](../app/api/v1/bookings/finalize/route.ts) `getFinalizeProNotificationMeta`
+  (324-339): when a new AFTERCARE-sourced booking's `rebookOf` is `AWAITING_CONFIRMATION`,
+  keep it `PENDING` but **suppress the standard `BOOKING_REQUEST_CREATED`** (payment confirm
+  is the single approval surface) and emit new key `PAYMENT_CONFIRMATION_REQUIRED`. Add that
+  key to `NotificationEventKey` (schema) + `lib/notifications/eventKeys.ts`. Tests: confirm →
+  `PAID` + coupled aftercare booking `PENDING→ACCEPTED`; multiple coupled rebooks all approve;
+  non-aftercare booking untouched.
+- [ ] **PF3 — client + pro UI.** Client:
+  [ClientCheckoutCard.tsx](../app/client/(gated)/bookings/%5Bid%5D/ClientCheckoutCard.tsx)
+  renders the `AWAITING_CONFIRMATION` state (the 789 copy becomes truthful); aftercare
+  "What's next" ([bookings/[id]/page.tsx:1667-1725](../app/client/(gated)/bookings/%5Bid%5D/page.tsx#L1667-L1725),
+  `AftercareRebookButton` / `AftercareNextAppointmentCard`) keeps offering rebooking while
+  payment is pending and labels a coupled next appointment "pending — your pro will confirm
+  after payment" (`loadClientBookingPage.ts` already selects `checkoutStatus`). Pro: a
+  "Confirm payment received" control near
+  [MarkPaidButton.tsx](../app/pro/bookings/%5Bid%5D/session/MarkPaidButton.tsx) and in the pro
+  notifications card, shown when `checkoutStatus = AWAITING_CONFIRMATION`, noting it also
+  approves the coupled next appointment. New strings via `lib/copy.ts` (white-label); tone
+  utilities only (no raw colors).
+
+### iOS workstream (detail in `tovis-ios/BACKLOG.md §6`)
+- [ ] **PF4 — iOS parity.** Mirror the flow in the SwiftUI app (`~/Dev/tovis-ios`): client
+  checkout renders the pending / awaiting-confirmation state and still exposes aftercare
+  rebooking; pro gains a "Confirm payment received" action hitting
+  `POST /api/v1/pro/bookings/[id]/checkout/confirm-payment`; decode the new `checkoutStatus`
+  value + the `PAYMENT_CONFIRMATION_REQUIRED` notification key. Ships after PF1–PF3 land the
+  additive backend. Follow the web↔iOS parity rule.
+
+## 11. Custom appointment-reminder timing for pros (design 2026-07-08)
+Today a pro's client-reminder cadence is three on/off switches — **7 / 3 / 1 days** before
+an appointment — stored as `ProReminderSettings.offsetDays Int[]` and surfaced identically on
+web ([ReminderCadenceSettings.tsx](../app/pro/notifications/settings/ReminderCadenceSettings.tsx))
+and iOS (`ProReminderSettingsView.swift`), via `/api/v1/pro/reminder-settings`. Each reminder
+fires at the appointment's own local wall-clock time N calendar days earlier
+([appointmentReminders.ts](../lib/notifications/appointmentReminders.ts)); the 15-min drain cron
++ per-minute delivery worker send it, deferring anything landing in quiet hours (22:00–08:00).
+The whole send path is welded to three symbolic "kinds" (`ONE_WEEK`/`THREE_DAYS`/`DAY_BEFORE`).
+**Gap:** pros can only flip the three fixed switches — they can't choose *when* reminders go out.
+Clients have no timing control (on/off + channel only); out of scope.
+
+**Locked decisions (Tori, 2026-07-08):** (1) pros build a **fully custom add/remove list** of
+reminders, each with an **arbitrary lead time** — any number of days OR hours before (e.g. "10
+days", "2 days", "4 hours"), not limited to 7/3/1; (2) reminders still fire at the appointment's
+own local time for day-scale leads (preserve current DST-safe behavior); hour-scale leads fire
+exactly that many hours before the appointment instant; (3) keep the current `[7,3,1]`-days
+cadence as the **default pre-fill** before a pro personalizes; keep the master enable toggle;
+(4) ship **web + iOS in parity**. **Core refactor:** replace the 3 symbolic kinds with a single
+scalar unit of identity — **minutes before appointment** (`offsetMinutes`; day = `*1440`, hour =
+`*60`, distinguished by `% 1440`). Full design in `~/.claude/plans/the-pros-can-choose-virtual-willow.md`.
+
+### Web workstreams
+- [ ] **RT1 — data model + scheduler refactor.** Prisma: `ProReminderSettings.offsetDays Int[]` →
+  `offsetMinutes Int[] @default([10080,4320,1440])` ([schema.prisma:2162](../prisma/schema.prisma#L2162));
+  hand-edit the migration to backfill `offsetDays*1440` (never auto-drop; **never `db push`** —
+  prod = Supabase "tovis-dev"). [settings.ts](../lib/reminderSettings/settings.ts): rename
+  `offsetDays`→`offsetMinutes` throughout; replace the `ALLOWED_OFFSET_DAYS` menu-check with
+  numeric bounds (int > 0, **min 60 min**, **max 129600 min / 90d**, **multiples of 15**, **max 10**
+  per pro, dedupe + sort desc); `REMINDER_OFFSET_OPTIONS` becomes suggested presets. Kill the kind
+  model in [appointmentReminders.ts](../lib/notifications/appointmentReminders.ts): delete
+  `AppointmentReminderKind`/`APPOINTMENT_REMINDER_KINDS`/`APPOINTMENT_REMINDER_OFFSET_DAYS`/
+  `resolveEnabledReminderKinds`; payload `reminderKind`→`offsetMinutes`; dedupe key
+  `CLIENT_REMINDER:M${offsetMinutes}:${bookingId}`; `computeAppointmentReminderRunAt` takes minutes
+  (whole-day → keep exact DST-safe `shiftLocalCalendarDate` path; sub-day → instant subtraction);
+  `buildAppointmentReminderContent` uses a `humanizeLeadTime(offsetMinutes)` humanizer (tomorrow /
+  in one week / in N days / in N hours / in N minutes); `parseAppointmentReminderPayload` +
+  `payloadsMatch` read `offsetMinutes` and stay **legacy-tolerant** (map old kinds→minutes);
+  thread `enabledOffsetMinutes` through `planBookingAppointmentReminders` / `validateDueAppointmentReminder`.
+  One-shot data migration rewrites pending `ScheduledClientNotification` rows (kind→`offsetMinutes`
+  + new dedupe key) so no reminder is missed across deploy. Drain cron unchanged. Tests: bounds,
+  runAt whole-day (incl. DST cross) vs sub-day, dedupe-key format, humanizer copy, legacy parse.
+- [ ] **RT2 — quiet-hours cap + API/DTO.** In
+  [claimDeliveries.ts](../lib/notifications/delivery/claimDeliveries.ts) `maybeDeferCandidateForQuietHours`:
+  for `APPOINTMENT_REMINDER`, if the computed quiet-hours resume `>=` appointment start, **do not
+  defer** (send now) so a short-lead reminder never lands after the appointment; plumb the appt
+  instant from the payload `scheduledFor` into the candidate select. (In-app is never deferred;
+  affects SMS/EMAIL only. Product call: on-time pre-dawn beats useless morning-after.)
+  [reminderSettings.ts DTO](../lib/dto/reminderSettings.ts): response `offsetDays`→`offsetMinutes`
+  (+ humanized `label` per item, `options`→suggested `presets {value,unit,label}`); request accepts
+  structured `reminders:{value,unit:'days'|'hours'}[]` → minutes server-side. Update
+  [route.ts](../app/api/v1/pro/reminder-settings/route.ts) GET/PUT; **re-run `npm run gen:api-schema`**
+  (else `check:api-schema` fails CI).
+- [ ] **RT3 — web UI.** [ReminderCadenceSettings.tsx](../app/pro/notifications/settings/ReminderCadenceSettings.tsx):
+  replace the fixed preset toggles with an editable list (number input + days/hours unit selector +
+  remove per row; "Add reminder" offering presets as quick-adds); master toggle + empty-list copy
+  unchanged; POST the structured `reminders[]`. Tone utilities only (no raw colors), no hardcoded
+  brand strings.
+
+### iOS workstream (detail in `tovis-ios/BACKLOG.md`)
+- [ ] **RT4 — iOS parity.** `TovisKit/…/ProSettings/ProReminderSettings.swift`: `offsetDays`→
+  `offsetMinutes`, add a lead `{value,unit,label}` decodable + structured update payload;
+  `ProSettingsService.updateReminderSettings` sends the structured list;
+  `ProReminderSettingsView.swift`: editable list (Stepper/Picker per row: value + days/hours + delete;
+  "Add reminder" preset quick-adds), master toggle unchanged. `BrandColor`/`BrandFont`, no raw hex.
+  Ships alongside RT1–RT3.
+
+## 12. Notification system rework (audit + copy walkthrough 2026-07-08)
+Full audit of every notification (email/SMS/push/in-app) across web + iOS (6 parallel
+agents) + a one-at-a-time copy walkthrough with Tori over all 46 notification types.
+**Full per-notification decision table + feature specs (C1–C5) in
+`~/.claude/plans/can-you-do-an-mossy-music.md`.** Pipeline = single choke point
+(`enqueueDispatch` → `NotificationDispatch`/`NotificationDelivery` → per-minute drain →
+per-channel senders); copy lives at emit sites + `lib/notifications/delivery/renderNotificationContent.ts`;
+channel policy in `lib/notifications/eventKeys.ts`. Two auth emails (`lib/auth/{emailVerification,passwordReset}.ts`)
++ OTP (Twilio Verify Console — not in repo) are separate.
+
+### Copy & channel rework — one focused PR (web + iOS), low-risk
+- [ ] **NC1 — notification copy pass (web).** Apply the ~35 copy reworks from the plan's
+  decision table (add who/what/when specifics + personalize with actor names) across emit
+  sites + `renderNotificationContent.ts`. Unify #3/#4 booking-confirmed into one enriched
+  string; enrich booking-request/confirmed/rescheduled/cancelled (both sides), consult
+  proposal (personalize, no amount), reminders (drop "Reminder:" + manage nudge), aftercare
+  (align headlines, stop dumping raw notes — privacy win), payments (fuller receipt/earnings
+  lines), waitlist offer (show offered time + urgency), social/looks (actor names + keep
+  count aggregation), digest headline, claim invite (**lead with pro, not "TOVIS"** — highest-
+  stakes first-touch), handle-expiry (days-remaining). Light polish to the two auth emails
+  (greeting + sign-off, keep deliverability-safe). Keep as-is: payment-action-required, OTP,
+  admin copy. Respect `check:no-hardcoded-brand-strings` (keep `{brandName}`) + tone utilities.
+- [ ] **NC2 — channel moves** (`eventKeys.ts`). Consult approved/declined → in-app only (drop
+  EMAIL). Last-minute opening → **+PUSH +EMAIL** on both variants, **+SMS only on the 1:1
+  priority offer** (NOT the mass broadcast — Twilio cost + promo-consent/TCPA); needs split
+  channel policy by variant. Admin ops (verification/support/viral) → **+PUSH** (EMAIL+in-app
+  already on). Push additions only deliver once APNs creds live (see §2 push go-live).
+- [ ] **NC3 — removal + link fixes.** Delete the `BOOKING_STARTED` emit (`writeBoundary.ts:5873-5875`
+  — client is physically present, redundant). Repoint #15 review-received link → the actual
+  review (not `/pro/bookings/{id}`); #37 referred-by → `/client/referrals` (not `/looks`).
+- [ ] **NC4 — iOS parity.** Mirror in-app notification strings (`NotificationsView.swift`/
+  `ProNotificationsView.swift` are server-fed, so mostly free) + fix the stale "Push —
+  Coming soon" disabled label in `NotificationPreferencesView.swift:105` (APNs registration
+  ships). Follow the web↔iOS parity rule.
+
+### Push deep-link routing (from the audit)
+- [ ] **NC5 — expand iOS push deep-link coverage.** Today only `/client/bookings/{id}` routes
+  on tap; query strings are dropped and `ProMainTabView` ignores `pushDeepLink`. Parse
+  `?step=`, add `.proBooking`/`.look`/`.offers`/`.referrals`/`.membership`/`.proProfile`
+  targets, role-aware cross-shell routing (client↔pro workspace switch before routing), and
+  tab-level fallbacks for destinations with no focused screen. Design (parser/router seams,
+  per-path destinations) in plan **Part B**. Pairs with NC3's review-received link.
+
+### Feature spin-offs — each its own PR (surfaced during the walkthrough)
+> **C2 (off-platform "confirm payment received" notification) is already tracked as §10
+> PF2's `PAYMENT_CONFIRMATION_REQUIRED` — do NOT duplicate; align there.**
+- [ ] **NC-C1 — last-minute reschedule = late cancellation + fill-the-slot.** A client
+  reschedule inside the pro's cancellation-policy window (`ProNoShowSettings.cancelWindowHours`,
+  default 24) is treated like a late cancel: same fee **by default**, pro can waive.
+  **Waive mechanism DECIDED (Tori): grace-hold-then-charge** — assess + notify, charge only
+  after a grace window (~1h, configurable) unless the pro waives; no charge-then-reverse.
+  Reuse `isWithinCancelWindow` + `computeNoShowFeeAmount` (`lib/noShowProtection/fee.ts`);
+  new deferred-charge path (existing `assessAndChargeNoShowFee` is synchronous) + pre-charge
+  waive state; hook `performLockedRescheduleBookingFromHold` (`writeBoundary.ts:7310`, has old
+  time). Add `NoShowFeeReason.RESCHEDULE` (or reuse `LATE_CANCEL`). Plus: from the reschedule/
+  cancel notification, surface pro **fill-the-slot** actions (seed `createWaitlistOffer` /
+  `createLastMinuteOpening` with the freed slot). **Gated on `ENABLE_NO_SHOW_PROTECTION`
+  (§2, off in prod).** Real payments logic — flag before build.
+- [ ] **NC-C3 — pro resolution actions on failed payment** (from #21). On
+  `PAYMENT_ACTION_REQUIRED` (pro side), add "Message {client}" (reuse messaging) and/or a
+  "Nudge to update payment" that re-sends the client the resolve link (rate-limited). Pro
+  cannot enter card data (Stripe/PCI).
+- [ ] **NC-C4 — refund routing: app-collected vs off-platform** (from #23; ties §10, §3D).
+  App-collected (Stripe) refunds pull from the pro's connected account / reverse transfer —
+  platform must NOT eat the cost. Off-platform (Venmo/cash, `AWAITING_CONFIRMATION` path):
+  app never held the funds, so no Stripe refund — pro refunds the client directly; app
+  records + notifies (#22/#23) but moves no money ("mark refunded directly" flow distinct
+  from Stripe refund). Financial correctness — flag before build.
+- [ ] **NC-C5 — booking-time cancellation-policy disclosure + consent capture** (from #24).
+  At every client confirm/schedule, surface the pro's cancellation/no-show policy (window +
+  fee) and capture explicit acknowledgment (policy snapshot/version + timestamp, persisted
+  per booking) for chargeback defense. Web booking finalize + iOS booking flow. Only
+  meaningful when the pro has a policy enabled — ties to NC-C1 / `ENABLE_NO_SHOW_PROTECTION`.
+
 ---
 
 ### Note on superseded docs
