@@ -126,3 +126,41 @@ export async function fetchLookPostEmbeddings(
   }
   return result
 }
+
+export type ClientTasteVectorRow = {
+  embedding: number[]
+  // How many embedded signals built the vector — the ranking layer's confidence
+  // knob (a 2-signal vector should steer far less than a 50-signal one).
+  signalCount: number
+}
+
+/**
+ * Fetch a client's global taste vector (§6.1 global_taste_embedding). Returns
+ * null when the client has no stored vector yet — pre-backfill, no like/save
+ * history, or all their signals sit on looks that aren't embedded — which the
+ * ranking layer reads as "no visual signal, no boost".
+ */
+export async function fetchClientTasteVector(
+  db: EmbeddingSqlDb,
+  clientProfileId: string,
+): Promise<ClientTasteVectorRow | null> {
+  if (clientProfileId.length === 0) return null
+
+  const rows = await db.$queryRaw<
+    Array<{ embeddingText: string; signalCount: number }>
+  >`
+    SELECT "embedding"::text AS "embeddingText", "signalCount"
+    FROM "ClientTasteVector"
+    WHERE "clientProfileId" = ${clientProfileId}
+    LIMIT 1
+  `
+
+  const row = rows[0]
+  if (!row) return null
+
+  return {
+    embedding: parseEmbeddingVectorText(row.embeddingText),
+    // Raw-SQL int columns can surface as bigint; normalize to a JS number.
+    signalCount: Number(row.signalCount),
+  }
+}

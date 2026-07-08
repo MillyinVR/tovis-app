@@ -24,6 +24,7 @@ import {
 
 import { LOOK_EMBEDDING_DIMENSIONS } from '@/lib/personalization/lookEmbedding'
 import {
+  fetchClientTasteVector,
   fetchLookPostEmbeddings,
   upsertLookPostEmbedding,
 } from '@/lib/personalization/lookEmbeddingStore'
@@ -32,6 +33,12 @@ import {
   recomputeClientTasteVector,
   refreshTasteVectors,
 } from '@/lib/personalization/tasteVectors'
+import {
+  computeForYouScore,
+  rankForYouRows,
+  type ForYouRankableRow,
+  type ForYouViewerAffinity,
+} from '@/lib/looks/forYouRanking'
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -297,5 +304,93 @@ describe('taste vectors end-to-end (real signals)', () => {
       }),
     ).toBe(0)
     expect(await db.boardTasteVector.count({ where: { boardId } })).toBe(0)
+  })
+})
+
+describe('ranking consumption: saved-look taste steers page order (real pgvector)', () => {
+  it('reads the client taste vector by PK and lifts the visually-similar look', async () => {
+    const clientUser = await db.clientProfile.findUniqueOrThrow({
+      where: { id: clientId },
+      select: { userId: true },
+    })
+
+    // Fresh, known embeddings: look A on axis 0, look B on axis 1 (orthogonal).
+    await upsertLookPostEmbedding(db, {
+      lookPostId: lookAId,
+      mediaAssetId: 'asset_rank_a',
+      model: MODEL,
+      embedding: basisVector(0),
+      now: NOW,
+    })
+    await upsertLookPostEmbedding(db, {
+      lookPostId: lookBId,
+      mediaAssetId: 'asset_rank_b',
+      model: MODEL,
+      embedding: basisVector(1),
+      now: NOW,
+    })
+
+    // The viewer's only signal is a LIKE on look A → their taste vector aligns
+    // with axis 0, i.e. look A's aesthetic.
+    await db.lookLike.create({
+      data: { lookPostId: lookAId, userId: clientUser.userId! },
+    })
+    const recomputed = await recomputeClientTasteVector(db, {
+      clientProfileId: clientId,
+      now: new Date(),
+    })
+    expect(recomputed.status).toBe('STORED')
+
+    // The new reader returns the stored vector + its confidence signal count.
+    const tasteRow = await fetchClientTasteVector(db, clientId)
+    expect(tasteRow).not.toBeNull()
+    expect(tasteRow?.embedding).toHaveLength(LOOK_EMBEDDING_DIMENSIONS)
+    expect(tasteRow?.signalCount).toBe(recomputed.signalCount)
+
+    const candidateEmbeddings = await fetchLookPostEmbeddings(db, [
+      lookAId,
+      lookBId,
+    ])
+
+    const affinity: ForYouViewerAffinity = {
+      followedProfessionalIds: new Set(),
+      categoryWeights: new Map(),
+      occasionTagWeights: new Map(),
+      tasteVector: tasteRow?.embedding ?? null,
+      tasteSignalCount: tasteRow?.signalCount ?? 0,
+    }
+
+    function candidateRow(id: string): ForYouRankableRow {
+      // Identical rankScore + publishedAt: the visual boost is the only thing
+      // that can separate them, so an ordering flip proves it drove the sort.
+      return {
+        id,
+        professionalId: 'pro',
+        publishedAt: NOW,
+        rankScore: 10,
+        service: null,
+        tags: null,
+      }
+    }
+
+    const context = {
+      affinity,
+      seenLookIds: new Set<string>(),
+      now: new Date(),
+      candidateEmbeddings,
+    }
+
+    const scoreA = computeForYouScore(candidateRow(lookAId), context)
+    const scoreB = computeForYouScore(candidateRow(lookBId), context)
+    expect(scoreA).toBeGreaterThan(scoreB)
+
+    // Input order is B-then-A; taste re-ranks A (viewer's aesthetic) to the top.
+    const ranked = rankForYouRows(
+      [candidateRow(lookBId), candidateRow(lookAId)],
+      context,
+    )
+    expect(ranked.map((row) => row.id)).toEqual([lookAId, lookBId])
+
+    await db.lookLike.deleteMany({ where: { userId: clientUser.userId! } })
   })
 })
