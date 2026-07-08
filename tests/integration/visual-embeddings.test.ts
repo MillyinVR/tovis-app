@@ -39,7 +39,12 @@ import {
   type ForYouRankableRow,
   type ForYouViewerAffinity,
 } from '@/lib/looks/forYouRanking'
-import { loadForYouAffinity } from '@/lib/looks/forYouFeed'
+import {
+  AFFINITY_LIKE_WEIGHT,
+  AFFINITY_SAVE_WEIGHT,
+  BOARD_GLOBAL_BLEED_WEIGHT,
+  loadForYouAffinity,
+} from '@/lib/looks/forYouFeed'
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -239,7 +244,10 @@ describe('taste vectors end-to-end (real signals)', () => {
       select: { userId: true },
     })
 
-    // Like look A (weight 1), save look B on the board (weight 2).
+    // Like look A (full like weight 1), save look B on the board. Per the §6.2
+    // separation rule the board save bleeds into the GLOBAL client vector at only
+    // AFFINITY_SAVE_WEIGHT × BOARD_GLOBAL_BLEED_WEIGHT, so despite a save being a
+    // stronger raw signal it lands BELOW the full-weight like globally.
     await db.lookLike.create({
       data: { lookPostId: lookAId, userId: clientUser.userId! },
     })
@@ -258,14 +266,19 @@ describe('taste vectors end-to-end (real signals)', () => {
       FROM "ClientTasteVector" WHERE "clientProfileId" = ${clientId}
     `
     expect(stored).toHaveLength(1)
-    // Save (axis 1, weight 2) must outweigh like (axis 2 after re-upsert,
-    // weight 1): component on look B's axis is the larger one.
+    // Full like (axis 2, weight 1) must outweigh the DAMPED board save (axis 1,
+    // weight AFFINITY_SAVE_WEIGHT × BOARD_GLOBAL_BLEED_WEIGHT) in the global
+    // client vector: component on look A's axis is the larger one (spec §6.2).
+    const likeW = AFFINITY_LIKE_WEIGHT
+    const saveW = AFFINITY_SAVE_WEIGHT * BOARD_GLOBAL_BLEED_WEIGHT
+    const denom = Math.sqrt(likeW * likeW + saveW * saveW)
     const vector = (stored[0]?.text ?? '')
       .slice(1, -1)
       .split(',')
       .map((part) => Number.parseFloat(part))
-    expect(vector[1] ?? Number.NaN).toBeGreaterThan(vector[2] ?? Number.NaN)
-    expect(vector[1] ?? Number.NaN).toBeCloseTo(2 / Math.sqrt(5), 3)
+    expect(vector[2] ?? Number.NaN).toBeGreaterThan(vector[1] ?? Number.NaN)
+    expect(vector[2] ?? Number.NaN).toBeCloseTo(likeW / denom, 3)
+    expect(vector[1] ?? Number.NaN).toBeCloseTo(saveW / denom, 3)
 
     const boardResult = await recomputeBoardTasteVector(db, {
       boardId,

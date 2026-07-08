@@ -24,6 +24,7 @@ import {
   AFFINITY_LIKE_WEIGHT,
   AFFINITY_SAMPLE_SIZE,
   AFFINITY_SAVE_WEIGHT,
+  BOARD_GLOBAL_BLEED_WEIGHT,
   computeAffinityDecayFactor,
 } from '@/lib/looks/forYouFeed'
 import {
@@ -177,10 +178,17 @@ export async function recomputeClientTasteVector(
         AFFINITY_LIKE_WEIGHT *
         computeAffinityDecayFactor(like.createdAt, args.now),
     })),
+    // §6.2 separation rule: board saves bleed into the client's GLOBAL taste
+    // vector at only BOARD_GLOBAL_BLEED_WEIGHT of their strength, so an active
+    // board doesn't dominate the discovery feed's visual taste. Likes (Looks-feed
+    // engagement) keep full weight; recomputeBoardTasteVector below keeps the full
+    // save weight LOCALLY, so the board's own feed is unaffected and the bleed
+    // stays one-directional.
     ...saves.map((save) => ({
       lookPostId: save.lookPostId,
       weight:
         AFFINITY_SAVE_WEIGHT *
+        BOARD_GLOBAL_BLEED_WEIGHT *
         computeAffinityDecayFactor(save.createdAt, args.now),
     })),
   ]
