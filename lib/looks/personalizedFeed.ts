@@ -1,6 +1,6 @@
-// lib/looks/forYouFeed.ts
+// lib/looks/personalizedFeed.ts
 //
-// Server-side orchestration for the personalized "For You" Looks feed (B1).
+// Server-side orchestration for the personalized Looks feed (B1).
 // Layers a query-time, per-viewer blend on top of the existing RANKED feed
 // backbone — no new tables, no precomputed per-viewer score:
 //
@@ -10,7 +10,7 @@
 //  2. Injection (entry load only): a few of the freshest looks from pros the
 //     viewer follows, so brand-new followed content — which has rankScore 0 and
 //     would otherwise sit on the last page — surfaces on the first screen.
-//  3. Re-rank: both sets are scored by computeForYouScore (follow / category
+//  3. Re-rank: both sets are scored by computePersonalizedScore (follow / category
 //     affinity / freshness boosts, seen penalty) and ordered best-first.
 //
 // The cursor always rides the backbone, so subsequent pages continue purely by
@@ -45,9 +45,9 @@ import {
   type TasteVectorSignal,
 } from '@/lib/personalization/tasteVectorMath'
 import {
-  rankForYouRows,
-  type ForYouViewerAffinity,
-} from '@/lib/looks/forYouRanking'
+  rankPersonalizedRows,
+  type PersonalizedViewerAffinity,
+} from '@/lib/looks/personalizedRanking'
 
 // How many of the viewer's most recent likes / saves feed category affinity.
 // Bounded so the signal query stays cheap regardless of a power user's history.
@@ -77,7 +77,7 @@ export const AFFINITY_HALF_LIFE_DAYS = 75
 // likes stay at full global weight; boards never receive Looks-feed signals, so
 // the bleed is one-directional (spec §6.2). Applied to the board-save weight in
 // BOTH projections of global taste — the categorical affinity here in
-// loadForYouAffinity and the visual ClientTasteVector in
+// loadPersonalizedAffinity and the visual ClientTasteVector in
 // lib/personalization/tasteVectors — while recomputeBoardTasteVector keeps the
 // full weight locally. Declared board PURPOSE (aggregateBoardContextSignals,
 // sharply event-decayed) is the deliberate "I know about your wedding" channel
@@ -91,7 +91,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 // request is treated as belonging to "this sitting" and folds into an in-request
 // visual taste delta, so the feed leans toward what the viewer just engaged with
 // before the daily taste-vector cron catches up. Category/occasion affinity is
-// already live (loadForYouAffinity re-queries likes/saves every page); the
+// already live (loadPersonalizedAffinity re-queries likes/saves every page); the
 // visual taste vector is the one signal that lagged a full day, so this overlay
 // targets it. Two hours comfortably spans a single scroll session without
 // treating yesterday's browsing as "now".
@@ -141,7 +141,7 @@ const FOLLOWED_INJECTION_LIMIT = 6
 // clause can't blow up the query.
 const SEEN_IDS_CAP = 300
 
-export type ForYouCategoryAffinityEntry = {
+export type PersonalizedCategoryAffinityEntry = {
   slug: string
   weight: number
 }
@@ -151,7 +151,7 @@ export type ForYouCategoryAffinityEntry = {
  * Pure + exported for unit testing.
  */
 export function aggregateCategoryWeights(
-  entries: readonly ForYouCategoryAffinityEntry[],
+  entries: readonly PersonalizedCategoryAffinityEntry[],
 ): Map<string, number> {
   const weights = new Map<string, number>()
 
@@ -191,14 +191,14 @@ export type BoardContextSignalRow = {
 }
 
 export type BoardContextSignals = {
-  categoryEntries: ForYouCategoryAffinityEntry[]
+  categoryEntries: PersonalizedCategoryAffinityEntry[]
   occasionTagWeights: Map<string, number>
 }
 
 /**
  * Fold the viewer's declared board purposes (type + event date, spec §7–8)
  * into feed signals: category-affinity entries (added alongside like/save
- * entries) and occasion tag weights (the new boost term in forYouRanking).
+ * entries) and occasion tag weights (the new boost term in personalizedRanking).
  * Each board's contribution is scaled by its event proximity — an imminent
  * wedding shapes the feed at full strength, a passed one not at all. Multiple
  * boards mapping to the same tag/category keep the STRONGEST weight (the same
@@ -329,16 +329,16 @@ function collectSessionSignals(
 }
 
 /**
- * Load the viewer's For You signals: which pros they follow, how strongly they
+ * Load the viewer's personalized-feed signals: which pros they follow, how strongly they
  * lean toward each service category (from their likes + saved-board items),
  * and their declared board purposes/event dates (occasion signals, spec §7–8).
  * Every query is bounded; missing signals just yield an empty affinity.
  */
-export async function loadForYouAffinity(args: {
+export async function loadPersonalizedAffinity(args: {
   userId: string
   clientId: string | null | undefined
   now: Date
-}): Promise<ForYouViewerAffinity> {
+}): Promise<PersonalizedViewerAffinity> {
   const clientId = args.clientId ?? null
 
   const [
@@ -395,7 +395,7 @@ export async function loadForYouAffinity(args: {
     ])
 
   // Behavioral signals decay with age (spec §6.2) so stale taste fades.
-  const entries: ForYouCategoryAffinityEntry[] = []
+  const entries: PersonalizedCategoryAffinityEntry[] = []
   for (const like of likes) {
     const slug = slugFromCategoryRow(like)
     if (!slug) continue
@@ -470,7 +470,7 @@ export async function loadForYouAffinity(args: {
   }
 }
 
-export type ForYouFeedPage = {
+export type PersonalizedFeedPage = {
   items: LooksFeedRow[]
   nextCursor: string | null
   // Instrumentation surface — how the page was assembled.
@@ -494,11 +494,11 @@ export type ForYouFeedPage = {
 }
 
 /**
- * Assemble one personalized For You page. `cursor` null means the entry load
+ * Assemble one personalized feed page. `cursor` null means the entry load
  * (fresh followed content is injected only there). The returned items are
  * ordered for display; `nextCursor` continues the RANKED backbone.
  */
-export async function buildForYouFeedPage(args: {
+export async function buildPersonalizedFeedPage(args: {
   tenant: TenantContext
   userId: string
   clientId: string | null | undefined
@@ -506,8 +506,8 @@ export async function buildForYouFeedPage(args: {
   cursor: LooksFeedCursor | null
   seenLookIds: ReadonlySet<string>
   now: Date
-}): Promise<ForYouFeedPage> {
-  const affinity = await loadForYouAffinity({
+}): Promise<PersonalizedFeedPage> {
+  const affinity = await loadPersonalizedAffinity({
     userId: args.userId,
     clientId: args.clientId,
     now: args.now,
@@ -599,7 +599,7 @@ export async function buildForYouFeedPage(args: {
         )
       : new Map<string, number[]>()
 
-  const items = rankForYouRows(candidateRows, {
+  const items = rankPersonalizedRows(candidateRows, {
     affinity,
     seenLookIds: args.seenLookIds,
     now: args.now,

@@ -715,7 +715,7 @@ enum BoardVisibility {
 }
 
 // What a board is for (personalization spec §7.3). Drives the creation-time
-// question set (lib/boards/context.ts) and the For You occasion boost.
+// question set (lib/boards/context.ts) and the personalized-feed occasion boost.
 // GENERAL = no declared purpose (the default; asks no questions).
 enum BoardType {
   GENERAL
@@ -4309,7 +4309,7 @@ model Board {
   // for; `eventDate` is the calendar date it counts down to (bridal/prom — a
   // Postgres DATE, so no time-of-day/timezone semantics); `answers` holds the
   // skippable creation-question chips, validated against the question sets in
-  // lib/boards/context.ts. type + eventDate feed the For You occasion boost;
+  // lib/boards/context.ts. type + eventDate feed the personalized-feed occasion boost;
   // answers are stored for the board-feed scoring pass (§4.4) and the
   // self-profile write-through (§6.6). Owner-only — never exposed on the
   // public board page.

@@ -11,7 +11,7 @@
 //   - `answers`    2–3 chip questions per type (spec §7.3), validated here
 //
 // This module is the single source of truth for the question sets, the answer
-// validation, and how a board's declared purpose maps onto For You feed
+// validation, and how a board's declared purpose maps onto personalized feed
 // signals (occasion tag slugs + service-category slugs). It is pure — no
 // Prisma, no clock reads — so everything is unit-testable.
 
@@ -410,7 +410,7 @@ export function parseBoardContextInput(
 }
 
 // ---------------------------------------------------------------------------
-// For You feed signals (spec §8 — what the declared purpose boosts)
+// personalized feed signals (spec §8 — what the declared purpose boosts)
 // ---------------------------------------------------------------------------
 
 export type BoardTypeFeedSignals = {

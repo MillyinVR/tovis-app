@@ -34,17 +34,17 @@ import {
   refreshTasteVectors,
 } from '@/lib/personalization/tasteVectors'
 import {
-  computeForYouScore,
-  rankForYouRows,
-  type ForYouRankableRow,
-  type ForYouViewerAffinity,
-} from '@/lib/looks/forYouRanking'
+  computePersonalizedScore,
+  rankPersonalizedRows,
+  type PersonalizedRankableRow,
+  type PersonalizedViewerAffinity,
+} from '@/lib/looks/personalizedRanking'
 import {
   AFFINITY_LIKE_WEIGHT,
   AFFINITY_SAVE_WEIGHT,
   BOARD_GLOBAL_BLEED_WEIGHT,
-  loadForYouAffinity,
-} from '@/lib/looks/forYouFeed'
+  loadPersonalizedAffinity,
+} from '@/lib/looks/personalizedFeed'
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -366,7 +366,7 @@ describe('ranking consumption: saved-look taste steers page order (real pgvector
       lookBId,
     ])
 
-    const affinity: ForYouViewerAffinity = {
+    const affinity: PersonalizedViewerAffinity = {
       followedProfessionalIds: new Set(),
       categoryWeights: new Map(),
       occasionTagWeights: new Map(),
@@ -374,7 +374,7 @@ describe('ranking consumption: saved-look taste steers page order (real pgvector
       tasteSignalCount: tasteRow?.signalCount ?? 0,
     }
 
-    function candidateRow(id: string): ForYouRankableRow {
+    function candidateRow(id: string): PersonalizedRankableRow {
       // Identical rankScore + publishedAt: the visual boost is the only thing
       // that can separate them, so an ordering flip proves it drove the sort.
       return {
@@ -394,12 +394,12 @@ describe('ranking consumption: saved-look taste steers page order (real pgvector
       candidateEmbeddings,
     }
 
-    const scoreA = computeForYouScore(candidateRow(lookAId), context)
-    const scoreB = computeForYouScore(candidateRow(lookBId), context)
+    const scoreA = computePersonalizedScore(candidateRow(lookAId), context)
+    const scoreB = computePersonalizedScore(candidateRow(lookBId), context)
     expect(scoreA).toBeGreaterThan(scoreB)
 
     // Input order is B-then-A; taste re-ranks A (viewer's aesthetic) to the top.
-    const ranked = rankForYouRows(
+    const ranked = rankPersonalizedRows(
       [candidateRow(lookBId), candidateRow(lookAId)],
       context,
     )
@@ -445,10 +445,10 @@ describe('§6.3 in-session responsiveness: a fresh save steers the feed now (rea
       data: { boardId, lookPostId: lookBId },
     })
 
-    // loadForYouAffinity reads via the shared prisma singleton (same test DB):
+    // loadPersonalizedAffinity reads via the shared prisma singleton (same test DB):
     // it must derive a session-seeded taste vector aligned with look B even
     // though the daily taste-vector cron has not run.
-    const affinity = await loadForYouAffinity({
+    const affinity = await loadPersonalizedAffinity({
       userId: clientUser.userId!,
       clientId,
       now,
@@ -462,7 +462,7 @@ describe('§6.3 in-session responsiveness: a fresh save steers the feed now (rea
       lookAId,
       lookBId,
     ])
-    function candidateRow(id: string): ForYouRankableRow {
+    function candidateRow(id: string): PersonalizedRankableRow {
       return {
         id,
         professionalId: 'pro',
@@ -480,8 +480,8 @@ describe('§6.3 in-session responsiveness: a fresh save steers the feed now (rea
     }
 
     // The just-saved look B (viewer's in-session aesthetic) now outscores A.
-    expect(computeForYouScore(candidateRow(lookBId), context)).toBeGreaterThan(
-      computeForYouScore(candidateRow(lookAId), context),
+    expect(computePersonalizedScore(candidateRow(lookBId), context)).toBeGreaterThan(
+      computePersonalizedScore(candidateRow(lookAId), context),
     )
 
     await db.boardItem.deleteMany({ where: { boardId } })

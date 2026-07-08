@@ -12,8 +12,8 @@
 // or behavior; every field is skippable, editable, and clearable.
 //
 // Current consumers:
-//   - `interests` feeds category affinity in the For You feed
-//     (lib/looks/forYouFeed.ts) — an explicit taste statement that gives a
+//   - `interests` feeds category affinity in the personalized feed
+//     (lib/looks/personalizedFeed.ts) — an explicit taste statement that gives a
 //     brand-new client a non-empty feed signal from day one.
 //   - The hair/skin fields are STORED but not yet scored: representation and
 //     feasibility matching (spec §6.6 uses 1–2) need look-side content
@@ -352,7 +352,7 @@ export function extractSelfProfileWriteThrough(
 
 /**
  * The ServiceCategory slugs a profile's declared interests imply — folded into
- * category affinity by the For You feed (explicit taste, so a brand-new client
+ * category affinity by the personalized feed (explicit taste, so a brand-new client
  * gets a signal before any like/save history exists).
  */
 export function selfProfileInterestCategorySlugs(

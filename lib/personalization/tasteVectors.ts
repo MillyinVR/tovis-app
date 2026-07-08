@@ -7,7 +7,7 @@
 // incrementally mutated — so the §6.2 exponential time decay stays exact
 // without any stored per-signal state.
 //
-// Signals + weights deliberately mirror lib/looks/forYouFeed.ts's category
+// Signals + weights deliberately mirror lib/looks/personalizedFeed.ts's category
 // affinity (like < save, 75-day half-life, same sample bound): the visual
 // vector and the categorical affinity are two projections of the same taste.
 // Ranking consumption (cosine similarity against candidate embeddings, spec
@@ -26,14 +26,14 @@ import {
   AFFINITY_SAVE_WEIGHT,
   BOARD_GLOBAL_BLEED_WEIGHT,
   computeAffinityDecayFactor,
-} from '@/lib/looks/forYouFeed'
+} from '@/lib/looks/personalizedFeed'
 import {
   fetchLookPostEmbeddings,
   serializeEmbeddingVector,
 } from '@/lib/personalization/lookEmbeddingStore'
 
 // The pure vector math lives in tasteVectorMath (no server imports) so both
-// this writer and the For You loader can share it without a circular import.
+// this writer and the personalized loader can share it without a circular import.
 import {
   computeWeightedTasteVector,
   type TasteVectorSignal,

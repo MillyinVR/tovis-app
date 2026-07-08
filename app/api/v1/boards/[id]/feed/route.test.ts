@@ -79,7 +79,7 @@ vi.mock('@/lib/clientVisibility', () => ({
 vi.mock('@/lib/tenant', () => ({
   resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
 }))
-vi.mock('@/lib/looks/forYouFeed', () => ({
+vi.mock('@/lib/looks/personalizedFeed', () => ({
   parseSeenLookIds: mocks.parseSeenLookIds,
 }))
 vi.mock('@/lib/observability/looksFeedEvents', () => ({

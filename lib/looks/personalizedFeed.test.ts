@@ -1,4 +1,4 @@
-// lib/looks/forYouFeed.test.ts
+// lib/looks/personalizedFeed.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -31,11 +31,11 @@ import {
   BOARD_GLOBAL_BLEED_WEIGHT,
   aggregateBoardContextSignals,
   aggregateCategoryWeights,
-  buildForYouFeedPage,
+  buildPersonalizedFeedPage,
   computeAffinityDecayFactor,
-  loadForYouAffinity,
+  loadPersonalizedAffinity,
   parseSeenLookIds,
-} from './forYouFeed'
+} from './personalizedFeed'
 
 const ROOT_TENANT = rootTenantContext('tenant_root')
 const NOW = new Date('2026-07-04T12:00:00.000Z')
@@ -56,7 +56,7 @@ function feedRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-describe('lib/looks/forYouFeed', () => {
+describe('lib/looks/personalizedFeed', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
@@ -175,7 +175,7 @@ describe('lib/looks/forYouFeed', () => {
     })
   })
 
-  describe('loadForYouAffinity', () => {
+  describe('loadPersonalizedAffinity', () => {
     it('folds declared board purposes into category + occasion weights', async () => {
       mocks.prisma.board.findMany.mockResolvedValue([
         {
@@ -185,7 +185,7 @@ describe('lib/looks/forYouFeed', () => {
       ])
       mocks.prisma.boardItem.findMany.mockResolvedValue([catRow('nails')])
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -213,7 +213,7 @@ describe('lib/looks/forYouFeed', () => {
       ])
       mocks.prisma.boardItem.findMany.mockResolvedValue([catRow('balayage')])
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -235,7 +235,7 @@ describe('lib/looks/forYouFeed', () => {
     it('bleeds a standalone board save (no like, no purpose) at exactly the small fraction (spec §6.2)', async () => {
       mocks.prisma.boardItem.findMany.mockResolvedValue([catRow('balayage')])
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -250,7 +250,7 @@ describe('lib/looks/forYouFeed', () => {
     })
 
     it('skips client-scoped queries for a viewer without a client profile', async () => {
-      await loadForYouAffinity({ userId: 'user_1', clientId: null, now: NOW })
+      await loadPersonalizedAffinity({ userId: 'user_1', clientId: null, now: NOW })
       expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.boardItem.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.board.findMany).not.toHaveBeenCalled()
@@ -270,7 +270,7 @@ describe('lib/looks/forYouFeed', () => {
         { ...catRow('balayage'), createdAt: halfLifeAgo },
       ])
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -289,7 +289,7 @@ describe('lib/looks/forYouFeed', () => {
         selfProfile: { interests: ['nails'] },
       })
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -304,7 +304,7 @@ describe('lib/looks/forYouFeed', () => {
         tasteVector: [{ embeddingText: dimVecText(0.02), signalCount: 12 }],
       })
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -315,7 +315,7 @@ describe('lib/looks/forYouFeed', () => {
     })
 
     it('leaves the taste vector null when none is stored', async () => {
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -326,12 +326,12 @@ describe('lib/looks/forYouFeed', () => {
     })
 
     it('does not read a taste vector for a viewer without a client profile', async () => {
-      await loadForYouAffinity({ userId: 'user_1', clientId: null, now: NOW })
+      await loadPersonalizedAffinity({ userId: 'user_1', clientId: null, now: NOW })
       expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled()
     })
   })
 
-  describe('loadForYouAffinity — §6.3 in-session visual responsiveness', () => {
+  describe('loadPersonalizedAffinity — §6.3 in-session visual responsiveness', () => {
     // A like/save row carrying the fields the §6.3 delta reads.
     function sessionRow(args: {
       lookPostId: string
@@ -368,7 +368,7 @@ describe('lib/looks/forYouFeed', () => {
         sessionRow({ lookPostId: 'saved_now', createdAt: NOW, slug: 'bridal' }),
       ])
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -397,7 +397,7 @@ describe('lib/looks/forYouFeed', () => {
         }),
       ])
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -422,7 +422,7 @@ describe('lib/looks/forYouFeed', () => {
         sessionRow({ lookPostId: 'liked_now', createdAt: NOW, slug: 'bridal' }),
       ])
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: 'client_1',
         now: NOW,
@@ -439,7 +439,7 @@ describe('lib/looks/forYouFeed', () => {
         sessionRow({ lookPostId: 'liked_now', createdAt: NOW }),
       ])
 
-      const affinity = await loadForYouAffinity({
+      const affinity = await loadPersonalizedAffinity({
         userId: 'user_1',
         clientId: null,
         now: NOW,
@@ -475,7 +475,7 @@ describe('lib/looks/forYouFeed', () => {
     })
   })
 
-  describe('buildForYouFeedPage', () => {
+  describe('buildPersonalizedFeedPage', () => {
     it('injects fresh followed looks on entry and rides the backbone cursor', async () => {
       mocks.prisma.proFollow.findMany.mockResolvedValue([
         { professionalId: 'pro_followed' },
@@ -498,7 +498,7 @@ describe('lib/looks/forYouFeed', () => {
           }),
         ])
 
-      const page = await buildForYouFeedPage({
+      const page = await buildPersonalizedFeedPage({
         tenant: ROOT_TENANT,
         userId: 'user_1',
         clientId: 'client_1',
@@ -529,7 +529,7 @@ describe('lib/looks/forYouFeed', () => {
         feedRow({ id: 'b1', rankScore: 5 }),
       ])
 
-      const page = await buildForYouFeedPage({
+      const page = await buildPersonalizedFeedPage({
         tenant: ROOT_TENANT,
         userId: 'user_1',
         clientId: 'client_1',
@@ -551,7 +551,7 @@ describe('lib/looks/forYouFeed', () => {
         feedRow({ id: 'b1', rankScore: 5 }),
       ])
 
-      const page = await buildForYouFeedPage({
+      const page = await buildPersonalizedFeedPage({
         tenant: ROOT_TENANT,
         userId: 'user_1',
         clientId: 'client_1',
@@ -586,7 +586,7 @@ describe('lib/looks/forYouFeed', () => {
         feedRow({ id: 'b_match', professionalId: 'pro_y', rankScore: 5 }),
       ])
 
-      const page = await buildForYouFeedPage({
+      const page = await buildPersonalizedFeedPage({
         tenant: ROOT_TENANT,
         userId: 'user_1',
         clientId: 'client_1',

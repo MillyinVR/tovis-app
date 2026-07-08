@@ -66,7 +66,7 @@ Without this, heavy users' noise drowns out light users' intent — and light us
 
 ## 3. The Two Feeds
 
-### 3.1 Looks Feed ("For You")
+### 3.1 Looks Feed ("Personalized")
 - Broad discovery, serendipity, "dream" mode
 - Optimized for range and surprise — where someone finds a board topic they didn't know they wanted
 - Driven by the **global taste vector** (see Section 6)
@@ -333,7 +333,7 @@ user_taste_profile:
 
 ### 6.2 Update Rules
 - Board interactions fully update that board's `local_affinity` and bleed a small fraction (`contributes_to_global`) into the user's `global_affinity`.
-- Looks Feed (For You) interactions fully update `global_affinity` and do **not** write back into any board's `local_affinity`.
+- Looks Feed (personalized) interactions fully update `global_affinity` and do **not** write back into any board's `local_affinity`.
 - This one-directional, weighted bleed keeps boards feeling personal and separate while still letting the general feed occasionally reflect "I know about your wedding."
 - **(NEW) Time decay:** all affinity weights and taste embeddings decay exponentially. Tastes shift; events pass; last year's prom obsession shouldn't shape this year's feed. Suggested half-lives: behavioral signals ~60–90 days, bookings ~6–12 months (decay slowest), event-tag-driven affinities → sharp decay after `event_date` passes (aligned with board archiving, §7.5).
 

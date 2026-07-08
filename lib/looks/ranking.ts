@@ -45,9 +45,9 @@ export const LOOK_POST_RANK_PRIOR: LookPostRankPrior = {
 /**
  * The smoothed rate typically lives in [0, 1] and is hard-bounded below the
  * max signal weight (5) by the impression floor, so scores stay strictly
- * under SCALE × 5 = 1000 — beneath forYouRanking's seen-penalty. `rankScore`
+ * under SCALE × 5 = 1000 — beneath personalizedRanking's seen-penalty. `rankScore`
  * is consumed alongside the additive per-viewer boosts in
- * `lib/looks/forYouRanking.ts` (follow / category affinity / freshness),
+ * `lib/looks/personalizedRanking.ts` (follow / category affinity / freshness),
  * which are calibrated against a tens-to-hundreds band. Scale the rate into
  * that band so the engagement backbone stays comparable to those boosts
  * instead of being buried by them.
@@ -73,7 +73,7 @@ export const LOOK_POST_RANK_SCORE_SCALE = 200
  * - `maxBoost`        — at publish, a zero-impression Look scores
  *   prior×scale + maxBoost ≈ 61: above the typical-rate band (~40) so it gets
  *   shown, below hot content (80+) so it can't bury proven Looks, and far
- *   below forYouRanking's seen-penalty (1000).
+ *   below personalizedRanking's seen-penalty (1000).
  * - `impressionFloor` — the guaranteed-impression target; set equal to the
  *   prior's pseudo-impression `strength` so support ends exactly when the
  *   Look's real evidence matches the prior's synthetic evidence.
@@ -137,7 +137,7 @@ export type LookPostRankScoreOptions = {
  * - category relevance
  * - follow affinity
  * - viewer-specific personalization
- * (all layered per-viewer at query time in forYouRanking.ts)
+ * (all layered per-viewer at query time in personalizedRanking.ts)
  */
 function normalizeCount(value: number): number {
   if (!Number.isFinite(value)) return 0

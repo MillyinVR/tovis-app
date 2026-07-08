@@ -1,8 +1,8 @@
 // lib/looks/boardFeed.ts
 //
 // Server-side orchestration for the board-scoped "Recommended for this board"
-// feed (spec §4.4) — the board-page sibling of the For You feed. Same shape as
-// buildForYouFeedPage:
+// feed (spec §4.4) — the board-page sibling of the personalized feed. Same shape as
+// buildPersonalizedFeedPage:
 //
 //  1. Backbone: the global RANKED page (rankScore desc + cursor) — authoritative
 //     for pagination, so no look is dropped as you scroll — scoped to the tenant

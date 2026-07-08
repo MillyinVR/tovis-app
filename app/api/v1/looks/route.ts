@@ -18,8 +18,8 @@ import { listFollowedClientIds } from '@/lib/follows/clientFollows'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
-import { forYouFeedEnabled } from '@/lib/looks/forYouFlag'
-import { buildForYouFeedPage, parseSeenLookIds } from '@/lib/looks/forYouFeed'
+import { personalizedFeedEnabled } from '@/lib/looks/personalizedFlag'
+import { buildPersonalizedFeedPage, parseSeenLookIds } from '@/lib/looks/personalizedFeed'
 import {
   logLooksFeedServe,
   type LooksFeedCohort,
@@ -112,12 +112,12 @@ export async function GET(req: Request) {
 
     const tenant = await resolveTenantContextForRequest(req)
 
-    // For You gates the DEFAULT Look tab only: signed-in viewer, no explicit
+    // The personalized feed gates the DEFAULT Look tab only: signed-in viewer, no explicit
     // sort/search/category, flag on. An explicit `sort=recent` (or the flag off)
     // always falls through to the chronological feed — the capability is never
     // gated, only the default.
-    const useForYou =
-      forYouFeedEnabled() &&
+    const usePersonalized =
+      personalizedFeedEnabled() &&
       Boolean(user) &&
       kind === 'ALL' &&
       !q &&
@@ -127,13 +127,13 @@ export async function GET(req: Request) {
     let items: LooksFeedRow[]
     let nextCursor: string | null
     let cohort: LooksFeedCohort
-    let forYouMeta: Awaited<ReturnType<typeof buildForYouFeedPage>>['meta'] | null =
+    let personalizedMeta: Awaited<ReturnType<typeof buildPersonalizedFeedPage>>['meta'] | null =
       null
 
-    if (useForYou && user) {
+    if (usePersonalized && user) {
       const seenLookIds = parseSeenLookIds(searchParams.get('seen'))
 
-      const page = await buildForYouFeedPage({
+      const page = await buildPersonalizedFeedPage({
         tenant,
         userId: user.id,
         clientId: user.clientProfile?.id ?? null,
@@ -145,8 +145,8 @@ export async function GET(req: Request) {
 
       items = page.items
       nextCursor = page.nextCursor
-      forYouMeta = page.meta
-      cohort = 'for_you'
+      personalizedMeta = page.meta
+      cohort = 'personalized'
     } else {
       const [followingProfessionalIds, followingClientIds] =
         kind === 'FOLLOWING'
@@ -233,15 +233,15 @@ export async function GET(req: Request) {
       page: cursor ? 'more' : 'entry',
       itemCount: payload.length,
       userId: user?.id ?? null,
-      backboneCount: forYouMeta?.backboneCount ?? null,
-      injectedCount: forYouMeta?.injectedCount ?? null,
-      seenCount: forYouMeta?.seenCount ?? null,
-      followedCount: forYouMeta?.followedCount ?? null,
-      affinityCategoryCount: forYouMeta?.affinityCategoryCount ?? null,
-      occasionTagCount: forYouMeta?.occasionTagCount ?? null,
-      tasteSignalCount: forYouMeta?.tasteSignalCount ?? null,
-      candidateEmbeddingCount: forYouMeta?.candidateEmbeddingCount ?? null,
-      sessionVisualSignalCount: forYouMeta?.sessionVisualSignalCount ?? null,
+      backboneCount: personalizedMeta?.backboneCount ?? null,
+      injectedCount: personalizedMeta?.injectedCount ?? null,
+      seenCount: personalizedMeta?.seenCount ?? null,
+      followedCount: personalizedMeta?.followedCount ?? null,
+      affinityCategoryCount: personalizedMeta?.affinityCategoryCount ?? null,
+      occasionTagCount: personalizedMeta?.occasionTagCount ?? null,
+      tasteSignalCount: personalizedMeta?.tasteSignalCount ?? null,
+      candidateEmbeddingCount: personalizedMeta?.candidateEmbeddingCount ?? null,
+      sessionVisualSignalCount: personalizedMeta?.sessionVisualSignalCount ?? null,
     })
 
     const body: LooksFeedResponseDto & { ok: true } = {

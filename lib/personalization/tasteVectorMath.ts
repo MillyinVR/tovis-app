@@ -2,8 +2,8 @@
 //
 // Pure vector math for the §6.0 visual-taste layer — no Prisma, no server
 // imports — so it is unit-testable in isolation and safe to import from both
-// the taste-vector writer (lib/personalization/tasteVectors.ts) and the For You
-// feed loader (lib/looks/forYouFeed.ts) without a circular dependency.
+// the taste-vector writer (lib/personalization/tasteVectors.ts) and the personalized
+// feed loader (lib/looks/personalizedFeed.ts) without a circular dependency.
 //
 // Owns two operations:
 //   1. computeWeightedTasteVector — the decayed, signal-weighted, L2-normalized

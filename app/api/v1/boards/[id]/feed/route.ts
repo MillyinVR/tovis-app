@@ -17,7 +17,7 @@ import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
 import { buildLooksViewerFlagResolver } from '@/lib/looks/viewerFlags'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
-import { parseSeenLookIds } from '@/lib/looks/forYouFeed'
+import { parseSeenLookIds } from '@/lib/looks/personalizedFeed'
 import { logLooksFeedServe } from '@/lib/observability/looksFeedEvents'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
 

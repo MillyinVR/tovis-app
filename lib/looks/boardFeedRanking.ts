@@ -1,12 +1,12 @@
 // lib/looks/boardFeedRanking.ts
 //
 // Pure, board-scoped re-rank for the "Recommended for this board" feed —
-// the board-page sibling of the For You feed (spec §4.4 board_feed_score).
-// Where For You personalizes against the viewer's WHOLE-account taste, this
+// the board-page sibling of the personalized feed (spec §4.4 board_feed_score).
+// Where the personalized feed leans on the viewer's WHOLE-account taste, this
 // personalizes against ONE board's declared purpose, its chip answers, its
 // saved-look taste, and the owner's self-profile:
 //
-//   score = engagement_score (rankScore backbone, same as For You's base)
+//   score = engagement_score (rankScore backbone, same as the personalized feed's base)
 //         + occasion_tag_match(board.type)        // heaviest — the board's
 //                                                 //   purpose tags, scaled by
 //                                                 //   event proximity (§7–8)
@@ -18,26 +18,26 @@
 //         - seenPenalty                           // already-seen this session
 //
 // Spec §4.4 also lists availability_boost. There is no per-look availability
-// primitive yet (neither does For You use one), so that term is deliberately
+// primitive yet (neither does the personalized feed use one), so that term is deliberately
 // omitted here rather than faked; it lands when a look-side availability signal
 // exists. All other terms are additive and null-safe — a board with no event
 // date, no answers, no taste vector, or an owner with no self-profile simply
 // sees those terms contribute 0 and falls back to the engagement backbone.
 //
-// Reuses the For You primitives (cosineSimilarity, computeVisualSimilarityBoost,
-// computeForYouFreshnessBoost, strongestTagWeightMatch) so the two feeds share
+// Reuses the personalized-feed primitives (cosineSimilarity, computeVisualSimilarityBoost,
+// computePersonalizedFreshnessBoost, strongestTagWeightMatch) so the two feeds share
 // one visual/occasion/freshness implementation. Pure (clock injected) so the
 // whole score is unit-testable without Prisma.
 
 import {
-  computeForYouFreshnessBoost,
+  computePersonalizedFreshnessBoost,
   computeVisualSimilarityBoost,
   strongestTagWeightMatch,
-  type ForYouRankableRow,
-} from '@/lib/looks/forYouRanking'
+  type PersonalizedRankableRow,
+} from '@/lib/looks/personalizedRanking'
 
-// A board-feed candidate is the same row shape the For You ranker scores.
-export type BoardFeedRankableRow = ForYouRankableRow
+// A board-feed candidate is the same row shape the personalized ranker scores.
+export type BoardFeedRankableRow = PersonalizedRankableRow
 
 export const BOARD_FEED_RANK_WEIGHTS = {
   // rankScore passes through unscaled — the engagement/recency backbone.
@@ -58,10 +58,10 @@ export const BOARD_FEED_RANK_WEIGHTS = {
   feasibilityMax: 10,
   // Peak visual-similarity boost (spec §6.0) — realized as visualMax × clamped
   // cosine × confidence, so a typical genuine match contributes single digits.
-  // Reuses the For You visual weight/scale.
+  // Reuses the personalized-feed visual weight/scale.
   visualMax: 20,
-  // Peak nudge for a brand-new look (via computeForYouFreshnessBoost, 1-day
-  // half-life) — same freshness curve/weight as For You.
+  // Peak nudge for a brand-new look (via computePersonalizedFreshnessBoost, 1-day
+  // half-life) — same freshness curve/weight as the personalized feed.
   freshnessMax: 6,
   // Large enough to sink an already-seen look beneath everything unseen.
   seen: 1_000,
@@ -135,7 +135,7 @@ export function computeBoardFeedScore(
     candidateEmbedding: context.candidateEmbeddings.get(row.id),
   })
 
-  const freshnessBoost = computeForYouFreshnessBoost(row.publishedAt, context.now)
+  const freshnessBoost = computePersonalizedFreshnessBoost(row.publishedAt, context.now)
 
   const seenPenalty = context.seenLookIds.has(row.id)
     ? BOARD_FEED_RANK_WEIGHTS.seen

@@ -1,20 +1,20 @@
-// lib/looks/forYouRanking.test.ts
+// lib/looks/personalizedRanking.test.ts
 import { describe, expect, it } from 'vitest'
 
 import {
-  FOR_YOU_RANK_WEIGHTS,
-  computeForYouFreshnessBoost,
-  computeForYouScore,
+  PERSONALIZED_RANK_WEIGHTS,
+  computePersonalizedFreshnessBoost,
+  computePersonalizedScore,
   computeVisualSimilarityBoost,
   cosineSimilarity,
-  rankForYouRows,
-  type ForYouRankableRow,
-  type ForYouViewerAffinity,
-} from './forYouRanking'
+  rankPersonalizedRows,
+  type PersonalizedRankableRow,
+  type PersonalizedViewerAffinity,
+} from './personalizedRanking'
 
 const NOW = new Date('2026-07-04T12:00:00.000Z')
 
-function row(overrides: Partial<ForYouRankableRow> = {}): ForYouRankableRow {
+function row(overrides: Partial<PersonalizedRankableRow> = {}): PersonalizedRankableRow {
   return {
     id: overrides.id ?? 'look_1',
     professionalId: overrides.professionalId ?? 'pro_1',
@@ -33,7 +33,7 @@ function affinity(
     tasteVector: number[] | null
     tasteSignalCount: number
   }> = {},
-): ForYouViewerAffinity {
+): PersonalizedViewerAffinity {
   return {
     followedProfessionalIds: new Set(overrides.followed ?? []),
     categoryWeights: new Map(overrides.categories ?? []),
@@ -45,17 +45,17 @@ function affinity(
 
 const EMPTY_SEEN: ReadonlySet<string> = new Set()
 
-describe('lib/looks/forYouRanking', () => {
-  describe('computeForYouScore', () => {
+describe('lib/looks/personalizedRanking', () => {
+  describe('computePersonalizedScore', () => {
     it('passes rankScore through when the viewer has no signals', () => {
-      const score = computeForYouScore(row({ rankScore: 10 }), {
+      const score = computePersonalizedScore(row({ rankScore: 10 }), {
         affinity: affinity(),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
       })
 
       // base 10 + freshness (3 days old, 1-day half-life) → 10 + 6/(1+3)
-      expect(score).toBeCloseTo(10 + FOR_YOU_RANK_WEIGHTS.freshnessMax / 4, 5)
+      expect(score).toBeCloseTo(10 + PERSONALIZED_RANK_WEIGHTS.freshnessMax / 4, 5)
     })
 
     it('lifts a followed pro above an identical non-followed look', () => {
@@ -65,20 +65,20 @@ describe('lib/looks/forYouRanking', () => {
         now: NOW,
       }
 
-      const followed = computeForYouScore(
+      const followed = computePersonalizedScore(
         row({ id: 'a', professionalId: 'pro_followed' }),
         context,
       )
-      const other = computeForYouScore(
+      const other = computePersonalizedScore(
         row({ id: 'b', professionalId: 'pro_other' }),
         context,
       )
 
-      expect(followed - other).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.follow, 5)
+      expect(followed - other).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.follow, 5)
     })
 
     it('surfaces a zero-engagement followed look (additive, not multiplicative)', () => {
-      const score = computeForYouScore(
+      const score = computePersonalizedScore(
         row({
           professionalId: 'pro_followed',
           rankScore: 0,
@@ -92,44 +92,44 @@ describe('lib/looks/forYouRanking', () => {
       )
 
       // rankScore 0 would zero out a multiplicative boost; additive keeps it high.
-      expect(score).toBeGreaterThanOrEqual(FOR_YOU_RANK_WEIGHTS.follow)
+      expect(score).toBeGreaterThanOrEqual(PERSONALIZED_RANK_WEIGHTS.follow)
     })
 
     it('boosts an affinity category and caps the weight', () => {
-      const uncapped = computeForYouScore(row(), {
+      const uncapped = computePersonalizedScore(row(), {
         affinity: affinity({ categories: [['balayage', 3]] }),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
       })
-      const base = computeForYouScore(row(), {
+      const base = computePersonalizedScore(row(), {
         affinity: affinity(),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
       })
       expect(uncapped - base).toBeCloseTo(
-        3 * FOR_YOU_RANK_WEIGHTS.categoryUnit,
+        3 * PERSONALIZED_RANK_WEIGHTS.categoryUnit,
         5,
       )
 
-      const wayOver = computeForYouScore(row(), {
+      const wayOver = computePersonalizedScore(row(), {
         affinity: affinity({ categories: [['balayage', 999]] }),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
       })
       expect(wayOver - base).toBeCloseTo(
-        FOR_YOU_RANK_WEIGHTS.categoryWeightCap *
-          FOR_YOU_RANK_WEIGHTS.categoryUnit,
+        PERSONALIZED_RANK_WEIGHTS.categoryWeightCap *
+          PERSONALIZED_RANK_WEIGHTS.categoryUnit,
         5,
       )
     })
 
     it('sinks a seen look below everything unseen', () => {
-      const seen = computeForYouScore(row({ id: 'seen', rankScore: 50 }), {
+      const seen = computePersonalizedScore(row({ id: 'seen', rankScore: 50 }), {
         affinity: affinity(),
         seenLookIds: new Set(['seen']),
         now: NOW,
       })
-      const fresh = computeForYouScore(row({ id: 'fresh', rankScore: 0 }), {
+      const fresh = computePersonalizedScore(row({ id: 'fresh', rankScore: 0 }), {
         affinity: affinity(),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
@@ -138,7 +138,7 @@ describe('lib/looks/forYouRanking', () => {
     })
 
     it('tolerates a missing category without throwing', () => {
-      const score = computeForYouScore(
+      const score = computePersonalizedScore(
         row({ service: { category: null } }),
         {
           affinity: affinity({ categories: [['balayage', 5]] }),
@@ -156,16 +156,16 @@ describe('lib/looks/forYouRanking', () => {
         now: NOW,
       }
 
-      const bridal = computeForYouScore(
+      const bridal = computePersonalizedScore(
         row({ id: 'a', tags: [{ slug: 'bridal' }, { slug: 'balayage' }] }),
         context,
       )
-      const plain = computeForYouScore(
+      const plain = computePersonalizedScore(
         row({ id: 'a', tags: [{ slug: 'balayage' }] }),
         context,
       )
 
-      expect(bridal - plain).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.occasionMax, 5)
+      expect(bridal - plain).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.occasionMax, 5)
     })
 
     it('scales the occasion boost by the tag weight and takes the strongest match, not the sum', () => {
@@ -180,15 +180,15 @@ describe('lib/looks/forYouRanking', () => {
         now: NOW,
       }
 
-      const both = computeForYouScore(
+      const both = computePersonalizedScore(
         row({ id: 'a', tags: [{ slug: 'bridal' }, { slug: 'wedding' }] }),
         context,
       )
-      const none = computeForYouScore(row({ id: 'a', tags: [] }), context)
+      const none = computePersonalizedScore(row({ id: 'a', tags: [] }), context)
 
       // strongest (0.5), NOT 0.5 + 0.4
       expect(both - none).toBeCloseTo(
-        FOR_YOU_RANK_WEIGHTS.occasionMax * 0.5,
+        PERSONALIZED_RANK_WEIGHTS.occasionMax * 0.5,
         5,
       )
     })
@@ -200,15 +200,15 @@ describe('lib/looks/forYouRanking', () => {
         now: NOW,
       }
 
-      const untagged = computeForYouScore(row({ id: 'a' }), context)
+      const untagged = computePersonalizedScore(row({ id: 'a' }), context)
       expect(Number.isFinite(untagged)).toBe(true)
 
-      const clamped = computeForYouScore(
+      const clamped = computePersonalizedScore(
         row({ id: 'a', tags: [{ slug: 'bridal' }] }),
         context,
       )
       expect(clamped - untagged).toBeCloseTo(
-        FOR_YOU_RANK_WEIGHTS.occasionMax,
+        PERSONALIZED_RANK_WEIGHTS.occasionMax,
         5,
       )
     })
@@ -238,7 +238,7 @@ describe('lib/looks/forYouRanking', () => {
   })
 
   describe('computeVisualSimilarityBoost', () => {
-    const FULL = FOR_YOU_RANK_WEIGHTS.visualConfidenceFullSignals
+    const FULL = PERSONALIZED_RANK_WEIGHTS.visualConfidenceFullSignals
 
     it('peaks at visualMax for a cosine-1 match at full confidence', () => {
       expect(
@@ -247,7 +247,7 @@ describe('lib/looks/forYouRanking', () => {
           tasteSignalCount: FULL,
           candidateEmbedding: [5, 0, 0], // un-normalized, same direction
         }),
-      ).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax, 6)
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.visualMax, 6)
     })
 
     it('scales linearly with clamped cosine', () => {
@@ -257,7 +257,7 @@ describe('lib/looks/forYouRanking', () => {
           tasteSignalCount: FULL,
           candidateEmbedding: [0.6, 0.8], // cosine 0.6
         }),
-      ).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax * 0.6, 6)
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.visualMax * 0.6, 6)
     })
 
     it('clamps a negative cosine to 0 (dissimilar looks are not penalized here)', () => {
@@ -276,7 +276,7 @@ describe('lib/looks/forYouRanking', () => {
         tasteSignalCount: FULL / 2,
         candidateEmbedding: [1, 0],
       })
-      expect(halfConfidence).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax * 0.5, 6)
+      expect(halfConfidence).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.visualMax * 0.5, 6)
 
       // A 1-signal vector is heavily discounted.
       const oneSignal = computeVisualSimilarityBoost({
@@ -284,7 +284,7 @@ describe('lib/looks/forYouRanking', () => {
         tasteSignalCount: 1,
         candidateEmbedding: [1, 0],
       })
-      expect(oneSignal).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax / FULL, 6)
+      expect(oneSignal).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.visualMax / FULL, 6)
     })
 
     it('caps confidence at 1 beyond the full-signal threshold', () => {
@@ -294,7 +294,7 @@ describe('lib/looks/forYouRanking', () => {
           tasteSignalCount: FULL * 10,
           candidateEmbedding: [1, 0],
         }),
-      ).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax, 6)
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.visualMax, 6)
     })
 
     it('returns 0 when any input is missing or degenerate', () => {
@@ -330,12 +330,12 @@ describe('lib/looks/forYouRanking', () => {
     })
   })
 
-  describe('computeForYouScore visual boost', () => {
+  describe('computePersonalizedScore visual boost', () => {
     it('lifts a visually-similar candidate above a dissimilar one', () => {
       const context = {
         affinity: affinity({
           tasteVector: [1, 0, 0],
-          tasteSignalCount: FOR_YOU_RANK_WEIGHTS.visualConfidenceFullSignals,
+          tasteSignalCount: PERSONALIZED_RANK_WEIGHTS.visualConfidenceFullSignals,
         }),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
@@ -345,35 +345,35 @@ describe('lib/looks/forYouRanking', () => {
         ]),
       }
 
-      const match = computeForYouScore(row({ id: 'match' }), context)
-      const miss = computeForYouScore(row({ id: 'miss' }), context)
+      const match = computePersonalizedScore(row({ id: 'match' }), context)
+      const miss = computePersonalizedScore(row({ id: 'miss' }), context)
 
-      expect(match - miss).toBeCloseTo(FOR_YOU_RANK_WEIGHTS.visualMax, 5)
+      expect(match - miss).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.visualMax, 5)
     })
 
     it('adds no visual boost when the candidate has no embedding on the page', () => {
       const context = {
         affinity: affinity({
           tasteVector: [1, 0, 0],
-          tasteSignalCount: FOR_YOU_RANK_WEIGHTS.visualConfidenceFullSignals,
+          tasteSignalCount: PERSONALIZED_RANK_WEIGHTS.visualConfidenceFullSignals,
         }),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
         candidateEmbeddings: new Map<string, readonly number[]>(),
       }
-      const withoutEmbedding = computeForYouScore(row({ id: 'x' }), context)
+      const withoutEmbedding = computePersonalizedScore(row({ id: 'x' }), context)
       const noVisualContext = {
         affinity: affinity(),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
       }
-      const baseline = computeForYouScore(row({ id: 'x' }), noVisualContext)
+      const baseline = computePersonalizedScore(row({ id: 'x' }), noVisualContext)
 
       expect(withoutEmbedding).toBeCloseTo(baseline, 5)
     })
 
     it('is null-safe when the context omits candidateEmbeddings entirely', () => {
-      const score = computeForYouScore(row({ id: 'x' }), {
+      const score = computePersonalizedScore(row({ id: 'x' }), {
         affinity: affinity({ tasteVector: [1, 0], tasteSignalCount: 20 }),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
@@ -382,33 +382,33 @@ describe('lib/looks/forYouRanking', () => {
     })
   })
 
-  describe('computeForYouFreshnessBoost', () => {
+  describe('computePersonalizedFreshnessBoost', () => {
     it('peaks for a brand-new look and decays with age', () => {
-      expect(computeForYouFreshnessBoost(NOW, NOW)).toBeCloseTo(
-        FOR_YOU_RANK_WEIGHTS.freshnessMax,
+      expect(computePersonalizedFreshnessBoost(NOW, NOW)).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.freshnessMax,
         5,
       )
 
       const oneHalfLife = new Date(NOW.getTime() - 24 * 60 * 60 * 1000)
-      expect(computeForYouFreshnessBoost(oneHalfLife, NOW)).toBeCloseTo(
-        FOR_YOU_RANK_WEIGHTS.freshnessMax / 2,
+      expect(computePersonalizedFreshnessBoost(oneHalfLife, NOW)).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.freshnessMax / 2,
         5,
       )
     })
 
     it('returns 0 for a missing publishedAt', () => {
-      expect(computeForYouFreshnessBoost(null, NOW)).toBe(0)
+      expect(computePersonalizedFreshnessBoost(null, NOW)).toBe(0)
     })
   })
 
-  describe('rankForYouRows', () => {
+  describe('rankPersonalizedRows', () => {
     it('orders a followed look ahead of a comparable-quality stranger', () => {
-      const rows: ForYouRankableRow[] = [
+      const rows: PersonalizedRankableRow[] = [
         row({ id: 'stranger', professionalId: 'pro_x', rankScore: 5 }),
         row({ id: 'followed', professionalId: 'pro_followed', rankScore: 2 }),
       ]
 
-      const ranked = rankForYouRows(rows, {
+      const ranked = rankPersonalizedRows(rows, {
         affinity: affinity({ followed: ['pro_followed'] }),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
@@ -420,15 +420,15 @@ describe('lib/looks/forYouRanking', () => {
     })
 
     it('still lets a genuinely viral stranger outrank a weak followed look', () => {
-      // Intended blend behavior, not a bug: For You is discovery, not a
+      // Intended blend behavior, not a bug: the personalized feed is discovery, not a
       // followed-only timeline (that is the Following tab). A big-engagement
       // stranger look wins over a near-dead followed one despite the boost.
-      const rows: ForYouRankableRow[] = [
+      const rows: PersonalizedRankableRow[] = [
         row({ id: 'viral_stranger', professionalId: 'pro_x', rankScore: 60 }),
         row({ id: 'followed_weak', professionalId: 'pro_followed', rankScore: 1 }),
       ]
 
-      const ranked = rankForYouRows(rows, {
+      const ranked = rankPersonalizedRows(rows, {
         affinity: affinity({ followed: ['pro_followed'] }),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
@@ -440,7 +440,7 @@ describe('lib/looks/forYouRanking', () => {
     it('does not mutate the input array', () => {
       const rows = [row({ id: 'a', rankScore: 1 }), row({ id: 'b', rankScore: 2 })]
       const snapshot = rows.map((r) => r.id)
-      rankForYouRows(rows, {
+      rankPersonalizedRows(rows, {
         affinity: affinity(),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
@@ -451,11 +451,11 @@ describe('lib/looks/forYouRanking', () => {
     it('falls back to the DB RANKED order on tied personalized scores', () => {
       // No viewer signals → score is base+freshness; same publishedAt → tie-break
       // by rankScore desc then id desc.
-      const rows: ForYouRankableRow[] = [
+      const rows: PersonalizedRankableRow[] = [
         row({ id: 'low', rankScore: 5 }),
         row({ id: 'high', rankScore: 9 }),
       ]
-      const ranked = rankForYouRows(rows, {
+      const ranked = rankPersonalizedRows(rows, {
         affinity: affinity(),
         seenLookIds: EMPTY_SEEN,
         now: NOW,
