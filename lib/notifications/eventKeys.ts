@@ -26,6 +26,7 @@ export type NotificationTemplateKey =
   | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
+  | 'payment_confirmation_required'
   | 'payment_refunded'
   | 'no_show_fee_charged'
   | 'look_follower_new'
@@ -158,6 +159,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.NO_SHOW_FEE_CHARGED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
@@ -502,6 +504,22 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  [NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED]: {
+    key: NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: true,
+    // Action-required for the pro: a client attested an off-platform payment and
+    // is (potentially) waiting on a coupled next appointment. Must arrive
+    // promptly rather than be deferred to morning — mirrors the other
+    // booking-lifecycle asks (request/confirmed all bypass).
+    allowQuietHoursBypass: true,
+    templateKey: 'payment_confirmation_required',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.PAYMENT_REFUNDED]: {
     key: NotificationEventKey.PAYMENT_REFUNDED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -780,6 +798,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
   NotificationEventKey.LOOK_COMMENTED,

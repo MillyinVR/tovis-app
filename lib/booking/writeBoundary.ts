@@ -573,6 +573,20 @@ type MarkProBookingCheckoutPaidArgs = {
   idempotencyKey?: string | null
 }
 
+type ConfirmProBookingPaymentReceivedArgs = {
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type ConfirmProBookingPaymentReceivedResult = ProCheckoutCloseoutResult & {
+  // Aftercare-sourced next appointments that were coupled to this payment and
+  // auto-approved (PENDING → ACCEPTED) as part of the confirmation.
+  approvedNextAppointmentBookingIds: string[]
+}
+
 type WaiveProBookingCheckoutArgs = {
   bookingId: string
   professionalId: string
@@ -11879,6 +11893,88 @@ async function performLockedUpdateProCheckoutCloseout(args: {
   }
 }
 
+/**
+ * Approves any aftercare-sourced next appointments that were coupled to a
+ * source booking's off-platform payment. When the client checked out with an
+ * unverifiable method (AWAITING_CONFIRMATION) they could still book the next
+ * appointment immediately, but an AFTERCARE-sourced rebook stays PENDING until
+ * the pro confirms receipt — this is the single approval surface. Confirming
+ * payment auto-approves every such PENDING rebook (PENDING → ACCEPTED),
+ * syncs reminders, and tells the client their next appointment is confirmed.
+ *
+ * Runs inside the pro's locked transaction, so the PENDING read + ACCEPTED
+ * write are serialized against any concurrent pro-side accept. Returns the ids
+ * of the bookings that were approved.
+ */
+async function approveCoupledAftercareNextAppointments(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  sourceBookingId: string
+  professionalId: string
+  route: string
+}): Promise<string[]> {
+  const coupled = await args.tx.booking.findMany({
+    where: {
+      rebookOfBookingId: args.sourceBookingId,
+      source: BookingSource.AFTERCARE,
+      status: BookingStatus.PENDING,
+      professionalId: args.professionalId,
+    },
+    select: {
+      id: true,
+      status: true,
+      clientId: true,
+      professionalId: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  const approvedIds: string[] = []
+
+  for (const booking of coupled) {
+    recordStatusTransition({
+      from: BookingStatus.PENDING,
+      to: BookingStatus.ACCEPTED,
+      actor: 'PRO',
+      route: `${args.route}#approve-coupled-rebook`,
+      bookingId: booking.id,
+      professionalId: booking.professionalId,
+    })
+
+    await args.tx.booking.update({
+      where: { id: booking.id },
+      data: { status: BookingStatus.ACCEPTED },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+
+    await syncBookingAppointmentReminders({
+      tx: args.tx,
+      bookingId: booking.id,
+    })
+
+    // BOOKING_CONFIRMED to the client — mirrors the pro-accept path
+    // (dedupeKey keeps a replayed confirmation from double-notifying).
+    await createUpdateClientNotification({
+      tx: args.tx,
+      clientId: booking.clientId,
+      bookingId: booking.id,
+      eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+      title: 'Appointment confirmed',
+      body: 'Your next appointment is confirmed now that your pro received payment.',
+      dedupeKey: `BOOKING_CONFIRMED:${booking.id}`,
+      href: `/client/bookings/${booking.id}?step=overview`,
+      data: {
+        bookingId: booking.id,
+        notificationReason: 'BOOKING_CONFIRMED',
+        bookingReason: 'PAYMENT_CONFIRMED_REBOOK_APPROVED',
+      },
+    })
+
+    approvedIds.push(booking.id)
+  }
+
+  return approvedIds
+}
+
 function assertCanCreateRebookFromSourceBooking(args: {
   source: RebookSourceBookingRecord
   clientId?: string | null
@@ -13016,6 +13112,87 @@ export async function markProBookingCheckoutPaid(
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),
+  )
+}
+
+/**
+ * Pro confirms receipt of an off-platform payment (cash / Venmo / Zelle / Apple
+ * Cash / PayPal) that was left AWAITING_CONFIRMATION at client checkout. In one
+ * locked transaction this both (a) closes out the booking's payment — PAID +
+ * paymentCollectedAt, running the aftercare/closeout completion + audit +
+ * PAYMENT_COLLECTED receipt via the shared closeout path — and (b) approves any
+ * aftercare-sourced next appointment coupled to it (PENDING → ACCEPTED).
+ *
+ * Distinct from `markProBookingCheckoutPaid`: that path records a manual collect
+ * from any pre-collection state; this one is specifically the confirmation of a
+ * pending off-platform payment and refuses anything not in AWAITING_CONFIRMATION.
+ */
+export async function confirmProBookingPaymentReceived(
+  args: ConfirmProBookingPaymentReceivedArgs,
+): Promise<ConfirmProBookingPaymentReceivedResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) => {
+      // Only a booking whose checkout is awaiting confirmation of an off-platform
+      // payment can be confirmed here; the ordinary manual-collect path is
+      // mark-paid. A replayed confirm (already PAID) falls through to this guard.
+      const current = await tx.booking.findUnique({
+        where: { id: args.bookingId },
+        select: {
+          id: true,
+          professionalId: true,
+          checkoutStatus: true,
+        } satisfies Prisma.BookingSelect,
+      })
+
+      if (!current || current.professionalId !== args.professionalId) {
+        throw bookingError('BOOKING_NOT_FOUND')
+      }
+
+      if (
+        current.checkoutStatus !== BookingCheckoutStatus.AWAITING_CONFIRMATION
+      ) {
+        throw bookingError('FORBIDDEN', {
+          message:
+            'confirmProBookingPaymentReceived requires checkoutStatus AWAITING_CONFIRMATION.',
+          userMessage: 'This booking is not awaiting payment confirmation.',
+        })
+      }
+
+      const route =
+        'lib/booking/writeBoundary.ts:confirmProBookingPaymentReceived'
+
+      const closeout = await performLockedUpdateProCheckoutCloseout({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        actorUserId: args.actorUserId,
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        paymentCollectedAt: now,
+        route,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      })
+
+      const approvedNextAppointmentBookingIds =
+        await approveCoupledAftercareNextAppointments({
+          tx,
+          now,
+          sourceBookingId: args.bookingId,
+          professionalId: args.professionalId,
+          route,
+        })
+
+      return {
+        ...closeout,
+        approvedNextAppointmentBookingIds,
+      }
+    },
   )
 }
 

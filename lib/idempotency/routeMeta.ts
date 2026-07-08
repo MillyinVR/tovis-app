@@ -11,6 +11,8 @@ export const IDEMPOTENCY_ROUTES = {
   PRO_BOOKING_FINAL_REVIEW: 'POST /api/v1/pro/bookings/[id]/final-review',
   PRO_BOOKING_CHECKOUT_MARK_PAID:
     'POST /api/v1/pro/bookings/[id]/checkout/mark-paid',
+  PRO_BOOKING_CHECKOUT_CONFIRM_PAYMENT:
+    'POST /api/v1/pro/bookings/[id]/checkout/confirm-payment',
   PRO_BOOKING_CHECKOUT_WAIVE:
     'POST /api/v1/pro/bookings/[id]/checkout/waive',
 
