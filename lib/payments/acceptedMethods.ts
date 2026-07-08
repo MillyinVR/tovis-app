@@ -62,6 +62,28 @@ export function normalizePaymentMethodInput(
   }
 }
 
+// Off-platform payment methods whose receipt the platform cannot verify — client
+// attests they paid, but only the pro can confirm the money actually arrived.
+// Card rails (STRIPE_CARD / CARD_ON_FILE / TAP_TO_PAY) are verifiable (Stripe /
+// terminal rails) and stay on the immediate-PAID path. Kept as a set so callers
+// read intent, not a hard-coded list.
+const UNVERIFIABLE_PAYMENT_METHODS: ReadonlySet<PaymentMethod> = new Set([
+  PaymentMethod.CASH,
+  PaymentMethod.VENMO,
+  PaymentMethod.ZELLE,
+  PaymentMethod.APPLE_CASH,
+  PaymentMethod.PAYPAL,
+])
+
+// True when a confirmed payment on this method must wait for the pro to confirm
+// receipt (drives the AWAITING_CONFIRMATION checkout state) rather than closing
+// out immediately. Null/undefined → false (no method chosen yet).
+export function isUnverifiablePaymentMethod(
+  method: PaymentMethod | null | undefined,
+): boolean {
+  return method != null && UNVERIFIABLE_PAYMENT_METHODS.has(method)
+}
+
 export function buildAcceptedPaymentMethods(
   settings: AcceptedPaymentMethodFlags | null,
 ): Set<PaymentMethod> {

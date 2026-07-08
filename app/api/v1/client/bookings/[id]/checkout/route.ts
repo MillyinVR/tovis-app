@@ -28,6 +28,7 @@ import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeCon
 import { updateClientBookingCheckout } from '@/lib/booking/writeBoundary'
 import {
   buildAcceptedPaymentMethods,
+  isUnverifiablePaymentMethod,
   normalizePaymentMethodInput,
 } from '@/lib/payments/acceptedMethods'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
@@ -319,16 +320,27 @@ export async function POST(req: NextRequest, props: RouteContext) {
       return jsonFail(400, 'Tips are not enabled for this provider.')
     }
 
+    // Off-platform methods (cash / Venmo / Zelle / Apple Cash / PayPal) can't be
+    // verified by us: the client attests payment, but the money only "arrives"
+    // once the pro confirms receipt. Those enter AWAITING_CONFIRMATION —
+    // paymentAuthorizedAt stamped, paymentCollectedAt held (so closeout waits).
+    // Verifiable rails (card-on-file / tap-to-pay) keep the immediate-PAID path.
+    const confirmAsUnverifiable =
+      parsed.value.confirmPayment === true &&
+      isUnverifiablePaymentMethod(effectivePaymentMethod)
+
     const result = await updateClientBookingCheckout({
       bookingId,
       clientId: auth.clientId,
       tipAmount: parsed.value.tipAmount,
       selectedPaymentMethod: parsed.value.selectedPaymentMethod,
       checkoutStatus: parsed.value.confirmPayment
-        ? BookingCheckoutStatus.PAID
+        ? confirmAsUnverifiable
+          ? BookingCheckoutStatus.AWAITING_CONFIRMATION
+          : BookingCheckoutStatus.PAID
         : undefined,
       markPaymentAuthorized: parsed.value.confirmPayment,
-      markPaymentCollected: parsed.value.confirmPayment,
+      markPaymentCollected: parsed.value.confirmPayment && !confirmAsUnverifiable,
     })
 
     const responseBody = buildCheckoutResponseBody({ result })

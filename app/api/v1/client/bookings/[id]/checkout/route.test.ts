@@ -212,6 +212,56 @@ function expectedPaidResponseBody(
   }
 }
 
+function makeAwaitingConfirmationResult(
+  paymentMethod: PaymentMethod = PaymentMethod.CASH,
+) {
+  return {
+    booking: {
+      id: 'booking_1',
+      checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
+      selectedPaymentMethod: paymentMethod,
+      serviceSubtotalSnapshot: new Prisma.Decimal(100),
+      productSubtotalSnapshot: new Prisma.Decimal(20),
+      subtotalSnapshot: new Prisma.Decimal(100),
+      tipAmount: new Prisma.Decimal(15),
+      taxAmount: new Prisma.Decimal(0),
+      discountAmount: new Prisma.Decimal(0),
+      totalAmount: new Prisma.Decimal(135),
+      paymentAuthorizedAt: paidAt,
+      paymentCollectedAt: null,
+    },
+    meta: {
+      mutated: true,
+      noOp: false,
+    },
+  }
+}
+
+function expectedAwaitingConfirmationResponseBody(
+  paymentMethod: PaymentMethod = PaymentMethod.CASH,
+) {
+  return {
+    booking: {
+      id: 'booking_1',
+      checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
+      selectedPaymentMethod: paymentMethod,
+      serviceSubtotalSnapshot: '100',
+      productSubtotalSnapshot: '20',
+      subtotalSnapshot: '100',
+      tipAmount: '15',
+      taxAmount: '0',
+      discountAmount: '0',
+      totalAmount: '135',
+      paymentAuthorizedAt: '2026-03-25T16:00:00.000Z',
+      paymentCollectedAt: null,
+    },
+    meta: {
+      mutated: true,
+      noOp: false,
+    },
+  }
+}
+
 function expectedStripeSelectionResponseBody() {
   return {
     booking: {
@@ -785,7 +835,14 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
   })
 
-  it('forwards a valid manual cash payload to updateClientBookingCheckout, completes idempotency, and returns the booking payload', async () => {
+  it('forwards a confirmed cash payment into AWAITING_CONFIRMATION (unverifiable — pro must confirm receipt)', async () => {
+    // Cash is off-platform / unverifiable: the client attests, but the money
+    // only "arrives" once the pro confirms. Checkout enters AWAITING_CONFIRMATION
+    // with authorization stamped and collection held.
+    mocks.updateClientBookingCheckout.mockResolvedValueOnce(
+      makeAwaitingConfirmationResult(),
+    )
+
     const response = await POST(
       makeIdempotentRequest(
         {
@@ -805,12 +862,12 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
       clientId: 'client_1',
       tipAmount: '15.00',
       selectedPaymentMethod: PaymentMethod.CASH,
-      checkoutStatus: BookingCheckoutStatus.PAID,
+      checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
       markPaymentAuthorized: true,
-      markPaymentCollected: true,
+      markPaymentCollected: false,
     })
 
-    const responseBody = expectedPaidResponseBody()
+    const responseBody = expectedAwaitingConfirmationResponseBody()
 
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
@@ -822,12 +879,41 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
     await expect(response.json()).resolves.toEqual(responseBody)
   })
 
+  it('keeps a verifiable card-on-file confirmation on the immediate-PAID path', async () => {
+    const response = await POST(
+      makeIdempotentRequest(
+        {
+          tipAmount: '15.00',
+          selectedPaymentMethod: 'card on file',
+          confirmPayment: true,
+        },
+        'idem_checkout_cardonfile_1',
+      ),
+      makeCtx(),
+    )
+
+    expect(mocks.updateClientBookingCheckout).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      clientId: 'client_1',
+      tipAmount: '15.00',
+      selectedPaymentMethod: PaymentMethod.CARD_ON_FILE,
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      markPaymentAuthorized: true,
+      markPaymentCollected: true,
+    })
+
+    expect(response.status).toBe(200)
+  })
+
   it('uses existing manual selected payment method when confirming payment without selectedPaymentMethod', async () => {
     mocks.prismaBookingFindUnique.mockResolvedValueOnce({
       id: 'booking_1',
       professionalId: 'pro_1',
       selectedPaymentMethod: PaymentMethod.CASH,
     })
+    mocks.updateClientBookingCheckout.mockResolvedValueOnce(
+      makeAwaitingConfirmationResult(),
+    )
 
     const response = await POST(
       makeIdempotentRequest(
@@ -849,14 +935,16 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
       }),
     )
 
+    // Existing method is CASH (unverifiable), so confirming holds it in
+    // AWAITING_CONFIRMATION rather than collecting immediately.
     expect(mocks.updateClientBookingCheckout).toHaveBeenCalledWith({
       bookingId: 'booking_1',
       clientId: 'client_1',
       tipAmount: '5.00',
       selectedPaymentMethod: undefined,
-      checkoutStatus: BookingCheckoutStatus.PAID,
+      checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
       markPaymentAuthorized: true,
-      markPaymentCollected: true,
+      markPaymentCollected: false,
     })
 
     expect(response.status).toBe(200)

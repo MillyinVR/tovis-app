@@ -26,7 +26,8 @@
         "READY",
         "PARTIALLY_PAID",
         "PAID",
-        "WAIVED"
+        "WAIVED",
+        "AWAITING_CONFIRMATION"
       ],
       "type": "string"
     },

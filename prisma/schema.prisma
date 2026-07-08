@@ -399,6 +399,11 @@ enum BookingCheckoutStatus {
   PARTIALLY_PAID
   PAID
   WAIVED
+  // Client attested an off-platform / unverifiable payment (cash / Venmo /
+  // Zelle / Apple Cash / PayPal); paymentAuthorizedAt is stamped but
+  // paymentCollectedAt waits until the pro confirms receipt (closeout keys on
+  // paymentCollectedAt, so an AWAITING_CONFIRMATION booking stays open).
+  AWAITING_CONFIRMATION
 }
 
 enum PaymentCollectionTiming {

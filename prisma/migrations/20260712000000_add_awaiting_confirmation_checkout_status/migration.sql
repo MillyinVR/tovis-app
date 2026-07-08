@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "BookingCheckoutStatus" ADD VALUE 'AWAITING_CONFIRMATION';
