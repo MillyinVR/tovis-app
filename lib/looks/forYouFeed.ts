@@ -69,6 +69,22 @@ export const AFFINITY_SAVE_WEIGHT = 2
 // bookings become an affinity source.
 export const AFFINITY_HALF_LIFE_DAYS = 75
 
+// Spec §6.2 separation rule ("board activity should NOT flood the general Looks
+// feed"): a board save fully updates that board's LOCAL taste — its
+// BoardTasteVector and the §4.4 board feed — but bleeds into the GLOBAL feed at
+// only this small, tunable fraction, so an active wedding board colors the
+// discovery feed ("I know about your wedding") without dominating it. Looks-feed
+// likes stay at full global weight; boards never receive Looks-feed signals, so
+// the bleed is one-directional (spec §6.2). Applied to the board-save weight in
+// BOTH projections of global taste — the categorical affinity here in
+// loadForYouAffinity and the visual ClientTasteVector in
+// lib/personalization/tasteVectors — while recomputeBoardTasteVector keeps the
+// full weight locally. Declared board PURPOSE (aggregateBoardContextSignals,
+// sharply event-decayed) is the deliberate "I know about your wedding" channel
+// and is NOT damped; this fraction governs raw save-engagement only. Start
+// conservative (~0.15) and tune as prod accumulates board activity.
+export const BOARD_GLOBAL_BLEED_WEIGHT = 0.15
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 // §6.3 in-session responsiveness: a like/save created within this window of the
@@ -392,10 +408,16 @@ export async function loadForYouAffinity(args: {
   for (const item of boardItems) {
     const slug = slugFromCategoryRow(item)
     if (!slug) continue
+    // §6.2 separation: a board save bleeds into the GLOBAL category affinity at
+    // only BOARD_GLOBAL_BLEED_WEIGHT of a like's strength (Looks-feed likes above
+    // stay at full weight), so board activity flavors the discovery feed without
+    // flooding it.
     entries.push({
       slug,
       weight:
-        AFFINITY_SAVE_WEIGHT * computeAffinityDecayFactor(item.createdAt, args.now),
+        AFFINITY_SAVE_WEIGHT *
+        BOARD_GLOBAL_BLEED_WEIGHT *
+        computeAffinityDecayFactor(item.createdAt, args.now),
     })
   }
 

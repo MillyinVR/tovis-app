@@ -28,6 +28,7 @@ import { rootTenantContext } from '@/lib/tenant/context'
 import { BOARD_EVENT_PROXIMITY } from '@/lib/boards/context'
 import {
   AFFINITY_HALF_LIFE_DAYS,
+  BOARD_GLOBAL_BLEED_WEIGHT,
   aggregateBoardContextSignals,
   aggregateCategoryWeights,
   buildForYouFeedPage,
@@ -190,14 +191,18 @@ describe('lib/looks/forYouFeed', () => {
         now: NOW,
       })
 
-      // save(2) + board-purpose (3 × noDateFactor 0.5 = 1.5)
-      expect(affinity.categoryWeights.get('nails')).toBeCloseTo(3.5, 5)
+      // damped board save (2 × 0.15 = 0.3) + board-purpose (3 × noDateFactor
+      // 0.5 = 1.5) — §6.2: the board save bleeds into global at the small fraction
+      expect(affinity.categoryWeights.get('nails')).toBeCloseTo(
+        2 * BOARD_GLOBAL_BLEED_WEIGHT + 1.5,
+        5,
+      )
       expect(affinity.occasionTagWeights.get('nails')).toBe(
         BOARD_EVENT_PROXIMITY.noDateFactor,
       )
     })
 
-    it('weights saves above likes and collects followed pros', async () => {
+    it('bleeds a board save into global at only BOARD_GLOBAL_BLEED_WEIGHT while likes stay full (spec §6.2) and collects followed pros', async () => {
       mocks.prisma.proFollow.findMany.mockResolvedValue([
         { professionalId: 'pro_a' },
         { professionalId: 'pro_b' },
@@ -218,8 +223,30 @@ describe('lib/looks/forYouFeed', () => {
         'pro_a',
         'pro_b',
       ])
-      // like(1) + save(2) on balayage
-      expect(affinity.categoryWeights.get('balayage')).toBe(3)
+      // full like (1 × 1) + damped board save (2 × 0.15) on balayage — the board
+      // save contributes far less than the Looks-feed like, so board activity
+      // flavors but never floods the discovery feed.
+      expect(affinity.categoryWeights.get('balayage')).toBeCloseTo(
+        1 + 2 * BOARD_GLOBAL_BLEED_WEIGHT,
+        5,
+      )
+    })
+
+    it('bleeds a standalone board save (no like, no purpose) at exactly the small fraction (spec §6.2)', async () => {
+      mocks.prisma.boardItem.findMany.mockResolvedValue([catRow('balayage')])
+
+      const affinity = await loadForYouAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      // Only signal is one board save → 2 × 0.15 = 0.3 in global category
+      // affinity, vs 1.0 for a single Looks-feed like on the same category.
+      expect(affinity.categoryWeights.get('balayage')).toBeCloseTo(
+        2 * BOARD_GLOBAL_BLEED_WEIGHT,
+        5,
+      )
     })
 
     it('skips client-scoped queries for a viewer without a client profile', async () => {
@@ -249,8 +276,12 @@ describe('lib/looks/forYouFeed', () => {
         now: NOW,
       })
 
-      // fresh like (1 × 1) + half-life-old save (2 × 0.5)
-      expect(affinity.categoryWeights.get('balayage')).toBeCloseTo(2, 5)
+      // fresh full like (1 × 1) + half-life-old damped board save
+      // (2 × 0.15 × 0.5) — decay and the §6.2 bleed fraction compose
+      expect(affinity.categoryWeights.get('balayage')).toBeCloseTo(
+        1 + 2 * BOARD_GLOBAL_BLEED_WEIGHT * 0.5,
+        5,
+      )
     })
 
     it('folds declared self-profile interests in undecayed (spec §6.6)', async () => {
