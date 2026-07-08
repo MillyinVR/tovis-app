@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { useLiveChannels } from '@/app/_components/live/useLiveChannels'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
 import { isRecord } from '@/lib/guards'
 
@@ -32,6 +33,13 @@ type Msg = {
 type ThreadClientProps = {
   threadId: string
   myUserId: string
+  /**
+   * This viewer's live-sync channel (`user:{id}`). The send route pings the
+   * OTHER participant's channel, so a broadcast here means the counterparty
+   * just sent — refetch immediately instead of waiting for the poll. Null when
+   * live-sync isn't configured, in which case the poll/focus refresh still run.
+   */
+  liveChannel: string | null
   initialMessages: Msg[]
   initialCounterpartyLastReadAt: string | null
 }
@@ -232,8 +240,13 @@ function AttachmentPreview(props: { attachment: Attachment }) {
 }
 
 export default function ThreadClient(props: ThreadClientProps) {
-  const { threadId, myUserId, initialMessages, initialCounterpartyLastReadAt } =
-    props
+  const {
+    threadId,
+    myUserId,
+    liveChannel,
+    initialMessages,
+    initialCounterpartyLastReadAt,
+  } = props
 
   const [messages, setMessages] = useState<Msg[]>(initialMessages)
   const [counterpartyLastReadAt, setCounterpartyLastReadAt] = useState<
@@ -482,6 +495,13 @@ export default function ThreadClient(props: ThreadClientProps) {
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [fetchLatest, lastId])
+
+  // Live-sync (Layer 2): a "changed" ping on my channel means the counterparty
+  // just sent — refetch right away so new messages land without waiting on the
+  // 10s poll. The poll/focus refresh stay as a fail-open safety net.
+  useLiveChannels(liveChannel ? [liveChannel] : [], () => {
+    void fetchLatest()
+  })
 
   // The last of my confirmed messages the counterparty has read — the only one
   // that shows a "Read" receipt (iMessage-style).
