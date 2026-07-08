@@ -98,14 +98,20 @@ one back to web; (2) client booking detail → web's tabbed IA wins, add
 before/after · care notes · product recs · review · rebook CTA · add-to-calendar
 to iOS; (3) pro home → Calendar on both (retire dead iOS `ProOverviewView`);
 (4) build first-class iOS Settings/Activity/Aftercare-inbox/Offers/Openings/
-Referrals screens; (5) full pro-side parity on iOS (build all); (6) full native
+Referrals screens + the public client profile `/u/[handle]` viewer + public
+boards (social surfaces, not SEO); (5) full pro-side parity on iOS (build all),
+incl. the pro's private client view (chart + `view=public` toggle to that
+client's public profile); (6) full native
 auth on iOS (signup + recovery + onboarding + verification); (7) port all four
 iOS wins to web; (8) add iOS's consolidated pro self-profile+settings surface to
 web; (9) fold minor drift in (inbox role-awareness FIX + filters, home invite
 card, notifications day-grouping).
 **Accepted divergences (no work):** camera/best-shots/scrubber + wrap-up AI
 critique (iOS-only); membership purchase (web-only, Apple IAP); NFC `/t` `/c`
-`/nfc/invalid` + claim-accept (web inbound); public SEO `/p` `/u` + public boards.
+`/nfc/invalid` + claim-accept (web inbound); public SEO `/p` pro-vanity mirror
+(iOS renders the native pro profile instead). NOTE: the public *client* profile
+`/u/[handle]` and public boards are NOT accepted divergences — they're iOS build
+items (A2), since they're social surfaces (looks/stats/follow), not SEO mirrors.
 
 ### Web workstreams
 - [x] **W1 — consolidated pro `/pro/profile` self-service surface** (decision 8) —
@@ -128,13 +134,16 @@ critique (iOS-only); membership purchase (web-only, Apple IAP); NFC `/t` `/c`
   pro onboarding checklist → license/document verification. App-Store hygiene.
 - [ ] **A2 — client screens** (decision 4): Settings hub (biggest) · Activity ·
   Aftercare inbox · Offers · Openings feed · Referrals activity · Boards
-  detail/create/share · Share-your-look.
+  detail/create/share · **public client profile `/u/[handle]` viewer** (looks /
+  stats / follow; guest + client viewer modes) · Share-your-look.
 - [ ] **A3 — client booking detail** rebuilt to web tabbed IA + missing aftercare/
   review pieces (decision 2).
 - [ ] **A4 — pro parity** (decision 5): Last Minute editor · Waitlist outreach ·
-  chart write-forms · calendar reschedule/offer-a-time modals · money-trail
-  inspector · manual reminders · referral-reward config · data-migration wizard ·
-  media manager + owner-menu edit · review "feature in portfolio" toggle.
+  pro's private client view — chart write-forms + technical-record decryption +
+  **`view=public` toggle** (chart ↔ that client's public profile) · calendar
+  reschedule/offer-a-time modals · money-trail inspector · manual reminders ·
+  referral-reward config · data-migration wizard · media manager + owner-menu
+  edit · review "feature in portfolio" toggle.
 - [ ] **A5 — pro home → Calendar** + delete unused `Tovis/ProOverviewView.swift`.
 - [ ] **A6 — minor drift**: Inbox role-awareness FIX (pro sees client name) +
   filter tabs/eyebrows · Home InviteFriendCard + two-column · Notifications
