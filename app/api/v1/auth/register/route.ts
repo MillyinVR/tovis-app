@@ -5,6 +5,10 @@ import { hashPassword, createVerificationToken } from '@/lib/auth'
 import { validatePassword } from '@/lib/passwordPolicy'
 import { getCurrentTosVersion } from '@/lib/legal'
 import { verifyTurnstileOrFailOpen } from '@/lib/auth/turnstile'
+import {
+  isNativeRegisterRequest,
+  verifyNativeRegistrationGateOrFailOpen,
+} from '@/lib/auth/appAttest'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import {
   getAppUrlFromRequest,
@@ -136,6 +140,10 @@ type RegisterBody = {
   tosAccepted?: unknown
   transactionalSmsConsent?: unknown
   turnstileToken?: unknown
+
+  // native (iOS) App Attest gate — sent in lieu of turnstileToken; see
+  // lib/auth/appAttest.ts. `{ keyId, attestation, timestamp }`.
+  appAttest?: unknown
 }
 
 /* =========================================================
@@ -774,33 +782,70 @@ export async function POST(request: Request) {
 
     const transactionalSmsConsentVersion = TRANSACTIONAL_SMS_POLICY_VERSION
 
-    const captcha = await verifyTurnstileOrFailOpen({
-      request,
-      token: turnstileToken,
-    })
-
-    if (!captcha.ok) {
-      return jsonFail(400, captcha.message, { code: captcha.code })
-    }
-
-    if (captcha.failOpen) {
-      logAuthEvent({
-        level: 'warn',
-        event: 'auth.register.captcha_fail_open',
-        route: 'auth.register',
-        email,
-        phone,
-        meta: {
-          captchaEvent: captcha.eventName,
-          reason: captcha.reason,
-          role,
-        },
+    // Bot/abuse gate. The native app can't render Turnstile, so it proves
+    // itself with an Apple App Attest attestation instead (lib/auth/appAttest.ts);
+    // the web path is unchanged. Both resolve to the same failOpen semantics used
+    // for the rate-limit bucket below.
+    let gateFailOpen: boolean
+    if (isNativeRegisterRequest(request)) {
+      const nativeGate = await verifyNativeRegistrationGateOrFailOpen({
+        // The attestation is bound to the RAW email/phone strings the client
+        // hashed — read them untransformed (not the normalized values above).
+        appAttest: body.appAttest,
+        email: typeof body.email === 'string' ? body.email : '',
+        phone: typeof body.phone === 'string' ? body.phone : '',
       })
+
+      if (!nativeGate.ok) {
+        return jsonFail(400, nativeGate.message, { code: nativeGate.code })
+      }
+
+      gateFailOpen = nativeGate.failOpen
+
+      if (nativeGate.failOpen) {
+        logAuthEvent({
+          level: 'warn',
+          event: 'auth.register.native_attest_fail_open',
+          route: 'auth.register',
+          email,
+          phone,
+          meta: {
+            reason: nativeGate.reason ?? null,
+            role,
+          },
+        })
+      }
+    } else {
+      const captcha = await verifyTurnstileOrFailOpen({
+        request,
+        token: turnstileToken,
+      })
+
+      if (!captcha.ok) {
+        return jsonFail(400, captcha.message, { code: captcha.code })
+      }
+
+      gateFailOpen = captcha.failOpen
+
+      if (captcha.failOpen) {
+        logAuthEvent({
+          level: 'warn',
+          event: 'auth.register.captcha_fail_open',
+          route: 'auth.register',
+          email,
+          phone,
+          meta: {
+            captchaEvent: captcha.eventName,
+            reason: captcha.reason,
+            role,
+          },
+        })
+      }
     }
 
     const identity = await rateLimitIdentity()
 
-    const registerBucket = captcha.failOpen
+    const registerBucket = gateFailOpen
       ? 'auth:register'
       : 'auth:register:verified'
 
