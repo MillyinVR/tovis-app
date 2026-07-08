@@ -238,7 +238,7 @@ describe('lib/looks/ranking.ts', () => {
     it('keeps the smoothed rate bounded below the max signal weight', () => {
       // Pathological all-save look with no recorded views: the floor caps the
       // rate strictly under the save weight (5), so scores stay under
-      // SCALE·5 = 1000 — beneath forYouRanking's seen-penalty.
+      // SCALE·5 = 1000 — beneath personalizedRanking's seen-penalty.
       const extreme = computeLookPostRankSmoothedRate({
         likeCount: 0,
         commentCount: 0,
@@ -572,7 +572,7 @@ describe('lib/looks/ranking.ts', () => {
       expect(score).toBe(scoreWithoutColdStart)
     })
 
-    it('stays below the forYouRanking seen penalty even for pathological cold inputs', () => {
+    it('stays below the personalizedRanking seen penalty even for pathological cold inputs', () => {
       // Worst case under the floor: every impression is a save (max weight),
       // impressions just shy of the floor, published this instant.
       const now = new Date('2026-04-20T00:00:00.000Z')
@@ -584,7 +584,7 @@ describe('lib/looks/ranking.ts', () => {
       expect(score).toBeLessThan(1000)
     })
 
-    it('keeps the score scale in the band forYouRanking boosts are calibrated against', () => {
+    it('keeps the score scale in the band personalizedRanking boosts are calibrated against', () => {
       // A strongly-engaged fresh look should land in the tens-to-hundreds band,
       // not below 1, so the additive follow/category/freshness boosts don't bury
       // the engagement backbone.

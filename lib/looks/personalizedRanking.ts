@@ -1,9 +1,9 @@
-// lib/looks/forYouRanking.ts
+// lib/looks/personalizedRanking.ts
 //
-// Pure, viewer-personalized re-rank for the "For You" Looks feed (B1, phase 1).
+// Pure, viewer-personalized re-rank for the personalized Looks feed (B1, phase 1).
 //
 // The persisted `rankScore` (lib/looks/ranking.ts) is a global, viewer-agnostic
-// blend of engagement × recency. For You layers a QUERY-TIME, per-viewer boost
+// blend of engagement × recency. The personalized feed layers a QUERY-TIME, per-viewer boost
 // on top of it — no new tables, no precomputed per-viewer score:
 //
 //   score = rankScore * BASE_WEIGHT
@@ -12,7 +12,7 @@
 //         + occasionBoost        (look's tags match a declared board occasion,
 //                                 e.g. a bridal board with an upcoming wedding
 //                                 — spec §7–8; weight is event-proximity-scaled
-//                                 at load time in forYouFeed.ts)
+//                                 at load time in personalizedFeed.ts)
 //         + visualBoost          (candidate look's image embedding is cosine-
 //                                 similar to the viewer's taste vector — spec
 //                                 §6.0; tags retrieve, embeddings RANK within
@@ -32,7 +32,7 @@
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-export const FOR_YOU_RANK_WEIGHTS = {
+export const PERSONALIZED_RANK_WEIGHTS = {
   // rankScore passes through unscaled — it is the quality/recency backbone.
   base: 1,
   // A followed-pro look reliably leads its rankScore band, even at 0 engagement.
@@ -67,14 +67,14 @@ export const FOR_YOU_RANK_WEIGHTS = {
   seen: 1_000,
 } as const
 
-export type ForYouViewerAffinity = {
+export type PersonalizedViewerAffinity = {
   followedProfessionalIds: ReadonlySet<string>
   // slug → affinity weight (raw count of the viewer's likes/saves in that
   // category; capped inside the ranker).
   categoryWeights: ReadonlyMap<string, number>
   // LookTag slug → occasion weight in [0, 1], derived from the viewer's
   // declared board purposes and scaled by event proximity at load time
-  // (lib/looks/forYouFeed.ts + lib/boards/context.ts). A look matching any of
+  // (lib/looks/personalizedFeed.ts + lib/boards/context.ts). A look matching any of
   // these tags gets occasionMax × the strongest matched weight.
   occasionTagWeights: ReadonlyMap<string, number>
   // The viewer's global taste vector (spec §6.1 global_taste_embedding) —
@@ -84,7 +84,7 @@ export type ForYouViewerAffinity = {
   // boost is then 0. Optional so non-visual callers (unit tests, the follow-only
   // paths) can omit them without churn. Note: from §6.3 this vector is the stored
   // vector already blended with this sitting's fresh likes/saves at load time
-  // (lib/looks/forYouFeed.ts), and tasteSignalCount its blended confidence.
+  // (lib/looks/personalizedFeed.ts), and tasteSignalCount its blended confidence.
   tasteVector?: readonly number[] | null
   tasteSignalCount?: number
   // Observability only (ignored by scoring): how many fresh same-session
@@ -92,7 +92,7 @@ export type ForYouViewerAffinity = {
   sessionVisualSignalCount?: number
 }
 
-export type ForYouRankableRow = {
+export type PersonalizedRankableRow = {
   id: string
   professionalId: string
   publishedAt: Date | null
@@ -105,12 +105,12 @@ export type ForYouRankableRow = {
   tags?: ReadonlyArray<{ slug?: string | null }> | null
 }
 
-export type ForYouRankContext = {
-  affinity: ForYouViewerAffinity
+export type PersonalizedRankContext = {
+  affinity: PersonalizedViewerAffinity
   seenLookIds: ReadonlySet<string>
   now: Date
   // Candidate look image embeddings keyed by look id (raw provider vectors,
-  // fetched by PK for the page in lib/looks/forYouFeed.ts). A look absent from
+  // fetched by PK for the page in lib/looks/personalizedFeed.ts). A look absent from
   // the map is not yet embedded → 0 visual boost. Optional/empty when the viewer
   // has no taste vector to compare against (the fetch is skipped entirely then).
   candidateEmbeddings?: ReadonlyMap<string, readonly number[]>
@@ -120,14 +120,14 @@ function safeNumber(value: number): number {
   return Number.isFinite(value) ? value : 0
 }
 
-function categorySlugOf(row: ForYouRankableRow): string | null {
+function categorySlugOf(row: PersonalizedRankableRow): string | null {
   const slug = row.service?.category?.slug
   if (typeof slug !== 'string') return null
   const trimmed = slug.trim()
   return trimmed.length > 0 ? trimmed : null
 }
 
-export function computeForYouFreshnessBoost(
+export function computePersonalizedFreshnessBoost(
   publishedAt: Date | null,
   now: Date,
 ): number {
@@ -138,9 +138,9 @@ export function computeForYouFreshnessBoost(
   const ageMs = Math.max(0, now.getTime() - publishedAt.getTime())
   const ageDays = ageMs / DAY_MS
   const decay =
-    1 / (1 + ageDays / FOR_YOU_RANK_WEIGHTS.freshnessHalfLifeDays)
+    1 / (1 + ageDays / PERSONALIZED_RANK_WEIGHTS.freshnessHalfLifeDays)
 
-  return FOR_YOU_RANK_WEIGHTS.freshnessMax * decay
+  return PERSONALIZED_RANK_WEIGHTS.freshnessMax * decay
 }
 
 /**
@@ -203,24 +203,24 @@ export function computeVisualSimilarityBoost(args: {
       ? Math.max(0, rawSignals)
       : 0
   const confidence = Math.min(
-    signals / FOR_YOU_RANK_WEIGHTS.visualConfidenceFullSignals,
+    signals / PERSONALIZED_RANK_WEIGHTS.visualConfidenceFullSignals,
     1,
   )
   if (confidence <= 0) return 0
 
-  return FOR_YOU_RANK_WEIGHTS.visualMax * clampedCosine * confidence
+  return PERSONALIZED_RANK_WEIGHTS.visualMax * clampedCosine * confidence
 }
 
-export function computeForYouScore(
-  row: ForYouRankableRow,
-  context: ForYouRankContext,
+export function computePersonalizedScore(
+  row: PersonalizedRankableRow,
+  context: PersonalizedRankContext,
 ): number {
-  const base = safeNumber(row.rankScore) * FOR_YOU_RANK_WEIGHTS.base
+  const base = safeNumber(row.rankScore) * PERSONALIZED_RANK_WEIGHTS.base
 
   const followBoost = context.affinity.followedProfessionalIds.has(
     row.professionalId,
   )
-    ? FOR_YOU_RANK_WEIGHTS.follow
+    ? PERSONALIZED_RANK_WEIGHTS.follow
     : 0
 
   const slug = categorySlugOf(row)
@@ -230,11 +230,11 @@ export function computeForYouScore(
   const categoryBoost =
     Math.min(
       Math.max(rawCategoryWeight, 0),
-      FOR_YOU_RANK_WEIGHTS.categoryWeightCap,
-    ) * FOR_YOU_RANK_WEIGHTS.categoryUnit
+      PERSONALIZED_RANK_WEIGHTS.categoryWeightCap,
+    ) * PERSONALIZED_RANK_WEIGHTS.categoryUnit
 
   const occasionBoost =
-    FOR_YOU_RANK_WEIGHTS.occasionMax *
+    PERSONALIZED_RANK_WEIGHTS.occasionMax *
     strongestTagWeightMatch(row, context.affinity.occasionTagWeights)
 
   const visualBoost = computeVisualSimilarityBoost({
@@ -243,13 +243,13 @@ export function computeForYouScore(
     candidateEmbedding: context.candidateEmbeddings?.get(row.id),
   })
 
-  const freshnessBoost = computeForYouFreshnessBoost(
+  const freshnessBoost = computePersonalizedFreshnessBoost(
     row.publishedAt,
     context.now,
   )
 
   const seenPenalty = context.seenLookIds.has(row.id)
-    ? FOR_YOU_RANK_WEIGHTS.seen
+    ? PERSONALIZED_RANK_WEIGHTS.seen
     : 0
 
   return (
@@ -270,7 +270,7 @@ export function computeForYouScore(
  * map, so the §4.4 board feed reuses it for its occasion term. Pure + exported.
  */
 export function strongestTagWeightMatch(
-  row: Pick<ForYouRankableRow, 'tags'>,
+  row: Pick<PersonalizedRankableRow, 'tags'>,
   tagWeights: ReadonlyMap<string, number>,
 ): number {
   if (tagWeights.size === 0) return 0
@@ -292,9 +292,9 @@ export function strongestTagWeightMatch(
 // Deterministic tie-break mirrors the DB RANKED order (rankScore desc,
 // publishedAt desc, id desc) so equal personalized scores fall back to the
 // global ordering rather than an arbitrary sort.
-function compareForYou(
-  a: { row: ForYouRankableRow; score: number },
-  b: { row: ForYouRankableRow; score: number },
+function comparePersonalized(
+  a: { row: PersonalizedRankableRow; score: number },
+  b: { row: PersonalizedRankableRow; score: number },
 ): number {
   if (b.score !== a.score) return b.score - a.score
   if (b.row.rankScore !== a.row.rankScore) {
@@ -307,15 +307,15 @@ function compareForYou(
 }
 
 /**
- * Re-rank a candidate set by personalized For You score, returning a NEW array
+ * Re-rank a candidate set by personalized score, returning a NEW array
  * ordered best-first. Does not mutate the input.
  */
-export function rankForYouRows<T extends ForYouRankableRow>(
+export function rankPersonalizedRows<T extends PersonalizedRankableRow>(
   rows: readonly T[],
-  context: ForYouRankContext,
+  context: PersonalizedRankContext,
 ): T[] {
   return rows
-    .map((row) => ({ row, score: computeForYouScore(row, context) }))
-    .sort(compareForYou)
+    .map((row) => ({ row, score: computePersonalizedScore(row, context) }))
+    .sort(comparePersonalized)
     .map((entry) => entry.row)
 }

@@ -360,7 +360,7 @@ export default function LooksFeed() {
         qs.set('q', query.trim())
       }
 
-      // Session seen list — the personalized For You feed uses it to avoid
+      // Session seen list — the personalized feed uses it to avoid
       // re-showing looks across pages; other feeds ignore it. Newest-loaded
       // first, capped.
       const seen = itemsRef.current

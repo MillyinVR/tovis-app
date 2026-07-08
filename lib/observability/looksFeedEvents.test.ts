@@ -29,7 +29,7 @@ describe('logLooksFeedServe', () => {
     const spy = vi.spyOn(console, 'info').mockImplementation(() => {})
 
     logLooksFeedServe({
-      cohort: 'for_you',
+      cohort: 'personalized',
       authed: true,
       page: 'entry',
       itemCount: 7,
@@ -46,7 +46,7 @@ describe('logLooksFeedServe', () => {
     expect(payload).toMatchObject({
       namespace: 'looks_feed',
       event: 'looks_feed_serve',
-      cohort: 'for_you',
+      cohort: 'personalized',
       authed: true,
       page: 'entry',
       itemCount: 7,

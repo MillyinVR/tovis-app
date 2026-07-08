@@ -1,6 +1,6 @@
 // lib/observability/looksFeedEvents.ts
 //
-// Crude, log-based instrumentation for the Looks feed so the For You cohort can
+// Crude, log-based instrumentation for the Looks feed so the personalized cohort can
 // be compared against the chronological default (B1, phase 1). Real impression
 // tracking arrives with B2; until then we emit one structured line per feed
 // serve tagged with its cohort, from which dwell/return proxies are derivable
@@ -16,7 +16,7 @@ const APP_NAME = 'tovis-app'
 const NAMESPACE = 'looks_feed'
 
 export type LooksFeedCohort =
-  | 'for_you'
+  | 'personalized'
   | 'board_feed'
   | 'recent'
   | 'spotlight'
@@ -31,7 +31,7 @@ export type LooksFeedServeEvent = {
   page: 'entry' | 'more'
   itemCount: number
   userId?: string | null
-  // For You assembly detail (null / omitted for other cohorts).
+  // personalized assembly detail (null / omitted for other cohorts).
   backboneCount?: number | null
   injectedCount?: number | null
   seenCount?: number | null
