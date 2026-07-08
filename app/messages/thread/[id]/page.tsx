@@ -7,6 +7,7 @@ import {
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { liveChannelForUser } from '@/lib/live/broadcast'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
@@ -360,6 +361,7 @@ export default async function MessageThreadPage(props: PageProps) {
         <ThreadClient
           threadId={thread.id}
           myUserId={user.id}
+          liveChannel={liveChannelForUser(user.id)}
           initialMessages={initialMessages}
           initialCounterpartyLastReadAt={initialCounterpartyLastReadAt}
         />

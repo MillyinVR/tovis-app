@@ -11,6 +11,9 @@ import {
 } from '@prisma/client'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import { LiveRefresh } from '@/app/_components/live/LiveRefresh'
+import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
+import { liveChannelForUser } from '@/lib/live/broadcast'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { formatInTimeZone, formatRelativeTimeCompact } from '@/lib/time'
@@ -543,8 +546,15 @@ export default async function MessagesInboxPage(props: PageProps) {
 
   const viewerLabel = user.role === Role.PRO ? 'Pro' : 'Client'
 
+  // Live-sync: this route sits outside the pro/client layouts (which mount
+  // LiveRefresh), so mount it here — the send route pings this user's channel,
+  // and router.refresh() re-runs the loader to slot the new thread/preview in.
+  const liveChannel = liveChannelForUser(user.id)
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-bgPrimary text-textPrimary">
+      <RefreshOnFocus />
+      {liveChannel ? <LiveRefresh channels={[liveChannel]} /> : null}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-[200px] bg-[linear-gradient(180deg,rgb(var(--accent-primary)/0.12),transparent)]"
