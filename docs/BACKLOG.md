@@ -115,7 +115,8 @@ items (A2), since they're social surfaces (looks/stats/follow), not SEO mirrors.
 
 ### Web workstreams
 - [x] **W1 — consolidated pro `/pro/profile` self-service surface** (decision 8) —
-  **PR #521 OPEN** (`feat/pro-profile-web-parity`). Ported the iOS Profile-tab
+  **MERGED #521** (`7f4a0382`, 2026-07-08; branch `feat/pro-profile-web-parity`
+  deletable). Ported the iOS Profile-tab
   account section (Workspace / Business / Growth / Appearance theme toggle / Sign
   out) below the tabs; extracted shared `clientSignOut()`. Deviations: Working
   hours → `/pro/calendar`; No-show fees omitted (lives in Payment settings modal).
