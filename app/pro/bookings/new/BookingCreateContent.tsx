@@ -327,6 +327,7 @@ export default async function BookingCreateContent(props: {
 
   return (
     <NewBookingForm
+      professionalId={professionalId}
       clients={clients}
       offerings={offerings}
       locations={locations}
