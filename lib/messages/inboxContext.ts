@@ -23,6 +23,14 @@ import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 
 export type InboxFilter = 'all' | 'bookings' | 'waitlists' | 'pros'
 
+/**
+ * How many inbox threads a single page returns. Shared by the SSR inbox
+ * (app/messages/page.tsx) and the JSON list route
+ * (app/api/v1/messages/threads/route.ts) so both surface the exact same set —
+ * 50 is the API's paged contract; the SSR page matches it rather than diverge.
+ */
+export const INBOX_THREADS_PAGE_SIZE = 50
+
 /** Whether a context type gets the accent-tinted eyebrow (actionable threads). */
 const ACCENT_CONTEXT_TYPES: ReadonlySet<MessageThreadContextType> = new Set([
   MessageThreadContextType.BOOKING,
@@ -269,4 +277,17 @@ export async function resolveInboxEyebrows(
   }
 
   return result
+}
+
+/**
+ * Single-thread variant of resolveInboxEyebrows. The SSR thread page
+ * (app/messages/thread/[id]/page.tsx) uses this so its header eyebrow is
+ * computed by the exact same logic as the inbox rows — the two can never drift.
+ * Thin wrapper: one thread, one round of lookups.
+ */
+export async function resolveInboxEyebrow(
+  thread: InboxEyebrowThread,
+): Promise<InboxEyebrow> {
+  const byId = await resolveInboxEyebrows([thread])
+  return byId.get(thread.id) ?? { eyebrow: 'Message', isAccentContext: false }
 }

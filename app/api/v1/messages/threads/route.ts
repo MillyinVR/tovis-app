@@ -4,6 +4,7 @@ import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import type { MessagesThreadsListResponseDTO } from '@/lib/dto/messaging'
 import {
+  INBOX_THREADS_PAGE_SIZE,
   parseInboxFilter,
   resolveInboxEyebrows,
   whereForInboxFilter,
@@ -24,7 +25,7 @@ export async function GET(req: Request) {
     const threads = await prisma.messageThread.findMany({
       where: whereForInboxFilter({ userId: user.id, filter }),
       orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
-      take: 50,
+      take: INBOX_THREADS_PAGE_SIZE,
       select: {
         id: true,
         contextType: true,
