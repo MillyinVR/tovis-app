@@ -54,6 +54,49 @@ export async function resolveLookActorPublicName(
 }
 
 /**
+ * Batch form of {@link resolveUserActorPublicName}. Resolves each distinct User
+ * id to its PUBLIC display name (pro opted-in identity or public client
+ * `@handle`), or `null` when none is available. Returns a map keyed by the
+ * (trimmed) User id; ids that resolve to no public identity are simply absent
+ * (callers treat a miss as `null`). Best-effort by design — a read failure
+ * yields an empty map so callers fall back to their name-free copy.
+ */
+export async function resolveUserPublicNames(
+  userIds: readonly string[],
+  db: Db = prisma,
+): Promise<Map<string, string | null>> {
+  const resolved = new Map<string, string | null>()
+  const distinct = [
+    ...new Set(userIds.map((id) => id.trim()).filter((id) => id.length > 0)),
+  ]
+  if (distinct.length === 0) return resolved
+
+  try {
+    const users = await db.user.findMany({
+      where: { id: { in: distinct } },
+      select: {
+        id: true,
+        professionalProfile: { select: professionalPublicDisplayNameSelect },
+        clientProfile: { select: { handle: true, isPublicProfile: true } },
+      },
+    })
+
+    for (const user of users) {
+      const name = user.professionalProfile
+        ? pickProfessionalPublicDisplayName(user.professionalProfile)
+        : user.clientProfile
+          ? pickClientPublicHandle(user.clientProfile)
+          : null
+      resolved.set(user.id, name)
+    }
+  } catch {
+    return new Map()
+  }
+
+  return resolved
+}
+
+/**
  * LOOK_FOLLOWER_NEW carries only the follower's User id. Resolve to the user's
  * pro public display name (their opted-in identity) or public client `@handle`,
  * else `null`. Same PUBLIC-only, never-legal-name, best-effort contract as
@@ -63,24 +106,6 @@ export async function resolveUserActorPublicName(
   userId: string,
   db: Db = prisma,
 ): Promise<string | null> {
-  try {
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: {
-        professionalProfile: { select: professionalPublicDisplayNameSelect },
-        clientProfile: { select: { handle: true, isPublicProfile: true } },
-      },
-    })
-
-    if (!user) return null
-    if (user.professionalProfile) {
-      return pickProfessionalPublicDisplayName(user.professionalProfile)
-    }
-    if (user.clientProfile) {
-      return pickClientPublicHandle(user.clientProfile)
-    }
-    return null
-  } catch {
-    return null
-  }
+  const resolved = await resolveUserPublicNames([userId], db)
+  return resolved.get(userId.trim()) ?? null
 }

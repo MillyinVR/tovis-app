@@ -19,6 +19,7 @@ import {
 
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { getAppUrl } from '@/lib/membership/urls'
+import { resolveUserPublicNames } from '@/lib/notifications/social/resolveActorPublicName'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { readPostmarkEmailConfig } from '@/lib/notifications/config'
 import { createEmailDeliveryProvider } from '@/lib/notifications/delivery/sendEmail'
@@ -46,6 +47,7 @@ import {
   type SocialDigestEmailModel,
   type SocialDigestTopLook,
 } from './render'
+import { extractEngagementActorUserId } from './leadActor'
 import {
   summarizeDigestRows,
   type DigestNotificationRow,
@@ -193,6 +195,26 @@ function capRowsPerRecipient(
     : rows
 }
 
+/**
+ * Batch-resolve the PUBLIC name of every looks-engagement actor referenced by
+ * these notification rows (§12 NC1 #35). One `user.findMany` per audience,
+ * regardless of recipient count; non-engagement rows contribute nothing.
+ */
+async function resolveEngagementActorNames(
+  db: DigestDb,
+  rows: ReadonlyArray<{
+    eventKey: NotificationEventKey
+    data: Prisma.JsonValue | null
+  }>,
+): Promise<Map<string, string | null>> {
+  const actorUserIds: string[] = []
+  for (const row of rows) {
+    const actorUserId = extractEngagementActorUserId(row.eventKey, row.data)
+    if (actorUserId) actorUserIds.push(actorUserId)
+  }
+  return resolveUserPublicNames(actorUserIds, db)
+}
+
 type CollectedRecipients = {
   recipients: PreparedRecipient[]
   /** Distinct recipients with unread digest activity (pre email-address check). */
@@ -262,6 +284,7 @@ async function collectProRecipients(args: {
         title: true,
         href: true,
         createdAt: true,
+        data: true,
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -274,14 +297,18 @@ async function collectProRecipients(args: {
     prefsById.set(pref.professionalId, map)
   }
 
+  const actorNamesById = await resolveEngagementActorNames(db, rows)
+
   const rowsById = new Map<string, DigestNotificationRow[]>()
   for (const row of rows) {
+    const actorUserId = extractEngagementActorUserId(row.eventKey, row.data)
     const list = rowsById.get(row.professionalId) ?? []
     list.push({
       eventKey: row.eventKey,
       title: row.title,
       href: row.href,
       createdAt: row.createdAt,
+      actorName: actorUserId ? actorNamesById.get(actorUserId) ?? null : null,
     })
     rowsById.set(row.professionalId, list)
   }
@@ -366,6 +393,7 @@ async function collectClientRecipients(args: {
         title: true,
         href: true,
         createdAt: true,
+        data: true,
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -378,14 +406,18 @@ async function collectClientRecipients(args: {
     prefsById.set(pref.clientId, map)
   }
 
+  const actorNamesById = await resolveEngagementActorNames(db, rows)
+
   const rowsById = new Map<string, DigestNotificationRow[]>()
   for (const row of rows) {
+    const actorUserId = extractEngagementActorUserId(row.eventKey, row.data)
     const list = rowsById.get(row.clientId) ?? []
     list.push({
       eventKey: row.eventKey,
       title: row.title,
       href: row.href,
       createdAt: row.createdAt,
+      actorName: actorUserId ? actorNamesById.get(actorUserId) ?? null : null,
     })
     rowsById.set(row.clientId, list)
   }
