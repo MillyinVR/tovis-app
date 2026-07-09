@@ -58,6 +58,8 @@ export type CreateProBookingWithClientArgs = {
   serviceAddress?: ProBookingServiceAddressInput | null
 
   offeringId: string
+  /** OfferingAddOn link ids to fold into the booking as ADD_ON line items. */
+  addOnIds?: string[]
   locationId: string
   locationType: ServiceLocationType
   scheduledFor: Date
@@ -401,6 +403,7 @@ export async function createProBookingWithClient(
     overrideReason: args.overrideReason,
     clientId: resolvedClient.clientId,
     offeringId: args.offeringId,
+    addOnIds: args.addOnIds ?? [],
     locationId: args.locationId,
     locationType: args.locationType,
     scheduledFor: args.scheduledFor,

@@ -130,8 +130,10 @@ import {
   type RequestedServiceItemInput,
   buildNormalizedBookingItemsFromRequestedOfferings,
   computeBookingItemLikeTotals,
+  normalizePositiveDurationMinutes,
   snapToStepMinutes,
 } from '@/lib/booking/serviceItems'
+import { resolveBookingAddOns } from '@/lib/booking/addOnResolution'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
 import { moneyToFixed2String } from '@/lib/money'
 import {
@@ -472,6 +474,10 @@ type CreateProBookingArgs = {
   overrideReason: string | null
   clientId: string
   offeringId: string
+  // OfferingAddOn link ids selected for this booking. The appointment duration
+  // and price fold in each add-on; each persists as an ADD_ON line item under
+  // the base. Defaults to none (calendar imports / waitlist reuse pass none).
+  addOnIds?: string[]
   locationId: string
   locationType: ServiceLocationType
   scheduledFor: Date
@@ -2991,16 +2997,6 @@ async function assertMobileBookingWithinRadius(args: {
       userMessage: `This service address is outside this professional's ${radiusMiles}-mile mobile service area.`,
     })
   }
-}
-
-function normalizePositiveDurationMinutes(value: unknown): number | null {
-  const parsed = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(parsed)) return null
-
-  const minutes = Math.trunc(parsed)
-  if (minutes <= 0) return null
-
-  return clampInt(minutes, 15, MAX_SLOT_DURATION_MINUTES)
 }
 
 function normalizePositiveMoneyDecimal(value: unknown): Prisma.Decimal | null {
@@ -8433,98 +8429,13 @@ async function performLockedFinalizeBookingFromHold(args: {
     }
   }
 
-  const addOnLinks = args.addOnIds.length
-    ? await args.tx.offeringAddOn.findMany({
-        where: {
-          id: { in: args.addOnIds },
-          offeringId: args.offering.id,
-          isActive: true,
-          OR: [{ locationType: null }, { locationType: args.locationType }],
-          addOnService: {
-            isActive: true,
-            isAddOnEligible: true,
-          },
-        },
-        select: {
-          id: true,
-          addOnServiceId: true,
-          sortOrder: true,
-          priceOverride: true,
-          durationOverrideMinutes: true,
-          addOnService: {
-            select: {
-              id: true,
-              defaultDurationMinutes: true,
-              minPrice: true,
-            },
-          },
-        },
-        take: 50,
-      })
-    : []
-
-  if (args.addOnIds.length && addOnLinks.length !== args.addOnIds.length) {
-    throw bookingError('ADDONS_INVALID')
-  }
-
-  const addOnServiceIds = addOnLinks.map((row) => row.addOnServiceId)
-
-  const proAddOnOfferings = addOnServiceIds.length
-    ? await args.tx.professionalServiceOffering.findMany({
-        where: {
-          professionalId: args.offering.professionalId,
-          isActive: true,
-          serviceId: { in: addOnServiceIds },
-        },
-        select: {
-          serviceId: true,
-          salonPriceStartingAt: true,
-          salonDurationMinutes: true,
-          mobilePriceStartingAt: true,
-          mobileDurationMinutes: true,
-        },
-        take: 200,
-      })
-    : []
-
-  const addOnOfferingByServiceId = new Map(
-    proAddOnOfferings.map((row) => [row.serviceId, row]),
-  )
-
-  const resolvedAddOns = addOnLinks.map((row) => {
-    const service = row.addOnService
-    const proOffering = addOnOfferingByServiceId.get(service.id) ?? null
-
-    const durationRaw =
-      row.durationOverrideMinutes ??
-      (args.locationType === ServiceLocationType.MOBILE
-        ? proOffering?.mobileDurationMinutes
-        : proOffering?.salonDurationMinutes) ??
-      service.defaultDurationMinutes
-
-    const durationMinutesSnapshot = normalizePositiveDurationMinutes(durationRaw)
-
-    const priceRaw =
-      row.priceOverride ??
-      (args.locationType === ServiceLocationType.MOBILE
-        ? proOffering?.mobilePriceStartingAt
-        : proOffering?.salonPriceStartingAt) ??
-      service.minPrice
-
-    return {
-      offeringAddOnId: row.id,
-      serviceId: service.id,
-      durationMinutesSnapshot,
-      priceSnapshot: decimalFromUnknown(priceRaw),
-      sortOrder: row.sortOrder ?? 0,
-    }
+  const resolvedAddOns = await resolveBookingAddOns({
+    client: args.tx,
+    professionalId: args.offering.professionalId,
+    offeringId: args.offering.id,
+    addOnIds: args.addOnIds,
+    locationType: args.locationType,
   })
-
-  for (const addOn of resolvedAddOns) {
-    if (addOn.durationMinutesSnapshot == null) {
-      throw bookingError('ADDONS_INVALID')
-    }
-  }
 
   const basePrice = decimalFromUnknown(priceStartingAt)
 
@@ -8958,6 +8869,7 @@ async function performLockedCreateProBooking(args: {
   professionalId: string
   clientId: string
   offeringId: string
+  addOnIds?: string[]
   locationId: string
   locationType: ServiceLocationType
   scheduledFor: Date
@@ -9112,6 +9024,27 @@ async function performLockedCreateProBooking(args: {
     })
   }
 
+  // Selected add-ons (OfferingAddOn links) fold their price into the service
+  // subtotal and their duration into the appointment length below; each persists
+  // as an ADD_ON line item under the base. The availability slot the pro picked
+  // already reserved this same folded duration. Imports/waitlist reuse pass none.
+  const resolvedAddOns = await resolveBookingAddOns({
+    client: args.tx,
+    professionalId: args.professionalId,
+    offeringId: offering.id,
+    addOnIds: args.addOnIds ?? [],
+    locationType: args.locationType,
+  })
+  const addOnsPriceTotal = resolvedAddOns.reduce(
+    (acc, addOn) => acc.add(addOn.priceSnapshot),
+    new Prisma.Decimal(0),
+  )
+  const addOnsDurationTotal = resolvedAddOns.reduce(
+    (sum, addOn) => sum + addOn.durationMinutesSnapshot,
+    0,
+  )
+  const serviceSubtotal = chargedUnitPrice.add(addOnsPriceTotal)
+
   await assertMobileBookingWithinRadius({
     tx: args.tx,
     professionalId: args.professionalId,
@@ -9188,16 +9121,24 @@ async function performLockedCreateProBooking(args: {
     MAX_SLOT_DURATION_MINUTES,
   )
 
+  // The appointment reserves the base service plus every selected add-on. A
+  // requested total may only extend it further, never below the real length.
+  const durationWithAddOns = clampInt(
+    computedDurationMinutes + addOnsDurationTotal,
+    computedDurationMinutes,
+    MAX_SLOT_DURATION_MINUTES,
+  )
+
   const totalDurationMinutes =
     args.requestedTotalDurationMinutes != null &&
-    args.requestedTotalDurationMinutes >= computedDurationMinutes &&
+    args.requestedTotalDurationMinutes >= durationWithAddOns &&
     args.requestedTotalDurationMinutes <= MAX_SLOT_DURATION_MINUTES
       ? clampInt(
           snapToStepMinutes(args.requestedTotalDurationMinutes, stepMinutes),
-          computedDurationMinutes,
+          durationWithAddOns,
           MAX_SLOT_DURATION_MINUTES,
         )
-      : computedDurationMinutes
+      : durationWithAddOns
 
     const schedulingDecision = await enforceProCreateScheduling({
     tx: args.tx,
@@ -9344,13 +9285,13 @@ async function performLockedCreateProBooking(args: {
             : null,
         bufferMinutes,
         totalDurationMinutes,
-        subtotalSnapshot: chargedUnitPrice,
-        serviceSubtotalSnapshot: chargedUnitPrice,
+        subtotalSnapshot: serviceSubtotal,
+        serviceSubtotalSnapshot: serviceSubtotal,
         productSubtotalSnapshot: zeroMoney(),
         tipAmount: zeroMoney(),
         taxAmount: zeroMoney(),
         discountAmount: zeroMoney(),
-        totalAmount: chargedUnitPrice,
+        totalAmount: serviceSubtotal,
         checkoutStatus: BookingCheckoutStatus.NOT_READY,
         selectedPaymentMethod: null,
         paymentAuthorizedAt: null,
@@ -9393,7 +9334,7 @@ async function performLockedCreateProBooking(args: {
     throw error
   }
 
-    await args.tx.bookingServiceItem.create({
+    const baseServiceItem = await args.tx.bookingServiceItem.create({
     data: {
       bookingId: booking.id,
       serviceId: offering.serviceId,
@@ -9403,7 +9344,27 @@ async function performLockedCreateProBooking(args: {
       durationMinutesSnapshot: computedDurationMinutes,
       sortOrder: 0,
     },
+    select: { id: true },
   })
+
+  // Persist each selected add-on as an ADD_ON line item hanging off the base
+  // (offeringId null; the source link is recorded in `notes` as ADDON:<id>),
+  // mirroring the client finalize path so both booking origins share one shape.
+  if (resolvedAddOns.length) {
+    await args.tx.bookingServiceItem.createMany({
+      data: resolvedAddOns.map((addOn, index) => ({
+        bookingId: booking.id,
+        serviceId: addOn.serviceId,
+        offeringId: null,
+        itemType: BookingServiceItemType.ADD_ON,
+        parentItemId: baseServiceItem.id,
+        priceSnapshot: addOn.priceSnapshot,
+        durationMinutesSnapshot: addOn.durationMinutesSnapshot,
+        sortOrder: index + 1,
+        notes: `ADDON:${addOn.offeringAddOnId}`,
+      })),
+    })
+  }
 
 // Imported bookings are silent: the migrated client has no account yet, so we
 // don't send a confirmation or schedule appointment reminders.
@@ -9459,7 +9420,7 @@ if (schedulingDecision.appliedOverrides.length > 0) {
       bufferMinutes: booking.bufferMinutes,
       status: booking.status,
     },
-    subtotalSnapshot: chargedUnitPrice,
+    subtotalSnapshot: serviceSubtotal,
     stepMinutes,
     appointmentTimeZone: locationContext.timeZone,
     locationId: locationContext.locationId,
@@ -13397,6 +13358,7 @@ export async function createProBooking(
         professionalId: args.professionalId,
         clientId: args.clientId,
         offeringId: args.offeringId,
+        addOnIds: args.addOnIds ?? [],
         locationId: args.locationId,
         locationType: args.locationType,
         scheduledFor: args.scheduledFor,

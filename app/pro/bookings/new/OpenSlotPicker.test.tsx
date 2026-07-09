@@ -94,6 +94,39 @@ describe('OpenSlotPicker', () => {
     expect(onChange).toHaveBeenCalledWith(null)
   })
 
+  it('passes selected add-on ids so slots reserve the full duration', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, { ok: true, slots: [], timeZone: 'America/New_York' }),
+    )
+
+    render(
+      <OpenSlotPicker
+        {...baseProps}
+        addOnIds={['oa_1', 'oa_2']}
+        value={null}
+        onChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://x')
+    expect(url.searchParams.get('addOnIds')).toBe('oa_1,oa_2')
+  })
+
+  it('omits the addOnIds param when none are selected', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, { ok: true, slots: [], timeZone: 'America/New_York' }),
+    )
+
+    render(<OpenSlotPicker {...baseProps} value={null} onChange={vi.fn()} />)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://x')
+    expect(url.searchParams.get('addOnIds')).toBeNull()
+  })
+
   it('scopes MOBILE slots to the client address when provided', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue(

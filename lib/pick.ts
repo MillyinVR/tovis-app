@@ -16,6 +16,23 @@ export function pickNonEmptyString(v: unknown): string | null {
   return pickString(v)
 }
 
+/**
+ * Coerce a JSON value into an array of trimmed, non-empty strings. Non-arrays
+ * yield `[]`; the result is capped at `max` (default 25) as a light abuse guard.
+ */
+export function pickStringArray(v: unknown, max = 25): string[] {
+  if (!Array.isArray(v)) return []
+
+  return v
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean)
+    .slice(0, max)
+}
+
+export function hasDuplicateStrings(values: string[]): boolean {
+  return new Set(values).size !== values.length
+}
+
 export function pickNumber(v: unknown): number | null {
   const n =
     typeof v === 'number'

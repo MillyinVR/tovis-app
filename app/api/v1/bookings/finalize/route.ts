@@ -12,7 +12,11 @@ import {
 
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
-import { pickString } from '@/app/api/_utils/pick'
+import {
+  hasDuplicateStrings,
+  pickString,
+  pickStringArray,
+} from '@/app/api/_utils/pick'
 import {
   markAftercareAccessTokenUsed,
   resolveAftercareAccessTokenForMutation,
@@ -176,19 +180,6 @@ function discoveryContextMissingFail(): Response {
   })
 }
 
-function pickStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-
-  return value
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
-    .slice(0, 25)
-}
-
-function hasDuplicates(values: string[]): boolean {
-  return new Set(values).size !== values.length
-}
-
 function hasDiscoveryReference(args: {
   mediaId: string | null
   lookPostId: string | null
@@ -256,7 +247,7 @@ function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
 function validateParsedFinalizeBody(
   body: ParsedFinalizeBody,
 ): { ok: true; body: ValidatedFinalizeBody } | { ok: false; response: Response } {
-  if (hasDuplicates(body.addOnIds)) {
+  if (hasDuplicateStrings(body.addOnIds)) {
     return { ok: false, response: bookingJsonFail('ADDONS_INVALID') }
   }
 

@@ -29,6 +29,9 @@ type Props = {
   /** For a MOBILE booking, the client's saved service-address id so slots respect
    * the pro's travel radius. null for SALON (or an as-yet-unsaved MOBILE address). */
   clientAddressId?: string | null
+  /** Selected OfferingAddOn link ids; the availability endpoint folds their
+   * duration into each slot so the reserved time matches the full appointment. */
+  addOnIds?: string[]
   /** The chosen slot's ISO UTC start instant (null = nothing picked). */
   value: string | null
   onChange: (slot: string | null) => void
@@ -59,10 +62,14 @@ export default function OpenSlotPicker({
   locationType,
   locationTimeZone,
   clientAddressId,
+  addOnIds,
   value,
   onChange,
   disabled = false,
 }: Props) {
+  // Stable comma key so a new array identity with the same ids doesn't refetch,
+  // and so it feeds the availability query + the fetch dependency below.
+  const addOnIdsKey = (addOnIds ?? []).join(',')
   const tz = sanitizeTimeZone(locationTimeZone, 'UTC')
   // Computed once (lazy initializer) so the `min` bound is stable across renders
   // and identical on SSR + hydration.
@@ -86,6 +93,7 @@ export default function OpenSlotPicker({
     locationId,
     locationType,
     clientAddressId ?? '',
+    addOnIdsKey,
     selectedDate,
   ].join('|')
 
@@ -113,6 +121,9 @@ export default function OpenSlotPicker({
         })
         if (locationType === 'MOBILE' && clientAddressId) {
           qs.set('clientAddressId', clientAddressId)
+        }
+        if (addOnIdsKey) {
+          qs.set('addOnIds', addOnIdsKey)
         }
 
         const res = await fetch(`/api/v1/availability/day?${qs.toString()}`, {
