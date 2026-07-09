@@ -140,6 +140,7 @@ describe('app/api/v1/auth/verification/status/route', () => {
       requiresPhoneVerification: false,
       requiresEmailVerification: true,
       nextUrl: null,
+      token: null,
     })
   })
 
@@ -173,6 +174,7 @@ describe('app/api/v1/auth/verification/status/route', () => {
       requiresPhoneVerification: false,
       requiresEmailVerification: true,
       nextUrl: null,
+      token: null,
     })
   })
 
@@ -290,6 +292,10 @@ describe('app/api/v1/auth/verification/status/route', () => {
       authVersion: 1,
     })
 
+    // Native (no cookie jar) reads the healed token from the body and swaps
+    // its stored bearer for it.
+    expect(body.token).toBe('active_token_test')
+
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=active_token_test')
     expect(setCookie).toContain('HttpOnly')
@@ -316,6 +322,7 @@ describe('app/api/v1/auth/verification/status/route', () => {
     const body = await result.json()
 
     expect(body.sessionKind).toBe('VERIFICATION')
+    expect(body.token).toBeNull()
     expect(result.headers.get('set-cookie')).toBeNull()
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
   })
@@ -333,6 +340,7 @@ describe('app/api/v1/auth/verification/status/route', () => {
     const body = await result.json()
 
     expect(body.sessionKind).toBe('ACTIVE')
+    expect(body.token).toBeNull()
     expect(result.headers.get('set-cookie')).toBeNull()
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
   })
