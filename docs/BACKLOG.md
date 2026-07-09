@@ -467,6 +467,73 @@ new persistence); merge UX = category-first detail views. iOS parity tracked in
 - [ ] Mirror F1–F3 in the native Finance screens (category-first merge, receipt capture
   via native camera/photo picker, Overview/Tax split). Defer F4 with web.
 
+## 15. iOS signup / new-user registration audit (2026-07-08)
+End-to-end audit of the native new-user registration flow (context: iOS had **no**
+signup at all in early July — a hard launch blocker: "if a new client on iOS can't
+create an account, nothing else matters"; built 2026-07-07/08). Bottom line: **the
+native signup flow is real and mostly PASSES** — it is NOT the "biggest structural
+gap" that §9 `A1` / `tovis-ios §5 A1` still imply (that framing is stale, written
+pre-build). Verified working: role chooser → client + pro (3-step) email/password
+signup (real `POST /api/v1/auth/register`, App Attest in lieu of Turnstile) · phone
+OTP verification · **Sign in with Apple** (creates the account) · forgot/reset
+password. New CLIENT correctly lands on the **Looks feed** (`MainTabView` defaults
+to `.looks`). No stubs/TODOs in the signup path. Three gaps remain (below); none
+block the Apple or phone-login paths, one blocks the primary email/password path.
+
+**Pass/fail:** phone OTP ✅ · Apple ✅ (creates accounts) · email/password account
+creation ✅ but **email-verification finish ❌ (A7)** · Google ❌ absent (A8) ·
+TikTok ➖ absent on both platforms, parked (A9) · client→Looks landing ✅.
+
+### iOS workstreams (build later; mirror into `tovis-ios/BACKLOG.md §5` when scheduled)
+- [ ] **A7 — email-verification completion path (REAL DEFECT; blocks the primary
+  email/password signup).** A new email/password user verifies phone, then
+  dead-ends: `SessionModel.verifyPhoneCode` finds email still unverified and only
+  sets `errorMessage = "Your phone is verified. Check your email to finish."`
+  (`tovis-ios Tovis/ContentView.swift:362-366`), stranding them on the phone-verify
+  screen. There is no in-app way to finish: `AuthService` has no email
+  send/verify/status method (only phone + password-reset); `.onOpenURL` is scoped
+  only to `/reset-password/*` (`ContentView.swift:109-111,643`) so the emailed verify
+  link opens web, not the app; and there's no verification-status re-poll. App entry
+  is gated on `isFullyVerified`, and the shared register endpoint always returns
+  `requiresEmailVerification:true` / `isFullyVerified:false` for email/password
+  signups (`app/api/v1/auth/register/route.ts:1358-1361`) — so this is the normal
+  path, not an edge case. Only current escape: tap the web email link → force-quit →
+  re-login. Apple/phone-login dodge it (Apple pre-verifies email). **Build:** a
+  verify-email screen (or extend the phone-verify screen) with an in-app "resend
+  email" action + a status re-check (`GET /auth/verification/status`) that advances
+  to `.signedIn` once email is confirmed — or an email-verify deep link (extend AASA
+  + `onOpenURL`). Mirror web `app/(auth)/verify-phone/page.tsx` (handles phone +
+  email resend/status). Endpoints already exist: `/auth/email/send`,
+  `/auth/email/verify`, `/auth/verification/status`.
+- [ ] **A8 — Google Sign-In (web-parity port; mostly client-side).** Web offers
+  Google account creation on client signup; iOS has none (no Google SDK anywhere).
+  The server endpoint already exists and is documented native-reusable: `POST
+  /api/v1/auth/google` verifies the Google identity token, find-or-creates a CLIENT
+  user (email pre-verified, phone not), and returns the same session payload as Apple
+  (`app/api/v1/auth/google/route.ts`, `lib/auth/findOrCreateGoogleUser.ts`). iOS work
+  ≈ clone the working Apple path: Google Sign-In SDK → ID token → `POST /auth/google`
+  with `deviceId` → `handleAuthResult` (lands at phone verify → Looks). Gate the
+  button on a configured client id (parity with web's inert-until-provisioned
+  `NEXT_PUBLIC_GOOGLE_CLIENT_ID`).
+- [ ] **A9 — TikTok login (PARKED, Tori 2026-07-08; greenfield, NOT a drop-in).**
+  Exists on neither platform (TikTok is only a pro profile social link today). ⚠️
+  Unlike Apple/Google (verifiable `id_token` carrying a verified email), TikTok Login
+  Kit is an OAuth2 auth-code + PKCE flow whose `user.info.basic` scope returns only
+  `open_id`/`union_id`/name/avatar — **no email**. Tovis accounts are email-keyed
+  (contact-lookup hash + email-at-rest), so a TikTok-only account can't satisfy the
+  `findOrCreate*` invariants → needs a post-auth collect-email(+phone) step, a new
+  `POST /api/v1/auth/tiktok` (code→token exchange + user-info fetch — a different
+  shape from apple/google token-verify), `findOrCreateTikTokUser`, a TikTok for
+  Developers app (client key/secret, redirect URI, **app review** before prod), and
+  the iOS TikTok LoginKit SDK + URL scheme. Decide the email-collection UX with Tori
+  before scheduling; parked for now.
+
+### Web workstream
+- [ ] Nothing required for A7/A8 — web is the parity leader (both already ship:
+  `SocialSignIn.tsx` + `/auth/google`; `app/(auth)/verify-phone/page.tsx` email
+  resend/status). A9 (TikTok) would additionally need the web `/auth/tiktok` half,
+  but is parked with the iOS side.
+
 ---
 
 ### Note on superseded docs
