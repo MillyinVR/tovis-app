@@ -17,6 +17,7 @@ import { NotificationEventKey, Prisma } from '@prisma/client'
 
 import { formatCents, formatMoneyFromUnknown } from '@/lib/money'
 import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
+import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
 
 import { upsertClientNotification } from './clientNotifications'
 import { createProNotification } from './proNotifications'
@@ -26,6 +27,12 @@ const paymentBookingContextSelect = {
   professionalId: true,
   totalAmount: true,
   stripePaymentIntentId: true,
+  client: {
+    select: {
+      firstName: true, // pii-plaintext-read-ok: pro-facing client name in payment notif (same as inbox/aftercare)
+      lastName: true, // pii-plaintext-read-ok: pro-facing client name in payment notif (same as inbox/aftercare)
+    },
+  },
   service: {
     select: { name: true },
   },
@@ -44,6 +51,7 @@ type PaymentBookingContext = {
   professionalId: string
   paymentIntentId: string | null
   serviceName: string
+  clientName: string
   totalAmountDisplay: string | null
 }
 
@@ -69,6 +77,7 @@ async function loadPaymentBookingContext(
       })),
       booking.service?.name?.trim() || 'your appointment',
     ),
+    clientName: formatClientName(booking.client),
     totalAmountDisplay: formatMoneyFromUnknown(booking.totalAmount),
   }
 }
@@ -91,11 +100,11 @@ export async function emitPaymentCollectedNotifications(args: {
 
   const dedupeKey = `PAYMENT_COLLECTED:${args.bookingId}:${ctx.paymentIntentId ?? 'none'}`
   const amountClause = ctx.totalAmountDisplay
-    ? `Your payment of ${ctx.totalAmountDisplay} for ${ctx.serviceName} was received.`
-    : `Your payment for ${ctx.serviceName} was received.`
+    ? `We received your payment of ${ctx.totalAmountDisplay} for ${ctx.serviceName}.`
+    : `We received your payment for ${ctx.serviceName}.`
   const proAmountClause = ctx.totalAmountDisplay
-    ? `${ctx.totalAmountDisplay} was collected for ${ctx.serviceName}.`
-    : `Payment was collected for ${ctx.serviceName}.`
+    ? `${ctx.clientName} paid ${ctx.totalAmountDisplay} for ${ctx.serviceName}.`
+    : `${ctx.clientName} paid for ${ctx.serviceName}.`
 
   await upsertClientNotification({
     tx: args.tx,
@@ -167,7 +176,7 @@ export async function emitPaymentActionRequiredNotifications(args: {
     professionalId: ctx.professionalId,
     eventKey: NotificationEventKey.PAYMENT_ACTION_REQUIRED,
     title: 'A payment needs attention',
-    body: `A client’s payment for ${ctx.serviceName} couldn’t be processed.`,
+    body: `${ctx.clientName}’s payment for ${ctx.serviceName} couldn’t be processed — we’ve asked them to update it.`,
     href: `/pro/bookings/${args.bookingId}`,
     bookingId: args.bookingId,
     dedupeKey,
@@ -199,11 +208,11 @@ export async function emitPaymentRefundedNotifications(args: {
   const dedupeKey = `PAYMENT_REFUNDED:${args.bookingId}:${args.refundDiscriminator}`
   const amountDisplay = centsToDisplay(args.amountRefundedCents)
   const clientBody = amountDisplay
-    ? `A refund of ${amountDisplay} for ${ctx.serviceName} is on its way.`
-    : `A refund for ${ctx.serviceName} is on its way.`
+    ? `A refund of ${amountDisplay} for ${ctx.serviceName} is on its way — expect it in 5–10 business days.`
+    : `A refund for ${ctx.serviceName} is on its way — expect it in 5–10 business days.`
   const proBody = amountDisplay
-    ? `A refund of ${amountDisplay} was issued for ${ctx.serviceName}.`
-    : `A refund was issued for ${ctx.serviceName}.`
+    ? `A refund of ${amountDisplay} was issued to ${ctx.clientName} for ${ctx.serviceName}.`
+    : `A refund was issued to ${ctx.clientName} for ${ctx.serviceName}.`
 
   await upsertClientNotification({
     tx: args.tx,

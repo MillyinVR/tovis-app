@@ -104,6 +104,7 @@ const mocks = vi.hoisted(() => ({
   rateLimitIdentity: vi.fn(),
 
   bookingFindUnique: vi.fn(),
+  clientProfileFindUnique: vi.fn(),
   prismaTransaction: vi.fn(),
 
   txConsultationApprovalFindUnique: vi.fn(),
@@ -141,6 +142,9 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
       findUnique: mocks.bookingFindUnique,
+    },
+    clientProfile: {
+      findUnique: mocks.clientProfileFindUnique,
     },
     $transaction: mocks.prismaTransaction,
   },
@@ -280,6 +284,12 @@ function expectIdempotencyStarted(
 describe('handleConsultationDecision', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    // §12 NC1 #11/#12: decision notif names the client.
+    mocks.clientProfileFindUnique.mockResolvedValue({
+      firstName: 'Jordan',
+      lastName: 'Lee',
+    })
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
@@ -700,7 +710,7 @@ describe('handleConsultationDecision', () => {
       professionalId: 'pro_1',
       eventKey: NotificationEventKey.CONSULTATION_APPROVED,
       title: 'Consultation approved',
-      body: 'Client approved your consultation proposal.',
+      body: "Jordan Lee approved your proposal — you're good to proceed.",
       href: '/pro/bookings/booking_1?step=consult',
       actorUserId: 'user_1',
       bookingId: 'booking_1',
@@ -797,8 +807,8 @@ describe('handleConsultationDecision', () => {
     expect(mocks.createProNotification).toHaveBeenCalledWith({
       professionalId: 'pro_1',
       eventKey: NotificationEventKey.CONSULTATION_REJECTED,
-      title: 'Consultation rejected',
-      body: 'Client rejected your consultation proposal.',
+      title: 'Consultation declined',
+      body: 'Jordan Lee declined your proposal. Tap to revise or discuss.',
       href: '/pro/bookings/booking_1?step=consult',
       actorUserId: 'user_1',
       bookingId: 'booking_1',

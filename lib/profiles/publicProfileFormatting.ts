@@ -131,6 +131,21 @@ export function formatDisplayHandle(handle: string | null | undefined): string |
   return trimmed.startsWith('@') ? trimmed : `@${trimmed}`
 }
 
+/**
+ * A client's PUBLIC handle (`@handle`) — but ONLY when they've opted into a
+ * public profile. Never returns a legal name. Null when the profile is private
+ * or has no handle, so callers fall back to a generic, name-free label. Mirrors
+ * the activity-feed gate (`isPublicProfile && handle`) so social notifications
+ * and the feed agree on when a stranger's identity may be shown.
+ */
+export function pickClientPublicHandle(input: {
+  handle: string | null | undefined
+  isPublicProfile: boolean | null | undefined
+}): string | null {
+  if (!input.isPublicProfile) return null
+  return formatDisplayHandle(input.handle)
+}
+
 export function formatBusinessName(
   businessName: string | null | undefined,
 ): string | null {
@@ -237,11 +252,18 @@ export function formatDateIso(value: Date): string {
   return value.toISOString()
 }
 
-export function formatClientName(input: {
-  firstName?: string | null
-  lastName?: string | null
-  email?: string | null
-}): string {
+export function formatClientName(
+  input:
+    | {
+        firstName?: string | null
+        lastName?: string | null
+        email?: string | null
+      }
+    | null
+    | undefined,
+): string {
+  if (!input) return 'Client'
+
   const firstName = trimToNull(input.firstName)
   const lastName = trimToNull(input.lastName)
   const fullName = [firstName, lastName].filter(Boolean).join(' ').trim()

@@ -162,6 +162,11 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/booking/timeZoneTruth', () => ({
   resolveAppointmentSchedulingContext: mocks.resolveAppointmentSchedulingContext,
+  resolveApptTimeZoneFromValues: () => ({
+    ok: true,
+    timeZone: 'America/Los_Angeles',
+    source: 'LOCATION',
+  }),
 }))
 
 vi.mock('@/lib/booking/policies/proSchedulingPolicy', () => ({

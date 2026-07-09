@@ -202,16 +202,33 @@ describe('lib/notifications/channelPolicy', () => {
     })
 
     it('selects the default channels for a supported event/recipient pair', () => {
+      // LAST_MINUTE_OPENING_AVAILABLE default is in-app + email + push (§12 NC2
+      // #26); makeCapabilities() reports email + push destinations, so all three
+      // are selected.
       const result = resolveChannelPolicy({
         key: NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
         recipientKind: NotificationRecipientKind.CLIENT,
         capabilities: makeCapabilities(),
       })
 
-      expect(result.selectedChannels).toEqual([NotificationChannel.IN_APP])
+      expect(result.selectedChannels).toEqual([
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+        NotificationChannel.PUSH,
+      ])
       expect(result.evaluations).toEqual([
         {
           channel: NotificationChannel.IN_APP,
+          enabled: true,
+          reason: null,
+        },
+        {
+          channel: NotificationChannel.EMAIL,
+          enabled: true,
+          reason: null,
+        },
+        {
+          channel: NotificationChannel.PUSH,
           enabled: true,
           reason: null,
         },
@@ -595,11 +612,13 @@ describe('lib/notifications/channelPolicy', () => {
     })
 
     it('returns false when the channel is not selected', () => {
+      // SMS is not in LAST_MINUTE_OPENING_AVAILABLE's default set (§12 NC2 #26
+      // keeps mass last-minute openings off SMS — promo-consent/TCPA).
       expect(
         isChannelSelected({
           key: NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
           recipientKind: NotificationRecipientKind.CLIENT,
-          channel: NotificationChannel.EMAIL,
+          channel: NotificationChannel.SMS,
           capabilities: makeCapabilities(),
         }),
       ).toBe(false)

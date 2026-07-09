@@ -56,7 +56,8 @@ export async function POST(_req: Request, ctx: RouteContext) {
       eventKey: NotificationEventKey.REFERRAL_CONFIRMED,
       title: `You were referred by ${referrerName}`,
       body: 'Welcome! Your referrer may earn a reward when you book.',
-      href: '/looks',
+      // §12 NC3: land on the rewards/referrals surface, not the looks feed.
+      href: '/client/referrals',
       dedupeKey: `REFERRAL_CONFIRMED:${referral.id}`,
     }).catch(() => null)
 

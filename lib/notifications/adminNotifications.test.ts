@@ -76,15 +76,21 @@ beforeEach(() => {
 })
 
 describe('admin event channel policy', () => {
-  it('every admin event is in-app + email only (never SMS), ADMIN-only recipient', () => {
+  it('every admin event is in-app + email + push (never SMS), ADMIN-only recipient', () => {
     for (const key of ADMIN_NOTIFICATION_EVENT_KEYS) {
       const channels = getDefaultChannelsForRecipient({
         key,
         recipientKind: NotificationRecipientKind.ADMIN,
       })
 
+      // §12 NC2: admin ops now include PUSH (inert until APNs creds land); still
+      // never SMS.
       expect([...channels].sort()).toEqual(
-        [NotificationChannel.IN_APP, NotificationChannel.EMAIL].sort(),
+        [
+          NotificationChannel.IN_APP,
+          NotificationChannel.EMAIL,
+          NotificationChannel.PUSH,
+        ].sort(),
       )
       expect(channels).not.toContain(NotificationChannel.SMS)
 

@@ -10,6 +10,12 @@ import {
 } from '@prisma/client'
 
 import { createProBooking } from '@/lib/booking/writeBoundary'
+import { buildBookingConfirmedClientCopy } from '@/lib/booking/notificationCopy'
+import {
+  formatProfessionalPublicDisplayName,
+  professionalPublicDisplayNameSelect,
+} from '@/lib/privacy/professionalDisplayName'
+import { DEFAULT_TIME_ZONE } from '@/lib/time'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { asTrimmedString, isRecord } from '@/lib/guards'
@@ -317,6 +323,31 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
   const recipientEmail = asTrimmedString(clientSnapshot.email)
   const now = new Date()
 
+  // §12 NC1 #3+4: shared "you're booked with {pro} for {service} on {date} at
+  // {time}" copy, matching every other confirm path.
+  const bookingMeta = await prisma.booking
+    .findUnique({
+      where: { id: args.bookingId },
+      select: {
+        scheduledFor: true,
+        locationTimeZone: true,
+        service: { select: { name: true } },
+        professional: {
+          select: { timeZone: true, ...professionalPublicDisplayNameSelect },
+        },
+      },
+    })
+    .catch(() => null)
+  const confirmedCopy = buildBookingConfirmedClientCopy({
+    proName: formatProfessionalPublicDisplayName(bookingMeta?.professional),
+    serviceName: bookingMeta?.service?.name,
+    scheduledFor: bookingMeta?.scheduledFor ?? null,
+    timeZone:
+      bookingMeta?.locationTimeZone ||
+      bookingMeta?.professional?.timeZone ||
+      DEFAULT_TIME_ZONE,
+  })
+
   try {
     await enqueueDispatch({
       key: NotificationEventKey.BOOKING_CONFIRMED,
@@ -335,8 +366,8 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
         emailVerifiedAt: recipientEmail ? now : null,
         timeZone: null,
       },
-      title: 'Booking confirmed',
-      body: 'Your appointment has been booked.',
+      title: confirmedCopy.title,
+      body: confirmedCopy.body,
       href: `/client/bookings/${args.bookingId}`,
       payload: {
         source: 'proCreatedBooking',

@@ -4,6 +4,7 @@ import {
   createClientNotification,
   type CreateClientNotificationArgs,
 } from './clientNotifications'
+import { resolveLookActorPublicName } from './social/resolveActorPublicName'
 
 export type ClientFollowNotificationData = {
   followerClientId: string
@@ -48,10 +49,19 @@ export async function createClientFollowNotification(
 
   const data: ClientFollowNotificationData = { followerClientId }
 
+  // Personalize with the follower's PUBLIC handle (§12 NC1 #34) — never a legal
+  // name; a private/no-handle follower stays anonymous.
+  const followerName = await resolveLookActorPublicName(
+    { professionalProfileId: null, clientProfileId: followerClientId },
+    args.tx,
+  )
+
   const payload: CreateClientNotificationArgs = {
     clientId: followedClientId,
     eventKey: NotificationEventKey.CLIENT_FOLLOW,
-    title: 'You have a new follower',
+    title: followerName
+      ? `${followerName} started following you`
+      : 'Someone started following you',
     href: '/client/activity',
     dedupeKey: buildClientFollowNotificationDedupeKey(followerClientId),
     data,

@@ -52,6 +52,7 @@ import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
+import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
 import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
 
 export const dynamic = 'force-dynamic'
@@ -170,6 +171,7 @@ const REVIEW_MEDIA_VISIBILITY = MediaVisibility.PUBLIC
 async function createReviewReceivedProNotification(args: {
   professionalId: string
   bookingId: string
+  clientId: string
   reviewId: string
   actorUserId: string
   rating: number
@@ -178,7 +180,20 @@ async function createReviewReceivedProNotification(args: {
   clientUploadedMediaCount: number
 }): Promise<void> {
   const title = 'New review received'
-  const body = `A client left a ${args.rating}-star review.`
+  // Name the client (§12 NC1 #15) — the pro knows this client. Best-effort read:
+  // a failure falls back to formatClientName's generic label, never blocks the
+  // notification.
+  const client = await prisma.clientProfile
+    .findUnique({
+      where: { id: args.clientId },
+      select: {
+        firstName: true, // pii-plaintext-read-ok: pro-facing client name in review notif (same as inbox)
+        lastName: true, // pii-plaintext-read-ok: pro-facing client name in review notif (same as inbox)
+      },
+    })
+    .catch(() => null)
+  const clientName = formatClientName(client ?? {})
+  const body = `${clientName} left you a ${args.rating}-star review.`
 
   await createProNotification({
     professionalId: args.professionalId,
@@ -186,7 +201,9 @@ async function createReviewReceivedProNotification(args: {
     priority: NotificationPriority.NORMAL,
     title,
     body,
-    href: `/pro/bookings/${args.bookingId}`,
+    // §12 NC3: point at the actual review (anchored on the pro reviews list),
+    // not the booking detail.
+    href: `/pro/reviews#review-${args.reviewId}`,
     actorUserId: args.actorUserId,
     bookingId: args.bookingId,
     reviewId: args.reviewId,
@@ -647,6 +664,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         await createReviewReceivedProNotification({
           professionalId: eligibility.booking.professionalId,
           bookingId: eligibility.booking.id,
+          clientId,
           reviewId: reviewResult.review.id,
           actorUserId,
           rating,

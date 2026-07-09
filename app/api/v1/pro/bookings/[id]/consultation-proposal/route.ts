@@ -1,5 +1,9 @@
 // app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts
 import { prisma } from '@/lib/prisma'
+import {
+  formatProfessionalPublicDisplayName,
+  professionalPublicDisplayNameSelect,
+} from '@/lib/privacy/professionalDisplayName'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import {
@@ -113,6 +117,7 @@ const CONSULTATION_DELIVERY_BOOKING_SELECT = {
   clientId: true,
   clientTimeZoneAtBooking: true,
   locationTimeZone: true,
+  professional: { select: professionalPublicDisplayNameSelect },
   client: {
     select: {
       id: true,
@@ -444,6 +449,7 @@ async function maybeQueueConsultationActionDelivery(args: {
   try {
     const delivery = await createConsultationActionDelivery({
       professionalId: args.professionalId,
+      professionalName: formatProfessionalPublicDisplayName(booking.professional),
       clientId: booking.clientId,
       bookingId: booking.id,
       consultationApprovalId: args.consultationApprovalId,
@@ -604,6 +610,7 @@ export async function POST(req: Request, ctx: RouteContext) {
           startedAt: true,
           finishedAt: true,
           sessionStep: true,
+          professional: { select: professionalPublicDisplayNameSelect },
           serviceItems: {
             select: {
               id: true,
@@ -840,7 +847,10 @@ export async function POST(req: Request, ctx: RouteContext) {
         clientId: booking.clientId,
         eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
         title: 'Consultation proposal ready',
-        body: 'Your professional sent an updated service total for approval.',
+        // §12 NC1 #10: personalize with the pro; no dollar amount in the notif.
+        body: `${formatProfessionalPublicDisplayName(
+          booking.professional,
+        )} sent an updated proposal for your visit. Approve or decline to continue.`,
         bookingId: booking.id,
         href: `/client/bookings/${booking.id}?step=consult`,
         dedupeKey: `CONSULTATION_PROPOSAL:${booking.id}`,

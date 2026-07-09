@@ -41,6 +41,9 @@ import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
+import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
+import { formatBookingWhenClause } from '@/lib/booking/notificationCopy'
+import { DEFAULT_TIME_ZONE } from '@/lib/time'
 import { bookingEntryPointFromBookingSource } from '@/lib/pro/readiness/bookingEntryPoint'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import {
@@ -340,8 +343,57 @@ function getFinalizeProNotificationMeta(args: {
 
   return {
     eventKey: NotificationEventKey.BOOKING_CONFIRMED,
-    title: 'New booking confirmed',
+    title: 'Booking confirmed',
   }
+}
+
+/**
+ * Who/what/when body for the pro's finalize notification (§12 NC1 #1/#2).
+ * Best-effort: a lookup failure yields an empty body (the heading + link still
+ * carry the notification). PAYMENT_CONFIRMATION_REQUIRED keeps its own body.
+ */
+async function buildFinalizeProNotificationBody(args: {
+  bookingId: string
+  eventKey: NotificationEventKey
+}): Promise<string> {
+  if (
+    args.eventKey !== NotificationEventKey.BOOKING_REQUEST_CREATED &&
+    args.eventKey !== NotificationEventKey.BOOKING_CONFIRMED
+  ) {
+    return ''
+  }
+
+  const booking = await prisma.booking
+    .findUnique({
+      where: { id: args.bookingId },
+      select: {
+        scheduledFor: true,
+        locationTimeZone: true,
+        service: { select: { name: true } },
+        professional: { select: { timeZone: true } },
+        client: {
+          select: {
+            firstName: true, // pii-plaintext-read-ok: pro-facing client name in booking notif (same as inbox)
+            lastName: true, // pii-plaintext-read-ok: pro-facing client name in booking notif (same as inbox)
+          },
+        },
+      },
+    })
+    .catch(() => null)
+
+  if (!booking) return ''
+
+  const clientName = formatClientName(booking.client ?? {})
+  const serviceLabel = booking.service?.name?.trim() || 'an appointment'
+  const timeZone =
+    booking.locationTimeZone ||
+    booking.professional?.timeZone ||
+    DEFAULT_TIME_ZONE
+  const whenClause = formatBookingWhenClause(booking.scheduledFor, timeZone)
+
+  return args.eventKey === NotificationEventKey.BOOKING_REQUEST_CREATED
+    ? `${clientName} requested ${serviceLabel}${whenClause}.`
+    : `${clientName} is booked for ${serviceLabel}${whenClause}.`
 }
 
 async function createFinalizeProNotification(args: {
@@ -359,11 +411,17 @@ async function createFinalizeProNotification(args: {
       args.coupledToPendingPaymentConfirmation,
   })
 
+  // §12 NC1 #1/#2: fill the empty pro-notification body with who/what/when.
+  const body = await buildFinalizeProNotificationBody({
+    bookingId: args.bookingId,
+    eventKey: meta.eventKey,
+  })
+
   await createProNotification({
     professionalId: args.professionalId,
     eventKey: meta.eventKey,
     title: meta.title,
-    body: '',
+    body,
     href: `/pro/bookings/${args.bookingId}`,
     actorUserId: args.actorUserId,
     bookingId: args.bookingId,

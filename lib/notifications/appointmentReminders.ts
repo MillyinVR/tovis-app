@@ -209,13 +209,10 @@ function shiftLocalCalendarDate(args: {
   }
 }
 
-function formatWhen(date: Date, timeZone: string): string {
+function formatTimeOnly(date: Date, timeZone: string): string {
   // sanitizeTimeZone falls back to DEFAULT_TIME_ZONE for an invalid tz, matching
   // the previous try/catch behavior; formatInTimeZone keeps the default locale.
   return formatInTimeZone(date, sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE), {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   })
@@ -298,34 +295,32 @@ export function buildAppointmentReminderContent(
     throw new Error('buildAppointmentReminderContent: invalid scheduledFor')
   }
 
-  const whenLabel = formatWhen(scheduledFor, payload.timeZone)
-  const subject = payload.serviceName
-    ? ` for ${payload.serviceName}`
+  // Personalized, "Reminder:"-free copy (§12 NC1 #13). The relative phrase comes
+  // from the reminder kind; the clock time comes from the appointment. A "manage"
+  // nudge closes every reminder so the client always knows they can reschedule.
+  const serviceLabel = payload.serviceName?.trim() || 'appointment'
+  const withPro = payload.professionalName?.trim()
+    ? ` with ${payload.professionalName.trim()}`
     : ''
-  const withPro = payload.professionalName
-    ? ` with ${payload.professionalName}`
-    : ''
-  const onWhen = whenLabel ? ` on ${whenLabel}` : ''
+  const timeLabel = formatTimeOnly(scheduledFor, payload.timeZone)
+  const atTime = timeLabel ? ` at ${timeLabel}` : ''
+  const manageNudge = ' Need to change it? Tap to manage.'
 
-  if (payload.reminderKind === 'ONE_WEEK') {
-    return {
-      title: 'Appointment reminder',
-      body: `Reminder: your appointment${subject} is in one week${onWhen}${withPro}.`,
-      data: payload,
-    }
-  }
+  const relativeWhen =
+    payload.reminderKind === 'ONE_WEEK'
+      ? 'in one week'
+      : payload.reminderKind === 'THREE_DAYS'
+        ? 'in 3 days'
+        : 'tomorrow'
 
-  if (payload.reminderKind === 'THREE_DAYS') {
-    return {
-      title: 'Appointment reminder',
-      body: `Reminder: your appointment${subject} is in 3 days${onWhen}${withPro}.`,
-      data: payload,
-    }
-  }
+  const title =
+    payload.reminderKind === 'DAY_BEFORE'
+      ? 'Appointment tomorrow'
+      : 'Appointment reminder'
 
   return {
-    title: 'Appointment tomorrow',
-    body: `Reminder: your appointment${subject} is tomorrow${onWhen}${withPro}.`,
+    title,
+    body: `Your ${serviceLabel}${withPro} is ${relativeWhen}${atTime}.${manageNudge}`,
     data: payload,
   }
 }

@@ -19,6 +19,7 @@ const mockRenderMediaUrls = vi.hoisted(() => vi.fn())
 
 const mocks = vi.hoisted(() => ({
   prismaTransaction: vi.fn(),
+  clientProfileFindUnique: vi.fn(),
 
   txReviewFindFirst: vi.fn(),
   txReviewFindUnique: vi.fn(),
@@ -60,6 +61,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     $transaction: mocks.prismaTransaction,
+    clientProfile: {
+      findUnique: mocks.clientProfileFindUnique,
+    },
   },
 }))
 
@@ -399,6 +403,12 @@ describe('app/api/v1/client/bookings/[id]/review/route.ts POST', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockRenderMediaUrls.mockReset()
+
+    // §12 NC1 #15: review-received notif names the client.
+    mocks.clientProfileFindUnique.mockResolvedValue({
+      firstName: 'Jordan',
+      lastName: 'Lee',
+    })
 
     mocks.txProfessionalProfileFindUnique.mockResolvedValue({
       homeTenantId: 'tenant_root',
@@ -856,8 +866,8 @@ describe('app/api/v1/client/bookings/[id]/review/route.ts POST', () => {
       eventKey: NotificationEventKey.REVIEW_RECEIVED,
       priority: NotificationPriority.NORMAL,
       title: 'New review received',
-      body: 'A client left a 5-star review.',
-      href: '/pro/bookings/booking_1',
+      body: 'Jordan Lee left you a 5-star review.',
+      href: '/pro/reviews#review-review_1',
       actorUserId: 'user_1',
       bookingId: 'booking_1',
       reviewId: 'review_1',

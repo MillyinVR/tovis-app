@@ -523,7 +523,7 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
     expect(mocks.upsertClientNotification).toHaveBeenCalledWith({
       clientId: 'client_1',
       eventKey: NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
-      title: 'Last-minute opening available',
+      title: 'A last-minute opening',
       body: expect.stringContaining('TOVIS Studio has a last-minute opening for Gel X'),
       href: '/offerings/offering_1?scheduledFor=2026-04-14T18%3A00%3A00.000Z&source=DISCOVERY&openingId=opening_1&proTimeZone=America%2FLos_Angeles',
       dedupeKey: 'last-minute-opening:opening_1:client:client_1',

@@ -144,21 +144,30 @@ export async function sendPasswordResetEmail(args: {
   const fromEmail = requireEmailEnv('POSTMARK_FROM_EMAIL')
   const messageStream = envOrNull('POSTMARK_MESSAGE_STREAM')
 
+  // §12 NC1 #42: light polish — warm greeting + sign-off; subject, 30-min expiry,
+  // safe-to-ignore line, and single CTA kept for deliverability/security. Generic
+  // greeting avoids interpolating a user-controlled name into email HTML.
   const subject = `Reset your ${args.brandName} password`
   const text = [
+    'Hi there,',
+    '',
     `We received a request to reset your ${args.brandName} password.`,
     '',
     `Open this link: ${args.resetUrl}`,
     '',
     'This link expires in 30 minutes.',
     'If you did not request this, you can ignore this email.',
+    '',
+    `— The ${args.brandName} team`,
   ].join('\n')
 
   const html = [
+    '<p>Hi there,</p>',
     `<p>We received a request to reset your ${args.brandName} password.</p>`,
     `<p><a href="${args.resetUrl}">Reset your password</a></p>`,
     '<p>This link expires in 30 minutes.</p>',
     '<p>If you did not request this, you can ignore this email.</p>',
+    `<p>— The ${args.brandName} team</p>`,
   ].join('')
 
   const payload = {

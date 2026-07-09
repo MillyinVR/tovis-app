@@ -19,6 +19,7 @@ import { approveConsultationAndMaterializeBooking } from '@/lib/booking/writeBou
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
+import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
 import {
   broadcastLive,
   liveChannelForPro,
@@ -109,6 +110,7 @@ function buildConsultationApprovalAuditSnapshot(
 
 function getConsultationDecisionNotificationMeta(
   action: ConsultationDecisionAction,
+  clientName: string,
 ): {
   title: string
   body: string
@@ -117,14 +119,15 @@ function getConsultationDecisionNotificationMeta(
   if (action === 'APPROVE') {
     return {
       title: 'Consultation approved',
-      body: 'Client approved your consultation proposal.',
+      body: `${clientName} approved your proposal — you're good to proceed.`,
       eventKey: NotificationEventKey.CONSULTATION_APPROVED,
     }
   }
 
   return {
-    title: 'Consultation rejected',
-    body: 'Client rejected your consultation proposal.',
+    // §12 NC1 #12: "declined" reads softer than "rejected".
+    title: 'Consultation declined',
+    body: `${clientName} declined your proposal. Tap to revise or discuss.`,
     eventKey: NotificationEventKey.CONSULTATION_REJECTED,
   }
 }
@@ -132,10 +135,25 @@ function getConsultationDecisionNotificationMeta(
 async function createConsultationDecisionNotification(args: {
   bookingId: string
   professionalId: string
+  clientId: string
   actorUserId: string
   action: ConsultationDecisionAction
 }): Promise<void> {
-  const meta = getConsultationDecisionNotificationMeta(args.action)
+  // Name the client (§12 NC1 #11/#12). Best-effort read; a failure falls back to
+  // formatClientName's generic label and never blocks the notification.
+  const client = await prisma.clientProfile
+    .findUnique({
+      where: { id: args.clientId },
+      select: {
+        firstName: true, // pii-plaintext-read-ok: pro-facing client name in consultation-decision notif
+        lastName: true, // pii-plaintext-read-ok: pro-facing client name in consultation-decision notif
+      },
+    })
+    .catch(() => null)
+  const meta = getConsultationDecisionNotificationMeta(
+    args.action,
+    formatClientName(client ?? {}),
+  )
 
   try {
     await createProNotification({
@@ -343,6 +361,7 @@ const idempotencyRequest = new Request(
       await createConsultationDecisionNotification({
         bookingId,
         professionalId: booking.professionalId,
+        clientId,
         actorUserId: user.id,
         action,
       })
@@ -478,6 +497,7 @@ const idempotencyRequest = new Request(
     await createConsultationDecisionNotification({
       bookingId,
       professionalId: booking.professionalId,
+      clientId,
       actorUserId: user.id,
       action,
     })

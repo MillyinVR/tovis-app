@@ -20,6 +20,8 @@ import type {
 
 export type CreateConsultationActionDeliveryArgs = {
   professionalId: string
+  /** The pro's PUBLIC display name, for the personalized SMS body (§12 NC1 #10). */
+  professionalName?: string | null
   clientId: string
   bookingId: string
   consultationApprovalId: string
@@ -55,8 +57,11 @@ function buildConsultationTitle(): string {
   return 'Consultation proposal ready'
 }
 
-function buildConsultationBody(): string {
-  return 'Review your updated service proposal and approve or decline it through this secure link.'
+function buildConsultationBody(professionalName?: string | null): string {
+  const name = professionalName?.trim()
+  return name
+    ? `${name} sent an updated proposal. Approve or decline through this secure link.`
+    : 'A pro sent you an updated proposal. Approve or decline through this secure link.'
 }
 
 function buildConsultationMetadata(
@@ -211,7 +216,7 @@ export async function createConsultationActionDelivery(
     plan: planWithMetadata,
     href: link.href,
     title: buildConsultationTitle(),
-    body: buildConsultationBody(),
+    body: buildConsultationBody(args.professionalName),
     payload: buildDispatchPayload({
       metadata,
       token,

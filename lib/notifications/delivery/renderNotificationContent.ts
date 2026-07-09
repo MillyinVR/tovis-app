@@ -306,7 +306,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   booking_cancelled_by_client: 'View cancellation',
   booking_cancelled_by_pro: 'View cancellation',
   booking_cancelled_by_admin: 'View cancellation',
-  client_claim_invite: 'Claim your profile',
+  client_claim_invite: 'View my booking',
   consultation_proposal_sent: 'Review proposal',
   consultation_approved: 'View consultation',
   consultation_rejected: 'View consultation',

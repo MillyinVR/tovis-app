@@ -4,6 +4,7 @@ import {
   createProNotification,
   type ProNotificationCreateResult,
 } from './proNotifications'
+import { resolveUserActorPublicName } from './social/resolveActorPublicName'
 
 export type LookFollowerNewNotificationData = {
   followerUserId: string
@@ -43,13 +44,17 @@ export async function createLookFollowerNewProNotification(
     followerUserId,
   }
 
-  // Title is intentionally name-free: pro notifications don't embed client PII
-  // (matches the "New booking request" pattern). The actor id is captured for
-  // attribution; the pro can see who via their followers list.
+  // Personalize with the follower's PUBLIC name (§12 NC1 #33) — a pro's opted-in
+  // display name, or a client's public @handle. Never a legal name: a private /
+  // no-handle follower falls back to the name-free copy.
+  const followerName = await resolveUserActorPublicName(followerUserId, args.tx)
+
   return createProNotification({
     professionalId,
     eventKey: NotificationEventKey.LOOK_FOLLOWER_NEW,
-    title: 'You have a new follower',
+    title: followerName
+      ? `${followerName} started following you`
+      : 'Someone started following you',
     href: '/pro/profile/public-profile',
     dedupeKey: buildLookFollowerNewProNotificationDedupeKey(followerUserId),
     data,
