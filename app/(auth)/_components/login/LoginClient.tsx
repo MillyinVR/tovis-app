@@ -320,7 +320,7 @@ export default function LoginClient() {
                   onClick={() => setMode('phone')}
                   className="text-[11px] font-black text-textSecondary/80 transition hover:text-textPrimary focus:outline-none focus-visible:underline"
                 >
-                  Sign in with a code instead
+                  Text me a code instead
                 </button>
               </div>
 

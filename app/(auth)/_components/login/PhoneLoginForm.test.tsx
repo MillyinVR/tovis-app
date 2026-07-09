@@ -234,7 +234,7 @@ describe('PhoneLoginForm', () => {
     ).toBe('+16195559999')
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Sign in with a password instead' }),
+      screen.getByRole('button', { name: 'Use your password instead' }),
     )
     expect(onUsePassword).toHaveBeenCalledTimes(1)
   })

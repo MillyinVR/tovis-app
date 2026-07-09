@@ -282,7 +282,7 @@ export default function PhoneLoginForm({
 
         <div className="flex justify-center pt-1">
           <TextButton onClick={onUsePassword} disabled={sending || verifying}>
-            Sign in with a password instead
+            Use your password instead
           </TextButton>
         </div>
       </div>
