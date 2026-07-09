@@ -13,11 +13,15 @@ import {
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import AuthShell from '../_components/AuthShell'
+import {
+  RESEND_COOLDOWN_SECONDS,
+  formatCooldown,
+  readRetryAfterSeconds,
+} from '../_components/otpCooldown'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { useBrand } from '@/lib/brand/BrandProvider'
 
-const RESEND_COOLDOWN_SECONDS = 60
 const NEXT_URL_RECOVERY_DELAY_MS = 3000
 
 type VerificationStatus = {
@@ -159,26 +163,6 @@ function buildLoginHref(args: {
   return qs ? `/login?${qs}` : '/login'
 }
 
-function readRetryAfterSeconds(
-  data: Record<string, unknown> | null,
-): number | null {
-  if (!data) return null
-
-  const value = data.retryAfterSeconds
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.max(0, Math.ceil(value))
-  }
-
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) {
-      return Math.max(0, Math.ceil(parsed))
-    }
-  }
-
-  return null
-}
-
 function readBooleanField(
   data: Record<string, unknown> | null,
   key: string,
@@ -212,13 +196,6 @@ function buildDefaultNextUrl(role: 'CLIENT' | 'PRO' | 'ADMIN' | null): string {
   if (role === 'PRO') return '/pro/calendar'
   if (role === 'ADMIN') return '/admin'
   return '/looks'
-}
-
-function formatCooldown(seconds: number): string {
-  const safe = Math.max(0, Math.ceil(seconds))
-  const mins = Math.floor(safe / 60)
-  const secs = safe % 60
-  return `${mins}:${String(secs).padStart(2, '0')}`
 }
 
 function getPhoneDisplayDigits(value: string): string {

@@ -11,6 +11,7 @@ import PasswordInput from '../PasswordInput'
 import PrimaryButton from '../PrimaryButton'
 import SecondaryLinkButton from '../SecondaryLinkButton'
 import SocialSignIn from '../social/SocialSignIn'
+import PhoneLoginForm from './PhoneLoginForm'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 import {
   resolvePostAuthNavigation,
@@ -123,6 +124,7 @@ export default function LoginClient() {
   )
   const phone = useMemo(() => sanitizeOptionalText(phoneRaw), [phoneRaw])
 
+  const [mode, setMode] = useState<'password' | 'phone'>('password')
   const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -254,7 +256,7 @@ export default function LoginClient() {
       title="Login"
       subtitle="Enter your credentials. Try not to be dramatic about it."
     >
-      <form noValidate onSubmit={handleSubmit} className="mt-1 grid gap-4">
+      <div className="grid gap-4">
         {reasonCopy ? (
           <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-semibold text-toneWarn">
             <div className="font-black">{reasonCopy.title}</div>
@@ -264,65 +266,86 @@ export default function LoginClient() {
           </div>
         ) : null}
 
-        <label className="grid gap-1.5">
-          <FieldLabel>Email</FieldLabel>
-          <Input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            type="email"
-            required
-            autoComplete="email"
-            inputMode="email"
+        {mode === 'password' ? (
+          <form noValidate onSubmit={handleSubmit} className="grid gap-4">
+            <label className="grid gap-1.5">
+              <FieldLabel>Email</FieldLabel>
+              <Input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                required
+                autoComplete="email"
+                inputMode="email"
+              />
+            </label>
+
+            <label className="grid gap-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <FieldLabel>Password</FieldLabel>
+                <Link
+                  href={forgotHref}
+                  className="text-[11px] font-black text-textSecondary/80 hover:text-textPrimary"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+
+              <PasswordInput
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+              />
+            </label>
+
+            {error ? (
+              <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
+                {error}
+              </div>
+            ) : null}
+
+            <div className="grid gap-2 pt-1">
+              <PrimaryButton loading={loading} withArrow>
+                {loading ? 'Logging in…' : 'Login'}
+              </PrimaryButton>
+
+              <SecondaryLinkButton href={signupHref}>
+                Create an account
+              </SecondaryLinkButton>
+
+              <div className="flex justify-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => setMode('phone')}
+                  className="text-[11px] font-black text-textSecondary/80 transition hover:text-textPrimary focus:outline-none focus-visible:underline"
+                >
+                  Text me a code instead
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-textSecondary">
+                <div className="text-textSecondary/70">
+                  No spam. Just bookings.
+                </div>
+                <Link
+                  href="/support"
+                  className="font-black text-textSecondary hover:text-textPrimary"
+                >
+                  Need help?
+                </Link>
+              </div>
+            </div>
+          </form>
+        ) : (
+          <PhoneLoginForm
+            nextSafe={nextSafe}
+            fromSafe={fromSafe}
+            initialPhone={phone ?? undefined}
+            onUsePassword={() => setMode('password')}
           />
-        </label>
+        )}
 
-        <label className="grid gap-1.5">
-          <div className="flex items-center justify-between gap-3">
-            <FieldLabel>Password</FieldLabel>
-            <Link
-              href={forgotHref}
-              className="text-[11px] font-black text-textSecondary/80 hover:text-textPrimary"
-            >
-              Forgot password?
-            </Link>
-          </div>
-
-          <PasswordInput
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-          />
-        </label>
-
-        {error ? (
-          <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="grid gap-2 pt-1">
-          <PrimaryButton loading={loading} withArrow>
-            {loading ? 'Logging in…' : 'Login'}
-          </PrimaryButton>
-
-          <SecondaryLinkButton href={signupHref}>
-            Create an account
-          </SecondaryLinkButton>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-textSecondary">
-            <div className="text-textSecondary/70">No spam. Just bookings.</div>
-            <Link
-              href="/support"
-              className="font-black text-textSecondary hover:text-textPrimary"
-            >
-              Need help?
-            </Link>
-          </div>
-        </div>
-      </form>
-
-      <div className="mt-4">
         <SocialSignIn />
       </div>
     </AuthShell>
