@@ -573,6 +573,57 @@ bottom of the list — including **Sign out** — is painted off-screen with no 
 
 ---
 
+## 17. TOVISCamera (native iOS AI-photographer) — build audit (2026-07-08)
+The native camera (SwiftUI + AVFoundation; `tovis-ios` `Tovis/` + `TovisKit/`, with a
+server tail in `app/api/v1/pro/camera/*` + `lib/pro/camera*`) is **largely built and wired
+end-to-end**. Two things are deliberate scaffolds rather than finished features, plus an
+owed on-device tuning pass. Most remaining work is iOS-side (tracked here since this is the
+audit epic; the iOS items also belong in `tovis-ios/BACKLOG.md`).
+
+**Phase-by-phase status:**
+- **Phase 1 — live lighting analysis + auto-exposure → done.** `CoachEngine`/`ShotCoach`
+  score exposure + backlight + color-of-light per frame; `CameraController` does real
+  face-priority metering, tap-to-focus, AE/AF lock, gray-card WB lock, card-anchored EV bias.
+- **Phase 2 — frame scoring + auto-select → done.** Weighted readiness score + post-capture
+  `PhotoQC` (sharpness/exposure/blink); "Session Reel" auto-harvests best stills at quality
+  peaks → `BestShotsReviewView`. Face/subject detection (the originally-also-scoped piece)
+  landed. Recorded-clip selection (`FrameScrubberView`) is a **manual** picker, not auto-scored.
+- **Phase 3 — guidance overlay + NFC-card calibration → partial.** Overlay is fully built
+  (readiness ring + hold-to-fire, checklist HUD, nudge chip, spoken/haptic directives, live
+  horizon, thirds + publish-crop guides, onion-skin, directed shot guides w/ pose gating).
+  Calibration card is scaffold — see open items.
+- **Phase 4 — feed-performance intelligence by service type → partial.** Service-adaptive
+  guidance works (guides + shot packs keyword-match the service; balayage→"The Reveal",
+  nails→"Claw & Sparkle"). The feed-performance feedback loop does **not** exist — packs are
+  editorially curated with hardcoded `trendScore`; zero wiring from Looks engagement.
+- **Integration → done.** Triggered from the booking closeout flow (`ProSessionHubView`:
+  BEFORE in the before-photos step, AFTER in wrap-up, alongside aftercare authoring +
+  set-critique). Captures upload scoped to `bookingId` + `BEFORE`/`AFTER`, and the client
+  chart aggregates booking photos (`ProClientChart.photos`) — auto-associated via the
+  booking→client link, not a separate tagging step.
+
+**Open work:**
+- [~] **Calibration card — real measured profile.** Replace the placeholder nominal-ColorChecker
+  profile (`CameraCalibration.placeholderClassic`) with *measured* swatches from a printed card
+  batch (`docs/calibration/generate_card.py`). Gray-card/towel WB is trustworthy today; the
+  swatch-based 3×3 chromatic correction is illustrative until a real card is measured. **(operator)** for the print+measure step.
+- [ ] **Calibration card — NFC version keying.** Wire CoreNFC to read the TOVIS referral card's
+  version id and select the matching `CardReferenceProfile` by `cardVersion`. Today no NFC is
+  read; the scan always uses the hardcoded placeholder. Scan geometry already assumes CR-80.
+- [ ] **Phase 4 — feed-performance-driven shot packs.** `lib/pro/cameraShotPacks.ts` is a static,
+  editorially-curated array. Build the deferred loop that generates/ranks packs from Looks-feed
+  engagement per service type (server-side; the source file flags this as the intended path).
+- [ ] **On-device tuning pass.** Every `CoachTuning` threshold was set without a device (luma
+  bands, sharpness/clutter divisors, pose tilt). Tune against real salon footage via the DEBUG
+  tuning HUD; verify the face-exposure axis map + `LevelCoach` tilt-sign conventions on hardware.
+- [ ] **(confirm scope)** Auto-select best frame from a *recorded clip*. Live-stream harvest is
+  automatic; `FrameScrubberView` is manual. Add auto-scoring if Phase-2's "auto-select from a
+  recorded buffer" was meant to cover clips too.
+- [ ] **Test coverage.** iOS tests cover the calibration math only (`CameraCalibrationTests`);
+  coaches/QC/frame-math are untested (frame-driven). Add fixture-image tests where feasible.
+
+---
+
 ### Note on superseded docs
 This backlog replaced these now-deleted planning docs — their open items are captured above; their history is in git:
 launch-readiness/{phase-2-remaining-work, finish-plan-2026-06-12, roadmap-corrected-2026-06-12, load-test-plan, traffic-model, load-traffic-model} ·
