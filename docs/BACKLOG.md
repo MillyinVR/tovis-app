@@ -13,6 +13,70 @@
 
 ---
 
+## ⭐ Work order — priority sequence (Tori, 2026-07-08)
+
+We work the queue in the **tier order below, not by section number.** Sections keep
+their original `§N` numbers (cross-referenced dozens of times across this file +
+`tovis-ios/BACKLOG.md`), so renumbering would break those links — this index, not the
+section order, is the source of truth for *what's next*. Ranking lens: **most
+blocking/degrading for a real user right now → least.**
+
+**Tier 1 — broken / blocked for real users right now (do first)**
+1. ~~iOS email+password signup dead-ends at email verification — §15 **A7**~~ ✅ **DONE**
+   (iOS #18 + web #546).
+2. ~~Pro account menu can't scroll on mobile web; **Sign out unreachable** — §16~~ ✅ **DONE**
+   (#545).
+
+**Tier 2 — turn on / finish already-built core features**
+3. Launch-gate flips + pro-migration go-live — §2 *(web/ops)* — ⚠️ **not blind
+   toggles:** each flag activates real product/policy (feed default for all signed-in
+   viewers / no-show *money* / membership *metering*); confirm what "on" does +
+   support-readiness per flag first (details in §2). **`ENABLE_PERSONALIZED_FEED` flipped
+   ON in prod 2026-07-09** (Tori-authorized); no-show + membership still HELD.
+4. ~~Web parity W2–W4~~ ✅ **DONE** (W2 #540 · W3 #541/#542 · W4 #543/#544) — §9 *(web)*
+
+**Tier 3 — everyday experience quality**
+5. ~~Notification copy + channel rework — §12 (NC1–NC5)~~ ✅ **DONE** (#547 · iOS #19/#20 ·
+   digest #35 web #548); deferred residuals in §12 *(web+iOS)*
+6. Messaging refinement M3–M5 — §13 / iOS §7 *(web+iOS)*
+7. Post-payment confirm read-endpoint follow-up — §10 / iOS §6 *(web+iOS)*
+
+**Tier 4 — login-method & big iOS surface parity**
+8. iOS native auth **residual only** — core signup/login/Apple/reset + **App Attest
+   already shipped** (per §15's 2026-07-08 audit, which supersedes A1's "biggest gap"
+   framing); remaining = pro onboarding checklist + license/doc verification — §9 /
+   iOS §5 **A1** *(iOS)*  ·  *(the real auth gaps A7/A8 are Tier 1 & item 9)*
+9. iOS Google Sign-In — §15 **A8** *(iOS)*
+10. iOS first-class client screens — §9 / iOS §5 **A2** *(iOS)*
+11. iOS client booking-detail rebuild — §9 / iOS **A3** *(iOS)*
+12. iOS full pro parity + home→Calendar — §9 / iOS **A4/A5** *(iOS)*
+
+**Tier 5 — new feature enhancements**
+13. Custom reminder timing — §11 (RT1–RT4) *(web+iOS)*
+14. Finance tab restructure — §14 (F1–F3) *(web+iOS)*
+15. Pro profile redesign — §18 (18a–18e) *(web+iOS)*
+16. Social-first media unification — §19 (19a–19g) *(web+iOS)*
+17. Client media capture outside before/after — §8 (client-capture bullet) *(web)*
+
+**Tier 6 — reliability / security / performance hardening**
+18. Premortem remediation + operator drills — §3 *(backend/ops)*
+19. Security / privacy tail — §4 *(backend)*
+20. Performance (nearbyPros index, perf baseline, exactOptional) — §5 *(tech debt)*
+
+**Tier 7 — tech debt & background**
+21. Duplicate-logic consolidation — §6 *(tech debt)*
+22. Media/token hardening + observability + load gate — §8 (remaining bullets) *(ops)*
+23. Personalization tail (metrics/holdout, priors, velocity check) — §1 *(backend)*
+24. TOVISCamera polish — §17 *(iOS)*
+
+**Tier 8 — verification, gated, parked, speculative**
+25. iOS launch train & live-verification (App Store upload) — iOS §1–§2 *(iOS)*
+26. iOS deferred web-parity polish — iOS §3–§4 *(iOS)*
+27. Product / legal-gated (parked incl. white-label) — §7 *(gated)*
+28. TikTok login (parked) — §15 **A9** *(parked)*
+
+---
+
 ## 1. Personalization epoch
 Spec: `docs/launch-readiness/personalization-algorithm-spec-v2.md` (18-step build order).
 Foundation shipped (rate-based Bayesian rank scoring); remaining:
@@ -33,7 +97,23 @@ Foundation shipped (rate-based Bayesian rank scoring); remaining:
 - [ ] ServicePermission filter: move legal caveat → staged, then flip `ENABLE_SERVICE_PERMISSION_FILTER` in prod. (`lib/services/allowedServices.ts`; `licenseScope.ts` is the de-facto SSOT — no admin UI for rows.)
 - [x] Camera-usage web endpoint `GET /pro/camera/usage` — PR #508 MERGED + deployed to prod 2026-07-07 (route live, auth-gated 401 confirmed).
 - [ ] Reserve-with-Google integration.
-- [ ] Flag flips when ready: `ENABLE_NO_SHOW_PROTECTION`, `ENABLE_MEMBERSHIP_ENFORCEMENT`, `ENABLE_PERSONALIZED_FEED`.
+- [ ] Flag flips when ready — ⚠️ **each is a deliberate product/policy activation, NOT a
+  no-op toggle; confirm behavior + support-readiness before flipping (verified 2026-07-08):**
+  - ✅ **`ENABLE_PERSONALIZED_FEED` — FLIPPED ON in prod 2026-07-09** (Tori-authorized this
+    one flag only). `lib/looks/personalizedFlag.ts`: switches EVERY signed-in viewer's
+    DEFAULT Look tab from chronological → the personalized RANKED blend
+    (`app/api/v1/looks/route.ts:119`). Ranking is built (categorical/occasion/follow terms
+    live; visual `visual_similarity` term stays dark until `VOYAGE_API_KEY` + backfill).
+    **No auto-fallback** — only an explicit `sort=recent` returns chronological. NOTE: prod
+    still carried the pre-rename var `ENABLE_FOR_YOU_FEED` (now dead code-side); the live
+    flag the deployed code reads is `ENABLE_PERSONALIZED_FEED`.
+  - `ENABLE_NO_SHOW_PROTECTION` (`lib/noShowProtection/flag.ts`): activates the client
+    save-card surface + REAL no-show fee charging (`charge.ts:70` short-circuits while off).
+    Money path — support-readiness (disputes/refunds) before flipping.
+  - `ENABLE_MEMBERSHIP_ENFORCEMENT` (`lib/membership/enforcement.ts`): activates camera-quota
+    metering (`lib/pro/cameraQuota.ts`), member search prioritization (`lib/search/pros.ts:380`),
+    and discovery fee-waiver logic (`lib/booking/resolveDiscoveryFinalize.ts:236`). Policy path —
+    support-readiness before flipping.
 - [ ] Pro-migration go-live: confirm catalog min prices; Square/Acuity OAuth (Phase 2); flip `ENABLE_PRO_MIGRATION`.
 
 ## 3. Premortem remediation — Phase 3/4 + operator
@@ -121,16 +201,24 @@ items (A2), since they're social surfaces (looks/stats/follow), not SEO mirrors.
   out) below the tabs; extracted shared `clientSignOut()`. Deviations: Working
   hours → `/pro/calendar`; No-show fees omitted (lives in Payment settings modal).
   typecheck/lint/guards/tests green.
-- [ ] **W2 — client Appointments list on web** (decision 1) — restore a standalone
-  bucketed list (Upcoming / Needs attention / Pre-booked / Waitlist / Past) to
-  match iOS `AppointmentsView`; web currently `redirect('/client')`s the old list.
-- [ ] **W3 — port iOS UX wins** (decision 7): open-slot picker replacing raw
-  `datetime-local` in new-booking + consultation base+add-on-aware service picker.
-- [ ] **W4 — port iOS UX wins, pt2** (decision 7): passwordless phone-OTP login +
-  clients-list search bar.
+- [x] **W2 — client Appointments list on web** (decision 1) — **MERGED #540.** Restored the
+  standalone bucketed list (Upcoming / Needs attention / Pre-booked / Waitlist / Past) to
+  match iOS `AppointmentsView`.
+- [x] **W3 — port iOS UX wins** (decision 7) — **MERGED #541 (W3a) + #542 (W3b):** open-slot
+  picker replacing raw `datetime-local` in new-booking + consultation base+add-on-aware
+  service picker.
+- [x] **W4 — port iOS UX wins, pt2** (decision 7) — **MERGED #543 (clients-list search bar)
+  + #544 (passwordless phone-OTP login).**
 
 ### iOS workstreams (detail in `tovis-ios/BACKLOG.md §5`)
-- [ ] **A1 — native auth** (decision 6, biggest structural gap): role chooser →
+- [ ] **A1 — native auth** (decision 6). ⚠️ **"Biggest structural gap" framing is STALE —
+  reconciled by §15 (2026-07-08 audit):** native signup/login is largely SHIPPED (role
+  chooser · client + pro 3-step email/password signup on real `POST /auth/register` ·
+  phone OTP · Sign in with Apple · forgot/reset · **App Attest landed** in lieu of
+  Turnstile). **Remaining A1 = pro onboarding checklist + license/document verification
+  only.** The two real auth gaps are tracked separately: **A7** (email-verify completion —
+  Tier 1) + **A8** (Google — §15). Original pre-build scope kept below for reference: role
+  chooser →
   client signup → pro 3-step signup → phone+email verify → forgot/reset password →
   pro onboarding checklist → license/document verification. App-Store hygiene.
   - **pt1 SHIPPED (iOS PR #4, branch `native/client-auth-signup`):** role chooser
@@ -336,7 +424,12 @@ channel policy in `lib/notifications/eventKeys.ts`. Two auth emails (`lib/auth/{
 + OTP (Twilio Verify Console — not in repo) are separate.
 
 ### Copy & channel rework — one focused PR (web + iOS), low-risk
-- [ ] **NC1 — notification copy pass (web).** Apply the ~35 copy reworks from the plan's
+> ✅ **NC1–NC5 SHIPPED (2026-07-09):** web copy + channel rework #547 · iOS in-app-string
+> parity #19 · iOS push deep-link routing + cross-shell workspace switch #20. The
+> digest-headline **lead-actor name (#35)**, deferred out of NC1, shipped web **#548**
+> ("{name} and {N} others engaged with your looks this week"). Deferred residuals are
+> listed under NC5.
+- [x] **NC1 — notification copy pass (web).** Apply the ~35 copy reworks from the plan's
   decision table (add who/what/when specifics + personalize with actor names) across emit
   sites + `renderNotificationContent.ts`. Unify #3/#4 booking-confirmed into one enriched
   string; enrich booking-request/confirmed/rescheduled/cancelled (both sides), consult
@@ -347,26 +440,45 @@ channel policy in `lib/notifications/eventKeys.ts`. Two auth emails (`lib/auth/{
   stakes first-touch), handle-expiry (days-remaining). Light polish to the two auth emails
   (greeting + sign-off, keep deliverability-safe). Keep as-is: payment-action-required, OTP,
   admin copy. Respect `check:no-hardcoded-brand-strings` (keep `{brandName}`) + tone utilities.
-- [ ] **NC2 — channel moves** (`eventKeys.ts`). Consult approved/declined → in-app only (drop
+- [x] **NC2 — channel moves** (`eventKeys.ts`). Consult approved/declined → in-app only (drop
   EMAIL). Last-minute opening → **+PUSH +EMAIL** on both variants, **+SMS only on the 1:1
   priority offer** (NOT the mass broadcast — Twilio cost + promo-consent/TCPA); needs split
   channel policy by variant. Admin ops (verification/support/viral) → **+PUSH** (EMAIL+in-app
   already on). Push additions only deliver once APNs creds live (see §2 push go-live).
-- [ ] **NC3 — removal + link fixes.** Delete the `BOOKING_STARTED` emit (`writeBoundary.ts:5873-5875`
+- [x] **NC3 — removal + link fixes.** Delete the `BOOKING_STARTED` emit (`writeBoundary.ts:5873-5875`
   — client is physically present, redundant). Repoint #15 review-received link → the actual
   review (not `/pro/bookings/{id}`); #37 referred-by → `/client/referrals` (not `/looks`).
-- [ ] **NC4 — iOS parity.** Mirror in-app notification strings (`NotificationsView.swift`/
+- [x] **NC4 — iOS parity.** Mirror in-app notification strings (`NotificationsView.swift`/
   `ProNotificationsView.swift` are server-fed, so mostly free) + fix the stale "Push —
   Coming soon" disabled label in `NotificationPreferencesView.swift:105` (APNs registration
   ships). Follow the web↔iOS parity rule.
 
 ### Push deep-link routing (from the audit)
-- [ ] **NC5 — expand iOS push deep-link coverage.** Today only `/client/bookings/{id}` routes
+- [x] **NC5 — expand iOS push deep-link coverage.** Today only `/client/bookings/{id}` routes
   on tap; query strings are dropped and `ProMainTabView` ignores `pushDeepLink`. Parse
   `?step=`, add `.proBooking`/`.look`/`.offers`/`.referrals`/`.membership`/`.proProfile`
   targets, role-aware cross-shell routing (client↔pro workspace switch before routing), and
   tab-level fallbacks for destinations with no focused screen. Design (parser/router seams,
   per-path destinations) in plan **Part B**. Pairs with NC3's review-received link.
+  **DONE — iOS #20** (`URLComponents` parse so `?step=`/`#review` survive; full Target→href
+  map; `PushDeepLink.role` → cross-workspace switch + link buffering; both `MainTabView` +
+  `ProMainTabView` route symmetrically). Tap path NOT sim-verifiable (no APNs) → on the iOS
+  device-verify checklist.
+
+**Deferred §12 residuals (next code-actionable slices):**
+- [ ] **Last-minute +SMS on the 1:1 PRIORITY offer only (#26).** Both variants already get
+  in-app + push + email (NC2). The extra +SMS on the priority (1:1) variant needs a
+  per-variant channel override (new event key OR channel-override on the emit) **plus a
+  promotional/marketing SMS consent primitive that does not exist yet** — only
+  `transactionalSmsConsentAt` exists; a promo SMS is a TCPA marketing message. **Blocked on a
+  product/legal decision (Tori):** capture an explicit marketing-SMS opt-in, treat the
+  priority offer as transactional, or park #26.
+- [ ] **iOS per-screen step-jump.** NC5 carries `step`/look id/review id on the targets but
+  the destinations open at the top. Consume them: net-new init param +
+  `ScrollViewReader`/segment on `BookingDetailView` / `ProBookingDetailView` /
+  `ProReviewsListView`. Clean, self-contained iOS work — good next pick.
+- [ ] **Push as a selectable preferred channel on iOS.** Needs a preference-model change (add
+  a `push` channel to `ChannelDraft` + server preference API).
 
 ### Feature spin-offs — each its own PR (surfaced during the walkthrough)
 > **C2 (off-platform "confirm payment received" notification) is already tracked as §10
@@ -485,8 +597,11 @@ creation ✅ but **email-verification finish ❌ (A7)** · Google ❌ absent (A8
 TikTok ➖ absent on both platforms, parked (A9) · client→Looks landing ✅.
 
 ### iOS workstreams (build later; mirror into `tovis-ios/BACKLOG.md §5` when scheduled)
-- [ ] **A7 — email-verification completion path (REAL DEFECT; blocks the primary
-  email/password signup).** A new email/password user verifies phone, then
+- [x] **A7 — email-verification completion path** — ✅ **DONE (iOS #18 + web #546, 2026-07-09):**
+  in-app email-verification completion screen on iOS (resend + status re-check advancing to
+  `.signedIn`); web `/auth/verification/status` now returns the healed ACTIVE token in the
+  body so native can finish without a re-login. Original defect writeup kept for reference:
+  A new email/password user verifies phone, then
   dead-ends: `SessionModel.verifyPhoneCode` finds email still unverified and only
   sets `errorMessage = "Your phone is verified. Check your email to finish."`
   (`tovis-ios Tovis/ContentView.swift:362-366`), stranding them on the phone-verify
@@ -553,14 +668,16 @@ bottom of the list — including **Sign out** — is painted off-screen with no 
 - **Root cause:** no bounded height + no `overflow-y-auto` on the panel, plus the
   page-scroll lock removes the fallback of scrolling the page.
 
-**Fix (decided with Tori — sticky header/footer, scroll the middle):**
-- [ ] **`ProAccountMenu.tsx` (the bug).** Split the panel into `flex flex-col` with a
+**Fix (decided with Tori — sticky header/footer, scroll the middle):** ✅ **DONE — MERGED
+#545 (2026-07-09):** both the `ProAccountMenu.tsx` scroll fix and the `SwitchAccountSheet.tsx`
+hardening below shipped in one PR (+ a `ProAccountMenu.test.tsx` guard).
+- [x] **`ProAccountMenu.tsx` (the bug).** Split the panel into `flex flex-col` with a
   `max-h-[calc(100dvh-~88px)]` bound; pin header (`shrink-0`) and footer (`shrink-0`,
   keep border-top); wrap the middle sections in a `flex-1 overflow-y-auto` region. Keep
   `overflow-hidden` on the outer panel for the rounded corners; keep the page-scroll lock
   (now correct). Use `dvh` not `vh`. Single-file change; no new deps. Confirm the real
   header height before hardcoding the `max-h` offset.
-- [ ] **`SwitchAccountSheet.tsx` (latent hardening; shared pro+client).** The panel `<div>`
+- [x] **`SwitchAccountSheet.tsx` (latent hardening; shared pro+client).** The panel `<div>`
   (`app/_components/AdminSessionFooter/SwitchAccountSheet.tsx:130-142`) has `maxWidth: 380`
   but **no `maxHeight` and no `overflowY`**, and its container is `fixed inset-0;
   align-items: flex-end`, so a list taller than the viewport would push the header off the
