@@ -15,9 +15,7 @@ import {
   MESSAGE_ATTACHMENT_BUCKET,
   signMessageAttachmentUrls,
 } from '@/lib/messages/attachments'
-import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
-import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
-import { DEFAULT_TIME_ZONE, formatInTimeZone, pickTimeZoneOrNull } from '@/lib/time'
+import { resolveInboxEyebrow } from '@/lib/messages/inboxContext'
 import ThreadClient from './ThreadClient'
 
 export const dynamic = 'force-dynamic'
@@ -40,154 +38,37 @@ type InitialMessage = {
   attachments: InitialMessageAttachment[]
 }
 
-type ContextMeta = {
-  line: string
-  href: string | null
-  cta: string | null
-}
-
-function isPresentString(value: string | null | undefined): value is string {
-  return typeof value === 'string' && value.trim().length > 0
-}
-
-function joinParts(parts: (string | null | undefined)[]): string {
-  return parts.filter(isPresentString).join(' · ')
-}
-
-function formatDayTime(date: Date, timeZone: string): string {
-  return formatInTimeZone(date, timeZone, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
-
 function toInitialMessageMediaType(mediaType: MediaType): InitialMessageAttachment['mediaType'] {
   if (mediaType === MediaType.VIDEO) return 'VIDEO'
   return 'IMAGE'
 }
 
-async function buildContextMeta(thread: {
+/**
+ * The header's deep link into the thread's context (booking / pro profile) when
+ * one exists. Pure — derived from the thread's own context ids, no lookup. The
+ * eyebrow *copy* comes from the shared resolveInboxEyebrow so the header label
+ * never drifts from the inbox row that opened this thread.
+ */
+function contextNav(thread: {
   contextType: MessageThreadContextType
   contextId: string
   bookingId: string | null
-  serviceId: string | null
-  offeringId: string | null
-  waitlistEntryId: string | null
-}): Promise<ContextMeta> {
+}): { href: string | null; cta: string | null } {
   if (thread.contextType === MessageThreadContextType.BOOKING && thread.bookingId) {
-    const booking = await prisma.booking.findUnique({
-      where: { id: thread.bookingId },
-      select: {
-        id: true,
-        scheduledFor: true,
-        locationTimeZone: true,
-        location: { select: { timeZone: true } },
-        service: { select: { name: true } },
-      },
-    })
-
-    const bookingTz =
-      pickTimeZoneOrNull(booking?.locationTimeZone) ??
-      pickTimeZoneOrNull(booking?.location?.timeZone) ??
-      DEFAULT_TIME_ZONE
-    const when = booking?.scheduledFor ? formatDayTime(booking.scheduledFor, bookingTz) : null
-    const serviceName = booking?.service?.name ?? null
-
     return {
-      line: joinParts(['Booking', serviceName, when]) || 'Booking',
       href: `/booking/${encodeURIComponent(thread.bookingId)}`,
       cta: 'View booking',
     }
   }
 
-  if (thread.contextType === MessageThreadContextType.WAITLIST && thread.waitlistEntryId) {
-    const waitlist = await prisma.waitlistEntry.findUnique({
-      where: { id: thread.waitlistEntryId },
-      select: {
-        id: true,
-        status: true,
-        preferenceType: true,
-        specificDate: true,
-        timeOfDay: true,
-        windowStartMin: true,
-        windowEndMin: true,
-        service: { select: { name: true } },
-      },
-    })
-
-    if (!waitlist) {
-      return {
-        line: 'Waitlist',
-        href: null,
-        cta: null,
-      }
-    }
-
-    const status = labelForWaitlistStatus(waitlist.status)
-    const preference = formatWaitlistPreferenceLabel({
-      preferenceType: waitlist.preferenceType,
-      specificDate: waitlist.specificDate,
-      timeOfDay: waitlist.timeOfDay,
-      windowStartMin: waitlist.windowStartMin,
-      windowEndMin: waitlist.windowEndMin,
-    })
-
+  if (thread.contextType === MessageThreadContextType.PRO_PROFILE && thread.contextId) {
     return {
-      line: joinParts(['Waitlist', status, waitlist.service?.name, preference]) || 'Waitlist',
-      href: null,
-      cta: null,
+      href: `/professionals/${encodeURIComponent(thread.contextId)}`,
+      cta: 'View profile',
     }
   }
 
-  if (thread.contextType === MessageThreadContextType.SERVICE && thread.serviceId) {
-    const service = await prisma.service.findUnique({
-      where: { id: thread.serviceId },
-      select: { id: true, name: true },
-    })
-
-    return {
-      line: joinParts(['Service', service?.name]) || 'Service',
-      href: null,
-      cta: null,
-    }
-  }
-
-  if (thread.contextType === MessageThreadContextType.OFFERING && thread.offeringId) {
-    const offering = await prisma.professionalServiceOffering.findUnique({
-      where: { id: thread.offeringId },
-      select: {
-        id: true,
-        title: true,
-        service: { select: { name: true } },
-      },
-    })
-
-    return {
-      line: joinParts(['Offering', offering?.title ?? offering?.service?.name]) || 'Offering',
-      href: null,
-      cta: null,
-    }
-  }
-
-  if (thread.contextType === MessageThreadContextType.PRO_PROFILE) {
-    const href = thread.contextId
-      ? `/professionals/${encodeURIComponent(thread.contextId)}`
-      : null
-
-    return {
-      line: 'Profile',
-      href,
-      cta: href ? 'View profile' : null,
-    }
-  }
-
-  return {
-    line: 'Messages',
-    href: null,
-    cta: null,
-  }
+  return { href: null, cta: null }
 }
 
 export default async function MessageThreadPage(props: PageProps) {
@@ -347,13 +228,21 @@ export default async function MessageThreadPage(props: PageProps) {
         : null
       : null
 
-  const contextMeta = await buildContextMeta({
+  // Header eyebrow uses the SAME resolver as the inbox rows so the label a user
+  // tapped never changes shape once the thread opens. Navigation (deep link into
+  // the booking / pro profile) is a separate, thread-page-only affordance.
+  const contextEyebrow = await resolveInboxEyebrow({
+    id: thread.id,
     contextType: thread.contextType,
-    contextId: thread.contextId,
     bookingId: thread.bookingId,
     serviceId: thread.serviceId,
     offeringId: thread.offeringId,
     waitlistEntryId: thread.waitlistEntryId,
+  })
+  const contextNavMeta = contextNav({
+    contextType: thread.contextType,
+    contextId: thread.contextId,
+    bookingId: thread.bookingId,
   })
 
   return (
@@ -366,20 +255,20 @@ export default async function MessageThreadPage(props: PageProps) {
         <header className="flex items-start justify-between gap-[14px]">
           <div className="min-w-0">
             <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-textMuted">
-              {contextMeta.line}
+              {contextEyebrow.eyebrow}
             </div>
 
             <h1 className="mt-[9px] truncate font-display text-[24px] font-bold leading-[1.05] tracking-[-0.02em] md:text-[26px] lg:text-[28px]">
               {title}
             </h1>
 
-            {contextMeta.href && contextMeta.cta ? (
+            {contextNavMeta.href && contextNavMeta.cta ? (
               <div className="mt-2">
                 <Link
-                  href={contextMeta.href}
+                  href={contextNavMeta.href}
                   className="font-display text-[12px] font-semibold text-accentPrimary hover:opacity-80"
                 >
-                  {contextMeta.cta} →
+                  {contextNavMeta.cta} →
                 </Link>
               </div>
             ) : null}

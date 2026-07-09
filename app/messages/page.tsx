@@ -13,6 +13,7 @@ import { formatRelativeTimeCompact } from '@/lib/time'
 import { initialsForName } from '@/lib/initials'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import {
+  INBOX_THREADS_PAGE_SIZE,
   parseInboxFilter,
   resolveInboxEyebrows,
   whereForInboxFilter,
@@ -204,7 +205,7 @@ async function findInboxThreads(params: {
   const threads: InboxThread[] = await prisma.messageThread.findMany({
     where: whereForInboxFilter(params),
     orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
-    take: 60,
+    take: INBOX_THREADS_PAGE_SIZE,
     select: {
       id: true,
       contextType: true,
