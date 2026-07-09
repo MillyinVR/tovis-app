@@ -6,7 +6,13 @@
 // the sent-flip, the notification, and the ownership / state guards.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AftercareRebookMode, BookingStatus, SessionStep } from '@prisma/client'
+import {
+  AftercareRebookMode,
+  BookingStatus,
+  NotificationChannel,
+  NotificationEventKey,
+  SessionStep,
+} from '@prisma/client'
 
 const TEST_NOW = new Date('2026-06-23T18:00:00.000Z')
 
@@ -121,6 +127,19 @@ describe('sendExistingAftercareDraft', () => {
       }),
     )
     expect(mocks.upsertClientNotification).toHaveBeenCalledTimes(1)
+    // §23: the inbox notification is IN_APP/PUSH only — EMAIL + SMS are owned
+    // solely by the magic-link delivery (its secure /client/rebook token link),
+    // so the login-gated /client/bookings href never ships over email/text.
+    expect(mocks.upsertClientNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventKey: NotificationEventKey.AFTERCARE_READY,
+        href: '/client/bookings/booking_1?step=aftercare',
+        requestedChannels: [
+          NotificationChannel.IN_APP,
+          NotificationChannel.PUSH,
+        ],
+      }),
+    )
   })
 
   it('is a no-op when the summary was already sent', async () => {
@@ -193,6 +212,16 @@ describe('nudgeAftercareRebook', () => {
       expect.objectContaining({ resendMode: 'RESEND', aftercareId: 'aftercare_1' }),
     )
     expect(mocks.upsertClientNotification).toHaveBeenCalledTimes(1)
+    // §23: a nudge's inbox notification is IN_APP/PUSH only, same as the send.
+    expect(mocks.upsertClientNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventKey: NotificationEventKey.AFTERCARE_READY,
+        requestedChannels: [
+          NotificationChannel.IN_APP,
+          NotificationChannel.PUSH,
+        ],
+      }),
+    )
     // A nudge never mutates the summary's sent/draft state.
     expect(mocks.txAftercareSummaryUpdate).not.toHaveBeenCalled()
   })

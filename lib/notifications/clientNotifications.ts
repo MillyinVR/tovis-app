@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
+  NotificationChannel,
   NotificationEventKey,
   NotificationRecipientKind,
   Prisma,
@@ -82,6 +83,13 @@ export type CreateClientNotificationArgs = {
 
   bookingId?: string | null
   aftercareId?: string | null
+
+  // Optional per-emit channel filter, intersected with the event's default
+  // channel set by resolveChannelPolicy. Omit (or null) to use the event
+  // default. Used when an event has more than one emitter that each own a
+  // subset of channels — e.g. AFTERCARE_READY, where the magic-link delivery
+  // owns EMAIL+SMS and this inbox notification owns IN_APP+PUSH (§23).
+  requestedChannels?: readonly NotificationChannel[] | null
 
   tx?: Prisma.TransactionClient
 }
@@ -217,6 +225,9 @@ function normalizeCreateClientNotificationArgs(
     dedupeKey: normNullableString(args.dedupeKey, MAX_DEDUPE_KEY),
     bookingId: normId(args.bookingId),
     aftercareId: normId(args.aftercareId),
+    // Pass through as-is; enqueueDispatch/resolveChannelPolicy normalizes
+    // (dedupe + empty→"no restriction") when it applies the filter.
+    requestedChannels: args.requestedChannels ?? null,
   }
 }
 
@@ -463,6 +474,7 @@ async function enqueueNewClientNotificationDispatch(args: {
   await enqueueDispatch({
     key: args.normalized.eventKey,
     sourceKey: `client-notification:${args.notificationId}`,
+    requestedChannels: args.normalized.requestedChannels,
     recipient: {
       kind: NotificationRecipientKind.CLIENT,
       clientId: recipient.client.id,
