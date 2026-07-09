@@ -622,6 +622,49 @@ audit epic; the iOS items also belong in `tovis-ios/BACKLOG.md`).
 - [ ] **Test coverage.** iOS tests cover the calibration math only (`CameraCalibrationTests`);
   coaches/QC/frame-math are untested (frame-driven). Add fixture-image tests where feasible.
 
+## 18. Pro profile redesign — social-media pattern (audit 2026-07-08)
+Client-facing pro profile (`/professionals/[id]`) + native iOS pro profile.
+Mockup (`tovis-profile-redesign.html`, Tori 2026-07-03) approved 2026-07-08.
+Moves from "pro's photo stretched as full-page background" to a creator-page
+pattern: work as the cover, face as a contained avatar (verified badge on it),
+portfolio high on the page, payments collapsed to one sheet. Ships web + iOS
+together (parity rule). Decisions (Tori 2026-07-08): cover is **pro-set with a
+graceful blank fallback** (never the stretched avatar), NOT auto-pulled; keep
+the 4-up stat row incl. Saved. **Upstream dependency (separate session):**
+portfolio (MediaAsset) ↔ looks feed (LookPost) are unlinked today — the deep-dive
+to connect them is tracked separately; this epic ships without it (cover =
+pro-chosen; grid "★ FEAT" stays newest-featured).
+
+Current "before" confirmed: avatar is the full-bleed 330px hero background
+(`ProfileHero.tsx` + `.brand-profile-hero-media`); portfolio grid is MediaAsset-
+based, tab-gated + below-fold; payments are a `flex-wrap` pill row
+(`AcceptedPayments.tsx`); "Saved" = `count(ProfessionalFavorite)`; verified badge
+is inlined (no reusable component); no cover field (only `avatarUrl`); no shared
+bottom-sheet primitive. Owner-view cover label reads "Add a cover photo" when
+blank (nothing for client viewers). Sequencing: 18a lands before 18b/18e (both
+clients read the cover DTO); 18c (BottomSheet extraction) is independent.
+
+### Web
+- [ ] **18a — schema + API**: `ProfessionalProfile.coverMediaAssetId String?`
+  (nullable FK → MediaAsset) + relation; expose `cover` in public-profile +
+  pro self-profile DTOs; set/clear mutation; regen api-schema. (1 migration, additive)
+- [ ] **18b — hero rework**: short cover banner (cover-or-branded-fallback, reuse
+  `.brand-profile-hero-fallback`) + contained avatar w/ verified badge + identity
+  block + bordered stats card; relocate Share/Favorite (+ back) onto cover overlay;
+  reorder page so the grid rides high (Portfolio default tab). New brand.css;
+  retire full-bleed `.brand-profile-hero-media`.
+- [ ] **18c — payments sheet**: extract a shared `BottomSheet` primitive from
+  `AvailabilityDrawer/DrawerShell`; replace pill row with an "Accepted payments"
+  button → sheet (same `publicAcceptedMethods` data).
+- [ ] **18d — owner cover editor**: "Cover photo" control (pick from portfolio /
+  clear) in the `/pro/profile` media manager. (confirm media-manager location)
+
+### iOS (detail → tovis-ios/BACKLOG.md §5)
+- [ ] **18e — native pro profile redesign**: cover + overlapping avatar +
+  verified-on-avatar + stats row + Book/Message + Accepted-payments → native
+  sheet + Portfolio/Services/Reviews + grid; owner cover picker in pro
+  self-profile. Consumes 18a DTO.
+
 ---
 
 ### Note on superseded docs
