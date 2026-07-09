@@ -903,6 +903,29 @@ vanity URL). The old mirror is retired.
 
 ---
 
+## 21. Aftercare pro-view — image display (shipped 2026-07-09, PR #554)
+
+The pro aftercare editor (`app/pro/bookings/[id]/aftercare`) loaded before/after
+photos slowly and unreliably, and the "enlarge" navigated instead of opening an
+overlay. Root-caused + fixed in **PR #554** (deploy pending Tori's go-ahead).
+
+- [x] **AC1** Slow load → batched signing via new `renderMediaUrlsBatch`
+  (`lib/media/renderUrls.ts`): one `createSignedUrls` per private bucket instead
+  of 2×N serial calls; retired the local N+1 `signObjectUrl` waterfall. **PR #554**
+- [x] **AC2** No loading state / ~50% reliability → route `loading.tsx` skeleton +
+  dropped the blind `router.refresh()` that re-signed & reloaded every image on
+  each save (footer still refreshes via the force event). **PR #554**
+- [x] **AC3** Enlarge-close reset the page + "before" not clickable → `MediaGrid`
+  now opens the in-place `ClickableMedia`/`MediaFullscreenViewer` (no navigation),
+  and its full→thumb fallback makes thumb-only "before" tiles openable. **PR #554**
+- [x] **AC4** Aftercare-inbox single-photo tap bubbled to the card `<Link>` →
+  `ClickableMedia` now `stopPropagation`s on open **and** close. **PR #554**
+- [x] **AC5** `GET .../aftercare` now returns the before/after pair
+  (`loadBookingBeforeAfterThumbsFor`) so native iOS can render photos — see
+  `tovis-ios/BACKLOG.md §4` (A-AC1). **PR #554**
+
+---
+
 ### Note on superseded docs
 This backlog replaced these now-deleted planning docs — their open items are captured above; their history is in git:
 launch-readiness/{phase-2-remaining-work, finish-plan-2026-06-12, roadmap-corrected-2026-06-12, load-test-plan, traffic-model, load-traffic-model} ·
