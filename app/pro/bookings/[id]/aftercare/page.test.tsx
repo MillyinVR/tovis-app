@@ -174,6 +174,7 @@ function makeBooking(overrides?: {
   startedAt?: Date | null
   finishedAt?: Date | null
   sessionStep?: SessionStep | null
+  offeringRebookIntervalDays?: number | null
   aftercareSummary?: Record<string, unknown> | null
   mediaAssets?: Array<Record<string, unknown>>
   serviceSubtotalSnapshot?: number | string | null
@@ -189,6 +190,7 @@ function makeBooking(overrides?: {
     id: 'booking_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
     status: overrides?.status ?? BookingStatus.ACCEPTED,
+    scheduledFor: new Date('2026-04-12T17:00:00.000Z'),
     startedAt:
       overrides && 'startedAt' in overrides
         ? overrides.startedAt
@@ -211,6 +213,10 @@ function makeBooking(overrides?: {
 
     service: {
       name: 'Haircut',
+    },
+
+    offering: {
+      rebookIntervalDays: overrides?.offeringRebookIntervalDays ?? null,
     },
 
     serviceItems: overrides?.serviceItems ?? [],

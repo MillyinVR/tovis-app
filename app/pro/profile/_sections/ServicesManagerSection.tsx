@@ -100,6 +100,8 @@ export default async function ServicesManagerSection({
       mobilePriceStartingAt: true,
       mobileDurationMinutes: true,
 
+      rebookIntervalDays: true,
+
       service: {
         select: {
           id: true,
@@ -164,6 +166,8 @@ export default async function ServicesManagerSection({
 
     mobilePriceStartingAt: o.mobilePriceStartingAt ? moneyToString(o.mobilePriceStartingAt) : null,
     mobileDurationMinutes: o.mobileDurationMinutes ?? null,
+
+    rebookIntervalDays: o.rebookIntervalDays ?? null,
 
     serviceName: o.service.name,
     categoryName: o.service.category?.name ?? null,

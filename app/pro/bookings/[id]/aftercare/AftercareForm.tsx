@@ -72,6 +72,13 @@ type Props = {
   existingRebookWindowStart?: string | null
   existingRebookWindowEnd?: string | null
   existingRebookDeclinedAt?: string | null
+  // Auto-suggested recommended-window dates for a fresh wrap-up (service date +
+  // the offering's typical rebook interval). The server sends these only when no
+  // aftercare has been saved yet; when present, they pre-select
+  // RECOMMENDED_WINDOW so the rebook recommendation defaults to a real date
+  // instead of "None". The pro can still edit or clear it.
+  suggestedRebookWindowStart?: string | null
+  suggestedRebookWindowEnd?: string | null
   // The previously-saved exact next-appointment slot, if any (for prefill).
   existingRebookSlot?: {
     offeringId: string | null
@@ -284,6 +291,8 @@ export default function AftercareForm({
   existingRebookWindowStart,
   existingRebookWindowEnd,
   existingRebookDeclinedAt,
+  suggestedRebookWindowStart,
+  suggestedRebookWindowEnd,
   existingRebookSlot,
   existingMedia,
   existingRecommendedProducts,
@@ -353,13 +362,30 @@ export default function AftercareForm({
         ? existingRebookMode
         : null
 
-    const inferred: RebookMode =
-      modeFromProps ??
-      (existingRebookWindowStart || existingRebookWindowEnd
-        ? 'RECOMMENDED_WINDOW'
-        : existingRebookedFor
-          ? 'BOOKED_NEXT_APPOINTMENT'
-          : 'NONE')
+    // A previously-saved rebook selection: an explicit non-NONE mode, or any
+    // saved window/booked date. (`existingRebookMode` arrives as 'NONE' for a
+    // fresh wrap-up, so it alone doesn't count as a saved selection.)
+    const hasSavedRebookSelection =
+      (modeFromProps != null && modeFromProps !== 'NONE') ||
+      Boolean(existingRebookWindowStart) ||
+      Boolean(existingRebookWindowEnd) ||
+      Boolean(existingRebookedFor)
+
+    // The server sends a suggestion only for a fresh wrap-up; apply it to
+    // pre-select a recommended window when nothing has been chosen yet.
+    const applySuggestion =
+      !hasSavedRebookSelection &&
+      Boolean(suggestedRebookWindowStart) &&
+      Boolean(suggestedRebookWindowEnd)
+
+    const inferred: RebookMode = applySuggestion
+      ? 'RECOMMENDED_WINDOW'
+      : (modeFromProps ??
+        (existingRebookWindowStart || existingRebookWindowEnd
+          ? 'RECOMMENDED_WINDOW'
+          : existingRebookedFor
+            ? 'BOOKED_NEXT_APPOINTMENT'
+            : 'NONE'))
 
     setRebookMode(inferred)
 
@@ -375,14 +401,18 @@ export default function AftercareForm({
         : null,
     )
     setWindowStart(
-      existingRebookWindowStart
-        ? isoToYmdInTimeZone(existingRebookWindowStart, tz)
-        : '',
+      applySuggestion && suggestedRebookWindowStart
+        ? isoToYmdInTimeZone(suggestedRebookWindowStart, tz)
+        : existingRebookWindowStart
+          ? isoToYmdInTimeZone(existingRebookWindowStart, tz)
+          : '',
     )
     setWindowEnd(
-      existingRebookWindowEnd
-        ? isoToYmdInTimeZone(existingRebookWindowEnd, tz)
-        : '',
+      applySuggestion && suggestedRebookWindowEnd
+        ? isoToYmdInTimeZone(suggestedRebookWindowEnd, tz)
+        : existingRebookWindowEnd
+          ? isoToYmdInTimeZone(existingRebookWindowEnd, tz)
+          : '',
     )
 
     setCreateRebookReminder(Boolean(existingRebookedFor))
@@ -405,6 +435,8 @@ export default function AftercareForm({
     existingRebookedFor,
     existingRebookWindowStart,
     existingRebookWindowEnd,
+    suggestedRebookWindowStart,
+    suggestedRebookWindowEnd,
     existingRebookSlot,
     existingRecommendedProducts,
     existingDraftSavedAt,

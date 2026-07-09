@@ -145,6 +145,63 @@ export function ymdToIsoEndOfDay(ymd: string, timeZone: string): string | null {
 }
 
 /**
+ * Number of days the auto-suggested rebook window spans, anchored at the target
+ * date (service date + the offering's rebook interval). A one-week window keeps
+ * the recommendation soft — the client picks the exact slot later.
+ */
+export const SUGGESTED_REBOOK_WINDOW_SPAN_DAYS = 7
+
+/**
+ * Auto-suggested recommended-window rebook dates for session wrap-up.
+ *
+ * Given the offering's typical rebook interval (`intervalDays`) and the service
+ * date (`anchorIso`, the booking's `scheduledFor`), returns the start/end of a
+ * recommended booking window as tz-aware instants that round-trip identically to
+ * what the form serializes on save (start-of-day / end-of-day in the pro's tz).
+ *
+ * Returns null when no suggestion should be made — i.e. the offering has no
+ * interval set (`intervalDays` null / non-positive) or the anchor is unusable.
+ * Callers should only apply the suggestion when no rebook selection has been
+ * saved yet (a fresh wrap-up), so an existing choice is never overwritten.
+ *
+ * Calendar math is done in the YMD domain (DST-agnostic, per this module's
+ * contract); only the final instant conversion is tz-aware.
+ */
+export function computeSuggestedRebookWindow(input: {
+  intervalDays: number | null | undefined
+  anchorIso: string | null | undefined
+  timeZone: string
+}): { windowStartIso: string; windowEndIso: string } | null {
+  const { intervalDays, anchorIso, timeZone } = input
+
+  if (
+    intervalDays == null ||
+    !Number.isFinite(intervalDays) ||
+    intervalDays <= 0
+  ) {
+    return null
+  }
+
+  const anchorYmd = isoToYmdInTimeZone(anchorIso, timeZone)
+  if (!anchorYmd) return null
+
+  const windowStartYmd = addDaysToYmd(anchorYmd, Math.trunc(intervalDays))
+  if (!windowStartYmd) return null
+
+  const windowEndYmd = addDaysToYmd(
+    windowStartYmd,
+    SUGGESTED_REBOOK_WINDOW_SPAN_DAYS,
+  )
+  if (!windowEndYmd) return null
+
+  const windowStartIso = ymdToIsoStartOfDay(windowStartYmd, timeZone)
+  const windowEndIso = ymdToIsoEndOfDay(windowEndYmd, timeZone)
+  if (!windowStartIso || !windowEndIso) return null
+
+  return { windowStartIso, windowEndIso }
+}
+
+/**
  * Step the date portion of a `datetime-local` value ("YYYY-MM-DDTHH:mm") by a
  * unit, preserving the time. If the value is empty/invalid, start from
  * `fallbackDateYmd` at noon (a safe default that avoids DST edge times).

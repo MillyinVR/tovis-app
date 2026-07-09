@@ -147,6 +147,8 @@ function toDto(off: OfferingRow) {
       : null,
     mobileDurationMinutes: off.mobileDurationMinutes ?? null,
 
+    rebookIntervalDays: off.rebookIntervalDays ?? null,
+
     isActive: Boolean(off.isActive),
 
     serviceName: off.service.name,
@@ -529,6 +531,15 @@ export async function PATCH(request: Request, ctx: RouteContext) {
         ? pickNullablePositiveInt(body.mobileDurationMinutes)
         : undefined
 
+      // Typical rebook interval in days (drives the wrap-up rebook suggestion).
+      // Independent of booking-mode config; null clears it (no suggestion).
+      const rebookIntervalIn = Object.prototype.hasOwnProperty.call(
+        body,
+        'rebookIntervalDays',
+      )
+        ? pickNullablePositiveInt(body.rebookIntervalDays)
+        : undefined
+
       if (
         Object.prototype.hasOwnProperty.call(body, 'salonPriceStartingAt') &&
         salonPriceIn === undefined
@@ -570,6 +581,17 @@ export async function PATCH(request: Request, ctx: RouteContext) {
           kind: 'ERROR',
           status: 400,
           msg: 'Invalid mobileDurationMinutes.',
+        }
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(body, 'rebookIntervalDays') &&
+        rebookIntervalIn === undefined
+      ) {
+        return {
+          kind: 'ERROR',
+          status: 400,
+          msg: 'rebookIntervalDays must be a positive whole number of days or null.',
         }
       }
 
@@ -737,6 +759,10 @@ export async function PATCH(request: Request, ctx: RouteContext) {
         }
 
         data.isActive = isActiveIn
+      }
+
+      if (rebookIntervalIn !== undefined) {
+        data.rebookIntervalDays = rebookIntervalIn
       }
 
       if (Object.keys(data).length === 0) {
