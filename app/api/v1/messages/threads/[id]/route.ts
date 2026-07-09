@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
 import { broadcastLive, liveChannelForUser } from '@/lib/live/broadcast'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
+import { notifyNewMessageRecipients } from '@/lib/messages/notifyNewMessage'
 import { THREAD_MESSAGE_PAGE_SIZE, nextOlderCursor } from '@/lib/messages/paging'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
@@ -328,6 +330,23 @@ export async function POST(req: Request, ctx: RouteContext) {
       recipients.map((participant) => liveChannelForUser(participant.userId)),
       'messages',
     )
+
+    // Notify the other participant(s) of the new message (in-app + push,
+    // debounced per thread). Best-effort — a notification failure must never
+    // fail the send, which already committed. Then kick the drain so the push
+    // goes out immediately instead of waiting for the cron tick.
+    await notifyNewMessageRecipients({
+      threadId,
+      senderUserId: userId,
+      preview: text ? text.slice(0, 140) : ATTACHMENT_ONLY_PREVIEW,
+    }).catch((err: unknown) => {
+      console.error('notifyNewMessageRecipients', {
+        debugId,
+        threadId,
+        err: err instanceof Error ? err.message : String(err),
+      })
+    })
+    kickNotificationDrain()
 
     // Sign the freshly-created attachments so the sender can render the image
     // immediately (rather than waiting for the next poll to re-sign it).

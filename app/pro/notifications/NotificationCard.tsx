@@ -47,6 +47,10 @@ function eventKeyLabel(eventKey: NotificationEventKey): string {
     return 'Follower'
   }
 
+  if (eventKey === NotificationEventKey.MESSAGE_RECEIVED) {
+    return 'Message'
+  }
+
   return 'Booking update'
 }
 
@@ -67,6 +71,10 @@ function eventKeyBadgeClass(eventKey: NotificationEventKey): string {
   }
 
   if (eventKey === NotificationEventKey.REVIEW_RECEIVED) {
+    return 'border-accentPrimary/20 bg-bgPrimary/35 text-textPrimary'
+  }
+
+  if (eventKey === NotificationEventKey.MESSAGE_RECEIVED) {
     return 'border-accentPrimary/20 bg-bgPrimary/35 text-textPrimary'
   }
 

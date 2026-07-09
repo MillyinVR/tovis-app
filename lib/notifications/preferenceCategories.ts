@@ -36,6 +36,7 @@ export type NotificationCategoryKey =
   | 'REMINDERS'
   | 'PAYMENTS'
   | 'LAST_MINUTE'
+  | 'MESSAGES'
   | 'SOCIAL'
 
 /** Stable display order for the three channels. */
@@ -97,6 +98,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.REFERRAL_TAP_RECEIVED]: 'Referral tap',
   [NotificationEventKey.REFERRAL_CONFIRMED]: 'Referral confirmed',
   [NotificationEventKey.REFERRAL_CONVERTED]: 'Referral converted',
+  [NotificationEventKey.MESSAGE_RECEIVED]: 'New messages',
   // Account/billing heads-up — kept out of the toggleable categories below so a pro
   // can't silence the warning that their reserved handle is about to be released.
   [NotificationEventKey.PRO_HANDLE_RESERVATION_EXPIRING]: 'Handle reservation expiring',
@@ -162,6 +164,12 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
       NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
       NotificationEventKey.WAITLIST_TIME_OFFERED,
     ],
+  },
+  {
+    key: 'MESSAGES',
+    label: 'Messages',
+    description: 'New messages in your conversations.',
+    eventKeys: [NotificationEventKey.MESSAGE_RECEIVED],
   },
   {
     key: 'SOCIAL',

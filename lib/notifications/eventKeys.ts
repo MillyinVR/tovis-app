@@ -40,6 +40,7 @@ export type NotificationTemplateKey =
   | 'referral_tap_received'
   | 'referral_confirmed'
   | 'referral_converted'
+  | 'message_received'
   | 'pro_handle_reservation_expiring'
   | 'admin_verification_review_needed'
   | 'admin_support_ticket_created'
@@ -173,6 +174,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
+  NotificationEventKey.MESSAGE_RECEIVED,
   NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED,
   NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED,
   NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING,
@@ -744,6 +746,27 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  // A new message in a thread → the OTHER participant (client or pro). In-app +
+  // PUSH (no email/SMS — the inbox is the durable record; a chat message isn't a
+  // receipt). Non-transactional, honors quiet hours (a message is never an
+  // emergency). The emit helper debounces per thread per recipient via a windowed
+  // dedupeKey, so a rapid burst refreshes one inbox row / fires one push.
+  [NotificationEventKey.MESSAGE_RECEIVED]: {
+    key: NotificationEventKey.MESSAGE_RECEIVED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'message_received',
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
+    },
+  },
+
   // Admin operational alerts. Tier B (in-app + email; never SMS). Transactional
   // so they are durable inbox records, but no quiet-hours bypass — admins are an
   // internal audience and these are not time-critical pages.
@@ -806,6 +829,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_LIKED,
   NotificationEventKey.LOOK_SAVED,
   NotificationEventKey.LOOK_MILESTONE_REACHED,
+  NotificationEventKey.MESSAGE_RECEIVED,
 ]
 
 export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -836,6 +860,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_SAVED,
   NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
   NotificationEventKey.LOOK_MILESTONE_REACHED,
+  NotificationEventKey.MESSAGE_RECEIVED,
 ]
 
 export const ADMIN_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
