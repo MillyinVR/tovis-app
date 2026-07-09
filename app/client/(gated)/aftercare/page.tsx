@@ -59,6 +59,8 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   id: true,
   status: true,
   source: true,
+  // Rebook-chain link — part of the canonical ClientBookingRow shape.
+  rebookOfBookingId: true,
   sessionStep: true,
   scheduledFor: true,
   finishedAt: true,

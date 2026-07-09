@@ -2518,6 +2518,13 @@
             }
           ]
         },
+        "rebookOfBookingId": {
+          "description": "When this booking is a rebook, the id of the appointment it was booked off of (the `RebookChain` source). For an aftercare-sourced PENDING rebook whose source payment is AWAITING_CONFIRMATION, this links the two so the native next-booking detail can label it \"pending — your pro will confirm after payment\". Null for a standalone booking. Populated only where the source query selects `rebookOfBookingId` (the client bookings list route).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "rebookProposedFor": {
           "description": "The pro-proposed next-appointment instant (ISO) when one is pending; else null.",
           "type": [
@@ -2569,6 +2576,7 @@
         "id",
         "status",
         "source",
+        "rebookOfBookingId",
         "sessionStep",
         "scheduledFor",
         "totalDurationMinutes",

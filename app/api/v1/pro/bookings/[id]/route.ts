@@ -233,6 +233,12 @@ export async function GET(_req: Request, ctx: RouteContext) {
         discountAmount: true,
         paymentCollectedAt: true,
         selectedPaymentMethod: true,
+        // Checkout lifecycle: AWAITING_CONFIRMATION drives the pro booking-detail
+        // "Confirm payment received" action (native parity with the session
+        // wrap-up control). rebookOfBookingId links a coupled aftercare rebook
+        // back to the appointment whose payment gates its approval.
+        checkoutStatus: true,
+        rebookOfBookingId: true,
         stripePaymentStatus: true,
         stripeAmountTotal: true,
         stripeCurrency: true,
@@ -380,6 +386,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
             ? booking.paymentCollectedAt.toISOString()
             : null,
           selectedPaymentMethod: booking.selectedPaymentMethod ?? null,
+          // Checkout lifecycle + rebook coupling (native booking-detail parity).
+          checkoutStatus: booking.checkoutStatus,
+          rebookOfBookingId: booking.rebookOfBookingId ?? null,
           stripePaymentStatus: booking.stripePaymentStatus ?? null,
           stripeAmountTotal: booking.stripeAmountTotal ?? null,
           stripeCurrency: booking.stripeCurrency ?? null,
