@@ -17,6 +17,7 @@ import {
   compareYmd,
   isoToYmdInTimeZone,
   stepYmd,
+  SUGGESTED_REBOOK_WINDOW_SPAN_DAYS,
   todayYmdInTimeZone,
   ymdToIsoEndOfDay,
   ymdToIsoStartOfDay,
@@ -543,14 +544,19 @@ export default function AftercareForm({
     markDirty()
   }
 
-  // Setting/stepping the window start keeps the end at least one day after it
-  // (the end used to stay on the current day — this advances it forward).
+  // Setting/stepping the window start advances the end to a full suggested span
+  // ahead whenever the current end is empty or would collapse to/before the new
+  // start — so the auto-advanced window matches the fresh auto-suggested width
+  // instead of a 1-day sliver (decided w/ Tori 2026-07-09). The hard floor stays
+  // "end after start" (the end input `min` + client/server validators); only
+  // this automatic advance lands on the span.
   function applyWindowStart(nextStart: string) {
     markDirty()
     setWindowStart(nextStart)
     setWindowEnd((prevEnd) => {
-      const minEnd = addDaysToYmd(nextStart, 1) ?? nextStart
-      return !prevEnd || compareYmd(prevEnd, nextStart) <= 0 ? minEnd : prevEnd
+      const spannedEnd =
+        addDaysToYmd(nextStart, SUGGESTED_REBOOK_WINDOW_SPAN_DAYS) ?? nextStart
+      return !prevEnd || compareYmd(prevEnd, nextStart) <= 0 ? spannedEnd : prevEnd
     })
   }
 
