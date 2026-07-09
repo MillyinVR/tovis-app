@@ -22,6 +22,17 @@ const mocks = vi.hoisted(() => ({
   pickString: vi.fn((value: unknown) =>
     typeof value === 'string' && value.trim() ? value.trim() : null,
   ),
+  pickStringArray: vi.fn((value: unknown) =>
+    Array.isArray(value)
+      ? value
+          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .filter(Boolean)
+          .slice(0, 25)
+      : [],
+  ),
+  hasDuplicateStrings: vi.fn(
+    (values: string[]) => new Set(values).size !== values.length,
+  ),
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
 
@@ -56,6 +67,8 @@ vi.mock('@/app/api/_utils/auth/requireClient', () => ({
 
 vi.mock('@/app/api/_utils/pick', () => ({
   pickString: mocks.pickString,
+  pickStringArray: mocks.pickStringArray,
+  hasDuplicateStrings: mocks.hasDuplicateStrings,
 }))
 
 vi.mock('@/app/api/_utils/responses', () => ({

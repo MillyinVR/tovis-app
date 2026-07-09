@@ -523,6 +523,7 @@ describe('createProBookingWithClient', () => {
       overrideReason: 'VIP exception',
       clientId: 'client_resolved_1',
       offeringId: 'offering_1',
+      addOnIds: [],
       locationId: 'loc_1',
       locationType: ServiceLocationType.MOBILE,
       scheduledFor,

@@ -34,7 +34,12 @@ import {
   IDEMPOTENCY_ROUTES,
 } from '@/lib/idempotency'
 import { moneyToString } from '@/lib/money'
-import { pickBool, pickInt } from '@/lib/pick'
+import {
+  hasDuplicateStrings,
+  pickBool,
+  pickInt,
+  pickStringArray,
+} from '@/lib/pick'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import {
@@ -323,6 +328,7 @@ export async function POST(req: Request) {
     const locationId = pickString(body.locationId)
     const locationType = normalizeLocationType(body.locationType)
     const offeringId = pickString(body.offeringId)
+    const addOnIds = pickStringArray(body.addOnIds)
 
     const requestedBufferMinutes = pickInt(body.bufferMinutes)
     const requestedTotalDurationMinutes = pickInt(body.totalDurationMinutes)
@@ -348,6 +354,10 @@ export async function POST(req: Request) {
       return bookingJsonFail('OFFERING_ID_REQUIRED')
     }
 
+    if (hasDuplicateStrings(addOnIds)) {
+      return bookingJsonFail('ADDONS_INVALID')
+    }
+
     const idempotency = await beginIdempotency<ProBookingSuccessBody>({
       actor: {
         actorUserId,
@@ -363,6 +373,7 @@ export async function POST(req: Request) {
         clientAddressId,
         serviceAddress,
         offeringId,
+        addOnIds,
         locationId,
         locationType,
         scheduledFor: scheduledFor.toISOString(),
@@ -404,6 +415,7 @@ export async function POST(req: Request) {
       clientAddressId,
       serviceAddress,
       offeringId,
+      addOnIds,
       locationId,
       locationType,
       scheduledFor,

@@ -72,6 +72,20 @@ export function snapToStepMinutes(value: number, stepMinutes: number): number {
   return Math.round(value / step) * step
 }
 
+// Coerce an unknown duration value to a positive, clamped minute count, or null
+// when it isn't a usable duration. Shared by the booking write boundary and the
+// add-on resolver so a service/add-on line's duration snapshot is normalized the
+// same way everywhere.
+export function normalizePositiveDurationMinutes(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return null
+
+  const minutes = Math.trunc(parsed)
+  if (minutes <= 0) return null
+
+  return clampInt(minutes, 15, MAX_SLOT_DURATION_MINUTES)
+}
+
 export function sumDecimal(values: Prisma.Decimal[]): Prisma.Decimal {
   return values.reduce((acc, value) => acc.add(value), new Prisma.Decimal(0))
 }

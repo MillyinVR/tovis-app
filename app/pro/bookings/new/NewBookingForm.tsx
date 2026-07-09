@@ -16,6 +16,7 @@ import type {
   ProBookingNewClientDTO,
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
+import type { OfferingAddOnItemDTO } from '@/lib/dto/offeringAddOns'
 import { isRecord } from '@/lib/guards'
 import {
   makePlacesSessionToken,
@@ -345,6 +346,41 @@ function normalizeSearchClients(data: unknown): ClientSearchResult[] {
   return out
 }
 
+function normalizeAddOns(data: unknown): OfferingAddOnItemDTO[] {
+  if (!isRecord(data)) return []
+
+  const raw = data.addOns
+  if (!Array.isArray(raw)) return []
+
+  const out: OfferingAddOnItemDTO[] = []
+
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const serviceId =
+      typeof item.serviceId === 'string' ? item.serviceId.trim() : ''
+    const title = typeof item.title === 'string' ? item.title.trim() : ''
+    const price = typeof item.price === 'string' ? item.price.trim() : ''
+    const minutes = typeof item.minutes === 'number' ? item.minutes : 0
+
+    if (!id || !serviceId || !title || !price || minutes <= 0) continue
+
+    out.push({
+      id,
+      serviceId,
+      title,
+      group: typeof item.group === 'string' ? item.group : null,
+      price,
+      minutes,
+      sortOrder: typeof item.sortOrder === 'number' ? item.sortOrder : 0,
+      isRecommended: item.isRecommended === true,
+    })
+  }
+
+  return out
+}
+
 function normalizeServiceAddresses(data: unknown): ClientServiceAddressOption[] {
   if (!isRecord(data)) return []
 
@@ -483,6 +519,13 @@ export default function NewBookingForm({
   })
 
   const [offeringId, setOfferingId] = useState(defaultOfferingId ?? '')
+  // Selectable add-ons for the chosen offering + mode, and the pro's selection.
+  // Fetched from GET /api/v1/offerings/add-ons (the same source the client
+  // booking flow uses); the selected link ids fold duration + price into the
+  // booking and persist as ADD_ON line items server-side.
+  const [addOnOptions, setAddOnOptions] = useState<OfferingAddOnItemDTO[]>([])
+  const [addOnsLoading, setAddOnsLoading] = useState(false)
+  const [selectedAddOnIds, setSelectedAddOnIds] = useState<string[]>([])
   const [locationType, setLocationType] = useState<ServiceLocationType>(
     normalizeDefaultLocationType(defaultLocationType),
   )
@@ -842,6 +885,43 @@ export default function NewBookingForm({
     setOfferingId('')
   }, [visibleOfferings, offeringId])
 
+  // Load the add-ons available for the chosen offering in the chosen mode. Any
+  // change to offering or mode clears the prior selection (add-ons are scoped to
+  // an offering + location mode), so a stale add-on can't ride along.
+  useEffect(() => {
+    setSelectedAddOnIds([])
+    setAddOnOptions([])
+
+    if (!offeringId) {
+      setAddOnsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+
+    void (async () => {
+      try {
+        setAddOnsLoading(true)
+        const qs = new URLSearchParams({ offeringId, locationType })
+        const res = await fetch(`/api/v1/offerings/add-ons?${qs.toString()}`, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        })
+        const data = await safeJson(res)
+        setAddOnOptions(res.ok ? normalizeAddOns(data) : [])
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setAddOnOptions([])
+      } finally {
+        setAddOnsLoading(false)
+      }
+    })()
+
+    return () => controller.abort()
+  }, [offeringId, locationType])
+
   const availableLocations = useMemo(
     () =>
       locations.filter((location) =>
@@ -939,7 +1019,7 @@ export default function NewBookingForm({
     setOverridePrompt(null)
     setAuthorizedOverrideFlags([])
     setOverrideReason('')
-  }, [scheduledAt, locationId, locationType, offeringId])
+  }, [scheduledAt, locationId, locationType, offeringId, selectedAddOnIds])
 
   const overrideAuthorized = overridePrompt
     ? authorizedOverrideFlags.includes(overridePrompt.flag)
@@ -951,6 +1031,32 @@ export default function NewBookingForm({
       return current.filter((value) => value !== flag)
     })
   }
+
+  function toggleAddOn(id: string, next: boolean) {
+    setSelectedAddOnIds((current) => {
+      if (next) {
+        return current.includes(id) ? current : [...current, id]
+      }
+      return current.filter((value) => value !== id)
+    })
+  }
+
+  const selectedAddOns = useMemo(
+    () => addOnOptions.filter((addOn) => selectedAddOnIds.includes(addOn.id)),
+    [addOnOptions, selectedAddOnIds],
+  )
+  const addOnMinutesTotal = useMemo(
+    () => selectedAddOns.reduce((sum, addOn) => sum + addOn.minutes, 0),
+    [selectedAddOns],
+  )
+  const addOnPriceTotal = useMemo(
+    () =>
+      selectedAddOns.reduce(
+        (sum, addOn) => sum + (Number(addOn.price) || 0),
+        0,
+      ),
+    [selectedAddOns],
+  )
 
   function handleCancel() {
     if (loading) return
@@ -1137,6 +1243,7 @@ export default function NewBookingForm({
       clientId: clientMode === 'existing' ? clientId : null,
       client: clientPayload,
       offeringId: selectedOffering.id,
+      addOnIds: selectedAddOnIds,
       locationType,
       locationId,
       clientAddressId:
@@ -1219,10 +1326,13 @@ export default function NewBookingForm({
     ? selectedOffering.title || selectedOffering.service.name
     : ''
   const summaryDuration = selectedOffering
-    ? pickDisplayDurationMinutes(selectedOffering, locationType)
+    ? pickDisplayDurationMinutes(selectedOffering, locationType) +
+      addOnMinutesTotal
     : 0
   const summaryPrice = selectedOffering
-    ? moneyToString(pickDisplayPrice(selectedOffering, locationType))
+    ? moneyToString(
+        pickDisplayPrice(selectedOffering, locationType) + addOnPriceTotal,
+      )
     : null
   const summaryWhere = (() => {
     if (locationType === 'SALON') {
@@ -1509,6 +1619,61 @@ export default function NewBookingForm({
           </div>
         ) : null}
       </div>
+
+      {offeringId && (addOnsLoading || addOnOptions.length > 0) ? (
+        <div className="grid gap-2">
+          <div className={label}>Add-ons</div>
+
+          {addOnsLoading ? (
+            <div className="text-[12px] text-textSecondary">
+              Loading add-ons…
+            </div>
+          ) : (
+            <div className="grid gap-1.5">
+              {addOnOptions.map((addOn) => {
+                const checked = selectedAddOnIds.includes(addOn.id)
+                return (
+                  <label
+                    key={addOn.id}
+                    className={[
+                      'flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition',
+                      checked
+                        ? 'border-accentPrimary/60 bg-accentPrimary/10'
+                        : 'border-white/10 bg-bgPrimary hover:border-white/20',
+                      loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+                    ].join(' ')}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={loading}
+                        onChange={(e) => toggleAddOn(addOn.id, e.target.checked)}
+                        className="h-4 w-4 rounded border-white/10 bg-bgPrimary"
+                      />
+                      <span className="text-[13px] font-black text-textPrimary">
+                        {addOn.title}
+                      </span>
+                      {addOn.isRecommended ? (
+                        <span className="rounded-full bg-accentPrimary/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-accentPrimary">
+                          Popular
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="whitespace-nowrap text-right text-[12px] font-black text-textSecondary">
+                      +${addOn.price} · {addOn.minutes} min
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          )}
+
+          <div className={helper}>
+            Add-ons extend the appointment length and total price.
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-2">
         <label htmlFor="location" className={label}>
@@ -1908,6 +2073,7 @@ export default function NewBookingForm({
                   ? clientAddressId
                   : null
               }
+              addOnIds={selectedAddOnIds}
               value={selectedSlot}
               onChange={setSelectedSlot}
               disabled={loading}
@@ -2020,6 +2186,12 @@ export default function NewBookingForm({
             <div className="mt-3 grid gap-2.5">
               <SummaryRow label="Client" value={summaryClientName} />
               <SummaryRow label="Service" value={summaryService} />
+              {selectedAddOns.length ? (
+                <SummaryRow
+                  label="Add-ons"
+                  value={selectedAddOns.map((addOn) => addOn.title).join(', ')}
+                />
+              ) : null}
               <SummaryRow label="Where" value={summaryWhere} />
               <SummaryRow label="When" value={summaryWhen} />
               <SummaryRow

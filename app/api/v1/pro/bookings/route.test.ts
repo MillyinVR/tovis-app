@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   pickString: vi.fn(),
   pickBool: vi.fn(),
   pickInt: vi.fn(),
+  pickStringArray: vi.fn(),
+  hasDuplicateStrings: vi.fn(),
 
   moneyToString: vi.fn(),
   computeRequestedEndUtc: vi.fn(),
@@ -55,6 +57,8 @@ vi.mock('@/app/api/_utils', () => ({
 vi.mock('@/lib/pick', () => ({
   pickBool: mocks.pickBool,
   pickInt: mocks.pickInt,
+  pickStringArray: mocks.pickStringArray,
+  hasDuplicateStrings: mocks.hasDuplicateStrings,
 }))
 
 vi.mock('@/lib/money', () => ({
@@ -256,6 +260,19 @@ describe('POST /api/v1/pro/bookings', () => {
       return null
     })
 
+    mocks.pickStringArray.mockImplementation((value: unknown) =>
+      Array.isArray(value)
+        ? value
+            .map((item) => (typeof item === 'string' ? item.trim() : ''))
+            .filter(Boolean)
+            .slice(0, 25)
+        : [],
+    )
+
+    mocks.hasDuplicateStrings.mockImplementation(
+      (values: string[]) => new Set(values).size !== values.length,
+    )
+
     mocks.normalizeLocationType.mockImplementation((value: unknown) => {
       if (value === 'SALON') return ServiceLocationType.SALON
       if (value === 'MOBILE') return ServiceLocationType.MOBILE
@@ -452,6 +469,54 @@ describe('POST /api/v1/pro/bookings', () => {
     )
   })
 
+  it('returns ADDONS_INVALID when addOnIds contains duplicates', async () => {
+    const result = await POST(
+      makeIdempotentRequest(
+        validBody({ addOnIds: ['addon_1', 'addon_1'] }),
+        'idem_dupe_addons_1',
+      ),
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      400,
+      expect.any(String),
+      expect.objectContaining({ code: 'ADDONS_INVALID' }),
+    )
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        status: 400,
+        code: 'ADDONS_INVALID',
+      }),
+    )
+  })
+
+  it('parses addOnIds and passes them through to createProBookingWithClient and idempotency', async () => {
+    await POST(
+      makeIdempotentRequest(
+        validBody({ addOnIds: ['addon_1', ' addon_2 '] }),
+        'idem_addons_1',
+      ),
+    )
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          addOnIds: ['addon_1', 'addon_2'],
+        }),
+      }),
+    )
+
+    expect(mocks.createProBookingWithClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        offeringId: 'offering_1',
+        addOnIds: ['addon_1', 'addon_2'],
+      }),
+    )
+  })
+
   it('returns missing idempotency key when valid authenticated request has no idempotency header', async () => {
     const result = await POST(makeRequest(validBody()))
 
@@ -477,6 +542,7 @@ describe('POST /api/v1/pro/bookings', () => {
         clientAddressId: null,
         serviceAddress: expectedBaseServiceAddressPayload(),
         offeringId: 'offering_1',
+        addOnIds: [],
         locationId: 'loc_1',
         locationType: ServiceLocationType.SALON,
         scheduledFor: scheduledForIso,
@@ -589,6 +655,7 @@ describe('POST /api/v1/pro/bookings', () => {
         clientAddressId: 'addr_1',
         serviceAddress: expectedBaseServiceAddressPayload(),
         offeringId: 'offering_1',
+        addOnIds: [],
         locationId: 'loc_1',
         locationType: ServiceLocationType.MOBILE,
         scheduledFor: scheduledForIso,
@@ -612,6 +679,7 @@ describe('POST /api/v1/pro/bookings', () => {
       clientAddressId: 'addr_1',
       serviceAddress: expectedBaseServiceAddressPayload(),
       offeringId: 'offering_1',
+      addOnIds: [],
       locationId: 'loc_1',
       locationType: ServiceLocationType.MOBILE,
       scheduledFor: new Date(scheduledForIso),
@@ -700,6 +768,7 @@ describe('POST /api/v1/pro/bookings', () => {
       clientAddressId: null,
       serviceAddress,
       offeringId: 'offering_1',
+      addOnIds: [],
       locationId: 'loc_1',
       locationType: ServiceLocationType.MOBILE,
       scheduledFor: new Date(scheduledForIso),
@@ -777,6 +846,7 @@ describe('POST /api/v1/pro/bookings', () => {
       clientAddressId: null,
       serviceAddress: expectedBaseServiceAddressPayload(),
       offeringId: 'offering_1',
+      addOnIds: [],
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
       scheduledFor: new Date(scheduledForIso),
