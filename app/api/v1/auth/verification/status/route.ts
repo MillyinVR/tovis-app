@@ -3,6 +3,7 @@ import { jsonOk } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { setSessionCookie } from '@/app/api/_utils/auth/sessionCookie'
 import { createActiveToken } from '@/lib/auth'
+import type { AuthVerificationStatusResponseDTO } from '@/lib/dto/auth'
 import { logAuthEvent } from '@/lib/observability/authEvents'
 import { getPostVerificationNextUrl } from '@/lib/proTrustState'
 
@@ -34,6 +35,18 @@ export async function GET(request: Request) {
             user.professionalProfile?.verificationStatus ?? null,
         })
 
+  // Mint the healed ACTIVE token once and hand it back BOTH ways: in the body
+  // (native has no cookie jar — it swaps its stored bearer for this) and via the
+  // cookie below (web). Null unless this call actually heals VERIFICATION→ACTIVE.
+  const upgradedToken = upgradeToActive
+    ? createActiveToken({
+        userId: user.id,
+        role: user.role,
+        authVersion: user.authVersion,
+        deviceId: user.deviceId, // preserve device binding through verification
+      })
+    : null
+
   const res = jsonOk({
     user: {
       id: user.id,
@@ -48,18 +61,14 @@ export async function GET(request: Request) {
     requiresPhoneVerification: !user.isPhoneVerified,
     requiresEmailVerification: !user.isEmailVerified,
     nextUrl,
-  })
+    token: upgradedToken,
+  } satisfies AuthVerificationStatusResponseDTO)
 
-  if (upgradeToActive) {
+  if (upgradedToken) {
     setSessionCookie({
       response: res,
       request,
-      token: createActiveToken({
-        userId: user.id,
-        role: user.role,
-        authVersion: user.authVersion,
-        deviceId: user.deviceId, // preserve device binding through verification
-      }),
+      token: upgradedToken,
     })
 
     logAuthEvent({

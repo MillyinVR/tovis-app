@@ -80,6 +80,28 @@ export type AuthEmailVerifyResponseDTO = {
   token: string | null
 }
 
+// GET /api/v1/auth/verification/status — post-signup verification snapshot the
+// verify screens poll. `token` is non-null ONLY when this call heals a stale
+// VERIFICATION session into ACTIVE (both factors now verified): web keeps using
+// the cookie set alongside it, while native swaps its stored bearer for this
+// upgraded token. Null in every other case (still pending, or already ACTIVE).
+export type AuthVerificationStatusResponseDTO = {
+  user: {
+    id: string
+    email: string
+    phone: string | null
+    role: Role
+  }
+  sessionKind: 'ACTIVE' | 'VERIFICATION'
+  isPhoneVerified: boolean
+  isEmailVerified: boolean
+  isFullyVerified: boolean
+  requiresPhoneVerification: boolean
+  requiresEmailVerification: boolean
+  nextUrl: string | null
+  token: string | null
+}
+
 // POST /api/v1/auth/resend-phone-code — `to` is masked.
 export type AuthResendPhoneCodeResponseDTO = {
   ok: true
