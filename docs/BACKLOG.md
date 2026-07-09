@@ -427,6 +427,48 @@ ids. iOS side tracked in `tovis-ios/BACKLOG.md §7`. 5 increments, one PR-pair e
 
 ---
 
+## 14. Finance tab restructure epic (audit 2026-07-08)
+Restructure the Pro Finance & Tax tab from Overview · Expenses · Write-Offs · Export
+into Overview · Tax · Expenses · Export — no two tabs with overlapping jobs. Data model,
+expense CRUD, income aggregation, category config, and export are already built (shipped
+early July); this epic is UI/aggregation only. Decisions locked with Tori 2026-07-08:
+Tax v1 = recommended set-aside + deadline only (NO saved-amount input / no real gap, no
+new persistence); merge UX = category-first detail views. iOS parity tracked in
+`tovis-ios/BACKLOG.md §8`.
+
+### Web workstreams
+- [ ] **F1 — Merge Expenses + Write-Offs into a category-first flow.** Replace the flat
+  add-expense form with a clickable list of IRS categories (reuse `EXPENSE_CATEGORIES` /
+  risk colors from `lib/finance/expenseCategories.ts`). Tapping a row opens a category
+  detail view: add/edit expense entries for that category with the category's risk
+  guidance (tooltip + examples + green/yellow/red) surfaced inline. Retire the standalone
+  Write-Offs tab (fold its content into the detail views). Keep the existing expenses CRUD
+  API unchanged. One PR.
+- [ ] **F2 — Receipt photo capture in the category detail view.** Wire the existing media
+  pipeline (`lib/media/uploadSession` + `RemoteImage`) into F1's detail view: camera
+  capture or device image upload → `recordMediaAsset` → pass `receiptMediaId` on expense
+  create/edit (API + schema already accept it). Render the attached receipt thumbnail on
+  each expense row and in the receipt-inbox review section (currently stores
+  `receiptMediaId` but never displays it). One PR; can stack on F1.
+- [ ] **F3 — Split Overview into monthly Overview + quarterly Tax tabs.** Add a Tax
+  sub-tab; move the est-tax card + quarterly reminder OUT of Overview into it. Overview
+  keeps monthly Services/Tips/Products income, expenses, net. Add a `quarter` scope
+  (reuse `monthKeysForScope` / `ensureProfessionalMonthlyAnalytics` summing pattern from
+  `lib/finance/financeExportData.ts`) so the Tax tab shows, per IRS quarter
+  (`ESTIMATED_TAX_DUE_DATES`): income earned, recommended set-aside (~28% via
+  `SELF_EMPLOYMENT_ESTIMATE_RATE`), and the next estimated-payment deadline. v1 =
+  recommended amount only (no "actually saved" / gap). One PR.
+- [ ] **F4 (later / deferred) — Real set-aside tracking + live gap.** Let the pro log the
+  amount actually set aside per quarter so gap = recommended − saved is real. Needs a new
+  Prisma field/model + save API + UI. Explicitly OUT of v1 (Tori 2026-07-08); park until
+  the recommended-only Tax view has shipped and there's demand.
+
+### iOS workstream (detail in `tovis-ios/BACKLOG.md §8`)
+- [ ] Mirror F1–F3 in the native Finance screens (category-first merge, receipt capture
+  via native camera/photo picker, Overview/Tax split). Defer F4 with web.
+
+---
+
 ### Note on superseded docs
 This backlog replaced these now-deleted planning docs — their open items are captured above; their history is in git:
 launch-readiness/{phase-2-remaining-work, finish-plan-2026-06-12, roadmap-corrected-2026-06-12, load-test-plan, traffic-model, load-traffic-model} ·
