@@ -427,6 +427,335 @@ ids. iOS side tracked in `tovis-ios/BACKLOG.md §7`. 5 increments, one PR-pair e
 
 ---
 
+## 14. Finance tab restructure epic (audit 2026-07-08)
+Restructure the Pro Finance & Tax tab from Overview · Expenses · Write-Offs · Export
+into Overview · Tax · Expenses · Export — no two tabs with overlapping jobs. Data model,
+expense CRUD, income aggregation, category config, and export are already built (shipped
+early July); this epic is UI/aggregation only. Decisions locked with Tori 2026-07-08:
+Tax v1 = recommended set-aside + deadline only (NO saved-amount input / no real gap, no
+new persistence); merge UX = category-first detail views. iOS parity tracked in
+`tovis-ios/BACKLOG.md §8`.
+
+### Web workstreams
+- [ ] **F1 — Merge Expenses + Write-Offs into a category-first flow.** Replace the flat
+  add-expense form with a clickable list of IRS categories (reuse `EXPENSE_CATEGORIES` /
+  risk colors from `lib/finance/expenseCategories.ts`). Tapping a row opens a category
+  detail view: add/edit expense entries for that category with the category's risk
+  guidance (tooltip + examples + green/yellow/red) surfaced inline. Retire the standalone
+  Write-Offs tab (fold its content into the detail views). Keep the existing expenses CRUD
+  API unchanged. One PR.
+- [ ] **F2 — Receipt photo capture in the category detail view.** Wire the existing media
+  pipeline (`lib/media/uploadSession` + `RemoteImage`) into F1's detail view: camera
+  capture or device image upload → `recordMediaAsset` → pass `receiptMediaId` on expense
+  create/edit (API + schema already accept it). Render the attached receipt thumbnail on
+  each expense row and in the receipt-inbox review section (currently stores
+  `receiptMediaId` but never displays it). One PR; can stack on F1.
+- [ ] **F3 — Split Overview into monthly Overview + quarterly Tax tabs.** Add a Tax
+  sub-tab; move the est-tax card + quarterly reminder OUT of Overview into it. Overview
+  keeps monthly Services/Tips/Products income, expenses, net. Add a `quarter` scope
+  (reuse `monthKeysForScope` / `ensureProfessionalMonthlyAnalytics` summing pattern from
+  `lib/finance/financeExportData.ts`) so the Tax tab shows, per IRS quarter
+  (`ESTIMATED_TAX_DUE_DATES`): income earned, recommended set-aside (~28% via
+  `SELF_EMPLOYMENT_ESTIMATE_RATE`), and the next estimated-payment deadline. v1 =
+  recommended amount only (no "actually saved" / gap). One PR.
+- [ ] **F4 (later / deferred) — Real set-aside tracking + live gap.** Let the pro log the
+  amount actually set aside per quarter so gap = recommended − saved is real. Needs a new
+  Prisma field/model + save API + UI. Explicitly OUT of v1 (Tori 2026-07-08); park until
+  the recommended-only Tax view has shipped and there's demand.
+
+### iOS workstream (detail in `tovis-ios/BACKLOG.md §8`)
+- [ ] Mirror F1–F3 in the native Finance screens (category-first merge, receipt capture
+  via native camera/photo picker, Overview/Tax split). Defer F4 with web.
+
+## 15. iOS signup / new-user registration audit (2026-07-08)
+End-to-end audit of the native new-user registration flow (context: iOS had **no**
+signup at all in early July — a hard launch blocker: "if a new client on iOS can't
+create an account, nothing else matters"; built 2026-07-07/08). Bottom line: **the
+native signup flow is real and mostly PASSES** — it is NOT the "biggest structural
+gap" that §9 `A1` / `tovis-ios §5 A1` still imply (that framing is stale, written
+pre-build). Verified working: role chooser → client + pro (3-step) email/password
+signup (real `POST /api/v1/auth/register`, App Attest in lieu of Turnstile) · phone
+OTP verification · **Sign in with Apple** (creates the account) · forgot/reset
+password. New CLIENT correctly lands on the **Looks feed** (`MainTabView` defaults
+to `.looks`). No stubs/TODOs in the signup path. Three gaps remain (below); none
+block the Apple or phone-login paths, one blocks the primary email/password path.
+
+**Pass/fail:** phone OTP ✅ · Apple ✅ (creates accounts) · email/password account
+creation ✅ but **email-verification finish ❌ (A7)** · Google ❌ absent (A8) ·
+TikTok ➖ absent on both platforms, parked (A9) · client→Looks landing ✅.
+
+### iOS workstreams (build later; mirror into `tovis-ios/BACKLOG.md §5` when scheduled)
+- [ ] **A7 — email-verification completion path (REAL DEFECT; blocks the primary
+  email/password signup).** A new email/password user verifies phone, then
+  dead-ends: `SessionModel.verifyPhoneCode` finds email still unverified and only
+  sets `errorMessage = "Your phone is verified. Check your email to finish."`
+  (`tovis-ios Tovis/ContentView.swift:362-366`), stranding them on the phone-verify
+  screen. There is no in-app way to finish: `AuthService` has no email
+  send/verify/status method (only phone + password-reset); `.onOpenURL` is scoped
+  only to `/reset-password/*` (`ContentView.swift:109-111,643`) so the emailed verify
+  link opens web, not the app; and there's no verification-status re-poll. App entry
+  is gated on `isFullyVerified`, and the shared register endpoint always returns
+  `requiresEmailVerification:true` / `isFullyVerified:false` for email/password
+  signups (`app/api/v1/auth/register/route.ts:1358-1361`) — so this is the normal
+  path, not an edge case. Only current escape: tap the web email link → force-quit →
+  re-login. Apple/phone-login dodge it (Apple pre-verifies email). **Build:** a
+  verify-email screen (or extend the phone-verify screen) with an in-app "resend
+  email" action + a status re-check (`GET /auth/verification/status`) that advances
+  to `.signedIn` once email is confirmed — or an email-verify deep link (extend AASA
+  + `onOpenURL`). Mirror web `app/(auth)/verify-phone/page.tsx` (handles phone +
+  email resend/status). Endpoints already exist: `/auth/email/send`,
+  `/auth/email/verify`, `/auth/verification/status`.
+- [ ] **A8 — Google Sign-In (web-parity port; mostly client-side).** Web offers
+  Google account creation on client signup; iOS has none (no Google SDK anywhere).
+  The server endpoint already exists and is documented native-reusable: `POST
+  /api/v1/auth/google` verifies the Google identity token, find-or-creates a CLIENT
+  user (email pre-verified, phone not), and returns the same session payload as Apple
+  (`app/api/v1/auth/google/route.ts`, `lib/auth/findOrCreateGoogleUser.ts`). iOS work
+  ≈ clone the working Apple path: Google Sign-In SDK → ID token → `POST /auth/google`
+  with `deviceId` → `handleAuthResult` (lands at phone verify → Looks). Gate the
+  button on a configured client id (parity with web's inert-until-provisioned
+  `NEXT_PUBLIC_GOOGLE_CLIENT_ID`).
+- [ ] **A9 — TikTok login (PARKED, Tori 2026-07-08; greenfield, NOT a drop-in).**
+  Exists on neither platform (TikTok is only a pro profile social link today). ⚠️
+  Unlike Apple/Google (verifiable `id_token` carrying a verified email), TikTok Login
+  Kit is an OAuth2 auth-code + PKCE flow whose `user.info.basic` scope returns only
+  `open_id`/`union_id`/name/avatar — **no email**. Tovis accounts are email-keyed
+  (contact-lookup hash + email-at-rest), so a TikTok-only account can't satisfy the
+  `findOrCreate*` invariants → needs a post-auth collect-email(+phone) step, a new
+  `POST /api/v1/auth/tiktok` (code→token exchange + user-info fetch — a different
+  shape from apple/google token-verify), `findOrCreateTikTokUser`, a TikTok for
+  Developers app (client key/secret, redirect URI, **app review** before prod), and
+  the iOS TikTok LoginKit SDK + URL scheme. Decide the email-collection UX with Tori
+  before scheduling; parked for now.
+
+### Web workstream
+- [ ] Nothing required for A7/A8 — web is the parity leader (both already ship:
+  `SocialSignIn.tsx` + `/auth/google`; `app/(auth)/verify-phone/page.tsx` email
+  resend/status). A9 (TikTok) would additionally need the web `/auth/tiktok` half,
+  but is parked with the iOS side.
+
+## 16. Pro account menu can't scroll — bottom items unreachable (audit 2026-07-08)
+The pro account dropdown (⋯ menu in `ProHeader`) renders a fixed, fairly tall list —
+identity header → View as client → Studio (3) → Content (4: Looks, Upload, Messages,
+Referral rewards) → footer (Switch workspace + **Sign out**), ~650–720px of content.
+The panel is `absolute`, top-anchored, `overflow-hidden` with **no `max-height` and
+no internal scroll region** (`panelBase`, `app/pro/_components/ProAccountMenu.tsx:205-206`),
+and opening it locks page scroll via `document.documentElement.style.overflow = 'hidden'`
+(same file, `:125-134`). Result: on any viewport shorter than ~780px usable height, the
+bottom of the list — including **Sign out** — is painted off-screen with no way to reach it.
+
+- **Affects:** mobile web (most phones once address-bar chrome counts) and short/zoomed
+  desktop windows. Not iOS. Width (`w-[min(384px,92vw)]`) is fine; height is the issue.
+- **Scope:** pro-only. Audited the client side — there is no equivalent client account
+  dropdown (client account lives in the `ClientSessionFooter` tab bar + the scrollable
+  `ClientMeDashboard` "Me" page, whose container is `h-full overflow-y-auto`), so the bug
+  does not reproduce there.
+- **Root cause:** no bounded height + no `overflow-y-auto` on the panel, plus the
+  page-scroll lock removes the fallback of scrolling the page.
+
+**Fix (decided with Tori — sticky header/footer, scroll the middle):**
+- [ ] **`ProAccountMenu.tsx` (the bug).** Split the panel into `flex flex-col` with a
+  `max-h-[calc(100dvh-~88px)]` bound; pin header (`shrink-0`) and footer (`shrink-0`,
+  keep border-top); wrap the middle sections in a `flex-1 overflow-y-auto` region. Keep
+  `overflow-hidden` on the outer panel for the rounded corners; keep the page-scroll lock
+  (now correct). Use `dvh` not `vh`. Single-file change; no new deps. Confirm the real
+  header height before hardcoding the `max-h` offset.
+- [ ] **`SwitchAccountSheet.tsx` (latent hardening; shared pro+client).** The panel `<div>`
+  (`app/_components/AdminSessionFooter/SwitchAccountSheet.tsx:130-142`) has `maxWidth: 380`
+  but **no `maxHeight` and no `overflowY`**, and its container is `fixed inset-0;
+  align-items: flex-end`, so a list taller than the viewport would push the header off the
+  top with no scroll. Harmless today (workspace options cap at the 3 roles), but cheap to
+  harden while in the area: add `maxHeight: 'min(70dvh, …)'` + `overflowY: 'auto'` to the
+  panel. Not blocking; do it in the same PR.
+- **Verify at:** mobile portrait + a ~700px-tall desktop window; confirm Sign out is always
+  visible and the middle list scrolls in the pro menu. For the sheet, no behavior change
+  expected with ≤3 rows.
+
+---
+
+## 17. TOVISCamera (native iOS AI-photographer) — build audit (2026-07-08)
+The native camera (SwiftUI + AVFoundation; `tovis-ios` `Tovis/` + `TovisKit/`, with a
+server tail in `app/api/v1/pro/camera/*` + `lib/pro/camera*`) is **largely built and wired
+end-to-end**. Two things are deliberate scaffolds rather than finished features, plus an
+owed on-device tuning pass. Most remaining work is iOS-side (tracked here since this is the
+audit epic; the iOS items also belong in `tovis-ios/BACKLOG.md`).
+
+**Phase-by-phase status:**
+- **Phase 1 — live lighting analysis + auto-exposure → done.** `CoachEngine`/`ShotCoach`
+  score exposure + backlight + color-of-light per frame; `CameraController` does real
+  face-priority metering, tap-to-focus, AE/AF lock, gray-card WB lock, card-anchored EV bias.
+- **Phase 2 — frame scoring + auto-select → done.** Weighted readiness score + post-capture
+  `PhotoQC` (sharpness/exposure/blink); "Session Reel" auto-harvests best stills at quality
+  peaks → `BestShotsReviewView`. Face/subject detection (the originally-also-scoped piece)
+  landed. Recorded-clip selection (`FrameScrubberView`) is a **manual** picker, not auto-scored.
+- **Phase 3 — guidance overlay + NFC-card calibration → partial.** Overlay is fully built
+  (readiness ring + hold-to-fire, checklist HUD, nudge chip, spoken/haptic directives, live
+  horizon, thirds + publish-crop guides, onion-skin, directed shot guides w/ pose gating).
+  Calibration card is scaffold — see open items.
+- **Phase 4 — feed-performance intelligence by service type → partial.** Service-adaptive
+  guidance works (guides + shot packs keyword-match the service; balayage→"The Reveal",
+  nails→"Claw & Sparkle"). The feed-performance feedback loop does **not** exist — packs are
+  editorially curated with hardcoded `trendScore`; zero wiring from Looks engagement.
+- **Integration → done.** Triggered from the booking closeout flow (`ProSessionHubView`:
+  BEFORE in the before-photos step, AFTER in wrap-up, alongside aftercare authoring +
+  set-critique). Captures upload scoped to `bookingId` + `BEFORE`/`AFTER`, and the client
+  chart aggregates booking photos (`ProClientChart.photos`) — auto-associated via the
+  booking→client link, not a separate tagging step.
+
+**Open work:**
+- [~] **Calibration card — real measured profile.** Replace the placeholder nominal-ColorChecker
+  profile (`CameraCalibration.placeholderClassic`) with *measured* swatches from a printed card
+  batch (`docs/calibration/generate_card.py`). Gray-card/towel WB is trustworthy today; the
+  swatch-based 3×3 chromatic correction is illustrative until a real card is measured. **(operator)** for the print+measure step.
+- [ ] **Calibration card — NFC version keying.** Wire CoreNFC to read the TOVIS referral card's
+  version id and select the matching `CardReferenceProfile` by `cardVersion`. Today no NFC is
+  read; the scan always uses the hardcoded placeholder. Scan geometry already assumes CR-80.
+- [ ] **Phase 4 — feed-performance-driven shot packs.** `lib/pro/cameraShotPacks.ts` is a static,
+  editorially-curated array. Build the deferred loop that generates/ranks packs from Looks-feed
+  engagement per service type (server-side; the source file flags this as the intended path).
+- [ ] **On-device tuning pass.** Every `CoachTuning` threshold was set without a device (luma
+  bands, sharpness/clutter divisors, pose tilt). Tune against real salon footage via the DEBUG
+  tuning HUD; verify the face-exposure axis map + `LevelCoach` tilt-sign conventions on hardware.
+- [ ] **(confirm scope)** Auto-select best frame from a *recorded clip*. Live-stream harvest is
+  automatic; `FrameScrubberView` is manual. Add auto-scoring if Phase-2's "auto-select from a
+  recorded buffer" was meant to cover clips too.
+- [ ] **Test coverage.** iOS tests cover the calibration math only (`CameraCalibrationTests`);
+  coaches/QC/frame-math are untested (frame-driven). Add fixture-image tests where feasible.
+
+## 18. Pro profile redesign — social-media pattern (audit 2026-07-08)
+Client-facing pro profile (`/professionals/[id]`) + native iOS pro profile.
+Mockup (`tovis-profile-redesign.html`, Tori 2026-07-03) approved 2026-07-08.
+Moves from "pro's photo stretched as full-page background" to a creator-page
+pattern: work as the cover, face as a contained avatar (verified badge on it),
+portfolio high on the page, payments collapsed to one sheet. Ships web + iOS
+together (parity rule). Decisions (Tori 2026-07-08): cover is **pro-set with a
+graceful blank fallback** (never the stretched avatar), NOT auto-pulled; keep
+the 4-up stat row incl. Saved. **Upstream dependency (separate session):**
+portfolio (MediaAsset) ↔ looks feed (LookPost) are unlinked today — the deep-dive
+to connect them is tracked separately; this epic ships without it (cover =
+pro-chosen; grid "★ FEAT" stays newest-featured).
+
+Current "before" confirmed: avatar is the full-bleed 330px hero background
+(`ProfileHero.tsx` + `.brand-profile-hero-media`); portfolio grid is MediaAsset-
+based, tab-gated + below-fold; payments are a `flex-wrap` pill row
+(`AcceptedPayments.tsx`); "Saved" = `count(ProfessionalFavorite)`; verified badge
+is inlined (no reusable component); no cover field (only `avatarUrl`); no shared
+bottom-sheet primitive. Owner-view cover label reads "Add a cover photo" when
+blank (nothing for client viewers). Sequencing: 18a lands before 18b/18e (both
+clients read the cover DTO); 18c (BottomSheet extraction) is independent.
+
+### Web
+- [ ] **18a — schema + API**: `ProfessionalProfile.coverMediaAssetId String?`
+  (nullable FK → MediaAsset) + relation; expose `cover` in public-profile +
+  pro self-profile DTOs; set/clear mutation; regen api-schema. (1 migration, additive)
+- [ ] **18b — hero rework**: short cover banner (cover-or-branded-fallback, reuse
+  `.brand-profile-hero-fallback`) + contained avatar w/ verified badge + identity
+  block + bordered stats card; relocate Share/Favorite (+ back) onto cover overlay;
+  reorder page so the grid rides high (Portfolio default tab). New brand.css;
+  retire full-bleed `.brand-profile-hero-media`.
+- [ ] **18c — payments sheet**: extract a shared `BottomSheet` primitive from
+  `AvailabilityDrawer/DrawerShell`; replace pill row with an "Accepted payments"
+  button → sheet (same `publicAcceptedMethods` data).
+- [ ] **18d — owner cover editor**: "Cover photo" control (pick from portfolio /
+  clear) in the `/pro/profile` media manager. (confirm media-manager location)
+
+### iOS (detail → tovis-ios/BACKLOG.md §5)
+- [ ] **18e — native pro profile redesign**: cover + overlapping avatar +
+  verified-on-avatar + stats row + Book/Message + Accepted-payments → native
+  sheet + Portfolio/Services/Reviews + grid; owner cover picker in pro
+  self-profile. Consumes 18a DTO.
+
+## 19. Social-first media unification — portfolio ↔ looks feed (audit 2026-07-08)
+The deep-dive §18 flagged as "tracked separately." **Goal (Tori 2026-07-08):
+social-first — a pro's profile grid IS the feed and vice-versa, TikTok-profile /
+Instagram-grid style.** Today it is the opposite: public media is fragmented
+across three independently-gated systems that share only the `MediaAsset` table.
+
+**Current state (all confirmed in code):**
+- **Two parallel content atoms.** *Portfolio* = `MediaAsset.isFeaturedInPortfolio`
+  (public-profile grid, `loadProPublicProfile.ts:199-214`, queries `MediaAsset`
+  directly). *Looks* = a separate `LookPost` row pointing at a `MediaAsset` via
+  `primaryMediaAssetId @unique` (feed/search/boards/tags, `feed.ts:211-281`,
+  queries `LookPost`). The two are gated by **orthogonal booleans**
+  (`isFeaturedInPortfolio` vs `isEligibleForLooks`, both `@default(false)`,
+  separate indexes) set by separate checkboxes at upload (`pro/media/route.ts:63-70`).
+- **Both bridges are dead.** Featuring to portfolio (`pro/media/[id]/portfolio/route.ts:136-142`)
+  never sets `isEligibleForLooks` and never creates a `LookPost` → featured work
+  never hits the feed. Publishing a look (`publication/service.ts:742`) never sets
+  `isFeaturedInPortfolio`, and the public profile has **no looks tab**
+  (`PublicProfileTab = 'portfolio' | 'services' | 'reviews'`,
+  `publicProfileFormatting.ts:8`) → published looks never hit the grid. The UI
+  even admits it: *"'Looks eligible' is a temporary media-level bridge"*
+  (`ProPortfolioGrid.tsx:42`).
+- **Same asset, divergent surfaces:** `isEligibleForLooks` only → feed ✅ grid ❌;
+  `isFeaturedInPortfolio` only → grid ✅ feed ❌; review photo (`visibility=PUBLIC`,
+  both flags `false`, `review/route.ts:503-506`) → **neither** (Reviews tab +
+  `/media/[id]` only) — the largest orphaned public-media set.
+- **Asymmetry:** clients already get a public looks grid at `/u/[handle]`
+  (`loadPublicClientProfile.ts:91-96`, authored `LookPost`s); **pros have no
+  equivalent public looks grid** — their feed-published + client-authored looks
+  are surfaced nowhere on their own profile.
+- **Other divergences to fix in-flight:** (a) client looks render on `/u/[handle]`
+  while still `PENDING_REVIEW` (`status+visibility` only) but are withheld from the
+  global feed until `APPROVED` — pre-moderation public exposure; (b) `isEligibleForLooks`
+  is a publish-time gate, not a live feed filter — flipping it off does **not**
+  retract an already-published `LookPost` (`publication/service.ts:318` vs feed
+  reading `LookPost`); (c) `media-public` bytes render via **unsigned permanent
+  URLs** (`renderUrls.ts:34-42`) — hiding a surface in the DB never revokes the
+  object URL, so "make social" is a one-way door for the bytes.
+
+**Decisions (Tori 2026-07-08):**
+- **One `LookPost` = grid + feed** (the "one post atom" option). `LookPost` becomes
+  the single public-content unit. Featuring to portfolio *publishes a look*; the
+  profile grid renders the pro's `LookPost`s; the dual booleans collapse to a single
+  published state (`isFeaturedInPortfolio` retires or is repurposed as a grid
+  pin/ordering flag to preserve today's "★ FEAT" first-tile).
+- **Review photos = per-photo pro opt-in.** Consented review media (consent already
+  required via `canProSharePublicly`) stays review-scoped by default; a pro can
+  explicitly promote an individual review photo into their grid/feed (creates a
+  `LookPost` for that asset — reuse `createOrUpdateProLookFromMediaAsset`, which
+  already accepts `reviewId`-backed media through the consent gate).
+
+**Interlock with §18:** §18 (profile redesign) intentionally ships *without* this
+and keeps the grid MediaAsset-based / "★ FEAT" newest-featured. §19c swaps that
+grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
+
+### Web
+- [ ] **19a — backfill**: one-time idempotent job — for every `MediaAsset` with
+  `isFeaturedInPortfolio=true` and no `LookPost`, create a PUBLISHED pro-authored
+  `LookPost` (upsert by `primaryMediaAssetId`; carry caption/service/before-after
+  pairing). Pro-authored looks default `moderationStatus=APPROVED`, so no human
+  gate. (script + safety: dry-run count first)
+- [ ] **19b — unify the write path**: featuring to portfolio auto-creates/publishes
+  a `LookPost`; publishing a look marks it grid-visible. Collapse
+  `isEligibleForLooks`/`isFeaturedInPortfolio` to a single derived state; keep a
+  `pinned`/ordering concept to preserve "★ FEAT". Retire the standalone portfolio
+  toggle in favor of the looks publish action (or make it call it). Make
+  `isEligibleForLooks=false` (unpublish) also retract the live `LookPost`
+  (fix divergence b).
+- [ ] **19c — unify the read path**: public profile grid renders the pro's
+  `LookPost`s (add a *Looks* tab or make *Portfolio* = looks grid) so grid + feed
+  draw from the same rows; mirror the `/u/[handle]` client-grid shape for pros.
+  Reconcile the moderation gate so nothing renders public pre-`APPROVED`
+  (fix divergence a).
+- [ ] **19d — review-photo opt-in**: a "Add to my grid/feed" control on a consented
+  review photo → creates a `LookPost` from that `MediaAsset` (per-photo, pro-driven).
+  Reuse the existing consent gate; no new public-by-default paths.
+- [ ] **19e — downstream coverage**: with everything a `LookPost`, verify boards
+  (`BoardItem`→`LookPost`) can now save formerly-portfolio-only media; confirm
+  search/tags/personalized feed pick up backfilled looks; audit the owner board
+  view showing stale-status saved looks.
+- [ ] **19f — cleanup**: remove the "temporary media-level bridge" copy + dead
+  `isFeaturedInPortfolio`-only query paths once 19c ships. (do NOT delete the flag
+  until the grid reads `LookPost`.)
+
+### iOS (detail → tovis-ios/BACKLOG.md §5)
+- [ ] **19g — native parity**: native pro profile shows the unified looks grid
+  (consumes the same DTO as 19c); publish/feature is one action; review-photo
+  "add to grid/feed" opt-in mirrors 19d. Ships with the web change (parity rule).
+
+---
+
 ### Note on superseded docs
 This backlog replaced these now-deleted planning docs — their open items are captured above; their history is in git:
 launch-readiness/{phase-2-remaining-work, finish-plan-2026-06-12, roadmap-corrected-2026-06-12, load-test-plan, traffic-model, load-traffic-model} ·
