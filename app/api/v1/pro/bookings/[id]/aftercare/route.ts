@@ -7,6 +7,7 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { loadBookingBeforeAfterThumbsFor } from '@/lib/media/bookingBeforeAfter'
 import { isRecord } from '@/lib/guards'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
@@ -845,6 +846,12 @@ export async function GET(_req: Request, ctx: RouteContext) {
       return bookingJsonFail('BOOKING_NOT_FOUND')
     }
 
+    // Before/after pair for the authoring screen, from the same SSOT the web
+    // page and the aftercare list use — so native (iOS ProAftercareAuthorView)
+    // shows the visual record instead of a text-only screen. Null-safe: bookings
+    // with no photos yield null URLs.
+    const media = await loadBookingBeforeAfterThumbsFor(booking.id)
+
     return jsonOk(
       {
         booking: {
@@ -857,6 +864,12 @@ export async function GET(_req: Request, ctx: RouteContext) {
           aftercareSummary: booking.aftercareSummary
             ? mapAftercareSummaryForGet(booking.aftercareSummary)
             : null,
+          media: {
+            beforeUrl: media.beforeUrl,
+            afterUrl: media.afterUrl,
+            beforeFullUrl: media.beforeFullUrl,
+            afterFullUrl: media.afterFullUrl,
+          },
         },
       },
       200,

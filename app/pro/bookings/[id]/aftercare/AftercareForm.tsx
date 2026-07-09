@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import RemoteImage from '@/app/_components/media/RemoteImage'
+import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { getZonedParts } from '@/lib/time'
 import { safeJson, readErrorMessage } from '@/lib/http'
@@ -820,7 +820,11 @@ export default function AftercareForm({
         typeof aftercare?.version === 'number' ? aftercare.version : null,
       )
 
-    router.refresh()
+    // Don't router.refresh() here: this page is force-dynamic, so a refresh
+    // re-runs the whole server component and re-signs + reloads every before/
+    // after image on every draft save. The save's own response already updated
+    // draft/sent/version state above, and the session footer refreshes via the
+    // force event below — nothing server-rendered on this page changed.
     dispatchForceRefresh()
 
     if (sendToClient) {
@@ -1459,67 +1463,41 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
   return (
     <div className="mt-3 grid grid-cols-3 gap-2">
       {items.map((m) => {
-        const href = m.renderUrl ?? null
-        const thumb = m.renderThumbUrl ?? m.renderUrl ?? null
-
         const isVideo = m.mediaType === 'VIDEO'
         const isProClient = m.visibility === 'PRO_CLIENT'
 
+        // Enlarge opens the shared in-place fullscreen viewer (local state, no
+        // navigation), so closing just dismisses the overlay instead of
+        // re-running this force-dynamic page and reloading every image.
+        // ClickableMedia falls back full→thumb, so a thumb-only "before" asset
+        // is still openable (previously it rendered as a dead, non-clickable
+        // tile while "after" opened fine).
         return (
-          <div
+          <ClickableMedia
             key={m.id}
+            thumbSrc={m.renderThumbUrl}
+            fullSrc={m.renderUrl}
+            mediaType={m.mediaType}
+            alt="Booking media"
+            hidePlayBadge
             className={[
-              'relative block aspect-square overflow-hidden rounded-card bg-bgPrimary transition',
+              'aspect-square rounded-card bg-bgPrimary transition',
               isProClient
                 ? 'border border-white/10'
                 : 'border border-transparent',
               'hover:bg-surfaceGlass',
             ].join(' ')}
-            title={isProClient ? 'Visible to pro + client' : 'Public'}
           >
-            {thumb ? (
-              href ? (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block h-full w-full"
-                >
-                  <RemoteImage
-                    src={thumb}
-                    alt="Booking media"
-                    width={400}
-                    height={400}
-                    className="h-full w-full object-cover"
-                  />
-                </a>
-              ) : (
-                <div className="h-full w-full">
-                  <RemoteImage
-                    src={thumb}
-                    alt="Booking media"
-                    width={400}
-                    height={400}
-                    className="h-full w-full object-cover"
-                  />
-                </div>
-              )
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-textSecondary">
-                Unavailable
-              </div>
-            )}
-
             {isVideo ? (
-              <div className="absolute right-2 top-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+              <div className="pointer-events-none absolute right-2 top-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
                 VIDEO
               </div>
             ) : null}
 
-            <div className="absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+            <div className="pointer-events-none absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
               {isProClient ? 'PRO + CLIENT' : 'PUBLIC'}
             </div>
-          </div>
+          </ClickableMedia>
         )
       })}
     </div>

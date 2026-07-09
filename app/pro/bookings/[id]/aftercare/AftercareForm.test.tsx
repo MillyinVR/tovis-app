@@ -144,7 +144,10 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
       )
     })
 
-    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1)
+    // Sending navigates to the wrap-up screen via push; it must NOT also
+    // router.refresh() this force-dynamic page (that re-signed + reloaded every
+    // before/after image for nothing).
+    expect(mocks.routerRefresh).not.toHaveBeenCalled()
     expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
 

@@ -9,8 +9,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
   resolveApptTimeZone: vi.fn(),
 
-  storageFrom: vi.fn(),
-  storageCreateSignedUrl: vi.fn(),
+  renderMediaUrlsBatch: vi.fn(),
 
   redirect: vi.fn(),
   notFound: vi.fn(),
@@ -56,12 +55,8 @@ vi.mock('@/lib/booking/timeZoneTruth', () => ({
   resolveApptTimeZone: mocks.resolveApptTimeZone,
 }))
 
-vi.mock('@/lib/supabaseAdmin', () => ({
-  supabaseAdmin: {
-    storage: {
-      from: mocks.storageFrom,
-    },
-  },
+vi.mock('@/lib/media/renderUrls', () => ({
+  renderMediaUrlsBatch: mocks.renderMediaUrlsBatch,
 }))
 
 vi.mock('./AftercareForm', () => ({
@@ -315,14 +310,16 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
       timeZone: 'America/Los_Angeles',
     })
 
-    mocks.storageCreateSignedUrl.mockResolvedValue({
-      data: { signedUrl: 'https://signed.example.com/file.jpg' },
-      error: null,
-    })
-
-    mocks.storageFrom.mockReturnValue({
-      createSignedUrl: mocks.storageCreateSignedUrl,
-    })
+    // The page delegates signing to renderMediaUrlsBatch (unit-tested in
+    // lib/media/renderUrls.test.ts); here we just resolve each asset to a
+    // render URL pair so the media pass-through can be asserted.
+    mocks.renderMediaUrlsBatch.mockImplementation(
+      async (items: Array<unknown>) =>
+        items.map(() => ({
+          renderUrl: 'https://signed.example.com/file.jpg',
+          renderThumbUrl: 'https://signed.example.com/thumb.jpg',
+        })),
+    )
   })
 
   it('redirects to login when pro user is missing', async () => {
@@ -489,7 +486,7 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     expect(markup).not.toContain('public_')
   })
 
-  it('renders finalized aftercare state with live client access and signs fallback media URLs', async () => {
+  it('renders finalized aftercare state with live client access and resolves media URLs via renderMediaUrlsBatch', async () => {
     const page = await renderPage({
       booking: makeBooking({
         aftercareSummary: {
@@ -510,16 +507,21 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
 
     const markup = renderMarkup(page)
 
-    expect(mocks.storageFrom).toHaveBeenCalledWith('booking-media')
-    expect(mocks.storageFrom).toHaveBeenCalledWith('booking-media-thumbs')
-    expect(mocks.storageCreateSignedUrl).toHaveBeenCalledWith(
-      'after/media_1.jpg',
-      600,
-    )
-    expect(mocks.storageCreateSignedUrl).toHaveBeenCalledWith(
-      'after/thumb_media_1.jpg',
-      600,
-    )
+    // The whole booking's media is handed to the batched signer in one call.
+    expect(mocks.renderMediaUrlsBatch).toHaveBeenCalledTimes(1)
+    const signedItems = mocks.renderMediaUrlsBatch.mock.calls[0]?.[0] as Array<{
+      storageBucket: string
+      storagePath: string
+      thumbBucket: string
+      thumbPath: string
+    }>
+    expect(signedItems).toHaveLength(1)
+    expect(signedItems[0]).toMatchObject({
+      storageBucket: 'booking-media',
+      storagePath: 'after/media_1.jpg',
+      thumbBucket: 'booking-media-thumbs',
+      thumbPath: 'after/thumb_media_1.jpg',
+    })
 
     expect(markup).toContain('Finalized + sent')
     expect(markup).toContain('Secure client access ready')
