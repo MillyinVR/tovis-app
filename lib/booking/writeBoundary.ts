@@ -2973,12 +2973,23 @@ async function assertMobileBookingWithinRadius(args: {
   clientAddressId: string | null | undefined
   clientLat: number | null | undefined
   clientLng: number | null | undefined
+  /**
+   * True when the booking already carries a preserved client-address *snapshot*
+   * (formatted address + coordinates on the Booking row itself) even though the
+   * live `clientAddressId` FK is gone — e.g. an aftercare rebook whose saved
+   * `ClientAddress` was deleted (`onDelete: SetNull` nulls only the FK, not the
+   * snapshot columns). A preserved destination satisfies the "mobile needs a
+   * client address" requirement; the coordinate and radius checks below still
+   * validate it. Defaults to false so the create/hold/pro-create paths keep
+   * demanding a live saved address.
+   */
+  hasSnapshotAddress?: boolean
 }): Promise<void> {
   if (args.locationType !== ServiceLocationType.MOBILE) {
     return
   }
 
-  if (!args.clientAddressId) {
+  if (!args.clientAddressId && !args.hasSnapshotAddress) {
     throw bookingError('CLIENT_SERVICE_ADDRESS_REQUIRED')
   }
 
@@ -9789,6 +9800,15 @@ assertCanCreateRebookFromSourceBooking({
       effectiveLocationType === ServiceLocationType.MOBILE
         ? source.clientAddressId
         : null,
+    // A completed mobile booking whose saved ClientAddress was later deleted
+    // keeps its address snapshot on the Booking row (onDelete: SetNull nulls
+    // only the FK). Treat that preserved snapshot as a valid destination so the
+    // client can still confirm the pro's proposed next appointment instead of
+    // dead-ending on CLIENT_SERVICE_ADDRESS_REQUIRED with no way to re-enter it.
+    hasSnapshotAddress:
+      effectiveLocationType === ServiceLocationType.MOBILE &&
+      (source.clientAddressSnapshot != null ||
+        source.encryptedClientAddressSnapshotJson != null),
     clientLat:
       effectiveLocationType === ServiceLocationType.MOBILE
         ? decimalToNumber(source.clientAddressLatSnapshot)

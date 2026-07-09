@@ -1584,4 +1584,119 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     })
     expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_1')
   })
+
+  it('confirms a mobile aftercare rebook whose saved address was deleted by reusing the preserved snapshot', async () => {
+    const salonSource = makeCompletedSourceBookingForAftercareRebook()
+
+    // A completed MOBILE booking whose saved ClientAddress was later deleted:
+    // onDelete: SetNull nulls the FK but the address snapshot columns on the
+    // Booking row survive. The client must still be able to confirm the pro's
+    // proposed next appointment.
+    const mobileSourceWithDeletedAddress = {
+      ...salonSource,
+      locationType: ServiceLocationType.MOBILE,
+      clientAddressId: null,
+      clientAddressSnapshot: {
+        formattedAddress: '456 Client Home, Los Angeles, CA',
+      },
+      clientAddressSnapshotKeyVersion: null,
+      encryptedClientAddressSnapshotJson: null,
+      clientAddressLatSnapshot: 34.052,
+      clientAddressLngSnapshot: -118.243,
+      clientAddressLatApprox: null,
+      clientAddressLngApprox: null,
+      addressSnapshotsEncryptedAt: null,
+      aftercareSummary: salonSource.aftercareSummary
+        ? {
+            ...salonSource.aftercareSummary,
+            rebookSlot: salonSource.aftercareSummary.rebookSlot
+              ? {
+                  ...salonSource.aftercareSummary.rebookSlot,
+                  locationType: ServiceLocationType.MOBILE,
+                }
+              : salonSource.aftercareSummary.rebookSlot,
+          }
+        : salonSource.aftercareSummary,
+    }
+
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(mobileSourceWithDeletedAddress)
+      .mockResolvedValueOnce(null)
+
+    mocks.txBookingCreate.mockResolvedValueOnce({
+      id: 'booking_rebook_1',
+      status: BookingStatus.PENDING,
+      scheduledFor: REQUESTED_START,
+    })
+
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        aftercareId: 'aftercare_1',
+        bookingId: 'booking_source_1',
+        clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
+        scheduledFor: REQUESTED_START,
+        requestId: 'req_mobile_rebook_snapshot',
+        idempotencyKey: 'idem_mobile_rebook_snapshot',
+      }),
+    ).resolves.toMatchObject({
+      booking: { id: 'booking_rebook_1' },
+      meta: { mutated: true, noOp: false },
+    })
+
+    // The rebooked booking is created carrying the preserved address forward:
+    // clientAddressId stays null (the saved row is gone) but the snapshot is
+    // reused so the mobile visit still has a real destination.
+    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          locationType: ServiceLocationType.MOBILE,
+          clientAddressId: null,
+          clientAddressSnapshot: {
+            formattedAddress: '456 Client Home, Los Angeles, CA',
+          },
+          clientAddressLatSnapshot: 34.052,
+          clientAddressLngSnapshot: -118.243,
+        }),
+      }),
+    )
+  })
+
+  it('still rejects a mobile aftercare rebook when the source booking has no address snapshot at all', async () => {
+    const salonSource = makeCompletedSourceBookingForAftercareRebook()
+
+    const mobileSourceNoAddress = {
+      ...salonSource,
+      locationType: ServiceLocationType.MOBILE,
+      clientAddressId: null,
+      clientAddressSnapshot: null,
+      clientAddressSnapshotKeyVersion: null,
+      encryptedClientAddressSnapshotJson: null,
+      clientAddressLatSnapshot: null,
+      clientAddressLngSnapshot: null,
+      clientAddressLatApprox: null,
+      clientAddressLngApprox: null,
+      addressSnapshotsEncryptedAt: null,
+    }
+
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(mobileSourceNoAddress)
+      .mockResolvedValueOnce(null)
+
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        aftercareId: 'aftercare_1',
+        bookingId: 'booking_source_1',
+        clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
+        scheduledFor: REQUESTED_START,
+        requestId: 'req_mobile_rebook_no_addr',
+        idempotencyKey: 'idem_mobile_rebook_no_addr',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
+    })
+
+    expect(mocks.txBookingCreate).not.toHaveBeenCalled()
+  })
 })
