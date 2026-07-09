@@ -56,6 +56,8 @@ const REVIEW_REQUEST_BOOKING_SELECT = {
   id: true,
   clientId: true,
   status: true,
+  // §12 NC1 #14: service name for the "How was your {service} with {pro}?" heading.
+  service: { select: { name: true } },
   client: {
     select: { claimStatus: true },
   },
@@ -73,11 +75,20 @@ type ReviewRequestBookingRow = Prisma.BookingGetPayload<{
 export function buildReviewRequestContent(args: {
   bookingId: string
   professionalName: string | null
+  serviceName?: string | null
 }): ReviewRequestContent {
   const name = args.professionalName?.trim() || null
+  const service = args.serviceName?.trim() || null
+
+  // §12 NC1 #14: personalize the heading with the service + pro when both are
+  // known; fall back to the generic heading otherwise.
+  const title =
+    service && name
+      ? `How was your ${service} with ${name}?`
+      : 'How was your visit?'
 
   return {
-    title: 'How was your visit?',
+    title,
     body: name
       ? `Leave a quick review for ${name} — it helps others find great pros.`
       : 'Leave a quick review — it helps others find great pros.',
@@ -218,6 +229,7 @@ export async function validateDueReviewRequest(args: {
     notification: buildReviewRequestContent({
       bookingId: booking.id,
       professionalName: professionalNameForBooking(booking),
+      serviceName: booking.service?.name ?? null,
     }),
   }
 }

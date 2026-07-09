@@ -446,7 +446,13 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'last_minute_opening_available',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+      // §12 NC2 #26: in-app + push + email for both variants (broadcast and the
+      // 1:1 priority offer). PUSH stays inert until APNs creds land; EMAIL honors
+      // the per-event preference toggle. The additional +SMS on the 1:1 PRIORITY
+      // offer only (never the mass broadcast — Twilio cost + promo-consent/TCPA)
+      // is deferred: it needs a per-variant channel override (a new event key or
+      // a channel-override on the emit) plus promotional-SMS consent verification.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 

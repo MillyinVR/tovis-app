@@ -369,6 +369,14 @@ function makeTxBooking(overrides?: {
     finishedAt:
       overrides && 'finishedAt' in overrides ? overrides.finishedAt : null,
     sessionStep: overrides?.sessionStep ?? SessionStep.CONSULTATION,
+    // §12 NC1 #10: proposal notif is personalized with the pro's display name.
+    professional: {
+      businessName: 'Glow Studio',
+      firstName: null,
+      lastName: null,
+      handle: null,
+      nameDisplay: null,
+    },
     serviceItems: [
       {
         id: 'bsi_1',
@@ -439,6 +447,14 @@ function makeDeliveryBooking(overrides?: {
     clientTimeZoneAtBooking:
       overrides?.clientTimeZoneAtBooking ?? 'America/Los_Angeles',
     locationTimeZone: overrides?.locationTimeZone ?? 'America/Los_Angeles',
+    // §12 NC1 #10: SMS body personalizes with the pro's display name.
+    professional: {
+      businessName: 'Glow Studio',
+      firstName: null,
+      lastName: null,
+      handle: null,
+      nameDisplay: null,
+    },
     client: {
       id: overrides?.clientId ?? 'client_1',
       userId: overrides?.userId ?? null,
@@ -862,7 +878,7 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
       clientId: 'client_1',
       eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       title: 'Consultation proposal ready',
-      body: 'Your professional sent an updated service total for approval.',
+      body: 'Glow Studio sent an updated proposal for your visit. Approve or decline to continue.',
       bookingId: 'booking_1',
       href: '/client/bookings/booking_1?step=consult',
       dedupeKey: 'CONSULTATION_PROPOSAL:booking_1',
@@ -910,6 +926,7 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
 
     expect(mocks.createConsultationActionDelivery).toHaveBeenCalledWith({
       professionalId: 'pro_1',
+      professionalName: 'Glow Studio',
       clientId: 'client_1',
       bookingId: 'booking_1',
       consultationApprovalId: 'approval_1',

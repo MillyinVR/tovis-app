@@ -510,8 +510,14 @@ describe('POST /api/v1/bookings/finalize', () => {
 
     // Source booking lookup for payment-confirmation coupling. Default: source
     // is not awaiting confirmation, so a rebook uses the standard request flow.
+    // Also feeds §12 NC1 #1/#2 pro-notification body (client + service).
     mocks.bookingFindUnique.mockResolvedValue({
       checkoutStatus: BookingCheckoutStatus.PAID,
+      scheduledFor: null,
+      locationTimeZone: null,
+      service: { name: 'Haircut' },
+      professional: { timeZone: null },
+      client: { firstName: 'Jordan', lastName: 'Lee' },
     })
 
     mocks.resolveDiscoveryFinalize.mockResolvedValue({
@@ -1064,7 +1070,7 @@ describe('POST /api/v1/bookings/finalize', () => {
       professionalId: 'pro_123',
       eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
       title: 'New booking request',
-      body: '',
+      body: 'Jordan Lee requested Haircut.',
       href: '/pro/bookings/booking_1',
       actorUserId: 'user_1',
       bookingId: 'booking_1',
@@ -1442,7 +1448,7 @@ describe('POST /api/v1/bookings/finalize', () => {
       professionalId: 'pro_123',
       eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
       title: 'New booking request',
-      body: '',
+      body: 'Jordan Lee requested Haircut.',
       href: '/pro/bookings/booking_1',
       actorUserId: 'user_1',
       bookingId: 'booking_1',
@@ -1482,7 +1488,7 @@ describe('POST /api/v1/bookings/finalize', () => {
       professionalId: 'pro_123',
       eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
       title: 'New booking request',
-      body: '',
+      body: 'Jordan Lee requested Haircut.',
       href: '/pro/bookings/booking_1',
       actorUserId: null,
       bookingId: 'booking_1',
@@ -1577,8 +1583,8 @@ describe('POST /api/v1/bookings/finalize', () => {
     expect(mocks.createProNotification).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       eventKey: NotificationEventKey.BOOKING_CONFIRMED,
-      title: 'New booking confirmed',
-      body: '',
+      title: 'Booking confirmed',
+      body: 'Jordan Lee is booked for Haircut.',
       href: '/pro/bookings/booking_1',
       actorUserId: 'user_1',
       bookingId: 'booking_1',

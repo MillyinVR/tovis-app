@@ -123,6 +123,19 @@ describe('lib/booking/writeBoundary', () => {
       startedAt: null,
       finishedAt: null,
       sessionStep: SessionStep.NONE,
+      // §12 NC1 #8/#9: cancellation copy is enriched with service + who.
+      scheduledFor: null,
+      locationTimeZone: null,
+      service: { name: 'Balayage' },
+      client: { firstName: 'Jordan', lastName: 'Lee' },
+      professional: {
+        timeZone: null,
+        businessName: 'Glow Studio',
+        firstName: null,
+        lastName: null,
+        handle: null,
+        nameDisplay: null,
+      },
     })
 
     mocks.txBookingUpdate.mockResolvedValueOnce({
@@ -178,7 +191,7 @@ describe('lib/booking/writeBoundary', () => {
       aftercareId: null,
       eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
       title: 'Appointment cancelled',
-      body: 'Your appointment was cancelled. Reason: Need to reschedule',
+      body: 'Your Balayage with Glow Studio was cancelled. Reason: Need to reschedule',
       dedupeKey: 'BOOKING_CANCELLED:booking_1',
       href: '/client/bookings/booking_1?step=overview',
       data: {
@@ -195,7 +208,7 @@ describe('lib/booking/writeBoundary', () => {
       eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
       priority: 'HIGH',
       title: 'Booking cancelled by client',
-      body: 'Client cancelled this booking. Reason: Need to reschedule',
+      body: 'Jordan Lee cancelled Balayage. Reason: Need to reschedule',
       href: '/pro/bookings/booking_1',
       actorUserId: null,
       bookingId: 'booking_1',

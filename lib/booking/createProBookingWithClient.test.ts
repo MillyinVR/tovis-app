@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   createProBooking: vi.fn(),
   upsertClientClaimLink: vi.fn(),
   clientProfileFindUnique: vi.fn(),
+  bookingFindUnique: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
   checkProReadinessForEntryPoint: vi.fn(),
   enqueueDispatch: vi.fn(),
@@ -49,6 +50,9 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     clientProfile: {
       findUnique: mocks.clientProfileFindUnique,
+    },
+    booking: {
+      findUnique: mocks.bookingFindUnique,
     },
   },
 }))
@@ -225,8 +229,8 @@ function expectBookingConfirmedDispatch(args: {
       inAppTargetId: args.clientId,
       email: args.email ?? null,
     }),
-    title: 'Booking confirmed',
-    body: 'Your appointment has been booked.',
+    title: 'Appointment confirmed',
+    body: "You're booked with Glow Studio for Haircut.",
     href: `/client/bookings/${bookingId}`,
     payload: {
       source: 'proCreatedBooking',
@@ -266,6 +270,20 @@ describe('createProBookingWithClient', () => {
     mocks.resolveProBookingClient.mockResolvedValue(makeResolvedClient())
     mocks.createProBooking.mockResolvedValue(makeBookingResult())
     mocks.clientProfileFindUnique.mockResolvedValue(makeInviteClientSnapshot())
+    // §12 NC1 #3+4: the confirmation copy reads booking meta (pro + service).
+    mocks.bookingFindUnique.mockResolvedValue({
+      scheduledFor: null,
+      locationTimeZone: null,
+      service: { name: 'Haircut' },
+      professional: {
+        timeZone: null,
+        businessName: 'Glow Studio',
+        firstName: null,
+        lastName: null,
+        handle: null,
+        nameDisplay: null,
+      },
+    })
     mocks.upsertClientClaimLink.mockResolvedValue(makeInviteResult())
     mocks.createClientClaimInviteDelivery.mockResolvedValue(
       makeInviteDeliveryResult(),

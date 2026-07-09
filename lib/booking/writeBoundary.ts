@@ -137,6 +137,18 @@ import { resolveBookingAddOns } from '@/lib/booking/addOnResolution'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
 import { moneyToFixed2String } from '@/lib/money'
 import {
+  formatProfessionalPublicDisplayName,
+  professionalPublicDisplayNameSelect,
+} from '@/lib/privacy/professionalDisplayName'
+import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
+import {
+  buildBookingConfirmedClientCopy,
+  formatBookingDateLabel,
+  formatBookingTimeLabel,
+  formatBookingWhenClause,
+} from '@/lib/booking/notificationCopy'
+import {
+  resolveApptTimeZoneFromValues,
   resolveAppointmentSchedulingContext,
   type AppointmentSchedulingContext,
   type TimeZoneTruthSource,
@@ -1125,6 +1137,19 @@ const CANCEL_BOOKING_SELECT = {
   startedAt: true,
   finishedAt: true,
   sessionStep: true,
+  // §12 NC1 #8/#9: enrich cancellation copy with service + who + when.
+  scheduledFor: true,
+  locationTimeZone: true,
+  service: { select: { name: true } },
+  client: {
+    select: {
+      firstName: true, // pii-plaintext-read-ok: pro-facing client name in cancellation notif (same as inbox)
+      lastName: true, // pii-plaintext-read-ok: pro-facing client name in cancellation notif (same as inbox)
+    },
+  },
+  professional: {
+    select: { timeZone: true, ...professionalPublicDisplayNameSelect },
+  },
 } satisfies Prisma.BookingSelect
 
 type CancelBookingRecord = Prisma.BookingGetPayload<{
@@ -2463,6 +2488,19 @@ function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
     },
     'en-US',
   )
+}
+
+/** Booking's display timezone via the standard truth precedence, never throwing. */
+function resolveBookingDisplayTimeZone(booking: {
+  locationTimeZone?: string | null
+  professional?: { timeZone?: string | null } | null
+}): string {
+  const result = resolveApptTimeZoneFromValues({
+    bookingLocationTimeZone: booking.locationTimeZone,
+    professionalTimeZone: booking.professional?.timeZone,
+    fallback: DEFAULT_TIME_ZONE,
+  })
+  return result.ok ? result.timeZone : DEFAULT_TIME_ZONE
 }
 
 function computeRebookReminderDueAt(args: {
@@ -4489,9 +4527,15 @@ async function maybeCreateBookingCancelledNotification(args: {
         ? NotificationEventKey.BOOKING_CANCELLED_BY_PRO
         : NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN
 
-  const body = reason
-    ? `Your appointment was cancelled. Reason: ${reason}`
-    : 'Your appointment was cancelled.'
+  // §12 NC1 #8: name the service + pro + when; keep the reason suffix.
+  const serviceLabel = booking.service?.name?.trim() || 'appointment'
+  const proName = formatProfessionalPublicDisplayName(booking.professional)
+  const whenClause = formatBookingWhenClause(
+    booking.scheduledFor,
+    resolveBookingDisplayTimeZone(booking),
+  )
+  const reasonClause = reason ? ` Reason: ${reason}` : ''
+  const body = `Your ${serviceLabel} with ${proName}${whenClause} was cancelled.${reasonClause}`
 
   await createUpdateClientNotification({
     tx: args.tx,
@@ -4522,18 +4566,24 @@ async function maybeCreateProBookingCancelledNotification(args: {
   let title: string
   let body: string
 
+  // §12 NC1 #9: name the client + service + when; keep by-client / by-admin
+  // heading variants.
+  const clientName = formatClientName(args.booking.client)
+  const serviceLabel = args.booking.service?.name?.trim() || 'the appointment'
+  const whenClause = formatBookingWhenClause(
+    args.booking.scheduledFor,
+    resolveBookingDisplayTimeZone(args.booking),
+  )
+  const reasonClause = reason ? ` Reason: ${reason}` : ''
+
   if (args.actor.kind === 'client') {
     eventKey = NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT
     title = 'Booking cancelled by client'
-    body = reason
-      ? `Client cancelled this booking. Reason: ${reason}`
-      : 'Client cancelled this booking.'
+    body = `${clientName} cancelled ${serviceLabel}${whenClause}.${reasonClause}`
   } else if (args.actor.kind === 'admin') {
     eventKey = NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN
     title = 'Booking cancelled by admin'
-    body = reason
-      ? `An admin cancelled this booking. Reason: ${reason}`
-      : 'An admin cancelled this booking.'
+    body = `An admin cancelled ${serviceLabel}${whenClause}.${reasonClause}`
   } else {
     // Pro cancelled their own booking.
     // Do not create a pro inbox notification for self-cancel.
@@ -4588,13 +4638,41 @@ async function createProBookingRescheduledNotification(args: {
   previousLocationTimeZone: string | null
   nextLocationTimeZone: string | null
 }): Promise<void> {
+  // §12 NC1 #6: "{client}'s {service} moved to {newDate} at {newTime}."
+  const rescheduleMeta = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: {
+      service: { select: { name: true } },
+      client: {
+        select: {
+          firstName: true, // pii-plaintext-read-ok: pro-facing client name in reschedule notif (same as inbox)
+          lastName: true, // pii-plaintext-read-ok: pro-facing client name in reschedule notif (same as inbox)
+        },
+      },
+    },
+  })
+  const rescheduleClientName = formatClientName(rescheduleMeta?.client ?? {})
+  const rescheduleServiceLabel =
+    rescheduleMeta?.service?.name?.trim() || 'appointment'
+  const rescheduleTz =
+    args.nextLocationTimeZone && isValidIanaTimeZone(args.nextLocationTimeZone)
+      ? args.nextLocationTimeZone
+      : DEFAULT_TIME_ZONE
+  const nextWhen = args.nextScheduledFor
+    ? new Date(args.nextScheduledFor)
+    : null
+  const rescheduleWhenClause =
+    nextWhen && !Number.isNaN(nextWhen.getTime())
+      ? ` to ${formatBookingDateLabel(nextWhen, rescheduleTz)} at ${formatBookingTimeLabel(nextWhen, rescheduleTz)}`
+      : ''
+
   await createProNotification({
     tx: args.tx,
     professionalId: args.professionalId,
     eventKey: NotificationEventKey.BOOKING_RESCHEDULED,
     priority: NotificationPriority.HIGH,
     title: 'Booking rescheduled',
-    body: 'A booking was rescheduled.',
+    body: `${rescheduleClientName}'s ${rescheduleServiceLabel} moved${rescheduleWhenClause}.`,
     href: `/pro/bookings/${args.bookingId}`,
     actorUserId: args.actorUserId,
     bookingId: args.bookingId,
@@ -5544,6 +5622,13 @@ export async function recordNoShowFeeCharge(args: {
         clientId: true,
         professionalId: true,
         noShowFeeStatus: true,
+        // §12 NC1 #24: service + pro + date for the fee receipt.
+        scheduledFor: true,
+        locationTimeZone: true,
+        service: { select: { name: true } },
+        professional: {
+          select: { timeZone: true, ...professionalPublicDisplayNameSelect },
+        },
       },
     })
 
@@ -5570,8 +5655,18 @@ export async function recordNoShowFeeCharge(args: {
     if (args.status === NoShowFeeStatus.CHARGED && args.amount) {
       const reasonLabel =
         args.reason === NoShowFeeReason.NO_SHOW
-          ? 'missed appointment'
-          : 'late cancellation'
+          ? 'a missed appointment'
+          : 'cancelling late'
+      const feeServiceLabel = booking.service?.name?.trim() || 'appointment'
+      const feeProName = formatProfessionalPublicDisplayName(
+        booking.professional,
+      )
+      const feeWhen = booking.scheduledFor
+        ? ` on ${formatBookingDateLabel(
+            booking.scheduledFor,
+            resolveBookingDisplayTimeZone(booking),
+          )}`
+        : ''
       await createUpdateClientNotification({
         tx,
         clientId: booking.clientId,
@@ -5580,7 +5675,7 @@ export async function recordNoShowFeeCharge(args: {
         title: 'A fee was charged',
         body: `Your saved card was charged $${args.amount.toFixed(
           2,
-        )} for a ${reasonLabel}.`,
+        )} for ${reasonLabel} — your ${feeServiceLabel} with ${feeProName}${feeWhen}.`,
         dedupeKey: `NO_SHOW_FEE:${booking.id}`,
         href: `/client/bookings/${booking.id}?step=overview`,
         data: {
@@ -9364,13 +9459,34 @@ async function performLockedCreateProBooking(args: {
 // Imported bookings are silent: the migrated client has no account yet, so we
 // don't send a confirmation or schedule appointment reminders.
 if (!importMode) {
+  // §12 NC1 #3+4: unified "you're booked with {pro} for {service} on {date} at
+  // {time}" copy, shared with every other confirm path.
+  const confirmMeta = await args.tx.booking.findUnique({
+    where: { id: booking.id },
+    select: {
+      scheduledFor: true,
+      locationTimeZone: true,
+      service: { select: { name: true } },
+      professional: {
+        select: { timeZone: true, ...professionalPublicDisplayNameSelect },
+      },
+    },
+  })
+  const confirmedCopy = buildBookingConfirmedClientCopy({
+    proName: formatProfessionalPublicDisplayName(confirmMeta?.professional),
+    serviceName: confirmMeta?.service?.name ?? offering.service.name,
+    scheduledFor: confirmMeta?.scheduledFor ?? null,
+    timeZone: confirmMeta
+      ? resolveBookingDisplayTimeZone(confirmMeta)
+      : DEFAULT_TIME_ZONE,
+  })
   await createUpdateClientNotification({
     tx: args.tx,
     clientId: args.clientId,
     bookingId: booking.id,
     eventKey: NotificationEventKey.BOOKING_CONFIRMED,
-    title: 'Appointment booked',
-    body: `Your appointment for ${offering.service.name || 'Appointment'} has been booked.`,
+    title: confirmedCopy.title,
+    body: confirmedCopy.body,
     dedupeKey: `BOOKING_CONFIRMED:${booking.id}`,
     href: `/client/bookings/${booking.id}?step=overview`,
     data: {
@@ -10083,8 +10199,10 @@ async function performLockedUpdateProBooking(args: {
       serviceId: true,
       offeringId: true,
       professionalId: true,
+      // §12 NC1 #8: enrich the pro-cancel client notification with service + pro.
+      service: { select: { name: true } },
       professional: {
-        select: { timeZone: true },
+        select: { timeZone: true, ...professionalPublicDisplayNameSelect },
       },
     },
   })
@@ -10172,13 +10290,19 @@ async function performLockedUpdateProBooking(args: {
   })
 
 if (args.notifyClient) {
+  const cancelServiceLabel = existing.service?.name?.trim() || 'appointment'
+  const cancelProName = formatProfessionalPublicDisplayName(existing.professional)
+  const cancelWhenClause = formatBookingWhenClause(
+    updated.scheduledFor,
+    resolveBookingDisplayTimeZone(existing),
+  )
   await createUpdateClientNotification({
     tx: args.tx,
     clientId: existing.clientId,
     bookingId: updated.id,
     eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
     title: 'Appointment cancelled',
-    body: 'Your appointment was cancelled.',
+    body: `Your ${cancelServiceLabel} with ${cancelProName}${cancelWhenClause} was cancelled.`,
     dedupeKey: `BOOKING_CANCELLED:${updated.id}`,
     href: `/client/bookings/${updated.id}?step=overview`,
     data: {
@@ -10589,13 +10713,25 @@ if (args.notifyClient) {
 
 if (args.notifyClient) {
   const isConfirm = args.nextStatus === BookingStatus.ACCEPTED
-  const title = isConfirm ? 'Appointment confirmed' : 'Appointment updated'
-  const bodyText = isConfirm
-    ? 'Your appointment has been confirmed.'
-    : 'Your appointment details were updated.'
+  const notifServiceLabel = existing.service?.name?.trim() || 'appointment'
+  const notifProName = formatProfessionalPublicDisplayName(existing.professional)
+  const notifTz = appointmentTimeZone || resolveBookingDisplayTimeZone(existing)
+  const notifWhen = new Date(updated.scheduledFor)
+
+  // §12 NC1 #3+4 (confirmed, unified helper) / #7 (rescheduled → "is now …").
   const eventKey = isConfirm
     ? NotificationEventKey.BOOKING_CONFIRMED
     : NotificationEventKey.BOOKING_RESCHEDULED
+  const confirmedCopy = buildBookingConfirmedClientCopy({
+    proName: notifProName,
+    serviceName: existing.service?.name,
+    scheduledFor: notifWhen,
+    timeZone: notifTz,
+  })
+  const title = isConfirm ? confirmedCopy.title : 'Appointment rescheduled'
+  const bodyText = isConfirm
+    ? confirmedCopy.body
+    : `Your ${notifServiceLabel} with ${notifProName} is now ${formatBookingDateLabel(notifWhen, notifTz)} at ${formatBookingTimeLabel(notifWhen, notifTz)}.`
   const notifKey = isConfirm
     ? `BOOKING_CONFIRMED:${updated.id}`
     : `BOOKING_RESCHEDULED:${updated.id}`
@@ -13780,6 +13916,8 @@ export async function createWaitlistOffer(
           id: true,
           offersInSalon: true,
           service: { select: { name: true } },
+          // §12 NC1 #25: pro name for the "{pro} has {when} open …" copy.
+          professional: { select: professionalPublicDisplayNameSelect },
         },
       })
       if (!offering) {
@@ -13794,7 +13932,7 @@ export async function createWaitlistOffer(
 
       const location = await tx.professionalLocation.findFirst({
         where: { id: args.locationId, professionalId: args.professionalId },
-        select: { id: true, type: true },
+        select: { id: true, type: true, timeZone: true },
       })
       if (!location) {
         throw bookingError('LOCATION_NOT_FOUND')
@@ -13846,13 +13984,22 @@ export async function createWaitlistOffer(
         data: { status: WaitlistStatus.NOTIFIED },
       })
 
+      // §12 NC1 #25: name the pro + concrete offered slot, add urgency.
       const serviceName = offering.service?.name?.trim() || 'your service'
+      const offerProName = formatProfessionalPublicDisplayName(
+        offering.professional,
+      )
+      const offerTz =
+        location.timeZone && isValidIanaTimeZone(location.timeZone)
+          ? location.timeZone
+          : DEFAULT_TIME_ZONE
+      const offerWhen = `${formatBookingDateLabel(offer.startsAt, offerTz)} at ${formatBookingTimeLabel(offer.startsAt, offerTz)}`
       await upsertClientNotification({
         tx,
         clientId: entry.clientId,
         eventKey: NotificationEventKey.WAITLIST_TIME_OFFERED,
-        title: 'A time was offered',
-        body: `Tap to confirm your ${serviceName} appointment time.`,
+        title: 'A spot opened up!',
+        body: `${offerProName} has ${offerWhen} open for your ${serviceName}. Tap to confirm before it's gone.`,
         dedupeKey: `WAITLIST_TIME_OFFERED:${offer.id}`,
         href: '/client/offers',
         data: {

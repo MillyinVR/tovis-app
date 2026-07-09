@@ -215,8 +215,9 @@ function buildNotificationContent(plan: DueTierPlanRow): {
   const incentive = incentiveLabel(plan)
 
   return {
-    title: 'Last-minute opening available',
-    body: `${proName} has a last-minute opening for ${serviceLabel} on ${when}.${incentive ? ` Offer: ${incentive}` : ''}`,
+    // §12 NC1 #26: add urgency + a clear call to action.
+    title: 'A last-minute opening',
+    body: `${proName} has a last-minute opening for ${serviceLabel} on ${when}.${incentive ? ` Offer: ${incentive}.` : ''} Tap to grab it.`,
     href: buildOfferingHref(plan),
     data: {
       openingId: plan.opening.id,

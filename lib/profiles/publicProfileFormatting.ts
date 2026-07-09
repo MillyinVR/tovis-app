@@ -252,11 +252,18 @@ export function formatDateIso(value: Date): string {
   return value.toISOString()
 }
 
-export function formatClientName(input: {
-  firstName?: string | null
-  lastName?: string | null
-  email?: string | null
-}): string {
+export function formatClientName(
+  input:
+    | {
+        firstName?: string | null
+        lastName?: string | null
+        email?: string | null
+      }
+    | null
+    | undefined,
+): string {
+  if (!input) return 'Client'
+
   const firstName = trimToNull(input.firstName)
   const lastName = trimToNull(input.lastName)
   const fullName = [firstName, lastName].filter(Boolean).join(' ').trim()

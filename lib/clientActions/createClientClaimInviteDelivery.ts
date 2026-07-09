@@ -4,6 +4,13 @@ import { ContactMethod, Prisma } from '@prisma/client'
 
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { asTrimmedString } from '@/lib/guards'
+import { prisma } from '@/lib/prisma'
+import {
+  pickProfessionalPublicDisplayName,
+  professionalPublicDisplayNameSelect,
+} from '@/lib/privacy/professionalDisplayName'
+import { formatBookingWhenClause } from '@/lib/booking/notificationCopy'
+import { DEFAULT_TIME_ZONE } from '@/lib/time'
 import type { TenantContext } from '@/lib/tenant/context'
 
 import { buildClientActionLinkForType } from './linkBuilders'
@@ -40,21 +47,74 @@ export type CreateClientClaimInviteDeliveryResult = {
   dispatch: Awaited<ReturnType<typeof enqueueClientActionDispatch>>
 }
 
-function buildInviteTitle(args: { brandName: string }): string {
-  return `You’ve been booked with ${args.brandName}`
+// §12 NC1 #39: this is the client's highest-stakes first touch, so lead with the
+// PRO (their actual relationship), falling back to the brand only when the pro
+// name is unavailable.
+function buildInviteTitle(args: {
+  proName: string | null
+  brandName: string
+}): string {
+  return args.proName
+    ? `You're booked with ${args.proName}`
+    : `You've been booked with ${args.brandName}`
 }
 
 function buildInviteBody(args: {
   invitedName: string | null
+  proName: string | null
+  serviceName: string | null
+  whenClause: string
   brandName: string
 }): string {
   const invitedName = asTrimmedString(args.invitedName)
+  const lead = invitedName ? `${invitedName}, your` : 'Your'
+  const withWhom = args.proName ?? args.brandName
+  const service = args.serviceName?.trim() || 'appointment'
 
-  if (invitedName) {
-    return `${invitedName}, your appointment with ${args.brandName} is booked. Tap to view your booking details and finish setting up your profile.`
+  return `${lead} ${service} with ${withWhom}${args.whenClause} is booked. Tap to view details and set up your profile.`
+}
+
+async function loadInviteBookingContext(
+  db: Prisma.TransactionClient | typeof prisma,
+  bookingId: string,
+): Promise<{
+  proName: string | null
+  serviceName: string | null
+  scheduledFor: Date | null
+  timeZone: string
+}> {
+  const booking = await db.booking
+    .findUnique({
+      where: { id: bookingId },
+      select: {
+        scheduledFor: true,
+        locationTimeZone: true,
+        service: { select: { name: true } },
+        professional: {
+          select: { timeZone: true, ...professionalPublicDisplayNameSelect },
+        },
+      },
+    })
+    .catch(() => null)
+
+  if (!booking) {
+    return {
+      proName: null,
+      serviceName: null,
+      scheduledFor: null,
+      timeZone: DEFAULT_TIME_ZONE,
+    }
   }
 
-  return `Your appointment with ${args.brandName} is booked. Tap to view your booking details and finish setting up your profile.`
+  return {
+    proName: pickProfessionalPublicDisplayName(booking.professional),
+    serviceName: booking.service?.name ?? null,
+    scheduledFor: booking.scheduledFor ?? null,
+    timeZone:
+      booking.locationTimeZone ||
+      booking.professional?.timeZone ||
+      DEFAULT_TIME_ZONE,
+  }
 }
 
 function buildInvitePayload(
@@ -117,6 +177,14 @@ export async function createClientClaimInviteDelivery(
 ): Promise<CreateClientClaimInviteDeliveryResult> {
   const plan = buildOrchestrationPlan(args)
   const brand = getBrandForTenantContext(args.tenantContext)
+  const bookingContext = await loadInviteBookingContext(
+    args.tx ?? prisma,
+    args.bookingId,
+  )
+  const whenClause = formatBookingWhenClause(
+    bookingContext.scheduledFor,
+    bookingContext.timeZone,
+  )
 
   const link = buildClientActionLinkForType({
     actionType: 'CLIENT_CLAIM_INVITE',
@@ -126,9 +194,15 @@ export async function createClientClaimInviteDelivery(
   const dispatch = await enqueueClientActionDispatch({
     plan,
     href: link.href,
-    title: buildInviteTitle({ brandName: brand.displayName }),
+    title: buildInviteTitle({
+      proName: bookingContext.proName,
+      brandName: brand.displayName,
+    }),
     body: buildInviteBody({
       invitedName: asTrimmedString(args.invitedName),
+      proName: bookingContext.proName,
+      serviceName: bookingContext.serviceName,
+      whenClause,
       brandName: brand.displayName,
     }),
     payload: buildInvitePayload(args),
