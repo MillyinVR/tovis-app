@@ -221,6 +221,7 @@
         "REFERRAL_TAP_RECEIVED",
         "REFERRAL_CONFIRMED",
         "REFERRAL_CONVERTED",
+        "MESSAGE_RECEIVED",
         "PRO_HANDLE_RESERVATION_EXPIRING",
         "ADMIN_VERIFICATION_REVIEW_NEEDED",
         "ADMIN_SUPPORT_TICKET_CREATED",
@@ -7636,6 +7637,7 @@
         "REMINDERS",
         "PAYMENTS",
         "LAST_MINUTE",
+        "MESSAGES",
         "SOCIAL"
       ],
       "type": "string"

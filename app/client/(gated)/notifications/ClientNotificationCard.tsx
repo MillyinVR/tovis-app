@@ -57,6 +57,8 @@ function eventKeyLabel(eventKey: NotificationEventKey): string {
       return 'Referral'
     case NotificationEventKey.VIRAL_REQUEST_APPROVED:
       return 'Featured'
+    case NotificationEventKey.MESSAGE_RECEIVED:
+      return 'Message'
     default:
       return 'Update'
   }
@@ -72,6 +74,7 @@ function eventKeyBadgeClass(eventKey: NotificationEventKey): string {
       return 'border-toneWarn/30 bg-toneWarn/10 text-textPrimary'
     case NotificationEventKey.BOOKING_CONFIRMED:
     case NotificationEventKey.PAYMENT_COLLECTED:
+    case NotificationEventKey.MESSAGE_RECEIVED:
       return 'border-accentPrimary/35 bg-accentPrimary/12 text-textPrimary'
     default:
       return 'border-surfaceGlass/14 bg-bgPrimary/40 text-textPrimary'
