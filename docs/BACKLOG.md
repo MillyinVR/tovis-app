@@ -26,6 +26,8 @@ blocking/degrading for a real user right now → least.**
    (iOS #18 + web #546).
 2. ~~Pro account menu can't scroll on mobile web; **Sign out unreachable** — §16~~ ✅ **DONE**
    (#545).
+3. ~~Aftercare email/SMS double-sent + the inbox-notification link bounced clients to
+   `/login` — §23~~ ✅ **DONE** (web #559; iOS auto-covered — server-only).
 
 **Tier 2 — turn on / finish already-built core features**
 3. Launch-gate flips + pro-migration go-live — §2 *(web/ops)* — ⚠️ **not blind
@@ -474,6 +476,13 @@ channel policy in `lib/notifications/eventKeys.ts`. Two auth emails (`lib/auth/{
   map; `PushDeepLink.role` → cross-workspace switch + link buffering; both `MainTabView` +
   `ProMainTabView` route symmetrically). Tap path NOT sim-verifiable (no APNs) → on the iOS
   device-verify checklist.
+
+> **Lesson (§23, 2026-07-09):** this channel rework touched the aftercare emit's
+> *copy* (NC1) but not its *channels*, and missed that `AFTERCARE_READY` had a second
+> emitter double-sending email/SMS with a login-gated link. When auditing a
+> notification, audit its **channels + every emitter of its event key**, not just copy.
+> Fixed in §23 / #559 by splitting the two emitters' channels via per-emit
+> `requestedChannels`.
 
 **Deferred §12 residuals (next code-actionable slices):**
 - [ ] **Last-minute +SMS on the 1:1 PRIORITY offer only (#26).** Both variants already get
@@ -995,6 +1004,52 @@ A4**, which delivers the edit-service-items client method (`tovis-ios/BACKLOG.md
   decision). Also decide whether to relax `ProConsultationFormView`'s single-BASE constraint
   (it currently blocks swapping the base service; web is looser) — keep both platforms
   consistent.
+
+## 23. Aftercare email/SMS: duplicate send + login-gated link (shipped 2026-07-09, PR #559)
+
+> **Was urgent — real client access blocker.** A client tapping the aftercare link
+> sent by SMS (the channel they check first) was bounced to `/login` and couldn't
+> complete aftercare or rebook; the same send also emailed the client **twice**.
+> Not previously tracked — surfaced by a 2026-07-09 audit.
+
+**Root cause (one defect, two symptoms).** Finalising/sending aftercare emitted **two**
+`AFTERCARE_READY` notifications for one event, and both fanned out to email + SMS:
+1. The **magic-link delivery** (`maybeCreateAftercareAccessDeliveryInBoundary` →
+   `createAftercareAccessDelivery`) — correct: a hashed 7-day `ClientActionToken` linking
+   `/client/rebook/{token}`, a **public no-login** page (`app/client/rebook/[token]/page.tsx`).
+2. The **inbox notification** (`createUpdateClientNotification`, in `upsertBookingAftercare`
+   + `sendExistingAftercareDraft` + `nudgeAftercareRebook`) with
+   `href: /client/bookings/{id}?step=aftercare` — under `app/client/(gated)/layout.tsx`,
+   which `redirect('/login?from=/client')`s any unauthenticated client. That path is NOT
+   in-app-only: `createUpdateClientNotification` → `upsertClientNotification` →
+   `createClientNotification` → `enqueueNewClientNotificationDispatch` fans out to SMS +
+   EMAIL (the `AFTERCARE_READY` catalog was `CLIENT_ALL_CHANNELS`).
+
+Both dispatches keyed the same event but used different `sourceKey`s
+(`client-action:…` vs `client-notification:{id}`), and dispatch dedupe is `sourceKey @unique`
+only — so they never collapsed → two emails/texts, one of which links to the login wall.
+_(Legacy `AftercareSummary.publicToken` is dead/unrelated; the §8 "drop it" bullet stands.)_
+
+**Decisions (Tori, 2026-07-09):** external EMAIL + SMS carry **only** the secure
+`/client/rebook/{token}` token link; keep the in-app `AFTERCARE_READY` notification but as
+**in-app/push only** (it drives the unread-aftercare badge via `loadClientBookingBuckets`
+and deep-links authenticated clients into the full booking view).
+
+- [x] **AL1 — split the two emitters' channels.** Threaded an optional `requestedChannels`
+  filter through `createUpdateClientNotification` → `upsertClientNotification` →
+  `createClientNotification` → `enqueueNewClientNotificationDispatch` → `enqueueDispatch`
+  (`resolveChannelPolicy` already intersects it with the event default). The three aftercare
+  inbox emits now request `[IN_APP, PUSH]`; the magic-link delivery is the **sole** EMAIL/SMS
+  sender. Added `PUSH` to the `AFTERCARE_READY` default set (`CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS`)
+  so the inbox emit's `[IN_APP, PUSH]` survives the intersection (PUSH inert until APNs).
+  Net per send: 1 email + 1 SMS (token link), 1 in-app row (badge preserved), push when live.
+- [x] **AL2 — tests.** Send + nudge assert the inbox emit requests `[IN_APP, PUSH]`;
+  `clientNotifications` asserts `requestedChannels` reaches `enqueueDispatch`; non-aftercare
+  emits pass `null` (event default). Full suite + typecheck + lint + `check:static-guards` green.
+- [x] **AL3 — parity/iOS.** Server-only fix → the iOS SMS/email duplicate clears
+  automatically; the in-app/push `AFTERCARE_READY` still reaches iOS unchanged. No iOS code.
+- ⚠️ **Prod deploy pending Tori's go-ahead** (no migration; pure notification-channel change).
+  Until deployed, prod still double-sends + login-walls the aftercare link.
 
 ---
 
