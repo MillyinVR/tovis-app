@@ -16,6 +16,7 @@ function row(
     title: overrides.title ?? `title-${eventKey}`,
     href: overrides.href ?? `/looks/${eventKey}`,
     createdAt: overrides.createdAt ?? new Date('2026-07-01T00:00:00.000Z'),
+    actorName: overrides.actorName ?? null,
   }
 }
 
@@ -94,6 +95,34 @@ describe('summarizeDigestRows', () => {
     expect(summary.totalCount).toBe(0)
     expect(summary.groups).toEqual([])
     expect(summary.recent).toEqual([])
+    expect(summary.leadActorName).toBeNull()
+  })
+
+  it('picks the newest engagement actor name as the lead', () => {
+    const summary = summarizeDigestRows([
+      row(NotificationEventKey.LOOK_LIKED, {
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        actorName: 'Older',
+      }),
+      row(NotificationEventKey.LOOK_COMMENTED, {
+        createdAt: new Date('2026-07-03T00:00:00.000Z'),
+        actorName: 'Jordan',
+      }),
+      // Newest row overall but no actor name (e.g. a milestone) — skipped.
+      row(NotificationEventKey.LOOK_MILESTONE_REACHED, {
+        createdAt: new Date('2026-07-04T00:00:00.000Z'),
+      }),
+    ])
+
+    expect(summary.leadActorName).toBe('Jordan')
+  })
+
+  it('leaves the lead null when no row carries an actor name', () => {
+    const summary = summarizeDigestRows([
+      row(NotificationEventKey.CLIENT_FOLLOW),
+      row(NotificationEventKey.LOOK_MILESTONE_REACHED),
+    ])
+    expect(summary.leadActorName).toBeNull()
   })
 })
 
@@ -121,6 +150,51 @@ describe('buildDigestHeadline', () => {
   it('falls back to a generic line when empty', () => {
     expect(buildDigestHeadline(summarizeDigestRows([]))).toBe(
       'You have new activity',
+    )
+  })
+
+  it('leads with the actor name and an others count when known', () => {
+    const summary = summarizeDigestRows([
+      row(NotificationEventKey.LOOK_LIKED, {
+        createdAt: new Date('2026-07-03T00:00:00.000Z'),
+        actorName: 'Maya',
+      }),
+      row(NotificationEventKey.LOOK_SAVED, {
+        createdAt: new Date('2026-07-02T00:00:00.000Z'),
+      }),
+      row(NotificationEventKey.LOOK_COMMENTED, {
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      }),
+    ])
+
+    expect(buildDigestHeadline(summary)).toBe(
+      'Maya and 2 others engaged with your looks this week',
+    )
+  })
+
+  it('uses the singular "other" for a count of two', () => {
+    const summary = summarizeDigestRows([
+      row(NotificationEventKey.LOOK_LIKED, {
+        createdAt: new Date('2026-07-03T00:00:00.000Z'),
+        actorName: 'Maya',
+      }),
+      row(NotificationEventKey.LOOK_SAVED, {
+        createdAt: new Date('2026-07-02T00:00:00.000Z'),
+      }),
+    ])
+
+    expect(buildDigestHeadline(summary)).toBe(
+      'Maya and 1 other engaged with your looks this week',
+    )
+  })
+
+  it('drops the others clause for a lone engagement', () => {
+    const summary = summarizeDigestRows([
+      row(NotificationEventKey.LOOK_LIKED, { actorName: 'Maya' }),
+    ])
+
+    expect(buildDigestHeadline(summary)).toBe(
+      'Maya engaged with your looks this week',
     )
   })
 })

@@ -19,6 +19,12 @@ export type DigestNotificationRow = {
   /** Relative deep-link path (may be empty). Absolutized by the caller. */
   href: string
   createdAt: Date
+  /**
+   * Public display name of this row's looks-engagement actor (like/save/comment)
+   * when one is resolvable, else null/absent. Populated by the orchestrator
+   * (`runDigest.ts`) — powers the lead-actor headline (§12 NC1 #35).
+   */
+  actorName?: string | null
 }
 
 export type DigestGroupSummary = {
@@ -38,6 +44,12 @@ export type SocialDigestSummary = {
   totalCount: number
   groups: DigestGroupSummary[]
   recent: DigestRecentItem[]
+  /**
+   * Public name of the newest looks-engagement actor across the summarized rows
+   * (§12 NC1 #35), or null when none is resolvable — then the headline falls
+   * back to the group-count line.
+   */
+  leadActorName: string | null
 }
 
 function labelForGroup(group: SocialDigestGroupDef, count: number): string {
@@ -89,21 +101,42 @@ export function summarizeDigestRows(
     })
   }
 
-  const recent = [...rows]
+  const digestRowsNewestFirst = [...rows]
     // Newest first; stable across equal timestamps.
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .filter((row) => digestGroupForEventKey(row.eventKey) !== null)
+
+  const recent = digestRowsNewestFirst
     .slice(0, maxRecent)
     .map((row) => ({ title: row.title, href: row.href }))
 
-  return { totalCount, groups, recent }
+  // Lead actor = the newest engagement row that carries a resolved public name.
+  const leadActorName =
+    digestRowsNewestFirst
+      .map((row) => row.actorName?.trim() || null)
+      .find((name): name is string => name !== null) ?? null
+
+  return { totalCount, groups, recent, leadActorName }
 }
 
 /**
- * Short subject/heading phrase from the summary — the two most significant
- * groups, e.g. "3 new likes & 2 new comments", falling back to a generic line.
+ * Short subject/heading phrase from the summary. Leads with the newest
+ * engagement actor's public name when one is known — "{name} and {N} others
+ * engaged with your looks this week" (§12 NC1 #35) — otherwise falls back to
+ * the two most significant groups ("3 new likes & 2 new comments"), then a
+ * generic line.
  */
 export function buildDigestHeadline(summary: SocialDigestSummary): string {
+  const leadActorName = summary.leadActorName?.trim()
+  if (leadActorName) {
+    const others = Math.max(0, summary.totalCount - 1)
+    if (others === 0) {
+      return `${leadActorName} engaged with your looks this week`
+    }
+    const otherNoun = others === 1 ? 'other' : 'others'
+    return `${leadActorName} and ${others} ${otherNoun} engaged with your looks this week`
+  }
+
   if (summary.groups.length === 0 || summary.totalCount === 0) {
     return 'You have new activity'
   }

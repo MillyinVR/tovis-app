@@ -10,6 +10,7 @@ const { mockPrisma } = vi.hoisted(() => ({
     professionalNotificationPreference: { findMany: vi.fn() },
     clientNotificationPreference: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
+    user: { findMany: vi.fn() },
   },
 }))
 
@@ -47,6 +48,7 @@ function resetMocks() {
   mockPrisma.professionalNotificationPreference.findMany.mockResolvedValue([])
   mockPrisma.clientNotificationPreference.findMany.mockResolvedValue([])
   mockPrisma.lookPost.findMany.mockResolvedValue([])
+  mockPrisma.user.findMany.mockResolvedValue([])
 }
 
 beforeEach(() => {
@@ -137,6 +139,58 @@ describe('runSocialDigest', () => {
       .find((payload) => payload.to === 'pro@test.com')
     expect(proPayload?.subject).toContain('TestBrand')
     expect(proPayload?.html).toContain('Hi Pat,')
+  })
+
+  it('personalizes the headline with the newest engagement actor', async () => {
+    mockPrisma.notification.groupBy.mockResolvedValue([
+      { professionalId: 'pro1', _count: { professionalId: 1 } },
+    ])
+    mockPrisma.professionalProfile.findMany.mockResolvedValue([
+      {
+        id: 'pro1',
+        firstName: 'Pat',
+        homeTenantId: 't1',
+        homeTenant: { id: 't1', slug: 'tovis-root' },
+        user: { email: 'pro@test.com' },
+      },
+    ])
+    mockPrisma.notification.findMany.mockResolvedValue([
+      {
+        professionalId: 'pro1',
+        eventKey: NotificationEventKey.LOOK_LIKED,
+        title: 'Glow Studio liked your look',
+        href: '/looks/1',
+        createdAt: new Date('2026-07-06T00:00:00.000Z'),
+        data: { lookPostId: 'look1', count: 1, actorUserId: 'u-actor' },
+      },
+    ])
+    mockPrisma.user.findMany.mockResolvedValue([
+      {
+        id: 'u-actor',
+        professionalProfile: {
+          businessName: 'Glow Studio',
+          firstName: null,
+          lastName: null,
+          handle: null,
+          nameDisplay: 'BUSINESS_NAME',
+        },
+        clientProfile: null,
+      },
+    ])
+    const sender = vi
+      .fn<(payload: DigestEmailPayload) => Promise<{ ok: boolean }>>()
+      .mockResolvedValue({ ok: true })
+
+    const result = await runSocialDigest({ now: NOW, sender })
+
+    expect(result.sent).toBe(1)
+    const payload = sender.mock.calls[0]?.[0]
+    expect(payload?.subject).toBe(
+      'TestBrand: Glow Studio engaged with your looks this week',
+    )
+    expect(payload?.html).toContain('Glow Studio engaged with your looks this week')
+    // The actor id was resolved through a single batched user lookup.
+    expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1)
   })
 
   it('no-ops when email is not configured', async () => {
