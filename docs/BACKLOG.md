@@ -884,6 +884,25 @@ grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
 
 ---
 
+## 20. Vanity link lands on the full profile (shipped 2026-07-09)
+
+`<handle>.tovis.me` (and premium NFC-card taps to `/p/[handle]`) used to render a
+stripped "link-in-bio" mirror. It now renders the **full** public profile in place
+by delegating to a shared `app/professionals/[id]/_components/PublicProfileView`
+(the vanity route resolves handle→id, no middleware change; the browser keeps the
+vanity URL). The old mirror is retired.
+
+- [ ] **Follow-up (not blocking): sticky vanity URL through interactions.** The
+  landing view stays on `<handle>.tovis.me`, but the profile's tab links + Book/
+  Message actions target `/professionals/{id}?tab=…` — non-root paths that
+  `proxy.ts` (L342–348) 307-redirects off the subdomain to the canonical host. So
+  interaction moves to `www`. Decide whether that's fine or make it sticky (relax
+  the middleware for `/professionals/*`, or emit root-relative/host-aware tab
+  hrefs). *iOS parity: N/A — web vanity-subdomain routing; native navigates to pro
+  profiles in-app (SEO/web-routing exempt per the parity rule).*
+
+---
+
 ### Note on superseded docs
 This backlog replaced these now-deleted planning docs — their open items are captured above; their history is in git:
 launch-readiness/{phase-2-remaining-work, finish-plan-2026-06-12, roadmap-corrected-2026-06-12, load-test-plan, traffic-model, load-traffic-model} ·
