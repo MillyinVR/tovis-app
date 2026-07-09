@@ -60,23 +60,26 @@ blocking/degrading for a real user right now → least.**
 15. Pro profile redesign — §18 (18a–18e) *(web+iOS)*
 16. Social-first media unification — §19 (19a–19g) *(web+iOS)*
 17. Client media capture outside before/after — §8 (client-capture bullet) *(web)*
+18. Change service mid-session (post-consultation) — §22 (MS1–MS3) *(web+iOS)* — new
+    pro capability; **gated behind §10 deploy** (payment reconciliation) + **iOS A4** (the
+    edit-service-items client method). Web-only pre-capture v1 is unblocked now.
 
 **Tier 6 — reliability / security / performance hardening**
-18. Premortem remediation + operator drills — §3 *(backend/ops)*
-19. Security / privacy tail — §4 *(backend)*
-20. Performance (nearbyPros index, perf baseline, exactOptional) — §5 *(tech debt)*
+19. Premortem remediation + operator drills — §3 *(backend/ops)*
+20. Security / privacy tail — §4 *(backend)*
+21. Performance (nearbyPros index, perf baseline, exactOptional) — §5 *(tech debt)*
 
 **Tier 7 — tech debt & background**
-21. Duplicate-logic consolidation — §6 *(tech debt)*
-22. Media/token hardening + observability + load gate — §8 (remaining bullets) *(ops)*
-23. Personalization tail (metrics/holdout, priors, velocity check) — §1 *(backend)*
-24. TOVISCamera polish — §17 *(iOS)*
+22. Duplicate-logic consolidation — §6 *(tech debt)*
+23. Media/token hardening + observability + load gate — §8 (remaining bullets) *(ops)*
+24. Personalization tail (metrics/holdout, priors, velocity check) — §1 *(backend)*
+25. TOVISCamera polish — §17 *(iOS)*
 
 **Tier 8 — verification, gated, parked, speculative**
-25. iOS launch train & live-verification (App Store upload) — iOS §1–§2 *(iOS)*
-26. iOS deferred web-parity polish — iOS §3–§4 *(iOS)*
-27. Product / legal-gated (parked incl. white-label) — §7 *(gated)*
-28. TikTok login (parked) — §15 **A9** *(parked)*
+26. iOS launch train & live-verification (App Store upload) — iOS §1–§2 *(iOS)*
+27. iOS deferred web-parity polish — iOS §3–§4 *(iOS)*
+28. Product / legal-gated (parked incl. white-label) — §7 *(gated)*
+29. TikTok login (parked) — §15 **A9** *(parked)*
 
 ---
 
@@ -923,6 +926,75 @@ overlay. Root-caused + fixed in **PR #554** (deploy pending Tori's go-ahead).
 - [x] **AC5** `GET .../aftercare` now returns the before/after pair
   (`loadBookingBeforeAfterThumbsFor`) so native iOS can render photos — see
   `tovis-ios/BACKLOG.md §4` (A-AC1). **PR #554**
+
+---
+
+## 22. Change service mid-session (post-consultation) (audit 2026-07-09)
+
+Audit of "can a pro add/remove/change the service being performed during a live
+appointment?" (3 read-only agents, web + iOS).
+
+**What already exists (do NOT rebuild):** the **consultation step (Step 1)** already has a
+full add/remove/change-service editor on both platforms — web `ConsultationForm`
+([`app/pro/bookings/[id]/ConsultationForm.tsx`](../app/pro/bookings/%5Bid%5D/ConsultationForm.tsx),
+rendered from [`session/page.tsx:823`](../app/pro/bookings/%5Bid%5D/session/page.tsx#L823))
+and iOS `ProConsultationFormView` — both shipped via **W3b / PR #542** (§9). That edit is a
+*proposal* that already reopens price/duration and requires client (re-)approval before it
+commits (materialized on approval via `replaceBookingServiceItems` in
+[`lib/booking/writeBoundary.ts`](../lib/booking/writeBoundary.ts)). So the pre-approval case
+is **done**.
+
+**The gap (this section):** once the consultation is **approved** and the session advances
+(before-photos → service-in-progress → wrap-up), there is **no in-session UI on either
+platform** to change the service if the plan changes mid-appointment. Web's only post-approval
+service-item editor is the calendar `BookingModal` (`updateProBooking`, `PATCH
+/api/v1/pro/bookings/[id]` with `serviceItems`) — not reachable from the session flow. iOS has
+**no** post-approval editor *and* no TovisKit method to edit service items at all (only
+`sendConsultationProposal`). Not tracked in either backlog before this audit.
+
+**Decision (Tori, 2026-07-09):** a mid-session service change **reopens price + duration
+(cascade) and requires client re-approval** — same contract as the consultation flow. NOT
+record-keeping-only.
+
+**Hard constraint.** Route every change through the existing recompute path
+(`updateProBooking` / `performLockedApproveConsultationMaterialization` /
+`replaceBookingServiceItems`), which rewrites `BookingServiceItem` rows + `Booking.serviceId`
++ all price/duration snapshots (`subtotalSnapshot`, `serviceSubtotalSnapshot`,
+`totalDurationMinutes`, `totalAmount`) atomically. **Never set `Booking.serviceId` alone** —
+snapshots have no read-through/trigger, so a bare serviceId write silently desyncs price,
+duration, and the charged amount (checkout reads `serviceSubtotalSnapshot` →
+`buildBookingCheckoutRollupUpdate` → Stripe `amountCents`). Stay inside `writeBoundary.ts`
+(respect `check:booking-boundary` + `check:lifecycle-field-writes`).
+
+**Sequencing (see ⭐ work order, Tier 5 #18):** the payment-reconciliation piece is **gated on
+§10 deploying + settling** (it extends the `AWAITING_CONFIRMATION`/checkout state machine §10
+just reworked; #550 was still deploy-pending at audit time). The iOS half is **gated on iOS
+A4**, which delivers the edit-service-items client method (`tovis-ios/BACKLOG.md §5 A4`). A
+**web-only, pre-capture-only v1 (MS1) has no live dependency** and is buildable now.
+
+### Web workstreams
+- [ ] **MS1 — web v1 (pre-capture only).** Add a "change service" affordance to the
+  post-consultation session screens (before-photos / service-in-progress). Reuse the
+  base+add-on-aware picker from `ConsultationForm` (don't duplicate). Allow the change **only
+  while nothing is captured yet**; on change, re-enter the consultation re-approval loop so
+  price/duration reopen and the client signs off before commit. Confirm
+  `resolveEffectiveSessionStep` handles a return-to-pending from a post-consultation step
+  without losing before-photos progress.
+- [ ] **MS2 — re-approval loop wiring.** Formalize the post-approval → `CONSULTATION_PENDING_CLIENT`
+  (or a lighter re-consent) → re-materialize transition and its notifications.
+- [ ] **MS3 — payment reconciliation (GATED on §10 deploy+settle).** Decide + build what
+  happens when a deposit/payment is **already captured** and the new service costs more/less:
+  adjustment / partial refund / re-charge. Do NOT let the snapshot change while a captured
+  charge stays stale. **Blocked until §10 is deployed and stable.**
+
+### iOS workstream (parity — gated on iOS A4; detail → `tovis-ios/BACKLOG.md §5`)
+- [ ] **MS-iOS.** Mirror the in-session change-service + re-approval flow in `~/Dev/tovis-ios`
+  (`ProSessionHubView` post-consultation screens). Predecessor: **iOS A4** must first add the
+  edit-service-items client method (or route via a re-opened `sendConsultationProposal` +
+  `decideConsultation`, which iOS already has — aligns with the "reopen + re-approve"
+  decision). Also decide whether to relax `ProConsultationFormView`'s single-BASE constraint
+  (it currently blocks swapping the base service; web is looser) — keep both platforms
+  consistent.
 
 ---
 
