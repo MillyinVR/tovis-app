@@ -534,6 +534,43 @@ TikTok ➖ absent on both platforms, parked (A9) · client→Looks landing ✅.
   resend/status). A9 (TikTok) would additionally need the web `/auth/tiktok` half,
   but is parked with the iOS side.
 
+## 16. Pro account menu can't scroll — bottom items unreachable (audit 2026-07-08)
+The pro account dropdown (⋯ menu in `ProHeader`) renders a fixed, fairly tall list —
+identity header → View as client → Studio (3) → Content (4: Looks, Upload, Messages,
+Referral rewards) → footer (Switch workspace + **Sign out**), ~650–720px of content.
+The panel is `absolute`, top-anchored, `overflow-hidden` with **no `max-height` and
+no internal scroll region** (`panelBase`, `app/pro/_components/ProAccountMenu.tsx:205-206`),
+and opening it locks page scroll via `document.documentElement.style.overflow = 'hidden'`
+(same file, `:125-134`). Result: on any viewport shorter than ~780px usable height, the
+bottom of the list — including **Sign out** — is painted off-screen with no way to reach it.
+
+- **Affects:** mobile web (most phones once address-bar chrome counts) and short/zoomed
+  desktop windows. Not iOS. Width (`w-[min(384px,92vw)]`) is fine; height is the issue.
+- **Scope:** pro-only. Audited the client side — there is no equivalent client account
+  dropdown (client account lives in the `ClientSessionFooter` tab bar + the scrollable
+  `ClientMeDashboard` "Me" page, whose container is `h-full overflow-y-auto`), so the bug
+  does not reproduce there.
+- **Root cause:** no bounded height + no `overflow-y-auto` on the panel, plus the
+  page-scroll lock removes the fallback of scrolling the page.
+
+**Fix (decided with Tori — sticky header/footer, scroll the middle):**
+- [ ] **`ProAccountMenu.tsx` (the bug).** Split the panel into `flex flex-col` with a
+  `max-h-[calc(100dvh-~88px)]` bound; pin header (`shrink-0`) and footer (`shrink-0`,
+  keep border-top); wrap the middle sections in a `flex-1 overflow-y-auto` region. Keep
+  `overflow-hidden` on the outer panel for the rounded corners; keep the page-scroll lock
+  (now correct). Use `dvh` not `vh`. Single-file change; no new deps. Confirm the real
+  header height before hardcoding the `max-h` offset.
+- [ ] **`SwitchAccountSheet.tsx` (latent hardening; shared pro+client).** The panel `<div>`
+  (`app/_components/AdminSessionFooter/SwitchAccountSheet.tsx:130-142`) has `maxWidth: 380`
+  but **no `maxHeight` and no `overflowY`**, and its container is `fixed inset-0;
+  align-items: flex-end`, so a list taller than the viewport would push the header off the
+  top with no scroll. Harmless today (workspace options cap at the 3 roles), but cheap to
+  harden while in the area: add `maxHeight: 'min(70dvh, …)'` + `overflowY: 'auto'` to the
+  panel. Not blocking; do it in the same PR.
+- **Verify at:** mobile portrait + a ~700px-tall desktop window; confirm Sign out is always
+  visible and the middle list scrolls in the pro menu. For the sheet, no behavior change
+  expected with ≤3 rows.
+
 ---
 
 ### Note on superseded docs
