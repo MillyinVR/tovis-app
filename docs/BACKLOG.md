@@ -38,8 +38,11 @@ blocking/degrading for a real user right now → least.**
 **Tier 3 — everyday experience quality**
 5. ~~Notification copy + channel rework — §12 (NC1–NC5)~~ ✅ **DONE** (#547 · iOS #19/#20 ·
    digest #35 web #548); deferred residuals in §12 *(web+iOS)*
-6. Messaging refinement M3–M5 — §13 / iOS §7 *(web+iOS)*
-7. Post-payment confirm read-endpoint follow-up — §10 / iOS §6 *(web+iOS)*
+6. ~~Messaging refinement M3–M5 — §13 / iOS §7~~ ✅ **DONE** (web M3–M5 #534–#539 · iOS
+   M3–M4c/d #14–#17); optional M3 niceties (search / numeric unread / zero-message
+   threads) remain deferred in §13 *(web+iOS)*
+7. ~~Post-payment confirm read-endpoint follow-up — §10 / iOS §6~~ ✅ **DONE** (web #550 ·
+   iOS #24) *(web+iOS)*
 
 **Tier 4 — login-method & big iOS surface parity**
 8. iOS native auth **residual only** — core signup/login/Apple/reset + **App Attest
@@ -254,9 +257,9 @@ items (A2), since they're social surfaces (looks/stats/follow), not SEO mirrors.
   day-grouping + filter chips.
 
 ## 10. Post-appointment payment confirmation + aftercare rebooking (audit 2026-07-08)
-> ✅ **COMPLETE (2026-07-08).** PF1 #527 · PF2 #528 · PF3 #529 (web) · PF4 iOS #10 all
-> merged. Deferred niceties (need read-endpoint fields) tracked in `tovis-ios/BACKLOG.md §6`.
-> ⚠️ Web prod deploy still pending Tori's go-ahead.
+> ✅ **COMPLETE (2026-07-09).** PF1 #527 · PF2 #528 · PF3 #529 (web) · PF4 iOS #10 ·
+> PF5 read-endpoint follow-up (web #550 · iOS #24) all merged — booking-detail surfaces done.
+> ⚠️ Web prod deploy of #550 still pending Tori's go-ahead.
 
 Audit of the client post-appointment checkout → aftercare rebooking flow (3 parallel
 agents). **Gap:** for off-platform / unverifiable methods (Venmo / Zelle / Cash /
@@ -342,9 +345,13 @@ booking/checkout writes must stay inside `lib/booking/writeBoundary.ts` (respect
 - [x] **PF4 — iOS parity** — SHIPPED (tovis-ios PR #10). Client AWAITING_CONFIRMATION banner;
   pro session wrap-up "Confirm payment received" → confirm-payment route (auto-approves the
   coupled next booking); PAYMENT_CONFIRMATION_REQUIRED labelled. Used the repo's stringly-typed
-  checkout-status/event-key convention (no new enum). Deferred: pro booking-detail confirm
-  button + coupled next-booking card + client "Pending confirmation" label (need `checkoutStatus`
-  + `rebookOfBookingId` on the pro/client read endpoints — a future backend PR).
+  checkout-status/event-key convention (no new enum).
+- [x] **PF5 — read-endpoint follow-up (booking-detail surfaces)** — SHIPPED (web #550 · iOS #24).
+  Backend: `checkoutStatus` + `rebookOfBookingId` now exposed on `GET /pro/bookings/[id]` and
+  the client bookings read (`rebookOfBookingId` added to `ClientBookingDTO` + every
+  `ClientBookingRow` select). iOS: the pro booking-DETAIL Payment card gains the "Confirm payment
+  received" control (AWAITING_CONFIRMATION), and a coupled aftercare PENDING next appointment shows
+  a "Pending — your pro will confirm" notice. Clears all §6 deferred booking-detail niceties.
 
 ## 11. Custom appointment-reminder timing for pros (design 2026-07-08)
 Today a pro's client-reminder cadence is three on/off switches — **7 / 3 / 1 days** before
@@ -527,15 +534,19 @@ ids. iOS side tracked in `tovis-ios/BACKLOG.md §7`. 5 increments, one PR-pair e
   on a `user:{id}` broadcast (poll/focus stay as a fail-open safety net). iOS was already at
   parity: its app-global `user:{id}` subscriber (iOS commit `5033dc0`) bumps `refreshTick`, which
   the inbox + thread both observe — so M2 was web catching up, no iOS PR.
-- [ ] **M3 — inbox polish parity.** iOS gains web's 4 filter tabs + context eyebrows (M3 also
-  clears the A6/§7 inbox-filter item on iOS). Consider adding search + a numeric per-row unread
-  count (both platforms only show a binary dot) + surfacing zero-message threads.
-- [ ] **M4 — richer thread + composer.** Attachment/media composer (both platforms only RENDER
-  attachments — can't send) + "load older" history paging (server cursor `nextCursor`/`hasMore`
-  exists but neither UI uses it). A message deep-link/push target so a notification opens the thread.
-- [ ] **M5 — dedup + hardening.** Extract the remaining duplicated eyebrow/context logic across
-  `app/messages/page.tsx` + `thread/[id]/page.tsx`; reconcile the inbox `take` mismatch (SSR 60 vs
-  `/threads` API 50); add route-level tests for the messaging endpoints (currently none).
+- [x] **M3 — inbox polish parity** — SHIPPED (web #534 · iOS #14). Server-computed inbox
+  `eyebrow`/`isAccentContext` + `?filter=` (All/Bookings/Waitlists/Pros) on `/threads`
+  (`lib/messages/inboxContext.ts` is the SSOT); iOS gained the 4 filter tabs + per-row context
+  eyebrow (also cleared the A6/§7 inbox-filter item). **Deferred (optional niceties, not built):**
+  thread search, a numeric per-row unread count (both platforms show a binary dot), surfacing
+  zero-message threads.
+- [x] **M4 — richer thread + composer** — SHIPPED. "Load earlier" cursor paging (web #535 ·
+  iOS #15/M4a), image attachment composer (web #536 · iOS #16/M4b), new-message notification +
+  push deep-link target that opens the thread + pro→client entry points (web #537 · iOS #17/M4c-d).
+- [x] **M5 — dedup + hardening** — SHIPPED (web #539). Extracted the shared eyebrow/context logic
+  into `lib/messages/inboxContext.ts`, reconciled the inbox `take` (both use
+  `INBOX_THREADS_PAGE_SIZE = 50`), added the first route-level tests for the messaging endpoints.
+  (iOS §7 M3–M5 as originally scoped are all covered by #14–#17 above.)
 
 ---
 
