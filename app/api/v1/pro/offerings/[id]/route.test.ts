@@ -584,6 +584,65 @@ describe('app/api/v1/pro/offerings/[id]/route.ts', () => {
       )
     })
 
+    it('updates the rebook interval with a positive whole number of days', async () => {
+      const result = await PATCH(
+        makeRequest({ rebookIntervalDays: 42 }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(200)
+      expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith({
+        where: { id: 'offering_1' },
+        data: { rebookIntervalDays: 42 },
+        include: {
+          service: {
+            include: {
+              category: true,
+            },
+          },
+        },
+      })
+    })
+
+    it('clears the rebook interval when passed null', async () => {
+      const result = await PATCH(
+        makeRequest({ rebookIntervalDays: null }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(200)
+      expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith({
+        where: { id: 'offering_1' },
+        data: { rebookIntervalDays: null },
+        include: {
+          service: {
+            include: {
+              category: true,
+            },
+          },
+        },
+      })
+    })
+
+    it('returns 400 when rebook interval is zero, negative, or fractional', async () => {
+      for (const bad of [0, -7, 30.5]) {
+        const result = await PATCH(
+          makeRequest({ rebookIntervalDays: bad }),
+          makeCtx(),
+        )
+
+        const body = await readJson<{ ok: false; error: string }>(result)
+        expect(result.status).toBe(400)
+        expect(body).toEqual({
+          ok: false,
+          error:
+            'rebookIntervalDays must be a positive whole number of days or null.',
+        })
+      }
+
+      expect(mocks.professionalServiceOffering.update).not.toHaveBeenCalled()
+    })
+
     it('returns 400 when description is not string or null', async () => {
       const result = await PATCH(
         makeRequest({

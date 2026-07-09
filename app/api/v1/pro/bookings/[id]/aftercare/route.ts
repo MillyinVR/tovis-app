@@ -24,6 +24,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
+import { computeSuggestedRebookWindow } from '@/app/pro/bookings/[id]/aftercare/aftercareDates'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
@@ -133,6 +134,12 @@ const GET_BOOKING_SELECT = {
   scheduledFor: true,
   finishedAt: true,
   locationTimeZone: true,
+  // Primary offering drives the auto-suggested rebook window at wrap-up.
+  offering: {
+    select: {
+      rebookIntervalDays: true,
+    },
+  },
   aftercareSummary: {
     select: {
       id: true,
@@ -852,6 +859,19 @@ export async function GET(_req: Request, ctx: RouteContext) {
     // with no photos yield null URLs.
     const media = await loadBookingBeforeAfterThumbsFor(booking.id)
 
+    // Auto-suggested recommended-window rebook dates for a fresh wrap-up (service
+    // date + the offering's typical rebook interval). Offered only when no
+    // aftercare has been saved yet, so a saved choice is never overwritten; null
+    // when the offering has no interval set. Clients pre-select
+    // RECOMMENDED_WINDOW from this so the rebook default is a date, not "None".
+    const rebookSuggestion = booking.aftercareSummary
+      ? null
+      : computeSuggestedRebookWindow({
+          intervalDays: booking.offering?.rebookIntervalDays ?? null,
+          anchorIso: booking.scheduledFor.toISOString(),
+          timeZone: booking.locationTimeZone ?? 'UTC',
+        })
+
     return jsonOk(
       {
         booking: {
@@ -861,6 +881,12 @@ export async function GET(_req: Request, ctx: RouteContext) {
           scheduledFor: booking.scheduledFor.toISOString(),
           finishedAt: toIsoOrNull(booking.finishedAt),
           locationTimeZone: booking.locationTimeZone,
+          rebookSuggestion: rebookSuggestion
+            ? {
+                windowStart: rebookSuggestion.windowStartIso,
+                windowEnd: rebookSuggestion.windowEndIso,
+              }
+            : null,
           aftercareSummary: booking.aftercareSummary
             ? mapAftercareSummaryForGet(booking.aftercareSummary)
             : null,

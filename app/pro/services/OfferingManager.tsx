@@ -39,6 +39,10 @@ type Offering = {
   mobilePriceStartingAt: string | null
   mobileDurationMinutes: number | null
 
+  // Typical rebook interval in days; drives the wrap-up rebook-window
+  // suggestion. Null = no suggestion.
+  rebookIntervalDays: number | null
+
   /**
    * ✅ Option 1 support (preferred names)
    */
@@ -67,6 +71,7 @@ type OfferingPatch = {
   salonDurationMinutes?: number | null
   mobilePriceStartingAt?: string | null
   mobileDurationMinutes?: number | null
+  rebookIntervalDays?: number | null
 }
 
 type EligibleAddOn = {
@@ -599,6 +604,9 @@ function OfferingEditor(props: {
   const [mobileDuration, setMobileDuration] = useState(
     o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '',
   )
+  const [rebookInterval, setRebookInterval] = useState(
+    o.rebookIntervalDays ? String(o.rebookIntervalDays) : '',
+  )
   const [addonsOpen, setAddonsOpen] = useState(false)
 
   const disabledForEdit = busy || uploadBusy || !upstreamOk
@@ -670,6 +678,22 @@ function OfferingEditor(props: {
       }
     }
 
+    // Rebook interval is optional; blank clears it (no suggestion). Any value
+    // must be a positive whole number of days.
+    let rebookIntervalInt: number | null = null
+    const rebookIntervalTrimmed = rebookInterval.trim()
+
+    if (rebookIntervalTrimmed) {
+      rebookIntervalInt = Math.trunc(Number(rebookIntervalTrimmed))
+
+      if (!Number.isFinite(rebookIntervalInt) || rebookIntervalInt <= 0) {
+        return {
+          ok: false,
+          error: 'Rebook interval must be a positive number of days, or blank.',
+        }
+      }
+    }
+
     return {
       ok: true,
       patch: {
@@ -680,6 +704,7 @@ function OfferingEditor(props: {
         salonDurationMinutes: offersInSalon ? salonDurInt : null,
         mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
         mobileDurationMinutes: offersMobile ? mobileDurInt : null,
+        rebookIntervalDays: rebookIntervalInt,
       },
     }
   }
@@ -870,6 +895,27 @@ function OfferingEditor(props: {
           </div>
         </div>
       </div>
+
+      <label className="grid gap-1">
+        <div className="text-[11px] font-black text-textSecondary">
+          Rebook interval (days)
+        </div>
+
+        <input
+          value={rebookInterval}
+          onChange={(e) => setRebookInterval(e.target.value)}
+          disabled={disabledForEdit}
+          type="number"
+          min={1}
+          className={inputBase}
+          placeholder="e.g. 42 — leave blank for no suggestion"
+        />
+
+        <div className="text-[11px] text-textSecondary/70">
+          Auto-suggests a rebook window at session wrap-up (service date + this
+          many days). Leave blank to keep it off.
+        </div>
+      </label>
 
       {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
       {success ? <div className="text-[12px] text-toneSuccess">{success}</div> : null}

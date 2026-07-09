@@ -76,7 +76,12 @@ vi.mock('@/lib/guards', () => ({
   isRecord: mocks.isRecord,
 }))
 
-vi.mock('@/lib/timeZone', () => ({
+vi.mock('@/lib/timeZone', async () => ({
+  // Keep the real tz math (used by the rebook-window suggestion helper) and
+  // mock only the validity check the route branches on.
+  ...(await vi.importActual<typeof import('@/lib/timeZone')>(
+    '@/lib/timeZone',
+  )),
   isValidIanaTimeZone: mocks.isValidIanaTimeZone,
 }))
 
@@ -212,6 +217,7 @@ function expectRouteIdempotencyStartedWith(
 function makeGetBooking(overrides?: {
   professionalId?: string
   aftercareSummary?: Record<string, unknown> | null
+  offeringRebookIntervalDays?: number | null
 }) {
   return {
     id: 'booking_1',
@@ -221,6 +227,9 @@ function makeGetBooking(overrides?: {
     scheduledFor: new Date('2026-04-12T18:00:00.000Z'),
     finishedAt: new Date('2026-04-12T20:00:00.000Z'),
     locationTimeZone: 'America/Los_Angeles',
+    offering: {
+      rebookIntervalDays: overrides?.offeringRebookIntervalDays ?? null,
+    },
     aftercareSummary:
       overrides && 'aftercareSummary' in overrides
         ? overrides.aftercareSummary
@@ -820,6 +829,7 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         scheduledFor: '2026-04-12T18:00:00.000Z',
         finishedAt: '2026-04-12T20:00:00.000Z',
         locationTimeZone: 'America/Los_Angeles',
+        rebookSuggestion: null,
         aftercareSummary: null,
         media: {
           beforeUrl: null,
@@ -829,6 +839,38 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         },
       },
     })
+  })
+
+  it('GET suggests a rebook window from the offering interval when no aftercare is saved', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce(
+      makeGetBooking({
+        aftercareSummary: null,
+        offeringRebookIntervalDays: 42,
+      }),
+    )
+
+    const result = await GET(new Request('http://localhost/test'), makeCtx())
+
+    expect(result.status).toBe(200)
+    const body = await result.json()
+    // scheduledFor 2026-04-12 (America/Los_Angeles) + 42d = 2026-05-24;
+    // window end = +7d = 2026-05-31. Start-of-day / end-of-day in PDT (UTC-7).
+    expect(body.booking.rebookSuggestion).toEqual({
+      windowStart: '2026-05-24T07:00:00.000Z',
+      windowEnd: '2026-06-01T06:59:00.000Z',
+    })
+  })
+
+  it('GET makes no rebook suggestion once aftercare has been saved', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce(
+      makeGetBooking({ offeringRebookIntervalDays: 42 }),
+    )
+
+    const result = await GET(new Request('http://localhost/test'), makeCtx())
+
+    expect(result.status).toBe(200)
+    const body = await result.json()
+    expect(body.booking.rebookSuggestion).toBeNull()
   })
 
   it('GET returns the primary before/after media pair for the authoring screen', async () => {
@@ -875,6 +917,7 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         scheduledFor: '2026-04-12T18:00:00.000Z',
         finishedAt: '2026-04-12T20:00:00.000Z',
         locationTimeZone: 'America/Los_Angeles',
+        rebookSuggestion: null,
         aftercareSummary: {
           id: 'aftercare_1',
           notes: 'Use a sulfate-free shampoo.',
@@ -959,6 +1002,7 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         scheduledFor: '2026-04-12T18:00:00.000Z',
         finishedAt: '2026-04-12T20:00:00.000Z',
         locationTimeZone: 'America/Los_Angeles',
+        rebookSuggestion: null,
         aftercareSummary: {
           id: 'aftercare_1',
           notes: 'Draft notes.',

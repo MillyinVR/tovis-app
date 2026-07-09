@@ -143,6 +143,7 @@ export function offeringToDto(off: OfferingRow) {
       ? moneyToString(off.mobilePriceStartingAt)
       : null,
     mobileDurationMinutes: off.mobileDurationMinutes ?? null,
+    rebookIntervalDays: off.rebookIntervalDays ?? null,
     isActive: Boolean(off.isActive),
     serviceName: off.service.name,
     categoryName: off.service.category?.name ?? null,

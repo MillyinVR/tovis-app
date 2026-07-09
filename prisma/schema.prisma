@@ -2575,6 +2575,12 @@ model ProfessionalServiceOffering {
   offersInSalon Boolean @default(true)
   offersMobile  Boolean @default(false)
 
+  // Typical rebook interval for this offering, in days, set by the pro. When
+  // present, session wrap-up (aftercare) auto-suggests a recommended-window
+  // rebook date = service date + this many days. Null = no suggestion (the
+  // rebook recommendation stays "None", the pre-existing behavior).
+  rebookIntervalDays Int?
+
   customImageUrl String?
 
   isActive  Boolean  @default(true)

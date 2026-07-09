@@ -10,6 +10,7 @@ import {
 } from '@prisma/client'
 
 import AftercareForm from './AftercareForm'
+import { computeSuggestedRebookWindow } from './aftercareDates'
 import ClientProfilePanel from './ClientProfilePanel'
 import ServicesReceivedCard from './ServicesReceivedCard'
 
@@ -509,6 +510,7 @@ export default async function ProAftercarePage({ params }: PageProps) {
       locationId: true,
       clientAddressId: true,
       status: true,
+      scheduledFor: true,
       startedAt: true,
       finishedAt: true,
       sessionStep: true,
@@ -523,6 +525,14 @@ export default async function ProAftercarePage({ params }: PageProps) {
       service: {
         select: {
           name: true,
+        },
+      },
+
+      // The booking's primary offering drives the auto-suggested rebook window
+      // (service date + the offering's typical rebook interval).
+      offering: {
+        select: {
+          rebookIntervalDays: true,
         },
       },
 
@@ -689,6 +699,18 @@ export default async function ProAftercarePage({ params }: PageProps) {
 
   const timeZone = timeZoneResult.ok ? timeZoneResult.timeZone : 'UTC'
   const aftercare = booking.aftercareSummary
+
+  // Auto-suggested recommended-window rebook dates for a fresh wrap-up. Only
+  // offered when no aftercare has been saved yet, so a pro's saved choice (even
+  // an explicit "None") is never overwritten. Null when the offering has no
+  // rebook interval set — the recommendation then stays "None" as before.
+  const rebookSuggestion = aftercare
+    ? null
+    : computeSuggestedRebookWindow({
+        intervalDays: booking.offering?.rebookIntervalDays ?? null,
+        anchorIso: booking.scheduledFor.toISOString(),
+        timeZone,
+      })
 
   // Sign every asset's full + thumb in one batched pass (one round-trip per
   // private bucket) rather than 2×N sequential signed-URL calls — the latter is
@@ -874,6 +896,8 @@ export default async function ProAftercarePage({ params }: PageProps) {
             )}
             existingRebookWindowEnd={dateToIso(aftercare?.rebookWindowEnd)}
             existingRebookDeclinedAt={dateToIso(aftercare?.rebookDeclinedAt)}
+            suggestedRebookWindowStart={rebookSuggestion?.windowStartIso ?? null}
+            suggestedRebookWindowEnd={rebookSuggestion?.windowEndIso ?? null}
             existingRebookSlot={
               aftercare?.rebookSlot
                 ? {
