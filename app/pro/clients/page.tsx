@@ -1,5 +1,4 @@
 // app/pro/clients/page.tsx
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Prisma } from '@prisma/client'
 
@@ -10,9 +9,8 @@ import { formatLastBookingLabel } from '@/lib/clients/lastBookingLabel'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 
 import NewClientForm from './NewClientForm'
-import ClientNameLink from '@/app/_components/ClientNameLink'
-import EmptyState from '@/app/_components/boundaries/EmptyState'
-import { Card, buttonClassName } from '@/app/_components/ui'
+import ClientsList, { type ProClientRow } from './ClientsList'
+import { Card } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,6 +72,29 @@ export default async function ProClientsPage() {
     },
   })
 
+  // Flatten to serializable display + search strings here (server-side) so the
+  // client search list carries no raw PII fields and needs no extra fetch. The
+  // last-booking label + message href are resolved in the pro's timezone.
+  const clientRows: ProClientRow[] = clients.map((client) => {
+    const email = client.user?.email ?? null // pii-plaintext-read-ok: pro reads own visible client contact for the clients list
+    const phone = client.phone // pii-plaintext-read-ok: pro reads own visible client contact for the clients list
+    const displayName = `${client.firstName} ${client.lastName}`.trim() || 'Client' // pii-plaintext-read-ok: pro reads own visible client name for the clients list
+
+    return {
+      id: client.id,
+      displayName,
+      contactLine: `${email ? email : 'No email'}${phone ? ` • ${phone}` : ''}`,
+      searchText: `${displayName} ${email ?? ''} ${phone ?? ''}`
+        .toLowerCase()
+        .trim(),
+      lastBookingLabel: formatLastBookingLabel(
+        client.bookings[0] ?? null,
+        scheduleTz,
+      ),
+      messageHref: buildProToClientMessageHref({ proId, clientId: client.id }),
+    }
+  })
+
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8 text-textPrimary">
       <header className="mb-6">
@@ -105,81 +126,7 @@ export default async function ProClientsPage() {
         </Card>
       </section>
 
-      <section className="grid gap-3">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-[15px] font-black text-textPrimary">
-              Client list
-            </h2>
-            <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-              Only clients with active access are shown here.
-            </div>
-          </div>
-
-          <div className="text-[12px] font-semibold text-textSecondary">
-            {clients.length ? `${clients.length} visible` : ''}
-          </div>
-        </div>
-
-        {clients.length === 0 ? (
-          <EmptyState
-            title="No clients with active visibility right now."
-            description="Only clients with active access appear here. Share your booking link to bring clients on."
-            action={{ label: 'View profile', href: '/pro/profile' }}
-          />
-        ) : (
-          <div className="grid gap-3">
-            {clients.map((client) => {
-              const lastBooking = client.bookings[0] ?? null
-              const messageHref = buildProToClientMessageHref({
-                proId,
-                clientId: client.id,
-              })
-
-              return (
-                <Card key={client.id} variant="glass" padding="md">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <ClientNameLink canLink={true} clientId={client.id}>
-                          {client.firstName} {client.lastName}
-                        </ClientNameLink>
-                      </div>
-
-                      <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                        {client.user?.email ? client.user.email : 'No email'}
-                        {client.phone ? ` • ${client.phone}` : ''}
-                      </div>
-
-                      <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
-                        {formatLastBookingLabel(lastBooking, scheduleTz)}
-                      </div>
-                    </div>
-
-                    <div className="shrink-0">
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <Link
-                          href={messageHref}
-                          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
-                        >
-                          Message
-                        </Link>
-
-                        <Link
-                          href={`/pro/clients/${encodeURIComponent(client.id)}`}
-                          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
-                        >
-                          View chart
-                        </Link>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              )
-            })}
-          </div>
-        )}
-      </section>
+      <ClientsList clients={clientRows} />
     </main>
   )
 }
