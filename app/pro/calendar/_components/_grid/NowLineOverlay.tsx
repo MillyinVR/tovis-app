@@ -19,7 +19,9 @@ export function NowLineOverlay(props: NowLineOverlayProps) {
     >
       <div
         className="grid items-center"
-        style={{ gridTemplateColumns: 'var(--cal-time-col) 1fr' }}
+        style={{
+          gridTemplateColumns: 'var(--brand-pro-calendar-time-column, 64px) 1fr',
+        }}
       >
         <div />
 

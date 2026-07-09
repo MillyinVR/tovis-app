@@ -99,24 +99,40 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
   } = props
 
   const [createSheetOpen, setCreateSheetOpen] = useState(false)
+  // Collapses the summary chrome (stats + location) to give the timeline more
+  // room — the web counterpart of the iOS `chromeCollapsed` toggle.
+  const [collapsed, setCollapsed] = useState(false)
 
   return (
     <>
-      <section className="brand-pro-calendar-shell" data-device="mobile">
-        <MobileCalendarHeader title={title} subtitle={subtitle} />
+      <section
+        className="brand-pro-calendar-shell"
+        data-device="mobile"
+        data-calendar-view={view}
+      >
+        <MobileCalendarHeader
+          title={title}
+          subtitle={subtitle}
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((current) => !current)}
+          expandLabel={copy.mobileChrome.expandLabel}
+          collapseLabel={copy.mobileChrome.collapseLabel}
+        />
 
-        <div className="px-5 pb-3">
-          <CalendarStatsPanel
-            copy={copy.stats}
-            stats={cal.stats}
-            management={cal.management}
-            showWaitlist={cal.management.waitlistToday.length > 0}
-            blockedMinutesToday={cal.blockedMinutesToday}
-            onOpenManagement={cal.openManagement}
-            variant="mobile"
-            compact
-          />
-        </div>
+        {collapsed ? null : (
+          <div className="px-5 pb-3">
+            <CalendarStatsPanel
+              copy={copy.stats}
+              stats={cal.stats}
+              management={cal.management}
+              showWaitlist={cal.management.waitlistToday.length > 0}
+              blockedMinutesToday={cal.blockedMinutesToday}
+              onOpenManagement={cal.openManagement}
+              variant="mobile"
+              compact
+            />
+          </div>
+        )}
 
         <div className="px-5 pb-3">
           <MobileCalendarControls
@@ -136,18 +152,21 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
           />
         </div>
 
-        <MobileLocationBar
-          shortLabel={copy.labels.locationShort}
-          selectAriaLabel={copy.locationPanel.selectAriaLabel}
-          selectFallbackLabel={copy.locationPanel.selectFallback}
-          optionFallbackLabel={copy.locationPanel.selectLabel}
-          locationsLoaded={cal.locationsLoaded}
-          scopedLocations={cal.scopedLocations}
-          activeLocationId={cal.activeLocationId}
-          activeLocationLabel={cal.activeLocationLabel}
-          onChangeLocation={cal.setActiveLocationId}
-        />
-        <div className="p-0">
+        {collapsed ? null : (
+          <MobileLocationBar
+            shortLabel={copy.labels.locationShort}
+            selectAriaLabel={copy.locationPanel.selectAriaLabel}
+            selectFallbackLabel={copy.locationPanel.selectFallback}
+            optionFallbackLabel={copy.locationPanel.selectLabel}
+            locationsLoaded={cal.locationsLoaded}
+            scopedLocations={cal.scopedLocations}
+            activeLocationId={cal.activeLocationId}
+            activeLocationLabel={cal.activeLocationLabel}
+            onChangeLocation={cal.setActiveLocationId}
+          />
+        )}
+
+        <div className="brand-pro-calendar-mobile-body">
           <div className="px-4 pt-3">
             {showInitialLoading ? (
               <StateBanner>{copy.labels.loadingCalendar}</StateBanner>
@@ -171,6 +190,7 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
               activeLocationType={cal.activeLocationType}
               stepMinutes={cal.activeStepMinutes}
               timeZone={calendarTimeZone}
+              initialScrollTarget="now"
               onClickEvent={cal.openBookingOrBlock}
               onCreateForClick={cal.openCreateForClick}
               onDragStart={cal.drag.onDragStart}

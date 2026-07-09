@@ -44,6 +44,13 @@ export type BrandProCalendarMobileHeaderCopy = {
   backAriaLabel: string
 }
 
+export type BrandProCalendarMobileChromeCopy = {
+  /** Accessible label for the chevron when the summary chrome is collapsed. */
+  expandLabel: string
+  /** Accessible label for the chevron when the summary chrome is expanded. */
+  collapseLabel: string
+}
+
 export type BrandProCalendarTabletCopy = {
   eyebrowPrefix: string
   layoutNote: string
@@ -335,6 +342,7 @@ export type BrandProCalendarCopy = {
   pageHero: BrandProCalendarPageHeroCopy
   header: BrandProCalendarHeaderCopy
   mobileHeader: BrandProCalendarMobileHeaderCopy
+  mobileChrome: BrandProCalendarMobileChromeCopy
   tablet: BrandProCalendarTabletCopy
   desktop: BrandProCalendarDesktopCopy
 

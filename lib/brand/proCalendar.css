@@ -91,6 +91,42 @@
   background: rgb(var(--bg-primary));
 }
 
+.brand-pro-calendar-mobile-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brand-pro-calendar-mobile-header-titles {
+  min-width: 0;
+}
+
+/* Chevron that collapses the summary chrome (stats / location) — web counterpart
+   of the iOS `chromeCollapsed` toggle. */
+.brand-pro-calendar-collapse-toggle {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-pill);
+  background: rgb(var(--bg-secondary));
+  color: rgb(var(--text-secondary));
+}
+
+.brand-pro-calendar-collapse-chevron {
+  transition: transform 0.2s ease;
+}
+
+/* Expanded → up chevron (tap to collapse); collapsed → down chevron (tap to
+   expand). The base path is a down chevron, so rotate it when expanded. */
+.brand-pro-calendar-collapse-toggle[data-collapsed="false"]
+  .brand-pro-calendar-collapse-chevron {
+  transform: rotate(180deg);
+}
+
 .brand-pro-calendar-mobile-top-row {
   display: flex;
   align-items: center;
@@ -824,19 +860,53 @@
   }
 }
 
-/* Mobile: let the timeline flow with the page so a vertical swipe scrolls the
-   page rather than being trapped in this nested viewport. The day columns keep
-   their intrinsic 24h height (TOTAL_MINUTES * PX_PER_MINUTE), so the container
-   grows to fit and vertical scroll becomes the page's scroll. Only the week
-   view's horizontal overflow stays an internal scroller. */
+/* Mobile day/week: the timeline is its own internal vertical scroller with the
+   summary chrome pinned above it, matching the iOS calendar (previously the grid
+   flowed in the page and the whole page scrolled). The shell fills the viewport
+   below the fixed app header and becomes a flex column; only `.mobile-body`
+   flexes/scrolls. A trailing ::after reserves room so the last hours can clear
+   the fixed auto-accept bar / FAB. Month view keeps the default page flow. */
 @media (max-width: 767px) {
   .brand-pro-calendar-timeline-scroll {
-    height: auto;
+    height: 100%;
     min-height: 0;
     max-height: none;
     overflow-x: auto;
-    overflow-y: visible;
-    overscroll-behavior-x: contain;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .brand-pro-calendar-timeline-scroll::after {
+    content: "";
+    display: block;
+    height: calc(104px + env(safe-area-inset-bottom));
+  }
+
+  .brand-pro-calendar-shell[data-device="mobile"][data-calendar-view="day"],
+  .brand-pro-calendar-shell[data-device="mobile"][data-calendar-view="week"] {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--pro-header-h) - var(--pro-banner-h, 0px));
+  }
+
+  .brand-pro-calendar-shell[data-device="mobile"][data-calendar-view="day"] > *,
+  .brand-pro-calendar-shell[data-device="mobile"][data-calendar-view="week"] > * {
+    flex: none;
+  }
+
+  .brand-pro-calendar-shell[data-device="mobile"][data-calendar-view="day"]
+    .brand-pro-calendar-mobile-body,
+  .brand-pro-calendar-shell[data-device="mobile"][data-calendar-view="week"]
+    .brand-pro-calendar-mobile-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .brand-pro-calendar-mobile-body > .brand-pro-calendar-timeline {
+    flex: 1 1 auto;
+    min-height: 0;
   }
 }
 
