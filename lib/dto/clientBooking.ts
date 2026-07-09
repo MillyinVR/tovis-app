@@ -87,6 +87,15 @@ export type ClientBookingDTO = {
   id: string
   status: string | null
   source: string | null
+  /**
+   * When this booking is a rebook, the id of the appointment it was booked off
+   * of (the `RebookChain` source). For an aftercare-sourced PENDING rebook whose
+   * source payment is AWAITING_CONFIRMATION, this links the two so the native
+   * next-booking detail can label it "pending — your pro will confirm after
+   * payment". Null for a standalone booking. Populated only where the source
+   * query selects `rebookOfBookingId` (the client bookings list route).
+   */
+  rebookOfBookingId: string | null
   sessionStep: string | null
 
   scheduledFor: string
@@ -255,6 +264,7 @@ export type ClientBookingRow = Prisma.BookingGetPayload<{
     id: true
     status: true
     source: true
+    rebookOfBookingId: true
     sessionStep: true
     scheduledFor: true
     finishedAt: true
@@ -509,6 +519,7 @@ export async function buildClientBookingDTO(input: {
     id: String(b.id),
     status: b.status != null ? String(b.status) : null,
     source: b.source != null ? String(b.source) : null,
+    rebookOfBookingId: b.rebookOfBookingId != null ? String(b.rebookOfBookingId) : null,
     sessionStep: b.sessionStep != null ? String(b.sessionStep) : null,
 
     scheduledFor: b.scheduledFor.toISOString(),

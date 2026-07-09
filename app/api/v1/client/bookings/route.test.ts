@@ -81,6 +81,7 @@ function makeBookingRow(overrides?: Partial<Record<string, unknown>>) {
     id: 'booking_1',
     status: 'ACCEPTED',
     source: 'DIRECT',
+    rebookOfBookingId: null,
     sessionStep: 'NONE',
     scheduledFor: new Date('2026-04-20T18:00:00.000Z'),
     finishedAt: null,
@@ -507,6 +508,32 @@ describe('GET /api/v1/client/bookings', () => {
         next30: '2026-05-12T12:00:00.000Z',
       },
     })
+  })
+
+  it('threads rebookOfBookingId through to buildClientBookingDTO (aftercare payment-confirm coupling)', async () => {
+    // An aftercare-sourced PENDING rebook coupled to a source appointment whose
+    // payment is still AWAITING_CONFIRMATION — the native next-booking detail
+    // needs rebookOfBookingId to label it "pending — your pro will confirm".
+    const coupledRebook = makeBookingRow({
+      id: 'booking_coupled',
+      status: 'PENDING',
+      source: 'AFTERCARE',
+      rebookOfBookingId: 'booking_source',
+      scheduledFor: new Date('2026-04-25T15:00:00.000Z'),
+    })
+
+    mocks.prismaBookingFindMany.mockResolvedValue([coupledRebook])
+
+    await GET()
+
+    expect(mocks.buildClientBookingDTO).toHaveBeenCalledWith(
+      expect.objectContaining({
+        booking: expect.objectContaining({
+          id: 'booking_coupled',
+          rebookOfBookingId: 'booking_source',
+        }),
+      }),
+    )
   })
 
   it('returns 500 when loading bookings fails', async () => {

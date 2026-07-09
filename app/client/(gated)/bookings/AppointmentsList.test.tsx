@@ -30,6 +30,7 @@ function makeBooking(overrides?: Partial<ClientBookingDTO>): ClientBookingDTO {
     id: 'booking_1',
     status: 'ACCEPTED',
     source: 'DIRECT',
+    rebookOfBookingId: null,
     sessionStep: null,
     scheduledFor: '2026-04-24T15:00:00.000Z',
     totalDurationMinutes: 60,
