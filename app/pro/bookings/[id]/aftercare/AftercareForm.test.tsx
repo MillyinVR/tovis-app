@@ -247,11 +247,13 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
       HTMLInputElement,
     ]
 
+    // Picking a start with no end yet fills the end to a full suggested span
+    // ahead (7 days), matching the fresh auto-suggested window width.
     fireEvent.change(startInput, { target: { value: '2026-09-10' } })
-    expect(endInput.value).toBe('2026-09-11')
+    expect(endInput.value).toBe('2026-09-17')
 
-    // Moving the start to/after the end pulls the end forward to start + 1 day.
+    // Moving the start to/after the end pulls the end forward to start + span.
     fireEvent.change(startInput, { target: { value: '2026-09-20' } })
-    expect(endInput.value).toBe('2026-09-21')
+    expect(endInput.value).toBe('2026-09-27')
   })
 })
