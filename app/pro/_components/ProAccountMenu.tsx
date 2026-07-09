@@ -203,7 +203,7 @@ export default function ProAccountMenu(props: Props) {
   const canSwitchWorkspace = workspaceOptions.length > 1
 
   const panelBase =
-    'absolute right-0 mt-2 w-[min(384px,92vw)] overflow-hidden rounded-[24px] border'
+    'absolute right-0 mt-2 flex w-[min(384px,92vw)] flex-col overflow-hidden rounded-[24px] border'
   const panelMotion =
     'origin-top-right transition duration-200 ease-out will-change-transform will-change-opacity'
 
@@ -265,12 +265,17 @@ export default function ProAccountMenu(props: Props) {
         style={{
           borderColor: 'var(--line)',
           boxShadow: 'var(--shadow-strong)',
+          // The panel is anchored to the ⋯ button inside the fixed pro header
+          // (reserved height `--pro-header-h`). Bound it to the space below so a
+          // tall list scrolls internally instead of painting Sign out off-screen.
+          // `dvh` tracks the mobile viewport as the address bar shows/hides.
+          maxHeight: 'calc(100dvh - var(--pro-header-h) - 12px)',
         }}
         role="menu"
         aria-label="Account actions"
       >
         {/* header */}
-        <div className="flex items-center gap-3 px-4.5 pb-4 pt-4.5">
+        <div className="flex shrink-0 items-center gap-3 px-4.5 pb-4 pt-4.5">
           <div
             className="h-11.5 w-11.5 shrink-0 rounded-full bg-plume p-0.5"
             aria-hidden="true"
@@ -307,69 +312,72 @@ export default function ProAccountMenu(props: Props) {
           </span>
         </div>
 
-        {/* primary — view as client */}
-        {props.publicUrl ? (
-          <div className="px-3 pb-1">
-            <Link
-              href={props.publicUrl}
-              role="menuitem"
-              onClick={() => setOpen(false)}
-              className={`${ROW_BASE} border border-accentPrimary/30 bg-accentPrimary/10`}
-            >
-              <span className="grid h-8.5 w-8.5 shrink-0 place-items-center rounded-[10px] bg-accentPrimary/20 text-accentPrimary">
-                <Eye size={19} aria-hidden="true" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-display text-[14.5px] font-semibold text-textPrimary">
-                  View as client
+        {/* scrollable middle — keeps header + footer (Sign out) pinned */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {/* primary — view as client */}
+          {props.publicUrl ? (
+            <div className="px-3 pb-1">
+              <Link
+                href={props.publicUrl}
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className={`${ROW_BASE} border border-accentPrimary/30 bg-accentPrimary/10`}
+              >
+                <span className="grid h-8.5 w-8.5 shrink-0 place-items-center rounded-[10px] bg-accentPrimary/20 text-accentPrimary">
+                  <Eye size={19} aria-hidden="true" />
                 </span>
-                <span className="mt-px block truncate text-[12px] text-textMuted">
-                  Preview your public profile
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-display text-[14.5px] font-semibold text-textPrimary">
+                    View as client
+                  </span>
+                  <span className="mt-px block truncate text-[12px] text-textMuted">
+                    Preview your public profile
+                  </span>
                 </span>
-              </span>
-              <span className="shrink-0 text-[17px] text-accentPrimary">›</span>
-            </Link>
-          </div>
-        ) : null}
-
-        {/* grouped sections */}
-        {sections.map((section) => (
-          <div key={section.label}>
-            <div className="px-5.5 pb-1.75 pt-3.5 font-mono text-[9px] uppercase tracking-[0.18em] text-textMuted">
-              {section.label}
+                <span className="shrink-0 text-[17px] text-accentPrimary">›</span>
+              </Link>
             </div>
+          ) : null}
 
-            {section.items.map((item) => (
-              <div key={item.href} className="px-2">
-                <Link
-                  href={item.href}
-                  role="menuitem"
-                  onClick={() => setOpen(false)}
-                  className={ROW_BASE}
-                >
-                  <span className="grid h-8.5 w-8.5 shrink-0 place-items-center rounded-[10px] bg-surfaceGlass/6 text-textSecondary">
-                    <item.Icon size={19} aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-display text-[14.5px] font-semibold text-textPrimary">
-                      {item.label}
-                    </span>
-                    <span className="mt-px block truncate text-[12px] text-textMuted">
-                      {item.hint}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-[17px] text-textMuted opacity-0 transition group-hover:opacity-100">
-                    ›
-                  </span>
-                </Link>
+          {/* grouped sections */}
+          {sections.map((section) => (
+            <div key={section.label}>
+              <div className="px-5.5 pb-1.75 pt-3.5 font-mono text-[9px] uppercase tracking-[0.18em] text-textMuted">
+                {section.label}
               </div>
-            ))}
-          </div>
-        ))}
+
+              {section.items.map((item) => (
+                <div key={item.href} className="px-2">
+                  <Link
+                    href={item.href}
+                    role="menuitem"
+                    onClick={() => setOpen(false)}
+                    className={ROW_BASE}
+                  >
+                    <span className="grid h-8.5 w-8.5 shrink-0 place-items-center rounded-[10px] bg-surfaceGlass/6 text-textSecondary">
+                      <item.Icon size={19} aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-display text-[14.5px] font-semibold text-textPrimary">
+                        {item.label}
+                      </span>
+                      <span className="mt-px block truncate text-[12px] text-textMuted">
+                        {item.hint}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-[17px] text-textMuted opacity-0 transition group-hover:opacity-100">
+                      ›
+                    </span>
+                  </Link>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
 
         {/* footer */}
         <div
-          className="mt-2.5 px-3 pb-3 pt-2"
+          className="mt-2.5 shrink-0 px-3 pb-3 pt-2"
           style={{ borderTop: '1px solid var(--line)' }}
         >
           {canSwitchWorkspace ? (

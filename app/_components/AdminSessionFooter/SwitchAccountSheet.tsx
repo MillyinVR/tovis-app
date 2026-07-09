@@ -132,6 +132,11 @@ export default function SwitchAccountSheet({
           position: 'relative',
           width: '100%',
           maxWidth: 380,
+          // Bottom-anchored (`fixed inset-0; flex-end`), so a list taller than
+          // the viewport would push the header off-screen. Bound the height and
+          // scroll internally. Harmless today (≤3 roles); cheap latent hardening.
+          maxHeight: 'min(70dvh, calc(100dvh - 32px))',
+          overflowY: 'auto',
           margin: '0 16px calc(16px + env(safe-area-inset-bottom))',
           background: 'rgb(var(--bg-surface))',
           border: '1px solid var(--line)',

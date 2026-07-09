@@ -148,4 +148,36 @@ describe('app/pro/_components/ProAccountMenu', () => {
       expect(mockRefresh).toHaveBeenCalled()
     })
   })
+
+  // Regression: on short viewports the tall list must scroll internally while
+  // Sign out stays pinned. The nav items live in an overflow-y-auto region;
+  // Sign out must sit OUTSIDE it so it can never be scrolled off-screen.
+  it('keeps Sign out pinned outside the scrollable middle region', async () => {
+    const user = userEvent.setup()
+
+    const { container } = render(
+      <ProAccountMenu
+        businessName="TOVIS Studio"
+        subtitle="BARBER"
+        publicUrl="/professionals/pro_1"
+        looksHref="/looks"
+        proServicesHref="/pro/profile/public-profile?tab=services"
+        uploadHref="/pro/media/new"
+        messagesHref="/messages"
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /account menu/i }))
+
+    const scrollRegion = container.querySelector('.overflow-y-auto')
+    expect(scrollRegion).not.toBeNull()
+
+    // A middle menu item scrolls with the region…
+    const looks = screen.getByRole('menuitem', { name: /looks/i })
+    expect(scrollRegion).toContainElement(looks)
+
+    // …but Sign out is pinned outside it.
+    const signOut = screen.getByRole('button', { name: /sign out/i })
+    expect(scrollRegion).not.toContainElement(signOut)
+  })
 })
