@@ -665,6 +665,95 @@ clients read the cover DTO); 18c (BottomSheet extraction) is independent.
   sheet + Portfolio/Services/Reviews + grid; owner cover picker in pro
   self-profile. Consumes 18a DTO.
 
+## 19. Social-first media unification — portfolio ↔ looks feed (audit 2026-07-08)
+The deep-dive §18 flagged as "tracked separately." **Goal (Tori 2026-07-08):
+social-first — a pro's profile grid IS the feed and vice-versa, TikTok-profile /
+Instagram-grid style.** Today it is the opposite: public media is fragmented
+across three independently-gated systems that share only the `MediaAsset` table.
+
+**Current state (all confirmed in code):**
+- **Two parallel content atoms.** *Portfolio* = `MediaAsset.isFeaturedInPortfolio`
+  (public-profile grid, `loadProPublicProfile.ts:199-214`, queries `MediaAsset`
+  directly). *Looks* = a separate `LookPost` row pointing at a `MediaAsset` via
+  `primaryMediaAssetId @unique` (feed/search/boards/tags, `feed.ts:211-281`,
+  queries `LookPost`). The two are gated by **orthogonal booleans**
+  (`isFeaturedInPortfolio` vs `isEligibleForLooks`, both `@default(false)`,
+  separate indexes) set by separate checkboxes at upload (`pro/media/route.ts:63-70`).
+- **Both bridges are dead.** Featuring to portfolio (`pro/media/[id]/portfolio/route.ts:136-142`)
+  never sets `isEligibleForLooks` and never creates a `LookPost` → featured work
+  never hits the feed. Publishing a look (`publication/service.ts:742`) never sets
+  `isFeaturedInPortfolio`, and the public profile has **no looks tab**
+  (`PublicProfileTab = 'portfolio' | 'services' | 'reviews'`,
+  `publicProfileFormatting.ts:8`) → published looks never hit the grid. The UI
+  even admits it: *"'Looks eligible' is a temporary media-level bridge"*
+  (`ProPortfolioGrid.tsx:42`).
+- **Same asset, divergent surfaces:** `isEligibleForLooks` only → feed ✅ grid ❌;
+  `isFeaturedInPortfolio` only → grid ✅ feed ❌; review photo (`visibility=PUBLIC`,
+  both flags `false`, `review/route.ts:503-506`) → **neither** (Reviews tab +
+  `/media/[id]` only) — the largest orphaned public-media set.
+- **Asymmetry:** clients already get a public looks grid at `/u/[handle]`
+  (`loadPublicClientProfile.ts:91-96`, authored `LookPost`s); **pros have no
+  equivalent public looks grid** — their feed-published + client-authored looks
+  are surfaced nowhere on their own profile.
+- **Other divergences to fix in-flight:** (a) client looks render on `/u/[handle]`
+  while still `PENDING_REVIEW` (`status+visibility` only) but are withheld from the
+  global feed until `APPROVED` — pre-moderation public exposure; (b) `isEligibleForLooks`
+  is a publish-time gate, not a live feed filter — flipping it off does **not**
+  retract an already-published `LookPost` (`publication/service.ts:318` vs feed
+  reading `LookPost`); (c) `media-public` bytes render via **unsigned permanent
+  URLs** (`renderUrls.ts:34-42`) — hiding a surface in the DB never revokes the
+  object URL, so "make social" is a one-way door for the bytes.
+
+**Decisions (Tori 2026-07-08):**
+- **One `LookPost` = grid + feed** (the "one post atom" option). `LookPost` becomes
+  the single public-content unit. Featuring to portfolio *publishes a look*; the
+  profile grid renders the pro's `LookPost`s; the dual booleans collapse to a single
+  published state (`isFeaturedInPortfolio` retires or is repurposed as a grid
+  pin/ordering flag to preserve today's "★ FEAT" first-tile).
+- **Review photos = per-photo pro opt-in.** Consented review media (consent already
+  required via `canProSharePublicly`) stays review-scoped by default; a pro can
+  explicitly promote an individual review photo into their grid/feed (creates a
+  `LookPost` for that asset — reuse `createOrUpdateProLookFromMediaAsset`, which
+  already accepts `reviewId`-backed media through the consent gate).
+
+**Interlock with §18:** §18 (profile redesign) intentionally ships *without* this
+and keeps the grid MediaAsset-based / "★ FEAT" newest-featured. §19c swaps that
+grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
+
+### Web
+- [ ] **19a — backfill**: one-time idempotent job — for every `MediaAsset` with
+  `isFeaturedInPortfolio=true` and no `LookPost`, create a PUBLISHED pro-authored
+  `LookPost` (upsert by `primaryMediaAssetId`; carry caption/service/before-after
+  pairing). Pro-authored looks default `moderationStatus=APPROVED`, so no human
+  gate. (script + safety: dry-run count first)
+- [ ] **19b — unify the write path**: featuring to portfolio auto-creates/publishes
+  a `LookPost`; publishing a look marks it grid-visible. Collapse
+  `isEligibleForLooks`/`isFeaturedInPortfolio` to a single derived state; keep a
+  `pinned`/ordering concept to preserve "★ FEAT". Retire the standalone portfolio
+  toggle in favor of the looks publish action (or make it call it). Make
+  `isEligibleForLooks=false` (unpublish) also retract the live `LookPost`
+  (fix divergence b).
+- [ ] **19c — unify the read path**: public profile grid renders the pro's
+  `LookPost`s (add a *Looks* tab or make *Portfolio* = looks grid) so grid + feed
+  draw from the same rows; mirror the `/u/[handle]` client-grid shape for pros.
+  Reconcile the moderation gate so nothing renders public pre-`APPROVED`
+  (fix divergence a).
+- [ ] **19d — review-photo opt-in**: a "Add to my grid/feed" control on a consented
+  review photo → creates a `LookPost` from that `MediaAsset` (per-photo, pro-driven).
+  Reuse the existing consent gate; no new public-by-default paths.
+- [ ] **19e — downstream coverage**: with everything a `LookPost`, verify boards
+  (`BoardItem`→`LookPost`) can now save formerly-portfolio-only media; confirm
+  search/tags/personalized feed pick up backfilled looks; audit the owner board
+  view showing stale-status saved looks.
+- [ ] **19f — cleanup**: remove the "temporary media-level bridge" copy + dead
+  `isFeaturedInPortfolio`-only query paths once 19c ships. (do NOT delete the flag
+  until the grid reads `LookPost`.)
+
+### iOS (detail → tovis-ios/BACKLOG.md §5)
+- [ ] **19g — native parity**: native pro profile shows the unified looks grid
+  (consumes the same DTO as 19c); publish/feature is one action; review-photo
+  "add to grid/feed" opt-in mirrors 19d. Ships with the web change (parity rule).
+
 ---
 
 ### Note on superseded docs
