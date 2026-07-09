@@ -44,6 +44,14 @@ type DayWeekGridProps = {
   activeLocationType?: 'SALON' | 'MOBILE'
   stepMinutes: number
   timeZone: string
+  /**
+   * Where the timeline scrolls to on first paint (and on range change):
+   * - `'workingStart'` → 8am (`PROTOTYPE_START_MINUTE`) — desktop/tablet default.
+   * - `'now'` → the current time with an hour of past context, when today is in
+   *   view (mobile, matching the iOS calendar). Falls back to `'workingStart'`
+   *   when today isn't visible.
+   */
+  initialScrollTarget?: 'workingStart' | 'now'
   onClickEvent: (id: string) => void
   onCreateForClick: (day: Date, clientY: number, columnTop: number) => void
   onDragStart: (event: CalendarEvent, dragEvent: DragEvent<HTMLDivElement>) => void
@@ -136,10 +144,6 @@ function timelineGridStyle(gridCols: string): CSSProperties {
   return {
     gridTemplateColumns: gridCols,
   }
-}
-
-function initialScrollTopPx(): number {
-  return PROTOTYPE_START_MINUTE * PX_PER_MINUTE
 }
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
@@ -266,6 +270,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
     activeLocationType = 'SALON',
     stepMinutes,
     timeZone: rawTimeZone,
+    initialScrollTarget = 'workingStart',
     onClickEvent,
     onCreateForClick,
     onDragStart,
@@ -321,10 +326,21 @@ export function DayWeekGrid(props: DayWeekGridProps) {
     [timeZone, view, visibleYmds],
   )
 
+  // 'now' (mobile) opens on the current time with an hour of past context, like
+  // iOS; otherwise open at the working-day start (8am). Only fires on mount /
+  // range change — the 30s now-tick doesn't re-scroll (see useInitialTimelineScroll).
+  const initialTargetTopPx = useMemo(() => {
+    if (initialScrollTarget === 'now' && todayIsInView) {
+      return clamp(nowMinutes - 60, 0, TOTAL_MINUTES_IN_DAY - 1) * PX_PER_MINUTE
+    }
+
+    return PROTOTYPE_START_MINUTE * PX_PER_MINUTE
+  }, [initialScrollTarget, todayIsInView, nowMinutes])
+
   useInitialTimelineScroll({
     scrollRef,
     enabled: isTimelineView,
-    targetTopPx: initialScrollTopPx(),
+    targetTopPx: initialTargetTopPx,
     scrollKey,
   })
 

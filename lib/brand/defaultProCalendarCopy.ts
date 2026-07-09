@@ -54,6 +54,11 @@ export function defaultProCalendarCopy(
     backAriaLabel: 'Go to client view',
   },
 
+  mobileChrome: {
+    expandLabel: 'Show calendar summary',
+    collapseLabel: 'Hide calendar summary',
+  },
+
   tablet: {
     eyebrowPrefix: '◆ Pro mode',
     layoutNote:
