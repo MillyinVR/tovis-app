@@ -27,8 +27,11 @@ import { moneyToString } from '@/lib/money'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import {
   datetimeLocalToUtcIsoStrict,
+  formatSlotFullLabel,
   WALL_TIME_ERROR_MESSAGE,
 } from '@/lib/time'
+
+import OpenSlotPicker from './OpenSlotPicker'
 
 type ServiceLocationType = 'SALON' | 'MOBILE'
 type ProfessionalLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
@@ -61,6 +64,7 @@ type ClientSearchResult = {
 }
 
 type Props = {
+  professionalId: string
   clients: ProBookingNewClientDTO[]
   offerings: ProBookingNewOfferingDTO[]
   locations: BookableLocationOption[]
@@ -447,6 +451,7 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 }
 
 export default function NewBookingForm({
+  professionalId,
   clients,
   offerings,
   locations,
@@ -615,6 +620,15 @@ export default function NewBookingForm({
   const [scheduledAt, setScheduledAt] = useState(
     defaultScheduledAt ?? defaultDatetimeLocal(),
   )
+  // Time selection has two modes: pick a real open slot (default), or enter a
+  // free custom time (with the scheduling overrides). A prefilled time (e.g.
+  // tapping an empty calendar slot) opens straight into custom mode, mirroring
+  // iOS `ProNewBookingView`.
+  const [timeMode, setTimeMode] = useState<'slots' | 'custom'>(
+    defaultScheduledAt ? 'custom' : 'slots',
+  )
+  // The chosen open slot's ISO UTC start instant (slots mode only).
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
   const [internalNotes, setInternalNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -956,7 +970,13 @@ export default function NewBookingForm({
     loading ? 'Still loading' : null,
     !selectedOffering ? 'Select a service' : null,
     !locationId ? 'Select a pro location' : null,
-    !scheduledAt ? 'Select date and time' : null,
+    timeMode === 'slots'
+      ? !selectedSlot
+        ? 'Pick an open time'
+        : null
+      : !scheduledAt
+        ? 'Select date and time'
+        : null,
     clientMode === 'existing' && !clientId ? 'Select an existing client' : null,
     clientMode === 'new' && !newClientReady
       ? 'Enter new client first name, last name, and email'
@@ -999,8 +1019,12 @@ export default function NewBookingForm({
       return
     }
 
-    if (!scheduledAt) {
-      setError('Date and time are required.')
+    if (timeMode === 'slots' ? !selectedSlot : !scheduledAt) {
+      setError(
+        timeMode === 'slots'
+          ? 'Pick an open time, or switch to a custom time.'
+          : 'Date and time are required.',
+      )
       return
     }
 
@@ -1038,17 +1062,28 @@ export default function NewBookingForm({
       }
     }
 
-    const scheduledResult = datetimeLocalToUtcIsoStrict(
-      scheduledAt,
-      bookingTimeZone,
-    )
+    // Slots mode submits the chosen open slot's ISO instant directly; custom
+    // mode converts the wall-clock input in the booking-location timezone.
+    let scheduledForISO: string
+    if (timeMode === 'slots') {
+      if (!selectedSlot) {
+        setError('Pick an open time, or switch to a custom time.')
+        return
+      }
+      scheduledForISO = selectedSlot
+    } else {
+      const scheduledResult = datetimeLocalToUtcIsoStrict(
+        scheduledAt,
+        bookingTimeZone,
+      )
 
-    if (!scheduledResult.ok) {
-      setError(WALL_TIME_ERROR_MESSAGE[scheduledResult.reason])
-      return
+      if (!scheduledResult.ok) {
+        setError(WALL_TIME_ERROR_MESSAGE[scheduledResult.reason])
+        return
+      }
+
+      scheduledForISO = scheduledResult.iso
     }
-
-    const scheduledForISO = scheduledResult.iso
 
     const clientPayload =
       clientMode === 'new'
@@ -1165,6 +1200,11 @@ export default function NewBookingForm({
     'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
   const label = 'text-[12px] font-black text-textPrimary'
   const helper = 'mt-2 text-[12px] text-textSecondary'
+  const toggleBtn =
+    'flex-1 rounded-xl border px-3 py-2 text-[12px] font-black transition disabled:opacity-60'
+  const toggleActive = 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
+  const toggleIdle =
+    'border-white/10 bg-bgPrimary text-textSecondary hover:border-white/20 hover:text-textPrimary'
 
   const tzLabel = sanitizeTimeZone(bookingTimeZone, 'UTC')
 
@@ -1200,7 +1240,12 @@ export default function NewBookingForm({
       serviceAddress.label.trim()
     return typed ? `Mobile · ${typed}` : 'Mobile'
   })()
-  const summaryWhen = formatWallClock(scheduledAt)
+  const summaryWhen =
+    timeMode === 'slots'
+      ? selectedSlot
+        ? formatSlotFullLabel(selectedSlot, bookingTimeZone)
+        : ''
+      : formatWallClock(scheduledAt)
 
   return (
     <form onSubmit={handleSubmit}>
@@ -1815,24 +1860,81 @@ export default function NewBookingForm({
           </FormCard>
 
           <FormCard step={3} title="When">
-      <div className="grid gap-2">
-        <label htmlFor="datetime" className={label}>
-          Date &amp; time <span className="text-textSecondary">*</span>
-        </label>
+      <div className="grid gap-3">
+        <div className="grid gap-2">
+          <span className={label}>
+            Date &amp; time <span className="text-textSecondary">*</span>
+          </span>
 
-        <input
-          id="datetime"
-          type="datetime-local"
-          value={scheduledAt}
-          disabled={loading}
-          onChange={(e) => setScheduledAt(e.target.value)}
-          className={field}
-        />
-
-        <div className={helper}>
-          Interpreted in <span className="font-black">{tzLabel}</span> based on
-          the selected booking location, then stored as UTC.
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => setTimeMode('slots')}
+              aria-pressed={timeMode === 'slots'}
+              className={`${toggleBtn} ${
+                timeMode === 'slots' ? toggleActive : toggleIdle
+              }`}
+            >
+              Open times
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => setTimeMode('custom')}
+              aria-pressed={timeMode === 'custom'}
+              className={`${toggleBtn} ${
+                timeMode === 'custom' ? toggleActive : toggleIdle
+              }`}
+            >
+              Custom time
+            </button>
+          </div>
         </div>
+
+        {timeMode === 'slots' ? (
+          selectedOffering && selectedLocation ? (
+            <OpenSlotPicker
+              professionalId={professionalId}
+              serviceId={selectedOffering.service.id}
+              offeringId={selectedOffering.id}
+              locationId={selectedLocation.id}
+              locationType={locationType}
+              locationTimeZone={bookingTimeZone}
+              clientAddressId={
+                locationType === 'MOBILE' &&
+                addressMode === 'existing' &&
+                clientAddressId
+                  ? clientAddressId
+                  : null
+              }
+              value={selectedSlot}
+              onChange={setSelectedSlot}
+              disabled={loading}
+            />
+          ) : (
+            <div className={helper}>
+              Choose a service and location to see the pro’s open times.
+            </div>
+          )
+        ) : (
+          <div className="grid gap-2">
+            <input
+              id="datetime"
+              type="datetime-local"
+              value={scheduledAt}
+              disabled={loading}
+              onChange={(e) => setScheduledAt(e.target.value)}
+              className={field}
+            />
+
+            <div className={helper}>
+              Interpreted in <span className="font-black">{tzLabel}</span> based
+              on the selected booking location, then stored as UTC. Off-grid
+              times may need the scheduling overrides below.
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-2">
