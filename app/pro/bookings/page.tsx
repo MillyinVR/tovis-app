@@ -15,7 +15,6 @@ import { mapsHrefFromLocation } from '@/lib/maps'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { Avatar, Badge } from '@/app/_components/ui'
-import type { BadgeTone } from '@/app/_components/ui'
 import {
   DEFAULT_TIME_ZONE,
   isValidIanaTimeZone,
@@ -24,7 +23,10 @@ import {
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
-import { labelForBookingStatus } from '@/lib/booking/statusLabel'
+import {
+  badgeToneForBookingStatus,
+  labelForBookingStatus,
+} from '@/lib/booking/statusLabel'
 import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
 import {
   computeBookingTotal,
@@ -58,24 +60,10 @@ function formatMoneyOrNull(v: Prisma.Decimal | null | undefined): string | null 
   return moneyToString(v)
 }
 
-function statusBadgeTone(status: string): BadgeTone {
-  switch (status) {
-    case BookingStatus.ACCEPTED:
-    case BookingStatus.IN_PROGRESS:
-      return 'accent'
-    case BookingStatus.COMPLETED:
-      return 'success'
-    case BookingStatus.CANCELLED:
-      return 'danger'
-    default:
-      return 'neutral'
-  }
-}
-
 function StatusPill({ status }: { status: string }) {
   const s = String(status || '')
 
-  return <Badge tone={statusBadgeTone(s)}>{labelForBookingStatus(s)}</Badge>
+  return <Badge tone={badgeToneForBookingStatus(s)}>{labelForBookingStatus(s)}</Badge>
 }
 
 function CloseoutBadge({ bookingId }: { bookingId: string }) {
