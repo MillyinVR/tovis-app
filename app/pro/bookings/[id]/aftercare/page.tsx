@@ -24,7 +24,7 @@ import {
   aftercareHref,
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { renderMediaUrlsBatch } from '@/lib/media/renderUrls'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,24 +38,8 @@ type PublicAccessSummary = {
   tone: 'success' | 'pending' | 'danger'
 }
 
-const SIGNED_URL_TTL_SECONDS = 60 * 10
-
 function loginHref(bookingId: string): string {
   return `/login?from=${encodeURIComponent(aftercareHref(bookingId))}`
-}
-
-function isHttpUrl(value: string | null | undefined): value is string {
-  if (!value) return false
-
-  const trimmed = value.trim()
-  if (!trimmed) return false
-
-  try {
-    const url = new URL(trimmed)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
-  }
 }
 
 function dateToIso(value: Date | null | undefined): string | null {
@@ -101,21 +85,6 @@ function buildPublicAccessSummary(args: {
     help: 'No client-facing aftercare access exists yet.',
     tone: 'danger',
   }
-}
-
-async function signObjectUrl(
-  bucket: string | null,
-  path: string | null,
-): Promise<string | null> {
-  if (!bucket || !path) return null
-
-  const { data, error } = await supabaseAdmin.storage
-    .from(bucket)
-    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
-
-  if (error) return null
-
-  return data?.signedUrl ?? null
 }
 
 function ChevronLeftIcon({ size = 13 }: { size?: number }) {
@@ -721,32 +690,24 @@ export default async function ProAftercarePage({ params }: PageProps) {
   const timeZone = timeZoneResult.ok ? timeZoneResult.timeZone : 'UTC'
   const aftercare = booking.aftercareSummary
 
-  const existingMedia = await Promise.all(
-    booking.mediaAssets.map(async (media) => {
-      const httpUrl = isHttpUrl(media.url) ? media.url : null
-      const httpThumbUrl = isHttpUrl(media.thumbUrl) ? media.thumbUrl : null
-
-      const renderUrl =
-        httpUrl ?? (await signObjectUrl(media.storageBucket, media.storagePath))
-      const renderThumbUrl =
-        httpThumbUrl ??
-        (await signObjectUrl(media.thumbBucket, media.thumbPath))
-
-      return {
-        id: media.id,
-        url: media.url ?? null,
-        thumbUrl: media.thumbUrl ?? null,
-        renderUrl,
-        renderThumbUrl,
-        mediaType: media.mediaType,
-        visibility: media.visibility,
-        uploadedByRole: media.uploadedByRole ?? null,
-        reviewId: media.reviewId ?? null,
-        createdAt: media.createdAt.toISOString(),
-        phase: media.phase ?? MediaPhase.OTHER,
-      }
-    }),
-  )
+  // Sign every asset's full + thumb in one batched pass (one round-trip per
+  // private bucket) rather than 2×N sequential signed-URL calls — the latter is
+  // what made this force-dynamic page slow and made full vs. thumb resolve
+  // independently (a thumb-only asset used to render as a non-clickable tile).
+  const renderedMedia = await renderMediaUrlsBatch(booking.mediaAssets)
+  const existingMedia = booking.mediaAssets.map((media, index) => ({
+    id: media.id,
+    url: media.url ?? null,
+    thumbUrl: media.thumbUrl ?? null,
+    renderUrl: renderedMedia[index]?.renderUrl ?? null,
+    renderThumbUrl: renderedMedia[index]?.renderThumbUrl ?? null,
+    mediaType: media.mediaType,
+    visibility: media.visibility,
+    uploadedByRole: media.uploadedByRole ?? null,
+    reviewId: media.reviewId ?? null,
+    createdAt: media.createdAt.toISOString(),
+    phase: media.phase ?? MediaPhase.OTHER,
+  }))
 
   const existingRecommendedProducts =
     aftercare?.recommendedProducts.map((recommendation) => ({

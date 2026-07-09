@@ -70,7 +70,14 @@ export default function ClickableMedia({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={(e) => {
+          // Opening the viewer must never also trigger an ancestor handler
+          // (e.g. a card <Link> wrapping this tile in the aftercare inbox),
+          // which would navigate away and, on a force-dynamic page, reload
+          // every image. Matches BeforeAfterReveal's own guard.
+          e.stopPropagation()
+          setOpen(true)
+        }}
         title="View full size"
         className={cn(
           'group relative block overflow-hidden',
@@ -115,7 +122,13 @@ export default function ClickableMedia({
           topLeft={
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={(e) => {
+                // Same guard as opening: the viewer is a DOM descendant of this
+                // component, so a bubbling close click could reach an ancestor
+                // <Link> and navigate on dismiss.
+                e.stopPropagation()
+                setOpen(false)
+              }}
               className={cn(
                 'tap-target inline-flex items-center gap-2 rounded-full border border-white/10',
                 'bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary',

@@ -5,6 +5,7 @@ import { BUCKETS } from '@/lib/storageBuckets'
 const mocks = vi.hoisted(() => ({
   getSupabaseAdmin: vi.fn(),
   createSignedUrl: vi.fn(),
+  createSignedUrls: vi.fn(),
   safeUrl: vi.fn(),
 }))
 
@@ -44,10 +45,13 @@ describe('lib/media/renderUrls', () => {
       error: null,
     })
 
+    mocks.createSignedUrls.mockResolvedValue({ data: [], error: null })
+
     mocks.getSupabaseAdmin.mockReturnValue({
       storage: {
         from: vi.fn(() => ({
           createSignedUrl: mocks.createSignedUrl,
+          createSignedUrls: mocks.createSignedUrls,
         })),
       },
     })
@@ -208,5 +212,84 @@ describe('lib/media/renderUrls', () => {
     })
 
     expect(mocks.getSupabaseAdmin).not.toHaveBeenCalled()
+  })
+
+  it('batch-signs every private object in one call per bucket, aligned to input order', async () => {
+    const signedByPath: Record<string, string> = {
+      'bookings/b1/before/main.jpg': 'https://signed.example/b1-before-main.jpg',
+      'bookings/b1/before/thumb.jpg':
+        'https://signed.example/b1-before-thumb.jpg',
+      'bookings/b2/after/main.jpg': 'https://signed.example/b2-after-main.jpg',
+      'bookings/b2/after/thumb.jpg': 'https://signed.example/b2-after-thumb.jpg',
+    }
+    mocks.createSignedUrls.mockImplementation(async (paths: string[]) => ({
+      data: paths.map((path) => ({ path, signedUrl: signedByPath[path] })),
+      error: null,
+    }))
+
+    const mod = await import('./renderUrls')
+    const result = await mod.renderMediaUrlsBatch([
+      {
+        storageBucket: BUCKETS.mediaPrivate,
+        storagePath: 'bookings/b1/before/main.jpg',
+        thumbBucket: BUCKETS.mediaPrivate,
+        thumbPath: 'bookings/b1/before/thumb.jpg',
+      },
+      {
+        storageBucket: BUCKETS.mediaPrivate,
+        storagePath: 'bookings/b2/after/main.jpg',
+        thumbBucket: BUCKETS.mediaPrivate,
+        thumbPath: 'bookings/b2/after/thumb.jpg',
+      },
+    ])
+
+    // One round-trip for the single private bucket — not one per object (the
+    // N+1 waterfall this batched helper exists to remove).
+    expect(mocks.createSignedUrls).toHaveBeenCalledTimes(1)
+    expect(result).toEqual([
+      {
+        renderUrl: 'https://signed.example/b1-before-main.jpg',
+        renderThumbUrl: 'https://signed.example/b1-before-thumb.jpg',
+      },
+      {
+        renderUrl: 'https://signed.example/b2-after-main.jpg',
+        renderThumbUrl: 'https://signed.example/b2-after-thumb.jpg',
+      },
+    ])
+  })
+
+  it('batch: private signing failure yields null (no legacy fallback); a pointer-less item uses its safe legacy url', async () => {
+    mocks.createSignedUrls.mockResolvedValue({
+      data: null,
+      error: { message: 'signing failed' },
+    })
+
+    const mod = await import('./renderUrls')
+    const result = await mod.renderMediaUrlsBatch([
+      {
+        storageBucket: BUCKETS.mediaPrivate,
+        storagePath: 'bookings/b1/before/main.jpg',
+        thumbBucket: BUCKETS.mediaPrivate,
+        thumbPath: 'bookings/b1/before/thumb.jpg',
+        url: 'https://legacy.example/private-main.jpg',
+        thumbUrl: 'https://legacy.example/private-thumb.jpg',
+      },
+      {
+        storageBucket: null,
+        storagePath: null,
+        thumbBucket: null,
+        thumbPath: null,
+        url: 'https://legacy.example/only-main.jpg',
+        thumbUrl: 'https://legacy.example/only-thumb.jpg',
+      },
+    ])
+
+    expect(result).toEqual([
+      { renderUrl: null, renderThumbUrl: null },
+      {
+        renderUrl: 'https://legacy.example/only-main.jpg',
+        renderThumbUrl: 'https://legacy.example/only-thumb.jpg',
+      },
+    ])
   })
 })

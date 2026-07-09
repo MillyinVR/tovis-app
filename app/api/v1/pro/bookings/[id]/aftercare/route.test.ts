@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
 
   bookingFindUnique: vi.fn(),
   upsertBookingAftercare: vi.fn(),
+  loadBookingBeforeAfterThumbsFor: vi.fn(),
 
   withRouteIdempotency: vi.fn(),
   beginRouteIdempotency: vi.fn(),
@@ -90,6 +91,10 @@ vi.mock('@/lib/prisma', () => ({
       findUnique: mocks.bookingFindUnique,
     },
   },
+}))
+
+vi.mock('@/lib/media/bookingBeforeAfter', () => ({
+  loadBookingBeforeAfterThumbsFor: mocks.loadBookingBeforeAfterThumbsFor,
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
@@ -665,6 +670,15 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
 
     mocks.bookingFindUnique.mockResolvedValue(makeGetBooking())
 
+    // Default: booking has no before/after photos. Individual tests override
+    // this to assert the media pass-through.
+    mocks.loadBookingBeforeAfterThumbsFor.mockResolvedValue({
+      beforeUrl: null,
+      afterUrl: null,
+      beforeFullUrl: null,
+      afterFullUrl: null,
+    })
+
     expectIdempotencyStarted()
 
     // The route now calls withRouteIdempotency; this mock reproduces the real
@@ -807,7 +821,39 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         finishedAt: '2026-04-12T20:00:00.000Z',
         locationTimeZone: 'America/Los_Angeles',
         aftercareSummary: null,
+        media: {
+          beforeUrl: null,
+          afterUrl: null,
+          beforeFullUrl: null,
+          afterFullUrl: null,
+        },
       },
+    })
+  })
+
+  it('GET returns the primary before/after media pair for the authoring screen', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce(
+      makeGetBooking({ aftercareSummary: null }),
+    )
+    mocks.loadBookingBeforeAfterThumbsFor.mockResolvedValueOnce({
+      beforeUrl: 'https://cdn.example.com/before-thumb.jpg',
+      afterUrl: 'https://cdn.example.com/after-thumb.jpg',
+      beforeFullUrl: 'https://cdn.example.com/before-full.jpg',
+      afterFullUrl: 'https://cdn.example.com/after-full.jpg',
+    })
+
+    const result = await GET(new Request('http://localhost/test'), makeCtx())
+
+    expect(mocks.loadBookingBeforeAfterThumbsFor).toHaveBeenCalledWith(
+      'booking_1',
+    )
+    expect(result.status).toBe(200)
+    const body = await result.json()
+    expect(body.booking.media).toEqual({
+      beforeUrl: 'https://cdn.example.com/before-thumb.jpg',
+      afterUrl: 'https://cdn.example.com/after-thumb.jpg',
+      beforeFullUrl: 'https://cdn.example.com/before-full.jpg',
+      afterFullUrl: 'https://cdn.example.com/after-full.jpg',
     })
   })
 
@@ -872,6 +918,12 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
             },
           ],
         },
+        media: {
+          beforeUrl: null,
+          afterUrl: null,
+          beforeFullUrl: null,
+          afterFullUrl: null,
+        },
       },
     })
   })
@@ -927,7 +979,13 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
             clientAftercareHref: null,
           },
           recommendedProducts: [],
-        }
+        },
+        media: {
+          beforeUrl: null,
+          afterUrl: null,
+          beforeFullUrl: null,
+          afterFullUrl: null,
+        },
       },
     })
   })
