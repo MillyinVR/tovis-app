@@ -83,6 +83,20 @@ const CLIENT_ALL_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.EMAIL,
 ]
 
+// CLIENT_ALL_CHANNELS with the "push later" channel added (see the note on the
+// *_PUSH sets below). Used by AFTERCARE_READY, which has TWO emitters that split
+// the channel set via per-emit requestedChannels: the magic-link delivery owns
+// EMAIL+SMS (secure /client/rebook token link), the inbox notification owns
+// IN_APP+PUSH. PUSH must be in the default set for the inbox emit's requested
+// [IN_APP, PUSH] to survive the channel-policy intersection. PUSH stays inert
+// until APNs is live.
+const CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS: readonly NotificationChannel[] = [
+  NotificationChannel.IN_APP,
+  NotificationChannel.SMS,
+  NotificationChannel.EMAIL,
+  NotificationChannel.PUSH,
+]
+
 const PRO_IN_APP_EMAIL_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.IN_APP,
   NotificationChannel.EMAIL,
@@ -432,9 +446,16 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'aftercare_ready',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
-      // SMS included so phone-only (often unclaimed) clients receive the
-      // secure aftercare magic link. Email-preferred clients still get email.
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // AFTERCARE_READY has two emitters that split these channels via per-emit
+      // requestedChannels (§23): the magic-link delivery
+      // (createAftercareAccessDelivery) owns EMAIL+SMS and carries the secure
+      // /client/rebook token link (works with no login, reaches phone-only /
+      // unclaimed clients); the inbox notification
+      // (createUpdateClientNotification) owns IN_APP+PUSH and deep-links the
+      // login-gated in-app booking view (fine for an authenticated tap). Both
+      // channels live here; neither emit sends the full set. PUSH stays inert
+      // until APNs is live.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
   },
 

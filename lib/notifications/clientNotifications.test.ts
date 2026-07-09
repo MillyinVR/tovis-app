@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { NotificationEventKey, Prisma } from '@prisma/client'
+import { NotificationChannel, NotificationEventKey, Prisma } from '@prisma/client'
 
 const mockEnqueueDispatch = vi.hoisted(() => vi.fn())
 
@@ -166,6 +166,7 @@ describe('lib/notifications/clientNotifications', () => {
     expect(mockEnqueueDispatch).toHaveBeenCalledWith({
       key: NotificationEventKey.AFTERCARE_READY,
       sourceKey: 'client-notification:notif_1',
+      requestedChannels: null,
       recipient: {
         kind: 'CLIENT',
         clientId: 'client_1',
@@ -189,6 +190,36 @@ describe('lib/notifications/clientNotifications', () => {
       clientNotificationId: 'notif_1',
       tx,
     })
+  })
+
+  it('forwards an explicit requestedChannels filter to enqueueDispatch (§23 aftercare inbox = IN_APP/PUSH only)', async () => {
+    mockPrisma.clientNotification.create.mockResolvedValue({ id: 'notif_1' })
+    mockPrisma.booking.findUnique.mockResolvedValue({
+      locationTimeZone: 'America/Los_Angeles',
+      clientTimeZoneAtBooking: null,
+    })
+
+    await createClientNotification({
+      clientId: 'client_1',
+      eventKey: NotificationEventKey.AFTERCARE_READY,
+      title: 'Aftercare ready',
+      bookingId: 'booking_1',
+      href: '/client/bookings/booking_1?step=aftercare',
+      requestedChannels: [
+        NotificationChannel.IN_APP,
+        NotificationChannel.PUSH,
+      ],
+    })
+
+    expect(mockEnqueueDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: NotificationEventKey.AFTERCARE_READY,
+        requestedChannels: [
+          NotificationChannel.IN_APP,
+          NotificationChannel.PUSH,
+        ],
+      }),
+    )
   })
 
   it('uses aftercare booking timezone when booking lookup is unavailable', async () => {

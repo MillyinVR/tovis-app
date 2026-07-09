@@ -22,6 +22,7 @@ import {
   MediaVisibility,
   NoShowFeeReason,
   NoShowFeeStatus,
+  NotificationChannel,
   NotificationEventKey,
   NotificationPriority,
   OpeningStatus,
@@ -2304,6 +2305,22 @@ function makeAftercareClientNotifDedupeKey(bookingId: string): string {
   return `client_aftercare:${bookingId}`
 }
 
+/**
+ * §23: aftercare-ready fans out over TWO emitters. EMAIL + SMS are owned solely
+ * by the magic-link delivery (createAftercareAccessDelivery), which carries the
+ * secure /client/rebook token link (no login required, reaches phone-only /
+ * unclaimed clients). This inbox notification is the IN_APP/PUSH surface only —
+ * its href is the login-gated in-app booking view, which is correct for an
+ * already-authenticated tap but must NEVER ship over EMAIL/SMS, or the client
+ * gets a duplicate "aftercare is ready" email/text whose link dead-ends at the
+ * login screen. Restricting the inbox emit to these channels keeps the external
+ * link the token link, and the single email/text the magic-link one.
+ */
+const AFTERCARE_INBOX_NOTIFICATION_CHANNELS: readonly NotificationChannel[] = [
+  NotificationChannel.IN_APP,
+  NotificationChannel.PUSH,
+]
+
 function pickFirstNonEmpty(
   ...values: Array<string | null | undefined>
 ): string | null {
@@ -3995,6 +4012,7 @@ async function createUpdateClientNotification(args: {
   aftercareId?: string | null
   href?: string | null
   data?: Prisma.InputJsonValue | null
+  requestedChannels?: readonly NotificationChannel[] | null
 }): Promise<void> {
   await upsertClientNotification({
     tx: args.tx,
@@ -4007,6 +4025,7 @@ async function createUpdateClientNotification(args: {
     dedupeKey: args.dedupeKey,
     href: args.href ?? `/client/bookings/${args.bookingId}`,
     data: args.data,
+    requestedChannels: args.requestedChannels ?? null,
   })
 }
 
@@ -11289,6 +11308,7 @@ await createUpdateClientNotification({
     aftercareId: finalizedAftercare.id,
     notificationReason: 'AFTERCARE_SENT',
   },
+  requestedChannels: AFTERCARE_INBOX_NOTIFICATION_CHANNELS,
 })
 
     clientNotified = true
@@ -14355,6 +14375,7 @@ export async function sendExistingAftercareDraft(
         aftercareId: aftercare.id,
         notificationReason: 'AFTERCARE_SENT',
       },
+      requestedChannels: AFTERCARE_INBOX_NOTIFICATION_CHANNELS,
     })
 
     return { ok: true as const }
@@ -14426,6 +14447,7 @@ export async function nudgeAftercareRebook(
         aftercareId: aftercare.id,
         notificationReason: 'AFTERCARE_NUDGE',
       },
+      requestedChannels: AFTERCARE_INBOX_NOTIFICATION_CHANNELS,
     })
 
     return { ok: true as const }

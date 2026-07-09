@@ -200,6 +200,9 @@ describe('lib/booking/writeBoundary', () => {
         cancelledBy: 'client',
         eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
       },
+      // §23: createUpdateClientNotification now always forwards an (optional)
+      // channel filter; non-aftercare emits pass null (= event default).
+      requestedChannels: null,
     })
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
