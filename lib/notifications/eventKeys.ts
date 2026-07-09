@@ -133,10 +133,14 @@ const CLIENT_EMAIL_SMS_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.EMAIL,
 ]
 
-// Admin operational alerts: in-app inbox + email only. Admins never receive SMS.
-const ADMIN_IN_APP_EMAIL_CHANNELS: readonly NotificationChannel[] = [
+// Admin operational alerts: in-app inbox + email + push. Admins never receive
+// SMS. PUSH stays inert until APNs creds land and the admin has a registered
+// device token, so adding it here is safe and lights up once push goes live
+// (§12 NC2 admin +PUSH).
+const ADMIN_IN_APP_EMAIL_PUSH_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.IN_APP,
   NotificationChannel.EMAIL,
+  NotificationChannel.PUSH,
 ]
 
 export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -345,7 +349,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       NotificationRecipientKind.CLIENT,
     ],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+      // Pro side is in-app only (§12 NC2): the pro is mid-session and watching
+      // the app — an email receipt for their own client's approval is noise.
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
       // Tier B confirmation: in-app + email + push. No SMS for app users.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
@@ -362,7 +368,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       NotificationRecipientKind.CLIENT,
     ],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+      // Pro side is in-app only (§12 NC2): a declined proposal is a live
+      // in-session signal for the pro, not an inbox receipt.
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
       // Tier B confirmation: in-app + email + push. No SMS for app users.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
@@ -778,7 +786,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'admin_verification_review_needed',
     supportedRecipients: [NotificationRecipientKind.ADMIN],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_CHANNELS,
+      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -790,7 +798,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'admin_support_ticket_created',
     supportedRecipients: [NotificationRecipientKind.ADMIN],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_CHANNELS,
+      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -802,7 +810,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'admin_viral_request_pending',
     supportedRecipients: [NotificationRecipientKind.ADMIN],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_CHANNELS,
+      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 }

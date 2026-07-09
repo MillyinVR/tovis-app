@@ -78,11 +78,24 @@ async function warnExpiringReservations(args: {
     const vanity = vanityLinkFor(pro.handle)
     if (!vanity || !pro.handleReservedAt) continue
 
+    // §12 NC1 #40: concrete days-remaining. The reservation releases once it ages
+    // past graceDays; releaseCutoff = now − graceDays, so the release instant is
+    // handleReservedAt + graceDays and the days left reduce to (reservedAt −
+    // releaseCutoff). One day left reads as "tomorrow".
+    const daysRemaining = Math.max(
+      1,
+      Math.ceil(
+        (pro.handleReservedAt.getTime() - args.releaseCutoff.getTime()) /
+          MS_PER_DAY,
+      ),
+    )
+    const whenPhrase = daysRemaining === 1 ? 'tomorrow' : `in ${daysRemaining} days`
+
     await createProNotification({
       professionalId: pro.id,
       eventKey: NotificationEventKey.PRO_HANDLE_RESERVATION_EXPIRING,
       title: `Keep ${vanity.host}`,
-      body: `Your reserved link ${vanity.host} will be released soon unless you upgrade. Upgrade to make it live and keep it.`,
+      body: `Your reserved link ${vanity.host} will be released ${whenPhrase} unless you upgrade. Upgrade now to keep it for good.`,
       href: '/pro/membership',
       // One warning per reservation instant — re-claiming restamps the timer and resets this.
       dedupeKey: `handle-reservation-expiring:${pro.handleReservedAt.getTime()}`,

@@ -8,6 +8,7 @@ import {
   type LookAuthorRef,
   type LookPartyIdentity,
 } from './lookParty'
+import { resolveLookActorPublicName } from './social/resolveActorPublicName'
 
 /**
  * Batched social notifications for Looks engagement (social-first plan A2):
@@ -73,7 +74,23 @@ export function buildLookEngagementDedupeKey(
   return `look:${normRequired(lookPostId, 'lookPostId')}:${kind}:${day}`
 }
 
-function buildTitle(kind: LookEngagementKind, count: number): string {
+function buildTitle(
+  kind: LookEngagementKind,
+  count: number,
+  actorName: string | null,
+): string {
+  const verb = kind === 'liked' ? 'liked' : 'saved'
+
+  // Personalized with the latest actor's PUBLIC name (§12 NC1 #27/#28). For a
+  // batched row (count > 1) the current actor leads and the rest fold into an
+  // "others" count, so the row stays accurate as it refreshes through the day.
+  if (actorName) {
+    if (count <= 1) return `${actorName} ${verb} your look`
+    const others = count - 1
+    return `${actorName} + ${others} ${others === 1 ? 'other' : 'others'} ${verb} your look`
+  }
+
+  // Name-free fallback (private / no-handle actor) — the historical copy.
   if (kind === 'liked') {
     return count > 1
       ? `${count} people liked your look`
@@ -96,6 +113,7 @@ async function notifyLookEngagement(
   const actorClientId = args.actor.clientProfileId?.trim() || undefined
   const count = normCount(args.count)
   const now = args.now ?? new Date()
+  const actorName = await resolveLookActorPublicName(args.actor, args.tx)
 
   const data: LookEngagementNotificationData = {
     lookPostId,
@@ -109,7 +127,7 @@ async function notifyLookEngagement(
       kind === 'liked'
         ? NotificationEventKey.LOOK_LIKED
         : NotificationEventKey.LOOK_SAVED,
-    title: buildTitle(kind, count),
+    title: buildTitle(kind, count, actorName),
     href: `/looks/${encodeURIComponent(lookPostId)}`,
     dedupeKey: buildLookEngagementDedupeKey(kind, lookPostId, now),
     data,

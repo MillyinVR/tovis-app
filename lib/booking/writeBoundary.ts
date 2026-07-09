@@ -5876,15 +5876,10 @@ async function performLockedStartBookingSession(args: {
     },
   })
 
-  await upsertClientNotification({
-    tx: args.tx,
-    clientId: booking.clientId,
-    bookingId: booking.id,
-    eventKey: NotificationEventKey.BOOKING_STARTED,
-    title: 'Your appointment has started',
-    body: "Your pro has started your session. They'll be with you shortly.",
-    dedupeKey: `BOOKING_STARTED:${booking.id}`,
-  })
+  // §12 NC3: no BOOKING_STARTED notification — the client is physically present
+  // when the pro starts the session, so a "your appointment has started" push /
+  // in-app row is redundant. The event key is retained (enum + channel policy)
+  // but is no longer emitted.
 
   return {
     booking: {
@@ -11116,11 +11111,12 @@ const finalizedAftercare =
 
   if (args.sendToClient) {
     const notifKey = makeAftercareClientNotifDedupeKey(booking.id)
-    const notifTitle = `Aftercare: ${booking.service?.name ?? 'Your appointment'}`
-    const bodyPreview =
-      (args.notes ?? '').trim().length > 0
-        ? (args.notes ?? '').trim().slice(0, 240)
-        : null
+    // §12 NC1 #16: align the heading with the SMS, and STOP dumping the raw
+    // aftercare notes into the notification body (privacy win) — the notes stay
+    // behind the tap.
+    const aftercareServiceLabel = booking.service?.name?.trim() || 'appointment'
+    const notifTitle = 'Your aftercare is ready'
+    const notifBody = `Your pro added aftercare notes and rebooking for your ${aftercareServiceLabel}. Tap to view.`
 
 await createUpdateClientNotification({
   tx: args.tx,
@@ -11129,7 +11125,7 @@ await createUpdateClientNotification({
   aftercareId: finalizedAftercare.id,
   eventKey: NotificationEventKey.AFTERCARE_READY,
   title: notifTitle,
-  body: bodyPreview,
+  body: notifBody,
   dedupeKey: notifKey,
   href: `/client/bookings/${booking.id}?step=aftercare`,
   data: {
@@ -14175,15 +14171,16 @@ export async function sendExistingAftercareDraft(
       data: { sentToClientAt: new Date(), draftSavedAt: null },
     })
 
-    const notes = (aftercare.notes ?? '').trim()
+    // §12 NC1 #16: aligned heading + no raw notes in the body (privacy win).
+    const aftercareServiceLabel = booking.service?.name?.trim() || 'appointment'
     await createUpdateClientNotification({
       tx,
       clientId: booking.clientId,
       bookingId: booking.id,
       aftercareId: aftercare.id,
       eventKey: NotificationEventKey.AFTERCARE_READY,
-      title: `Aftercare: ${booking.service?.name ?? 'Your appointment'}`,
-      body: notes.length > 0 ? notes.slice(0, 240) : null,
+      title: 'Your aftercare is ready',
+      body: `Your pro added aftercare notes and rebooking for your ${aftercareServiceLabel}. Tap to view.`,
       dedupeKey: makeAftercareClientNotifDedupeKey(booking.id),
       href: `/client/bookings/${booking.id}?step=aftercare`,
       data: {
@@ -14245,15 +14242,16 @@ export async function nudgeAftercareRebook(
       resendMode: 'RESEND',
     })
 
-    const notes = (aftercare.notes ?? '').trim()
+    // §12 NC1 #16: aligned heading + no raw notes in the body (privacy win).
+    const aftercareServiceLabel = booking.service?.name?.trim() || 'appointment'
     await createUpdateClientNotification({
       tx,
       clientId: booking.clientId,
       bookingId: booking.id,
       aftercareId: aftercare.id,
       eventKey: NotificationEventKey.AFTERCARE_READY,
-      title: `Aftercare: ${booking.service?.name ?? 'Your appointment'}`,
-      body: notes.length > 0 ? notes.slice(0, 240) : null,
+      title: 'Your aftercare is ready',
+      body: `Your pro added aftercare notes and rebooking for your ${aftercareServiceLabel}. Tap to view.`,
       dedupeKey: makeAftercareClientNotifDedupeKey(booking.id),
       href: `/client/bookings/${booking.id}?step=aftercare`,
       data: {

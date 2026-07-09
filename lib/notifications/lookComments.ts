@@ -9,6 +9,7 @@ import {
   type LookNotificationRecipient,
   type LookPartyIdentity,
 } from './lookParty'
+import { resolveLookActorPublicName } from './social/resolveActorPublicName'
 
 /**
  * Social notifications for Looks comments (social-first plan A1):
@@ -42,6 +43,9 @@ export type CreateLookCommentNotificationArgs = {
   commentBody: string
   actorUserId: string
   actorClientId?: string | null
+  /** The commenter's resolved PUBLIC name (§12 NC1 #30/#31), or null → the
+   * name-free title. Resolved once in notifyLookCommentCreated. */
+  actorName?: string | null
   tx?: Prisma.TransactionClient
 }
 
@@ -75,11 +79,23 @@ export function buildLookCommentNotificationDedupeKey(
   return `${prefix}:${normRequired(commentId, 'commentId')}`
 }
 
+function buildCommentTitle(
+  eventKey:
+    | typeof NotificationEventKey.LOOK_COMMENTED
+    | typeof NotificationEventKey.LOOK_COMMENT_REPLIED,
+  actorName: string | null,
+): string {
+  const isReply = eventKey === NotificationEventKey.LOOK_COMMENT_REPLIED
+  if (actorName) {
+    return isReply ? `${actorName} replied` : `${actorName} commented`
+  }
+  return isReply ? 'New reply to your comment' : 'New comment on your look'
+}
+
 async function createForRecipient(
   eventKey:
     | typeof NotificationEventKey.LOOK_COMMENTED
     | typeof NotificationEventKey.LOOK_COMMENT_REPLIED,
-  title: string,
   args: CreateLookCommentNotificationArgs,
 ): Promise<void> {
   const lookPostId = normRequired(args.lookPostId, 'lookPostId')
@@ -96,7 +112,7 @@ async function createForRecipient(
 
   const shared = {
     eventKey,
-    title,
+    title: buildCommentTitle(eventKey, args.actorName?.trim() || null),
     body: toSnippet(args.commentBody),
     href: `/looks/${encodeURIComponent(lookPostId)}`,
     dedupeKey: buildLookCommentNotificationDedupeKey(eventKey, commentId),
@@ -119,26 +135,18 @@ async function createForRecipient(
   })
 }
 
-/** "New comment on your look" → the look's author. */
+/** "{name} commented" / "New comment on your look" → the look's author. */
 export async function createLookCommentedNotification(
   args: CreateLookCommentNotificationArgs,
 ): Promise<void> {
-  await createForRecipient(
-    NotificationEventKey.LOOK_COMMENTED,
-    'New comment on your look',
-    args,
-  )
+  await createForRecipient(NotificationEventKey.LOOK_COMMENTED, args)
 }
 
-/** "New reply to your comment" → the parent comment's author. */
+/** "{name} replied" / "New reply to your comment" → the parent comment's author. */
 export async function createLookCommentRepliedNotification(
   args: CreateLookCommentNotificationArgs,
 ): Promise<void> {
-  await createForRecipient(
-    NotificationEventKey.LOOK_COMMENT_REPLIED,
-    'New reply to your comment',
-    args,
-  )
+  await createForRecipient(NotificationEventKey.LOOK_COMMENT_REPLIED, args)
 }
 
 /** A user identity as both inbox routes see it (either profile may be absent). */
@@ -173,12 +181,15 @@ export type NotifyLookCommentCreatedArgs = {
 export async function notifyLookCommentCreated(
   args: NotifyLookCommentCreatedArgs,
 ): Promise<void> {
+  const actorName = await resolveLookActorPublicName(args.actor, args.tx)
+
   const shared = {
     lookPostId: args.lookPostId,
     commentId: args.comment.id,
     commentBody: args.comment.body,
     actorUserId: args.actor.userId,
     actorClientId: args.actor.clientProfileId,
+    actorName,
     tx: args.tx,
   }
 

@@ -5,6 +5,7 @@ import { NotificationEventKey } from '@prisma/client'
 const mocks = vi.hoisted(() => ({
   createProNotification: vi.fn(),
   createClientNotification: vi.fn(),
+  resolveLookActorPublicName: vi.fn(),
 }))
 
 vi.mock('./proNotifications', () => ({
@@ -13,6 +14,10 @@ vi.mock('./proNotifications', () => ({
 
 vi.mock('./clientNotifications', () => ({
   createClientNotification: mocks.createClientNotification,
+}))
+
+vi.mock('./social/resolveActorPublicName', () => ({
+  resolveLookActorPublicName: mocks.resolveLookActorPublicName,
 }))
 
 import { notifyLookCommentCreated } from './lookComments'
@@ -41,6 +46,8 @@ describe('notifyLookCommentCreated', () => {
     vi.clearAllMocks()
     mocks.createProNotification.mockResolvedValue({ id: 'n1' })
     mocks.createClientNotification.mockResolvedValue({ id: 'n2' })
+    // Default: no public identity → name-free titles (historical behavior).
+    mocks.resolveLookActorPublicName.mockResolvedValue(null)
   })
 
   it('notifies the pro on a top-level comment from a stranger', async () => {
@@ -70,6 +77,22 @@ describe('notifyLookCommentCreated', () => {
       }),
     )
     expect(mocks.createClientNotification).not.toHaveBeenCalled()
+  })
+
+  it('personalizes the comment title with the actor public name when available', async () => {
+    mocks.resolveLookActorPublicName.mockResolvedValue('@amy')
+
+    await notifyLookCommentCreated({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      comment: COMMENT,
+      parent: null,
+      actor: client('client_2', 'user_2'),
+    })
+
+    expect(mocks.createProNotification.mock.calls[0]?.[0].title).toBe(
+      '@amy commented',
+    )
   })
 
   it('routes LOOK_COMMENTED to the client author for client-shared looks', async () => {

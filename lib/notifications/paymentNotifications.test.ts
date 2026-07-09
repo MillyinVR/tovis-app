@@ -23,6 +23,7 @@ type BookingRow = {
   professionalId: string
   totalAmount: Prisma.Decimal | null
   stripePaymentIntentId: string | null
+  client: { firstName: string | null; lastName: string | null } | null
   service: { name: string | null } | null
 }
 
@@ -41,6 +42,7 @@ const DEFAULT_BOOKING: BookingRow = {
   professionalId: 'pro_1',
   totalAmount: new Prisma.Decimal('120.00'),
   stripePaymentIntentId: 'pi_123',
+  client: { firstName: 'Jordan', lastName: 'Lee' },
   service: { name: 'Balayage' },
 }
 
@@ -74,6 +76,9 @@ describe('emitPaymentCollectedNotifications', () => {
     expect(proArgs.eventKey).toBe(NotificationEventKey.PAYMENT_COLLECTED)
     expect(proArgs.professionalId).toBe('pro_1')
     expect(proArgs.dedupeKey).toBe('PAYMENT_COLLECTED:bk_1:pi_123')
+    // Pro-facing receipt names the client (§12 NC1 #19).
+    expect(proArgs.body).toContain('Jordan Lee')
+    expect(proArgs.body).toContain('$120.00')
   })
 
   it('uses a stable dedupeKey across replays (webhook retries never duplicate)', async () => {
@@ -113,6 +118,8 @@ describe('emitPaymentActionRequiredNotifications', () => {
     const proArgs = mockCreateProNotification.mock.calls[0]?.[0]
     expect(proArgs.eventKey).toBe(NotificationEventKey.PAYMENT_ACTION_REQUIRED)
     expect(proArgs.dedupeKey).toBe('PAYMENT_ACTION_REQUIRED:bk_2:pi_999')
+    // Pro-facing alert names the client (§12 NC1 #21).
+    expect(proArgs.body).toContain('Jordan Lee')
   })
 })
 
@@ -133,6 +140,8 @@ describe('emitPaymentRefundedNotifications', () => {
     const proArgs = mockCreateProNotification.mock.calls[0]?.[0]
     expect(proArgs.eventKey).toBe(NotificationEventKey.PAYMENT_REFUNDED)
     expect(proArgs.dedupeKey).toBe('PAYMENT_REFUNDED:bk_3:re_abc')
+    // Pro-facing refund receipt names the client (§12 NC1 #23).
+    expect(proArgs.body).toContain('Jordan Lee')
   })
 
   it('distinct refund ids produce distinct dedupeKeys (partial refunds)', async () => {

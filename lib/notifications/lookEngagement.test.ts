@@ -5,6 +5,7 @@ import { NotificationEventKey } from '@prisma/client'
 const mocks = vi.hoisted(() => ({
   createProNotification: vi.fn(),
   createClientNotification: vi.fn(),
+  resolveLookActorPublicName: vi.fn(),
 }))
 
 vi.mock('./proNotifications', () => ({
@@ -13,6 +14,10 @@ vi.mock('./proNotifications', () => ({
 
 vi.mock('./clientNotifications', () => ({
   createClientNotification: mocks.createClientNotification,
+}))
+
+vi.mock('./social/resolveActorPublicName', () => ({
+  resolveLookActorPublicName: mocks.resolveLookActorPublicName,
 }))
 
 import {
@@ -60,6 +65,8 @@ describe('notifyLookLiked / notifyLookSaved', () => {
     vi.clearAllMocks()
     mocks.createProNotification.mockResolvedValue({ id: 'n1' })
     mocks.createClientNotification.mockResolvedValue({ id: 'n2' })
+    // Default: no public identity → name-free titles (historical behavior).
+    mocks.resolveLookActorPublicName.mockResolvedValue(null)
   })
 
   it('notifies the pro with a singular title on the first like', async () => {
@@ -105,6 +112,33 @@ describe('notifyLookLiked / notifyLookSaved', () => {
         dedupeKey: 'look:look_1:liked:2026-07-03',
         data: expect.objectContaining({ count: 4 }),
       }),
+    )
+  })
+
+  it('personalizes the title with the actor public name, folding the rest into an "others" count', async () => {
+    mocks.resolveLookActorPublicName.mockResolvedValue('@amy')
+
+    await notifyLookLiked({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      actor: client('client_2', 'user_2'),
+      count: 1,
+      now: NOW,
+    })
+    expect(mocks.createProNotification.mock.calls[0]?.[0].title).toBe(
+      '@amy liked your look',
+    )
+
+    mocks.createProNotification.mockClear()
+    await notifyLookLiked({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      actor: client('client_3', 'user_3'),
+      count: 4,
+      now: NOW,
+    })
+    expect(mocks.createProNotification.mock.calls[0]?.[0].title).toBe(
+      '@amy + 3 others liked your look',
     )
   })
 

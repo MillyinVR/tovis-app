@@ -71,7 +71,8 @@ function buildAftercareTitle(): string {
 }
 
 function buildAftercareBody(): string {
-  return 'Use this secure link to view your aftercare summary and rebook when you are ready.'
+  // §12 NC1 #17: lead with the "ready" cue, keep the secure-link phrasing.
+  return "Your aftercare is ready — use this secure link to view your summary and rebook when you're ready."
 }
 
 function buildAftercareMetadata(

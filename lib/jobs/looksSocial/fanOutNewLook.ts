@@ -13,6 +13,10 @@ import {
   type CreateClientNotificationArgs,
 } from '@/lib/notifications/clientNotifications'
 import { normalizeRequiredId } from '@/lib/guards'
+import {
+  pickProfessionalPublicDisplayName,
+  professionalPublicDisplayNameSelect,
+} from '@/lib/privacy/professionalDisplayName'
 
 type FanOutNewLookDb = PrismaClient | Prisma.TransactionClient
 
@@ -43,6 +47,7 @@ export const fanOutNewLookSelect = Prisma.validator<Prisma.LookPostSelect>()({
   removedAt: true,
   professional: {
     select: {
+      ...professionalPublicDisplayNameSelect,
       user: {
         select: {
           clientProfile: { select: { id: true } },
@@ -97,13 +102,18 @@ function toCaptionSnippet(caption: string | null): string | null {
 export function buildNewLookClientNotificationArgs(args: {
   clientId: string
   look: Pick<FanOutNewLookRow, 'id' | 'professionalId' | 'caption'>
+  /** The look's pro PUBLIC display name (§12 NC1 #32), or null → name-free. */
+  proName?: string | null
 }): CreateClientNotificationArgs {
   const lookPostId = normalizeRequiredId('lookPostId', args.look.id)
+  const proName = args.proName?.trim() || null
 
   return {
     clientId: normalizeRequiredId('clientId', args.clientId),
     eventKey: NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
-    title: 'New look from a pro you follow',
+    title: proName
+      ? `${proName} just posted a new look`
+      : 'New look from a pro you follow',
     body: toCaptionSnippet(args.look.caption),
     href: `/looks/${encodeURIComponent(lookPostId)}`,
     dedupeKey: `look:${lookPostId}:new-look`,
@@ -171,6 +181,9 @@ export async function processFanOutNewLookNotifications(
   // self-notification.
   const proOwnClientId = look.professional.user.clientProfile?.id ?? null
 
+  // Resolve the pro's PUBLIC display name once for the whole fan-out.
+  const proName = pickProfessionalPublicDisplayName(look.professional)
+
   let notifiedCount = 0
   let skippedSelfCount = 0
 
@@ -187,6 +200,7 @@ export async function processFanOutNewLookNotifications(
       buildNewLookClientNotificationArgs({
         clientId: follower.clientId,
         look,
+        proName,
       }),
     )
 

@@ -160,21 +160,31 @@ export async function sendVerificationEmail(args: {
   const fromEmail = requireEmailEnv('POSTMARK_FROM_EMAIL')
   const messageStream = envOrNull('POSTMARK_MESSAGE_STREAM')
 
+  // §12 NC1 #41: light polish — warm greeting + sign-off, everything else (subject,
+  // 24h expiry line, safe-to-ignore line, single CTA) kept for deliverability. A
+  // generic greeting avoids interpolating a user-controlled name into email HTML
+  // (this module has no HTML escaper).
   const subject = `Verify your email for ${args.brandName}`
   const text = [
+    'Hi there,',
+    '',
     `Verify your email to finish setting up your ${args.brandName} account.`,
     '',
     `Open this link: ${args.verifyUrl}`,
     '',
     'This link expires in 24 hours.',
     'If you did not create this account, you can ignore this email.',
+    '',
+    `— The ${args.brandName} team`,
   ].join('\n')
 
   const html = [
+    '<p>Hi there,</p>',
     `<p>Verify your email to finish setting up your ${args.brandName} account.</p>`,
     `<p><a href="${args.verifyUrl}">Verify your email</a></p>`,
     '<p>This link expires in 24 hours.</p>',
     '<p>If you did not create this account, you can ignore this email.</p>',
+    `<p>— The ${args.brandName} team</p>`,
   ].join('')
 
   const payload = {
