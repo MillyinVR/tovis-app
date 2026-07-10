@@ -39,6 +39,8 @@ export type {
   ClientAftercareDetailDTO,
   ClientAftercareRecommendedProductDTO,
   ClientAftercareCheckoutProductDTO,
+  ClientAftercareRebookDTO,
+  ClientAftercareNextBookingDTO,
 } from '@/lib/dto/clientAftercare'
 
 // ── Pro Overview / performance dashboard (GET /api/v1/pro/overview) ───────────

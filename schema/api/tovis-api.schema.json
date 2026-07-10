@@ -1,6 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "$Enums.AftercareRebookMode": {
+      "enum": [
+        "NONE",
+        "BOOKED_NEXT_APPOINTMENT",
+        "RECOMMENDED_WINDOW"
+      ],
+      "type": "string"
+    },
     "$Enums.BoardType": {
       "enum": [
         "GENERAL",
@@ -35,6 +43,17 @@
       "enum": [
         "BASE",
         "ADD_ON"
+      ],
+      "type": "string"
+    },
+    "$Enums.BookingStatus": {
+      "enum": [
+        "PENDING",
+        "ACCEPTED",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "CANCELLED",
+        "NO_SHOW"
       ],
       "type": "string"
     },
@@ -351,6 +370,9 @@
         "PENDING_MANUAL_REVIEW"
       ],
       "type": "string"
+    },
+    "AftercareRebookMode": {
+      "$ref": "#/definitions/%24Enums.AftercareRebookMode"
     },
     "ApiOk<(def-alias-1643606088-2592-2984-1643606088-0-93002041664248&structure-1643606088-5702-6857-1643606088-5676-6857-1643606088-5669-6859-1643606088-5630-6859-1643606088-0-9300)>": {
       "properties": {
@@ -1896,6 +1918,9 @@
     "BookingServiceItemType": {
       "$ref": "#/definitions/%24Enums.BookingServiceItemType"
     },
+    "BookingStatus": {
+      "$ref": "#/definitions/%24Enums.BookingStatus"
+    },
     "ChannelPreferenceState": {
       "description": "Read/write surface for the *NotificationPreference tables. The delivery engine already consumes these rows (see channelPolicy.ts); this module only lets a user view and edit their own rows. It changes no policy default.\n\nQuiet hours are stored per-eventKey on every preference row, so a single user-facing window is written uniformly across all of an owner's rows.\n\nTo tell \"never configured\" apart from \"explicitly turned off\", we use a sentinel the engine already treats as no-quiet-hours: equal start/end minutes (channelPolicy.isWithinQuietHours returns false when start === end). So:   - both null               → never configured → UI default ON (22:00–08:00)   - start === end (e.g. 0)  → explicitly OFF   - start !== end           → explicitly ON with that window",
       "properties": {
@@ -2189,6 +2214,17 @@
           "description": "Whether the client may edit their checkout-product selection right now — mirrors the write path's `assertClientCanEditBookingCheckoutProducts` gate (finalized aftercare, not yet in/through payment, not completed/cancelled). When false the native + web pickers render read-only.",
           "type": "boolean"
         },
+        "rebook": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientAftercareRebookDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The pro's rebook recommendation (recommended window / proposed next appointment) + the coupled next booking, or null when no summary is sent."
+        },
         "recommendedProducts": {
           "description": "The pro's product recommendations from the sent summary (empty if none).",
           "items": {
@@ -2203,7 +2239,90 @@
         "beforeAfter",
         "recommendedProducts",
         "checkoutProducts",
+        "rebook",
         "checkoutProductsEditable"
+      ],
+      "type": "object"
+    },
+    "ClientAftercareNextBookingDTO": {
+      "description": "The AFTERCARE-sourced next booking coupled to this booking (its `rebookOfBookingId` points back here). Lets the aftercare rebook card show a confirmed / pending-approval state instead of re-offering Confirm. Mirrors the web `rebookedNextBooking` load.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "scheduledFor": {
+          "description": "Scheduled instant (ISO), or null when unset.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/BookingStatus",
+          "description": "The next booking's lifecycle status (PENDING until the pro approves, etc.)."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "scheduledFor"
+      ],
+      "type": "object"
+    },
+    "ClientAftercareRebookDTO": {
+      "description": "The pro's rebook recommendation from the sent aftercare summary + the coupled next booking (if the client has already rebooked). Mirrors the web page's `getAftercareRebookInfo` inputs (`aftercareSummarySelect` rebook fields) plus the `rebookedNextBooking` load — powers the native rebook-window card. Present only when a summary has been sent (same gate as `aftercare`).",
+      "properties": {
+        "declinedAt": {
+          "description": "ISO instant the client declined the pro's proposed `BOOKED_NEXT_APPOINTMENT`, else null. Cleared when the pro re-offers.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/definitions/AftercareRebookMode",
+          "description": "The pro's rebook mode: `NONE` (no recommendation), `RECOMMENDED_WINDOW` (a date range the client picks within), or `BOOKED_NEXT_APPOINTMENT` (a specific time the pro proposed for the client to confirm/decline)."
+        },
+        "nextBooking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientAftercareNextBookingDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The coupled AFTERCARE-sourced next booking when one exists (the client has confirmed/booked), else null."
+        },
+        "rebookedFor": {
+          "description": "The pro-proposed next-appointment instant for `BOOKED_NEXT_APPOINTMENT` (ISO), else null. Not set for `RECOMMENDED_WINDOW`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "windowEnd": {
+          "description": "Recommended-window end (ISO) for `RECOMMENDED_WINDOW`, else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "windowStart": {
+          "description": "Recommended-window start (ISO) for `RECOMMENDED_WINDOW`, else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "rebookedFor",
+        "windowStart",
+        "windowEnd",
+        "declinedAt",
+        "nextBooking"
       ],
       "type": "object"
     },

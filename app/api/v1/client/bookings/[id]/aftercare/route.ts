@@ -32,7 +32,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
     const own = await requireClientBookingOwnership(bookingId, clientId)
     if (!own.ok) return own.res
 
-    const [booking, aftercare, beforeAfter] = await Promise.all([
+    const [booking, aftercare, beforeAfter, rebookedNextBooking] = await Promise.all([
       // Lifecycle status drives the aftercare-visibility gate (COMPLETED shows
       // the surface even before a summary is sent); the remaining fields +
       // current checkout selection drive the `checkoutProductsEditable` gate and
@@ -65,6 +65,13 @@ export async function GET(_req: Request, ctx: RouteContext) {
           id: true,
           notes: true,
           sentToClientAt: true,
+          // Rebook recommendation (§5 A3-rebook) — mirrors the web detail loader's
+          // `aftercareSummarySelect`; drives the native rebook-window card.
+          rebookMode: true,
+          rebookedFor: true,
+          rebookWindowStart: true,
+          rebookWindowEnd: true,
+          rebookDeclinedAt: true,
           recommendedProducts: {
             take: 50,
             orderBy: { id: 'asc' },
@@ -89,6 +96,15 @@ export async function GET(_req: Request, ctx: RouteContext) {
       // Featured (else earliest-per-phase) before/after pair, already resolved
       // to render URLs — the shared SSOT the web + client home reuse.
       loadBookingBeforeAfterThumbsFor(bookingId),
+      // The AFTERCARE-sourced next booking coupled to this one (its
+      // rebookOfBookingId points back here) — lets the rebook card show a
+      // confirmed/pending state instead of re-offering Confirm. Mirrors the web
+      // detail loader's `rebookedNextBooking` load. Scoped to the authed client.
+      prisma.booking.findFirst({
+        where: { rebookOfBookingId: bookingId, clientId },
+        orderBy: { scheduledFor: 'desc' },
+        select: { id: true, status: true, scheduledFor: true },
+      }),
     ])
 
     const dto: ClientAftercareDetailDTO = buildClientAftercareDetailDTO({
@@ -100,6 +116,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
       aftercare,
       beforeAfter,
       checkoutProductItems: booking?.checkoutProductItems ?? [],
+      rebookedNextBooking,
     })
 
     return jsonOk(dto)

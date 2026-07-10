@@ -12,7 +12,12 @@
 // (pro-chosen featured pair, else earliest-per-phase) — the same shape the
 // client home aftercare action card already carries.
 
-import type { BookingCheckoutStatus, BookingStatus, Prisma } from '@prisma/client'
+import type {
+  AftercareRebookMode,
+  BookingCheckoutStatus,
+  BookingStatus,
+  Prisma,
+} from '@prisma/client'
 
 import { isClientAftercareVisible } from '@/lib/aftercare/aftercareVisibility'
 import { clientCanEditBookingCheckoutProducts } from '@/lib/booking/checkoutProductsEditable'
@@ -67,6 +72,55 @@ export type ClientAftercareCheckoutProductDTO = {
   unitPrice: string | null
 }
 
+/**
+ * The AFTERCARE-sourced next booking coupled to this booking (its
+ * `rebookOfBookingId` points back here). Lets the aftercare rebook card show a
+ * confirmed / pending-approval state instead of re-offering Confirm. Mirrors the
+ * web `rebookedNextBooking` load.
+ */
+export type ClientAftercareNextBookingDTO = {
+  id: string
+  /** The next booking's lifecycle status (PENDING until the pro approves, etc.). */
+  status: BookingStatus
+  /** Scheduled instant (ISO), or null when unset. */
+  scheduledFor: string | null
+}
+
+/**
+ * The pro's rebook recommendation from the sent aftercare summary + the coupled
+ * next booking (if the client has already rebooked). Mirrors the web page's
+ * `getAftercareRebookInfo` inputs (`aftercareSummarySelect` rebook fields) plus
+ * the `rebookedNextBooking` load — powers the native rebook-window card. Present
+ * only when a summary has been sent (same gate as `aftercare`).
+ */
+export type ClientAftercareRebookDTO = {
+  /**
+   * The pro's rebook mode: `NONE` (no recommendation), `RECOMMENDED_WINDOW` (a
+   * date range the client picks within), or `BOOKED_NEXT_APPOINTMENT` (a specific
+   * time the pro proposed for the client to confirm/decline).
+   */
+  mode: AftercareRebookMode
+  /**
+   * The pro-proposed next-appointment instant for `BOOKED_NEXT_APPOINTMENT`
+   * (ISO), else null. Not set for `RECOMMENDED_WINDOW`.
+   */
+  rebookedFor: string | null
+  /** Recommended-window start (ISO) for `RECOMMENDED_WINDOW`, else null. */
+  windowStart: string | null
+  /** Recommended-window end (ISO) for `RECOMMENDED_WINDOW`, else null. */
+  windowEnd: string | null
+  /**
+   * ISO instant the client declined the pro's proposed `BOOKED_NEXT_APPOINTMENT`,
+   * else null. Cleared when the pro re-offers.
+   */
+  declinedAt: string | null
+  /**
+   * The coupled AFTERCARE-sourced next booking when one exists (the client has
+   * confirmed/booked), else null.
+   */
+  nextBooking: ClientAftercareNextBookingDTO | null
+}
+
 export type ClientAftercareDetailDTO = {
   /**
    * Whether the client's aftercare surface is visible for this booking —
@@ -82,6 +136,11 @@ export type ClientAftercareDetailDTO = {
   recommendedProducts: ClientAftercareRecommendedProductDTO[]
   /** The client's current booking-checkout product selection (empty if none). */
   checkoutProducts: ClientAftercareCheckoutProductDTO[]
+  /**
+   * The pro's rebook recommendation (recommended window / proposed next
+   * appointment) + the coupled next booking, or null when no summary is sent.
+   */
+  rebook: ClientAftercareRebookDTO | null
   /**
    * Whether the client may edit their checkout-product selection right now —
    * mirrors the write path's `assertClientCanEditBookingCheckoutProducts` gate
@@ -163,16 +222,49 @@ export function buildClientAftercareDetailDTO(input: {
         notes: string | null
         sentToClientAt: Date | null
         recommendedProducts: AftercareRecommendedProductInput[]
+        rebookMode: AftercareRebookMode
+        rebookedFor: Date | null
+        rebookWindowStart: Date | null
+        rebookWindowEnd: Date | null
+        rebookDeclinedAt: Date | null
       }
     | null
   beforeAfter: BookingBeforeAfterThumbs
   checkoutProductItems: AftercareCheckoutProductInput[]
+  /**
+   * The AFTERCARE-sourced booking whose `rebookOfBookingId` points back at this
+   * booking (the client's coupled next appointment), or null. Loaded alongside
+   * the summary; surfaced so the rebook card can show a confirmed/pending state.
+   */
+  rebookedNextBooking: {
+    id: string
+    status: BookingStatus
+    scheduledFor: Date | null
+  } | null
 }): ClientAftercareDetailDTO {
   const aftercare = input.aftercare
     ? {
         id: input.aftercare.id,
         notes: input.aftercare.notes,
         sentToClientAt: input.aftercare.sentToClientAt?.toISOString() ?? null,
+      }
+    : null
+
+  const rebook: ClientAftercareRebookDTO | null = input.aftercare
+    ? {
+        mode: input.aftercare.rebookMode,
+        rebookedFor: input.aftercare.rebookedFor?.toISOString() ?? null,
+        windowStart: input.aftercare.rebookWindowStart?.toISOString() ?? null,
+        windowEnd: input.aftercare.rebookWindowEnd?.toISOString() ?? null,
+        declinedAt: input.aftercare.rebookDeclinedAt?.toISOString() ?? null,
+        nextBooking: input.rebookedNextBooking
+          ? {
+              id: input.rebookedNextBooking.id,
+              status: input.rebookedNextBooking.status,
+              scheduledFor:
+                input.rebookedNextBooking.scheduledFor?.toISOString() ?? null,
+            }
+          : null,
       }
     : null
 
@@ -187,6 +279,7 @@ export function buildClientAftercareDetailDTO(input: {
       mapRecommendedProduct,
     ),
     checkoutProducts: input.checkoutProductItems.map(mapCheckoutProduct),
+    rebook,
     checkoutProductsEditable: clientCanEditBookingCheckoutProducts({
       status: input.status,
       finishedAt: input.finishedAt,
