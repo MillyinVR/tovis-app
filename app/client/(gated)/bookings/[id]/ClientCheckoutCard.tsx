@@ -416,23 +416,28 @@ export default function ClientCheckoutCard(props: Props) {
 
   const selectedMethodIsStripe = selectedMethodKey === STRIPE_METHOD_KEY
 
-  // Server-rendered total = service + product + tip + tax - discount,
-  // computed by the booking rollup. We mirror it locally only as a hint
-  // while the user is editing the tip; the *charged* amount always comes
-  // from the server.
+  // Persisted server total (= service + product + saved tip + tax - discount),
+  // frozen at the last save. It reflects the *saved* tip, not whatever the
+  // client is currently typing, so it must never drive an on-screen or deep-link
+  // amount — only the label decision below (finalized "Total" vs "Preview total")
+  // and, at confirm time, the server's authoritative charge.
   const totalSnapshot = useMemo(
     () => getNumericMoney(props.totalAmount),
     [props.totalAmount],
   )
+  // Live amount owed, recomputed client-side the instant the tip changes. This is
+  // the single source of truth for every amount we show the client (Total row,
+  // CTA, off-platform deep-link) so they all track the tip with no "Save tip"
+  // round-trip. The charged amount is still settled server-side at confirm.
   const livePreviewTotal = useMemo(() => {
     return serviceSubtotal + productSubtotal + tipAmount + taxAmount - discountAmount
   }, [serviceSubtotal, productSubtotal, tipAmount, taxAmount, discountAmount])
 
   // One-tap "pay the pro" action for the selected off-platform method. Uses the
-  // full amount due (snapshot once the checkout is finalized, live preview while
-  // the client is still adjusting the tip). Null for cash / Stripe / methods
-  // without a stored handle.
-  const amountDue = totalSnapshot ?? livePreviewTotal
+  // live full amount due so the pre-filled amount tracks the tip the instant it
+  // changes — no "Save tip" round-trip. Null for cash / Stripe / methods without
+  // a stored handle.
+  const amountDue = livePreviewTotal
   const payAction = useMemo(
     () =>
       selectedMethod
@@ -601,7 +606,7 @@ export default function ClientCheckoutCard(props: Props) {
       return selectedMethodIsStripe ? 'Opening Stripe…' : 'Confirming…'
     }
     if (!selectedMethod) return 'Choose a payment method'
-    const total = formatMoneyFromUnknown(totalSnapshot ?? livePreviewTotal)
+    const total = formatMoneyFromUnknown(livePreviewTotal)
     if (selectedMethodIsStripe) {
       return total ? `Pay ${total} with card` : 'Pay with card'
     }
@@ -667,10 +672,7 @@ export default function ClientCheckoutCard(props: Props) {
           />
           <SummaryRow
             label={totalSnapshot != null ? 'Total' : 'Preview total'}
-            value={
-              formatMoneyFromUnknown(totalSnapshot ?? livePreviewTotal) ||
-              '$0.00'
-            }
+            value={formatMoneyFromUnknown(livePreviewTotal) || '$0.00'}
           />
         </div>
       </div>
