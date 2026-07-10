@@ -2262,7 +2262,7 @@
       "type": "object"
     },
     "ClientAftercareExistingReviewDTO": {
-      "description": "The client's own review of this booking (text only — media belongs to A3-rev 4b), when they've left one. Mirrors the web `SafeExistingReview`'s text slice; powers prefill + edit in the native review block. Gated like `aftercare` (only surfaced once a summary is sent).",
+      "description": "The client's own review of this booking, when they've left one. Mirrors the web `SafeExistingReview` (text slice + attached media); powers prefill + edit and the photo grid in the native review block. Gated like `aftercare` (only surfaced once a summary is sent).",
       "properties": {
         "body": {
           "description": "Optional free-text review body, or null.",
@@ -2281,6 +2281,13 @@
         "id": {
           "type": "string"
         },
+        "mediaAssets": {
+          "description": "Photos/videos the client attached to their review (newest first; empty when none). The client can add more (fresh uploads or \"from this session\") or remove one (DELETE /client/reviews/[id]/media/[mediaId]).",
+          "items": {
+            "$ref": "#/definitions/ClientAftercareReviewMediaDTO"
+          },
+          "type": "array"
+        },
         "rating": {
           "description": "The 1–5 star rating the client gave.",
           "type": "number"
@@ -2290,7 +2297,8 @@
         "id",
         "rating",
         "headline",
-        "body"
+        "body",
+        "mediaAssets"
       ],
       "type": "object"
     },
@@ -2456,6 +2464,44 @@
         "externalName",
         "externalUrl",
         "product"
+      ],
+      "type": "object"
+    },
+    "ClientAftercareReviewMediaDTO": {
+      "description": "One photo/video attached to the client's review, with render-ready URLs. Review media lives in the public bucket (visibility PUBLIC — attaching to a review is the publish-consent action); the URLs are resolved the same way the web booking-detail page resolves the review's `mediaAssets`. Powers the native review photo grid (A3-rev 4b).",
+      "properties": {
+        "createdAt": {
+          "description": "ISO instant the media was attached to the review.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType",
+          "description": "IMAGE or VIDEO."
+        },
+        "thumbUrl": {
+          "description": "Render-ready thumbnail URL, or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Render-ready full-size URL, or null when it can't be resolved.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "url",
+        "thumbUrl",
+        "createdAt"
       ],
       "type": "object"
     },

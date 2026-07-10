@@ -10,6 +10,7 @@ import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeCon
 import { requireClientBookingOwnership } from '@/app/api/_utils/auth/requireClientBookingOwnership'
 import { prisma } from '@/lib/prisma'
 import { loadBookingBeforeAfterThumbsFor } from '@/lib/media/bookingBeforeAfter'
+import { renderMediaUrlsBatch } from '@/lib/media/renderUrls'
 import {
   buildClientAftercareDetailDTO,
   type ClientAftercareDetailDTO,
@@ -106,16 +107,59 @@ export async function GET(_req: Request, ctx: RouteContext) {
         orderBy: { scheduledFor: 'desc' },
         select: { id: true, status: true, scheduledFor: true },
       }),
-      // The client's own review of this booking (text slice only — media is
-      // A3-rev 4b), for prefill/edit in the native review block. Scoped to the
-      // authed client; the DTO gates it behind a sent summary. Mirrors the web
-      // detail loader's `existingReview` load.
+      // The client's own review of this booking (text slice + attached media),
+      // for prefill/edit + the photo grid in the native review block. Scoped to
+      // the authed client; the DTO gates it behind a sent summary. Storage
+      // pointers are selected so the render URLs resolve exactly like the web
+      // detail loader's `existingReview`.
       prisma.review.findFirst({
         where: { bookingId, clientId },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, rating: true, headline: true, body: true },
+        select: {
+          id: true,
+          rating: true,
+          headline: true,
+          body: true,
+          mediaAssets: {
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              mediaType: true,
+              createdAt: true,
+              url: true,
+              thumbUrl: true,
+              storageBucket: true,
+              storagePath: true,
+              thumbBucket: true,
+              thumbPath: true,
+            },
+          },
+        },
       }),
     ])
+
+    // Resolve render-ready URLs for the review's attached media (public-bucket
+    // review photos → deterministic public URLs; batched, matching the web
+    // loader). The builder consumes the already-resolved list.
+    const reviewMediaUrls = review
+      ? await renderMediaUrlsBatch(review.mediaAssets)
+      : []
+    const reviewForDto = review
+      ? {
+          id: review.id,
+          rating: review.rating,
+          headline: review.headline,
+          body: review.body,
+          // `renderMediaUrlsBatch` returns results aligned to the input order.
+          mediaAssets: review.mediaAssets.map((asset, index) => ({
+            id: asset.id,
+            mediaType: asset.mediaType,
+            url: reviewMediaUrls[index]?.renderUrl ?? null,
+            thumbUrl: reviewMediaUrls[index]?.renderThumbUrl ?? null,
+            createdAt: asset.createdAt,
+          })),
+        }
+      : null
 
     const dto: ClientAftercareDetailDTO = buildClientAftercareDetailDTO({
       status: booking?.status ?? null,
@@ -127,7 +171,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
       beforeAfter,
       checkoutProductItems: booking?.checkoutProductItems ?? [],
       rebookedNextBooking,
-      review,
+      review: reviewForDto,
     })
 
     return jsonOk(dto)

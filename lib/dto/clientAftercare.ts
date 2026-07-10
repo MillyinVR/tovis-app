@@ -16,6 +16,7 @@ import type {
   AftercareRebookMode,
   BookingCheckoutStatus,
   BookingStatus,
+  MediaType,
   Prisma,
 } from '@prisma/client'
 
@@ -123,9 +124,28 @@ export type ClientAftercareRebookDTO = {
 }
 
 /**
- * The client's own review of this booking (text only — media belongs to A3-rev
- * 4b), when they've left one. Mirrors the web `SafeExistingReview`'s text slice;
- * powers prefill + edit in the native review block. Gated like `aftercare` (only
+ * One photo/video attached to the client's review, with render-ready URLs.
+ * Review media lives in the public bucket (visibility PUBLIC — attaching to a
+ * review is the publish-consent action); the URLs are resolved the same way the
+ * web booking-detail page resolves the review's `mediaAssets`. Powers the native
+ * review photo grid (A3-rev 4b).
+ */
+export type ClientAftercareReviewMediaDTO = {
+  id: string
+  /** IMAGE or VIDEO. */
+  mediaType: MediaType
+  /** Render-ready full-size URL, or null when it can't be resolved. */
+  url: string | null
+  /** Render-ready thumbnail URL, or null. */
+  thumbUrl: string | null
+  /** ISO instant the media was attached to the review. */
+  createdAt: string
+}
+
+/**
+ * The client's own review of this booking, when they've left one. Mirrors the
+ * web `SafeExistingReview` (text slice + attached media); powers prefill + edit
+ * and the photo grid in the native review block. Gated like `aftercare` (only
  * surfaced once a summary is sent).
  */
 export type ClientAftercareExistingReviewDTO = {
@@ -136,6 +156,12 @@ export type ClientAftercareExistingReviewDTO = {
   headline: string | null
   /** Optional free-text review body, or null. */
   body: string | null
+  /**
+   * Photos/videos the client attached to their review (newest first; empty when
+   * none). The client can add more (fresh uploads or "from this session") or
+   * remove one (DELETE /client/reviews/[id]/media/[mediaId]).
+   */
+  mediaAssets: ClientAftercareReviewMediaDTO[]
 }
 
 export type ClientAftercareDetailDTO = {
@@ -272,7 +298,9 @@ export function buildClientAftercareDetailDTO(input: {
     scheduledFor: Date | null
   } | null
   /**
-   * The client's existing review for this booking (text slice only), or null.
+   * The client's existing review for this booking (text slice + attached media),
+   * or null. `mediaAssets` URLs are already render-resolved by the caller (the
+   * route resolves them via `renderMediaUrlsBatch`, matching the web loader).
    * Loaded alongside the summary; only surfaced once a summary is sent.
    */
   review: {
@@ -280,6 +308,13 @@ export function buildClientAftercareDetailDTO(input: {
     rating: number
     headline: string | null
     body: string | null
+    mediaAssets: Array<{
+      id: string
+      mediaType: MediaType
+      url: string | null
+      thumbUrl: string | null
+      createdAt: Date
+    }>
   } | null
 }): ClientAftercareDetailDTO {
   const aftercare = input.aftercare
@@ -320,6 +355,13 @@ export function buildClientAftercareDetailDTO(input: {
           rating: input.review.rating,
           headline: input.review.headline,
           body: input.review.body,
+          mediaAssets: input.review.mediaAssets.map((asset) => ({
+            id: asset.id,
+            mediaType: asset.mediaType,
+            url: asset.url,
+            thumbUrl: asset.thumbUrl,
+            createdAt: asset.createdAt.toISOString(),
+          })),
         }
       : null
   const reviewEligible = summarySent
