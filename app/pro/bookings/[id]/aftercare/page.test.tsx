@@ -69,6 +69,8 @@ vi.mock('./AftercareForm', () => ({
     existingRebookWindowStart,
     existingRebookWindowEnd,
     existingMedia,
+    existingFeaturedBeforeAssetId,
+    existingFeaturedAfterAssetId,
     existingRecommendedProducts,
     existingDraftSavedAt,
     existingSentToClientAt,
@@ -85,6 +87,8 @@ vi.mock('./AftercareForm', () => ({
     existingRebookWindowStart: string | null
     existingRebookWindowEnd: string | null
     existingMedia: Array<unknown>
+    existingFeaturedBeforeAssetId: string | null
+    existingFeaturedAfterAssetId: string | null
     existingRecommendedProducts: Array<unknown>
     existingDraftSavedAt: string | null
     existingSentToClientAt: string | null
@@ -104,6 +108,8 @@ vi.mock('./AftercareForm', () => ({
         'data-existing-rebooked-for': existingRebookedFor ?? '',
         'data-existing-rebook-window-start': existingRebookWindowStart ?? '',
         'data-existing-rebook-window-end': existingRebookWindowEnd ?? '',
+        'data-existing-featured-before': existingFeaturedBeforeAssetId ?? '',
+        'data-existing-featured-after': existingFeaturedAfterAssetId ?? '',
         'data-existing-media-count': String(existingMedia.length),
         'data-existing-products-count': String(
           existingRecommendedProducts.length,
@@ -289,11 +295,13 @@ function makeBooking(overrides?: {
 
 async function renderPage(args?: {
   booking?: ReturnType<typeof makeBooking>
+  searchParams?: Record<string, string | string[] | undefined>
 }) {
   mocks.bookingFindUnique.mockResolvedValueOnce(args?.booking ?? makeBooking())
 
   return ProAftercarePage({
     params: Promise.resolve({ id: 'booking_1' }),
+    searchParams: Promise.resolve(args?.searchParams ?? {}),
   })
 }
 
@@ -334,6 +342,7 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     await expect(
       ProAftercarePage({
         params: Promise.resolve({ id: 'booking_1' }),
+        searchParams: Promise.resolve({}),
       }),
     ).rejects.toMatchObject({
       href: '/login?from=%2Fpro%2Fbookings%2Fbooking_1%2Faftercare',
@@ -346,6 +355,7 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     await expect(
       ProAftercarePage({
         params: Promise.resolve({ id: '   ' }),
+        searchParams: Promise.resolve({}),
       }),
     ).rejects.toMatchObject({
       digest: 'NEXT_NOT_FOUND',
@@ -490,6 +500,63 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     expect(markup).toContain('data-existing-products-count="2"')
     expect(markup).toContain('data-existing-is-finalized="false"')
     expect(markup).not.toContain('public_')
+  })
+
+  it('carries a valid ?fb=/?fa= featured pre-selection into the aftercare form', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        mediaAssets: [
+          {
+            id: 'media_b',
+            url: null,
+            thumbUrl: null,
+            mediaType: 'IMAGE',
+            visibility: 'PRIVATE',
+            uploadedByRole: 'PRO',
+            reviewId: null,
+            createdAt: new Date('2026-04-12T19:00:00.000Z'),
+            phase: 'BEFORE',
+            storageBucket: 'booking-media',
+            storagePath: 'before/media_b.jpg',
+            thumbBucket: 'booking-media-thumbs',
+            thumbPath: 'before/thumb_media_b.jpg',
+          },
+          {
+            id: 'media_a',
+            url: null,
+            thumbUrl: null,
+            mediaType: 'IMAGE',
+            visibility: 'PRIVATE',
+            uploadedByRole: 'PRO',
+            reviewId: null,
+            createdAt: new Date('2026-04-12T20:00:00.000Z'),
+            phase: 'AFTER',
+            storageBucket: 'booking-media',
+            storagePath: 'after/media_a.jpg',
+            thumbBucket: 'booking-media-thumbs',
+            thumbPath: 'after/thumb_media_a.jpg',
+          },
+        ],
+      }),
+      searchParams: { fb: 'media_b', fa: 'media_a' },
+    })
+
+    const markup = renderMarkup(page)
+    expect(markup).toContain('data-existing-featured-before="media_b"')
+    expect(markup).toContain('data-existing-featured-after="media_a"')
+  })
+
+  it('drops a carried featured id that is not a matching-phase image on the booking', async () => {
+    // The default booking has one AFTER image (media_1) and no before image.
+    // fb references that AFTER image (wrong phase) → dropped; fa is valid.
+    const page = await renderPage({
+      booking: makeBooking(),
+      searchParams: { fb: 'media_1', fa: 'media_1' },
+    })
+
+    const markup = renderMarkup(page)
+    expect(markup).toContain('data-existing-featured-before=""')
+    expect(markup).toContain('data-existing-featured-after="media_1"')
   })
 
   it('renders finalized aftercare state with live client access and resolves media URLs via renderMediaUrlsBatch', async () => {

@@ -56,22 +56,31 @@ vi.mock('@/lib/media/renderUrls', () => ({
   renderMediaUrls: mocks.renderMediaUrls,
 }))
 
-vi.mock('../_components/SessionPhotoGrid', () => ({
+vi.mock('./FeaturedPairPicker', () => ({
   default: ({
-    items,
-    label,
+    aftercareHref,
+    beforeItems,
+    afterItems,
+    initialBeforeId,
+    initialAfterId,
   }: {
-    items: Array<{ id: string }>
-    label: string
+    aftercareHref: string
+    beforeItems: Array<{ id: string }>
+    afterItems: Array<{ id: string }>
+    initialBeforeId: string | null
+    initialAfterId: string | null
   }) =>
     React.createElement(
       'div',
       {
-        'data-testid': 'session-photo-grid',
-        'data-label': label,
-        'data-count': String(items.length),
+        'data-testid': 'featured-pair-picker',
+        'data-aftercare-href': aftercareHref,
+        'data-before-count': String(beforeItems.length),
+        'data-after-count': String(afterItems.length),
+        'data-initial-before': initialBeforeId ?? '',
+        'data-initial-after': initialAfterId ?? '',
       },
-      label,
+      'FeaturedPairPicker',
     ),
 }))
 
@@ -187,10 +196,11 @@ async function renderPage(args?: {
   booking?: ReturnType<typeof makeBooking> | null
   afterCount?: number
   mediaRows?: Array<ReturnType<typeof makeMediaRow>>
+  searchParams?: Record<string, string | string[] | undefined>
 }) {
   // The page loads the booking once for its own guards and the shared
-  // listProBookingMedia path re-checks ownership, so both reads see the
-  // same row.
+  // listProBookingMedia path re-checks ownership (once per phase), so every
+  // read sees the same row.
   mocks.bookingFindUnique.mockResolvedValue(
     args && 'booking' in args ? args.booking : makeBooking(),
   )
@@ -200,6 +210,7 @@ async function renderPage(args?: {
 
   return ProAfterPhotosPage({
     params: Promise.resolve({ id: 'booking_1' }),
+    searchParams: Promise.resolve(args?.searchParams ?? {}),
   })
 }
 
@@ -248,6 +259,11 @@ type TestElementProps = {
   'data-booking-id'?: string
   'data-phase'?: string
   'data-count'?: string
+  'data-aftercare-href'?: string
+  'data-before-count'?: string
+  'data-after-count'?: string
+  'data-initial-before'?: string
+  'data-initial-after'?: string
 }
 
 function findElementsByTestId(
@@ -308,6 +324,7 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
     await expect(
       ProAfterPhotosPage({
         params: Promise.resolve({ id: 'booking_1' }),
+        searchParams: Promise.resolve({}),
       }),
     ).rejects.toMatchObject({
       href: '/login?from=%2Fpro%2Fbookings%2Fbooking_1%2Fsession%2Fafter-photos',
@@ -327,8 +344,9 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
 
     expect(hasText(page, 'After photos')).toBe(true)
     expect(hasText(page, 'WRAP-UP · AFTER PHOTOS')).toBe(true)
-    expect(hasText(page, 'After photos saved')).toBe(true)
-    expect(hasText(page, 'Continue to aftercare')).toBe(true)
+    // With at least one after photo, the featured-pair picker (which owns the
+    // "Continue to aftercare" action) replaces the locked status card.
+    expect(hasText(page, 'FeaturedPairPicker')).toBe(true)
     expect(hasText(page, 'Take or upload after photos')).toBe(true)
     expect(hasText(page, 'MediaUploader:AFTER')).toBe(true)
     expect(hasText(page, 'for you and')).toBe(true)
@@ -346,18 +364,28 @@ describe('app/pro/bookings/[id]/session/after-photos/page.tsx', () => {
       },
     })
 
+    // The page now loads media for both phases (before + after) to feed the
+    // pair picker.
     expect(mocks.mediaAssetFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
-          bookingId: 'booking_1',
-          phase: MediaPhase.AFTER,
-        },
+        where: { bookingId: 'booking_1', phase: MediaPhase.BEFORE },
+      }),
+    )
+    expect(mocks.mediaAssetFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { bookingId: 'booking_1', phase: MediaPhase.AFTER },
       }),
     )
 
-    const grids = findElementsByTestId(page, 'session-photo-grid')
-    expect(grids).toHaveLength(1)
-    expect(grids[0]?.props['data-count']).toBe('1')
+    const pickers = findElementsByTestId(page, 'featured-pair-picker')
+    expect(pickers).toHaveLength(1)
+    expect(pickers[0]?.props['data-aftercare-href']).toBe(
+      '/pro/bookings/booking_1/aftercare',
+    )
+    expect(pickers[0]?.props['data-after-count']).toBe('1')
+    // No carried params and no saved summary → nothing pre-selected.
+    expect(pickers[0]?.props['data-initial-before']).toBe('')
+    expect(pickers[0]?.props['data-initial-after']).toBe('')
   })
 
   it('renders the after-photo upload UI when session step is FINISH_REVIEW (transient pass-through)', async () => {

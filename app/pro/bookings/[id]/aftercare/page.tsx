@@ -26,11 +26,18 @@ import {
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
 import { renderMediaUrlsBatch } from '@/lib/media/renderUrls'
+import {
+  FEATURED_AFTER_PARAM,
+  FEATURED_BEFORE_PARAM,
+  normalizeSeedParam,
+} from '@/lib/aftercare/featuredPairParams'
+import { resolveFeaturedPairSeed } from '@/lib/aftercare/featuredPairSeed'
 
 export const dynamic = 'force-dynamic'
 
 type PageProps = {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }
 
 type PublicAccessSummary = {
@@ -484,7 +491,10 @@ function SummaryCard({
   )
 }
 
-export default async function ProAftercarePage({ params }: PageProps) {
+export default async function ProAftercarePage({
+  params,
+  searchParams,
+}: PageProps) {
   const { id } = await params
   const bookingId = String(id || '').trim()
 
@@ -733,6 +743,30 @@ export default async function ProAftercarePage({ params }: PageProps) {
     phase: media.phase ?? MediaPhase.OTHER,
   }))
 
+  // The featured pair can arrive as an in-session pre-selection from the
+  // session "after-photos" step (`?fb=`/`?fa=`); an explicit carried pick wins
+  // over any stale saved value, else the saved AftercareSummary choice stands.
+  // The resolver re-validates a carried id (IMAGE + matching phase on this
+  // booking) — the server upsert validates it authoritatively again on save.
+  // A completed booking is read-only, so a carried param can never override its
+  // finalized saved pair.
+  const featuredParams = await searchParams
+  const featuredSeed = resolveFeaturedPairSeed({
+    savedBeforeAssetId: aftercare?.featuredBeforeAssetId ?? null,
+    savedAfterAssetId: aftercare?.featuredAfterAssetId ?? null,
+    paramBeforeAssetId: readOnly
+      ? undefined
+      : normalizeSeedParam(featuredParams[FEATURED_BEFORE_PARAM]),
+    paramAfterAssetId: readOnly
+      ? undefined
+      : normalizeSeedParam(featuredParams[FEATURED_AFTER_PARAM]),
+    media: existingMedia.map((m) => ({
+      id: m.id,
+      phase: m.phase,
+      mediaType: m.mediaType,
+    })),
+  })
+
   const existingRecommendedProducts =
     aftercare?.recommendedProducts.map((recommendation) => ({
       id: recommendation.id,
@@ -912,8 +946,8 @@ export default async function ProAftercarePage({ params }: PageProps) {
                 : null
             }
             existingMedia={existingMedia}
-            existingFeaturedBeforeAssetId={aftercare?.featuredBeforeAssetId ?? null}
-            existingFeaturedAfterAssetId={aftercare?.featuredAfterAssetId ?? null}
+            existingFeaturedBeforeAssetId={featuredSeed.featuredBeforeAssetId}
+            existingFeaturedAfterAssetId={featuredSeed.featuredAfterAssetId}
             existingRecommendedProducts={existingRecommendedProducts}
             existingDraftSavedAt={dateToIso(aftercare?.draftSavedAt)}
             existingSentToClientAt={dateToIso(aftercare?.sentToClientAt)}

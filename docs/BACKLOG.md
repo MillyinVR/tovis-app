@@ -1051,6 +1051,43 @@ and deep-links authenticated clients into the full booking view).
 - ⚠️ **Prod deploy pending Tori's go-ahead** (no migration; pure notification-channel change).
   Until deployed, prod still double-sends + login-walls the aftercare link.
 
+## 24. Aftercare before/after — client-facing pair (epic, 2026-07-09)
+
+> Client-facing before/after on the aftercare summary: fix a photo silently dropping,
+> then let the pro choose which pair the client sees first, on **both** authoring surfaces.
+> Locked decisions (Tori, 2026-07-09): aftercare-only + `PRO_CLIENT` (never touches portfolio
+> featuring/visibility, so it can't reintroduce the AF1 bug); extras render as flat thumbnails;
+> unset → fall back to the earliest of each.
+
+- [x] **AF1 — emailed rebook page dropped featured photos (shipped, PR #560).** The public
+  token page `app/client/rebook/[token]` was the only before/after reader filtering
+  `visibility: PRO_CLIENT`; featuring a photo to portfolio flips it `PUBLIC`, so it vanished
+  from the client's summary while showing everywhere else. Removed the filter (a valid booking
+  token entitles the client regardless of visibility). +1 regression test. No migration.
+- [x] **AF2 — pro picks the featured pair on the aftercare form (shipped, PR #561).** New
+  nullable `AftercareSummary.featuredBeforeAssetId`/`featuredAfterAssetId` (migration
+  `20260717000000_add_aftercare_featured_pair`, additive), validated in the locked upsert tx
+  (each id must be an IMAGE of the matching phase on the booking). "Feature" pill on the
+  authoring form; honored on every client surface; extras render flat.
+- [x] **AF2-follow-up — session wrap-up (after-photos) pre-selection surface (this session).**
+  Tori asked for the picker on **both** surfaces; the after-photos step runs *before* any
+  `AftercareSummary` exists, and creating one early would suppress the §10/#556 rebook-window
+  suggestion (which keys on `booking.aftercareSummary == null`). Design chosen: **prefill-carry,
+  no early DB write** — the pro taps Feature on the after-photos step, the pick rides `?fb=`/`?fa=`
+  into the aftercare form (the single persist boundary) and pre-fills it; an explicit carried
+  pick wins over a stale saved value, per field. New pure `resolveFeaturedPairSeed` +
+  `featuredPairParams` (shared by both pages), `FeaturedPairPicker` client component. No schema,
+  no API, no rebook-gate change → zero blast radius on the summary-existence consumers. Unit +
+  page + jsdom interaction tests; typecheck/lint/static-guards green.
+- [ ] **AF3 — iOS parity (deferred).** Client aftercare before/after is **web-only** today
+  (native `BookingDetailView` aftercare anchor = the media-consent card; before/after compare
+  unbuilt — `tovis-ios/BACKLOG.md §5 A3`). `GET .../aftercare` already returns the featured pair
+  (`loadBookingBeforeAfterThumbsFor`), so iOS gets the *rendering* free once A3's view lands; the
+  native **picker** is the parity item. `BeforeAfterCompareView.swift` +
+  `AftercareBeforeAfterPair.swift` exist (pro/portfolio) and are reusable. The AF2-follow-up
+  after-photos surface is a **web-only** UI convenience (URL-carried, no server contract) — no
+  iOS counterpart to build beyond A3's picker.
+
 ---
 
 ### Note on superseded docs
