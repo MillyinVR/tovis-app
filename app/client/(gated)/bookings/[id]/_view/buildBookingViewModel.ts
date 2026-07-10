@@ -2,6 +2,7 @@
 import { COPY } from '@/lib/copy'
 import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { isClientAftercareVisible } from '@/lib/aftercare/aftercareVisibility'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/time'
 
@@ -150,8 +151,10 @@ export function buildBookingViewModel(input: {
     (sessionStepUpper === 'CONSULTATION_PENDING_CLIENT' ||
       showConsultationApproval)
 
-  const canShowAftercareTab =
-    statusUpper === 'COMPLETED' || Boolean(input.aftercare?.id)
+  const canShowAftercareTab = isClientAftercareVisible({
+    status: statusUpper,
+    hasSentAftercare: Boolean(input.aftercare?.id),
+  })
 
   const { subtotal, hasAnyPrice } = sumPricedItems(input.booking.items)
   const breakdownTotalLabel = hasAnyPrice

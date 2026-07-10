@@ -1090,12 +1090,20 @@ and deep-links authenticated clients into the full booking view).
     field coerces to `null`), so any native aftercare save silently wiped a web-set pair. **No
     web/server change, no migration.** The AF2-follow-up after-photos surface is a **web-only** UI
     convenience (URL-carried, no server contract) — no iOS counterpart.
-  - [ ] **AF3b — client-facing before/after RENDER (deferred to A3).** Client aftercare
-    before/after is still web-only on native (`BookingDetailView` aftercare anchor = the
-    media-consent card; before/after compare unbuilt — `tovis-ios/BACKLOG.md §5 A3`).
-    `GET .../aftercare` already returns the featured pair (`loadBookingBeforeAfterThumbsFor`), so
-    iOS gets the *rendering* free once A3's view lands; `BeforeAfterCompareView.swift` +
-    `AftercareBeforeAfterPair.swift` exist and are reusable.
+  - [x] **AF3b — client-facing before/after RENDER + care notes (web PR #564 · iOS PR #32).**
+    Native client aftercare on `BookingDetailView`: an "Aftercare" section (care notes + the
+    pro-chosen featured before/after compare, reusing `AftercareBeforeAfterPair` /
+    `BeforeAfterCompareView`), with the `?step=aftercare` deep-link anchor moved onto it.
+    **Correction to the prior note:** there was *no* client-facing `GET .../aftercare` — the web
+    render is a server component reading the DB directly, and the client bookings-list DTO carries
+    only a `hasUnreadAftercare` flag. So AF3b needed a small **additive, no-migration** client read
+    endpoint `GET /api/v1/client/bookings/[id]/aftercare` (care notes from a SENT summary +
+    featured pair via the shared `loadBookingBeforeAfterThumbsFor`). The `COMPLETED || sent-summary`
+    visibility gate was extracted to `lib/aftercare/aftercareVisibility.ts` so the web view-model
+    (`canShowAftercareTab`) and the native DTO can't drift. ⚠️ **Server work → iOS surface is dark
+    in prod until the endpoint deploys** (deploy HELD — Tori's call). This closes the pro+client
+    aftercare before/after epic on both platforms (the larger A3 tabbed-IA rebuild remains — see
+    `tovis-ios/BACKLOG.md §5 A3`).
 
 ---
 
