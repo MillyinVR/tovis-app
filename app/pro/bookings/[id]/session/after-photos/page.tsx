@@ -9,8 +9,14 @@ import {
 } from '@prisma/client'
 
 import MediaUploader from '../MediaUploader'
-import SessionPhotoGrid from '../_components/SessionPhotoGrid'
+import FeaturedPairPicker from './FeaturedPairPicker'
 
+import {
+  FEATURED_AFTER_PARAM,
+  FEATURED_BEFORE_PARAM,
+  normalizeSeedParam,
+} from '@/lib/aftercare/featuredPairParams'
+import { resolveFeaturedPairSeed } from '@/lib/aftercare/featuredPairSeed'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { listProBookingMedia } from '@/lib/proBookingMedia'
@@ -27,6 +33,7 @@ export const dynamic = 'force-dynamic'
 
 type PageProps = {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }
 
 function loginHref(bookingId: string): string {
@@ -47,43 +54,6 @@ function ChevronLeftIcon({ size = 13 }: { size?: number }) {
       strokeLinejoin="round"
     >
       <polyline points="15 18 9 12 15 6" />
-    </svg>
-  )
-}
-
-function CheckIcon({ size = 11 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  )
-}
-
-function ArrowRightIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="5" y1="12" x2="19" y2="12" />
-      <polyline points="12 5 19 12 12 19" />
     </svg>
   )
 }
@@ -199,63 +169,27 @@ function SessionHeader({
   )
 }
 
-function StatusCard({
-  afterCount,
-  canContinue,
-  bookingId,
-  timeZone,
-}: {
-  afterCount: number
-  canContinue: boolean
-  bookingId: string
-  timeZone: string
-}) {
-  if (!canContinue) {
-    return (
-      <Card accent>
-        <div className="brand-pro-session-card-heading">
-          <span className="brand-pro-session-card-dot" />
-          Add at least one after photo
-        </div>
-
-        <div className="brand-pro-session-card-body">
-          Saved <strong>privately</strong> for the client and you. Add one
-          after photo to unlock aftercare.
-        </div>
-
-        <div className="brand-pro-session-chip-row mt-3">
-          <span className="brand-pro-session-pill" data-tone="pending">
-            Aftercare locked
-          </span>
-        </div>
-
-        <div className="brand-pro-session-help-text">
-          Times shown in <strong>{friendlyTimeZoneLabel(timeZone) ?? timeZone}</strong>
-        </div>
-      </Card>
-    )
-  }
-
+// Shown while no after photo has been captured yet — aftercare stays locked
+// until there is at least one. Once an after photo exists the page swaps this
+// for the FeaturedPairPicker, which carries the pro's featured pick into the
+// aftercare step via its own "Continue to aftercare" action.
+function LockedStatusCard({ timeZone }: { timeZone: string }) {
   return (
-    <Card tone="success">
+    <Card accent>
       <div className="brand-pro-session-card-heading">
         <span className="brand-pro-session-card-dot" />
-        After photos saved
+        Add at least one after photo
       </div>
 
       <div className="brand-pro-session-card-body">
-        {afterCount} after photo{afterCount === 1 ? '' : 's'} uploaded. Next,
-        fill out the aftercare summary for your client.
+        Saved <strong>privately</strong> for the client and you. Add one
+        after photo to unlock aftercare.
       </div>
 
-      <div className="mt-3">
-        <Link
-          href={aftercareHref(bookingId)}
-          className="brand-pro-session-button brand-focus"
-          data-full="true"
-        >
-          Continue to aftercare <ArrowRightIcon />
-        </Link>
+      <div className="brand-pro-session-chip-row mt-3">
+        <span className="brand-pro-session-pill" data-tone="pending">
+          Aftercare locked
+        </span>
       </div>
 
       <div className="brand-pro-session-help-text">
@@ -293,6 +227,15 @@ export default async function ProAfterPhotosPage(props: PageProps) {
       startedAt: true,
       finishedAt: true,
       sessionStep: true,
+      // Field-keyed read (never branches on row existence) so a bare summary
+      // could not exist here anyway — seeds the featured-pair picker with any
+      // already-saved choice.
+      aftercareSummary: {
+        select: {
+          featuredBeforeAssetId: true,
+          featuredAfterAssetId: true,
+        },
+      },
       service: {
         select: {
           name: true,
@@ -337,22 +280,46 @@ export default async function ProAfterPhotosPage(props: PageProps) {
   ) {
     redirect(sessionHubHref(bookingId))
   }
-  const [mediaOutcome, afterCount] = await Promise.all([
-    listProBookingMedia({
-      bookingId,
-      professionalId,
-      phase: MediaPhase.AFTER,
-    }),
-    prisma.mediaAsset.count({
-      where: {
+  const [beforeOutcome, afterOutcome, afterCount, searchParams] =
+    await Promise.all([
+      listProBookingMedia({
         bookingId,
+        professionalId,
+        phase: MediaPhase.BEFORE,
+      }),
+      listProBookingMedia({
+        bookingId,
+        professionalId,
         phase: MediaPhase.AFTER,
-        uploadedByRole: Role.PRO,
-      },
-    }),
-  ])
+      }),
+      prisma.mediaAsset.count({
+        where: {
+          bookingId,
+          phase: MediaPhase.AFTER,
+          uploadedByRole: Role.PRO,
+        },
+      }),
+      props.searchParams,
+    ])
 
-  const items = mediaOutcome.ok ? mediaOutcome.items : []
+  const beforeItems = beforeOutcome.ok ? beforeOutcome.items : []
+  const afterItems = afterOutcome.ok ? afterOutcome.items : []
+
+  // Seed the featured pick from an in-session `?fb=`/`?fa=` pre-selection (the
+  // pro may have picked here and refreshed) or, absent that, any already-saved
+  // aftercare featured pair. Same resolver the aftercare form uses downstream,
+  // so the two surfaces stay in agreement.
+  const featuredSeed = resolveFeaturedPairSeed({
+    savedBeforeAssetId: booking.aftercareSummary?.featuredBeforeAssetId ?? null,
+    savedAfterAssetId: booking.aftercareSummary?.featuredAfterAssetId ?? null,
+    paramBeforeAssetId: normalizeSeedParam(searchParams[FEATURED_BEFORE_PARAM]),
+    paramAfterAssetId: normalizeSeedParam(searchParams[FEATURED_AFTER_PARAM]),
+    media: [...beforeItems, ...afterItems].map((m) => ({
+      id: m.id,
+      phase: m.phase,
+      mediaType: m.mediaType,
+    })),
+  })
 
   const canContinue = afterCount > 0
   const serviceName = booking.service?.name?.trim() || 'Service'
@@ -383,21 +350,6 @@ export default async function ProAfterPhotosPage(props: PageProps) {
         </div>
 
         <section className="mt-4">
-          <div className="brand-pro-session-photo-header">
-            <div className="brand-pro-session-section-title">
-              After photo set
-            </div>
-
-            <div className="brand-pro-session-photo-count">
-              <CheckIcon size={10} />
-              {afterCount} captured
-            </div>
-          </div>
-
-          <SessionPhotoGrid items={items} label="After" />
-        </section>
-
-        <section className="mt-4">
           <div className="brand-pro-session-capture">
             <span className="brand-pro-session-capture-icon">
               <CameraIcon size={26} />
@@ -423,14 +375,18 @@ export default async function ProAfterPhotosPage(props: PageProps) {
         </section>
 
         <section className="mt-4">
-          <StatusCard
-            afterCount={afterCount}
-            canContinue={canContinue}
-            bookingId={bookingId}
-            timeZone={proTimeZone}
-          />
+          {canContinue ? (
+            <FeaturedPairPicker
+              aftercareHref={aftercareHref(bookingId)}
+              beforeItems={beforeItems}
+              afterItems={afterItems}
+              initialBeforeId={featuredSeed.featuredBeforeAssetId}
+              initialAfterId={featuredSeed.featuredAfterAssetId}
+            />
+          ) : (
+            <LockedStatusCard timeZone={proTimeZone} />
+          )}
         </section>
-
       </div>
     </PageShell>
   )
