@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   prismaBookingFindUnique: vi.fn(),
+  prismaBookingFindFirst: vi.fn(),
   prismaAftercareFindFirst: vi.fn(),
   loadBookingBeforeAfterThumbsFor: vi.fn(),
 
@@ -24,6 +25,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
       findUnique: mocks.prismaBookingFindUnique,
+      findFirst: mocks.prismaBookingFindFirst,
     },
     aftercareSummary: {
       findFirst: mocks.prismaAftercareFindFirst,
@@ -111,6 +113,8 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
     // status/checkout read; return every field either call selects.
     mocks.prismaBookingFindUnique.mockResolvedValue(bookingRead())
     mocks.prismaAftercareFindFirst.mockResolvedValue(null)
+    // No coupled AFTERCARE-sourced next booking by default.
+    mocks.prismaBookingFindFirst.mockResolvedValue(null)
     mocks.loadBookingBeforeAfterThumbsFor.mockResolvedValue(EMPTY_BEFORE_AFTER)
   })
 
@@ -169,6 +173,8 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         beforeAfter,
         recommendedProducts: [],
         checkoutProducts: [],
+        // No sent summary ⇒ no rebook recommendation to surface.
+        rebook: null,
         // COMPLETED locks product editing even though the surface shows.
         checkoutProductsEditable: false,
       },
@@ -193,6 +199,11 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
       id: 'ac_1',
       notes: 'Rinse with cool water for 48h.',
       sentToClientAt: new Date('2026-07-02T15:00:00.000Z'),
+      rebookMode: 'NONE',
+      rebookedFor: null,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      rebookDeclinedAt: null,
       recommendedProducts: [
         {
           id: 'rp_1',
@@ -226,6 +237,11 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         id: true,
         notes: true,
         sentToClientAt: true,
+        rebookMode: true,
+        rebookedFor: true,
+        rebookWindowStart: true,
+        rebookWindowEnd: true,
+        rebookDeclinedAt: true,
         recommendedProducts: {
           take: 50,
           orderBy: { id: 'asc' },
@@ -284,6 +300,15 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
             unitPrice: '28',
           },
         ],
+        // Sent summary, no rebook recommendation set (mode NONE) + no coupled next.
+        rebook: {
+          mode: 'NONE',
+          rebookedFor: null,
+          windowStart: null,
+          windowEnd: null,
+          declinedAt: null,
+          nextBooking: null,
+        },
         // ACCEPTED + sent aftercare + no payment yet ⇒ editable.
         checkoutProductsEditable: true,
       },
@@ -302,6 +327,11 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
       id: 'ac_1',
       notes: null,
       sentToClientAt: new Date('2026-07-02T15:00:00.000Z'),
+      rebookMode: 'NONE',
+      rebookedFor: null,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      rebookDeclinedAt: null,
       recommendedProducts: [],
     })
 
@@ -320,6 +350,117 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         beforeAfter: EMPTY_BEFORE_AFTER,
         recommendedProducts: [],
         checkoutProducts: [],
+        rebook: {
+          mode: 'NONE',
+          rebookedFor: null,
+          windowStart: null,
+          windowEnd: null,
+          declinedAt: null,
+          nextBooking: null,
+        },
+        checkoutProductsEditable: false,
+      },
+    })
+  })
+
+  it('surfaces a RECOMMENDED_WINDOW rebook slice (ISO window) with no coupled next booking', async () => {
+    mocks.prismaBookingFindUnique.mockResolvedValue(
+      bookingRead({ status: 'COMPLETED' }),
+    )
+    mocks.prismaAftercareFindFirst.mockResolvedValueOnce({
+      id: 'ac_1',
+      notes: null,
+      sentToClientAt: new Date('2026-07-02T15:00:00.000Z'),
+      rebookMode: 'RECOMMENDED_WINDOW',
+      rebookedFor: null,
+      rebookWindowStart: new Date('2026-08-01T00:00:00.000Z'),
+      rebookWindowEnd: new Date('2026-08-15T00:00:00.000Z'),
+      rebookDeclinedAt: null,
+      recommendedProducts: [],
+    })
+
+    const result = await GET(makeRequest(), makeCtx())
+
+    // The coupled-next lookup is scoped to this booking + the authed client.
+    expect(mocks.prismaBookingFindFirst).toHaveBeenCalledWith({
+      where: { rebookOfBookingId: 'booking_1', clientId: 'client_1' },
+      orderBy: { scheduledFor: 'desc' },
+      select: { id: true, status: true, scheduledFor: true },
+    })
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      body: {
+        canShowAftercare: true,
+        aftercare: {
+          id: 'ac_1',
+          notes: null,
+          sentToClientAt: '2026-07-02T15:00:00.000Z',
+        },
+        beforeAfter: EMPTY_BEFORE_AFTER,
+        recommendedProducts: [],
+        checkoutProducts: [],
+        rebook: {
+          mode: 'RECOMMENDED_WINDOW',
+          rebookedFor: null,
+          windowStart: '2026-08-01T00:00:00.000Z',
+          windowEnd: '2026-08-15T00:00:00.000Z',
+          declinedAt: null,
+          nextBooking: null,
+        },
+        checkoutProductsEditable: false,
+      },
+    })
+  })
+
+  it('surfaces a coupled next booking (confirmed BOOKED_NEXT_APPOINTMENT) as ISO', async () => {
+    mocks.prismaBookingFindUnique.mockResolvedValue(
+      bookingRead({ status: 'COMPLETED' }),
+    )
+    mocks.prismaAftercareFindFirst.mockResolvedValueOnce({
+      id: 'ac_1',
+      notes: null,
+      sentToClientAt: new Date('2026-07-02T15:00:00.000Z'),
+      rebookMode: 'BOOKED_NEXT_APPOINTMENT',
+      rebookedFor: new Date('2026-08-05T17:00:00.000Z'),
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      rebookDeclinedAt: null,
+      recommendedProducts: [],
+    })
+    mocks.prismaBookingFindFirst.mockResolvedValueOnce({
+      id: 'booking_next',
+      status: 'PENDING',
+      scheduledFor: new Date('2026-08-05T17:00:00.000Z'),
+    })
+
+    const result = await GET(makeRequest(), makeCtx())
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      body: {
+        canShowAftercare: true,
+        aftercare: {
+          id: 'ac_1',
+          notes: null,
+          sentToClientAt: '2026-07-02T15:00:00.000Z',
+        },
+        beforeAfter: EMPTY_BEFORE_AFTER,
+        recommendedProducts: [],
+        checkoutProducts: [],
+        rebook: {
+          mode: 'BOOKED_NEXT_APPOINTMENT',
+          rebookedFor: '2026-08-05T17:00:00.000Z',
+          windowStart: null,
+          windowEnd: null,
+          declinedAt: null,
+          nextBooking: {
+            id: 'booking_next',
+            status: 'PENDING',
+            scheduledFor: '2026-08-05T17:00:00.000Z',
+          },
+        },
         checkoutProductsEditable: false,
       },
     })
@@ -341,6 +482,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         beforeAfter: EMPTY_BEFORE_AFTER,
         recommendedProducts: [],
         checkoutProducts: [],
+        rebook: null,
         // No sent aftercare ⇒ not editable.
         checkoutProductsEditable: false,
       },
