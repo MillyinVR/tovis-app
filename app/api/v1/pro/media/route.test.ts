@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
 
   const serviceFindMany = vi.fn()
   const mediaAssetCreate = vi.fn()
+  const mediaAssetFindMany = vi.fn()
   const professionalProfileFindUnique = vi.fn()
 
   const tx = {
@@ -51,6 +52,9 @@ const mocks = vi.hoisted(() => {
     service: {
       findMany: serviceFindMany,
     },
+    mediaAsset: {
+      findMany: mediaAssetFindMany,
+    },
     $transaction: vi.fn(
       async (callback: (db: typeof tx) => Promise<unknown>) => {
         return await callback(tx)
@@ -63,6 +67,8 @@ const mocks = vi.hoisted(() => {
   const validateUploadSession = vi.fn()
   const consumeUploadSession = vi.fn()
 
+  const renderMediaUrlsBatch = vi.fn()
+
   return {
     jsonOk,
     jsonFail,
@@ -71,10 +77,12 @@ const mocks = vi.hoisted(() => {
     tx,
     serviceFindMany,
     mediaAssetCreate,
+    mediaAssetFindMany,
     professionalProfileFindUnique,
     createOrUpdateProLookFromMediaAsset,
     validateUploadSession,
     consumeUploadSession,
+    renderMediaUrlsBatch,
   }
 })
 
@@ -118,6 +126,10 @@ vi.mock('@/lib/media/uploadSession', () => {
   }
 })
 
+vi.mock('@/lib/media/renderUrls', () => ({
+  renderMediaUrlsBatch: mocks.renderMediaUrlsBatch,
+}))
+
 vi.mock('@/lib/security/logging', () => ({
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'NonErrorThrown',
@@ -125,7 +137,7 @@ vi.mock('@/lib/security/logging', () => ({
   })),
 }))
 
-import { POST } from './route'
+import { GET, POST } from './route'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { safeError } from '@/lib/security/logging'
 
@@ -741,6 +753,172 @@ describe('app/api/v1/pro/media/route.ts', () => {
         message: 'storage failed for https://example.com/private.jpg?token=secret',
       },
     })
+
+    consoleErrorSpy.mockRestore()
+  })
+})
+
+// A MediaAsset row shaped exactly as the GET select returns it (storage pointers
+// present for renderMediaUrlsBatch; service tags as { serviceId, service: name }).
+function makeManagedMediaRow(
+  overrides?: Partial<{
+    id: string
+    mediaType: MediaType
+    visibility: MediaVisibility
+    caption: string | null
+    createdAt: Date
+    reviewId: string | null
+    isEligibleForLooks: boolean
+    isFeaturedInPortfolio: boolean
+    beforeAssetId: string | null
+    storageBucket: string | null
+    storagePath: string | null
+    thumbBucket: string | null
+    thumbPath: string | null
+    url: string | null
+    thumbUrl: string | null
+    services: { serviceId: string; service: { name: string } }[]
+  }>,
+) {
+  return {
+    id: 'media_1',
+    mediaType: MediaType.IMAGE,
+    visibility: MediaVisibility.PUBLIC,
+    caption: 'Fresh set',
+    createdAt: CREATED_AT,
+    reviewId: null,
+    isEligibleForLooks: false,
+    isFeaturedInPortfolio: true,
+    beforeAssetId: null,
+    storageBucket: BUCKETS.mediaPublic,
+    storagePath: 'pros/pro_1/media_1.jpg',
+    thumbBucket: null,
+    thumbPath: null,
+    url: 'https://cdn.example.com/media_1.jpg',
+    thumbUrl: null,
+    services: [{ serviceId: 'service_1', service: { name: 'Gel X' } }],
+    ...overrides,
+  }
+}
+
+describe('GET /api/v1/pro/media', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.requirePro.mockResolvedValue(makeProAuth())
+    mocks.mediaAssetFindMany.mockResolvedValue([makeManagedMediaRow()])
+    mocks.serviceFindMany.mockResolvedValue([
+      { id: 'service_1', name: 'Gel X' },
+      { id: 'service_2', name: 'Nail Art' },
+    ])
+    mocks.renderMediaUrlsBatch.mockResolvedValue([
+      {
+        renderUrl: 'https://signed.example/media_1.jpg',
+        renderThumbUrl: 'https://signed.example/media_1_thumb.jpg',
+      },
+    ])
+  })
+
+  it('passes through failed pro auth responses unchanged', async () => {
+    const authRes = Response.json(
+      { ok: false, error: 'Unauthorized' },
+      { status: 401 },
+    )
+    mocks.requirePro.mockResolvedValue({ ok: false as const, res: authRes })
+
+    const res = await GET()
+
+    expect(res).toBe(authRes)
+    expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mocks.serviceFindMany).not.toHaveBeenCalled()
+  })
+
+  it('lists the owning pro’s media with resolved URLs, tags, and service options', async () => {
+    const res = await GET()
+    const body = await readJson(res)
+
+    // Owner-scoped, most-recent-first, capped.
+    expect(mocks.mediaAssetFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { professionalId: 'pro_1' },
+        orderBy: { createdAt: 'desc' },
+        take: 60,
+      }),
+    )
+    // Taggable options = the active Service taxonomy the PATCH validates against.
+    expect(mocks.serviceFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(body).toEqual({
+      ok: true,
+      items: [
+        {
+          id: 'media_1',
+          mediaType: MediaType.IMAGE,
+          visibility: MediaVisibility.PUBLIC,
+          caption: 'Fresh set',
+          createdAt: CREATED_AT.toISOString(),
+          reviewId: null,
+          isEligibleForLooks: false,
+          isFeaturedInPortfolio: true,
+          beforeAssetId: null,
+          services: [{ serviceId: 'service_1', name: 'Gel X' }],
+          url: 'https://cdn.example.com/media_1.jpg',
+          thumbUrl: null,
+          renderUrl: 'https://signed.example/media_1.jpg',
+          renderThumbUrl: 'https://signed.example/media_1_thumb.jpg',
+        },
+      ],
+      serviceOptions: [
+        { serviceId: 'service_1', name: 'Gel X' },
+        { serviceId: 'service_2', name: 'Nail Art' },
+      ],
+    })
+  })
+
+  it('carries the before/after pairing pointer and null render URLs when unresolvable', async () => {
+    mocks.mediaAssetFindMany.mockResolvedValue([
+      makeManagedMediaRow({
+        id: 'media_after',
+        beforeAssetId: 'media_before',
+        storageBucket: BUCKETS.mediaPrivate,
+        url: null,
+        thumbUrl: null,
+      }),
+    ])
+    mocks.renderMediaUrlsBatch.mockResolvedValue([
+      { renderUrl: null, renderThumbUrl: null },
+    ])
+
+    const res = await GET()
+    const body = (await readJson(res)) as {
+      items: { beforeAssetId: string | null; renderUrl: string | null }[]
+    }
+
+    expect(res.status).toBe(200)
+    const [first] = body.items
+    expect(first).toBeDefined()
+    expect(first?.beforeAssetId).toBe('media_before')
+    expect(first?.renderUrl).toBeNull()
+  })
+
+  it('returns 500 and logs a safe error when the query throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+    const thrown = new Error('db down')
+    mocks.mediaAssetFindMany.mockRejectedValueOnce(thrown)
+
+    const res = await GET()
+    const body = await readJson(res)
+
+    expect(res.status).toBe(500)
+    expect(body).toEqual({ ok: false, error: 'Failed to load media.' })
+    expect(safeError).toHaveBeenCalledWith(thrown)
 
     consoleErrorSpy.mockRestore()
   })

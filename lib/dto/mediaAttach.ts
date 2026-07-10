@@ -62,6 +62,44 @@ export type ProMediaCreateResponseDTO = {
   lookPublication?: ProLookPublicationResultDto
 }
 
+// ── GET /api/v1/pro/media ────────────────────────────────────────────────────
+
+// One item in the pro's own media library — the native counterpart of the
+// RSC-only web media manager (`/pro/media` grid + the `OwnerMediaMenu` editor).
+// Carries every field that editor reads/writes: caption, the Looks/portfolio
+// flags, the current service tags, the before/after pairing pointer, and the
+// media type/visibility. Storage pointers are dropped; `renderUrl`/
+// `renderThumbUrl` are the short-lived signed URLs the grid renders from, with
+// `url`/`thumbUrl` mirroring the stored public pointers as a fallback.
+export type ProManagedMediaItemDTO = {
+  id: string
+  mediaType: MediaType
+  visibility: MediaVisibility
+  caption: string | null
+  createdAt: string // ISO-8601
+  reviewId: string | null
+  isEligibleForLooks: boolean
+  isFeaturedInPortfolio: boolean
+  // The paired "before" asset id when this featured "after" has one; null when
+  // unpaired. Fed to the pairing editor.
+  beforeAssetId: string | null
+  services: ProMediaServiceTagDTO[]
+  url: string | null
+  thumbUrl: string | null
+  renderUrl: string | null
+  renderThumbUrl: string | null
+}
+
+// GET — the pro's whole library plus the taggable service options the editor
+// needs (the active Service taxonomy the PATCH validates `serviceIds` against),
+// returned alongside so the editor is a single round-trip (mirrors the web
+// detail page loading `serviceOptions` next to the media it edits). Each option
+// is a `{ serviceId, name }` pair; `serviceId` is the id to send in `serviceIds`.
+export type ProManagedMediaListResponseDTO = {
+  items: ProManagedMediaItemDTO[]
+  serviceOptions: ProMediaServiceTagDTO[]
+}
+
 // ── GET + POST /api/v1/pro/bookings/[id]/media ───────────────────────────────
 
 // A booking-session media item. `renderUrl`/`renderThumbUrl` are short-lived

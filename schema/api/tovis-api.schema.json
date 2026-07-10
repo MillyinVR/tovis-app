@@ -9829,6 +9829,114 @@
       ],
       "type": "object"
     },
+    "ProManagedMediaItemDTO": {
+      "properties": {
+        "beforeAssetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isEligibleForLooks": {
+          "type": "boolean"
+        },
+        "isFeaturedInPortfolio": {
+          "type": "boolean"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "renderThumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "renderUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "services": {
+          "items": {
+            "$ref": "#/definitions/ProMediaServiceTagDTO"
+          },
+          "type": "array"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibility": {
+          "$ref": "#/definitions/MediaVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "visibility",
+        "caption",
+        "createdAt",
+        "reviewId",
+        "isEligibleForLooks",
+        "isFeaturedInPortfolio",
+        "beforeAssetId",
+        "services",
+        "url",
+        "thumbUrl",
+        "renderUrl",
+        "renderThumbUrl"
+      ],
+      "type": "object"
+    },
+    "ProManagedMediaListResponseDTO": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ProManagedMediaItemDTO"
+          },
+          "type": "array"
+        },
+        "serviceOptions": {
+          "items": {
+            "$ref": "#/definitions/ProMediaServiceTagDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "serviceOptions"
+      ],
+      "type": "object"
+    },
     "ProMediaCreateResponseDTO": {
       "properties": {
         "lookPublication": {
