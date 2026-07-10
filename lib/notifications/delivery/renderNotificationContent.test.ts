@@ -20,6 +20,9 @@ function makeDispatch(
     payload: overrides.payload ?? {
       bookingId: 'booking_1',
     },
+    ...(overrides.calendarLinks !== undefined
+      ? { calendarLinks: overrides.calendarLinks }
+      : {}),
   }
 }
 
@@ -114,6 +117,90 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     expect(result.text).toBe(
       'TOVIS: Appointment confirmed Your appointment has been confirmed. https://tovis.test/client/bookings/booking_1',
     )
+  })
+
+  const calendarLinks = {
+    googleUrl:
+      'https://calendar.google.com/calendar/render?action=TEMPLATE&text=Balayage',
+    icsUrl: 'https://tovis.test/api/v1/calendar/ics/v1.abc.def',
+  }
+
+  it('appends both calendar links to a booking email when calendarLinks are present', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.EMAIL,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch({ calendarLinks }),
+    })
+
+    if (result.channel !== NotificationChannel.EMAIL) {
+      throw new Error('expected EMAIL content')
+    }
+
+    // Plain-text part carries the raw (unescaped) URLs.
+    expect(result.text).toContain(
+      `Add to Google Calendar: ${calendarLinks.googleUrl}`,
+    )
+    expect(result.text).toContain(
+      `Add to Apple or Outlook calendar: ${calendarLinks.icsUrl}`,
+    )
+    // HTML part hyperlinks them; the & in the google url is html-escaped.
+    expect(result.html).toContain('Add to Google Calendar</a>')
+    expect(result.html).toContain(
+      `<a href="${calendarLinks.icsUrl}">Add to Apple or Outlook calendar</a>`,
+    )
+  })
+
+  it('appends the same-origin .ics calendar link to a booking SMS (preferred over google)', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.SMS,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch({ calendarLinks }),
+    })
+
+    if (result.channel !== NotificationChannel.SMS) {
+      throw new Error('expected SMS content')
+    }
+
+    expect(result.text).toContain(`Add to calendar: ${calendarLinks.icsUrl}`)
+    expect(result.text).not.toContain(calendarLinks.googleUrl)
+  })
+
+  it('falls back to the google calendar link in SMS when the ics url is unavailable', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.SMS,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch({
+        calendarLinks: { googleUrl: calendarLinks.googleUrl, icsUrl: null },
+      }),
+    })
+
+    if (result.channel !== NotificationChannel.SMS) {
+      throw new Error('expected SMS content')
+    }
+
+    expect(result.text).toContain(
+      `Add to calendar: ${calendarLinks.googleUrl}`,
+    )
+  })
+
+  it('adds no calendar links when the dispatch carries none', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.EMAIL,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch(),
+    })
+
+    if (result.channel !== NotificationChannel.EMAIL) {
+      throw new Error('expected EMAIL content')
+    }
+
+    expect(result.text).not.toContain('Add to Google Calendar')
+    expect(result.text).not.toContain('Add to Apple or Outlook calendar')
+    expect(result.html).not.toContain('Add to Google Calendar')
   })
 
   it('renders branded email content with CTA text and html using absolute app href', () => {

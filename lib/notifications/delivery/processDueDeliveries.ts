@@ -10,6 +10,11 @@ import {
   type NotificationTemplateKey,
 } from '../eventKeys'
 import {
+  resolveBookingCalendarLinks,
+  type BookingCalendarLinks,
+} from '@/lib/calendar/bookingInvite'
+import { isRecord } from '@/lib/guards'
+import {
   claimDeliveries,
   type ClaimDeliveriesArgs,
   type ClaimedNotificationDelivery,
@@ -144,9 +149,50 @@ function hasRetryAttemptsRemaining(
   return delivery.attemptCount < delivery.maxAttempts - 1
 }
 
+// Booking notifications whose email/SMS should carry an "Add to calendar" link.
+const CALENDAR_LINK_TEMPLATE_KEYS: ReadonlySet<NotificationTemplateKey> = new Set([
+  'booking_confirmed',
+  'booking_rescheduled',
+  'appointment_reminder',
+  'client_claim_invite',
+])
+
+function readBookingIdFromPayload(payload: unknown): string | null {
+  if (!isRecord(payload)) return null
+  const value = payload.bookingId
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+/**
+ * For email/SMS deliveries of appointment notifications, resolve the "Add to
+ * calendar" links from the payload's bookingId. Best-effort: returns null (link
+ * omitted) for other channels, non-calendar templates, or any resolution miss —
+ * never throws, so it can't fail a delivery.
+ */
+async function resolveDeliveryCalendarLinks(
+  delivery: ClaimedNotificationDelivery,
+): Promise<BookingCalendarLinks | null> {
+  if (
+    delivery.channel !== NotificationChannel.EMAIL &&
+    delivery.channel !== NotificationChannel.SMS
+  ) {
+    return null
+  }
+
+  if (!CALENDAR_LINK_TEMPLATE_KEYS.has(getTemplateKeyForDelivery(delivery))) {
+    return null
+  }
+
+  const bookingId = readBookingIdFromPayload(delivery.dispatch.payload)
+  if (!bookingId) return null
+
+  return resolveBookingCalendarLinks(bookingId)
+}
+
 function buildProviderRequest(
   delivery: ClaimedNotificationDelivery,
   tenantContext: TenantContext,
+  calendarLinks: BookingCalendarLinks | null,
 ): ProviderSendRequest {
   const content = renderNotificationContent({
     channel: delivery.channel,
@@ -159,6 +205,7 @@ function buildProviderRequest(
       body: delivery.dispatch.body,
       href: delivery.dispatch.href,
       payload: delivery.dispatch.payload,
+      calendarLinks,
     },
   })
 
@@ -436,7 +483,12 @@ async function processClaimedDelivery(args: {
   }
 
   try {
-    const request = buildProviderRequest(args.delivery, args.tenantContext)
+    const calendarLinks = await resolveDeliveryCalendarLinks(args.delivery)
+    const request = buildProviderRequest(
+      args.delivery,
+      args.tenantContext,
+      calendarLinks,
+    )
     const sendResult = await sendWithProvider({
       request,
       providers: args.providers,

@@ -1,6 +1,8 @@
 import { NotificationChannel, NotificationEventKey, Prisma } from '@prisma/client'
 
+import { readAppOriginFromEnv } from '@/lib/appUrl'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import type { BookingCalendarLinks } from '@/lib/calendar/bookingInvite'
 import type { TenantContext } from '@/lib/tenant/context'
 
 import { type NotificationTemplateKey } from '../eventKeys'
@@ -9,12 +11,20 @@ const DEFAULT_TEMPLATE_VERSION = 1
 const MAX_EMAIL_SUBJECT = 160
 const MAX_SMS_TEXT = 320
 
+const CALENDAR_GOOGLE_LABEL = 'Add to Google Calendar'
+const CALENDAR_ICS_LABEL = 'Add to Apple or Outlook calendar'
+const CALENDAR_SMS_LABEL = 'Add to calendar'
+
 export type NotificationRenderDispatchLike = {
   eventKey: NotificationEventKey
   title: string
   body: string
   href: string
   payload?: Prisma.JsonValue | null
+  // "Add to calendar" links, resolved by the delivery layer for booking
+  // notifications (confirm / reschedule / reminder / claim-invite). Absent for
+  // every other notification, so the renderer simply formats them when present.
+  calendarLinks?: BookingCalendarLinks | null
 }
 
 export type RenderedInAppNotificationContent = {
@@ -113,40 +123,15 @@ function sanitizeInternalHref(value: unknown): string {
 }
 
 function readAppOrigin(): string {
-  const raw =
-    process.env.APP_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    ''
+  const origin = readAppOriginFromEnv()
 
-  if (!raw) {
+  if (!origin) {
     throw new Error(
-      'renderNotificationContent: missing APP_URL or NEXT_PUBLIC_APP_URL',
+      'renderNotificationContent: missing or invalid APP_URL/NEXT_PUBLIC_APP_URL',
     )
   }
 
-  let url: URL
-
-  try {
-    url = new URL(raw)
-  } catch {
-    throw new Error(
-      'renderNotificationContent: APP_URL/NEXT_PUBLIC_APP_URL must be a valid absolute URL',
-    )
-  }
-
-  if (!url.protocol || !url.hostname) {
-    throw new Error(
-      'renderNotificationContent: app URL must include protocol and hostname',
-    )
-  }
-
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(
-      'renderNotificationContent: app URL must use http or https',
-    )
-  }
-
-  return url.origin
+  return origin
 }
 
 function buildExternalAppHref(value: unknown): string {
@@ -180,11 +165,27 @@ function joinSmsParts(parts: Array<string | null | undefined>): string {
   return clip(normalized.join(' '), MAX_SMS_TEXT)
 }
 
+function buildCalendarTextLines(
+  calendarLinks: BookingCalendarLinks | null | undefined,
+): string[] {
+  if (!calendarLinks) return []
+
+  const lines: string[] = []
+  if (calendarLinks.googleUrl) {
+    lines.push(`${CALENDAR_GOOGLE_LABEL}: ${calendarLinks.googleUrl}`)
+  }
+  if (calendarLinks.icsUrl) {
+    lines.push(`${CALENDAR_ICS_LABEL}: ${calendarLinks.icsUrl}`)
+  }
+  return lines
+}
+
 function buildEmailText(args: {
   title: string
   body: string
   href: string
   ctaLabel: string
+  calendarLinks?: BookingCalendarLinks | null
   brandName: string
 }): string {
   const lines = [args.title]
@@ -197,9 +198,40 @@ function buildEmailText(args: {
     lines.push('', `${args.ctaLabel}: ${args.href}`)
   }
 
+  const calendarLines = buildCalendarTextLines(args.calendarLinks)
+  if (calendarLines.length > 0) {
+    lines.push('', ...calendarLines)
+  }
+
   lines.push('', `Sent by ${args.brandName}`)
 
   return lines.join('\n')
+}
+
+function buildCalendarHtmlParagraph(
+  calendarLinks: BookingCalendarLinks | null | undefined,
+): string {
+  if (!calendarLinks) return ''
+
+  const anchors: string[] = []
+  if (calendarLinks.googleUrl) {
+    anchors.push(
+      `<a href="${escapeHtml(calendarLinks.googleUrl)}">${escapeHtml(
+        CALENDAR_GOOGLE_LABEL,
+      )}</a>`,
+    )
+  }
+  if (calendarLinks.icsUrl) {
+    anchors.push(
+      `<a href="${escapeHtml(calendarLinks.icsUrl)}">${escapeHtml(
+        CALENDAR_ICS_LABEL,
+      )}</a>`,
+    )
+  }
+
+  if (anchors.length === 0) return ''
+
+  return `<p>${anchors.join(' &middot; ')}</p>`
 }
 
 function buildEmailHtml(args: {
@@ -207,6 +239,7 @@ function buildEmailHtml(args: {
   body: string
   href: string
   ctaLabel: string
+  calendarLinks?: BookingCalendarLinks | null
   brandName: string
 }): string {
   const safeTitle = escapeHtml(args.title)
@@ -219,6 +252,7 @@ function buildEmailHtml(args: {
   const linkParagraph = safeHref
     ? `<p><a href="${safeHref}">${safeCtaLabel}</a></p>`
     : ''
+  const calendarParagraph = buildCalendarHtmlParagraph(args.calendarLinks)
 
   return [
     '<!doctype html>',
@@ -227,6 +261,7 @@ function buildEmailHtml(args: {
     `    <h1>${safeTitle}</h1>`,
     bodyParagraph ? `    ${bodyParagraph}` : '',
     linkParagraph ? `    ${linkParagraph}` : '',
+    calendarParagraph ? `    ${calendarParagraph}` : '',
     `    <p>Sent by ${safeBrand}</p>`,
     '  </body>',
     '</html>',
@@ -251,9 +286,21 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
       const body = normalizeText(dispatch.body)
       const href = buildExternalAppHref(dispatch.href)
 
+      // Clip the message body first, then append the calendar link intact — an
+      // "add to calendar" URL is worthless if truncated. Prefer the shorter
+      // same-origin .ics link (opens Apple/Google/Outlook natively) over the
+      // long Google template URL to keep segment count down.
+      const base = joinSmsParts([`${brandName}: ${title}`, body, href])
+      const calendarUrl =
+        dispatch.calendarLinks?.icsUrl ??
+        dispatch.calendarLinks?.googleUrl ??
+        null
+
       return {
         channel: NotificationChannel.SMS,
-        text: joinSmsParts([`${brandName}: ${title}`, body, href]),
+        text: calendarUrl
+          ? `${base} ${CALENDAR_SMS_LABEL}: ${calendarUrl}`
+          : base,
       }
     },
 
@@ -261,6 +308,7 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
       const title = normalizeText(dispatch.title)
       const body = normalizeText(dispatch.body)
       const href = buildExternalAppHref(dispatch.href)
+      const calendarLinks = dispatch.calendarLinks
 
       return {
         channel: NotificationChannel.EMAIL,
@@ -270,6 +318,7 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
           body,
           href,
           ctaLabel,
+          calendarLinks,
           brandName,
         }),
         html: buildEmailHtml({
@@ -277,6 +326,7 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
           body,
           href,
           ctaLabel,
+          calendarLinks,
           brandName,
         }),
       }

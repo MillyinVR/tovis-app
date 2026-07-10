@@ -142,17 +142,6 @@ app/api/v1/auth/register/route.ts:direct property read:res.cookies.set('tovis_cl
 app/api/v1/auth/register/route.ts:direct property read:typeof v.postalCode === 'string' &&
 app/api/v1/availability/other-pros/route.ts:Prisma select/include plaintext field:lat: true,
 app/api/v1/availability/other-pros/route.ts:Prisma select/include plaintext field:lng: true,
-app/api/v1/calendar/route.ts:Prisma select/include plaintext field:email: true,
-app/api/v1/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
-app/api/v1/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/v1/calendar/route.ts:direct property read:const clientEmail = normalizeEmail(args.booking.client?.user?.email)
-app/api/v1/calendar/route.ts:direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
-app/api/v1/calendar/route.ts:direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
-app/api/v1/calendar/route.ts:direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
-app/api/v1/calendar/route.ts:optional direct property read:const clientEmail = normalizeEmail(args.booking.client?.user?.email)
-app/api/v1/calendar/route.ts:optional direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
-app/api/v1/calendar/route.ts:optional direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
-app/api/v1/calendar/route.ts:optional direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
 app/api/v1/client/addresses/[id]/route.ts:direct property read:body.addressLine1 !== undefined ||
 app/api/v1/client/addresses/[id]/route.ts:direct property read:body.addressLine2 !== undefined ||
 app/api/v1/client/addresses/[id]/route.ts:direct property read:body.postalCode !== undefined ||
@@ -500,6 +489,13 @@ lib/booking/writeBoundary.ts:optional direct property read:`${(booking.client?.f
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.email ?? null,
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.phone ?? null,
 lib/booking/writeBoundary.ts:optional direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
+lib/calendar/bookingInvite.ts:Prisma select/include plaintext field:email: true,
+lib/calendar/bookingInvite.ts:Prisma select/include plaintext field:firstName: true,
+lib/calendar/bookingInvite.ts:Prisma select/include plaintext field:lastName: true,
+lib/calendar/bookingInvite.ts:direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
+lib/calendar/bookingInvite.ts:direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
+lib/calendar/bookingInvite.ts:optional direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
+lib/calendar/bookingInvite.ts:optional direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
 lib/clients/clientClaimLinks.ts:Prisma select/include plaintext field:email: true,
 lib/clients/clientClaimLinks.ts:Prisma select/include plaintext field:firstName: true,
 lib/clients/clientClaimLinks.ts:Prisma select/include plaintext field:lastName: true,
