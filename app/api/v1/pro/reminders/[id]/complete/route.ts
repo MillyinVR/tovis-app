@@ -1,7 +1,7 @@
 // app/api/v1/pro/reminders/[id]/complete/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { jsonFail, pickString, requirePro } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +30,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       data: { completedAt: new Date() },
     })
 
-    return NextResponse.redirect(new URL('/pro/reminders', req.url))
+    // Mirror the sibling create route: browsers submit an HTML form and want the
+    // page back, so redirect them (explicit 303 → the follow-up is a GET; the
+    // NextResponse.redirect default of 307 would re-POST to the page route and
+    // 405). API / native callers (Accept: application/json) get the completed id.
+    const accept = req.headers.get('accept') || ''
+    if (accept.includes('text/html')) {
+      return Response.redirect(new URL('/pro/reminders', req.url), 303)
+    }
+
+    return jsonOk({ id: reminder.id }, 200)
   } catch (e) {
     console.error('POST /api/v1/pro/reminders/[id]/complete error', e)
     return jsonFail(500, 'Internal server error')
