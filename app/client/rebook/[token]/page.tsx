@@ -8,7 +8,6 @@ import {
   BookingStatus,
   ClientClaimStatus,
   MediaPhase,
-  MediaVisibility,
   ServiceLocationType,
 } from '@prisma/client'
 
@@ -387,10 +386,19 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
   const paymentSettled =
     checkoutAvailability.status === 'ALREADY_PAID' || checkoutParam === 'success'
 
+  // The client reached this page with a valid access token for THIS booking, so
+  // they're entitled to their own visit's before/after photos regardless of
+  // visibility. Do NOT filter by `visibility` here: when a pro features a
+  // before/after photo to their portfolio (or publishes it as a look) its
+  // visibility flips PRO_CLIENT → PUBLIC (see computeVisibility in
+  // app/api/v1/pro/media/[id]/portfolio/route.ts), so a `PRO_CLIENT`-only filter
+  // would silently drop that photo from the client's aftercare summary while it
+  // still shows on every other surface. Matches the gated booking page
+  // (loadClientBookingPage) and the shared before/after loader
+  // (lib/media/bookingBeforeAfter), neither of which filters on visibility.
   const rawMedia = await prisma.mediaAsset.findMany({
     where: {
       bookingId: booking.id,
-      visibility: MediaVisibility.PRO_CLIENT,
     },
     orderBy: { createdAt: 'asc' },
     select: {
