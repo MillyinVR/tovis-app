@@ -116,6 +116,8 @@ type ParsedPostBody = {
   createProductReminder: boolean
   productReminderDaysAfter: number
   clientTimeZoneReceived: string | null
+  featuredBeforeAssetId: string | null
+  featuredAfterAssetId: string | null
   version: number | null
 }
 
@@ -149,6 +151,8 @@ const GET_BOOKING_SELECT = {
       rebookWindowStart: true,
       rebookWindowEnd: true,
       rebookDeclinedAt: true,
+      featuredBeforeAssetId: true,
+      featuredAfterAssetId: true,
       draftSavedAt: true,
       sentToClientAt: true,
       lastEditedAt: true,
@@ -644,6 +648,8 @@ function mapAftercareSummaryForGet(
     rebookWindowStart: toIsoOrNull(aftercare.rebookWindowStart),
     rebookWindowEnd: toIsoOrNull(aftercare.rebookWindowEnd),
     rebookDeclinedAt: toIsoOrNull(aftercare.rebookDeclinedAt),
+    featuredBeforeAssetId: aftercare.featuredBeforeAssetId,
+    featuredAfterAssetId: aftercare.featuredAfterAssetId,
     rebookSlot: aftercare.rebookSlot
       ? {
           id: aftercare.rebookSlot.id,
@@ -754,6 +760,11 @@ function parsePostBody(
         180,
       ),
       clientTimeZoneReceived,
+      // Pro-chosen featured before/after pair (validated against the booking's
+      // media in the write boundary). trimmedString → null when absent/blank,
+      // which clears any prior selection.
+      featuredBeforeAssetId: trimmedString(rawBody.featuredBeforeAssetId),
+      featuredAfterAssetId: trimmedString(rawBody.featuredAfterAssetId),
       version: parseOptionalVersion(rawBody.version),
     },
   }
@@ -784,6 +795,8 @@ function buildIdempotencyRequestBody(args: {
     createProductReminder: args.parsedBody.createProductReminder,
     productReminderDaysAfter: args.parsedBody.productReminderDaysAfter,
     clientTimeZoneReceived: args.parsedBody.clientTimeZoneReceived,
+    featuredBeforeAssetId: args.parsedBody.featuredBeforeAssetId,
+    featuredAfterAssetId: args.parsedBody.featuredAfterAssetId,
     version: args.parsedBody.version,
   })
 }
@@ -799,6 +812,8 @@ function buildAftercareResponseBody(args: {
       rebookedFor: toIsoOrNull(args.result.aftercare.rebookedFor),
       rebookWindowStart: toIsoOrNull(args.result.aftercare.rebookWindowStart),
       rebookWindowEnd: toIsoOrNull(args.result.aftercare.rebookWindowEnd),
+      featuredBeforeAssetId: args.result.aftercare.featuredBeforeAssetId,
+      featuredAfterAssetId: args.result.aftercare.featuredAfterAssetId,
       rebookSlot: args.parsedBody.normalizedRebook.rebookSlot,
       draftSavedAt: toIsoOrNull(args.result.aftercare.draftSavedAt),
       sentToClientAt: toIsoOrNull(args.result.aftercare.sentToClientAt),
@@ -1002,6 +1017,8 @@ export async function POST(req: Request, ctx: RouteContext) {
           productReminderDaysAfter: parsedBody.value.productReminderDaysAfter,
           recommendedProducts: parsedBody.value.recommendedProducts,
           sendToClient: parsedBody.value.sendToClient,
+          featuredBeforeAssetId: parsedBody.value.featuredBeforeAssetId,
+          featuredAfterAssetId: parsedBody.value.featuredAfterAssetId,
           version: parsedBody.value.version,
           requestId: requestMeta.requestId,
           idempotencyKey: idem.idempotencyKey,

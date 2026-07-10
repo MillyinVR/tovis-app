@@ -28,7 +28,9 @@ import { pickString } from '@/lib/pick'
 import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
 import { isBookingError } from '@/lib/booking/errors'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { orderMediaByFeatured } from '@/lib/media/bookingBeforeAfter'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
+import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 export const dynamic = 'force-dynamic'
@@ -427,8 +429,28 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
     }),
   )
 
-  const beforeMedia = media.filter((item) => item.phase === MediaPhase.BEFORE)
-  const afterMedia = media.filter((item) => item.phase === MediaPhase.AFTER)
+  // Pro-chosen featured pair first (falls back to the earliest when unset), so
+  // it renders as the primary before/after comparison and the rest trail as
+  // flat thumbnails.
+  const beforeMedia = orderMediaByFeatured(
+    media.filter((item) => item.phase === MediaPhase.BEFORE),
+    aftercare.featuredBeforeAssetId,
+  )
+  const afterMedia = orderMediaByFeatured(
+    media.filter((item) => item.phase === MediaPhase.AFTER),
+    aftercare.featuredAfterAssetId,
+  )
+
+  // The reveal comparison is image-only; pick the first image of each phase as
+  // the featured half and let everything else (incl. videos) fall to the
+  // thumbnail strips below.
+  const isImageMedia = (item: { mediaType: string }) =>
+    item.mediaType?.toUpperCase() !== 'VIDEO'
+  const featuredBefore = beforeMedia.find(isImageMedia) ?? null
+  const featuredAfter = afterMedia.find(isImageMedia) ?? null
+  const hasFeaturedComparison = Boolean(featuredBefore || featuredAfter)
+  const beforeExtras = beforeMedia.filter((item) => item.id !== featuredBefore?.id)
+  const afterExtras = afterMedia.filter((item) => item.id !== featuredAfter?.id)
 
   const sourceAppointmentLabel = formatAppointmentWhen(
     booking.scheduledFor,
@@ -521,8 +543,40 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
           )}
         </SectionCard>
 
-        <MediaStrip title="Before photos" items={beforeMedia} />
-        <MediaStrip title="After photos" items={afterMedia} />
+        {hasFeaturedComparison ? (
+          <>
+            <SectionCard title="Before &amp; after">
+              <AftercareBeforeAfter
+                media={{
+                  beforeUrl: featuredBefore
+                    ? featuredBefore.thumbUrl || featuredBefore.url
+                    : null,
+                  afterUrl: featuredAfter
+                    ? featuredAfter.thumbUrl || featuredAfter.url
+                    : null,
+                  beforeFullUrl: featuredBefore
+                    ? featuredBefore.url || featuredBefore.thumbUrl
+                    : null,
+                  afterFullUrl: featuredAfter
+                    ? featuredAfter.url || featuredAfter.thumbUrl
+                    : null,
+                }}
+                serviceName={serviceTitle}
+              />
+            </SectionCard>
+            {beforeExtras.length > 0 ? (
+              <MediaStrip title="More before photos" items={beforeExtras} />
+            ) : null}
+            {afterExtras.length > 0 ? (
+              <MediaStrip title="More after photos" items={afterExtras} />
+            ) : null}
+          </>
+        ) : (
+          <>
+            <MediaStrip title="Before photos" items={beforeMedia} />
+            <MediaStrip title="After photos" items={afterMedia} />
+          </>
+        )}
 
         <SectionCard
           title="Booking details"

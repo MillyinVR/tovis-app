@@ -324,6 +324,8 @@ describe('lib/booking/writeBoundary aftercare atomicity', () => {
         rebookedFor: true,
         rebookWindowStart: true,
         rebookWindowEnd: true,
+        featuredBeforeAssetId: true,
+        featuredAfterAssetId: true,
         draftSavedAt: true,
         sentToClientAt: true,
         lastEditedAt: true,

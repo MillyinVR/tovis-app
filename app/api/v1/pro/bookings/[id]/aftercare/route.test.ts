@@ -298,6 +298,8 @@ function makeUpsertResult(overrides?: {
   rebookedFor?: Date | null
   rebookWindowStart?: Date | null
   rebookWindowEnd?: Date | null
+  featuredBeforeAssetId?: string | null
+  featuredAfterAssetId?: string | null
   sentToClientAt?: Date | null
   aftercareAccessDelivery?: {
     attempted: boolean
@@ -347,6 +349,14 @@ function makeUpsertResult(overrides?: {
           : isNone
             ? null
             : new Date('2026-05-15T18:00:00.000Z'),
+      featuredBeforeAssetId:
+        overrides && 'featuredBeforeAssetId' in overrides
+          ? overrides.featuredBeforeAssetId
+          : null,
+      featuredAfterAssetId:
+        overrides && 'featuredAfterAssetId' in overrides
+          ? overrides.featuredAfterAssetId
+          : null,
       rebookSlot:
         overrides && 'rebookSlot' in overrides ? overrides.rebookSlot : null,
       draftSavedAt: new Date('2026-04-12T20:05:00.000Z'),
@@ -437,6 +447,8 @@ function makeExpectedIdempotencyRequestBody(overrides?: {
   createProductReminder?: boolean
   productReminderDaysAfter?: number
   clientTimeZoneReceived?: string | null
+  featuredBeforeAssetId?: string | null
+  featuredAfterAssetId?: string | null
   version?: number | null
 }) {
   return {
@@ -487,6 +499,14 @@ function makeExpectedIdempotencyRequestBody(overrides?: {
       overrides && 'clientTimeZoneReceived' in overrides
         ? overrides.clientTimeZoneReceived
         : 'America/Los_Angeles',
+    featuredBeforeAssetId:
+      overrides && 'featuredBeforeAssetId' in overrides
+        ? overrides.featuredBeforeAssetId
+        : null,
+    featuredAfterAssetId:
+      overrides && 'featuredAfterAssetId' in overrides
+        ? overrides.featuredAfterAssetId
+        : null,
     version: overrides && 'version' in overrides ? overrides.version : 2,
   }
 }
@@ -496,6 +516,8 @@ function makeExpectedPostResponse(overrides?: {
   rebookedFor?: string | null
   rebookWindowStart?: string | null
   rebookWindowEnd?: string | null
+  featuredBeforeAssetId?: string | null
+  featuredAfterAssetId?: string | null
   sentToClientAt?: string | null
   aftercareAccessDelivery?: {
     attempted: boolean
@@ -542,6 +564,14 @@ function makeExpectedPostResponse(overrides?: {
         overrides && 'rebookWindowEnd' in overrides
           ? overrides.rebookWindowEnd
           : '2026-05-15T18:00:00.000Z',
+      featuredBeforeAssetId:
+        overrides && 'featuredBeforeAssetId' in overrides
+          ? overrides.featuredBeforeAssetId
+          : null,
+      featuredAfterAssetId:
+        overrides && 'featuredAfterAssetId' in overrides
+          ? overrides.featuredAfterAssetId
+          : null,
       rebookSlot:
         overrides && 'rebookSlot' in overrides ? overrides.rebookSlot : null,
       draftSavedAt: '2026-04-12T20:05:00.000Z',
@@ -1326,6 +1356,8 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
       productReminderDaysAfter: 1,
       recommendedProducts: makeExpectedRecommendedProducts(),
       sendToClient: true,
+      featuredBeforeAssetId: null,
+      featuredAfterAssetId: null,
       version: 2,
       requestId: 'req_1',
       idempotencyKey: 'idem_1',
@@ -1344,6 +1376,39 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
       ok: true,
       ...responseBody,
     })
+  })
+
+  it('POST threads the featured before/after pair through to upsertBookingAftercare', async () => {
+    expectIdempotencyStarted('idem_featured_1')
+
+    await POST(
+      makeIdempotentRequest({
+        key: 'idem_featured_1',
+        body: {
+          ...makeValidPostBody(),
+          featuredBeforeAssetId: '  media_before_1  ',
+          featuredAfterAssetId: 'media_after_1',
+        },
+      }),
+      makeCtx(),
+    )
+
+    // Trimmed and forwarded to the write boundary (which validates them against
+    // the booking's media inside the locked transaction).
+    expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        featuredBeforeAssetId: 'media_before_1',
+        featuredAfterAssetId: 'media_after_1',
+      }),
+    )
+
+    // And captured in the idempotency body so a different pair is not a replay.
+    expectRouteIdempotencyStartedWith(
+      makeExpectedIdempotencyRequestBody({
+        featuredBeforeAssetId: 'media_before_1',
+        featuredAfterAssetId: 'media_after_1',
+      }),
+    )
   })
 
   it('POST returns bookingFinished false with completion blockers when aftercare sends but closeout is blocked', async () => {
@@ -1640,6 +1705,8 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
       productReminderDaysAfter: 7,
       recommendedProducts: [],
       sendToClient: false,
+      featuredBeforeAssetId: null,
+      featuredAfterAssetId: null,
       version: null,
       requestId: null,
       idempotencyKey: 'idem_bad_timezone_1',

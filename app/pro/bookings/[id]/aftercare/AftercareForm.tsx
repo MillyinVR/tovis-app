@@ -89,6 +89,10 @@ type Props = {
     endsAt: string
   } | null
   existingMedia: MediaItem[]
+  // Pro-chosen featured before/after pair (the primary comparison the client
+  // sees). Null → the client falls back to the earliest before/after.
+  existingFeaturedBeforeAssetId?: string | null
+  existingFeaturedAfterAssetId?: string | null
   existingRecommendedProducts?: RecommendedProduct[]
 
   // Step 5 explicit state
@@ -296,6 +300,8 @@ export default function AftercareForm({
   suggestedRebookWindowEnd,
   existingRebookSlot,
   existingMedia,
+  existingFeaturedBeforeAssetId,
+  existingFeaturedAfterAssetId,
   existingRecommendedProducts,
   existingDraftSavedAt,
   existingSentToClientAt,
@@ -338,6 +344,14 @@ export default function AftercareForm({
 
   const [createProductReminder, setCreateProductReminder] = useState(false)
   const [productDaysAfter, setProductDaysAfter] = useState('7')
+
+  // Pro-chosen featured before/after pair (null = client sees the earliest).
+  const [featuredBeforeId, setFeaturedBeforeId] = useState<string | null>(
+    existingFeaturedBeforeAssetId ?? null,
+  )
+  const [featuredAfterId, setFeaturedAfterId] = useState<string | null>(
+    existingFeaturedAfterAssetId ?? null,
+  )
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -458,6 +472,17 @@ export default function AftercareForm({
     setError(null)
     setSuccess(null)
     setProductsError(null)
+  }
+
+  // Tap a before/after photo's "Feature" pill to make it the primary pair the
+  // client sees; tap again to clear (client falls back to the earliest).
+  function toggleFeaturedBefore(id: string) {
+    markDirty()
+    setFeaturedBeforeId((current) => (current === id ? null : id))
+  }
+  function toggleFeaturedAfter(id: string) {
+    markDirty()
+    setFeaturedAfterId((current) => (current === id ? null : id))
   }
 
   const sortedMedia = useMemo(() => {
@@ -668,9 +693,23 @@ export default function AftercareForm({
         note: p.note,
       }))
 
+    // Only send a featured id that still maps to a current before/after photo,
+    // so a stale selection (e.g. a since-deleted photo) clears instead of
+    // tripping the server's ownership/phase validation.
+    const validFeaturedBefore =
+      featuredBeforeId && beforeMedia.some((m) => m.id === featuredBeforeId)
+        ? featuredBeforeId
+        : null
+    const validFeaturedAfter =
+      featuredAfterId && afterMedia.some((m) => m.id === featuredAfterId)
+        ? featuredAfterId
+        : null
+
     return {
       notes: notes.trim().slice(0, NOTES_MAX) || '',
       recommendedProducts: sanitizedProducts,
+      featuredBeforeAssetId: validFeaturedBefore,
+      featuredAfterAssetId: validFeaturedAfter,
       rebookMode,
       rebookedFor: rebookISO,
       rebookSlot:
@@ -970,7 +1009,10 @@ export default function AftercareForm({
           <div className={cardClass()}>
             <div className={sectionTitleClass()}>Photos</div>
             <div className={subtleTextClass()}>
-              Visible to you + the client (PRO_CLIENT). Not public.
+              Visible to you + the client (PRO_CLIENT). Not public. Tap
+              “Feature” on a before and an after photo to set the pair the client
+              sees first — the rest show as thumbnails. Leave both unset to
+              feature the earliest of each.
             </div>
 
             <div className="mt-3 grid gap-4">
@@ -981,7 +1023,15 @@ export default function AftercareForm({
                 <div className={subtleTextClass()}>
                   Before photos/videos from this booking.
                 </div>
-                <MediaGrid items={beforeMedia} />
+                <MediaGrid
+                  items={beforeMedia}
+                  feature={{
+                    label: 'before',
+                    selectedId: featuredBeforeId,
+                    onToggle: toggleFeaturedBefore,
+                    disabled: readOnly,
+                  }}
+                />
               </div>
 
               <div>
@@ -989,7 +1039,15 @@ export default function AftercareForm({
                 <div className={subtleTextClass()}>
                   After photos/videos from this booking.
                 </div>
-                <MediaGrid items={afterMedia} />
+                <MediaGrid
+                  items={afterMedia}
+                  feature={{
+                    label: 'after',
+                    selectedId: featuredAfterId,
+                    onToggle: toggleFeaturedAfter,
+                    disabled: readOnly,
+                  }}
+                />
               </div>
 
               {otherMedia.length ? (
@@ -1489,7 +1547,20 @@ function StepButtons({
   )
 }
 
-function MediaGrid({ items }: { items: MediaItem[] }) {
+function MediaGrid({
+  items,
+  feature,
+}: {
+  items: MediaItem[]
+  // When provided (before/after grids), image tiles get a "Feature" pill that
+  // marks this photo as the primary half of the client's before/after pair.
+  feature?: {
+    label: 'before' | 'after'
+    selectedId: string | null
+    onToggle: (id: string) => void
+    disabled?: boolean
+  }
+}) {
   if (!items || items.length === 0) {
     return (
       <div className="mt-2 text-sm font-semibold text-textSecondary">
@@ -1503,39 +1574,70 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
       {items.map((m) => {
         const isVideo = m.mediaType === 'VIDEO'
         const isProClient = m.visibility === 'PRO_CLIENT'
+        // The reveal comparison is image-only, so only images are featurable.
+        const canFeature = Boolean(feature) && !isVideo
+        const isFeatured = feature?.selectedId === m.id
 
         // Enlarge opens the shared in-place fullscreen viewer (local state, no
         // navigation), so closing just dismisses the overlay instead of
         // re-running this force-dynamic page and reloading every image.
         // ClickableMedia falls back full→thumb, so a thumb-only "before" asset
         // is still openable (previously it rendered as a dead, non-clickable
-        // tile while "after" opened fine).
+        // tile while "after" opened fine). The Feature pill sits OUTSIDE the
+        // ClickableMedia button (a nested <button> is invalid), so tapping it
+        // toggles the selection without opening the viewer.
         return (
-          <ClickableMedia
-            key={m.id}
-            thumbSrc={m.renderThumbUrl}
-            fullSrc={m.renderUrl}
-            mediaType={m.mediaType}
-            alt="Booking media"
-            hidePlayBadge
-            className={[
-              'aspect-square rounded-card bg-bgPrimary transition',
-              isProClient
-                ? 'border border-white/10'
-                : 'border border-transparent',
-              'hover:bg-surfaceGlass',
-            ].join(' ')}
-          >
-            {isVideo ? (
-              <div className="pointer-events-none absolute right-2 top-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
-                VIDEO
-              </div>
-            ) : null}
+          <div key={m.id} className="relative">
+            <ClickableMedia
+              thumbSrc={m.renderThumbUrl}
+              fullSrc={m.renderUrl}
+              mediaType={m.mediaType}
+              alt="Booking media"
+              hidePlayBadge
+              className={[
+                'aspect-square rounded-card bg-bgPrimary transition',
+                isFeatured
+                  ? 'border-2 border-accentPrimary'
+                  : isProClient
+                    ? 'border border-white/10'
+                    : 'border border-transparent',
+                'hover:bg-surfaceGlass',
+              ].join(' ')}
+            >
+              {isVideo ? (
+                <div className="pointer-events-none absolute right-2 top-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+                  VIDEO
+                </div>
+              ) : null}
 
-            <div className="pointer-events-none absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
-              {isProClient ? 'PRO + CLIENT' : 'PUBLIC'}
-            </div>
-          </ClickableMedia>
+              <div className="pointer-events-none absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+                {isProClient ? 'PRO + CLIENT' : 'PUBLIC'}
+              </div>
+            </ClickableMedia>
+
+            {canFeature ? (
+              <button
+                type="button"
+                disabled={feature?.disabled}
+                aria-pressed={isFeatured}
+                aria-label={
+                  isFeatured
+                    ? `Remove this ${feature?.label} photo as featured`
+                    : `Feature this ${feature?.label} photo`
+                }
+                onClick={() => feature?.onToggle(m.id)}
+                className={[
+                  'absolute right-1 top-1 z-10 rounded-full px-2 py-1 text-[10px] font-black transition',
+                  'disabled:cursor-not-allowed disabled:opacity-50',
+                  isFeatured
+                    ? 'bg-accentPrimary text-bgPrimary'
+                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass',
+                ].join(' ')}
+              >
+                {isFeatured ? '★ Featured' : 'Feature'}
+              </button>
+            ) : null}
+          </div>
         )
       })}
     </div>
