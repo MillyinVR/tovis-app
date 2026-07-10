@@ -17,6 +17,7 @@ import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
+import { orderMediaByFeatured } from '@/lib/media/bookingBeforeAfter'
 
 import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
@@ -914,11 +915,16 @@ export default async function ClientBookingPage(props: {
   }
 
   const validMedia = media.filter(hasUsableMediaUrl)
-  const beforeMedia = validMedia.filter(
-    (mediaItem) => upper(mediaItem.phase) === 'BEFORE',
+  // Order the pro-chosen featured pair first so it renders as the primary
+  // before/after comparison; the rest trail as flat thumbnails. Falls back to
+  // earliest-first (the prior behavior) when nothing is featured.
+  const beforeMedia = orderMediaByFeatured(
+    validMedia.filter((mediaItem) => upper(mediaItem.phase) === 'BEFORE'),
+    aftercare?.featuredBeforeAssetId ?? null,
   )
-  const afterMedia = validMedia.filter(
-    (mediaItem) => upper(mediaItem.phase) === 'AFTER',
+  const afterMedia = orderMediaByFeatured(
+    validMedia.filter((mediaItem) => upper(mediaItem.phase) === 'AFTER'),
+    aftercare?.featuredAfterAssetId ?? null,
   )
 
   // Primary service name for descriptive session-photo alt text; null when the

@@ -132,6 +132,8 @@ function makeResolvedAftercareAccess(overrides?: {
   rebookWindowEnd?: Date | null
   notes?: string | null
   locationType?: 'SALON' | 'MOBILE'
+  featuredBeforeAssetId?: string | null
+  featuredAfterAssetId?: string | null
   token?: Partial<{
     id: string
     expiresAt: Date
@@ -173,6 +175,8 @@ function makeResolvedAftercareAccess(overrides?: {
       rebookWindowEnd:
         overrides?.rebookWindowEnd ??
         new Date('2026-04-30T18:00:00.000Z'),
+      featuredBeforeAssetId: overrides?.featuredBeforeAssetId ?? null,
+      featuredAfterAssetId: overrides?.featuredAfterAssetId ?? null,
       publicToken: 'legacy_public_token_should_not_drive_ui',
       draftSavedAt: new Date('2026-04-12T17:00:00.000Z'),
       sentToClientAt: new Date('2026-04-12T17:30:00.000Z'),
@@ -400,6 +404,81 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     )
 
     // Both sections are populated, so neither shows the empty placeholder.
+    expect(markup).not.toContain('No photos available.')
+  })
+
+  it('renders the featured before/after pair as a comparison with the rest as thumbnails', async () => {
+    // Two befores + two afters; the pro featured the second of each.
+    mocks.mediaAssetFindMany.mockResolvedValueOnce([
+      {
+        id: 'b1',
+        storageBucket: 'media-private',
+        storagePath: 'bookings/booking_1/before/b1.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: 'https://cdn.test/b1.jpg',
+        thumbUrl: null,
+        mediaType: 'IMAGE',
+        phase: MediaPhase.BEFORE,
+      },
+      {
+        id: 'b2',
+        storageBucket: 'media-private',
+        storagePath: 'bookings/booking_1/before/b2.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: 'https://cdn.test/b2.jpg',
+        thumbUrl: null,
+        mediaType: 'IMAGE',
+        phase: MediaPhase.BEFORE,
+      },
+      {
+        id: 'a1',
+        storageBucket: 'media-private',
+        storagePath: 'bookings/booking_1/after/a1.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: 'https://cdn.test/a1.jpg',
+        thumbUrl: null,
+        mediaType: 'IMAGE',
+        phase: MediaPhase.AFTER,
+      },
+      {
+        id: 'a2',
+        storageBucket: 'media-private',
+        storagePath: 'bookings/booking_1/after/a2.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: 'https://cdn.test/a2.jpg',
+        thumbUrl: null,
+        mediaType: 'IMAGE',
+        phase: MediaPhase.AFTER,
+      },
+    ])
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({
+        offeringId: 'offering_1',
+        featuredBeforeAssetId: 'b2',
+        featuredAfterAssetId: 'a2',
+      }),
+    })
+
+    const markup = renderMarkup(page)
+
+    // Featured pair renders as the comparison card; the leftover before/after
+    // photos render as flat "More ..." thumbnail strips.
+    expect(markup).toContain('Before &amp; after')
+    expect(markup).toContain('More before photos')
+    expect(markup).toContain('More after photos')
+    // The featured pair (b2/a2) is the primary comparison; the leftovers
+    // (b1/a1) are the "More ..." thumbnails.
+    const comparison = markup.slice(
+      markup.indexOf('Before &amp; after'),
+      markup.indexOf('More before photos'),
+    )
+    expect(comparison).toContain('after/a2.jpg')
+    expect(comparison).toContain('before/b2.jpg')
     expect(markup).not.toContain('No photos available.')
   })
 

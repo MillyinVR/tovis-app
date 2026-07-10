@@ -156,6 +156,8 @@ const aftercareSummarySelect = {
   rebookWindowStart: true,
   rebookWindowEnd: true,
   rebookDeclinedAt: true,
+  featuredBeforeAssetId: true,
+  featuredAfterAssetId: true,
   draftSavedAt: true,
   sentToClientAt: true,
   lastEditedAt: true,

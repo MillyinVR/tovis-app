@@ -607,6 +607,8 @@ export default async function ProAftercarePage({ params }: PageProps) {
           rebookWindowStart: true,
           rebookWindowEnd: true,
           rebookDeclinedAt: true,
+          featuredBeforeAssetId: true,
+          featuredAfterAssetId: true,
           rebookSlot: {
             select: {
               offeringId: true,
@@ -910,6 +912,8 @@ export default async function ProAftercarePage({ params }: PageProps) {
                 : null
             }
             existingMedia={existingMedia}
+            existingFeaturedBeforeAssetId={aftercare?.featuredBeforeAssetId ?? null}
+            existingFeaturedAfterAssetId={aftercare?.featuredAfterAssetId ?? null}
             existingRecommendedProducts={existingRecommendedProducts}
             existingDraftSavedAt={dateToIso(aftercare?.draftSavedAt)}
             existingSentToClientAt={dateToIso(aftercare?.sentToClientAt)}

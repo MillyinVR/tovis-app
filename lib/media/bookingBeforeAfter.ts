@@ -30,6 +30,7 @@ const EMPTY: BookingBeforeAfterThumbs = {
 }
 
 const beforeAfterMediaSelect = {
+  id: true,
   bookingId: true,
   phase: true,
   createdAt: true,
@@ -48,10 +49,12 @@ type BeforeAfterMediaRow = Prisma.MediaAssetGetPayload<{
 /**
  * Resolve the primary before + after photo for each of the given bookings.
  *
- * The "primary" shot per phase is the earliest one taken, matching the booking
- * aftercare view (which renders `beforeMedia[0]` / `afterMedia[0]` from an
- * ascending-by-`createdAt` list). Bookings with no before/after image are
- * simply absent from the returned map.
+ * The "primary" shot per phase is the pro-chosen featured photo
+ * (`AftercareSummary.featuredBeforeAssetId` / `featuredAfterAssetId`) when set,
+ * otherwise the earliest one taken — matching the booking aftercare view
+ * (which renders `beforeMedia[0]` / `afterMedia[0]` from an ascending-by-
+ * `createdAt` list). Bookings with no before/after image are simply absent from
+ * the returned map.
  */
 export async function loadBookingBeforeAfterThumbs(
   bookingIds: string[],
@@ -67,33 +70,73 @@ export async function loadBookingBeforeAfterThumbs(
   )
   if (ids.length === 0) return result
 
-  const rows = await prisma.mediaAsset.findMany({
-    where: {
-      bookingId: { in: ids },
-      mediaType: MediaType.IMAGE,
-      phase: { in: [MediaPhase.BEFORE, MediaPhase.AFTER] },
-    },
-    // Earliest-first so the first BEFORE / first AFTER per booking is the
-    // "primary" shot (consistent with the booking aftercare summary).
-    orderBy: [{ bookingId: 'asc' }, { createdAt: 'asc' }],
-    select: beforeAfterMediaSelect,
-  })
+  const [rows, featuredSummaries] = await Promise.all([
+    prisma.mediaAsset.findMany({
+      where: {
+        bookingId: { in: ids },
+        mediaType: MediaType.IMAGE,
+        phase: { in: [MediaPhase.BEFORE, MediaPhase.AFTER] },
+      },
+      // Earliest-first so the first BEFORE / first AFTER per booking is the
+      // "primary" shot (consistent with the booking aftercare summary).
+      orderBy: [{ bookingId: 'asc' }, { createdAt: 'asc' }],
+      select: beforeAfterMediaSelect,
+    }),
+    // Pro-chosen featured pair per booking (one AftercareSummary per booking).
+    prisma.aftercareSummary.findMany({
+      where: { bookingId: { in: ids } },
+      select: {
+        bookingId: true,
+        featuredBeforeAssetId: true,
+        featuredAfterAssetId: true,
+      },
+    }),
+  ])
 
-  // First row per (booking, phase) wins.
+  // First row per (booking, phase) wins (the earliest = default primary).
   const primaryByBookingPhase = new Map<string, BeforeAfterMediaRow>()
+  const rowsById = new Map<string, BeforeAfterMediaRow>()
   for (const row of rows) {
     if (!row.bookingId) continue
+    rowsById.set(row.id, row)
     const key = `${row.bookingId}:${row.phase}`
     if (primaryByBookingPhase.has(key)) continue
     primaryByBookingPhase.set(key, row)
   }
 
+  const featuredByBooking = new Map(
+    featuredSummaries.map((s) => [s.bookingId, s] as const),
+  )
+
+  // The featured photo when it's a valid same-booking, same-phase row; else the
+  // earliest (pre-feature behavior). Guards against a stale/foreign id.
+  const pickPrimary = (
+    bookingId: string,
+    phase: typeof MediaPhase.BEFORE | typeof MediaPhase.AFTER,
+    featuredId: string | null | undefined,
+  ): BeforeAfterMediaRow | null => {
+    if (featuredId) {
+      const featured = rowsById.get(featuredId)
+      if (featured && featured.bookingId === bookingId && featured.phase === phase) {
+        return featured
+      }
+    }
+    return primaryByBookingPhase.get(`${bookingId}:${phase}`) ?? null
+  }
+
   await Promise.all(
     ids.map(async (bookingId) => {
-      const before =
-        primaryByBookingPhase.get(`${bookingId}:${MediaPhase.BEFORE}`) ?? null
-      const after =
-        primaryByBookingPhase.get(`${bookingId}:${MediaPhase.AFTER}`) ?? null
+      const featured = featuredByBooking.get(bookingId)
+      const before = pickPrimary(
+        bookingId,
+        MediaPhase.BEFORE,
+        featured?.featuredBeforeAssetId,
+      )
+      const after = pickPrimary(
+        bookingId,
+        MediaPhase.AFTER,
+        featured?.featuredAfterAssetId,
+      )
 
       const [beforeRendered, afterRendered] = await Promise.all([
         before ? renderMediaUrls(before) : Promise.resolve(null),
@@ -128,6 +171,25 @@ export async function loadBookingBeforeAfterThumbsFor(
 ): Promise<BookingBeforeAfterThumbs> {
   const map = await loadBookingBeforeAfterThumbs([bookingId])
   return map.get(bookingId) ?? EMPTY
+}
+
+/**
+ * Reorder a single-phase media list so the pro-chosen featured asset is first —
+ * the "primary" the client sees as the before/after comparison; every other
+ * photo trails it as a flat thumbnail. Relative order is otherwise preserved.
+ * A null / non-matching `featuredId` returns the list unchanged (falls back to
+ * the existing primary = first element). Pure (no I/O).
+ */
+export function orderMediaByFeatured<T extends { id: string }>(
+  items: T[],
+  featuredId: string | null | undefined,
+): T[] {
+  if (!featuredId) return items
+  const index = items.findIndex((item) => item.id === featuredId)
+  if (index <= 0) return items
+  const featured = items[index]
+  if (featured === undefined) return items
+  return [featured, ...items.slice(0, index), ...items.slice(index + 1)]
 }
 
 /**

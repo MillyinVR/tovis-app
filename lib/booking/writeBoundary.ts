@@ -807,6 +807,11 @@ type UpsertBookingAftercareArgs = {
   recommendedProducts: RecommendedProductInput[]
   sendToClient: boolean
   version: number | null
+  // Pro-chosen featured before/after pair for the client aftercare summary.
+  // Null clears; a non-null id must be an IMAGE on this booking with the
+  // matching phase (validated inside the locked transaction).
+  featuredBeforeAssetId?: string | null
+  featuredAfterAssetId?: string | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -1049,6 +1054,8 @@ type UpsertBookingAftercareResult = {
     rebookedFor: Date | null
     rebookWindowStart: Date | null
     rebookWindowEnd: Date | null
+    featuredBeforeAssetId: string | null
+    featuredAfterAssetId: string | null
     draftSavedAt: Date | null
     sentToClientAt: Date | null
     lastEditedAt: Date | null
@@ -1638,6 +1645,8 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
       rebookedFor: true,
       rebookWindowStart: true,
       rebookWindowEnd: true,
+      featuredBeforeAssetId: true,
+      featuredAfterAssetId: true,
       draftSavedAt: true,
       sentToClientAt: true,
       lastEditedAt: true,
@@ -10818,6 +10827,43 @@ if (args.notifyClient) {
   })
 }
 
+/**
+ * Validate a pro-chosen aftercare "featured" photo. A non-null id must be an
+ * IMAGE attached to THIS booking with the matching phase (BEFORE/AFTER) — so a
+ * pro can never feature another booking's photo, a video, or a wrong-phase
+ * shot. Null/empty clears the selection. Returns the trimmed id or null.
+ */
+async function resolveAftercareFeaturedAssetId(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  assetId: string | null | undefined
+  phase: typeof MediaPhase.BEFORE | typeof MediaPhase.AFTER
+}): Promise<string | null> {
+  const id = typeof args.assetId === 'string' ? args.assetId.trim() : ''
+  if (!id) return null
+
+  // Existence-only check (no url/thumbUrl read → no render-boundary concern):
+  // the id must be an IMAGE on THIS booking with the matching phase.
+  const matches = await args.tx.mediaAsset.count({
+    where: {
+      id,
+      bookingId: args.bookingId,
+      phase: args.phase,
+      mediaType: MediaType.IMAGE,
+    },
+  })
+
+  if (matches === 0) {
+    throw bookingError('FORBIDDEN', {
+      message: `Featured ${args.phase} asset ${id} is not a ${args.phase} image on this booking.`,
+      userMessage:
+        'The selected featured photo is no longer available for this booking.',
+    })
+  }
+
+  return id
+}
+
 async function performLockedUpsertBookingAftercare(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -10843,6 +10889,8 @@ async function performLockedUpsertBookingAftercare(args: {
   recommendedProducts: RecommendedProductInput[]
   sendToClient: boolean
   version: number | null
+  featuredBeforeAssetId?: string | null
+  featuredAfterAssetId?: string | null
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<UpsertBookingAftercareResult> {
@@ -11021,6 +11069,21 @@ if (args.rebookSlot) {
     professionalTimeZone: booking.professional?.timeZone,
   })
 
+  // Validate the pro-chosen featured pair against this booking's media. Each id
+  // must be an IMAGE on this booking with the matching phase; null clears.
+  const featuredBeforeAssetId = await resolveAftercareFeaturedAssetId({
+    tx: args.tx,
+    bookingId: booking.id,
+    assetId: args.featuredBeforeAssetId,
+    phase: MediaPhase.BEFORE,
+  })
+  const featuredAfterAssetId = await resolveAftercareFeaturedAssetId({
+    tx: args.tx,
+    bookingId: booking.id,
+    assetId: args.featuredAfterAssetId,
+    phase: MediaPhase.AFTER,
+  })
+
   const existingAftercare = booking.aftercareSummary
   // (Re)send to the client on EVERY explicit send — not just the first one.
   // "Send update to client" must re-deliver the aftercare magic link (text +
@@ -11065,6 +11128,8 @@ const existingAftercareComparable = existingAftercare
       recommendedProducts: buildExistingRecommendedProductsForComparison(
         existingAftercare.recommendedProducts,
       ),
+      featuredBeforeAssetId: existingAftercare.featuredBeforeAssetId ?? null,
+      featuredAfterAssetId: existingAftercare.featuredAfterAssetId ?? null,
       sentToClient: Boolean(existingAftercare.sentToClientAt),
     }
   : null
@@ -11079,6 +11144,8 @@ const incomingAftercareComparable = {
   recommendedProducts: normalizeRecommendedProductsForComparison(
     args.recommendedProducts,
   ),
+  featuredBeforeAssetId,
+  featuredAfterAssetId,
   sentToClient: args.sendToClient
     ? true
     : Boolean(existingAftercare?.sentToClientAt),
@@ -11099,6 +11166,8 @@ if (
       rebookedFor: existingAftercare.rebookedFor,
       rebookWindowStart: existingAftercare.rebookWindowStart,
       rebookWindowEnd: existingAftercare.rebookWindowEnd,
+      featuredBeforeAssetId: existingAftercare.featuredBeforeAssetId ?? null,
+      featuredAfterAssetId: existingAftercare.featuredAfterAssetId ?? null,
       draftSavedAt: existingAftercare.draftSavedAt,
       sentToClientAt: existingAftercare.sentToClientAt,
       lastEditedAt: existingAftercare.lastEditedAt,
@@ -11140,6 +11209,8 @@ if (
       rebookWindowStart: args.rebookWindowStart,
       rebookWindowEnd: args.rebookWindowEnd,
       rebookDeclinedAt: null,
+      featuredBeforeAssetId,
+      featuredAfterAssetId,
 
       // Important:
       // Do not mark sent here. Sending is only true after the access delivery
@@ -11158,6 +11229,8 @@ if (
       rebookWindowEnd: args.rebookWindowEnd,
       // A freshly saved proposal supersedes any prior client decline.
       rebookDeclinedAt: null,
+      featuredBeforeAssetId,
+      featuredAfterAssetId,
 
       // Important:
       // Preserve existing sent state, but do not create a new sent state yet.
@@ -11175,6 +11248,8 @@ if (
       rebookedFor: true,
       rebookWindowStart: true,
       rebookWindowEnd: true,
+      featuredBeforeAssetId: true,
+      featuredAfterAssetId: true,
       draftSavedAt: true,
       sentToClientAt: true,
       lastEditedAt: true,
@@ -11258,6 +11333,8 @@ const finalizedAftercare =
           rebookedFor: true,
           rebookWindowStart: true,
           rebookWindowEnd: true,
+          featuredBeforeAssetId: true,
+          featuredAfterAssetId: true,
           draftSavedAt: true,
           sentToClientAt: true,
           lastEditedAt: true,
@@ -11557,6 +11634,8 @@ return {
     rebookedFor: finalizedAftercare.rebookedFor,
     rebookWindowStart: finalizedAftercare.rebookWindowStart,
     rebookWindowEnd: finalizedAftercare.rebookWindowEnd,
+    featuredBeforeAssetId: finalizedAftercare.featuredBeforeAssetId ?? null,
+    featuredAfterAssetId: finalizedAftercare.featuredAfterAssetId ?? null,
     draftSavedAt: finalizedAftercare.draftSavedAt,
     sentToClientAt: finalizedAftercare.sentToClientAt,
     lastEditedAt: finalizedAftercare.lastEditedAt,
@@ -13115,6 +13194,8 @@ export async function upsertBookingAftercare(
         recommendedProducts: args.recommendedProducts,
         sendToClient: args.sendToClient,
         version: args.version,
+        featuredBeforeAssetId: args.featuredBeforeAssetId ?? null,
+        featuredAfterAssetId: args.featuredAfterAssetId ?? null,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),

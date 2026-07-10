@@ -3442,6 +3442,18 @@ model AftercareSummary {
   rebookDeclinedAt  DateTime?
   rebookSlot        AftercareRebookSlot?
 
+  // Pro-chosen "featured pair" shown as the primary before/after comparison on
+  // the client's aftercare summary; every other before/after photo renders as a
+  // flat thumbnail. Both nullable — unset falls back to the earliest BEFORE /
+  // AFTER (the pre-feature behavior). Aftercare-only + PRO_CLIENT: deliberately
+  // NOT the portfolio `MediaAsset.beforeAssetId` pairing, so featuring here never
+  // flips a photo PUBLIC or touches the public-share consent gate. onDelete
+  // SetNull so deleting a photo just clears the selection.
+  featuredBeforeAssetId String?
+  featuredAfterAssetId  String?
+  featuredBeforeAsset   MediaAsset? @relation("AftercareFeaturedBefore", fields: [featuredBeforeAssetId], references: [id], onDelete: SetNull)
+  featuredAfterAsset    MediaAsset? @relation("AftercareFeaturedAfter", fields: [featuredAfterAssetId], references: [id], onDelete: SetNull)
+
   draftSavedAt   DateTime?
   sentToClientAt DateTime?
   lastEditedAt   DateTime?
@@ -3453,6 +3465,8 @@ model AftercareSummary {
 
   @@index([sentToClientAt, createdAt])
   @@index([bookingId, sentToClientAt])
+  @@index([featuredBeforeAssetId])
+  @@index([featuredAfterAssetId])
 }
 
 model AftercareRebookSlot {
@@ -3854,6 +3868,11 @@ model MediaAsset {
   review         Review?             @relation(fields: [reviewId], references: [id])
   beforeAsset    MediaAsset?         @relation("MediaBeforeAfterPair", fields: [beforeAssetId], references: [id], onDelete: SetNull)
   pairedAsAfter  MediaAsset[]        @relation("MediaBeforeAfterPair")
+  // Back-relations for the aftercare "featured pair" (which before/after this
+  // asset is the pro-chosen primary of, per AftercareSummary). Aftercare-only,
+  // stays PRO_CLIENT — never touches portfolio featuring/visibility.
+  featuredInAftercareBefore AftercareSummary[] @relation("AftercareFeaturedBefore")
+  featuredInAftercareAfter  AftercareSummary[] @relation("AftercareFeaturedAfter")
   primaryService Service             @relation("MediaPrimaryService", fields: [primaryServiceId], references: [id])
   phase          MediaPhase          @default(OTHER)
   uploadedByUser User?               @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])

@@ -51,6 +51,8 @@ const AFTERCARE_ACCESS_AFTERCARE_SELECT = {
   rebookedFor: true,
   rebookWindowStart: true,
   rebookWindowEnd: true,
+  featuredBeforeAssetId: true,
+  featuredAfterAssetId: true,
   draftSavedAt: true,
   sentToClientAt: true,
   lastEditedAt: true,
@@ -153,6 +155,8 @@ export type ResolvedAftercareAccessToken = {
     rebookedFor: Date | null
     rebookWindowStart: Date | null
     rebookWindowEnd: Date | null
+    featuredBeforeAssetId: string | null
+    featuredAfterAssetId: string | null
     draftSavedAt: Date | null
     sentToClientAt: Date | null
     lastEditedAt: Date | null
@@ -287,6 +291,8 @@ function toResolvedAccessResult(args: {
       rebookedFor: aftercare.rebookedFor,
       rebookWindowStart: aftercare.rebookWindowStart,
       rebookWindowEnd: aftercare.rebookWindowEnd,
+      featuredBeforeAssetId: aftercare.featuredBeforeAssetId,
+      featuredAfterAssetId: aftercare.featuredAfterAssetId,
       draftSavedAt: aftercare.draftSavedAt,
       sentToClientAt: aftercare.sentToClientAt,
       lastEditedAt: aftercare.lastEditedAt,
