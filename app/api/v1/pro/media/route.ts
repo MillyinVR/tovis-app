@@ -25,8 +25,12 @@ import { createOrUpdateProLookFromMediaAsset } from '@/lib/looks/publication/ser
 import type {
   ProMediaCreatedDTO,
   ProMediaCreateResponseDTO,
+  ProManagedMediaItemDTO,
+  ProManagedMediaListResponseDTO,
+  ProMediaServiceTagDTO,
 } from '@/lib/dto/mediaAttach'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { renderMediaUrlsBatch } from '@/lib/media/renderUrls'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -402,5 +406,106 @@ export async function POST(req: Request) {
     })
 
     return jsonFail(500, 'Internal server error')
+  }
+}
+
+// GET /api/v1/pro/media — the pro's own media library for the native media
+// manager (the RSC-only web `/pro/media` grid + `OwnerMediaMenu` editor have no
+// JSON API; this is the native read side). Lists the pro's most-recent media
+// across all visibilities with the fields the editor reads/writes, and returns
+// the taggable service options (the active Service taxonomy the PATCH validates
+// `serviceIds` against) alongside so the editor is a single round-trip. PRO-only,
+// owner-scoped by `professionalId`.
+export async function GET() {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
+
+    const [media, serviceRows] = await Promise.all([
+      prisma.mediaAsset.findMany({
+        where: { professionalId },
+        orderBy: { createdAt: 'desc' },
+        take: 60,
+        select: {
+          id: true,
+          mediaType: true,
+          visibility: true,
+          caption: true,
+          createdAt: true,
+          reviewId: true,
+          isEligibleForLooks: true,
+          isFeaturedInPortfolio: true,
+          beforeAssetId: true,
+          // single source of truth inputs for renderMediaUrlsBatch
+          storageBucket: true,
+          storagePath: true,
+          thumbBucket: true,
+          thumbPath: true,
+          // legacy fallbacks (still allowed)
+          url: true,
+          thumbUrl: true,
+          services: {
+            select: { serviceId: true, service: { select: { name: true } } },
+          },
+        },
+      }),
+      prisma.service.findMany({
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+        take: 500,
+        select: { id: true, name: true },
+      }),
+    ])
+
+    // Sign every private object in one round-trip per bucket (avoids an N+1
+    // waterfall across the library).
+    const rendered = await renderMediaUrlsBatch(
+      media.map((m) => ({
+        storageBucket: m.storageBucket,
+        storagePath: m.storagePath,
+        thumbBucket: m.thumbBucket,
+        thumbPath: m.thumbPath,
+        url: m.url,
+        thumbUrl: m.thumbUrl,
+      })),
+    )
+
+    const items = media.map(
+      (m, i): ProManagedMediaItemDTO => ({
+        id: m.id,
+        mediaType: m.mediaType,
+        visibility: m.visibility,
+        caption: m.caption ?? null,
+        createdAt: m.createdAt.toISOString(),
+        reviewId: m.reviewId ?? null,
+        isEligibleForLooks: Boolean(m.isEligibleForLooks),
+        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+        beforeAssetId: m.beforeAssetId ?? null,
+        services: m.services.map((tag) => ({
+          serviceId: tag.serviceId,
+          name: tag.service.name,
+        })),
+        url: m.url ?? null,
+        thumbUrl: m.thumbUrl ?? null,
+        renderUrl: rendered[i]?.renderUrl ?? null,
+        renderThumbUrl: rendered[i]?.renderThumbUrl ?? null,
+      }),
+    )
+
+    const serviceOptions = serviceRows.map(
+      (s): ProMediaServiceTagDTO => ({ serviceId: s.id, name: s.name }),
+    )
+
+    return jsonOk(
+      { items, serviceOptions } satisfies ProManagedMediaListResponseDTO,
+      200,
+    )
+  } catch (e: unknown) {
+    console.error('GET /api/v1/pro/media error', {
+      error: safeError(e),
+    })
+
+    return jsonFail(500, 'Failed to load media.')
   }
 }

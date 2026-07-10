@@ -82,6 +82,8 @@ export type {
   ProMediaServiceTagDTO,
   ProMediaCreatedDTO,
   ProMediaCreateResponseDTO,
+  ProManagedMediaItemDTO,
+  ProManagedMediaListResponseDTO,
   ProBookingMediaItemDTO,
   ProBookingMediaListResponseDTO,
   ProBookingMediaCreateResponseDTO,
