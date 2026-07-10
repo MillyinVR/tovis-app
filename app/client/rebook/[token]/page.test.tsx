@@ -1,7 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AftercareRebookMode, BookingStatus } from '@prisma/client'
+import { AftercareRebookMode, BookingStatus, MediaPhase } from '@prisma/client'
 
 const TOKEN = 'token_1'
 
@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   mediaAssetFindMany: vi.fn(),
   clientProfileFindUnique: vi.fn(),
   getPublicCheckoutAvailability: vi.fn(),
+
+  renderMediaUrls: vi.fn(),
 
   sanitizeTimeZone: vi.fn(),
   formatAppointmentWhen: vi.fn(),
@@ -104,6 +106,10 @@ vi.mock('@/lib/aftercare/unclaimedAftercareAccess', () => ({
 
 vi.mock('@/lib/booking/errors', () => ({
   isBookingError: mocks.isBookingError,
+}))
+
+vi.mock('@/lib/media/renderUrls', () => ({
+  renderMediaUrls: mocks.renderMediaUrls,
 }))
 
 import ClientRebookFromAftercarePage from './page'
@@ -266,6 +272,12 @@ describe('app/client/rebook/[token]/page.tsx', () => {
 
     mocks.isBookingError.mockReturnValue(false)
     mocks.mediaAssetFindMany.mockResolvedValue([])
+    mocks.renderMediaUrls.mockImplementation(
+      (row: { storagePath?: string | null; url?: string | null }) => ({
+        renderUrl: `https://cdn.test/${row?.storagePath ?? row?.url ?? 'x'}`,
+        renderThumbUrl: null,
+      }),
+    )
     mocks.bookingFindUnique.mockResolvedValue({ clientAddressId: null })
     mocks.clientProfileFindUnique.mockResolvedValue({
       claimStatus: 'CLAIMED',
@@ -343,6 +355,52 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).toContain(`/client/rebook/${TOKEN}`)
     expect(markup).not.toContain('Legacy public token')
     expect(markup).not.toContain('/client/bookings/')
+  })
+
+  it('shows the client their booking before/after regardless of visibility', async () => {
+    // A pro who features the "after" to their portfolio flips it to PUBLIC; the
+    // client must still see it on their own aftercare summary. The media query
+    // must therefore NOT constrain by visibility.
+    mocks.mediaAssetFindMany.mockResolvedValueOnce([
+      {
+        id: 'm_before',
+        storageBucket: 'media-private',
+        storagePath: 'bookings/booking_1/before/b.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: null,
+        thumbUrl: null,
+        mediaType: 'IMAGE',
+        phase: MediaPhase.BEFORE,
+      },
+      {
+        // Featured-to-portfolio "after" → PUBLIC visibility.
+        id: 'm_after',
+        storageBucket: 'media-public',
+        storagePath: 'bookings/booking_1/after/a.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: 'https://cdn.test/a.jpg',
+        thumbUrl: null,
+        mediaType: 'IMAGE',
+        phase: MediaPhase.AFTER,
+      },
+    ])
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({ offeringId: 'offering_1' }),
+    })
+
+    const markup = renderMarkup(page)
+
+    // The query is scoped to the booking only — no visibility filter, or the
+    // PUBLIC featured "after" would be dropped from the client's summary.
+    expect(mocks.mediaAssetFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { bookingId: 'booking_1' } }),
+    )
+
+    // Both sections are populated, so neither shows the empty placeholder.
+    expect(markup).not.toContain('No photos available.')
   })
 
   it('renders the create-account invite for an UNCLAIMED client', async () => {
