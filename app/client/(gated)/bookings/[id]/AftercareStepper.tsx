@@ -24,9 +24,20 @@ function chipClass(active: boolean): string {
   ].join(' ')
 }
 
-export default function AftercareStepper(props: { steps: AftercareStep[] }) {
+export default function AftercareStepper(props: {
+  steps: AftercareStep[]
+  /** Key of the step to open on mount. Defaults to the first step; falls back
+   *  to the first step when the key isn't present. */
+  initialActiveKey?: string
+}) {
   const steps = props.steps
-  const [activeIndex, setActiveIndex] = useState(0)
+  const initialIndex = props.initialActiveKey
+    ? Math.max(
+        0,
+        steps.findIndex((stepItem) => stepItem.key === props.initialActiveKey),
+      )
+    : 0
+  const [activeIndex, setActiveIndex] = useState(initialIndex)
 
   if (steps.length === 0) return null
 

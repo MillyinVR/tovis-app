@@ -357,6 +357,19 @@ booking/checkout writes must stay inside `lib/booking/writeBoundary.ts` (respect
   `ClientBookingRow` select). iOS: the pro booking-DETAIL Payment card gains the "Confirm payment
   received" control (AWAITING_CONFIRMATION), and a coupled aftercare PENDING next appointment shows
   a "Pending — your pro will confirm" notice. Clears all §6 deferred booking-detail niceties.
+- [x] **PF6 — surface the rebook option at the payment-confirmation moment (web)** — SHIPPED
+  (audit 2026-07-10; decisions w/ Tori). After a client marks an off-platform payment sent, the
+  `AWAITING_CONFIRMATION` banner said "there's nothing else you need to do" while the pro's rebook
+  option sat unreachable on a *different* `AftercareStepper` step, and its recommended-window
+  "Rebook now" CTA was gated on `statusUpper === 'COMPLETED'` (unreachable in this state, since
+  closeout needs `paymentCollectedAt`). Fix: (1) **auto-advance** the stepper to "What's next"
+  when a rebook option is present in `AWAITING_CONFIRMATION` (`initialActiveKey` + a state-keyed
+  remount so `router.refresh()` after confirm re-lands there); (2) **un-gate** `showRebookCTA` for
+  `AWAITING_CONFIRMATION` + a real recommendation (`RECOMMENDED_WINDOW`/`RECOMMENDED_DATE`);
+  (3) **conditional copy** — `awaitingConfirmationBodyWithRebook` replaces the "nothing else"
+  line via a new `rebookOptionAvailable` prop on `ClientCheckoutCard`. Centralized `hasRebookSection`
+  (single source for step gate / section gate / banner copy / auto-advance). No DTO/schema change.
+  Pairs iOS §6 PF6.
 
 ## 11. Custom appointment-reminder timing for pros (design 2026-07-08)
 Today a pro's client-reminder cadence is three on/off switches — **7 / 3 / 1 days** before

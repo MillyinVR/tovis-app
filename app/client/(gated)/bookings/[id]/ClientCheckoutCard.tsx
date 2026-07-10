@@ -48,6 +48,11 @@ type Props = {
   tipsEnabled?: boolean | null
   allowCustomTip?: boolean | null
   tipSuggestions?: unknown
+
+  // True when the pro also sent a rebook option (recommended window / coupled
+  // next appointment). Flips the AWAITING_CONFIRMATION banner from "nothing else
+  // to do" to rebook-guiding copy (PF6). Owned by the booking-detail page.
+  rebookOptionAvailable?: boolean
 }
 
 const STRIPE_METHOD_KEY = 'stripe_card'
@@ -371,6 +376,13 @@ export default function ClientCheckoutCard(props: Props) {
   const awaitingConfirmation = checkoutStatus === 'AWAITING_CONFIRMATION'
   const controlsFrozen = checkoutLocked || awaitingConfirmation
 
+  // While waiting on the pro, point the client at rebooking when the pro sent a
+  // rebook option — otherwise keep the "nothing else to do" reassurance (PF6).
+  const awaitingBodyCopy =
+    props.rebookOptionAvailable === true
+      ? COPY.bookings.checkout.awaitingConfirmationBodyWithRebook
+      : COPY.bookings.checkout.awaitingConfirmationBody
+
   const tipsEnabled = props.tipsEnabled !== false
   const allowCustomTip = props.allowCustomTip !== false
 
@@ -640,7 +652,7 @@ export default function ClientCheckoutCard(props: Props) {
               {COPY.bookings.checkout.awaitingConfirmationTitle}
             </div>
             <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-              {COPY.bookings.checkout.awaitingConfirmationBody}
+              {awaitingBodyCopy}
             </div>
           </div>
         ) : null}
@@ -811,7 +823,7 @@ export default function ClientCheckoutCard(props: Props) {
             </div>
             <div className="mt-1 text-[12px] font-semibold text-textSecondary">
               {awaitingConfirmation
-                ? COPY.bookings.checkout.awaitingConfirmationBody
+                ? awaitingBodyCopy
                 : selectedMethodIsStripe
                   ? 'Card payment opens Stripe Checkout. Tips are saved before redirect.'
                   : 'Once your pro confirms they received payment, your booking will close out.'}

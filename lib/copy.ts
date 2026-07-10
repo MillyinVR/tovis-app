@@ -96,6 +96,11 @@ export const COPY = {
       awaitingConfirmationTitle: 'Payment sent — waiting on your pro',
       awaitingConfirmationBody:
         'Once your pro confirms they received payment, your booking will close out. There’s nothing else you need to do.',
+      // Shown instead of the line above when the pro also sent a rebook option
+      // (a recommended window, or a coupled next appointment) — the banner must
+      // never claim there's “nothing else to do” while a rebook is waiting (PF6).
+      awaitingConfirmationBodyWithRebook:
+        'Once your pro confirms they received payment, your booking will close out. In the meantime, your pro suggested a time to rebook — you can book your next appointment now.',
     },
 
     status: {
