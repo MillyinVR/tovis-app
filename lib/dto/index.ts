@@ -33,6 +33,12 @@ export type {
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 
+// ── Client aftercare read (GET /api/v1/client/bookings/[id]/aftercare) ────────
+export type {
+  ClientAftercareSummaryDTO,
+  ClientAftercareDetailDTO,
+} from '@/lib/dto/clientAftercare'
+
 // ── Pro Overview / performance dashboard (GET /api/v1/pro/overview) ───────────
 export type {
   ProOverviewTrendTone,

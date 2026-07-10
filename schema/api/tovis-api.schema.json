@@ -2129,6 +2129,63 @@
     "ClientAddressKind": {
       "$ref": "#/definitions/%24Enums.ClientAddressKind"
     },
+    "ClientAftercareDetailDTO": {
+      "properties": {
+        "aftercare": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientAftercareSummaryDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The sent aftercare summary (care notes), or null when none is sent yet."
+        },
+        "beforeAfter": {
+          "$ref": "#/definitions/BookingBeforeAfterThumbs",
+          "description": "Primary before/after pair (featured, else earliest per phase)."
+        },
+        "canShowAftercare": {
+          "description": "Whether the client's aftercare surface is visible for this booking — mirrors the web `canShowAftercareTab` gate (booking COMPLETED, or a sent aftercare summary exists). When false the native client hides the section.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "canShowAftercare",
+        "aftercare",
+        "beforeAfter"
+      ],
+      "type": "object"
+    },
+    "ClientAftercareSummaryDTO": {
+      "description": "The care-notes slice of a SENT aftercare summary the client may read.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "notes": {
+          "description": "Free-text care instructions the pro wrote for the client.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sentToClientAt": {
+          "description": "ISO instant the pro sent this aftercare to the client.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "notes",
+        "sentToClientAt"
+      ],
+      "type": "object"
+    },
     "ClientBookingCheckoutDTO": {
       "properties": {
         "checkoutStatus": {
