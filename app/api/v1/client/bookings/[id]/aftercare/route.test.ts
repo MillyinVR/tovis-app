@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   prismaBookingFindUnique: vi.fn(),
   prismaBookingFindFirst: vi.fn(),
   prismaAftercareFindFirst: vi.fn(),
+  prismaReviewFindFirst: vi.fn(),
   loadBookingBeforeAfterThumbsFor: vi.fn(),
 
   jsonFail: vi.fn(),
@@ -29,6 +30,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     aftercareSummary: {
       findFirst: mocks.prismaAftercareFindFirst,
+    },
+    review: {
+      findFirst: mocks.prismaReviewFindFirst,
     },
   },
 }))
@@ -115,6 +119,8 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
     mocks.prismaAftercareFindFirst.mockResolvedValue(null)
     // No coupled AFTERCARE-sourced next booking by default.
     mocks.prismaBookingFindFirst.mockResolvedValue(null)
+    // No existing client review by default.
+    mocks.prismaReviewFindFirst.mockResolvedValue(null)
     mocks.loadBookingBeforeAfterThumbsFor.mockResolvedValue(EMPTY_BEFORE_AFTER)
   })
 
@@ -175,6 +181,9 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         checkoutProducts: [],
         // No sent summary ⇒ no rebook recommendation to surface.
         rebook: null,
+        // No sent summary ⇒ review is gated off (null + not eligible).
+        existingReview: null,
+        reviewEligible: false,
         // COMPLETED locks product editing even though the surface shows.
         checkoutProductsEditable: false,
       },
@@ -309,6 +318,9 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
           declinedAt: null,
           nextBooking: null,
         },
+        // No review left yet; ACCEPTED (not completed/finished + unpaid) ⇒ not eligible.
+        existingReview: null,
+        reviewEligible: false,
         // ACCEPTED + sent aftercare + no payment yet ⇒ editable.
         checkoutProductsEditable: true,
       },
@@ -358,6 +370,9 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
           declinedAt: null,
           nextBooking: null,
         },
+        // ACCEPTED (not COMPLETED) ⇒ review not eligible despite paid closeout.
+        existingReview: null,
+        reviewEligible: false,
         checkoutProductsEditable: false,
       },
     })
@@ -408,6 +423,9 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
           declinedAt: null,
           nextBooking: null,
         },
+        // COMPLETED but not finished + unpaid ⇒ review not eligible yet.
+        existingReview: null,
+        reviewEligible: false,
         checkoutProductsEditable: false,
       },
     })
@@ -461,6 +479,8 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
             scheduledFor: '2026-08-05T17:00:00.000Z',
           },
         },
+        existingReview: null,
+        reviewEligible: false,
         checkoutProductsEditable: false,
       },
     })
@@ -483,8 +503,113 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         recommendedProducts: [],
         checkoutProducts: [],
         rebook: null,
+        existingReview: null,
+        reviewEligible: false,
         // No sent aftercare ⇒ not editable.
         checkoutProductsEditable: false,
+      },
+    })
+  })
+
+  it('surfaces reviewEligible + the existing review once closeout is complete', async () => {
+    mocks.prismaBookingFindUnique.mockResolvedValue(
+      bookingRead({
+        status: 'COMPLETED',
+        finishedAt: new Date('2026-07-02T14:00:00.000Z'),
+        checkoutStatus: 'PAID',
+        paymentCollectedAt: new Date('2026-07-02T16:00:00.000Z'),
+      }),
+    )
+    mocks.prismaAftercareFindFirst.mockResolvedValueOnce({
+      id: 'ac_1',
+      notes: 'Rinse with cool water for 48h.',
+      sentToClientAt: new Date('2026-07-02T15:00:00.000Z'),
+      rebookMode: 'NONE',
+      rebookedFor: null,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      rebookDeclinedAt: null,
+      recommendedProducts: [],
+    })
+    mocks.prismaReviewFindFirst.mockResolvedValueOnce({
+      id: 'rev_1',
+      rating: 5,
+      headline: 'Loved it',
+      body: 'Best color of my life.',
+    })
+
+    const result = await GET(makeRequest(), makeCtx())
+
+    // The review lookup is scoped to this booking + the authed client (text slice
+    // only — media is A3-rev 4b).
+    expect(mocks.prismaReviewFindFirst).toHaveBeenCalledWith({
+      where: { bookingId: 'booking_1', clientId: 'client_1' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, rating: true, headline: true, body: true },
+    })
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      body: {
+        canShowAftercare: true,
+        aftercare: {
+          id: 'ac_1',
+          notes: 'Rinse with cool water for 48h.',
+          sentToClientAt: '2026-07-02T15:00:00.000Z',
+        },
+        beforeAfter: EMPTY_BEFORE_AFTER,
+        recommendedProducts: [],
+        checkoutProducts: [],
+        rebook: {
+          mode: 'NONE',
+          rebookedFor: null,
+          windowStart: null,
+          windowEnd: null,
+          declinedAt: null,
+          nextBooking: null,
+        },
+        existingReview: {
+          id: 'rev_1',
+          rating: 5,
+          headline: 'Loved it',
+          body: 'Best color of my life.',
+        },
+        // COMPLETED + finished + PAID + collected + sent summary ⇒ eligible.
+        reviewEligible: true,
+        // Payment collected ⇒ product editing locked.
+        checkoutProductsEditable: false,
+      },
+    })
+  })
+
+  it('gates the existing review off until a summary is sent (no leak pre-aftercare)', async () => {
+    // Closeout-complete booking, a review row exists, but NO sent summary — the
+    // review* fields are gated exactly like `aftercare`, so both stay off.
+    mocks.prismaBookingFindUnique.mockResolvedValue(
+      bookingRead({
+        status: 'COMPLETED',
+        finishedAt: new Date('2026-07-02T14:00:00.000Z'),
+        checkoutStatus: 'PAID',
+        paymentCollectedAt: new Date('2026-07-02T16:00:00.000Z'),
+      }),
+    )
+    mocks.prismaAftercareFindFirst.mockResolvedValueOnce(null)
+    mocks.prismaReviewFindFirst.mockResolvedValueOnce({
+      id: 'rev_1',
+      rating: 4,
+      headline: null,
+      body: null,
+    })
+
+    const result = await GET(makeRequest(), makeCtx())
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: 200,
+      body: {
+        aftercare: null,
+        existingReview: null,
+        reviewEligible: false,
       },
     })
   })

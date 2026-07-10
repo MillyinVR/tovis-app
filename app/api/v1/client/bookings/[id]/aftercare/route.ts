@@ -32,7 +32,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
     const own = await requireClientBookingOwnership(bookingId, clientId)
     if (!own.ok) return own.res
 
-    const [booking, aftercare, beforeAfter, rebookedNextBooking] = await Promise.all([
+    const [booking, aftercare, beforeAfter, rebookedNextBooking, review] =
+      await Promise.all([
       // Lifecycle status drives the aftercare-visibility gate (COMPLETED shows
       // the surface even before a summary is sent); the remaining fields +
       // current checkout selection drive the `checkoutProductsEditable` gate and
@@ -105,6 +106,15 @@ export async function GET(_req: Request, ctx: RouteContext) {
         orderBy: { scheduledFor: 'desc' },
         select: { id: true, status: true, scheduledFor: true },
       }),
+      // The client's own review of this booking (text slice only — media is
+      // A3-rev 4b), for prefill/edit in the native review block. Scoped to the
+      // authed client; the DTO gates it behind a sent summary. Mirrors the web
+      // detail loader's `existingReview` load.
+      prisma.review.findFirst({
+        where: { bookingId, clientId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, rating: true, headline: true, body: true },
+      }),
     ])
 
     const dto: ClientAftercareDetailDTO = buildClientAftercareDetailDTO({
@@ -117,6 +127,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
       beforeAfter,
       checkoutProductItems: booking?.checkoutProductItems ?? [],
       rebookedNextBooking,
+      review,
     })
 
     return jsonOk(dto)

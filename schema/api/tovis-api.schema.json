@@ -2214,6 +2214,17 @@
           "description": "Whether the client may edit their checkout-product selection right now — mirrors the write path's `assertClientCanEditBookingCheckoutProducts` gate (finalized aftercare, not yet in/through payment, not completed/cancelled). When false the native + web pickers render read-only.",
           "type": "boolean"
         },
+        "existingReview": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientAftercareExistingReviewDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The client's existing review for this booking (text only), or null when they haven't left one yet / no summary is sent. Prefills the native review block for editing. Gated like `aftercare`."
+        },
         "rebook": {
           "anyOf": [
             {
@@ -2231,6 +2242,10 @@
             "$ref": "#/definitions/ClientAftercareRecommendedProductDTO"
           },
           "type": "array"
+        },
+        "reviewEligible": {
+          "description": "Whether the client may leave or edit a review right now — mirrors the write path's `canBookingAcceptClientReview` closeout gate (completed + finished booking, finalized aftercare, collected payment). False until a summary is sent. When false the native review block stays hidden.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -2240,7 +2255,42 @@
         "recommendedProducts",
         "checkoutProducts",
         "rebook",
+        "existingReview",
+        "reviewEligible",
         "checkoutProductsEditable"
+      ],
+      "type": "object"
+    },
+    "ClientAftercareExistingReviewDTO": {
+      "description": "The client's own review of this booking (text only — media belongs to A3-rev 4b), when they've left one. Mirrors the web `SafeExistingReview`'s text slice; powers prefill + edit in the native review block. Gated like `aftercare` (only surfaced once a summary is sent).",
+      "properties": {
+        "body": {
+          "description": "Optional free-text review body, or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "headline": {
+          "description": "Optional review headline, or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "rating": {
+          "description": "The 1–5 star rating the client gave.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "rating",
+        "headline",
+        "body"
       ],
       "type": "object"
     },

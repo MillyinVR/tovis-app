@@ -21,6 +21,7 @@ import type {
 
 import { isClientAftercareVisible } from '@/lib/aftercare/aftercareVisibility'
 import { clientCanEditBookingCheckoutProducts } from '@/lib/booking/checkoutProductsEditable'
+import { isBookingReviewEligible } from '@/lib/booking/closeoutState'
 import type { BookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 import { moneyToString } from '@/lib/money'
 
@@ -121,6 +122,22 @@ export type ClientAftercareRebookDTO = {
   nextBooking: ClientAftercareNextBookingDTO | null
 }
 
+/**
+ * The client's own review of this booking (text only — media belongs to A3-rev
+ * 4b), when they've left one. Mirrors the web `SafeExistingReview`'s text slice;
+ * powers prefill + edit in the native review block. Gated like `aftercare` (only
+ * surfaced once a summary is sent).
+ */
+export type ClientAftercareExistingReviewDTO = {
+  id: string
+  /** The 1–5 star rating the client gave. */
+  rating: number
+  /** Optional review headline, or null. */
+  headline: string | null
+  /** Optional free-text review body, or null. */
+  body: string | null
+}
+
 export type ClientAftercareDetailDTO = {
   /**
    * Whether the client's aftercare surface is visible for this booking —
@@ -141,6 +158,19 @@ export type ClientAftercareDetailDTO = {
    * appointment) + the coupled next booking, or null when no summary is sent.
    */
   rebook: ClientAftercareRebookDTO | null
+  /**
+   * The client's existing review for this booking (text only), or null when
+   * they haven't left one yet / no summary is sent. Prefills the native review
+   * block for editing. Gated like `aftercare`.
+   */
+  existingReview: ClientAftercareExistingReviewDTO | null
+  /**
+   * Whether the client may leave or edit a review right now — mirrors the write
+   * path's `canBookingAcceptClientReview` closeout gate (completed + finished
+   * booking, finalized aftercare, collected payment). False until a summary is
+   * sent. When false the native review block stays hidden.
+   */
+  reviewEligible: boolean
   /**
    * Whether the client may edit their checkout-product selection right now —
    * mirrors the write path's `assertClientCanEditBookingCheckoutProducts` gate
@@ -241,6 +271,16 @@ export function buildClientAftercareDetailDTO(input: {
     status: BookingStatus
     scheduledFor: Date | null
   } | null
+  /**
+   * The client's existing review for this booking (text slice only), or null.
+   * Loaded alongside the summary; only surfaced once a summary is sent.
+   */
+  review: {
+    id: string
+    rating: number
+    headline: string | null
+    body: string | null
+  } | null
 }): ClientAftercareDetailDTO {
   const aftercare = input.aftercare
     ? {
@@ -268,6 +308,30 @@ export function buildClientAftercareDetailDTO(input: {
       }
     : null
 
+  // Review fields are gated exactly like `aftercare`: only surface a client's
+  // review (and only claim they can leave one) once the pro has SENT the summary
+  // — `reviewEligible` additionally requires the full closeout to be complete,
+  // mirroring the write path's `canBookingAcceptClientReview` gate.
+  const summarySent = Boolean(input.aftercare)
+  const existingReview: ClientAftercareExistingReviewDTO | null =
+    summarySent && input.review
+      ? {
+          id: input.review.id,
+          rating: input.review.rating,
+          headline: input.review.headline,
+          body: input.review.body,
+        }
+      : null
+  const reviewEligible = summarySent
+    ? isBookingReviewEligible({
+        bookingStatus: input.status,
+        finishedAt: input.finishedAt,
+        aftercareSentAt: input.aftercare?.sentToClientAt ?? null,
+        checkoutStatus: input.checkoutStatus,
+        paymentCollectedAt: input.paymentCollectedAt,
+      })
+    : false
+
   return {
     canShowAftercare: isClientAftercareVisible({
       status: input.status,
@@ -280,6 +344,8 @@ export function buildClientAftercareDetailDTO(input: {
     ),
     checkoutProducts: input.checkoutProductItems.map(mapCheckoutProduct),
     rebook,
+    existingReview,
+    reviewEligible,
     checkoutProductsEditable: clientCanEditBookingCheckoutProducts({
       status: input.status,
       finishedAt: input.finishedAt,

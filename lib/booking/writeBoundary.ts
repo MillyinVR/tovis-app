@@ -199,6 +199,7 @@ import { findSchedulingConflicts } from '@/lib/booking/schedulingConflicts'
 import { resolveAftercarePreselectedSlot } from '@/lib/booking/aftercarePreselectedSlot'
 import { validateAftercareRebookSlotOwnership } from '@/lib/booking/aftercareRebookSlotOwnership'
 import {
+  isBookingReviewEligible,
   isCheckoutCloseoutComplete,
   isCloseoutPaymentAndAftercareComplete,
 } from '@/lib/booking/closeoutState'
@@ -2758,23 +2759,10 @@ function canCompleteBookingCloseout(args: {
   )
 }
 
-function isReviewEligibleCloseout(args: {
-  bookingStatus: BookingStatus | null | undefined
-  finishedAt: Date | null | undefined
-  aftercareSentAt: Date | null | undefined
-  checkoutStatus: BookingCheckoutStatus | null | undefined
-  paymentCollectedAt: Date | null | undefined
-}): boolean {
-  return (
-    args.bookingStatus === BookingStatus.COMPLETED &&
-    Boolean(args.finishedAt) &&
-    isCloseoutPaymentAndAftercareComplete({
-      aftercareSentAt: args.aftercareSentAt,
-      checkoutStatus: args.checkoutStatus,
-      paymentCollectedAt: args.paymentCollectedAt,
-    })
-  )
-}
+// Thin local alias — the review-eligibility predicate is the shared SSOT in
+// `closeoutState.ts` (also consumed by the client aftercare read DTO's
+// `reviewEligible`), so the write gate and the read surface can never drift.
+const isReviewEligibleCloseout = isBookingReviewEligible
 
 /**
  * Returns a list of human-readable error codes that explain why a
