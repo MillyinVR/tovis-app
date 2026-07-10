@@ -1079,14 +1079,23 @@ and deep-links authenticated clients into the full booking view).
   `featuredPairParams` (shared by both pages), `FeaturedPairPicker` client component. No schema,
   no API, no rebook-gate change → zero blast radius on the summary-existence consumers. Unit +
   page + jsdom interaction tests; typecheck/lint/static-guards green.
-- [ ] **AF3 — iOS parity (deferred).** Client aftercare before/after is **web-only** today
-  (native `BookingDetailView` aftercare anchor = the media-consent card; before/after compare
-  unbuilt — `tovis-ios/BACKLOG.md §5 A3`). `GET .../aftercare` already returns the featured pair
-  (`loadBookingBeforeAfterThumbsFor`), so iOS gets the *rendering* free once A3's view lands; the
-  native **picker** is the parity item. `BeforeAfterCompareView.swift` +
-  `AftercareBeforeAfterPair.swift` exist (pro/portfolio) and are reusable. The AF2-follow-up
-  after-photos surface is a **web-only** UI convenience (URL-carried, no server contract) — no
-  iOS counterpart to build beyond A3's picker.
+- [~] **AF3 — iOS parity (in progress).**
+  - [x] **AF3a — pro authoring featured-pair PICKER (iOS PR #31).** Native
+    `ProAftercareAuthorView` gains the "Feature" pill picker — Before/After grids loaded from the
+    existing `GET .../media` (the aftercare GET returns only the single *resolved* pair, not every
+    candidate), seeded from + saving the featured pair. New DTO fields
+    (`featuredBefore/AfterAssetId` on the summary + save request) + a pure `AftercareFeaturedPair`
+    helper mirroring `featuredPairSeed`/`validFeatured*`. **Also fixed a latent cross-platform
+    regression:** iOS omitted the featured ids on save and the server always writes them (an absent
+    field coerces to `null`), so any native aftercare save silently wiped a web-set pair. **No
+    web/server change, no migration.** The AF2-follow-up after-photos surface is a **web-only** UI
+    convenience (URL-carried, no server contract) — no iOS counterpart.
+  - [ ] **AF3b — client-facing before/after RENDER (deferred to A3).** Client aftercare
+    before/after is still web-only on native (`BookingDetailView` aftercare anchor = the
+    media-consent card; before/after compare unbuilt — `tovis-ios/BACKLOG.md §5 A3`).
+    `GET .../aftercare` already returns the featured pair (`loadBookingBeforeAfterThumbsFor`), so
+    iOS gets the *rendering* free once A3's view lands; `BeforeAfterCompareView.swift` +
+    `AftercareBeforeAfterPair.swift` exist and are reusable.
 
 ---
 
