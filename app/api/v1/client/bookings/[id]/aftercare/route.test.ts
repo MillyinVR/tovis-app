@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   prismaAftercareFindFirst: vi.fn(),
   prismaReviewFindFirst: vi.fn(),
   loadBookingBeforeAfterThumbsFor: vi.fn(),
+  renderMediaUrlsBatch: vi.fn(),
 
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
@@ -46,6 +47,10 @@ vi.mock('@/app/api/_utils', () => ({
 
 vi.mock('@/lib/media/bookingBeforeAfter', () => ({
   loadBookingBeforeAfterThumbsFor: mocks.loadBookingBeforeAfterThumbsFor,
+}))
+
+vi.mock('@/lib/media/renderUrls', () => ({
+  renderMediaUrlsBatch: mocks.renderMediaUrlsBatch,
 }))
 
 vi.mock('@/lib/security/logging', () => ({
@@ -122,6 +127,19 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
     // No existing client review by default.
     mocks.prismaReviewFindFirst.mockResolvedValue(null)
     mocks.loadBookingBeforeAfterThumbsFor.mockResolvedValue(EMPTY_BEFORE_AFTER)
+    // Deterministic render URLs from each asset's storage pointers (public-bucket
+    // review media resolves synchronously in prod; here we mirror the shape).
+    mocks.renderMediaUrlsBatch.mockImplementation(
+      async (
+        items: Array<{ storagePath?: string | null; thumbPath?: string | null }>,
+      ) =>
+        items.map((item) => ({
+          renderUrl: item.storagePath ? `https://cdn/${item.storagePath}` : null,
+          renderThumbUrl: item.thumbPath
+            ? `https://cdn/${item.thumbPath}`
+            : null,
+        })),
+    )
   })
 
   afterEach(() => {
@@ -536,16 +554,36 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
       rating: 5,
       headline: 'Loved it',
       body: 'Best color of my life.',
+      mediaAssets: [],
     })
 
     const result = await GET(makeRequest(), makeCtx())
 
-    // The review lookup is scoped to this booking + the authed client (text slice
-    // only — media is A3-rev 4b).
+    // The review lookup is scoped to this booking + the authed client, selecting
+    // the text slice + attached media (with storage pointers for URL resolution).
     expect(mocks.prismaReviewFindFirst).toHaveBeenCalledWith({
       where: { bookingId: 'booking_1', clientId: 'client_1' },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, rating: true, headline: true, body: true },
+      select: {
+        id: true,
+        rating: true,
+        headline: true,
+        body: true,
+        mediaAssets: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            mediaType: true,
+            createdAt: true,
+            url: true,
+            thumbUrl: true,
+            storageBucket: true,
+            storagePath: true,
+            thumbBucket: true,
+            thumbPath: true,
+          },
+        },
+      },
     })
     expect(result).toEqual({
       ok: true,
@@ -573,6 +611,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
           rating: 5,
           headline: 'Loved it',
           body: 'Best color of my life.',
+          mediaAssets: [],
         },
         // COMPLETED + finished + PAID + collected + sent summary ⇒ eligible.
         reviewEligible: true,
@@ -599,6 +638,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
       rating: 4,
       headline: null,
       body: null,
+      mediaAssets: [],
     })
 
     const result = await GET(makeRequest(), makeCtx())
@@ -610,6 +650,92 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         aftercare: null,
         existingReview: null,
         reviewEligible: false,
+      },
+    })
+  })
+
+  it('carries the existing review’s attached media with render-resolved URLs (A3-rev 4b)', async () => {
+    mocks.prismaBookingFindUnique.mockResolvedValue(
+      bookingRead({
+        status: 'COMPLETED',
+        finishedAt: new Date('2026-07-02T14:00:00.000Z'),
+        checkoutStatus: 'PAID',
+        paymentCollectedAt: new Date('2026-07-02T16:00:00.000Z'),
+      }),
+    )
+    mocks.prismaAftercareFindFirst.mockResolvedValueOnce({
+      id: 'ac_1',
+      notes: null,
+      sentToClientAt: new Date('2026-07-02T15:00:00.000Z'),
+      rebookMode: 'NONE',
+      rebookedFor: null,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      rebookDeclinedAt: null,
+      recommendedProducts: [],
+    })
+    mocks.prismaReviewFindFirst.mockResolvedValueOnce({
+      id: 'rev_1',
+      rating: 5,
+      headline: 'Loved it',
+      body: null,
+      mediaAssets: [
+        {
+          id: 'rm_1',
+          mediaType: 'IMAGE',
+          createdAt: new Date('2026-07-03T10:00:00.000Z'),
+          url: null,
+          thumbUrl: null,
+          storageBucket: 'media-public',
+          storagePath: 'client/c1/review_public/rm_1.jpg',
+          thumbBucket: null,
+          thumbPath: 'client/c1/review_public/rm_1_thumb.jpg',
+        },
+        {
+          id: 'rm_2',
+          mediaType: 'VIDEO',
+          createdAt: new Date('2026-07-03T09:00:00.000Z'),
+          url: null,
+          thumbUrl: null,
+          storageBucket: 'media-public',
+          storagePath: 'client/c1/review_public/rm_2.mp4',
+          thumbBucket: null,
+          thumbPath: null,
+        },
+      ],
+    })
+
+    const result = await GET(makeRequest(), makeCtx())
+
+    // The whole media list is resolved in one batched round-trip.
+    expect(mocks.renderMediaUrlsBatch).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      ok: true,
+      status: 200,
+      body: {
+        reviewEligible: true,
+        existingReview: {
+          id: 'rev_1',
+          rating: 5,
+          headline: 'Loved it',
+          body: null,
+          mediaAssets: [
+            {
+              id: 'rm_1',
+              mediaType: 'IMAGE',
+              url: 'https://cdn/client/c1/review_public/rm_1.jpg',
+              thumbUrl: 'https://cdn/client/c1/review_public/rm_1_thumb.jpg',
+              createdAt: '2026-07-03T10:00:00.000Z',
+            },
+            {
+              id: 'rm_2',
+              mediaType: 'VIDEO',
+              url: 'https://cdn/client/c1/review_public/rm_2.mp4',
+              thumbUrl: null,
+              createdAt: '2026-07-03T09:00:00.000Z',
+            },
+          ],
+        },
       },
     })
   })
