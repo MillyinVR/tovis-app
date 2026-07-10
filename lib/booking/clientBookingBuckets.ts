@@ -17,7 +17,12 @@ import { prisma } from '@/lib/prisma'
 import {
   buildClientBookingDTO,
   type ClientBookingDTO,
+  type ClientBookingPaymentOptionsDTO,
 } from '@/lib/dto/clientBooking'
+import {
+  buildClientPaymentOptions,
+  clientPaymentOptionsSelect,
+} from '@/lib/payments/clientPaymentOptions'
 
 /** Trim + upper a maybe-string enum value; '' when absent. */
 function upper(v: unknown): string {
@@ -284,6 +289,37 @@ export type LoadedClientBookingBuckets = {
 }
 
 /**
+ * Resolve each distinct pro's client checkout payment options in one query, keyed
+ * by professionalId. Pros without a saved settings row simply have no map entry
+ * (the caller falls back to the Cash-only default per booking).
+ */
+async function loadPaymentOptionsByPro(
+  professionalIds: string[],
+): Promise<Map<string, ClientBookingPaymentOptionsDTO>> {
+  const distinctIds = Array.from(new Set(professionalIds))
+  const byPro = new Map<string, ClientBookingPaymentOptionsDTO>()
+  if (distinctIds.length === 0) return byPro
+
+  const rows = await prisma.professionalPaymentSettings.findMany({
+    where: { professionalId: { in: distinctIds } },
+    select: { professionalId: true, ...clientPaymentOptionsSelect },
+  })
+  const rowByPro = new Map(rows.map((row) => [row.professionalId, row]))
+
+  // Emit an entry for every pro that has a booking — a pro with no settings row
+  // gets the Cash-only default (buildClientPaymentOptions(null)), matching the web
+  // page's fallback so the client is never left with "no way to pay".
+  for (const professionalId of distinctIds) {
+    byPro.set(
+      professionalId,
+      buildClientPaymentOptions(rowByPro.get(professionalId) ?? null),
+    )
+  }
+
+  return byPro
+}
+
+/**
  * Load the full bucketed set for a client — bookings (with unread-aftercare +
  * pending-consultation flags folded into each DTO) plus active waitlist entries.
  * Used by the API route and the SSR Appointments page so both share one query.
@@ -321,12 +357,26 @@ export async function loadClientBookingBuckets(
       ),
   )
 
+  // The native client checkout renders the pro's accepted methods (with handles)
+  // + tip config natively, so we resolve each booking's pro's payment options and
+  // fold them into the DTO. One batched query for the distinct pros in the set;
+  // handles stay gated to the client's own bookings. A pro with no settings row
+  // gets the Cash-only default (buildClientPaymentOptions(null)).
+  const paymentOptionsByPro = await loadPaymentOptionsByPro(
+    bookings
+      .map((booking) => booking.professional?.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0),
+  )
+
   const bookingDtos: ClientBookingDTO[] = await Promise.all(
     bookings.map((booking) =>
       buildClientBookingDTO({
         booking,
         unreadAftercare: unreadBookingIds.has(booking.id),
         hasPendingConsultationApproval: hasPendingConsultationApproval(booking),
+        paymentOptions: booking.professional?.id
+          ? paymentOptionsByPro.get(booking.professional.id) ?? null
+          : null,
       }),
     ),
   )

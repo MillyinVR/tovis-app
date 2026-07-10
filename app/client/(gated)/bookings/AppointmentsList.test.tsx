@@ -80,6 +80,7 @@ function makeBooking(overrides?: Partial<ClientBookingDTO>): ClientBookingDTO {
     rebookProposedFor: null,
     mediaUseConsent: false,
     consultation: null,
+    paymentOptions: null,
     ...overrides,
   }
 }

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   prismaBookingFindMany: vi.fn(),
   prismaClientNotificationFindMany: vi.fn(),
   prismaWaitlistEntryFindMany: vi.fn(),
+  prismaProfessionalPaymentSettingsFindMany: vi.fn(),
 
   buildClientBookingDTO: vi.fn(),
   safeError: vi.fn(),
@@ -30,6 +31,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     waitlistEntry: {
       findMany: mocks.prismaWaitlistEntryFindMany,
+    },
+    professionalPaymentSettings: {
+      findMany: mocks.prismaProfessionalPaymentSettingsFindMany,
     },
   },
 }))
@@ -234,6 +238,11 @@ describe('GET /api/v1/client/bookings', () => {
     mocks.prismaWaitlistEntryFindMany.mockResolvedValue([
       makeWaitlistRow(),
     ])
+
+    // Payment options are resolved per booking's pro (batched). Default to no
+    // saved settings → the loader emits the Cash-only default; assertions here
+    // don't depend on the options shape.
+    mocks.prismaProfessionalPaymentSettingsFindMany.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -365,6 +374,13 @@ describe('GET /api/v1/client/bookings', () => {
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
+      select: expect.any(Object),
+    })
+
+    // Payment options are batch-loaded for the distinct pros across the bookings
+    // (all pro_1 here), for the native client checkout.
+    expect(mocks.prismaProfessionalPaymentSettingsFindMany).toHaveBeenCalledWith({
+      where: { professionalId: { in: ['pro_1'] } },
       select: expect.any(Object),
     })
 

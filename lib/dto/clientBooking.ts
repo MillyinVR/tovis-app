@@ -83,6 +83,30 @@ export type ClientBookingCheckoutDTO = {
   depositAmount: string | null
 }
 
+export type ClientBookingPaymentMethodDTO = {
+  key: string
+  label: string
+  /** Off-platform handle (Venmo @, Zelle/Apple Cash contact, PayPal); null for
+   * on-platform / handle-free methods. Gated to the client's own booking. */
+  handle: string | null
+}
+
+// The pro's accepted methods (with handles) + tip config + payment note for a
+// committed booking — the data the native client checkout needs to render the
+// tip selector, method picker, and off-platform pay affordance. Mirrors what the
+// web booking page loads server-side via loadProfessionalPaymentSettings. Built
+// by lib/payments/clientPaymentOptions.buildClientPaymentOptions.
+export type ClientBookingPaymentOptionsDTO = {
+  methods: ClientBookingPaymentMethodDTO[]
+  tipsEnabled: boolean
+  allowCustomTip: boolean
+  /** Whole-percent tip presets on the services subtotal; the client prepends 0%. */
+  tipSuggestions: number[]
+  paymentNote: string | null
+  /** "AT_BOOKING" | "AFTER_SERVICE" (or null when the pro has no settings row). */
+  collectPaymentAt: string | null
+}
+
 export type ClientBookingDTO = {
   id: string
   status: string | null
@@ -168,6 +192,15 @@ export type ClientBookingDTO = {
   mediaUseConsent: boolean
 
   consultation: ClientBookingConsultationDTO | null
+
+  /**
+   * The pro's accepted payment methods (with off-platform handles) + tip config
+   * + payment note for this booking's checkout. Populated only where the caller
+   * loads the pro's payment settings (the client bookings list route, for the
+   * native checkout); null elsewhere. Handles are gated to the client's own
+   * booking — never exposed on public surfaces.
+   */
+  paymentOptions: ClientBookingPaymentOptionsDTO | null
 }
 
 function mapTimeZoneTruthSourceToClientDtoSource(
@@ -392,6 +425,12 @@ export async function buildClientBookingDTO(input: {
     ClientBookingMediaConsentFields
   unreadAftercare: boolean
   hasPendingConsultationApproval: boolean
+  /**
+   * The pro's checkout payment options (accepted methods + handles + tip config)
+   * for this booking. The list route resolves it per booking's pro; other callers
+   * omit it and the DTO carries null.
+   */
+  paymentOptions?: ClientBookingPaymentOptionsDTO | null
 }): Promise<ClientBookingDTO> {
   const { booking: b } = input
 
@@ -606,5 +645,7 @@ export async function buildClientBookingDTO(input: {
     mediaUseConsent: b.mediaUseConsentAt != null,
 
     consultation,
+
+    paymentOptions: input.paymentOptions ?? null,
   }
 }
