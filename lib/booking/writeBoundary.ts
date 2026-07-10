@@ -56,6 +56,7 @@ import {
   resolveProTenantId,
 } from '@/lib/tenant/bookingAttribution'
 import { upper } from '@/lib/booking/guards'
+import { clientCheckoutProductsEditBlockReason } from '@/lib/booking/checkoutProductsEditable'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import {
   pickOfferingModeRamp,
@@ -3122,48 +3123,51 @@ function assertClientCanEditBookingCheckoutProducts(
     throw bookingError('BOOKING_NOT_FOUND')
   }
 
-  if (booking.status === BookingStatus.CANCELLED) {
-    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
-  }
+  // The lifecycle gate is shared with the client aftercare read DTO
+  // (`checkoutProductsEditable`) so the read surface can never disagree with
+  // what this write path enforces. Ownership stays here (a 404, above); this
+  // maps each lifecycle reason to its specific error.
+  const reason = clientCheckoutProductsEditBlockReason({
+    status: booking.status,
+    finishedAt: booking.finishedAt,
+    checkoutStatus: booking.checkoutStatus,
+    paymentAuthorizedAt: booking.paymentAuthorizedAt,
+    paymentCollectedAt: booking.paymentCollectedAt,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt ?? null,
+  })
 
-  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
-    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
-      message: 'Completed bookings cannot be changed.',
-      userMessage: 'This booking is already completed.',
-    })
-  }
-
-  if (!booking.aftercareSummary?.id || !booking.aftercareSummary.sentToClientAt) {
-    throw bookingError('FORBIDDEN', {
-      message: 'Product checkout requires finalized aftercare.',
-      userMessage: 'Products can only be selected after aftercare is finalized.',
-    })
-  }
-
-  if (booking.paymentAuthorizedAt) {
-    throw bookingError('FORBIDDEN', {
-      message: 'Payment has already been authorized for this booking.',
-      userMessage:
-        'This checkout is already in payment and cannot be changed.',
-    })
-  }
-
-  if (booking.paymentCollectedAt) {
-    throw bookingError('FORBIDDEN', {
-      message: 'Checkout is already paid and cannot be changed.',
-      userMessage: 'This checkout is already paid and cannot be changed.',
-    })
-  }
-
-  if (
-    booking.checkoutStatus === BookingCheckoutStatus.PARTIALLY_PAID ||
-    booking.checkoutStatus === BookingCheckoutStatus.PAID ||
-    booking.checkoutStatus === BookingCheckoutStatus.WAIVED
-  ) {
-    throw bookingError('FORBIDDEN', {
-      message: 'Checkout status is locked and cannot be changed.',
-      userMessage: 'This checkout is already locked and cannot be changed.',
-    })
+  switch (reason) {
+    case null:
+      return
+    case 'CANCELLED':
+      throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+    case 'COMPLETED':
+      throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
+        message: 'Completed bookings cannot be changed.',
+        userMessage: 'This booking is already completed.',
+      })
+    case 'AFTERCARE_NOT_SENT':
+      throw bookingError('FORBIDDEN', {
+        message: 'Product checkout requires finalized aftercare.',
+        userMessage:
+          'Products can only be selected after aftercare is finalized.',
+      })
+    case 'PAYMENT_AUTHORIZED':
+      throw bookingError('FORBIDDEN', {
+        message: 'Payment has already been authorized for this booking.',
+        userMessage:
+          'This checkout is already in payment and cannot be changed.',
+      })
+    case 'PAYMENT_COLLECTED':
+      throw bookingError('FORBIDDEN', {
+        message: 'Checkout is already paid and cannot be changed.',
+        userMessage: 'This checkout is already paid and cannot be changed.',
+      })
+    case 'CHECKOUT_LOCKED':
+      throw bookingError('FORBIDDEN', {
+        message: 'Checkout status is locked and cannot be changed.',
+        userMessage: 'This checkout is already locked and cannot be changed.',
+      })
   }
 }
 

@@ -68,6 +68,24 @@ const EMPTY_BEFORE_AFTER = {
   afterFullUrl: null,
 }
 
+// The default booking read: an in-progress, editable-eligible booking with no
+// checkout selection yet. Individual tests override the fields they exercise.
+function bookingRead(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: 'booking_1',
+    clientId: 'client_1',
+    status: 'COMPLETED',
+    finishedAt: null,
+    checkoutStatus: 'READY',
+    paymentAuthorizedAt: null,
+    paymentCollectedAt: null,
+    checkoutProductItems: [],
+    ...overrides,
+  }
+}
+
 describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
@@ -89,13 +107,9 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
       body,
     }))
     mocks.requireClient.mockResolvedValue({ ok: true, clientId: 'client_1' })
-    // Same mock drives both the ownership gate (reads clientId) and the
-    // status read; return every field either call selects.
-    mocks.prismaBookingFindUnique.mockResolvedValue({
-      id: 'booking_1',
-      clientId: 'client_1',
-      status: 'COMPLETED',
-    })
+    // Same mock drives both the ownership gate (reads id + clientId) and the
+    // status/checkout read; return every field either call selects.
+    mocks.prismaBookingFindUnique.mockResolvedValue(bookingRead())
     mocks.prismaAftercareFindFirst.mockResolvedValue(null)
     mocks.loadBookingBeforeAfterThumbsFor.mockResolvedValue(EMPTY_BEFORE_AFTER)
   })
@@ -122,10 +136,9 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
   })
 
   it('returns 404 when the booking belongs to another client (no existence leak)', async () => {
-    mocks.prismaBookingFindUnique.mockResolvedValueOnce({
-      id: 'booking_1',
-      clientId: 'other_client',
-    })
+    mocks.prismaBookingFindUnique.mockResolvedValueOnce(
+      bookingRead({ clientId: 'other_client' }),
+    )
 
     const result = await GET(makeRequest(), makeCtx())
 
@@ -154,27 +167,80 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         canShowAftercare: true,
         aftercare: null,
         beforeAfter,
+        recommendedProducts: [],
+        checkoutProducts: [],
+        // COMPLETED locks product editing even though the surface shows.
+        checkoutProductsEditable: false,
       },
     })
   })
 
-  it('maps a sent aftercare summary (notes + ISO sentToClientAt)', async () => {
-    mocks.prismaBookingFindUnique.mockResolvedValue({
-      id: 'booking_1',
-      clientId: 'client_1',
-      status: 'ACCEPTED',
-    })
+  it('maps a sent aftercare summary (notes + ISO sentToClientAt + recommendations) and the current selection', async () => {
+    mocks.prismaBookingFindUnique.mockResolvedValue(
+      bookingRead({
+        status: 'ACCEPTED',
+        checkoutProductItems: [
+          {
+            recommendationId: 'rp_2',
+            productId: 'prod_9',
+            quantity: 2,
+            unitPrice: '28.00',
+          },
+        ],
+      }),
+    )
     mocks.prismaAftercareFindFirst.mockResolvedValueOnce({
       id: 'ac_1',
       notes: 'Rinse with cool water for 48h.',
       sentToClientAt: new Date('2026-07-02T15:00:00.000Z'),
+      recommendedProducts: [
+        {
+          id: 'rp_1',
+          productId: null,
+          note: 'AM only',
+          externalName: 'Olaplex No.7',
+          externalUrl: 'https://example.com/olaplex-7',
+          product: null,
+        },
+        {
+          id: 'rp_2',
+          productId: 'prod_9',
+          note: null,
+          externalName: null,
+          externalUrl: null,
+          product: {
+            id: 'prod_9',
+            name: 'Purple Toning Shampoo',
+            brand: 'Tovis',
+            retailPrice: '28.00',
+          },
+        },
+      ],
     })
 
     const result = await GET(makeRequest(), makeCtx())
 
     expect(mocks.prismaAftercareFindFirst).toHaveBeenCalledWith({
       where: { bookingId: 'booking_1', sentToClientAt: { not: null } },
-      select: { id: true, notes: true, sentToClientAt: true },
+      select: {
+        id: true,
+        notes: true,
+        sentToClientAt: true,
+        recommendedProducts: {
+          take: 50,
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            productId: true,
+            note: true,
+            externalName: true,
+            externalUrl: true,
+            product: {
+              select: { id: true, name: true, brand: true, retailPrice: true },
+            },
+          },
+        },
+      },
     })
     expect(result).toEqual({
       ok: true,
@@ -187,16 +253,82 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
           sentToClientAt: '2026-07-02T15:00:00.000Z',
         },
         beforeAfter: EMPTY_BEFORE_AFTER,
+        recommendedProducts: [
+          {
+            id: 'rp_1',
+            productId: null,
+            note: 'AM only',
+            externalName: 'Olaplex No.7',
+            externalUrl: 'https://example.com/olaplex-7',
+            product: null,
+          },
+          {
+            id: 'rp_2',
+            productId: 'prod_9',
+            note: null,
+            externalName: null,
+            externalUrl: null,
+            product: {
+              id: 'prod_9',
+              name: 'Purple Toning Shampoo',
+              brand: 'Tovis',
+              retailPrice: '28',
+            },
+          },
+        ],
+        checkoutProducts: [
+          {
+            recommendationId: 'rp_2',
+            productId: 'prod_9',
+            quantity: 2,
+            unitPrice: '28',
+          },
+        ],
+        // ACCEPTED + sent aftercare + no payment yet ⇒ editable.
+        checkoutProductsEditable: true,
+      },
+    })
+  })
+
+  it('locks product editing once payment is collected (but still shows recommendations)', async () => {
+    mocks.prismaBookingFindUnique.mockResolvedValue(
+      bookingRead({
+        status: 'ACCEPTED',
+        checkoutStatus: 'PAID',
+        paymentCollectedAt: new Date('2026-07-03T10:00:00.000Z'),
+      }),
+    )
+    mocks.prismaAftercareFindFirst.mockResolvedValueOnce({
+      id: 'ac_1',
+      notes: null,
+      sentToClientAt: new Date('2026-07-02T15:00:00.000Z'),
+      recommendedProducts: [],
+    })
+
+    const result = await GET(makeRequest(), makeCtx())
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      body: {
+        canShowAftercare: true,
+        aftercare: {
+          id: 'ac_1',
+          notes: null,
+          sentToClientAt: '2026-07-02T15:00:00.000Z',
+        },
+        beforeAfter: EMPTY_BEFORE_AFTER,
+        recommendedProducts: [],
+        checkoutProducts: [],
+        checkoutProductsEditable: false,
       },
     })
   })
 
   it('hides aftercare when the booking is not completed and no summary is sent', async () => {
-    mocks.prismaBookingFindUnique.mockResolvedValue({
-      id: 'booking_1',
-      clientId: 'client_1',
-      status: 'ACCEPTED',
-    })
+    mocks.prismaBookingFindUnique.mockResolvedValue(
+      bookingRead({ status: 'ACCEPTED' }),
+    )
 
     const result = await GET(makeRequest(), makeCtx())
 
@@ -207,6 +339,10 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         canShowAftercare: false,
         aftercare: null,
         beforeAfter: EMPTY_BEFORE_AFTER,
+        recommendedProducts: [],
+        checkoutProducts: [],
+        // No sent aftercare ⇒ not editable.
+        checkoutProductsEditable: false,
       },
     })
   })
