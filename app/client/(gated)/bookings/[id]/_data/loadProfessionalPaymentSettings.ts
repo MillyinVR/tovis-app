@@ -2,6 +2,7 @@
 import type { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { normalizeClientVisiblePaymentSettings } from '@/lib/payments/clientPaymentOptions'
 
 const professionalPaymentSettingsSelect = {
   collectPaymentAt: true,
@@ -39,37 +40,6 @@ export type ClientVisibleProfessionalPaymentSettings =
     select: typeof professionalPaymentSettingsSelect
   }>
 
-function normalizePublicHandle(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function normalizePaymentNote(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function canAcceptStripeCard(
-  settings: Pick<
-    ClientVisibleProfessionalPaymentSettings,
-    | 'acceptStripeCard'
-    | 'stripeAccountId'
-    | 'stripeChargesEnabled'
-    | 'stripePayoutsEnabled'
-  >,
-): boolean {
-  return Boolean(
-    settings.acceptStripeCard &&
-      settings.stripeAccountId &&
-      settings.stripeChargesEnabled &&
-      settings.stripePayoutsEnabled,
-  )
-}
-
 export async function loadProfessionalPaymentSettings(args: {
   professionalId: string
 }): Promise<ClientVisibleProfessionalPaymentSettings | null> {
@@ -83,16 +53,8 @@ export async function loadProfessionalPaymentSettings(args: {
 
   if (!settings) return null
 
-  return {
-    ...settings,
-
-    // Never expose Stripe as client-usable unless the account is actually usable.
-    acceptStripeCard: canAcceptStripeCard(settings),
-
-    venmoHandle: normalizePublicHandle(settings.venmoHandle),
-    zelleHandle: normalizePublicHandle(settings.zelleHandle),
-    appleCashHandle: normalizePublicHandle(settings.appleCashHandle),
-    paypalHandle: normalizePublicHandle(settings.paypalHandle),
-    paymentNote: normalizePaymentNote(settings.paymentNote),
-  }
+  // Gate Stripe to "actually chargeable" and trim the off-platform handles + note
+  // to null when blank — shared with the native client-checkout payment options
+  // so the two never drift.
+  return normalizeClientVisiblePaymentSettings(settings)
 }

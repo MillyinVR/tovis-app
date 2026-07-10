@@ -2498,6 +2498,17 @@
           "description": "True when the client has granted the pro media-use consent for this session (allow featuring their photos/video publicly — portfolio/Looks). Toggle via POST /api/v1/client/bookings/[id]/media-consent { granted }. Populated only where the source query selects `mediaUseConsentAt` (the client bookings list route); false elsewhere.",
           "type": "boolean"
         },
+        "paymentOptions": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientBookingPaymentOptionsDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The pro's accepted payment methods (with off-platform handles) + tip config + payment note for this booking's checkout. Populated only where the caller loads the pro's payment settings (the client bookings list route, for the native checkout); null elsewhere. Handles are gated to the client's own booking — never exposed on public surfaces."
+        },
         "productSales": {
           "items": {
             "$ref": "#/definitions/ClientBookingProductSaleDTO"
@@ -2654,7 +2665,8 @@
         "hasPendingRebookConfirmation",
         "rebookProposedFor",
         "mediaUseConsent",
-        "consultation"
+        "consultation",
+        "paymentOptions"
       ],
       "type": "object"
     },
@@ -2697,6 +2709,74 @@
         "durationMinutes",
         "parentItemId",
         "sortOrder"
+      ],
+      "type": "object"
+    },
+    "ClientBookingPaymentMethodDTO": {
+      "properties": {
+        "handle": {
+          "description": "Off-platform handle (Venmo",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "handle"
+      ],
+      "type": "object"
+    },
+    "ClientBookingPaymentOptionsDTO": {
+      "properties": {
+        "allowCustomTip": {
+          "type": "boolean"
+        },
+        "collectPaymentAt": {
+          "description": "\"AT_BOOKING\" | \"AFTER_SERVICE\" (or null when the pro has no settings row).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "methods": {
+          "items": {
+            "$ref": "#/definitions/ClientBookingPaymentMethodDTO"
+          },
+          "type": "array"
+        },
+        "paymentNote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tipSuggestions": {
+          "description": "Whole-percent tip presets on the services subtotal; the client prepends 0%.",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "tipsEnabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "methods",
+        "tipsEnabled",
+        "allowCustomTip",
+        "tipSuggestions",
+        "paymentNote",
+        "collectPaymentAt"
       ],
       "type": "object"
     },

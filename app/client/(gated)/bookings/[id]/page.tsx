@@ -7,6 +7,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { buildClientAcceptedMethods } from '@/lib/payments/clientPaymentOptions'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
 import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
@@ -45,7 +46,6 @@ type LoadedClientBookingPage = Awaited<ReturnType<typeof loadClientBookingPage>>
 type LoadedAftercare = LoadedClientBookingPage['aftercare']
 type LoadedExistingReview = LoadedClientBookingPage['existingReview']
 type LoadedMedia = LoadedClientBookingPage['media'][number]
-type LoadedPaymentSettings = LoadedClientBookingPage['paymentSettings']
 type LoadedCheckoutProductItem =
   LoadedClientBookingPage['checkoutProductItems'][number]
 type LoadedReviewMedia =
@@ -72,12 +72,6 @@ type AftercareRebookInfo =
   | { mode: 'RECOMMENDED_WINDOW'; label: string }
   | { mode: 'RECOMMENDED_DATE'; label: string }
   | { mode: 'NONE'; label: null }
-
-type AcceptedMethod = {
-  key: string
-  label: string
-  handle: string | null
-}
 
 const NO_REBOOK_INFO: AftercareRebookInfo = { mode: 'NONE', label: null }
 
@@ -215,79 +209,6 @@ function friendlyCollectionTiming(value: unknown): string | null {
     .split('_')
     .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
     .join(' ')
-}
-
-function buildAcceptedMethods(
-  paymentSettings: LoadedPaymentSettings,
-): AcceptedMethod[] {
-  // A pro with no saved ProfessionalPaymentSettings row still implicitly accepts
-  // cash: the schema defaults acceptCash to true and the settings-save flow
-  // requires at least one method. Treat a missing/unconfigured row as that
-  // default (Cash) instead of "no methods enabled", so a client is never
-  // hard-blocked from paying for a completed appointment.
-  if (!paymentSettings) {
-    return [{ key: 'cash', label: 'Cash', handle: null }]
-  }
-
-  const methods: AcceptedMethod[] = []
-
-  if (paymentSettings.acceptCash) {
-    methods.push({ key: 'cash', label: 'Cash', handle: null })
-  }
-
-  if (paymentSettings.acceptCardOnFile) {
-    methods.push({ key: 'card_on_file', label: 'Card on file', handle: null })
-  }
-
-  if (paymentSettings.acceptTapToPay) {
-    methods.push({ key: 'tap_to_pay', label: 'Tap to pay', handle: null })
-  }
-
-  if (paymentSettings.acceptVenmo) {
-    methods.push({
-      key: 'venmo',
-      label: 'Venmo',
-      handle: paymentSettings.venmoHandle ?? null,
-    })
-  }
-
-  if (paymentSettings.acceptZelle) {
-    methods.push({
-      key: 'zelle',
-      label: 'Zelle',
-      handle: paymentSettings.zelleHandle ?? null,
-    })
-  }
-
-  if (paymentSettings.acceptAppleCash) {
-    methods.push({
-      key: 'apple_cash',
-      label: 'Apple Cash',
-      handle: paymentSettings.appleCashHandle ?? null,
-    })
-  }
-
-  if (paymentSettings.acceptPaypal) {
-    methods.push({
-      key: 'paypal',
-      label: 'PayPal',
-      handle: paymentSettings.paypalHandle ?? null,
-    })
-  }
-
-  if (paymentSettings.acceptApplePay) {
-    methods.push({ key: 'apple_pay', label: 'Apple Pay', handle: null })
-  }
-
-  if (paymentSettings.acceptStripeCard) {
-    methods.push({
-      key: 'stripe_card',
-      label: 'Credit/debit card',
-      handle: null,
-    })
-  }
-
-  return methods
 }
 
 function statusPillVariant(
@@ -1046,7 +967,7 @@ export default async function ClientBookingPage(props: {
   const collectionTimingLabel = friendlyCollectionTiming(
     paymentSettings?.collectPaymentAt,
   )
-  const acceptedMethods = buildAcceptedMethods(paymentSettings)
+  const acceptedMethods = buildClientAcceptedMethods(paymentSettings)
 
   const modeLabel = friendlyLocationType(booking.locationType)
   const sourceLabel = friendlySource(booking.source)
