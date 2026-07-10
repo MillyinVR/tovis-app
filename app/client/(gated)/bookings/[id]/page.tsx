@@ -994,9 +994,30 @@ export default async function ClientBookingPage(props: {
     paymentCollectedAt: raw.paymentCollectedAt ?? null,
   })
 
+  // Off-platform payment the client marked sent, now waiting on the pro to
+  // confirm receipt. The booking can't reach COMPLETED yet (closeout needs the
+  // collected payment), so the rebook CTA below is un-gated for this state when
+  // the pro actually sent a recommendation — otherwise the client is stranded on
+  // "waiting on your pro" with no way to act on the suggested window (PF6).
+  const awaitingPaymentConfirmation =
+    upper(booking.checkout.checkoutStatus) === 'AWAITING_CONFIRMATION'
+
+  const hasRebookRecommendation =
+    rebookInfo.mode === 'RECOMMENDED_WINDOW' ||
+    rebookInfo.mode === 'RECOMMENDED_DATE'
+
   const showRebookCTA =
-    statusUpper === 'COMPLETED' && finalizedAftercare
-    
+    finalizedAftercare &&
+    (statusUpper === 'COMPLETED' ||
+      (awaitingPaymentConfirmation && hasRebookRecommendation))
+
+  // The rebook "What's next" section has something to render — a recommendation
+  // label or the actionable CTA. Single source for the step gate, the section
+  // gate, the checkout banner copy, and the auto-advance target. A truthy
+  // rebookInfo.label / showRebookCTA already implies a loaded aftercare, so this
+  // stays equivalent to the old `aftercare && (label || cta)` guard.
+  const hasRebookSection = Boolean(rebookInfo.label) || showRebookCTA
+
   // Resolve through the canonical helper (businessName → real name → fallback);
   // never expose the pro's email address as a display name to the client.
   const professionalLabel = formatProfessionalPublicDisplayName(
@@ -1021,9 +1042,12 @@ export default async function ClientBookingPage(props: {
   // the review-locked notice, a rebook/next-appointment action, or the review
   // form itself. Otherwise the stepper collapses to two steps.
   const hasAftercareNextStep =
-    !reviewCloseoutEligible ||
-    Boolean(aftercare && (rebookInfo.label || showRebookCTA)) ||
-    shouldShowReview
+    !reviewCloseoutEligible || hasRebookSection || shouldShowReview
+
+  // After the client confirms an off-platform payment, land them on "What's next"
+  // (instead of the "waiting on your pro" checkout step) whenever a rebook option
+  // is present, so the suggested-window CTA is the first thing they see (PF6).
+  const landOnAftercareNextStep = awaitingPaymentConfirmation && hasRebookSection
 
   const safeExistingReview = toSafeExistingReview(existingReview)
 
@@ -1382,6 +1406,17 @@ export default async function ClientBookingPage(props: {
               </ClientAftercareCard>
 
               <AftercareStepper
+                // Remount when the desired landing step flips (e.g. the client
+                // confirms payment → router.refresh re-renders here) so the
+                // stepper re-derives its initial step from the new state (PF6).
+                key={
+                  landOnAftercareNextStep
+                    ? 'aftercare-stepper:next'
+                    : 'aftercare-stepper:default'
+                }
+                initialActiveKey={
+                  landOnAftercareNextStep ? 'next' : undefined
+                }
                 steps={[
                   {
                     key: 'visit',
@@ -1581,6 +1616,7 @@ export default async function ClientBookingPage(props: {
                               tipsEnabled={paymentSettings?.tipsEnabled ?? true}
                               allowCustomTip={paymentSettings?.allowCustomTip ?? true}
                               tipSuggestions={paymentSettings?.tipSuggestions ?? true}
+                              rebookOptionAvailable={hasRebookSection}
                             />
                           </div>
                         </ClientAftercareCard>
@@ -1606,7 +1642,7 @@ export default async function ClientBookingPage(props: {
                                 </ClientAftercareCard>
                               ) : null}
 
-                              {aftercare && (rebookInfo.label || showRebookCTA) ? (
+                              {aftercare && hasRebookSection ? (
                                 <section id="rebook" className="brand-client-aftercare-rebook">
                                   <ClientAftercareSectionTitle
                                     title={

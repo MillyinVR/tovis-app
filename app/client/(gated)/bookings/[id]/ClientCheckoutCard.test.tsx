@@ -46,6 +46,10 @@ describe('ClientCheckoutCard — AWAITING_CONFIRMATION', () => {
       screen.getAllByText(/once your pro confirms they received payment/i)
         .length,
     ).toBeGreaterThan(0)
+    // With no rebook option, the reassuring "nothing else to do" line stands.
+    expect(
+      screen.getAllByText(/nothing else you need to do/i).length,
+    ).toBeGreaterThan(0)
 
     // No re-confirm / save-tip buttons while waiting on the pro.
     expect(
@@ -53,6 +57,32 @@ describe('ClientCheckoutCard — AWAITING_CONFIRMATION', () => {
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: /save tip/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('swaps to rebook-guiding copy when a rebook option is available (PF6)', () => {
+    render(
+      <ClientCheckoutCard
+        bookingId="booking_1"
+        checkoutStatus="AWAITING_CONFIRMATION"
+        paymentCollectedAt={null}
+        selectedPaymentMethod="CASH"
+        totalAmount="40.00"
+        acceptedMethods={METHODS}
+        rebookOptionAvailable
+      />,
+    )
+
+    // Still confirms the pending state...
+    expect(
+      screen.getAllByText(/waiting on your pro/i).length,
+    ).toBeGreaterThan(0)
+    // ...but points the client at rebooking instead of "nothing else to do".
+    expect(
+      screen.getAllByText(/suggested a time to rebook/i).length,
+    ).toBeGreaterThan(0)
+    expect(
+      screen.queryByText(/nothing else you need to do/i),
     ).not.toBeInTheDocument()
   })
 
