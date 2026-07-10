@@ -34,16 +34,57 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     const [booking, aftercare, beforeAfter] = await Promise.all([
       // Lifecycle status drives the aftercare-visibility gate (COMPLETED shows
-      // the surface even before a summary is sent).
+      // the surface even before a summary is sent); the remaining fields +
+      // current checkout selection drive the `checkoutProductsEditable` gate and
+      // the client's product-checkout picker (parity with the web detail loader).
       prisma.booking.findUnique({
         where: { id: bookingId },
-        select: { status: true },
+        select: {
+          status: true,
+          finishedAt: true,
+          checkoutStatus: true,
+          paymentAuthorizedAt: true,
+          paymentCollectedAt: true,
+          checkoutProductItems: {
+            orderBy: [{ createdAt: 'asc' }],
+            select: {
+              recommendationId: true,
+              productId: true,
+              quantity: true,
+              unitPrice: true,
+            },
+          },
+        },
       }),
       // Only a SENT summary is client-visible — an in-progress draft stays
-      // private to the pro (parity with the web detail loader's filter).
+      // private to the pro (parity with the web detail loader's filter). The
+      // recommendedProducts select mirrors the web `aftercareSummarySelect`.
       prisma.aftercareSummary.findFirst({
         where: { bookingId, sentToClientAt: { not: null } },
-        select: { id: true, notes: true, sentToClientAt: true },
+        select: {
+          id: true,
+          notes: true,
+          sentToClientAt: true,
+          recommendedProducts: {
+            take: 50,
+            orderBy: { id: 'asc' },
+            select: {
+              id: true,
+              productId: true,
+              note: true,
+              externalName: true,
+              externalUrl: true,
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  brand: true,
+                  retailPrice: true,
+                },
+              },
+            },
+          },
+        },
       }),
       // Featured (else earliest-per-phase) before/after pair, already resolved
       // to render URLs — the shared SSOT the web + client home reuse.
@@ -52,8 +93,13 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     const dto: ClientAftercareDetailDTO = buildClientAftercareDetailDTO({
       status: booking?.status ?? null,
+      finishedAt: booking?.finishedAt ?? null,
+      checkoutStatus: booking?.checkoutStatus ?? null,
+      paymentAuthorizedAt: booking?.paymentAuthorizedAt ?? null,
+      paymentCollectedAt: booking?.paymentCollectedAt ?? null,
       aftercare,
       beforeAfter,
+      checkoutProductItems: booking?.checkoutProductItems ?? [],
     })
 
     return jsonOk(dto)

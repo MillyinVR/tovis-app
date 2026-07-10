@@ -2129,6 +2129,34 @@
     "ClientAddressKind": {
       "$ref": "#/definitions/%24Enums.ClientAddressKind"
     },
+    "ClientAftercareCheckoutProductDTO": {
+      "description": "The client's current booking-checkout product selection — one line per recommendation they've added, with the snapshotted unit price. Mirrors `BookingCheckoutProductItem`.",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "recommendationId": {
+          "type": "string"
+        },
+        "unitPrice": {
+          "description": "Decimal-string unit price snapshot (per the wire money convention).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "recommendationId",
+        "productId",
+        "quantity",
+        "unitPrice"
+      ],
+      "type": "object"
+    },
     "ClientAftercareDetailDTO": {
       "properties": {
         "aftercare": {
@@ -2149,12 +2177,116 @@
         "canShowAftercare": {
           "description": "Whether the client's aftercare surface is visible for this booking — mirrors the web `canShowAftercareTab` gate (booking COMPLETED, or a sent aftercare summary exists). When false the native client hides the section.",
           "type": "boolean"
+        },
+        "checkoutProducts": {
+          "description": "The client's current booking-checkout product selection (empty if none).",
+          "items": {
+            "$ref": "#/definitions/ClientAftercareCheckoutProductDTO"
+          },
+          "type": "array"
+        },
+        "checkoutProductsEditable": {
+          "description": "Whether the client may edit their checkout-product selection right now — mirrors the write path's `assertClientCanEditBookingCheckoutProducts` gate (finalized aftercare, not yet in/through payment, not completed/cancelled). When false the native + web pickers render read-only.",
+          "type": "boolean"
+        },
+        "recommendedProducts": {
+          "description": "The pro's product recommendations from the sent summary (empty if none).",
+          "items": {
+            "$ref": "#/definitions/ClientAftercareRecommendedProductDTO"
+          },
+          "type": "array"
         }
       },
       "required": [
         "canShowAftercare",
         "aftercare",
-        "beforeAfter"
+        "beforeAfter",
+        "recommendedProducts",
+        "checkoutProducts",
+        "checkoutProductsEditable"
+      ],
+      "type": "object"
+    },
+    "ClientAftercareRecommendedProductDTO": {
+      "description": "One product the pro recommended in the aftercare summary. Internal recommendations (`productId` + `product` set) can be added to the booking checkout; external ones (`externalName`/`externalUrl`) are link-outs only. Mirrors the web `AftercareProductRecommendationsCard` recommendation shape.",
+      "properties": {
+        "externalName": {
+          "description": "Display name for an external (link-out) recommendation, else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "externalUrl": {
+          "description": "Link target for an external recommendation, else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "note": {
+          "description": "Optional free-text note the pro attached to the recommendation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product": {
+          "anyOf": [
+            {
+              "properties": {
+                "brand": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "retailPrice": {
+                  "description": "Decimal-string retail price (per the wire money convention), or null.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "brand",
+                "retailPrice"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The internal product (name/brand/price), or null for external recs."
+        },
+        "productId": {
+          "description": "The internal Product id when this is an in-app recommendation, else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "productId",
+        "note",
+        "externalName",
+        "externalUrl",
+        "product"
       ],
       "type": "object"
     },
