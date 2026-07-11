@@ -96,6 +96,13 @@ export type {
 // `lookPublication` on the pro/media response — already a JSON-safe DTO.
 export type { ProLookPublicationResultDto } from '@/lib/looks/publication/contracts'
 
+// ── Pro migration wizard (GET /api/v1/pro/migrate/summary) ───────────────────
+export type {
+  ProMigrationRaiseDTO,
+  ProMigrationSummaryDTO,
+  ProMigrationSummaryResponseDTO,
+} from '@/lib/dto/proMigration'
+
 // ── Messaging (GET/POST /api/v1/messages/*) ──────────────────────────────────
 export type {
   MessageThreadClientPreviewDTO,
