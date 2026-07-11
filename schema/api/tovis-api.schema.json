@@ -10755,6 +10755,88 @@
     "ProfessionalLocationType": {
       "$ref": "#/definitions/%24Enums.ProfessionalLocationType"
     },
+    "PublicBoardData": {
+      "properties": {
+        "boardName": {
+          "type": "string"
+        },
+        "boardSlug": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        },
+        "looks": {
+          "items": {
+            "$ref": "#/definitions/PublicBoardLook"
+          },
+          "type": "array"
+        },
+        "ownerAvatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerProfilePublic": {
+          "description": "Whether the owner's /u/[handle] profile is itself public (back-link gate).",
+          "type": "boolean"
+        },
+        "viewer": {
+          "properties": {
+            "followingOwner": {
+              "description": "The signed-in client follows the board owner.",
+              "type": "boolean"
+            },
+            "isOwn": {
+              "description": "The signed-in client is looking at their OWN board.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "isOwn",
+            "followingOwner"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "handle",
+        "ownerProfilePublic",
+        "ownerAvatarUrl",
+        "boardName",
+        "boardSlug",
+        "looks",
+        "viewer"
+      ],
+      "type": "object"
+    },
+    "PublicBoardLook": {
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "imageUrl",
+        "href"
+      ],
+      "type": "object"
+    },
     "PublicClientLook": {
       "properties": {
         "href": {
