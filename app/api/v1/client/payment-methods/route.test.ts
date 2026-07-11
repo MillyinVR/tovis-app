@@ -111,7 +111,8 @@ describe('card-on-file routes when the flag is on', () => {
     expect(mocks.listClientPaymentMethods).toHaveBeenCalledWith(CLIENT_ID)
   })
 
-  it('POST setup-intent returns a client secret', async () => {
+  it('POST setup-intent returns a client secret + publishable key', async () => {
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = 'pk_test_route'
     mocks.createClientSetupIntent.mockResolvedValue({
       clientSecret: 'seti_secret',
       setupIntentId: 'seti_1',
@@ -121,7 +122,12 @@ describe('card-on-file routes when the flag is on', () => {
     const res = await SETUP_INTENT_POST()
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body).toMatchObject({ clientSecret: 'seti_secret', setupIntentId: 'seti_1' })
+    expect(body).toMatchObject({
+      clientSecret: 'seti_secret',
+      setupIntentId: 'seti_1',
+      customerId: 'cus_1',
+      publishableKey: 'pk_test_route',
+    })
     expect(mocks.createClientSetupIntent).toHaveBeenCalledWith({
       clientId: CLIENT_ID,
       email: 'c@example.com',

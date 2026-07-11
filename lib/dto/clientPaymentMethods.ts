@@ -30,6 +30,13 @@ export type ClientSetupIntentResponseDTO = {
   setupIntentId: string
   /** The client's Stripe Billing customer id. */
   customerId: string
+  /**
+   * The Stripe publishable key to initialize the client SDK with. Web reads this
+   * from the `NEXT_PUBLIC_` bundle inline and ignores this field; native clients
+   * (which can't inline build-time env) use it so the key always matches the
+   * backend's Stripe mode (test vs live). Empty string if unconfigured.
+   */
+  publishableKey: string
 }
 
 /** Response for GET /api/v1/client/payment-methods. */

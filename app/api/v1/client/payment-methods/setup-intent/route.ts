@@ -25,6 +25,9 @@ export async function POST() {
       clientSecret: setup.clientSecret,
       setupIntentId: setup.setupIntentId,
       customerId: setup.customerId,
+      // Web inlines this from the NEXT_PUBLIC_ bundle; native clients can't, so
+      // we vend it here to guarantee the SDK key matches the backend Stripe mode.
+      publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '',
     }
 
     return jsonOk(response)
