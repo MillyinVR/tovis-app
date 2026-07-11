@@ -57,7 +57,7 @@ blocking/degrading for a real user right now → least.**
 12. iOS full pro parity + home→Calendar — §9 / iOS **A4/A5** *(iOS)*
 
 **Tier 5 — new feature enhancements**
-13. Custom reminder timing — §11 (RT1–RT4) *(web+iOS)*
+13. ~~Custom reminder timing — §11 (RT1–RT4)~~ ✅ **DONE** (web #583 · iOS #98) *(web+iOS)*
 14. Finance tab restructure — §14 (F1–F3) *(web+iOS)*
 15. Pro profile redesign — §18 (18a–18e) *(web+iOS)*
 16. Social-first media unification — §19 (19a–19g) *(web+iOS)*
@@ -372,6 +372,12 @@ booking/checkout writes must stay inside `lib/booking/writeBoundary.ts` (respect
   Pairs iOS §6 PF6.
 
 ## 11. Custom appointment-reminder timing for pros (design 2026-07-08)
+> ✅ **DONE 2026-07-11** — web **#583** (RT1–RT3) + iOS **#98** (RT4). `offsetDays`→`offsetMinutes`
+> across schema/settings/scheduler; fully custom lead-time list (days OR hours, min 1h / max 90d /
+> multiples of 15 / max 10); DST-safe whole-day + exact-instant sub-day `runAt`; humanized copy;
+> legacy-tolerant parse + one-shot pending-row migration; short-lead quiet-hours cap. ⚠️ Web prod
+> deploy pending Tori.
+
 Today a pro's client-reminder cadence is three on/off switches — **7 / 3 / 1 days** before
 an appointment — stored as `ProReminderSettings.offsetDays Int[]` and surfaced identically on
 web ([ReminderCadenceSettings.tsx](../app/pro/notifications/settings/ReminderCadenceSettings.tsx))
@@ -394,7 +400,7 @@ scalar unit of identity — **minutes before appointment** (`offsetMinutes`; day
 `*60`, distinguished by `% 1440`). Full design in `~/.claude/plans/the-pros-can-choose-virtual-willow.md`.
 
 ### Web workstreams
-- [ ] **RT1 — data model + scheduler refactor.** Prisma: `ProReminderSettings.offsetDays Int[]` →
+- [x] **RT1 — data model + scheduler refactor.** Prisma: `ProReminderSettings.offsetDays Int[]` →
   `offsetMinutes Int[] @default([10080,4320,1440])` ([schema.prisma:2162](../prisma/schema.prisma#L2162));
   hand-edit the migration to backfill `offsetDays*1440` (never auto-drop; **never `db push`** —
   prod = Supabase "tovis-dev"). [settings.ts](../lib/reminderSettings/settings.ts): rename
@@ -413,7 +419,7 @@ scalar unit of identity — **minutes before appointment** (`offsetMinutes`; day
   One-shot data migration rewrites pending `ScheduledClientNotification` rows (kind→`offsetMinutes`
   + new dedupe key) so no reminder is missed across deploy. Drain cron unchanged. Tests: bounds,
   runAt whole-day (incl. DST cross) vs sub-day, dedupe-key format, humanizer copy, legacy parse.
-- [ ] **RT2 — quiet-hours cap + API/DTO.** In
+- [x] **RT2 — quiet-hours cap + API/DTO.** In
   [claimDeliveries.ts](../lib/notifications/delivery/claimDeliveries.ts) `maybeDeferCandidateForQuietHours`:
   for `APPOINTMENT_REMINDER`, if the computed quiet-hours resume `>=` appointment start, **do not
   defer** (send now) so a short-lead reminder never lands after the appointment; plumb the appt
@@ -424,14 +430,14 @@ scalar unit of identity — **minutes before appointment** (`offsetMinutes`; day
   structured `reminders:{value,unit:'days'|'hours'}[]` → minutes server-side. Update
   [route.ts](../app/api/v1/pro/reminder-settings/route.ts) GET/PUT; **re-run `npm run gen:api-schema`**
   (else `check:api-schema` fails CI).
-- [ ] **RT3 — web UI.** [ReminderCadenceSettings.tsx](../app/pro/notifications/settings/ReminderCadenceSettings.tsx):
+- [x] **RT3 — web UI.** [ReminderCadenceSettings.tsx](../app/pro/notifications/settings/ReminderCadenceSettings.tsx):
   replace the fixed preset toggles with an editable list (number input + days/hours unit selector +
   remove per row; "Add reminder" offering presets as quick-adds); master toggle + empty-list copy
   unchanged; POST the structured `reminders[]`. Tone utilities only (no raw colors), no hardcoded
   brand strings.
 
 ### iOS workstream (detail in `tovis-ios/BACKLOG.md`)
-- [ ] **RT4 — iOS parity.** `TovisKit/…/ProSettings/ProReminderSettings.swift`: `offsetDays`→
+- [x] **RT4 — iOS parity.** `TovisKit/…/ProSettings/ProReminderSettings.swift`: `offsetDays`→
   `offsetMinutes`, add a lead `{value,unit,label}` decodable + structured update payload;
   `ProSettingsService.updateReminderSettings` sends the structured list;
   `ProReminderSettingsView.swift`: editable list (Stepper/Picker per row: value + days/hours + delete;
