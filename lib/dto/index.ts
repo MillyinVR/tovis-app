@@ -247,6 +247,9 @@ export type {
   PublicClientProfileData,
 } from '@/app/u/[handle]/_data/loadPublicClientProfile'
 
+// ── Public board (GET /api/v1/u/[handle]/boards/[slug]) ──────────────────────
+export type { PublicBoardLook, PublicBoardData } from '@/lib/boards/publicBoard'
+
 // ── Public pro profile (GET /api/v1/professionals/[id]) ──────────────────────
 export type { ProPublicProfileDto } from '@/app/professionals/[id]/_data/loadProPublicProfile'
 
