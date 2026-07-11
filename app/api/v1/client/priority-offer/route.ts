@@ -146,6 +146,12 @@ export async function GET() {
 
     const expiresAt = row.priorityExpiresAt ? row.priorityExpiresAt.toISOString() : null
     const expired = row.priorityExpiresAt ? row.priorityExpiresAt <= now : false
+    // The first (primary) service row drives the claim — the same row
+    // `buildClaimHref` reads the offering from. Exposing its ids as flat fields
+    // (alongside the web-facing `claimHref`) lets a native client resolve the
+    // offering on the pro's profile and open its booking flow without parsing the
+    // route-shaped hrefs. The web UI ignores these; nothing else changes.
+    const primaryService = opening.services[0] ?? null
 
     return {
       recipientId: row.id,
@@ -157,8 +163,11 @@ export async function GET() {
         opening.professional.handle ??
         'Your pro',
       proHref: professionalProfileHref(opening.professional.id),
+      professionalId: opening.professional.id,
       avatarUrl: opening.professional.avatarUrl ?? null,
       serviceLabel: serviceSummary(opening.services),
+      serviceId: primaryService?.serviceId ?? null,
+      offeringId: primaryService?.offeringId ?? null,
       startAt: opening.startAt.toISOString(),
       endAt: opening.endAt ? opening.endAt.toISOString() : null,
       timeZone: opening.timeZone,
