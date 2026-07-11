@@ -2302,6 +2302,129 @@
       ],
       "type": "object"
     },
+    "ClientAftercareInboxDTO": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ClientAftercareInboxItemDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "ClientAftercareInboxItemDTO": {
+      "properties": {
+        "aftercareId": {
+          "description": "The AftercareSummary id, when present on the notification.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "beforeAfter": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BookingBeforeAfterThumbs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The pro-chosen (or earliest) before/after pair, or null when none."
+        },
+        "body": {
+          "description": "The notification body copy the pro wrote, or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bookingId": {
+          "description": "The visit this aftercare belongs to; null if the notification lost its link.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "description": "When the aftercare landed in the inbox (ISO).",
+          "type": "string"
+        },
+        "notificationId": {
+          "description": "The AFTERCARE_READY notification id (stable list key).",
+          "type": "string"
+        },
+        "proId": {
+          "description": "The pro's profile id for a profile deep-link, or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proName": {
+          "description": "The pro's public display name (honors nameDisplay), or \"Your pro\".",
+          "type": "string"
+        },
+        "rebookMode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AftercareRebookMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The aftercare rebook mode, driving the row hint; null when unset."
+        },
+        "rebookedFor": {
+          "description": "The pro's recommended rebook date (ISO), when set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scheduledFor": {
+          "description": "The visit instant (ISO), or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZone": {
+          "description": "The booking's sanitized IANA timezone for rendering `scheduledFor`.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Canonical booking title (service + add-ons), or a fallback.",
+          "type": "string"
+        },
+        "unread": {
+          "description": "True while the client hasn't opened this aftercare (drives the NEW pill).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "notificationId",
+        "bookingId",
+        "aftercareId",
+        "title",
+        "proId",
+        "proName",
+        "scheduledFor",
+        "timeZone",
+        "beforeAfter",
+        "rebookMode",
+        "rebookedFor",
+        "body",
+        "unread",
+        "createdAt"
+      ],
+      "type": "object"
+    },
     "ClientAftercareNextBookingDTO": {
       "description": "The AFTERCARE-sourced next booking coupled to this booking (its `rebookOfBookingId` points back here). Lets the aftercare rebook card show a confirmed / pending-approval state instead of re-offering Confirm. Mirrors the web `rebookedNextBooking` load.",
       "properties": {
