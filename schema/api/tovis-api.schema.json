@@ -10033,6 +10033,82 @@
       ],
       "type": "object"
     },
+    "ProMigrationRaiseDTO": {
+      "properties": {
+        "cadenceWeeks": {
+          "type": "number"
+        },
+        "from": {
+          "type": "number"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "stepMode": {
+          "enum": [
+            "PCT",
+            "USD"
+          ],
+          "type": "string"
+        },
+        "stepValue": {
+          "type": "number"
+        },
+        "to": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "serviceName",
+        "from",
+        "to",
+        "stepMode",
+        "stepValue",
+        "cadenceWeeks"
+      ],
+      "type": "object"
+    },
+    "ProMigrationSummaryDTO": {
+      "properties": {
+        "clients": {
+          "type": "number"
+        },
+        "importedBlocks": {
+          "type": "number"
+        },
+        "importedBookings": {
+          "type": "number"
+        },
+        "offerings": {
+          "type": "number"
+        },
+        "raises": {
+          "items": {
+            "$ref": "#/definitions/ProMigrationRaiseDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "offerings",
+        "clients",
+        "importedBookings",
+        "importedBlocks",
+        "raises"
+      ],
+      "type": "object"
+    },
+    "ProMigrationSummaryResponseDTO": {
+      "properties": {
+        "summary": {
+          "$ref": "#/definitions/ProMigrationSummaryDTO"
+        }
+      },
+      "required": [
+        "summary"
+      ],
+      "type": "object"
+    },
     "ProNameDisplay": {
       "$ref": "#/definitions/%24Enums.ProNameDisplay"
     },
