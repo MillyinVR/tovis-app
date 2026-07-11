@@ -45,6 +45,12 @@ export type {
   ClientAftercareReviewMediaDTO,
 } from '@/lib/dto/clientAftercare'
 
+// ── Client aftercare inbox list (GET /api/v1/client/aftercare) ────────────────
+export type {
+  ClientAftercareInboxItemDTO,
+  ClientAftercareInboxDTO,
+} from '@/lib/dto/clientAftercareInbox'
+
 // ── Pro Overview / performance dashboard (GET /api/v1/pro/overview) ───────────
 export type {
   ProOverviewTrendTone,

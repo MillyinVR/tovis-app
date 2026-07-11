@@ -1,42 +1,22 @@
 // app/client/aftercare/page.tsx
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { loadBookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
 import { COPY } from '@/lib/copy'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
-import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
-import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import {
-  AftercareRebookMode,
-  ConsultationApprovalStatus,
-  NotificationEventKey,
-  Prisma,
-} from '@prisma/client'
+  aftercareInboxHintMode,
+  loadClientAftercareInbox,
+} from '@/lib/aftercare/loadClientAftercareInbox'
 
 export const dynamic = 'force-dynamic'
 
-function toDate(v: unknown): Date | null {
-  if (!v) return null
-  const d = v instanceof Date ? v : new Date(String(v))
-  return Number.isNaN(d.getTime()) ? null : d
-}
-
-function safeText(v: unknown, fallback: string) {
-  const s = typeof v === 'string' ? v.trim() : ''
-  return s ? s : fallback
-}
-
-function safeId(v: unknown): string | null {
-  const s = typeof v === 'string' ? v.trim() : ''
-  return s ? s : null
-}
-
-function formatDateInTz(d: Date, timeZone: string) {
+function formatDateInTz(iso: string, timeZone: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   return formatInTimeZone(d, tz, {
     weekday: 'short',
@@ -54,165 +34,13 @@ function SmallPill({ label }: { label: string }) {
   )
 }
 
-// Booking shape must match ClientBookingRow expectations from buildClientBookingDTO
-const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
-  id: true,
-  status: true,
-  source: true,
-  // Rebook-chain link — part of the canonical ClientBookingRow shape.
-  rebookOfBookingId: true,
-  sessionStep: true,
-  scheduledFor: true,
-  finishedAt: true,
-
-  subtotalSnapshot: true,
-  serviceSubtotalSnapshot: true,
-  productSubtotalSnapshot: true,
-  tipAmount: true,
-  taxAmount: true,
-  discountAmount: true,
-  totalAmount: true,
-  checkoutStatus: true,
-  selectedPaymentMethod: true,
-  paymentAuthorizedAt: true,
-  paymentCollectedAt: true,
-  totalDurationMinutes: true,
-  bufferMinutes: true,
-
-  locationType: true,
-  locationId: true,
-  locationTimeZone: true,
-  locationAddressSnapshot: true,
-
-  service: { select: { id: true, name: true } },
-
-  professional: {
-    select: {
-      id: true,
-      businessName: true,
-      firstName: true,
-      lastName: true,
-      handle: true,
-      nameDisplay: true,
-      location: true,
-      timeZone: true,
-    },
-  },
-
-  location: {
-    select: {
-      id: true,
-      name: true,
-      formattedAddress: true,
-      city: true,
-      state: true,
-      timeZone: true,
-    },
-  },
-
-  serviceItems: {
-    orderBy: { sortOrder: 'asc' },
-    take: 80,
-    select: {
-      id: true,
-      itemType: true,
-      parentItemId: true,
-      sortOrder: true,
-      durationMinutesSnapshot: true,
-      priceSnapshot: true,
-      serviceId: true,
-      service: { select: { name: true } },
-    },
-  },
-
-  productSales: {
-    orderBy: { createdAt: 'asc' },
-    take: 80,
-    select: {
-      id: true,
-      productId: true,
-      quantity: true,
-      unitPrice: true,
-      product: { select: { name: true } },
-    },
-  },
-
-  consultationNotes: true,
-  consultationPrice: true,
-  consultationConfirmedAt: true,
-  consultationApproval: {
-    select: {
-      status: true,
-      proposedServicesJson: true,
-      proposedTotal: true,
-      notes: true,
-      approvedAt: true,
-      rejectedAt: true,
-    },
-  },
-})
-
-const inboxSelect = Prisma.validator<Prisma.ClientNotificationSelect>()({
-  id: true,
-  title: true,
-  body: true,
-  readAt: true,
-  createdAt: true,
-  bookingId: true,
-  aftercareId: true,
-  booking: { select: bookingSelect },
-  aftercare: { select: { rebookMode: true, rebookedFor: true } },
-})
-
-type InboxItem = Prisma.ClientNotificationGetPayload<{ select: typeof inboxSelect }>
-
 export default async function ClientAftercareInboxPage() {
   const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
     redirect('/login?from=/client/aftercare')
   }
 
-  const items: InboxItem[] = await prisma.clientNotification.findMany({
-    where: {
-      clientId: user.clientProfile.id,
-      eventKey: NotificationEventKey.AFTERCARE_READY,
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 300,
-    select: inboxSelect,
-  })
-
-  const rows = await Promise.all(
-    items.map(async (n) => {
-      const raw = n.booking
-
-      let dto: ClientBookingDTO | null = null
-      if (raw) {
-        const hasPendingConsultationApproval =
-          raw.consultationApproval?.status === ConsultationApprovalStatus.PENDING
-
-        try {
-          dto = await buildClientBookingDTO({
-            booking: raw,
-            unreadAftercare: !n.readAt,
-            hasPendingConsultationApproval,
-          })
-        } catch {
-          dto = null
-        }
-      }
-
-      return { n, raw, dto }
-    }),
-  )
-
-  // Before/after photos for every visit linked from this inbox, loaded in one
-  // batch via the shared SSOT and rendered on each card.
-  const beforeAfterByBooking = await loadBookingBeforeAfterThumbs(
-    rows
-      .map(({ n, raw, dto }) => safeId(dto?.id ?? raw?.id ?? n.bookingId))
-      .filter((id): id is string => Boolean(id)),
-  )
+  const rows = await loadClientAftercareInbox(user.clientProfile.id)
 
   return (
     <main className="mx-auto w-full max-w-860px px-4 pb-24 pt-7 text-textPrimary">
@@ -232,42 +60,27 @@ export default async function ClientAftercareInboxPage() {
         </div>
       ) : (
         <div className="mt-4 grid gap-2.5">
-          {rows.map(({ n, raw, dto }) => {
-            const bookingId = safeId(dto?.id ?? raw?.id ?? n.bookingId)
-            const href = bookingId
-              ? `/client/bookings/${encodeURIComponent(bookingId)}?step=aftercare`
+          {rows.map((item) => {
+            const href = item.bookingId
+              ? `/client/bookings/${encodeURIComponent(item.bookingId)}?step=aftercare`
               : null
 
-            const isUnread = !n.readAt
-            const title =
-              dto?.display?.title || safeText(n.title, COPY.aftercareInbox.serviceFallback)
+            const tz = sanitizeTimeZone(item.timeZone, DEFAULT_TIME_ZONE)
+            const dateLabel = item.scheduledFor
+              ? formatDateInTz(item.scheduledFor, tz)
+              : ''
 
-            const proId = dto?.professional?.id ?? raw?.professional?.id ?? null
-            const proName = formatProfessionalPublicDisplayName(
-              dto?.professional ?? raw?.professional ?? null,
-              COPY.aftercareInbox.proFallback,
-            )
-
-            const tz = sanitizeTimeZone(dto?.timeZone, DEFAULT_TIME_ZONE)
-
-            const date = toDate(dto?.scheduledFor ?? raw?.scheduledFor)
-            const dateLabel = date ? formatDateInTz(date, tz) : ''
-
-            const beforeAfter = bookingId
-              ? beforeAfterByBooking.get(bookingId)
-              : undefined
-
-            const mode = n.aftercare?.rebookMode ?? null
+            const hintMode = aftercareInboxHintMode(item)
             const hint =
-              mode === AftercareRebookMode.RECOMMENDED_WINDOW
+              hintMode === 'RECOMMENDED_WINDOW'
                 ? COPY.aftercareInbox.hintRecommendedWindow
-                : n.aftercare?.rebookedFor
+                : hintMode === 'RECOMMENDED_DATE'
                   ? COPY.aftercareInbox.hintRecommendedDate
                   : COPY.aftercareInbox.hintNotes
 
             return (
               <div
-                key={n.id}
+                key={item.notificationId}
                 className={[
                   'rounded-card border border-white/10 bg-bgSecondary p-4',
                   href ? '' : 'opacity-70',
@@ -276,8 +89,8 @@ export default async function ClientAftercareInboxPage() {
                 <div className="grid gap-2">
                   <div className="flex flex-wrap items-baseline justify-between gap-3">
                     <div className="text-[14px] font-black text-textPrimary">
-                      {title}
-                      {isUnread ? <SmallPill label={COPY.aftercareInbox.newPill} /> : null}
+                      {item.title}
+                      {item.unread ? <SmallPill label={COPY.aftercareInbox.newPill} /> : null}
                     </div>
 
                     <div className="text-[12px] font-semibold text-textSecondary">
@@ -291,16 +104,16 @@ export default async function ClientAftercareInboxPage() {
 
                   <div>
                     <ProProfileLink
-                      proId={proId}
-                      label={proName}
+                      proId={item.proId}
+                      label={item.proName}
                       className="text-textSecondary font-semibold hover:opacity-80"
                     />
                   </div>
 
-                  {beforeAfter ? (
+                  {item.beforeAfter ? (
                     <AftercareBeforeAfter
-                      media={beforeAfter}
-                      serviceName={title}
+                      media={item.beforeAfter}
+                      serviceName={item.title}
                     />
                   ) : null}
 
@@ -308,16 +121,16 @@ export default async function ClientAftercareInboxPage() {
                     {hint}
                   </div>
 
-                  {n.body ? (
+                  {item.body ? (
                     <div className="text-[12px] font-semibold leading-snug text-textSecondary/90">
-                      {n.body}
+                      {item.body}
                     </div>
                   ) : null}
 
                   {href ? (
                     <Link
                       href={href}
-                      aria-label={`Open aftercare: ${title}`}
+                      aria-label={`Open aftercare: ${item.title}`}
                       className="mt-1 inline-flex w-fit rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
                     >
                       {COPY.aftercareInbox.openCta}
