@@ -10,7 +10,7 @@ import {
   cancelScheduledClientNotificationsForBooking,
   scheduleClientNotification,
 } from '@/lib/notifications/clientNotifications'
-import { resolveEnabledReminderOffsetDays } from '@/lib/reminderSettings/settings'
+import { resolveEnabledReminderOffsetMinutes } from '@/lib/reminderSettings/settings'
 import {
   DEFAULT_TIME_ZONE,
   formatInTimeZone,
@@ -20,10 +20,13 @@ import {
   zonedTimeToUtc,
 } from '@/lib/time'
 
-export type AppointmentReminderKind = 'ONE_WEEK' | 'THREE_DAYS' | 'DAY_BEFORE'
-
 export type AppointmentReminderPayload = {
-  reminderKind: AppointmentReminderKind
+  /**
+   * Lead time in minutes before the appointment. Whole-day leads are a multiple
+   * of 1440 (fire at the appointment's own local wall-clock time N days earlier,
+   * DST-safe); sub-day leads are a multiple of 60 (an exact instant offset).
+   */
+  offsetMinutes: number
   bookingId: string
   scheduledFor: string
   timeZone: string
@@ -56,42 +59,58 @@ export type ValidateDueAppointmentReminderResult =
     }
 
 type AppointmentReminderPlanItem = {
-  kind: AppointmentReminderKind
+  offsetMinutes: number
   dedupeKey: string
   runAt: Date
   payload: AppointmentReminderPayload
 }
 
-// Canonical order (longest lead first). Iteration order here defines the order
-// reminders are scheduled/validated; keep it stable.
-const APPOINTMENT_REMINDER_KINDS: readonly AppointmentReminderKind[] = [
-  'ONE_WEEK',
-  'THREE_DAYS',
-  'DAY_BEFORE',
-]
+const MINUTES_PER_DAY = 1440
+const MINUTES_PER_HOUR = 60
 
-const APPOINTMENT_REMINDER_OFFSET_DAYS: Record<
-  AppointmentReminderKind,
-  number
-> = {
-  ONE_WEEK: 7,
-  THREE_DAYS: 3,
-  DAY_BEFORE: 1,
+// Legacy symbolic reminder kinds (pre-offsetMinutes). Kept only to map old
+// scheduled-notification payloads onto minutes at read time (defense-in-depth
+// alongside the one-shot deploy migration that rewrites pending rows).
+const LEGACY_REMINDER_KIND_MINUTES: Record<string, number> = {
+  ONE_WEEK: 10080,
+  THREE_DAYS: 4320,
+  DAY_BEFORE: 1440,
 }
 
 /**
- * Map a pro's configured day-offsets (from ProReminderSettings) onto the reminder
- * kinds we actually schedule, in canonical order. Offsets outside the supported
- * menu are ignored — the settings layer already validates on write, this guards
- * the read path against drift.
+ * The relative-when phrase + tomorrow flag for a reminder's client-facing copy,
+ * derived from its lead time. Whole-day leads read "tomorrow" / "in one week" /
+ * "in N days"; hour leads read "in N hours"; anything finer reads "in N minutes".
  */
-function resolveEnabledReminderKinds(
-  offsetDays: readonly number[],
-): AppointmentReminderKind[] {
-  const enabled = new Set(offsetDays)
-  return APPOINTMENT_REMINDER_KINDS.filter((kind) =>
-    enabled.has(APPOINTMENT_REMINDER_OFFSET_DAYS[kind]),
-  )
+function humanizeLeadTime(offsetMinutes: number): {
+  relativeWhen: string
+  isTomorrow: boolean
+} {
+  if (offsetMinutes % MINUTES_PER_DAY === 0) {
+    const days = offsetMinutes / MINUTES_PER_DAY
+    if (days === 1) return { relativeWhen: 'tomorrow', isTomorrow: true }
+    if (days === 7) return { relativeWhen: 'in one week', isTomorrow: false }
+    return { relativeWhen: `in ${days} days`, isTomorrow: false }
+  }
+
+  if (offsetMinutes % MINUTES_PER_HOUR === 0) {
+    const hours = offsetMinutes / MINUTES_PER_HOUR
+    return {
+      relativeWhen: `in ${hours} hour${hours === 1 ? '' : 's'}`,
+      isTomorrow: false,
+    }
+  }
+
+  return {
+    relativeWhen: `in ${offsetMinutes} minute${offsetMinutes === 1 ? '' : 's'}`,
+    isTomorrow: false,
+  }
+}
+
+function readOffsetMinutes(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : null
 }
 
 /**
@@ -220,9 +239,11 @@ function formatTimeOnly(date: Date, timeZone: string): string {
 
 function makeAppointmentReminderDedupeKey(
   bookingId: string,
-  kind: AppointmentReminderKind,
+  offsetMinutes: number,
 ): string {
-  return `CLIENT_REMINDER:${kind}:${bookingId}`
+  // The `M` prefix guarantees new minute-keyed keys never collide with the old
+  // textual-kind keys (CLIENT_REMINDER:ONE_WEEK:… etc.).
+  return `CLIENT_REMINDER:M${offsetMinutes}:${bookingId}`
 }
 
 function buildAppointmentReminderHref(bookingId: string): string {
@@ -231,7 +252,7 @@ function buildAppointmentReminderHref(bookingId: string): string {
 
 export function buildAppointmentReminderPayload(args: {
   bookingId: string
-  kind: AppointmentReminderKind
+  offsetMinutes: number
   scheduledFor: Date
   timeZone: string
   serviceName?: string | null
@@ -243,7 +264,7 @@ export function buildAppointmentReminderPayload(args: {
   }
 
   return {
-    reminderKind: args.kind,
+    offsetMinutes: args.offsetMinutes,
     bookingId: args.bookingId,
     scheduledFor: scheduledFor.toISOString(),
     timeZone: resolveAppointmentReminderTimeZone(args.timeZone),
@@ -257,14 +278,13 @@ export function parseAppointmentReminderPayload(
 ): AppointmentReminderPayload | null {
   if (!isRecord(data)) return null
 
-  const reminderKind = readString(data.reminderKind)
-  if (
-    reminderKind !== 'ONE_WEEK' &&
-    reminderKind !== 'THREE_DAYS' &&
-    reminderKind !== 'DAY_BEFORE'
-  ) {
-    return null
-  }
+  // Prefer the canonical minutes field; fall back to the legacy symbolic kind so
+  // a reminder scheduled before the offsetMinutes cutover still validates.
+  const offsetMinutes =
+    readOffsetMinutes(data.offsetMinutes) ??
+    LEGACY_REMINDER_KIND_MINUTES[readString(data.reminderKind) ?? ''] ??
+    null
+  if (offsetMinutes == null) return null
 
   const bookingId = readString(data.bookingId)
   if (!bookingId) return null
@@ -278,7 +298,7 @@ export function parseAppointmentReminderPayload(
   }
 
   return {
-    reminderKind,
+    offsetMinutes,
     bookingId,
     scheduledFor: scheduledFor.toISOString(),
     timeZone: sanitizeTimeZone(rawTimeZone, DEFAULT_TIME_ZONE),
@@ -296,7 +316,7 @@ export function buildAppointmentReminderContent(
   }
 
   // Personalized, "Reminder:"-free copy (§12 NC1 #13). The relative phrase comes
-  // from the reminder kind; the clock time comes from the appointment. A "manage"
+  // from the lead time; the clock time comes from the appointment. A "manage"
   // nudge closes every reminder so the client always knows they can reschedule.
   const serviceLabel = payload.serviceName?.trim() || 'appointment'
   const withPro = payload.professionalName?.trim()
@@ -306,17 +326,9 @@ export function buildAppointmentReminderContent(
   const atTime = timeLabel ? ` at ${timeLabel}` : ''
   const manageNudge = ' Need to change it? Tap to manage.'
 
-  const relativeWhen =
-    payload.reminderKind === 'ONE_WEEK'
-      ? 'in one week'
-      : payload.reminderKind === 'THREE_DAYS'
-        ? 'in 3 days'
-        : 'tomorrow'
+  const { relativeWhen, isTomorrow } = humanizeLeadTime(payload.offsetMinutes)
 
-  const title =
-    payload.reminderKind === 'DAY_BEFORE'
-      ? 'Appointment tomorrow'
-      : 'Appointment reminder'
+  const title = isTomorrow ? 'Appointment tomorrow' : 'Appointment reminder'
 
   return {
     title,
@@ -342,19 +354,27 @@ function isBookingEligibleForAppointmentReminders(
 export function computeAppointmentReminderRunAt(args: {
   scheduledFor: Date
   timeZone: string
-  kind: AppointmentReminderKind
+  offsetMinutes: number
 }): Date | null {
   const scheduledFor = normalizeDateOrNull(args.scheduledFor)
   if (!scheduledFor) return null
 
   const timeZone = resolveAppointmentReminderTimeZone(args.timeZone)
+
+  // Sub-day leads fire at an exact instant offset before the appointment.
+  if (args.offsetMinutes % MINUTES_PER_DAY !== 0) {
+    return new Date(scheduledFor.getTime() - args.offsetMinutes * 60_000)
+  }
+
+  // Whole-day leads preserve the appointment's own local wall-clock time N
+  // calendar days earlier (DST-safe).
   const zonedScheduledFor = getZonedParts(scheduledFor, timeZone)
 
   const shiftedDate = shiftLocalCalendarDate({
     year: zonedScheduledFor.year,
     month: zonedScheduledFor.month,
     day: zonedScheduledFor.day,
-    daysToSubtract: APPOINTMENT_REMINDER_OFFSET_DAYS[args.kind],
+    daysToSubtract: args.offsetMinutes / MINUTES_PER_DAY,
   })
 
   return zonedTimeToUtc({
@@ -373,7 +393,7 @@ function payloadsMatch(
   right: AppointmentReminderPayload,
 ): boolean {
   return (
-    left.reminderKind === right.reminderKind &&
+    left.offsetMinutes === right.offsetMinutes &&
     left.bookingId === right.bookingId &&
     left.scheduledFor === right.scheduledFor &&
     left.timeZone === right.timeZone &&
@@ -384,9 +404,9 @@ function payloadsMatch(
 
 function buildReminderPlanItem(args: {
   booking: BookingReminderRecord
-  kind: AppointmentReminderKind
+  offsetMinutes: number
 }): AppointmentReminderPlanItem | null {
-  const { booking, kind } = args
+  const { booking, offsetMinutes } = args
 
   if (!isBookingEligibleForAppointmentReminders(booking)) {
     return null
@@ -402,18 +422,18 @@ function buildReminderPlanItem(args: {
   const runAt = computeAppointmentReminderRunAt({
     scheduledFor,
     timeZone,
-    kind,
+    offsetMinutes,
   })
 
   if (!runAt) return null
 
   return {
-    kind,
-    dedupeKey: makeAppointmentReminderDedupeKey(booking.id, kind),
+    offsetMinutes,
+    dedupeKey: makeAppointmentReminderDedupeKey(booking.id, offsetMinutes),
     runAt,
     payload: buildAppointmentReminderPayload({
       bookingId: booking.id,
-      kind,
+      offsetMinutes,
       scheduledFor,
       timeZone,
       serviceName: formatBookingServicesLabel(
@@ -435,7 +455,7 @@ function buildReminderPlanItem(args: {
 
 export function planBookingAppointmentReminders(args: {
   booking: BookingReminderRecord
-  enabledKinds: readonly AppointmentReminderKind[]
+  enabledOffsetMinutes: readonly number[]
   now?: Date
 }): AppointmentReminderPlanItem[] {
   if (!isBookingEligibleForAppointmentReminders(args.booking)) {
@@ -443,15 +463,18 @@ export function planBookingAppointmentReminders(args: {
   }
 
   const now = normalizeNowOrThrow(args.now, 'now')
-  const enabled = new Set(args.enabledKinds)
   const plan: AppointmentReminderPlanItem[] = []
 
-  for (const kind of APPOINTMENT_REMINDER_KINDS) {
-    if (!enabled.has(kind)) continue
+  // enabledOffsetMinutes is already deduped + sorted longest-lead first by the
+  // settings resolver; keep that as the canonical schedule order.
+  const seen = new Set<number>()
+  for (const offsetMinutes of args.enabledOffsetMinutes) {
+    if (seen.has(offsetMinutes)) continue
+    seen.add(offsetMinutes)
 
     const item = buildReminderPlanItem({
       booking: args.booking,
-      kind,
+      offsetMinutes,
     })
     if (!item) continue
     if (item.runAt.getTime() <= now.getTime()) continue
@@ -528,16 +551,14 @@ export async function syncBookingAppointmentReminders(args: {
     bookingId: booking.id,
   })
 
-  const enabledKinds = resolveEnabledReminderKinds(
-    await resolveEnabledReminderOffsetDays({
-      professionalId: booking.professionalId,
-      db: args.tx,
-    }),
-  )
+  const enabledOffsetMinutes = await resolveEnabledReminderOffsetMinutes({
+    professionalId: booking.professionalId,
+    db: args.tx,
+  })
 
   const plan = planBookingAppointmentReminders({
     booking,
-    enabledKinds,
+    enabledOffsetMinutes,
     now: args.now,
   })
 
@@ -640,14 +661,12 @@ export async function validateDueAppointmentReminder(args: {
 
   // The pro may have turned this offset off (or disabled reminders) since the
   // row was scheduled — drop it rather than send a reminder they no longer want.
-  const enabledKinds = resolveEnabledReminderKinds(
-    await resolveEnabledReminderOffsetDays({
-      professionalId: booking.professionalId,
-      db: args.tx,
-    }),
-  )
+  const enabledOffsetMinutes = await resolveEnabledReminderOffsetMinutes({
+    professionalId: booking.professionalId,
+    db: args.tx,
+  })
 
-  if (!enabledKinds.includes(parsedPayload.reminderKind)) {
+  if (!enabledOffsetMinutes.includes(parsedPayload.offsetMinutes)) {
     return {
       action: 'CANCEL',
       reason:
@@ -657,7 +676,7 @@ export async function validateDueAppointmentReminder(args: {
 
   const planned = buildReminderPlanItem({
     booking,
-    kind: parsedPayload.reminderKind,
+    offsetMinutes: parsedPayload.offsetMinutes,
   })
 
   if (!planned) {

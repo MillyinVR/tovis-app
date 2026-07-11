@@ -65,6 +65,8 @@ function makeRuntimePolicyCandidate(args: {
   recipientTimeZone?: string | null
   eventKey?: NotificationEventKey
   nextAttemptAt?: Date
+  /** Appointment instant for the short-lead reminder cap (dispatch payload). */
+  appointmentStartsAt?: Date
 }) {
   const now = args.nextAttemptAt ?? new Date('2026-04-09T12:00:00.000Z')
 
@@ -86,6 +88,14 @@ function makeRuntimePolicyCandidate(args: {
       clientId: args.clientId ?? 'client_1',
       recipientTimeZone: args.recipientTimeZone ?? 'America/Los_Angeles',
       cancelledAt: null,
+      ...(args.appointmentStartsAt
+        ? {
+            payload: {
+              bookingId: 'booking_1',
+              scheduledFor: args.appointmentStartsAt.toISOString(),
+            },
+          }
+        : {}),
     },
   }
 }
@@ -619,6 +629,114 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
       leaseExpiresAt: new Date(now.getTime() + 60_000),
       deliveries: [],
     })
+  })
+
+  it('does not defer a short-lead appointment reminder whose quiet-hours resume lands after the appointment', async () => {
+    const now = new Date('2026-04-09T06:30:00.000Z') // 11:30 PM America/Los_Angeles
+    // Default quiet hours (22:00–08:00) would defer this SMS to 08:00 LA =
+    // 15:00 UTC — but the appointment itself is at 13:00 UTC, before the resume,
+    // so the reminder must send NOW rather than land after the appointment.
+    const appointmentStartsAt = new Date('2026-04-09T13:00:00.000Z')
+
+    mockTransaction.notificationDelivery.findMany
+      .mockResolvedValueOnce([
+        makeRuntimePolicyCandidate({
+          id: 'delivery_shortlead_1',
+          channel: NotificationChannel.SMS,
+          recipientKind: NotificationRecipientKind.CLIENT,
+          clientId: 'client_1',
+          recipientTimeZone: 'America/Los_Angeles',
+          eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+          nextAttemptAt: now,
+          appointmentStartsAt,
+        }),
+      ])
+      .mockResolvedValueOnce([
+        makeClaimedDelivery({
+          id: 'delivery_shortlead_1',
+          leaseToken: 'token_shortlead',
+          claimedAt: now,
+          leaseExpiresAt: new Date(now.getTime() + 60_000),
+        }),
+      ])
+
+    mockTransaction.notificationDelivery.updateMany.mockResolvedValueOnce({
+      count: 1,
+    })
+    mockTransaction.notificationDeliveryEvent.create.mockResolvedValueOnce({
+      id: 'event_shortlead_1',
+    })
+
+    const result = await claimDeliveries({ now, batchSize: 1 })
+
+    // Claimed, not deferred: the single updateMany stamps lease fields (claim),
+    // and the delivery event is CLAIMED — not a quiet-hours RETRY_SCHEDULED.
+    expect(mockTransaction.notificationDelivery.updateMany).toHaveBeenCalledTimes(
+      1,
+    )
+    const update =
+      requireDefined(
+        mockTransaction.notificationDelivery.updateMany.mock.calls[0],
+      )[0]
+    expect(update.data.claimedAt).toEqual(now)
+    expect(typeof update.data.leaseToken).toBe('string')
+
+    const event =
+      requireDefined(
+        mockTransaction.notificationDeliveryEvent.create.mock.calls[0],
+      )[0]
+    expect(event.data.type).toBe(NotificationDeliveryEventType.CLAIMED)
+
+    expect(result.deliveries).toHaveLength(1)
+  })
+
+  it('still defers a long-lead reminder whose quiet-hours resume is before the appointment', async () => {
+    const now = new Date('2026-04-09T06:30:00.000Z') // 11:30 PM America/Los_Angeles
+    // Resume is 15:00 UTC; the appointment is days away, so the cap does not
+    // apply and the reminder defers to the end of quiet hours as usual.
+    const appointmentStartsAt = new Date('2026-04-16T13:00:00.000Z')
+
+    mockTransaction.notificationDelivery.findMany
+      .mockResolvedValueOnce([
+        makeRuntimePolicyCandidate({
+          id: 'delivery_longlead_1',
+          channel: NotificationChannel.SMS,
+          recipientKind: NotificationRecipientKind.CLIENT,
+          clientId: 'client_1',
+          recipientTimeZone: 'America/Los_Angeles',
+          eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+          nextAttemptAt: now,
+          appointmentStartsAt,
+        }),
+      ])
+      .mockResolvedValueOnce([])
+
+    mockTransaction.notificationDelivery.updateMany.mockResolvedValueOnce({
+      count: 1,
+    })
+    mockTransaction.notificationDeliveryEvent.create.mockResolvedValueOnce({
+      id: 'event_longlead_1',
+    })
+
+    const result = await claimDeliveries({ now, batchSize: 1 })
+
+    const update =
+      requireDefined(
+        mockTransaction.notificationDelivery.updateMany.mock.calls[0],
+      )[0]
+    // Deferred: nextAttemptAt pushed to the quiet-hours resume, lease cleared.
+    expect(update.data.nextAttemptAt).toEqual(
+      new Date('2026-04-09T15:00:00.000Z'),
+    )
+    expect(update.data.leaseToken).toBeNull()
+
+    const event =
+      requireDefined(
+        mockTransaction.notificationDeliveryEvent.create.mock.calls[0],
+      )[0]
+    expect(event.data.type).toBe(NotificationDeliveryEventType.RETRY_SCHEDULED)
+
+    expect(result.deliveries).toEqual([])
   })
 
   it('claims sms deliveries during quiet hours when the event allows bypass', async () => {

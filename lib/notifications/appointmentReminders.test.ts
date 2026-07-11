@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 
   cancelScheduledClientNotificationsForBooking: vi.fn(),
   scheduleClientNotification: vi.fn(),
-  resolveEnabledReminderOffsetDays: vi.fn(),
+  resolveEnabledReminderOffsetMinutes: vi.fn(),
 }))
 
 vi.mock('@/lib/notifications/clientNotifications', () => ({
@@ -24,7 +24,7 @@ vi.mock('@/lib/notifications/clientNotifications', () => ({
 }))
 
 vi.mock('@/lib/reminderSettings/settings', () => ({
-  resolveEnabledReminderOffsetDays: mocks.resolveEnabledReminderOffsetDays,
+  resolveEnabledReminderOffsetMinutes: mocks.resolveEnabledReminderOffsetMinutes,
 }))
 
 import {
@@ -33,6 +33,7 @@ import {
   cancelBookingAppointmentReminders,
   cancelDueAppointmentReminder,
   computeAppointmentReminderRunAt,
+  parseAppointmentReminderPayload,
   syncBookingAppointmentReminders,
   validateDueAppointmentReminder,
 } from './appointmentReminders'
@@ -94,7 +95,7 @@ function makeBooking(
 
 function makeReminderPayload(args: {
   bookingId: string
-  kind: 'ONE_WEEK' | 'THREE_DAYS' | 'DAY_BEFORE'
+  offsetMinutes: number
   scheduledFor: Date
   timeZone: string
   serviceName?: string | null
@@ -102,7 +103,7 @@ function makeReminderPayload(args: {
 }) {
   return buildAppointmentReminderPayload({
     bookingId: args.bookingId,
-    kind: args.kind,
+    offsetMinutes: args.offsetMinutes,
     scheduledFor: args.scheduledFor,
     timeZone: args.timeZone,
     serviceName: args.serviceName,
@@ -143,13 +144,13 @@ function makeDueRow(
     dedupeKey:
       'dedupeKey' in overrides
         ? overrides.dedupeKey!
-        : 'CLIENT_REMINDER:ONE_WEEK:booking_1',
+        : 'CLIENT_REMINDER:M10080:booking_1',
     data:
       'data' in overrides
         ? overrides.data!
         : makeReminderPayload({
             bookingId: 'booking_1',
-            kind: 'ONE_WEEK',
+            offsetMinutes: 10080,
             scheduledFor: new Date('2026-03-28T16:00:00.000Z'),
             timeZone: 'America/Los_Angeles',
             serviceName: 'Silk Press',
@@ -181,21 +182,126 @@ describe('lib/notifications/appointmentReminders', () => {
     mocks.txScheduledClientNotificationUpdateMany.mockResolvedValue({
       count: 1,
     })
-    // Default cadence: one week + three days + day before, all enabled.
-    mocks.resolveEnabledReminderOffsetDays.mockResolvedValue([7, 3, 1])
+    // Default cadence: one week + three days + day before, all enabled (minutes).
+    mocks.resolveEnabledReminderOffsetMinutes.mockResolvedValue([
+      10080, 4320, 1440,
+    ])
   })
 
   describe('computeAppointmentReminderRunAt', () => {
-    it('preserves local wall-clock time across a DST fallback boundary', () => {
+    it('preserves local wall-clock time across a DST fallback boundary for whole-day leads', () => {
       const scheduledFor = new Date('2026-11-08T17:00:00.000Z') // 9:00 AM PST
 
       const runAt = computeAppointmentReminderRunAt({
         scheduledFor,
         timeZone: 'America/Los_Angeles',
-        kind: 'ONE_WEEK',
+        offsetMinutes: 10080,
       })
 
       expect(runAt).toEqual(new Date('2026-11-01T17:00:00.000Z'))
+    })
+
+    it('subtracts an exact instant offset for sub-day leads', () => {
+      const scheduledFor = new Date('2026-03-28T16:00:00.000Z')
+
+      const runAt = computeAppointmentReminderRunAt({
+        scheduledFor,
+        timeZone: 'America/Los_Angeles',
+        offsetMinutes: 240, // 4 hours
+      })
+
+      expect(runAt).toEqual(new Date('2026-03-28T12:00:00.000Z'))
+    })
+  })
+
+  describe('parseAppointmentReminderPayload', () => {
+    const base = {
+      bookingId: 'booking_1',
+      scheduledFor: '2026-03-28T16:00:00.000Z',
+      timeZone: 'America/Los_Angeles',
+      serviceName: 'Silk Press',
+    }
+
+    it('reads the canonical offsetMinutes field', () => {
+      const parsed = parseAppointmentReminderPayload({
+        ...base,
+        offsetMinutes: 240,
+      })
+      expect(parsed?.offsetMinutes).toBe(240)
+    })
+
+    it('maps a legacy reminderKind onto minutes', () => {
+      expect(
+        parseAppointmentReminderPayload({ ...base, reminderKind: 'ONE_WEEK' })
+          ?.offsetMinutes,
+      ).toBe(10080)
+      expect(
+        parseAppointmentReminderPayload({ ...base, reminderKind: 'THREE_DAYS' })
+          ?.offsetMinutes,
+      ).toBe(4320)
+      expect(
+        parseAppointmentReminderPayload({ ...base, reminderKind: 'DAY_BEFORE' })
+          ?.offsetMinutes,
+      ).toBe(1440)
+    })
+
+    it('prefers offsetMinutes over a stale legacy kind', () => {
+      const parsed = parseAppointmentReminderPayload({
+        ...base,
+        offsetMinutes: 240,
+        reminderKind: 'ONE_WEEK',
+      })
+      expect(parsed?.offsetMinutes).toBe(240)
+    })
+
+    it('returns null when neither offsetMinutes nor a known kind is present', () => {
+      expect(parseAppointmentReminderPayload({ ...base })).toBeNull()
+    })
+  })
+
+  describe('buildAppointmentReminderContent (lead-time humanizer)', () => {
+    function contentFor(offsetMinutes: number) {
+      return buildAppointmentReminderContent(
+        makeReminderPayload({
+          bookingId: 'booking_1',
+          offsetMinutes,
+          scheduledFor: new Date('2026-03-28T16:00:00.000Z'),
+          timeZone: 'America/Los_Angeles',
+          serviceName: 'Silk Press',
+        }),
+      )
+    }
+
+    it('reads "in one week" for a 7-day lead', () => {
+      const content = contentFor(10080)
+      expect(content.title).toBe('Appointment reminder')
+      expect(content.body).toContain('in one week')
+    })
+
+    it('reads "in 3 days" for a 3-day lead', () => {
+      expect(contentFor(4320).body).toContain('in 3 days')
+    })
+
+    it('reads "tomorrow" and the tomorrow title for a 1-day lead', () => {
+      const content = contentFor(1440)
+      expect(content.title).toBe('Appointment tomorrow')
+      expect(content.body).toContain('tomorrow')
+    })
+
+    it('reads "in 2 days" for a 2-day lead', () => {
+      expect(contentFor(2880).body).toContain('in 2 days')
+    })
+
+    it('reads "in 4 hours" for a 4-hour lead', () => {
+      expect(contentFor(240).body).toContain('in 4 hours')
+    })
+
+    it('reads "in 1 hour" for a 1-hour lead', () => {
+      expect(contentFor(60).body).toContain('in 1 hour')
+    })
+
+    it('reads "in 90 minutes" for a sub-hour lead', () => {
+      expect(contentFor(90).body).toContain('in 90 minutes')
     })
   })
 
@@ -295,7 +401,7 @@ describe('lib/notifications/appointmentReminders', () => {
         onlyPending: true,
       })
 
-      expect(mocks.resolveEnabledReminderOffsetDays).toHaveBeenCalledWith({
+      expect(mocks.resolveEnabledReminderOffsetMinutes).toHaveBeenCalledWith({
         professionalId: 'pro_3',
         db: tx,
       })
@@ -308,10 +414,10 @@ describe('lib/notifications/appointmentReminders', () => {
         bookingId: 'booking_3',
         eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt: new Date('2026-03-21T16:00:00.000Z'),
-        dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_3',
+        dedupeKey: 'CLIENT_REMINDER:M10080:booking_3',
         href: '/client/bookings/booking_3?step=overview',
         data: {
-          reminderKind: 'ONE_WEEK',
+          offsetMinutes: 10080,
           bookingId: 'booking_3',
           scheduledFor: '2026-03-28T16:00:00.000Z',
           timeZone: 'America/Los_Angeles',
@@ -326,10 +432,10 @@ describe('lib/notifications/appointmentReminders', () => {
         bookingId: 'booking_3',
         eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt: new Date('2026-03-25T16:00:00.000Z'),
-        dedupeKey: 'CLIENT_REMINDER:THREE_DAYS:booking_3',
+        dedupeKey: 'CLIENT_REMINDER:M4320:booking_3',
         href: '/client/bookings/booking_3?step=overview',
         data: {
-          reminderKind: 'THREE_DAYS',
+          offsetMinutes: 4320,
           bookingId: 'booking_3',
           scheduledFor: '2026-03-28T16:00:00.000Z',
           timeZone: 'America/Los_Angeles',
@@ -344,10 +450,10 @@ describe('lib/notifications/appointmentReminders', () => {
         bookingId: 'booking_3',
         eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt: new Date('2026-03-27T16:00:00.000Z'),
-        dedupeKey: 'CLIENT_REMINDER:DAY_BEFORE:booking_3',
+        dedupeKey: 'CLIENT_REMINDER:M1440:booking_3',
         href: '/client/bookings/booking_3?step=overview',
         data: {
-          reminderKind: 'DAY_BEFORE',
+          offsetMinutes: 1440,
           bookingId: 'booking_3',
           scheduledFor: '2026-03-28T16:00:00.000Z',
           timeZone: 'America/Los_Angeles',
@@ -357,8 +463,38 @@ describe('lib/notifications/appointmentReminders', () => {
       })
     })
 
+    it('schedules a sub-day (hour-scale) lead at an exact instant offset', async () => {
+      mocks.resolveEnabledReminderOffsetMinutes.mockResolvedValue([240])
+
+      const booking = makeBooking({
+        id: 'booking_hours',
+        clientId: 'client_hours',
+        professionalId: 'pro_hours',
+        scheduledFor: new Date('2026-03-28T16:00:00.000Z'),
+        locationTimeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+      })
+
+      queueBookingForSync(booking)
+
+      await syncBookingAppointmentReminders({
+        tx,
+        bookingId: 'booking_hours',
+        now: TEST_NOW,
+      })
+
+      expect(mocks.scheduleClientNotification).toHaveBeenCalledTimes(1)
+      expect(mocks.scheduleClientNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runAt: new Date('2026-03-28T12:00:00.000Z'),
+          dedupeKey: 'CLIENT_REMINDER:M240:booking_hours',
+          data: expect.objectContaining({ offsetMinutes: 240 }),
+        }),
+      )
+    })
+
     it('schedules only the pro-enabled offsets', async () => {
-      mocks.resolveEnabledReminderOffsetDays.mockResolvedValue([7])
+      mocks.resolveEnabledReminderOffsetMinutes.mockResolvedValue([10080])
 
       const booking = makeBooking({
         id: 'booking_offsets',
@@ -380,13 +516,13 @@ describe('lib/notifications/appointmentReminders', () => {
       expect(mocks.scheduleClientNotification).toHaveBeenCalledTimes(1)
       expect(mocks.scheduleClientNotification).toHaveBeenCalledWith(
         expect.objectContaining({
-          dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_offsets',
+          dedupeKey: 'CLIENT_REMINDER:M10080:booking_offsets',
         }),
       )
     })
 
     it('schedules nothing when the pro has reminders disabled', async () => {
-      mocks.resolveEnabledReminderOffsetDays.mockResolvedValue([])
+      mocks.resolveEnabledReminderOffsetMinutes.mockResolvedValue([])
 
       const booking = makeBooking({
         id: 'booking_off',
@@ -439,10 +575,10 @@ describe('lib/notifications/appointmentReminders', () => {
         bookingId: 'booking_4',
         eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt: new Date('2026-03-19T16:00:00.000Z'),
-        dedupeKey: 'CLIENT_REMINDER:DAY_BEFORE:booking_4',
+        dedupeKey: 'CLIENT_REMINDER:M1440:booking_4',
         href: '/client/bookings/booking_4?step=overview',
         data: {
-          reminderKind: 'DAY_BEFORE',
+          offsetMinutes: 1440,
           bookingId: 'booking_4',
           scheduledFor: '2026-03-20T16:00:00.000Z',
           timeZone: 'America/Chicago',
@@ -604,7 +740,7 @@ describe('lib/notifications/appointmentReminders', () => {
 
       const payload = makeReminderPayload({
         bookingId: 'booking_1',
-        kind: 'ONE_WEEK',
+        offsetMinutes: 10080,
         scheduledFor: booking.scheduledFor,
         timeZone: 'America/Los_Angeles',
         serviceName: 'Silk Press',
@@ -616,7 +752,7 @@ describe('lib/notifications/appointmentReminders', () => {
         bookingId: 'booking_1',
         eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         runAt: new Date('2026-03-21T16:00:00.000Z'),
-        dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_1',
+        dedupeKey: 'CLIENT_REMINDER:M10080:booking_1',
         data: payload,
       })
 
@@ -634,10 +770,47 @@ describe('lib/notifications/appointmentReminders', () => {
         rowId: 'row_process_1',
         clientId: 'client_1',
         bookingId: 'booking_1',
-        dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_1',
+        dedupeKey: 'CLIENT_REMINDER:M10080:booking_1',
         href: '/client/bookings/booking_1?step=overview',
         notification: buildAppointmentReminderContent(payload),
       })
+    })
+
+    it('processes a legacy reminderKind row (rewritten dedupeKey) at parity', async () => {
+      const booking = makeBooking({
+        id: 'booking_1',
+        clientId: 'client_1',
+        scheduledFor: new Date('2026-03-28T16:00:00.000Z'),
+        locationTimeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+      })
+
+      // A pre-cutover payload (legacy reminderKind), with the dedupeKey the deploy
+      // migration rewrites it to.
+      const legacyData = {
+        reminderKind: 'ONE_WEEK',
+        bookingId: 'booking_1',
+        scheduledFor: '2026-03-28T16:00:00.000Z',
+        timeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+        professionalName: null,
+      }
+
+      mocks.txScheduledClientNotificationFindUnique.mockResolvedValueOnce(
+        makeDueRow({
+          dedupeKey: 'CLIENT_REMINDER:M10080:booking_1',
+          data: legacyData,
+        }),
+      )
+      mocks.txBookingFindUnique.mockResolvedValueOnce(booking)
+
+      const result = await validateDueAppointmentReminder({
+        tx,
+        scheduledClientNotificationId: 'row_legacy',
+        now: new Date('2026-03-21T16:00:01.000Z'),
+      })
+
+      expect(result.action).toBe('PROCESS')
     })
 
     it('returns CANCEL when the pro no longer schedules that reminder offset', async () => {
@@ -652,7 +825,7 @@ describe('lib/notifications/appointmentReminders', () => {
 
       const payload = makeReminderPayload({
         bookingId: 'booking_1',
-        kind: 'ONE_WEEK',
+        offsetMinutes: 10080,
         scheduledFor: booking.scheduledFor,
         timeZone: 'America/Los_Angeles',
         serviceName: 'Silk Press',
@@ -660,13 +833,13 @@ describe('lib/notifications/appointmentReminders', () => {
 
       mocks.txScheduledClientNotificationFindUnique.mockResolvedValueOnce(
         makeDueRow({
-          dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_1',
+          dedupeKey: 'CLIENT_REMINDER:M10080:booking_1',
           data: payload,
         }),
       )
       mocks.txBookingFindUnique.mockResolvedValueOnce(booking)
       // Pro dropped the one-week offset, keeping only three-days + day-before.
-      mocks.resolveEnabledReminderOffsetDays.mockResolvedValue([3, 1])
+      mocks.resolveEnabledReminderOffsetMinutes.mockResolvedValue([4320, 1440])
 
       const result = await validateDueAppointmentReminder({
         tx,
@@ -806,7 +979,7 @@ describe('lib/notifications/appointmentReminders', () => {
       mocks.txScheduledClientNotificationFindUnique.mockResolvedValueOnce(
         makeDueRow({
           data: {
-            reminderKind: 'ONE_WEEK',
+            offsetMinutes: 10080,
             bookingId: 'booking_1',
             scheduledFor: 'not-a-date',
             timeZone: 'America/Los_Angeles',
@@ -838,7 +1011,7 @@ describe('lib/notifications/appointmentReminders', () => {
 
       const payload = makeReminderPayload({
         bookingId: 'booking_1',
-        kind: 'ONE_WEEK',
+        offsetMinutes: 10080,
         scheduledFor: booking.scheduledFor,
         timeZone: 'America/Los_Angeles',
         serviceName: 'Silk Press',
@@ -846,7 +1019,7 @@ describe('lib/notifications/appointmentReminders', () => {
 
       mocks.txScheduledClientNotificationFindUnique.mockResolvedValueOnce(
         makeDueRow({
-          dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:wrong_booking',
+          dedupeKey: 'CLIENT_REMINDER:M10080:wrong_booking',
           data: payload,
         }),
       )
