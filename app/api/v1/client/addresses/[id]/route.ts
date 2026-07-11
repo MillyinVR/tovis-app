@@ -20,6 +20,7 @@ import {
   normalizeClientAddressKind,
   normalizeClientAddressLatLng,
   normalizeClientAddressOptionalString,
+  normalizeClientAddressRadiusMiles,
 } from '@/lib/clientAddresses/addressInput'
 
 export const dynamic = 'force-dynamic'
@@ -88,6 +89,7 @@ function hasPatchChange(body: Record<string, unknown>): boolean {
     body.placeId !== undefined ||
     body.lat !== undefined ||
     body.lng !== undefined ||
+    body.radiusMiles !== undefined ||
     body.isDefault !== undefined
   )
 }
@@ -166,6 +168,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     const lat = normalizeClientAddressLatLng(body.lat)
     const lng = normalizeClientAddressLatLng(body.lng)
     const isDefault = normalizeClientAddressBoolean(body.isDefault)
+    const radiusMiles = normalizeClientAddressRadiusMiles(body.radiusMiles)
+
+    if (radiusMiles === 'invalid') {
+      return jsonFail(400, 'Invalid radiusMiles.')
+    }
 
     const invalidField = getInvalidClientAddressField({
       label,
@@ -279,6 +286,12 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           placeId: resolvedValues.placeId,
           lat: clientAddressNumberToDecimalOrNull(resolvedValues.lat),
           lng: clientAddressNumberToDecimalOrNull(resolvedValues.lng),
+          radiusMiles:
+            nextKind === ClientAddressKind.SEARCH_AREA
+              ? radiusMiles === undefined
+                ? existing.radiusMiles
+                : radiusMiles
+              : null,
           ...addressPrivacyData,
         },
         select: { id: true },

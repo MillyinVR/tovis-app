@@ -17,6 +17,7 @@ import {
   normalizeClientAddressKind,
   normalizeClientAddressLatLng,
   normalizeClientAddressOptionalString,
+  normalizeClientAddressRadiusMiles,
   sortClientAddresses,
 } from '@/lib/clientAddresses/addressInput'
 
@@ -36,6 +37,7 @@ function normalizeCreateClientAddressBody(body: Record<string, unknown>):
       ok: true
       kind: NonNullable<ReturnType<typeof normalizeClientAddressKind>>
       isDefault: boolean | undefined
+      radiusMiles: number | null
       values: ReturnType<typeof normalizeClientAddressInput>
     }
   | {
@@ -76,6 +78,11 @@ function normalizeCreateClientAddressBody(body: Record<string, unknown>):
   const lat = normalizeClientAddressLatLng(body.lat)
   const lng = normalizeClientAddressLatLng(body.lng)
   const isDefault = normalizeClientAddressBoolean(body.isDefault)
+  const radiusMiles = normalizeClientAddressRadiusMiles(body.radiusMiles)
+
+  if (radiusMiles === 'invalid') {
+    return { ok: false, error: 'Invalid radiusMiles.' }
+  }
 
   const invalidField = getInvalidClientAddressField({
     label,
@@ -137,6 +144,7 @@ function normalizeCreateClientAddressBody(body: Record<string, unknown>):
     ok: true,
     kind,
     isDefault: typeof isDefault === 'boolean' ? isDefault : undefined,
+    radiusMiles: typeof radiusMiles === 'number' ? radiusMiles : null,
     values,
   }
 }
@@ -168,7 +176,7 @@ export async function POST(req: Request) {
       return jsonFail(400, parsed.error)
     }
 
-    const { kind, isDefault } = parsed
+    const { kind, isDefault, radiusMiles } = parsed
     let values = parsed.values
 
     // Canonicalize a hand-typed service address into a formatted address +
@@ -231,6 +239,7 @@ export async function POST(req: Request) {
           placeId: values.placeId,
           lat: clientAddressNumberToDecimalOrNull(values.lat),
           lng: clientAddressNumberToDecimalOrNull(values.lng),
+          radiusMiles: kind === 'SEARCH_AREA' ? radiusMiles : null,
           ...addressPrivacyData,
         },
         select: CLIENT_ADDRESS_SELECT,

@@ -15,6 +15,10 @@ import {
   VIEWER_RADIUS_DEFAULT_MILES,
 } from '@/lib/viewerLocation'
 
+function pickRadiusMiles(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
 type AddressKind = 'SEARCH_AREA' | 'SERVICE_ADDRESS'
 
 type AddressRecord = {
@@ -32,6 +36,7 @@ type AddressRecord = {
   placeId: string | null
   lat: number | null
   lng: number | null
+  radiusMiles: number | null
   createdAt: string
   updatedAt: string
 }
@@ -202,6 +207,7 @@ function parseAddresses(raw: unknown): AddressRecord[] {
         placeId: pickText(row.placeId) || null,
         lat,
         lng,
+        radiusMiles: pickRadiusMiles(row.radiusMiles),
         createdAt: pickText(row.createdAt) || '',
         updatedAt: pickText(row.updatedAt) || '',
       }
@@ -468,8 +474,12 @@ export default function ClientAddressesSettings() {
     if (address.lat == null || address.lng == null) return
 
     const currentViewer = loadViewerLocation()
+    // The server-persisted search radius wins so a radius set on another device
+    // (e.g. iOS) hydrates into the local viewer; fall back to the local value.
     const radiusMiles =
-      currentViewer?.radiusMiles ?? VIEWER_RADIUS_DEFAULT_MILES
+      address.radiusMiles ??
+      currentViewer?.radiusMiles ??
+      VIEWER_RADIUS_DEFAULT_MILES
 
     setViewerLocation({
       label:
@@ -696,6 +706,8 @@ export default function ClientAddressesSettings() {
       setSaving(true)
       setErr(null)
 
+      const isEdit = Boolean(editingId)
+
       const payload = {
         kind: 'SEARCH_AREA' as const,
         label: searchDraft.label || null,
@@ -708,9 +720,17 @@ export default function ClientAddressesSettings() {
         placeId: searchDraft.placeId,
         lat: searchDraft.lat,
         lng: searchDraft.lng,
+        // Seed a new area with the current (tuned) radius so it isn't null; an
+        // edit omits it so the existing server radius is preserved (the radius is
+        // tuned in the Discovery-location slice, not here).
+        ...(isEdit
+          ? {}
+          : {
+              radiusMiles:
+                loadViewerLocation()?.radiusMiles ?? VIEWER_RADIUS_DEFAULT_MILES,
+            }),
       }
 
-      const isEdit = Boolean(editingId)
       const url = isEdit
         ? `/api/v1/client/addresses/${encodeURIComponent(editingId!)}`
         : '/api/v1/client/addresses'

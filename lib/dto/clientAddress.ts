@@ -27,6 +27,12 @@ export type ClientAddressDTO = {
   placeId: string | null
   lat: number | null
   lng: number | null
+  /**
+   * SEARCH_AREA only: the discovery search radius in miles (5–50), the
+   * cross-device-synced counterpart of the local viewer radius. Null for a
+   * SERVICE_ADDRESS or a search area saved before a radius was set.
+   */
+  radiusMiles: number | null
   createdAt: string // ISO-8601
   updatedAt: string // ISO-8601
 }

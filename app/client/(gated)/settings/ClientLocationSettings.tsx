@@ -84,6 +84,9 @@ export default function ClientLocationSettings() {
   const [err, setErr] = useState<string | null>(null)
 
   const sessionTokenRef = useRef<string>(makeSessionToken())
+  // The default SEARCH_AREA id (server), so radius changes can write through and
+  // sync across devices. Null until the server area is loaded (or if none exists).
+  const searchAreaIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     const initial = loadViewerLocation()
@@ -93,6 +96,60 @@ export default function ClientLocationSettings() {
       setViewer(v)
       if (v?.radiusMiles) setRadiusMiles(v.radiusMiles)
     })
+  }, [])
+
+  // Load the server-persisted default SEARCH_AREA: hydrate the radius (so a value
+  // set on another device shows here) and, when there's no local viewer yet,
+  // mirror the server origin+radius into it. Also captures the area id so radius
+  // edits write through (below).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/v1/client/addresses', {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+        const raw = await safeJson(res)
+        if (cancelled || !res.ok || !isRecord(raw)) return
+
+        const rows = Array.isArray(raw.addresses) ? raw.addresses : []
+        const area = rows.find(
+          (a): a is Record<string, unknown> =>
+            isRecord(a) && a.kind === 'SEARCH_AREA' && a.isDefault === true,
+        )
+        if (!area) return
+
+        searchAreaIdRef.current = pickText(area.id) || null
+
+        const serverRadius =
+          typeof area.radiusMiles === 'number' &&
+          Number.isFinite(area.radiusMiles)
+            ? area.radiusMiles
+            : null
+        if (serverRadius != null) setRadiusMiles(serverRadius)
+
+        const lat = typeof area.lat === 'number' ? area.lat : null
+        const lng = typeof area.lng === 'number' ? area.lng : null
+        if (!loadViewerLocation() && lat != null && lng != null) {
+          setViewerLocation({
+            label:
+              pickText(area.label) ||
+              pickText(area.formattedAddress) ||
+              'Search area',
+            lat,
+            lng,
+            placeId: pickText(area.placeId) || null,
+            radiusMiles: serverRadius ?? VIEWER_RADIUS_DEFAULT_MILES,
+          })
+        }
+      } catch {
+        // best-effort — the local viewer works without the server area
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -142,19 +199,33 @@ export default function ClientLocationSettings() {
     }
   }, [query])
 
+  const persistRadiusToServer = useCallback((next: number) => {
+    const id = searchAreaIdRef.current
+    if (!id) return
+    // Best-effort write-through so the radius syncs across devices via the
+    // server SEARCH_AREA. The local viewer already updated regardless.
+    void fetch(`/api/v1/client/addresses/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ radiusMiles: next }),
+    }).catch(() => {})
+  }, [])
+
   const applyRadius = useCallback(
     (next: number) => {
       setRadiusMiles(next)
-      if (!viewer) return
-      setViewerLocation({
-        label: viewer.label,
-        lat: viewer.lat,
-        lng: viewer.lng,
-        placeId: viewer.placeId,
-        radiusMiles: next,
-      })
+      if (viewer) {
+        setViewerLocation({
+          label: viewer.label,
+          lat: viewer.lat,
+          lng: viewer.lng,
+          placeId: viewer.placeId,
+          radiusMiles: next,
+        })
+      }
+      persistRadiusToServer(next)
     },
-    [viewer],
+    [viewer, persistRadiusToServer],
   )
 
   const choose = useCallback(
