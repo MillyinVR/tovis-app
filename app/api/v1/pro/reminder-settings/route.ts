@@ -1,38 +1,21 @@
 // app/api/v1/pro/reminder-settings/route.ts
 //
-// GET  — read the pro's appointment-reminder cadence + the supported menu.
-// PUT  — create/update it.
+// GET  — read the pro's appointment-reminder cadence + suggested presets.
+// PUT  — create/update it from a structured reminders: {value, unit}[] list.
 // Not flag-gated: appointment reminders already ship; this just lets a pro
-// choose which of them fire.
+// choose which of them fire and at what lead times.
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import {
   getProReminderSettings,
+  parseReminderLeadsToOffsetMinutes,
   updateProReminderSettings,
   ProReminderSettingsValidationError,
-  REMINDER_OFFSET_OPTIONS,
+  REMINDER_PRESETS,
 } from '@/lib/reminderSettings/settings'
-import type {
-  ProReminderSettingsResponseDTO,
-  ProReminderSettingsUpdateRequestDTO,
-} from '@/lib/dto/reminderSettings'
+import type { ProReminderSettingsResponseDTO } from '@/lib/dto/reminderSettings'
 
 export const dynamic = 'force-dynamic'
-
-function normalizeOffsetDays(v: unknown): number[] {
-  if (!Array.isArray(v)) return []
-  const out: number[] = []
-  for (const raw of v) {
-    const n =
-      typeof raw === 'number'
-        ? raw
-        : typeof raw === 'string' && raw.trim() !== ''
-          ? Number.parseInt(raw.trim(), 10)
-          : NaN
-    if (Number.isInteger(n)) out.push(n)
-  }
-  return out
-}
 
 export async function GET() {
   try {
@@ -42,7 +25,7 @@ export async function GET() {
     const settings = await getProReminderSettings(auth.professionalId)
     const response: ProReminderSettingsResponseDTO = {
       settings,
-      options: [...REMINDER_OFFSET_OPTIONS],
+      presets: [...REMINDER_PRESETS],
     }
     return jsonOk(response)
   } catch (error: unknown) {
@@ -59,19 +42,17 @@ export async function PUT(req: Request) {
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
 
-    const update: ProReminderSettingsUpdateRequestDTO = {
-      enabled: body.enabled === true,
-      offsetDays: normalizeOffsetDays(body.offsetDays),
-    }
-
     const settings = await updateProReminderSettings({
       professionalId: auth.professionalId,
-      update,
+      update: {
+        enabled: body.enabled === true,
+        offsetMinutes: parseReminderLeadsToOffsetMinutes(body.reminders),
+      },
     })
 
     const response: ProReminderSettingsResponseDTO = {
       settings,
-      options: [...REMINDER_OFFSET_OPTIONS],
+      presets: [...REMINDER_PRESETS],
     }
     return jsonOk(response)
   } catch (error: unknown) {

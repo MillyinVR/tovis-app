@@ -226,7 +226,10 @@ export type {
   ProReminderSettingsDTO,
   ProReminderSettingsResponseDTO,
   ProReminderSettingsUpdateRequestDTO,
-  ReminderOffsetOptionDTO,
+  ReminderLeadDTO,
+  ReminderLeadInputDTO,
+  ReminderLeadUnit,
+  ReminderPresetDTO,
 } from '@/lib/dto/reminderSettings'
 
 // ── Pro AI-camera monthly image usage (GET /api/v1/pro/camera/usage) ──────────

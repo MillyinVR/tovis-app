@@ -5,9 +5,12 @@ import {
   NotificationChannel,
   NotificationDeliveryEventType,
   NotificationDeliveryStatus,
+  NotificationEventKey,
   NotificationRecipientKind,
   Prisma,
 } from '@prisma/client'
+
+import { isRecord } from '@/lib/guards'
 
 import { type NotificationPreferenceLike } from '../channelPolicy'
 import { getNotificationEventDefinition } from '../eventKeys'
@@ -96,6 +99,8 @@ const runtimePolicyCandidateSelect = {
       clientId: true,
       recipientTimeZone: true,
       cancelledAt: true,
+      // Carries the appointment instant for the short-lead reminder cap below.
+      payload: true,
     },
   },
 } satisfies Prisma.NotificationDeliverySelect
@@ -313,6 +318,21 @@ function shouldRequestRuntimeQuietHoursBypass(
     .allowQuietHoursBypass
 }
 
+/**
+ * The appointment instant for an APPOINTMENT_REMINDER delivery, read from the
+ * reminder payload's `scheduledFor` (mirrored into the dispatch payload). Used to
+ * cap a short-lead reminder so it never defers past the appointment itself.
+ */
+function readAppointmentStartFromPayload(
+  payload: Prisma.JsonValue | null | undefined,
+): Date | null {
+  if (!isRecord(payload)) return null
+  const scheduledFor = payload.scheduledFor
+  if (typeof scheduledFor !== 'string') return null
+  const parsed = new Date(scheduledFor)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 async function maybeDeferCandidateForQuietHours(args: {
   tx: Prisma.TransactionClient
   candidate: RuntimePolicyCandidateDelivery
@@ -343,6 +363,27 @@ async function maybeDeferCandidateForQuietHours(args: {
 
   if (runtimePolicy.action !== 'DEFER') {
     return false
+  }
+
+  // Short-lead reminder cap: a reminder whose quiet-hours resume time lands at or
+  // after the appointment start would arrive AFTER the appointment — useless. An
+  // on-time pre-dawn reminder beats a morning-after one, so send it now instead
+  // of deferring. Only appointment reminders (which carry the appointment instant
+  // in their payload) qualify; in-app is never deferred, so this only bites
+  // SMS/EMAIL short leads.
+  if (
+    args.candidate.dispatch.eventKey ===
+    NotificationEventKey.APPOINTMENT_REMINDER
+  ) {
+    const appointmentStartsAt = readAppointmentStartFromPayload(
+      args.candidate.dispatch.payload,
+    )
+    if (
+      appointmentStartsAt &&
+      runtimePolicy.nextAttemptAt.getTime() >= appointmentStartsAt.getTime()
+    ) {
+      return false
+    }
   }
 
   const deferResult = await args.tx.notificationDelivery.updateMany({

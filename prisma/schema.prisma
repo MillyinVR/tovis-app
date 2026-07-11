@@ -2172,10 +2172,13 @@ model ProReminderSettings {
   // pro's bookings. Reminders default ON so every pro sends them out of the box.
   enabled Boolean @default(true)
 
-  // Days-before-appointment offsets to send a reminder at. Each maps to one
-  // reminder kind; only values in the supported menu (1 / 3 / 7) are honored.
-  // Default cadence: one week + three days + day before.
-  offsetDays Int[] @default([7, 3, 1])
+  // Lead times (minutes before the appointment) to send a reminder at. Any lead
+  // is allowed — a whole-day lead is a multiple of 1440 and fires at the
+  // appointment's own local wall-clock time N days earlier (DST-safe); a sub-day
+  // lead fires exactly that many minutes before the appointment instant. Bounds
+  // (min/max/granularity/count) are enforced in lib/reminderSettings/settings.ts.
+  // Default cadence: one week + three days + day before (10080 / 4320 / 1440).
+  offsetMinutes Int[] @default([10080, 4320, 1440])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
