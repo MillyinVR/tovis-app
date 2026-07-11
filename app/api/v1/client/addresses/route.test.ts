@@ -209,6 +209,7 @@ describe('POST /api/v1/client/addresses', () => {
         placeId: 'place_123',
         lat: new Prisma.Decimal('34.052235'),
         lng: new Prisma.Decimal('-118.243683'),
+        radiusMiles: null,
         encryptedAddressJson: {
           v: 1,
           algorithm: 'plaintext-json-expand-phase',
@@ -253,11 +254,78 @@ describe('POST /api/v1/client/addresses', () => {
           placeId: 'place_123',
           lat: 34.052235,
           lng: -118.243683,
+          radiusMiles: null,
           createdAt: '2026-03-11T19:00:00.000Z',
           updatedAt: '2026-03-11T19:00:00.000Z',
         },
       },
     })
+  })
+
+  it('persists a clamped radiusMiles for a search area and returns it in the DTO', async () => {
+    mocks.clientAddressCreate.mockResolvedValueOnce({
+      id: 'addr_search_2',
+      kind: ClientAddressKind.SEARCH_AREA,
+      label: null,
+      isDefault: true,
+      formattedAddress: 'San Diego, CA, USA',
+      addressLine1: null,
+      addressLine2: null,
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: null,
+      countryCode: 'US',
+      placeId: 'pl_sd',
+      lat: new Prisma.Decimal('32.7157'),
+      lng: new Prisma.Decimal('-117.1611'),
+      radiusMiles: 50,
+      createdAt: new Date('2026-03-11T19:00:00.000Z'),
+      updatedAt: new Date('2026-03-11T19:00:00.000Z'),
+    })
+
+    const result = await POST(
+      makeRequest({
+        kind: 'SEARCH_AREA',
+        placeId: 'pl_sd',
+        lat: 32.7157,
+        lng: -117.1611,
+        radiusMiles: 999, // out of range → clamped to the 50mi max
+      }),
+    )
+
+    expect(mocks.clientAddressCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: ClientAddressKind.SEARCH_AREA,
+          radiusMiles: 50,
+        }),
+      }),
+    )
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        status: 201,
+        data: expect.objectContaining({
+          address: expect.objectContaining({ radiusMiles: 50 }),
+        }),
+      }),
+    )
+  })
+
+  it('rejects a non-numeric radiusMiles', async () => {
+    const result = await POST(
+      makeRequest({
+        kind: 'SEARCH_AREA',
+        placeId: 'pl_sd',
+        lat: 32.7157,
+        lng: -117.1611,
+        radiusMiles: 'wide',
+      }),
+    )
+
+    expect(result).toEqual({ ok: false, status: 400, error: 'Invalid radiusMiles.' })
+    expect(mocks.clientAddressCreate).not.toHaveBeenCalled()
   })
 
   it('creates a client search area with address privacy write fields', async () => {

@@ -99,6 +99,7 @@ function makeExistingAddress(
     placeId: string | null
     lat: Prisma.Decimal | null
     lng: Prisma.Decimal | null
+    radiusMiles: number | null
     createdAt: Date
     updatedAt: Date
   }> = {},
@@ -120,6 +121,7 @@ function makeExistingAddress(
     placeId: overrides.placeId ?? 'old_place_1',
     lat: overrides.lat ?? new Prisma.Decimal('34.050000'),
     lng: overrides.lng ?? new Prisma.Decimal('-118.240000'),
+    radiusMiles: overrides.radiusMiles ?? null,
     createdAt:
       overrides.createdAt ?? new Date('2026-03-11T18:00:00.000Z'),
     updatedAt:
@@ -144,6 +146,7 @@ function makeUpdatedAddress() {
     placeId: 'place_123',
     lat: new Prisma.Decimal('34.052235'),
     lng: new Prisma.Decimal('-118.243683'),
+    radiusMiles: null,
     createdAt: new Date('2026-03-11T18:00:00.000Z'),
     updatedAt: new Date('2026-03-11T19:00:00.000Z'),
   }
@@ -269,6 +272,7 @@ describe('PATCH /api/v1/client/addresses/[id]', () => {
         placeId: 'place_123',
         lat: new Prisma.Decimal('34.052235'),
         lng: new Prisma.Decimal('-118.243683'),
+        radiusMiles: null,
         encryptedAddressJson: {
           v: 1,
           algorithm: 'plaintext-json-expand-phase',
@@ -313,11 +317,57 @@ describe('PATCH /api/v1/client/addresses/[id]', () => {
           placeId: 'place_123',
           lat: 34.052235,
           lng: -118.243683,
+          radiusMiles: null,
           createdAt: '2026-03-11T18:00:00.000Z',
           updatedAt: '2026-03-11T19:00:00.000Z',
         },
       },
     })
+  })
+
+  it('updates only radiusMiles on a search area, keeping the saved address', async () => {
+    const existing = makeExistingAddress({
+      kind: ClientAddressKind.SEARCH_AREA,
+      label: 'My area',
+      radiusMiles: 15,
+    })
+    mocks.clientAddressFindFirst.mockResolvedValue(existing)
+    mocks.clientAddressFindUnique.mockResolvedValue({
+      ...existing,
+      radiusMiles: 30,
+    })
+
+    const result = await PATCH(makeRequest({ radiusMiles: 30 }), makeCtx())
+
+    // The radius is updated; the address anchor is preserved (kept from existing).
+    expect(mocks.clientAddressUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: ClientAddressKind.SEARCH_AREA,
+          radiusMiles: 30,
+        }),
+      }),
+    )
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        status: 200,
+        data: expect.objectContaining({
+          address: expect.objectContaining({ radiusMiles: 30 }),
+        }),
+      }),
+    )
+  })
+
+  it('rejects a non-numeric radiusMiles', async () => {
+    const result = await PATCH(
+      makeRequest({ radiusMiles: 'wide' }),
+      makeCtx(),
+    )
+
+    expect(result).toEqual({ ok: false, status: 400, error: 'Invalid radiusMiles.' })
+    expect(mocks.clientAddressUpdate).not.toHaveBeenCalled()
   })
 
   it('builds address privacy data from existing values plus partial incoming changes', async () => {
@@ -400,6 +450,7 @@ describe('PATCH /api/v1/client/addresses/[id]', () => {
           placeId: existing.placeId,
           lat: 34.05,
           lng: -118.24,
+          radiusMiles: null,
           createdAt: '2026-03-11T18:00:00.000Z',
           updatedAt: '2026-03-11T18:30:00.000Z',
         },

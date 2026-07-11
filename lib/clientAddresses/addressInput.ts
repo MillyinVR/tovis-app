@@ -22,6 +22,7 @@ export const CLIENT_ADDRESS_SELECT = {
   placeId: true,
   lat: true,
   lng: true,
+  radiusMiles: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.ClientAddressSelect
@@ -66,6 +67,14 @@ export type NormalizedOptionalString =
 
 export type NormalizedLatLng = number | null | undefined | 'invalid'
 export type NormalizedBoolean = boolean | undefined | 'invalid'
+export type NormalizedRadiusMiles = number | null | undefined | 'invalid'
+
+// SEARCH_AREA discovery radius bounds — mirror the viewer-location clamp
+// (VIEWER_RADIUS_MIN/MAX_MILES) so the server-persisted radius and the local
+// viewer radius agree. Kept here (not imported from lib/viewerLocation) so this
+// server module has no dependency on the browser-oriented viewer module.
+export const SEARCH_AREA_RADIUS_MIN_MILES = 5
+export const SEARCH_AREA_RADIUS_MAX_MILES = 50
 
 export type ClientAddressInvalidFieldInput = {
   label: NormalizedOptionalString
@@ -152,6 +161,27 @@ export function normalizeClientAddressLatLng(
   if (numberValue == null || !Number.isFinite(numberValue)) return 'invalid'
 
   return numberValue
+}
+
+/**
+ * Normalize a request `radiusMiles` for a SEARCH_AREA:
+ *   undefined → undefined (no change), null/'' → null (clear),
+ *   a finite number → rounded and clamped to [5, 50], anything else → 'invalid'.
+ */
+export function normalizeClientAddressRadiusMiles(
+  value: unknown,
+): NormalizedRadiusMiles {
+  if (value === undefined) return undefined
+  if (value === null || value === '') return null
+
+  const numberValue = pickNumber(value)
+  if (numberValue == null || !Number.isFinite(numberValue)) return 'invalid'
+
+  const rounded = Math.round(numberValue)
+  if (rounded < SEARCH_AREA_RADIUS_MIN_MILES) return SEARCH_AREA_RADIUS_MIN_MILES
+  if (rounded > SEARCH_AREA_RADIUS_MAX_MILES) return SEARCH_AREA_RADIUS_MAX_MILES
+
+  return rounded
 }
 
 export function coerceClientAddressLatLng(
@@ -310,6 +340,7 @@ export function mapClientAddress(row: ClientAddressRow): ClientAddressDTO {
     placeId: row.placeId ?? null,
     lat: decimalToNullableNumber(row.lat),
     lng: decimalToNullableNumber(row.lng),
+    radiusMiles: row.radiusMiles ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
