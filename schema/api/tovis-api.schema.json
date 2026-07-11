@@ -5746,6 +5746,10 @@
           "description": "The client's Stripe Billing customer id.",
           "type": "string"
         },
+        "publishableKey": {
+          "description": "The Stripe publishable key to initialize the client SDK with. Web reads this from the `NEXT_PUBLIC_` bundle inline and ignores this field; native clients (which can't inline build-time env) use it so the key always matches the backend's Stripe mode (test vs live). Empty string if unconfigured.",
+          "type": "string"
+        },
         "setupIntentId": {
           "description": "SetupIntent id, echoed back to the confirm (POST payment-methods) step.",
           "type": "string"
@@ -5754,7 +5758,8 @@
       "required": [
         "clientSecret",
         "setupIntentId",
-        "customerId"
+        "customerId",
+        "publishableKey"
       ],
       "type": "object"
     },
