@@ -41,6 +41,20 @@ export const publicProfessionalProfileSelect =
     instagramHandle: true,
     tiktokHandle: true,
     websiteUrl: true,
+
+    // Creator-page cover banner (§18). Just the render pointers so the mapper can
+    // resolve a display URL; null when the pro hasn't set a cover (branded
+    // fallback). Public-bucket covers render as permanent URLs, private ones sign.
+    coverMediaAsset: {
+      select: {
+        storageBucket: true,
+        storagePath: true,
+        thumbBucket: true,
+        thumbPath: true,
+        url: true,
+        thumbUrl: true,
+      },
+    },
   })
 
 export const publicOfferingServiceSelect =

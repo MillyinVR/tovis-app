@@ -11272,6 +11272,12 @@
             "null"
           ]
         },
+        "coverUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "displayHandle": {
           "type": [
             "string",
@@ -11358,6 +11364,7 @@
         "businessName",
         "bio",
         "avatarUrl",
+        "coverUrl",
         "professionType",
         "professionLabel",
         "location",
