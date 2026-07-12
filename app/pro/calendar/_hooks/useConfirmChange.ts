@@ -39,6 +39,7 @@ import {
 } from '@/lib/timeZone'
 
 import { errorMessageFromUnknown, safeJson } from '@/lib/http'
+import { hasOverlap } from '@/lib/calendar/overlap'
 
 import {
   BookingOverrideRequiredError,
@@ -416,6 +417,48 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     }
   }, [bookingContext, pendingChange])
 
+  // Passive double-book note for the confirm: the client the proposed new time
+  // overlaps, if any (the server still allows a pro overlap — this only surfaces
+  // it). Blocks and the moved booking itself are skipped.
+  const pendingOverlapName = useMemo(() => {
+    if (!pendingChange || pendingChange.entityType !== 'booking' || !bookingContext) {
+      return null
+    }
+
+    const startIso =
+      pendingChange.kind === 'move'
+        ? snappedMoveStartIso({ change: pendingChange, context: bookingContext }) ??
+          pendingChange.nextStartIso
+        : pendingChange.original.startsAt
+
+    const durationMinutes =
+      pendingChange.kind === 'resize'
+        ? Number(pendingChange.nextTotalDurationMinutes)
+        : eventDurationMinutes(pendingChange.original)
+
+    const start = new Date(startIso)
+
+    if (!Number.isFinite(start.getTime()) || !(durationMinutes > 0)) return null
+
+    const end = new Date(start.getTime() + durationMinutes * 60_000)
+
+    for (const candidate of eventsRef.current) {
+      if (candidate.kind === 'BLOCK') continue
+      if (candidate.id === pendingChange.eventId) continue
+
+      if (
+        hasOverlap(
+          { startsAt: start, endsAt: end },
+          { startsAt: candidate.startsAt, endsAt: candidate.endsAt },
+        )
+      ) {
+        return candidate.clientName?.trim() || 'another appointment'
+      }
+    }
+
+    return null
+  }, [bookingContext, eventsRef, pendingChange])
+
   const openConfirm = useCallback((change: PendingChange) => {
     setOverrideReason('')
     setPendingChange(change)
@@ -604,6 +647,7 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     applyConfirm,
 
     pendingOutsideWorkingHours,
+    pendingOverlapName,
     overrideReason,
     setOverrideReason,
 

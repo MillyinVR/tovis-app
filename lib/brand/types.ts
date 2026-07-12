@@ -130,6 +130,8 @@ export type BrandProCalendarLabelsCopy = {
   lifetime: string
   noShows: string
   timeZone: string
+  /** Passive double-book signal: tile a11y hint + reschedule-confirm note. */
+  overlapWarning: string
 }
 
 export type BrandProCalendarLocationPanelCopy = {

@@ -573,6 +573,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     cancelConfirm: confirm.cancelConfirm,
     applyConfirm: confirm.applyConfirm,
     pendingOutsideWorkingHours: confirm.pendingOutsideWorkingHours,
+    pendingOverlapName: confirm.pendingOverlapName,
     overrideReason: confirm.overrideReason,
     setOverrideReason: confirm.setOverrideReason,
 

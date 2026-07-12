@@ -15,6 +15,8 @@ type ConfirmChangeModalProps = {
   change: PendingChange | null
   applying: boolean
   outsideWorkingHours?: boolean
+  /** Passive double-book note: the client the new time overlaps, if any. */
+  overlapName?: string | null
   overrideReason: string
   onChangeOverrideReason: (value: string) => void
   onCancel: () => void
@@ -171,6 +173,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
     change,
     applying,
     outsideWorkingHours = false,
+    overlapName = null,
     overrideReason,
     onChangeOverrideReason,
     onCancel,
@@ -272,6 +275,18 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
               <p className="mt-2 text-sm leading-6 text-paperDim">
                 Clients cannot normally book this time. You can still place the
                 booking here, and optionally add a note for your client.
+              </p>
+            </section>
+          ) : null}
+
+          {overlapName && !isBlock ? (
+            <section className="mt-4 rounded-2xl border border-toneWarn/25 bg-toneWarn/10 p-4">
+              <p className="font-mono text-[10px] font-black uppercase tracking-[0.14em] text-toneWarn">
+                Schedule conflict
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-paperDim">
+                This overlaps {overlapName}. You can still move it.
               </p>
             </section>
           ) : null}

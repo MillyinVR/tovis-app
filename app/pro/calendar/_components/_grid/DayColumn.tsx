@@ -5,6 +5,7 @@ import { useMemo, useRef } from 'react'
 import type { CSSProperties, DragEvent, MutableRefObject } from 'react'
 
 import { formatInTimeZone } from '@/lib/time'
+import { overlappingEventIds } from '@/lib/calendar/overlap'
 
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType, WorkingHoursJson } from '../../_types'
@@ -511,6 +512,23 @@ export function DayColumn(props: DayColumnProps) {
     [dayEvents, dayYmd, stepMinutes, timeFormatter, timeZone],
   )
 
+  // Passive double-book signal: which bookings overlap another booking today
+  // (blocks excluded — the pro's own time isn't a client conflict). The server
+  // still allows the overlap; this only surfaces it.
+  const conflictIds = useMemo(
+    () =>
+      overlappingEventIds(
+        eventLayouts
+          .filter((item) => item.layout.entityType === 'booking')
+          .map((item) => ({
+            id: item.event.id,
+            startsAt: item.event.startsAt,
+            endsAt: item.event.endsAt,
+          })),
+      ),
+    [eventLayouts],
+  )
+
   function getColumnTop(): number {
     return containerRef.current?.getBoundingClientRect().top ?? 0
   }
@@ -594,6 +612,7 @@ export function DayColumn(props: DayColumnProps) {
             ev={event}
             entityType={layout.entityType}
             apiId={layout.apiId}
+            conflict={conflictIds.has(event.id)}
             topPx={layout.topPx}
             heightPx={layout.heightPx}
             timeLabel={layout.timeLabel}

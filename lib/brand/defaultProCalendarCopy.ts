@@ -139,6 +139,7 @@ export function defaultProCalendarCopy(
     lifetime: 'Lifetime',
     noShows: 'No-shows',
     timeZone: 'TZ',
+    overlapWarning: 'Overlaps another appointment',
   },
 
   locationPanel: {
