@@ -366,6 +366,32 @@ describe('upsertProClient', () => {
     })
   })
 
+  it('stamps createdByProfessionalId on a newly created unclaimed profile', async () => {
+    mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([])
+    mocks.prisma.user.findMany.mockResolvedValueOnce([])
+    mocks.prisma.clientProfile.create.mockResolvedValueOnce(
+      makeProfile({ id: 'client_new_1' }),
+    )
+
+    const result = await upsertProClient({
+      professionalId: 'pro_1',
+      firstName: 'Tori',
+      lastName: 'Morales',
+      email: 'tori@example.com',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(mocks.prisma.clientProfile.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: null,
+          claimStatus: ClientClaimStatus.UNCLAIMED,
+          createdByProfessionalId: 'pro_1',
+        }),
+      }),
+    )
+  })
+
   it('does not include plaintext phone fallback in client profile lookup', async () => {
     mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([])
     mocks.prisma.user.findMany.mockResolvedValueOnce([])

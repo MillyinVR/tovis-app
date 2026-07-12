@@ -1,5 +1,6 @@
 // app/api/v1/pro/clients/route.test.ts
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { ClientClaimStatus } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn(
@@ -91,6 +92,64 @@ describe('GET /api/v1/pro/clients', () => {
     expect(first?.lastBookingLabel).toMatch(/^Last booking: /)
     expect(second?.lastBookingLabel).toBe('No bookings yet')
     expect(second?.phone).toBeNull()
+  })
+
+  it('with ENABLE_BOOKINGLESS_CLAIM on, also lists createdBy clients and flags invitable ones', async () => {
+    const prior = process.env.ENABLE_BOOKINGLESS_CLAIM
+    process.env.ENABLE_BOOKINGLESS_CLAIM = '1'
+    try {
+      mocks.requirePro.mockResolvedValue({
+        ok: true,
+        professionalId: 'pro_1',
+        user: { professionalProfile: { timeZone: null } },
+      })
+      mocks.prisma.clientProfile.findMany.mockResolvedValue([
+        {
+          id: 'c_unclaimed',
+          firstName: 'Imported',
+          lastName: 'Client',
+          phone: null,
+          userId: null,
+          claimStatus: ClientClaimStatus.UNCLAIMED,
+          user: null,
+          bookings: [],
+        },
+        {
+          id: 'c_claimed',
+          firstName: 'Booked',
+          lastName: 'Client',
+          phone: null,
+          userId: 'u_9',
+          claimStatus: ClientClaimStatus.CLAIMED,
+          user: { email: 'b@example.com' },
+          bookings: [{ scheduledFor: new Date('2026-07-01T17:00:00Z'), locationTimeZone: 'America/Los_Angeles' }],
+        },
+      ])
+
+      const res = await GET()
+      expect(res.status).toBe(200)
+
+      const whereArg = (
+        mocks.prisma.clientProfile.findMany.mock.calls[0]?.[0] as {
+          where: { OR?: Array<Record<string, unknown>> }
+        }
+      ).where
+      expect(whereArg.OR).toEqual(
+        expect.arrayContaining([{ createdByProfessionalId: 'pro_1' }]),
+      )
+
+      const body = (await res.json()) as {
+        clients: Array<{ id: string; invitable: boolean }>
+      }
+      const invitable = Object.fromEntries(
+        body.clients.map((c) => [c.id, c.invitable]),
+      )
+      expect(invitable.c_unclaimed).toBe(true)
+      expect(invitable.c_claimed).toBe(false)
+    } finally {
+      if (prior === undefined) delete process.env.ENABLE_BOOKINGLESS_CLAIM
+      else process.env.ENABLE_BOOKINGLESS_CLAIM = prior
+    }
   })
 
   it('falls back to email then "Client" when the name is blank', async () => {

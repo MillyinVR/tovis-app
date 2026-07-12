@@ -22,6 +22,7 @@ export type RateLimitBucket =
   | 'pro:finance:expenses:write'
   | 'pro:camera:look-brief'
   | 'pro:camera:set-critique'
+  | 'pro:client-claim-invite'
   | 'google:proxy'
   | 'pro-license:verify'
   | 'messages:send'
@@ -146,6 +147,14 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 30,
     windowSeconds: 60,
     prefix: 'rl:pro:media:write',
+    mode: 'redis-only',
+  },
+  // Keyed per (pro, client) so a pro can batch-invite many DIFFERENT clients
+  // (a migrated list) while no single client can be spammed with claim links.
+  'pro:client-claim-invite': {
+    limit: 5,
+    windowSeconds: 60 * 60,
+    prefix: 'rl:pro:client-claim-invite',
     mode: 'redis-only',
   },
   'pro:offerings:write': {
