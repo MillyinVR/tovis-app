@@ -9,11 +9,15 @@ import {
   type ClientClaimLinkRow,
 } from '@/lib/clients/clientClaimLinks'
 import { normalizeProClientInviteToken } from '@/lib/clients/proClientInviteTokens'
+import {
+  buildClaimLocationLabel,
+  buildClaimProfessionalLabel,
+  resolveClaimBookingTimeZone,
+} from '@/lib/clients/claimPublicView'
 import { getCurrentUser } from '@/lib/currentUser'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { pickString } from '@/lib/pick'
-import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
-import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
+import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -120,46 +124,10 @@ function isClientClaimed(invite: Pick<ClaimInviteRecord, 'client'>): boolean {
   return invite.client?.claimStatus === ClientClaimStatus.CLAIMED
 }
 
-function buildLocationLabel(
-  booking: NonNullable<ClaimInviteRecord['booking']>,
-): string | null {
-  const formattedAddress = booking.location?.formattedAddress?.trim()
-  if (formattedAddress) return formattedAddress
-
-  const locationName = booking.location?.name?.trim()
-  if (locationName) return locationName
-
-  const cityState = [booking.location?.city, booking.location?.state]
-    .filter(Boolean)
-    .join(', ')
-    .trim()
-
-  if (cityState) return cityState
-
-  const professionalLocation = booking.professional?.location?.trim()
-  if (professionalLocation) return professionalLocation
-
-  return null
-}
-
-function buildProfessionalLabel(
-  booking: NonNullable<ClaimInviteRecord['booking']>,
-): string {
-  return formatProfessionalPublicDisplayName(
-    booking.professional ?? null,
-    'your professional',
-  )
-}
-
 function buildAppointmentLabel(
   booking: NonNullable<ClaimInviteRecord['booking']>,
 ): string | null {
-  const timeZone = sanitizeTimeZone(
-    booking.locationTimeZone ??
-      booking.location?.timeZone ??
-      booking.professional?.timeZone,
-    'UTC',
-  )
+  const timeZone = resolveClaimBookingTimeZone(booking)
 
   if (!(booking.scheduledFor instanceof Date)) return null
 
@@ -299,8 +267,8 @@ export default async function ClaimInvitePage(props: PageProps) {
   }
 
   const serviceTitle = invite.booking.service?.name?.trim() || 'Service'
-  const professionalLabel = buildProfessionalLabel(invite.booking)
-  const locationLabel = buildLocationLabel(invite.booking)
+  const professionalLabel = buildClaimProfessionalLabel(invite.booking)
+  const locationLabel = buildClaimLocationLabel(invite.booking)
   const appointmentLabel = buildAppointmentLabel(invite.booking)
 
   return (
