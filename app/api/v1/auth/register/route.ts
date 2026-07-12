@@ -64,6 +64,7 @@ import {
 import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
 import { buildEmailEncryptionWriteData } from '@/lib/security/emailPrivacy'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
+import { adoptClaimInviteDuringRegistration } from '@/lib/clients/claimAdoption'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -1067,6 +1068,27 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(password)
 
+    // Claim-link signup: the real person should ADOPT the pro's existing UNCLAIMED
+    // ClientProfile (keeping its bookings, aftercare, addresses, and contact)
+    // rather than mint a duplicate that collides on the unique contact hashes and
+    // dead-ends with ACCOUNT_EXISTS. When adopting, create the User with NO nested
+    // profile and adopt-or-create the profile explicitly below.
+    const attemptClaimAdopt =
+      role === 'CLIENT' &&
+      verificationIntent === 'CLAIM_INVITE' &&
+      Boolean(verificationInviteToken)
+
+    const clientProfileCreateData = {
+      homeTenantId: tenantContext.tenantId,
+      firstName,
+      lastName,
+      phone,
+      ...buildClientProfileContactLookupData({ email, phone }),
+      ...buildEmailEncryptionWriteData({ email }),
+      ...buildPhoneEncryptionWriteData({ phone }),
+      phoneVerifiedAt: null,
+    } satisfies Prisma.ClientProfileUncheckedCreateWithoutUserInput
+
     const { user } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -1089,19 +1111,8 @@ export async function POST(request: Request) {
           transactionalSmsConsentUserAgent,
           
           clientProfile:
-            role === 'CLIENT'
-              ? {
-                  create: {
-                    homeTenantId: tenantContext.tenantId,
-                    firstName,
-                    lastName,
-                    phone,
-                    ...buildClientProfileContactLookupData({ email, phone }),
-                    ...buildEmailEncryptionWriteData({ email }),
-                    ...buildPhoneEncryptionWriteData({ phone }),
-                    phoneVerifiedAt: null,
-                  },
-                }
+            role === 'CLIENT' && !attemptClaimAdopt
+              ? { create: clientProfileCreateData }
               : undefined,
 
           professionalProfile:
@@ -1235,6 +1246,25 @@ export async function POST(request: Request) {
           authVersion: true,
         },
       })
+
+      if (role === 'CLIENT' && attemptClaimAdopt) {
+        const adoption = await adoptClaimInviteDuringRegistration({
+          tx,
+          token: verificationInviteToken,
+          userId: user.id,
+          registeredEmail: email,
+          registeredPhone: phone,
+          now: new Date(),
+        })
+
+        // Contact mismatch / invalid / already-claimed invite: fall back to a
+        // fresh profile so signup still succeeds (degrades to today's behavior).
+        if (!adoption.adopted) {
+          await tx.clientProfile.create({
+            data: { userId: user.id, ...clientProfileCreateData },
+          })
+        }
+      }
 
       return { user }
     })

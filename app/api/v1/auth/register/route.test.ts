@@ -39,6 +39,8 @@ const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockBuildAddressPrivacyWriteData = vi.hoisted(() => vi.fn())
 
+const mockAdoptClaimInvite = vi.hoisted(() => vi.fn())
+
 const mockFetch = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
@@ -134,6 +136,10 @@ vi.mock('@/lib/observability/authEvents', () => ({
 
 vi.mock('@/lib/security/addressEncryption', () => ({
   buildAddressPrivacyWriteData: mockBuildAddressPrivacyWriteData,
+}))
+
+vi.mock('@/lib/clients/claimAdoption', () => ({
+  adoptClaimInviteDuringRegistration: mockAdoptClaimInvite,
 }))
 
 // Deterministic stand-in for the AEAD dual-write so the assertion does not
@@ -479,6 +485,12 @@ describe('app/api/v1/auth/register/route', () => {
     })
 
     mockStartTwilioVerifyPhoneVerification.mockReset()
+
+    mockAdoptClaimInvite.mockReset()
+    mockAdoptClaimInvite.mockResolvedValue({
+      adopted: true,
+      clientId: 'client_adopted',
+    })
 
     mockFetch.mockReset()
     vi.stubGlobal('fetch', mockFetch)
@@ -1301,6 +1313,137 @@ describe('app/api/v1/auth/register/route', () => {
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
     expect(setCookie).toContain('tovis_client_zip=92101')
+  })
+
+  it('does not attempt claim adoption for a normal (non-claim) client signup', async () => {
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_plain',
+      email: 'client@example.com',
+      role: Role.CLIENT,
+    })
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    await flushWaitUntilTasks()
+
+    expect(result.status).toBe(201)
+    expect(mockAdoptClaimInvite).not.toHaveBeenCalled()
+
+    const userCreateArg = tx.user.create.mock.calls[0]?.[0]
+    expect(userCreateArg.data.clientProfile).toEqual({
+      create: expect.objectContaining({
+        firstName: 'Tori',
+        lastName: 'Morales',
+        homeTenantId: 'tenant_root',
+      }),
+    })
+  })
+
+  it('adopts the existing unclaimed profile for a claim-link client signup', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_claim',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      clientProfile: {
+        updateMany: vi.fn(),
+        create: vi.fn(),
+      },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockAdoptClaimInvite.mockResolvedValueOnce({
+      adopted: true,
+      clientId: 'client_existing',
+    })
+
+    const result = await POST(
+      makeRequest({
+        ...makeClientSignupBody(),
+        intent: 'CLAIM_INVITE',
+        inviteToken: 'tok_claim_1',
+      }),
+    )
+    await flushWaitUntilTasks()
+
+    expect(result.status).toBe(201)
+
+    // The User is created WITHOUT a nested client profile so we can adopt the
+    // pre-existing unclaimed one instead of minting a colliding duplicate.
+    const userCreateArg = tx.user.create.mock.calls[0]?.[0]
+    expect(userCreateArg.data.clientProfile).toBeUndefined()
+
+    expect(mockAdoptClaimInvite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tx,
+        token: 'tok_claim_1',
+        userId: 'user_claim',
+        registeredEmail: 'client@example.com',
+        registeredPhone: '+15551234567',
+      }),
+    )
+
+    // Adopted -> no fresh profile is created.
+    expect(tx.clientProfile.create).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a fresh profile when the claim invite is not adopted', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_fallback',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      clientProfile: {
+        updateMany: vi.fn(),
+        create: vi.fn().mockResolvedValue({ id: 'client_fresh' }),
+      },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockAdoptClaimInvite.mockResolvedValueOnce({
+      adopted: false,
+      reason: 'contact_mismatch',
+    })
+
+    const result = await POST(
+      makeRequest({
+        ...makeClientSignupBody(),
+        intent: 'CLAIM_INVITE',
+        inviteToken: 'tok_claim_1',
+      }),
+    )
+    await flushWaitUntilTasks()
+
+    expect(result.status).toBe(201)
+    expect(mockAdoptClaimInvite).toHaveBeenCalledTimes(1)
+
+    expect(tx.clientProfile.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'user_fallback',
+        firstName: 'Tori',
+        lastName: 'Morales',
+        homeTenantId: 'tenant_root',
+      }),
+    })
   })
 
   it('still returns 201 immediately when email send fails in the background tail', async () => {
