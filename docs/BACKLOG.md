@@ -1252,9 +1252,15 @@ profile instead of colliding; the on-file address survives adoption untouched.
   **PR #593** *(iOS parity: deferred — native signup shows the message with no
   bridge; needs the error `code` plumbed through TovisKit `SessionStore`. Logged
   in `tovis-ios/BACKLOG.md`.)*
-- [ ] **C2 (operator/Tori) — DEPLOY.** #585–#590 + #593 are code-only for this flow
-  (the payload's migrations are listed in the deploy record); nothing here is
-  flag-gated except #589 (`ENABLE_BOOKINGLESS_CLAIM` — separate decision).
+- [x] **C2 (operator/Tori) — DEPLOY.** ✅ **DEPLOYED 2026-07-12** (Tori-authorized;
+  prod `tovis-eb422rbi1` = main `9006c7ae`): the #585–#590 + #593 claim payload is
+  live (4 additive-nullable migrations applied), so the web claim path (adopt-at-signup
+  #585, cold self-serve 409 #586, `GET /public/claim/[token]` #587, booking-less #588,
+  ready copy #590, ACCOUNT_EXISTS→login bridge #593) is now unblocked in prod. #589's
+  directory invite stays dark (`ENABLE_BOOKINGLESS_CLAIM` NOT flipped — separate
+  decision). ⚠️ Follow-up: the AASA (`/.well-known/apple-app-site-association`) only
+  allowed `/reset-password/*`, so the iOS `/claim/<token>` universal link did **not**
+  tap-to-app — added `/claim/*` (route + test), which rides the NEXT deploy.
 - [ ] **C3 — address visibility (cosmetic).** The on-file address is preserved via
   profile adoption but never shown in the claim form (only an empty ZIP field) —
   reads as "my info was dropped." Options: vend it via `lib/dto/claimPublic.ts` +

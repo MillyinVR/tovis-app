@@ -13,7 +13,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(res.headers.get('content-type')).toBe('application/json')
   })
 
-  it('associates only the reset-password path with the real app id', async () => {
+  it('associates the reset-password + claim paths with the real app id', async () => {
     const res = GET()
     const body = await res.json()
 
@@ -25,8 +25,12 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(detail.appID).toBe('SB3J675LNU.app.tovis.Tovis')
     expect(detail.appIDs).toEqual(['SB3J675LNU.app.tovis.Tovis'])
 
-    // Only the emailed reset link opens in-app; everything else stays in the browser.
-    expect(detail.paths).toEqual(['/reset-password/*'])
-    expect(detail.components).toEqual([{ '/': '/reset-password/*' }])
+    // The emailed reset link + the §27 account-claim link open in-app; everything
+    // else stays in the browser. `components` mirrors `paths` one-for-one.
+    expect(detail.paths).toEqual(['/reset-password/*', '/claim/*'])
+    expect(detail.components).toEqual([
+      { '/': '/reset-password/*' },
+      { '/': '/claim/*' },
+    ])
   })
 })
