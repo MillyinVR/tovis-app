@@ -281,6 +281,16 @@ export default async function ClaimInvitePage(props: PageProps) {
   const locationLabel = booking ? buildClaimLocationLabel(booking) : null
   const appointmentLabel = booking ? buildAppointmentLabel(booking) : null
 
+  // Ready-state lead copy for a not-yet-signed-in viewer. Only the booking path
+  // has a booking to "manage"; only a pro-attributed invite has a professional
+  // to "message" — a cold self-serve orphan (booking-less AND pro-less) has
+  // neither, so keep that copy about the history and identity alone.
+  const readyLeadCopy = booking
+    ? 'Your booking details are shown above — no account needed to view them. Create a free account to manage this booking, message your professional, and keep your history together.'
+    : professionalLabel
+      ? `Your history with ${professionalLabel} is shown above — no account needed to view it. Create a free account to keep it attached to your identity and message your professional.`
+      : 'Your history is shown above — no account needed to view it. Create a free account to attach it to your identity and keep everything together.'
+
   return (
     <main className="mx-auto w-full max-w-[720px] px-4 pb-16 pt-16 text-textPrimary">
       <header>
@@ -364,7 +374,7 @@ export default async function ClaimInvitePage(props: PageProps) {
         {pageState === 'already-claimed' ? (
           <StatusCard
             title="This client history is already claimed"
-            body="The client identity behind this link has already been claimed. If this is your account, go to your bookings to continue."
+            body="The client identity behind this link has already been claimed. If this is your account, head to your account to continue."
           >
             {isMatchingClient ? (
               <Link
@@ -418,9 +428,7 @@ export default async function ClaimInvitePage(props: PageProps) {
             {!user ? (
               <>
                 <div className="mt-2 text-sm text-textSecondary">
-                  Your booking details are shown above — no account needed to
-                  view them. Create a free account to manage this booking,
-                  message your professional, and keep your history together.
+                  {readyLeadCopy}
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-3">
