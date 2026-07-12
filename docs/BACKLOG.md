@@ -890,11 +890,23 @@ and keeps the grid MediaAsset-based / "★ FEAT" newest-featured. §19c swaps th
 grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
 
 ### Web
-- [ ] **19a — backfill**: one-time idempotent job — for every `MediaAsset` with
-  `isFeaturedInPortfolio=true` and no `LookPost`, create a PUBLISHED pro-authored
-  `LookPost` (upsert by `primaryMediaAssetId`; carry caption/service/before-after
-  pairing). Pro-authored looks default `moderationStatus=APPROVED`, so no human
-  gate. (script + safety: dry-run count first)
+- [~] **19a — backfill** *(code shipped; operator run pending)*. One-time
+  idempotent sweep — for every featured, public `MediaAsset` with no `LookPost`,
+  mark it `isEligibleForLooks` and publish a pro-authored `LookPost` (upsert by
+  `primaryMediaAssetId`; caption carries from the asset; before/after pairing
+  lives on `MediaAsset.beforeAssetId` and is preserved). Reuses the canonical
+  `createOrUpdateProLookFromMediaAsset` so backfilled looks get the same
+  tag-sync/score/moderation-scan effects as an interactive publish; pro-authored
+  looks default `moderationStatus=APPROVED`, so no human gate. Assets that can't
+  back a look (not public, no bookable service tag, unpromoted client-private
+  media) are reported, not forced. **Shipped:** `scripts/backfill-portfolio-looks.ts`
+  (+ processor `lib/looks/publication/backfillPortfolioLook.ts`, 13 tests),
+  `pnpm backfill:portfolio-looks` (`--dry-run` default-off, `--batch-size`,
+  id-cursor paging). **(operator)** run `pnpm backfill:portfolio-looks --dry-run`
+  for a count first, then without the flag — surfaces featured work into the
+  looks feed/search/boards, so it's Tori's call when to run (like the Voyage
+  backfill). ⚠️ ordering: this catches up *existing* data; the going-forward
+  write-path unify is 19b.
 - [ ] **19b — unify the write path**: featuring to portfolio auto-creates/publishes
   a `LookPost`; publishing a look marks it grid-visible. Collapse
   `isEligibleForLooks`/`isFeaturedInPortfolio` to a single derived state; keep a
