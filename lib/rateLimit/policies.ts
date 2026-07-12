@@ -35,6 +35,7 @@ export type RateLimitBucket =
   | 'auth:phone-login'
   | 'auth:register'
   | 'auth:register:verified'
+  | 'auth:self-serve-claim'
   | 'auth:password-reset-request'
   | 'auth:password-reset-request:identity'
   | 'auth:password-reset-confirm'
@@ -291,6 +292,17 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     windowSeconds: 60 * 60,
     prefix: 'rl:auth:register:verified',
     mode: 'auth-critical',
+  },
+  // Cold self-serve claim: caps how often a claim link is (re)sent for the SAME
+  // matched unclaimed profile, keyed by that profile id — so a signup contact a
+  // stranger happens to know can't be used to spam the on-file owner across IPs.
+  // redis-only (fail-open) like account-invite:mint; the upstream auth:register
+  // bucket already fails closed, so a Redis outage can't turn this into a vector.
+  'auth:self-serve-claim': {
+    limit: 3,
+    windowSeconds: 60 * 60,
+    prefix: 'rl:auth:self-serve-claim',
+    mode: 'redis-only',
   },
   // Password-reset request mirrors the login two-dimensional shape: a generous
   // per-IP ceiling for NAT tolerance, plus a tight IP+email composite guard so a
