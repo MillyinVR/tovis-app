@@ -1,17 +1,13 @@
 // lib/boards/publicBoard.ts
 import 'server-only'
 
-import {
-  BoardVisibility,
-  LookPostStatus,
-  LookPostVisibility,
-  ModerationStatus,
-} from '@prisma/client'
+import { BoardVisibility } from '@prisma/client'
 
 import { getViewerClientFollowState } from '@/lib/follows'
 import { asTrimmedString } from '@/lib/guards'
 import { normalizeHandle } from '@/lib/handles'
 import { lookNameFromCaption } from '@/lib/looks/publication/clientLookService'
+import { boardVisibleLookItemWhere } from '@/lib/looks/selects'
 import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 
@@ -79,13 +75,9 @@ export async function loadPublicBoard(
         },
       },
       items: {
-        where: {
-          lookPost: {
-            status: LookPostStatus.PUBLISHED,
-            visibility: LookPostVisibility.PUBLIC,
-            moderationStatus: ModerationStatus.APPROVED,
-          },
-        },
+        // §19e — shared with the owner board selects so public + owner views gate
+        // saved looks identically (no stale unpublished/rejected/removed looks).
+        where: boardVisibleLookItemWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 60,
         select: {
