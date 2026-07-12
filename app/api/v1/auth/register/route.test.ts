@@ -41,6 +41,9 @@ const mockBuildAddressPrivacyWriteData = vi.hoisted(() => vi.fn())
 
 const mockAdoptClaimInvite = vi.hoisted(() => vi.fn())
 
+const mockFindSelfServeClaimable = vi.hoisted(() => vi.fn())
+const mockSendSelfServeClaimLink = vi.hoisted(() => vi.fn())
+
 const mockFetch = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
@@ -140,6 +143,11 @@ vi.mock('@/lib/security/addressEncryption', () => ({
 
 vi.mock('@/lib/clients/claimAdoption', () => ({
   adoptClaimInviteDuringRegistration: mockAdoptClaimInvite,
+}))
+
+vi.mock('@/lib/clients/selfServeClaim', () => ({
+  findSelfServeClaimableProfile: mockFindSelfServeClaimable,
+  sendSelfServeClaimLink: mockSendSelfServeClaimLink,
 }))
 
 // Deterministic stand-in for the AEAD dual-write so the assertion does not
@@ -491,6 +499,11 @@ describe('app/api/v1/auth/register/route', () => {
       adopted: true,
       clientId: 'client_adopted',
     })
+
+    mockFindSelfServeClaimable.mockReset()
+    mockFindSelfServeClaimable.mockResolvedValue(null)
+    mockSendSelfServeClaimLink.mockReset()
+    mockSendSelfServeClaimLink.mockResolvedValue({ sent: true })
 
     mockFetch.mockReset()
     vi.stubGlobal('fetch', mockFetch)
@@ -1444,6 +1457,81 @@ describe('app/api/v1/auth/register/route', () => {
         homeTenantId: 'tenant_root',
       }),
     })
+  })
+
+  it('sends a self-serve claim link and returns CLAIMABLE_HISTORY when the contact matches unclaimed history', async () => {
+    mockFindSelfServeClaimable.mockResolvedValueOnce({
+      clientId: 'client_cold',
+      bookingId: 'booking_cold',
+      maskedDestination: 't***@example.com',
+    })
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    const body = await result.json()
+
+    expect(result.status).toBe(409)
+    expect(body.code).toBe('CLAIMABLE_HISTORY')
+    expect(body.maskedDestination).toBe('t***@example.com')
+
+    expect(mockFindSelfServeClaimable).toHaveBeenCalledWith({
+      email: 'client@example.com',
+      phone: '+15551234567',
+    })
+    expect(mockSendSelfServeClaimLink).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: 'booking_cold' }),
+    )
+    // No account is created for a cold-claimable contact.
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('does not resend the self-serve claim link when its rate-limit bucket is exhausted', async () => {
+    mockFindSelfServeClaimable.mockResolvedValueOnce({
+      clientId: 'client_cold',
+      bookingId: 'booking_cold',
+      maskedDestination: null,
+    })
+    mockEnforceRateLimit.mockImplementation(
+      async (args: { bucket: string }) =>
+        args.bucket === 'auth:self-serve-claim' ? { limited: true } : null,
+    )
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    const body = await result.json()
+
+    expect(result.status).toBe(409)
+    expect(body.code).toBe('CLAIMABLE_HISTORY')
+    expect(mockSendSelfServeClaimLink).not.toHaveBeenCalled()
+  })
+
+  it('does not run self-serve claim detection for a warm claim-adopt signup', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_warm',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      clientProfile: { updateMany: vi.fn(), create: vi.fn() },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    const result = await POST(
+      makeRequest({
+        ...makeClientSignupBody(),
+        intent: 'CLAIM_INVITE',
+        inviteToken: 'tok_warm',
+      }),
+    )
+    await flushWaitUntilTasks()
+
+    expect(result.status).toBe(201)
+    expect(mockFindSelfServeClaimable).not.toHaveBeenCalled()
   })
 
   it('still returns 201 immediately when email send fails in the background tail', async () => {

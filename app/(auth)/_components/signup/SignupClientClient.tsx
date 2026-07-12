@@ -207,6 +207,9 @@ export default function SignupClientClient() {
   const [tosAccepted, setTosAccepted] = useState(false)
   const [transactionalSmsConsent, setTransactionalSmsConsent] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [claimableInfo, setClaimableInfo] = useState<{
+    maskedDestination: string | null
+  } | null>(null)
   const [fieldErrors, setFieldErrors] = useState<
     Partial<Record<ClientField, string>>
   >({})
@@ -294,6 +297,7 @@ export default function SignupClientClient() {
     e.preventDefault()
     if (loading) return
     setError(null)
+    setClaimableInfo(null)
 
     const errors: Partial<Record<ClientField, string>> = {}
 
@@ -378,6 +382,17 @@ export default function SignupClientClient() {
       const data = await safeJsonRecord(res)
 
       if (!res.ok) {
+        // Cold self-serve claim: the contact matches existing (pro-created)
+        // history, so the server sent a claim link to the on-file contact instead
+        // of creating a duplicate account. Show a check-your-inbox state, not an
+        // error.
+        if (readStringField(data, 'code') === 'CLAIMABLE_HISTORY') {
+          setClaimableInfo({
+            maskedDestination: readStringField(data, 'maskedDestination'),
+          })
+          return
+        }
+
         setError(readErrorMessage(data) ?? 'Signup failed.')
         return
       }
@@ -430,6 +445,26 @@ export default function SignupClientClient() {
             <span className="font-black text-textPrimary">Claim invite:</span>{' '}
             Your account will return to the secure claim link after phone
             verification.
+          </div>
+        ) : null}
+
+        {claimableInfo ? (
+          <div className="rounded-card border border-toneSuccess/30 bg-toneSuccess/10 px-4 py-3 text-sm text-textPrimary">
+            <div className="font-black">Check your email or text</div>
+            <div className="mt-1 text-textSecondary">
+              We found existing history for this contact and sent a secure link
+              {claimableInfo.maskedDestination ? (
+                <>
+                  {' '}
+                  to{' '}
+                  <span className="font-black text-textPrimary">
+                    {claimableInfo.maskedDestination}
+                  </span>
+                </>
+              ) : null}
+              . Open it to finish setting up your account and keep your booking
+              history together.
+            </div>
           </div>
         ) : null}
 

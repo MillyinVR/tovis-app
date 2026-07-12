@@ -65,6 +65,10 @@ import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
 import { buildEmailEncryptionWriteData } from '@/lib/security/emailPrivacy'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import { adoptClaimInviteDuringRegistration } from '@/lib/clients/claimAdoption'
+import {
+  findSelfServeClaimableProfile,
+  sendSelfServeClaimLink,
+} from '@/lib/clients/selfServeClaim'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -1066,8 +1070,6 @@ export async function POST(request: Request) {
       }
     }
 
-    const passwordHash = await hashPassword(password)
-
     // Claim-link signup: the real person should ADOPT the pro's existing UNCLAIMED
     // ClientProfile (keeping its bookings, aftercare, addresses, and contact)
     // rather than mint a duplicate that collides on the unique contact hashes and
@@ -1077,6 +1079,50 @@ export async function POST(request: Request) {
       role === 'CLIENT' &&
       verificationIntent === 'CLAIM_INVITE' &&
       Boolean(verificationInviteToken)
+
+    // Cold self-serve claim: a normal client signup whose contact matches an
+    // existing UNCLAIMED profile would otherwise dead-end on ACCOUNT_EXISTS. Detect
+    // it and send a claim link to the on-file contact instead of minting a
+    // colliding duplicate. The warm intent=CLAIM_INVITE path adopts directly, so it
+    // is excluded here.
+    if (role === 'CLIENT' && !attemptClaimAdopt) {
+      const claimable = await findSelfServeClaimableProfile({ email, phone })
+
+      if (claimable) {
+        const claimSendLimited = await enforceRateLimit({
+          bucket: 'auth:self-serve-claim',
+          identity: { kind: 'token', id: claimable.clientId },
+        })
+
+        if (!claimSendLimited) {
+          try {
+            await sendSelfServeClaimLink({
+              bookingId: claimable.bookingId,
+              tenantContext,
+            })
+          } catch (claimErr) {
+            captureAuthException({
+              event: 'auth.self_serve_claim.send_failed',
+              route: 'auth.register',
+              email,
+              phone,
+              error: claimErr,
+            })
+          }
+        }
+
+        return jsonFail(
+          409,
+          'We found existing history for this contact. Check your email or text for a secure link to finish setting up your account.',
+          {
+            code: 'CLAIMABLE_HISTORY',
+            maskedDestination: claimable.maskedDestination,
+          },
+        )
+      }
+    }
+
+    const passwordHash = await hashPassword(password)
 
     const clientProfileCreateData = {
       homeTenantId: tenantContext.tenantId,
