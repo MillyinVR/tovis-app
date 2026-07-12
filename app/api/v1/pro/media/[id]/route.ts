@@ -9,6 +9,7 @@ import {
   resolveFeaturePairing,
 } from '@/lib/media/portfolioPairing'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
+import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
 import { pickBool, pickString } from '@/lib/pick'
 import { safeError } from '@/lib/security/logging'
 
@@ -182,6 +183,15 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
       },
+    })
+
+    // §19b: reconcile the LookPost with the asset's new public state — publish a
+    // Look when it's now featured/Looks-eligible, or retract the live Look when
+    // it's no longer public (fixes divergence b: Looks-eligible off never
+    // retracted an already-published look).
+    await reconcilePortfolioLookForMediaAsset(prisma, {
+      professionalId: auth.professionalId,
+      mediaAssetId: mediaId,
     })
 
     return jsonOk({ media: updated }, 200)

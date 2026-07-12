@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => {
     resolveFeaturePairing: vi.fn(),
     resolveAutoPairedBefore: vi.fn(),
 
+    reconcilePortfolioLookForMediaAsset: vi.fn(),
+
     safeError: vi.fn((error: unknown) => ({
       name: error instanceof Error ? error.name : 'NonErrorThrown',
       message: error instanceof Error ? error.message : String(error),
@@ -71,6 +73,11 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
+}))
+
+vi.mock('@/lib/looks/publication/portfolioLookSync', () => ({
+  reconcilePortfolioLookForMediaAsset:
+    mocks.reconcilePortfolioLookForMediaAsset,
 }))
 
 // Real body parsing; the two async resolvers are stubbed so the test controls
@@ -185,6 +192,8 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
       beforeAssetId: null,
     })
     mocks.resolveAutoPairedBefore.mockResolvedValue(null)
+
+    mocks.reconcilePortfolioLookForMediaAsset.mockResolvedValue('NOOP')
   })
 
   describe('PATCH', () => {
@@ -298,6 +307,14 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
 
       expect(res.status).toBe(200)
       expect(mocks.mediaAssetUpdate).toHaveBeenCalledTimes(1)
+
+      // §19b: the edit reconciles the LookPost with the asset's new public state.
+      expect(
+        mocks.reconcilePortfolioLookForMediaAsset,
+      ).toHaveBeenCalledWith(expect.anything(), {
+        professionalId: 'pro_1',
+        mediaAssetId: 'media_1',
+      })
     })
 
     it('returns 400 when provided serviceIds is empty', async () => {

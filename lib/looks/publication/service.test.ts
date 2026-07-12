@@ -21,6 +21,7 @@ const FIXED_DATE = new Date(FIXED_DATE_ISO)
 
 const mocks = vi.hoisted(() => {
   const mediaAssetFindUnique = vi.fn()
+  const mediaAssetUpdate = vi.fn()
   const lookPostFindUnique = vi.fn()
   const lookPostCreate = vi.fn()
   const lookPostUpdate = vi.fn()
@@ -28,6 +29,9 @@ const mocks = vi.hoisted(() => {
   const tx = {
     mediaAsset: {
       findUnique: mediaAssetFindUnique,
+      // §19b: the publication service mirrors a look's published state back onto
+      // the backing MediaAsset's portfolio flags.
+      update: mediaAssetUpdate,
     },
     lookPost: {
       findUnique: lookPostFindUnique,
@@ -53,6 +57,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     mediaAssetFindUnique,
+    mediaAssetUpdate,
     lookPostFindUnique,
     lookPostCreate,
     lookPostUpdate,
@@ -364,6 +369,8 @@ describe('lib/looks/publication/service.ts', () => {
     mocks.enqueueLookPostMutationPolicy.mockResolvedValue(
       makeAsyncEffects(),
     )
+
+    mocks.mediaAssetUpdate.mockResolvedValue({ id: 'media_1' })
   })
 
   afterEach(() => {
@@ -511,6 +518,17 @@ describe('lib/looks/publication/service.ts', () => {
       mocks.tx,
       'look_1',
     )
+
+    // §19b: publishing mirrors the look's published state back onto the backing
+    // MediaAsset so the grid (isFeaturedInPortfolio) and the feed stay in lockstep.
+    expect(mocks.mediaAssetUpdate).toHaveBeenCalledWith({
+      where: { id: 'media_1' },
+      data: {
+        isFeaturedInPortfolio: true,
+        isEligibleForLooks: true,
+        visibility: MediaVisibility.PUBLIC,
+      },
+    })
 
     expect(mocks.enqueueLookPostMutationPolicy).toHaveBeenCalledWith(
       mocks.tx,
@@ -899,6 +917,13 @@ describe('lib/looks/publication/service.ts', () => {
         professionalId: true,
         primaryMediaAssetId: true,
       }),
+    })
+
+    // §19b: an archived (no longer published) look drops the backing asset out
+    // of the portfolio grid.
+    expect(mocks.mediaAssetUpdate).toHaveBeenCalledWith({
+      where: { id: 'media_1' },
+      data: { isFeaturedInPortfolio: false },
     })
 
     expect(mocks.enqueueLookPostMutationPolicy).toHaveBeenCalledWith(

@@ -39,9 +39,14 @@ const mocks = vi.hoisted(() => {
   const mediaAssetFindMany = vi.fn()
   const professionalProfileFindUnique = vi.fn()
 
+  const mediaAssetFindUniqueTx = vi.fn()
+
   const tx = {
     mediaAsset: {
       create: mediaAssetCreate,
+      // §19b: the route re-reads the reconciled portfolio flags after publishing
+      // so the response echoes DB truth.
+      findUnique: mediaAssetFindUniqueTx,
     },
     professionalProfile: {
       findUnique: professionalProfileFindUnique,
@@ -79,6 +84,7 @@ const mocks = vi.hoisted(() => {
     mediaAssetCreate,
     mediaAssetFindMany,
     professionalProfileFindUnique,
+    mediaAssetFindUniqueTx,
     createOrUpdateProLookFromMediaAsset,
     validateUploadSession,
     consumeUploadSession,
@@ -383,6 +389,10 @@ describe('app/api/v1/pro/media/route.ts', () => {
       mediaAssetId: null,
     })
     mocks.consumeUploadSession.mockResolvedValue(undefined)
+
+    // Default finalFlags re-read → undefined so the response echoes the created
+    // row; individual tests that assert the mirror override this.
+    mocks.mediaAssetFindUniqueTx.mockResolvedValue(undefined)
   })
 
   it('passes through failed pro auth responses unchanged', async () => {
@@ -429,12 +439,14 @@ describe('app/api/v1/pro/media/route.ts', () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('creates media only and does not publish a look when Looks is not enabled', async () => {
+  it('§19b: featuring to portfolio publishes a Look even when the Looks checkbox is off', async () => {
     mocks.serviceFindMany.mockResolvedValue([{ id: 'service_1' }])
 
+    // Unified public atom: a featured upload is stored Looks-eligible and its
+    // Look is published (grid + feed are one surface).
     const createdMedia = makeCreatedMedia({
       isFeaturedInPortfolio: true,
-      isEligibleForLooks: false,
+      isEligibleForLooks: true,
     })
 
     mocks.mediaAssetCreate.mockResolvedValue(createdMedia)
@@ -451,23 +463,6 @@ describe('app/api/v1/pro/media/route.ts', () => {
     const res = await POST(req)
     const body = await readJson(res)
 
-    expect(mocks.validateUploadSession).toHaveBeenCalledWith(expect.anything(), {
-      uploadSessionId: 'us_1',
-      surface: ['PRO_LOOKS', 'PRO_PORTFOLIO'],
-      professionalId: 'pro_1',
-      now: expect.any(Date),
-    })
-
-    expect(mocks.serviceFindMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ['service_1'] },
-        isActive: true,
-      },
-      select: {
-        id: true,
-      },
-    })
-
     expect(mocks.mediaAssetCreate).toHaveBeenCalledWith({
       data: {
         professionalId: 'pro_1',
@@ -479,7 +474,8 @@ describe('app/api/v1/pro/media/route.ts', () => {
         mediaType: MediaType.IMAGE,
         visibility: MediaVisibility.PUBLIC,
         isFeaturedInPortfolio: true,
-        isEligibleForLooks: false,
+        // §19b: featured ⇒ Looks-eligible so the publish below can back a Look.
+        isEligibleForLooks: true,
         storageBucket: BUCKETS.mediaPublic,
         storagePath: 'pros/pro_1/media_1.jpg',
         thumbBucket: null,
@@ -506,9 +502,20 @@ describe('app/api/v1/pro/media/route.ts', () => {
       },
     })
 
-    expect(
-      mocks.createOrUpdateProLookFromMediaAsset,
-    ).not.toHaveBeenCalled()
+    // Featured (publishToLooks defaults off) → the Look is published anyway.
+    expect(mocks.createOrUpdateProLookFromMediaAsset).toHaveBeenCalledWith(
+      mocks.tx,
+      {
+        professionalId: 'pro_1',
+        request: {
+          mediaAssetId: 'media_1',
+          primaryServiceId: 'service_1',
+          caption: 'Portfolio upload',
+          priceStartingAt: null,
+          publish: true,
+        },
+      },
+    )
 
     expect(mocks.consumeUploadSession).toHaveBeenCalledWith(expect.anything(), {
       uploadSessionId: 'us_1',
@@ -520,6 +527,7 @@ describe('app/api/v1/pro/media/route.ts', () => {
     expect(body).toEqual({
       ok: true,
       media: expectedMediaDTO(createdMedia),
+      lookPublication: makeLookPublicationResult(),
     })
   })
 

@@ -318,7 +318,9 @@ export async function POST(req: Request) {
             visibility,
 
             isFeaturedInPortfolio,
-            isEligibleForLooks,
+            // §19b: a featured upload is Looks-eligible too (unified public atom),
+            // so the publish below can back a Look from featured-only media.
+            isEligibleForLooks: isEligibleForLooks || isFeaturedInPortfolio,
 
             storageBucket: bucket,
             storagePath: path,
@@ -343,21 +345,27 @@ export async function POST(req: Request) {
         },
       })
 
-      const lookPublication = isEligibleForLooks
-        ? await createOrUpdateProLookFromMediaAsset(tx, {
-            professionalId,
-            request: {
-              mediaAssetId: created.id,
-              primaryServiceId,
-              caption: caption || null,
-              priceStartingAt: priceStartingAt || null,
-              ...(lookVisibility !== undefined
-                ? { visibility: lookVisibility }
-                : {}),
-              publish: publishToLooks,
-            },
-          })
-        : null
+      // §19b — every PUBLIC upload (Looks-eligible OR featured-to-portfolio)
+      // becomes a LookPost, the single public-content atom. It's published when
+      // the pro published to Looks or featured it; a Looks-eligible-only upload
+      // stays a draft. The publication service then mirrors the look's published
+      // state back onto the asset's portfolio flags.
+      const lookPublication =
+        visibility === MediaVisibility.PUBLIC
+          ? await createOrUpdateProLookFromMediaAsset(tx, {
+              professionalId,
+              request: {
+                mediaAssetId: created.id,
+                primaryServiceId: mediaPrimaryServiceId,
+                caption: caption || null,
+                priceStartingAt: priceStartingAt || null,
+                ...(lookVisibility !== undefined
+                  ? { visibility: lookVisibility }
+                  : {}),
+                publish: publishToLooks || isFeaturedInPortfolio,
+              },
+            })
+          : null
 
       // Consume the session inside the same transaction; a CONSUME_CONFLICT
       // (double-attach) rolls the whole create back.
@@ -367,8 +375,20 @@ export async function POST(req: Request) {
         now: new Date(),
       })
 
+      // The publication mirror may have moved the asset's portfolio flags after
+      // create; read the reconciled values so the response echoes DB truth.
+      const finalFlags = await tx.mediaAsset.findUnique({
+        where: { id: created.id },
+        select: {
+          isFeaturedInPortfolio: true,
+          isEligibleForLooks: true,
+          visibility: true,
+        },
+      })
+
       return {
         media: created,
+        finalFlags,
         lookPublication,
       }
     })
@@ -378,10 +398,13 @@ export async function POST(req: Request) {
       professionalId: result.media.professionalId,
       primaryServiceId: result.media.primaryServiceId,
       mediaType: result.media.mediaType,
-      visibility: result.media.visibility,
+      visibility: result.finalFlags?.visibility ?? result.media.visibility,
       caption: result.media.caption,
-      isFeaturedInPortfolio: result.media.isFeaturedInPortfolio,
-      isEligibleForLooks: result.media.isEligibleForLooks,
+      isFeaturedInPortfolio:
+        result.finalFlags?.isFeaturedInPortfolio ??
+        result.media.isFeaturedInPortfolio,
+      isEligibleForLooks:
+        result.finalFlags?.isEligibleForLooks ?? result.media.isEligibleForLooks,
       url: result.media.url,
       thumbUrl: result.media.thumbUrl,
       createdAt: result.media.createdAt.toISOString(),
