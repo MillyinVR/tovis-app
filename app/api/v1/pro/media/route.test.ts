@@ -60,6 +60,10 @@ const mocks = vi.hoisted(() => {
     mediaAsset: {
       findMany: mediaAssetFindMany,
     },
+    // §18d — GET reads the pro's cover id to flag the cover tile.
+    professionalProfile: {
+      findUnique: professionalProfileFindUnique,
+    },
     $transaction: vi.fn(
       async (callback: (db: typeof tx) => Promise<unknown>) => {
         return await callback(tx)
@@ -814,6 +818,10 @@ describe('GET /api/v1/pro/media', () => {
     vi.clearAllMocks()
     mocks.requirePro.mockResolvedValue(makeProAuth())
     mocks.mediaAssetFindMany.mockResolvedValue([makeManagedMediaRow()])
+    // §18d — no cover set by default (branded fallback).
+    mocks.professionalProfileFindUnique.mockResolvedValue({
+      coverMediaAssetId: null,
+    })
     mocks.serviceFindMany.mockResolvedValue([
       { id: 'service_1', name: 'Gel X' },
       { id: 'service_2', name: 'Nail Art' },
@@ -873,6 +881,7 @@ describe('GET /api/v1/pro/media', () => {
           reviewId: null,
           isEligibleForLooks: false,
           isFeaturedInPortfolio: true,
+          isCoverMedia: false,
           beforeAssetId: null,
           services: [{ serviceId: 'service_1', name: 'Gel X' }],
           url: 'https://cdn.example.com/media_1.jpg',
@@ -886,6 +895,31 @@ describe('GET /api/v1/pro/media', () => {
         { serviceId: 'service_2', name: 'Nail Art' },
       ],
     })
+  })
+
+  it('flags the media that is the pro’s current cover banner (§18d)', async () => {
+    mocks.mediaAssetFindMany.mockResolvedValue([
+      makeManagedMediaRow({ id: 'media_cover' }),
+      makeManagedMediaRow({ id: 'media_other' }),
+    ])
+    mocks.professionalProfileFindUnique.mockResolvedValue({
+      coverMediaAssetId: 'media_cover',
+    })
+    mocks.renderMediaUrlsBatch.mockResolvedValue([
+      { renderUrl: 'https://signed.example/a.jpg', renderThumbUrl: null },
+      { renderUrl: 'https://signed.example/b.jpg', renderThumbUrl: null },
+    ])
+
+    const res = await GET()
+    const body = (await readJson(res)) as {
+      items: { id: string; isCoverMedia: boolean }[]
+    }
+
+    expect(res.status).toBe(200)
+    expect(body.items.map((i) => [i.id, i.isCoverMedia])).toEqual([
+      ['media_cover', true],
+      ['media_other', false],
+    ])
   })
 
   it('carries the before/after pairing pointer and null render URLs when unresolvable', async () => {

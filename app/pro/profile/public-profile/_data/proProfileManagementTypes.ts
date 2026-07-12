@@ -144,6 +144,10 @@ export type ProProfileManagementPortfolio = {
   tiles: LooksPortfolioTileDto[]
   serviceOptions: ProProfileManagementServiceOption[]
   hasLooksEligibleBridge: boolean
+  // §18d — the media id currently set as the pro's creator-page cover banner
+  // (null when unset → branded fallback). Drives the per-tile "Cover" badge +
+  // the OwnerMediaMenu "Set/Remove cover" action.
+  coverMediaAssetId: string | null
 }
 
 export type ProProfileManagementReviews = {

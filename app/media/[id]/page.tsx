@@ -118,14 +118,23 @@ export default async function MediaDetailPage({ params }: PageProps) {
     .map((tag) => tag.service.name.trim())
     .filter((name) => name.length > 0)
 
-  const serviceOptions = isOwner
-    ? await prisma.service.findMany({
-        where: { isActive: true },
-        orderBy: { name: 'asc' },
-        take: 500,
-        select: { id: true, name: true },
-      })
-    : []
+  const [serviceOptions, ownerProfile] = isOwner
+    ? await Promise.all([
+        prisma.service.findMany({
+          where: { isActive: true },
+          orderBy: { name: 'asc' },
+          take: 500,
+          select: { id: true, name: true },
+        }),
+        // §18d — is this media the owner's current cover banner?
+        prisma.professionalProfile.findUnique({
+          where: { id: media.professionalId },
+          select: { coverMediaAssetId: true },
+        }),
+      ])
+    : [[], null]
+
+  const isCover = ownerProfile?.coverMediaAssetId === media.id
 
   const footerOffsetPx = UI_SIZES.footerHeight ?? 0
 
@@ -156,6 +165,7 @@ export default async function MediaDetailPage({ params }: PageProps) {
             mediaId={media.id}
             serviceOptions={serviceOptions}
             isVideo={isVideo}
+            isCover={isCover}
             initial={{
               caption: media.caption ?? null,
               visibility: media.visibility,

@@ -145,6 +145,7 @@ function makeModel(
       tiles: [],
       serviceOptions: [],
       hasLooksEligibleBridge: false,
+      coverMediaAssetId: null,
     },
 
     reviews: {

@@ -80,6 +80,10 @@ export type ProManagedMediaItemDTO = {
   reviewId: string | null
   isEligibleForLooks: boolean
   isFeaturedInPortfolio: boolean
+  // §18d — true when this media is the pro's current creator-page cover banner
+  // (`ProfessionalProfile.coverMediaAssetId`). Lets the native media manager mark
+  // the cover tile + offer "Remove cover" (§18e).
+  isCoverMedia: boolean
   // The paired "before" asset id when this featured "after" has one; null when
   // unpaired. Fed to the pairing editor.
   beforeAssetId: string | null

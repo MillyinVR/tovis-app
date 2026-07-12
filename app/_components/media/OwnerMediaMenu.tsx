@@ -30,6 +30,12 @@ type Props = {
   serviceOptions: ServiceOption[]
   /** Videos can't be a before/after "after" — hides the pairing picker. */
   isVideo?: boolean
+  /**
+   * §18d — whether this media is the pro's current creator-page cover banner.
+   * Drives the "Set as cover" ↔ "Remove cover" menu action. Covers are images
+   * only, so the action is hidden for videos.
+   */
+  isCover?: boolean
 }
 
 type JsonObject = Record<string, unknown>
@@ -72,7 +78,7 @@ function visibilityFromFlags(flags: { isEligibleForLooks: boolean; isFeaturedInP
   return flags.isEligibleForLooks || flags.isFeaturedInPortfolio ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
 }
 
-export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVideo = false }: Props) {
+export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVideo = false, isCover = false }: Props) {
   const router = useRouter()
 
   const [openMenu, setOpenMenu] = useState(false)
@@ -80,6 +86,9 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // §18d — creator-page cover banner. Optimistic so the menu label flips instantly.
+  const [cover, setCover] = useState(Boolean(isCover))
 
   // Edit state
   const [caption, setCaption] = useState(initial.caption ?? '')
@@ -279,6 +288,32 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
     }
   }
 
+  async function toggleCover() {
+    if (saving) return
+    setError(null)
+    setSaving(true)
+
+    const nextCover = !cover
+    try {
+      const res = await fetch(
+        `/api/v1/pro/media/${encodeURIComponent(mediaId)}/cover`,
+        { method: nextCover ? 'POST' : 'DELETE' },
+      )
+      const data = await safeJsonObject(res)
+      if (!res.ok) {
+        throw new Error(pickErrorMessage(data, `Request failed (${res.status})`))
+      }
+
+      setCover(nextCover)
+      setOpenMenu(false)
+      router.refresh()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to update cover.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const canSave = !busy && mustHaveService
 
   return (
@@ -320,6 +355,21 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
           >
             Edit
           </button>
+
+          {/* §18d — cover banner (images only). */}
+          {!isVideo ? (
+            <button
+              type="button"
+              onClick={toggleCover}
+              disabled={saving}
+              className={cn(
+                'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-white/10',
+                saving ? 'cursor-not-allowed opacity-70' : '',
+              )}
+            >
+              {cover ? 'Remove cover photo' : 'Set as cover photo'}
+            </button>
+          ) : null}
 
           <button
             type="button"

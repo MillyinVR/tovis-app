@@ -63,6 +63,9 @@ const proProfileManagementSelect =
     bio: true,
     location: true,
     avatarUrl: true,
+    // §18d — the pro's current creator-page cover banner (null = branded fallback),
+    // so the media manager can mark the cover tile + offer "Remove cover".
+    coverMediaAssetId: true,
     professionType: true,
     nameDisplay: true,
     instagramHandle: true,
@@ -236,7 +239,9 @@ export async function loadProProfileManagementPage({
         readAt: null,
       },
     }),
-    tab === 'portfolio' ? loadPortfolio(pro.id) : emptyPortfolio(),
+    tab === 'portfolio'
+      ? loadPortfolio(pro.id, pro.coverMediaAssetId)
+      : emptyPortfolio(),
     tab === 'reviews'
       ? loadReviews(pro.id, await loadClientLinkViewer(user))
       : Promise.resolve<ProProfileManagementReview[]>([]),
@@ -303,6 +308,7 @@ async function loadReviewStats(
 
 async function loadPortfolio(
   professionalId: string,
+  coverMediaAssetId: string | null,
 ): Promise<ProProfileManagementPortfolio> {
   const [assets, serviceOptions] = await Promise.all([
     prisma.mediaAsset.findMany({
@@ -335,6 +341,7 @@ async function loadPortfolio(
     tiles,
     serviceOptions,
     hasLooksEligibleBridge: tiles.some((tile) => tile.isEligibleForLooks),
+    coverMediaAssetId,
   }
 }
 
@@ -343,6 +350,7 @@ async function emptyPortfolio(): Promise<ProProfileManagementPortfolio> {
     tiles: [],
     serviceOptions: [],
     hasLooksEligibleBridge: false,
+    coverMediaAssetId: null,
   }
 }
 
