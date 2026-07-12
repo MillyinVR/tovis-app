@@ -136,6 +136,23 @@ export const publicPortfolioMediaAssetSelect =
     },
   })
 
+/**
+ * §19c — the public profile grid now reads the pro's `LookPost`s (the same rows
+ * the feed/search/boards read), not `MediaAsset.isFeaturedInPortfolio` directly,
+ * so grid + feed can never diverge. Each tile still renders from the look's
+ * `primaryMediaAsset` (reusing {@link publicPortfolioMediaAssetSelect} + the
+ * existing tile mapper), so the tile DTO shape is unchanged. `publishedAt` drives
+ * newest-first ordering (preserving today's "★ FEAT" first tile).
+ */
+export const publicPortfolioLookSelect =
+  Prisma.validator<Prisma.LookPostSelect>()({
+    id: true,
+    publishedAt: true,
+    primaryMediaAsset: {
+      select: publicPortfolioMediaAssetSelect,
+    },
+  })
+
 export const publicReviewClientSelect =
   Prisma.validator<Prisma.ClientProfileSelect>()({
     // id + name are used server-side: id to upgrade the link to the pro chart for
@@ -223,6 +240,10 @@ export type PublicPortfolioMediaAssetRow =
   Prisma.MediaAssetGetPayload<{
     select: typeof publicPortfolioMediaAssetSelect
   }>
+
+export type PublicPortfolioLookRow = Prisma.LookPostGetPayload<{
+  select: typeof publicPortfolioLookSelect
+}>
 
 export type PublicReviewClientRow = Prisma.ClientProfileGetPayload<{
   select: typeof publicReviewClientSelect

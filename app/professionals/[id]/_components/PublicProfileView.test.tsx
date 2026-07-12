@@ -3,8 +3,11 @@ import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,
+  LookPostStatus,
+  LookPostVisibility,
   MediaType,
   MediaVisibility,
+  ModerationStatus,
   ProfessionType,
   Role,
   VerificationStatus,
@@ -214,6 +217,9 @@ import PublicProfileView from './PublicProfileView'
 function makePro(args?: {
   id?: string
   verificationStatus?: VerificationStatus
+  // §19c — the portfolio grid now reads the pro's LookPosts through the owner
+  // relation (`professionalProfile.lookPosts`), so the profile mock carries them.
+  lookPosts?: unknown[]
 }) {
   return {
     id: args?.id ?? 'pro_1',
@@ -227,6 +233,7 @@ function makePro(args?: {
     professionType: ProfessionType.BARBER,
     location: 'San Diego, CA',
     timeZone: 'America/Los_Angeles',
+    lookPosts: args?.lookPosts ?? [],
   }
 }
 
@@ -406,7 +413,7 @@ describe('app/professionals/[id] PublicProfileView', () => {
     expect(
       mocks.prisma.professionalServiceOffering.findMany,
     ).not.toHaveBeenCalled()
-    expect(mocks.prisma.mediaAsset.findMany).not.toHaveBeenCalled()
+    // §19c — a non-viewable pro loads no tab content (portfolio/reviews) at all.
     expect(mocks.prisma.review.findMany).not.toHaveBeenCalled()
   })
 
@@ -500,19 +507,39 @@ describe('app/professionals/[id] PublicProfileView', () => {
     )
   })
 
-  it('loads portfolio rows only for the portfolio tab', async () => {
-    mocks.prisma.mediaAsset.findMany.mockResolvedValue([makePortfolioMedia()])
+  it("loads the pro's LookPosts (owner relation) for the portfolio tab", async () => {
+    // §19c — the grid tile still renders from the look's primaryMediaAsset.
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue(
+      makePro({
+        verificationStatus: VerificationStatus.APPROVED,
+        lookPosts: [
+          {
+            id: 'look_1',
+            publishedAt: new Date('2026-04-08T10:00:00.000Z'),
+            primaryMediaAsset: makePortfolioMedia(),
+          },
+        ],
+      }),
+    )
 
     await renderView()
 
-    expect(mocks.prisma.mediaAsset.findMany).toHaveBeenCalledWith(
+    // Owner-relation read gated to APPROVED, pro-authored, public looks.
+    expect(mocks.prisma.professionalProfile.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
-          professionalId: 'pro_1',
-          visibility: MediaVisibility.PUBLIC,
-          isFeaturedInPortfolio: true,
-        },
-        orderBy: { createdAt: 'desc' },
+        where: { id: 'pro_1' },
+        select: expect.objectContaining({
+          lookPosts: expect.objectContaining({
+            where: {
+              clientAuthorId: null,
+              status: LookPostStatus.PUBLISHED,
+              moderationStatus: ModerationStatus.APPROVED,
+              visibility: LookPostVisibility.PUBLIC,
+              removedAt: null,
+            },
+            orderBy: { publishedAt: 'desc' },
+          }),
+        }),
       }),
     )
 
@@ -540,7 +567,8 @@ describe('app/professionals/[id] PublicProfileView', () => {
     )
     expect(screen.getByText('Signature Cut')).toBeInTheDocument()
 
-    expect(mocks.prisma.mediaAsset.findMany).not.toHaveBeenCalled()
+    // §19c — the portfolio grid (pro LookPosts) is only rendered on the portfolio tab.
+    expect(screen.queryByTestId('portfolio-grid')).not.toBeInTheDocument()
     expect(mocks.prisma.review.findMany).not.toHaveBeenCalled()
   })
 
