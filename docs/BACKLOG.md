@@ -28,6 +28,13 @@ blocking/degrading for a real user right now → least.**
    (#545).
 3. ~~Aftercare email/SMS double-sent + the inbox-notification link bounced clients to
    `/login` — §23~~ ✅ **DONE** (web #559; iOS auto-covered — server-only).
+4. **Claim flow blocks real client conversion — §27** ⚠️ **HARD BLOCKER (Tori's call,
+   field test 2026-07-11): jumps the tier order.** The fixes are *merged but not
+   deployed* — the unblock is **deploying** the #585–#590 claim payload (+ #593's
+   log-in bridge), not new code. Fixed-pending-deploy; details in §27.
+5. ~~Pro can't double-book own calendar + drag-reschedule fails silently (web §25,
+   iOS §26 → tovis-ios #111)~~ ✅ **DONE** (web #593 + iOS #111, field test
+   2026-07-11) — live on next deploy / next TestFlight build.
 
 **Tier 2 — turn on / finish already-built core features**
 3. Launch-gate flips + pro-migration go-live — §2 *(web/ops)* — ⚠️ **not blind
@@ -1145,6 +1152,82 @@ and deep-links authenticated clients into the full booking view).
     in prod until the endpoint deploys** (deploy HELD — Tori's call). This closes the pro+client
     aftercare before/after epic on both platforms (the larger A3 tabbed-IA rebuild remains — see
     `tovis-ios/BACKLOG.md §5 A3`).
+
+---
+
+## 25. Pro double-book blocked + silent drag-reschedule failure (field test 2026-07-11, fixed PR #593)
+
+Live session: booking husband + wife into overlapping slots on the pro's own calendar
+threw "that slot was just taken"; dragging one appointment onto the other completed
+visually, then Confirm did nothing — no save, no error. Root causes (both dated to the
+features' original landings — never a regression, never previously fixed):
+
+- [x] **A1 — overlap allowance unshadowed.** `PRO_AUTHORIZED_OVERLAP` +
+  `allowsOverlap` (#364) existed but was dead code: the actor-blind busy gate
+  (`evaluateProSchedulingDecision`) threw `TIME_BOOKED` before
+  `enforceBookingOverlapPolicy` ever ran, on both pro create and pro reschedule.
+  Now booking/hold conflicts defer to the overlap policy on pro write paths
+  (`deferBusyConflictsToOverlapPolicy`); blocks stay fatal; client self-booking
+  still blocked. Also unshadows the aftercare pre-selected-slot allowance. **PR #593**
+- [x] **A2 — rejected reschedule now visible.** `cal.error` (written by
+  `useConfirmChange` on rejection + by calendar fetch failures) was never rendered
+  by any component; now a floating `role=alert` toast on `ProCalendarClientPage`.
+  **PR #593**
+- [x] **A3 — update path 23P01.** `performLockedUpdateProBooking` now maps an
+  EXCLUDE-constraint race to a clean `TIME_BOOKED` 409 (was an unhandled 500).
+  **PR #593**
+- [ ] **Follow-up:** web new-booking form has no *pre-submit* passive overlap
+  warning — after A1 an overlapping pro create just succeeds (grid then shows the
+  #584 amber double-book signal). Mirror of the native follow-up logged in
+  tovis-ios #105. Nice-to-have, not blocking.
+- Field-test item **#5** (inconsistent calendar clicks) is intentionally **unlisted**:
+  suspected downstream of A2's silent-failure state desync — re-test after this
+  deploys before spending audit time.
+
+---
+
+## 26. iOS drag-to-reschedule never armed (field test 2026-07-11, fixed tovis-ios #111)
+
+Cross-reference stub (iOS work lives in `tovis-ios/BACKLOG.md`): drag-to-reschedule
+(iOS #99/#100) was code-complete but the long-press→drag lost gesture arbitration to
+the tile's inner tap + the enclosing ScrollView, so it never responded. Fixed in
+**tovis-ios #111** (`.highPriorityGesture` + `.scrollDisabled` while lifted). Server
+side needs web **#593** deployed for the *drop onto an occupied slot* to save (same
+§25 A1 gate). Remaining native drag follow-ups (resize, cross-day, blocks, haptics)
+were already logged via tovis-ios #101.
+
+---
+
+## 27. Claim flow — client conversion dead end (field test 2026-07-11) ⚠️ HARD BLOCKER — deploy to clear
+
+Live session: claim link for a fully-populated unclaimed profile (name, email, phone,
+address) pre-filled **only name**; creating the account hit "account already exists"
+with no path to claim or log in — the client could not get into his own account.
+
+**Status: the exact repro is already fixed on `main` but NOT deployed.** Prod is
+missing the #585–#590 claim payload (see the pending-deploy list in memory /
+`pending-prod-deploy-payload`): #585 adopt-at-signup, #586 cold self-serve 409
+`CLAIMABLE_HISTORY`, #587 `GET /public/claim/[token]`, #588 booking-less claim,
+#589 directory invite (flag-gated), #590 claim-page ready copy. On current main the
+claim form pre-fills name+email+phone and the warm path **adopts** the unclaimed
+profile instead of colliding; the on-file address survives adoption untouched.
+
+- [x] **C1 — already-CLAIMED contact match dead end** (the one gap the payload
+  didn't cover): `ACCOUNT_EXISTS` on client signup now renders a "log in to
+  continue" bridge carrying the typed email/phone into `/login` as prefill.
+  **PR #593** *(iOS parity: deferred — native signup shows the message with no
+  bridge; needs the error `code` plumbed through TovisKit `SessionStore`. Logged
+  in `tovis-ios/BACKLOG.md`.)*
+- [ ] **C2 (operator/Tori) — DEPLOY.** #585–#590 + #593 are code-only for this flow
+  (the payload's migrations are listed in the deploy record); nothing here is
+  flag-gated except #589 (`ENABLE_BOOKINGLESS_CLAIM` — separate decision).
+- [ ] **C3 — address visibility (cosmetic).** The on-file address is preserved via
+  profile adoption but never shown in the claim form (only an empty ZIP field) —
+  reads as "my info was dropped." Options: vend it via `lib/dto/claimPublic.ts` +
+  `/claim` page params, or a "we have your address on file" note. Low priority.
+- [ ] **C4 — cold self-serve inline fallback.** The 409 `CLAIMABLE_HISTORY` path is
+  an inbox round-trip ("check your email/text") with no in-page fallback if
+  delivery is slow/fails. Behavioral gap, not a dead end.
 
 ---
 
