@@ -123,6 +123,11 @@ export type { PairedBeforeDto }
 
 export type PublicPortfolioTileDto = {
   id: string
+  // §19f — the backing `LookPost` id (the grid reads LookPosts since §19c), so the
+  // tile links to `/looks/[lookId]` (the feed detail with engagement) instead of the
+  // media page — mirroring the `/u/[handle]` client grid. Null on the rare legacy
+  // path where a tile isn't backed by a look; the grid then falls back to /media.
+  lookId: string | null
   caption: string | null
   src: string
   thumbUrl: string | null
@@ -436,6 +441,7 @@ export function getPublicProfilePriceFromLabel(
 
 export async function mapPublicPortfolioTileToDto(
   asset: PublicPortfolioMediaAssetRow,
+  lookId: string | null = null,
 ): Promise<PublicPortfolioTileDto | null> {
   const rendered = await renderAssetUrls({
     storageBucket: asset.storageBucket,
@@ -458,6 +464,7 @@ export async function mapPublicPortfolioTileToDto(
 
   return {
     id: asset.id,
+    lookId,
     caption: pickString(asset.caption),
     src,
     thumbUrl: rendered.thumbUrl,
@@ -471,11 +478,15 @@ export async function mapPublicPortfolioTileToDto(
   }
 }
 
+/**
+ * Maps portfolio tiles from the pro's `LookPost`s (§19c read path). Each entry
+ * carries the look id so the tile can link to `/looks/[lookId]` (§19f).
+ */
 export async function mapPublicPortfolioTilesToDtos(
-  assets: PublicPortfolioMediaAssetRow[],
+  looks: Array<{ lookId: string | null; asset: PublicPortfolioMediaAssetRow }>,
 ): Promise<PublicPortfolioTileDto[]> {
   const tiles = await Promise.all(
-    assets.map((asset) => mapPublicPortfolioTileToDto(asset)),
+    looks.map((look) => mapPublicPortfolioTileToDto(look.asset, look.lookId)),
   )
 
   return tiles.filter(isNonNull)

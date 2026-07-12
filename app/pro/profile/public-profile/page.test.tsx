@@ -144,7 +144,6 @@ function makeModel(
     portfolio: {
       tiles: [],
       serviceOptions: [],
-      hasLooksEligibleBridge: false,
       coverMediaAssetId: null,
     },
 

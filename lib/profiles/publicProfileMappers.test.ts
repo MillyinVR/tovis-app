@@ -98,6 +98,13 @@ describe('mapPublicPortfolioTileToDto before/after pairing', () => {
     )
     expect(tile?.before).toBeNull()
   })
+
+  it('threads the backing look id (§19f) — null when omitted', async () => {
+    expect((await mapPublicPortfolioTileToDto(makePortfolioRow()))?.lookId).toBeNull()
+    expect(
+      (await mapPublicPortfolioTileToDto(makePortfolioRow(), 'look_9'))?.lookId,
+    ).toBe('look_9')
+  })
 })
 
 function makeReviewMediaRow(

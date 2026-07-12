@@ -96,10 +96,11 @@ describe('loadPortfolioTiles (§19c — grid reads pro LookPosts)', () => {
     const tiles = await loadPortfolioTiles('pro_1')
 
     expect(tiles).toHaveLength(1)
-    // Tile identity + link target stay the MediaAsset id (→ /media/[id]), so the
-    // DTO contract and native consumers are unchanged.
+    // Tile id stays the MediaAsset id (→ native/render parity); §19f additionally
+    // threads the backing look id so the grid links to /looks/[lookId].
     expect(tiles[0]).toMatchObject({
       id: 'media_1',
+      lookId: 'look_1',
       src: 'https://cdn.example/1-thumb.jpg',
       caption: 'Balayage',
       serviceIds: ['svc_1'],

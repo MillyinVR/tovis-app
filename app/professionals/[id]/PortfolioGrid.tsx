@@ -14,6 +14,15 @@ function mediaHref(mediaId: string): string {
   return `/media/${encodeURIComponent(mediaId)}`
 }
 
+// §19f — a portfolio tile IS a look now, so open the look detail (feed post with
+// engagement), mirroring the /u/[handle] client grid. Fall back to the media page
+// for the rare tile with no backing look.
+function tileHref(tile: PublicPortfolioTileDto): string {
+  return tile.lookId
+    ? `/looks/${encodeURIComponent(tile.lookId)}`
+    : mediaHref(tile.id)
+}
+
 export default function PortfolioGrid({
   tiles,
   emptyMessage,
@@ -67,7 +76,7 @@ function PortfolioTile({
 
   return (
     <Link
-      href={mediaHref(tile.id)}
+      href={tileHref(tile)}
       className="brand-profile-media-tile group"
       title={title}
       aria-label={title}

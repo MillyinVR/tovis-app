@@ -11219,6 +11219,12 @@
         "isVideo": {
           "type": "boolean"
         },
+        "lookId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "mediaType": {
           "$ref": "#/definitions/MediaType"
         },
@@ -11243,6 +11249,7 @@
       },
       "required": [
         "id",
+        "lookId",
         "caption",
         "src",
         "thumbUrl",

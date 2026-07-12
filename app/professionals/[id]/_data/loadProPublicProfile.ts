@@ -243,7 +243,10 @@ export async function loadPortfolioTiles(
   if (!row) return []
 
   return mapPublicPortfolioTilesToDtos(
-    row.lookPosts.map((look) => look.primaryMediaAsset),
+    row.lookPosts.map((look) => ({
+      lookId: look.id,
+      asset: look.primaryMediaAsset,
+    })),
   )
 }
 
