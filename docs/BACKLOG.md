@@ -936,9 +936,18 @@ grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
   draw from the same rows; mirror the `/u/[handle]` client-grid shape for pros.
   Reconcile the moderation gate so nothing renders public pre-`APPROVED`
   (fix divergence a).
-- [ ] **19d — review-photo opt-in**: a "Add to my grid/feed" control on a consented
-  review photo → creates a `LookPost` from that `MediaAsset` (per-photo, pro-driven).
-  Reuse the existing consent gate; no new public-by-default paths.
+- [x] **19d — review-photo opt-in** *(shipped — reuses §19b write path; deploy-held)*.
+  The existing pro **"Add to portfolio"** control on a consented review photo
+  (`/pro/reviews` `MediaPortfolioToggle` + `app/pro/profile/ReviewsPanel`) already POSTs
+  the portfolio route, so post-§19b it now publishes a `LookPost` too. The one gap:
+  review/session media carries a canonical `primaryServiceId` but **no `MediaServiceTag`
+  M2M row** (only the upload path populates it), so the reconcile had no tagged service
+  to anchor a look to. Fixed in `reconcilePortfolioLookForMediaAsset` — when a consented,
+  public, tagless asset is promoted it adopts its `primaryServiceId` into the M2M
+  (idempotent, `skipDuplicates`) before publishing. Consent gate unchanged
+  (`isUnpromotedPrivateMedia`); **no new public-by-default path; no migration.** Promoting
+  a consented review photo now surfaces it in the grid **and** the feed/search/boards,
+  service-anchored. (UI "grid/feed" relabel rides §19f.)
 - [ ] **19e — downstream coverage**: with everything a `LookPost`, verify boards
   (`BoardItem`→`LookPost`) can now save formerly-portfolio-only media; confirm
   search/tags/personalized feed pick up backfilled looks; audit the owner board
