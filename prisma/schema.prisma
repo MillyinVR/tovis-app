@@ -1705,6 +1705,13 @@ model ProfessionalProfile {
   bio              String?
   avatarUrl        String?
 
+  // Creator-page cover banner (§18): a pro-chosen portfolio photo shown as the
+  // profile's cover, with a graceful branded fallback when unset (never the
+  // stretched avatar). Nullable soft link to one of the pro's own MediaAssets;
+  // onDelete SetNull so deleting the underlying photo simply clears the cover.
+  coverMediaAssetId String?
+  coverMediaAsset   MediaAsset? @relation("ProfessionalCoverMedia", fields: [coverMediaAssetId], references: [id], onDelete: SetNull)
+
   // Public social presence (display-only deep links; normalized without "@").
   // Instagram is the industry's #2 discovery channel — pros link their
   // portfolio identity here and the profile links back out.
@@ -1811,6 +1818,7 @@ model ProfessionalProfile {
   @@index([handleNormalized])
   @@index([verificationStatus])
   @@index([homeTenantId])
+  @@index([coverMediaAssetId])
 }
 
 model ProfessionalMonthlyAnalytics {
@@ -3879,20 +3887,23 @@ model MediaAsset {
   isEligibleForLooks    Boolean         @default(false)
   reviewLocked          Boolean         @default(false)
 
-  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id])
-  proTenant      Tenant?             @relation("TenantMediaAssets", fields: [proTenantId], references: [id], onDelete: Restrict)
-  booking        Booking?            @relation(fields: [bookingId], references: [id])
-  review         Review?             @relation(fields: [reviewId], references: [id])
-  beforeAsset    MediaAsset?         @relation("MediaBeforeAfterPair", fields: [beforeAssetId], references: [id], onDelete: SetNull)
-  pairedAsAfter  MediaAsset[]        @relation("MediaBeforeAfterPair")
+  professional              ProfessionalProfile   @relation(fields: [professionalId], references: [id])
+  proTenant                 Tenant?               @relation("TenantMediaAssets", fields: [proTenantId], references: [id], onDelete: Restrict)
+  booking                   Booking?              @relation(fields: [bookingId], references: [id])
+  review                    Review?               @relation(fields: [reviewId], references: [id])
+  beforeAsset               MediaAsset?           @relation("MediaBeforeAfterPair", fields: [beforeAssetId], references: [id], onDelete: SetNull)
+  pairedAsAfter             MediaAsset[]          @relation("MediaBeforeAfterPair")
   // Back-relations for the aftercare "featured pair" (which before/after this
   // asset is the pro-chosen primary of, per AftercareSummary). Aftercare-only,
   // stays PRO_CLIENT — never touches portfolio featuring/visibility.
-  featuredInAftercareBefore AftercareSummary[] @relation("AftercareFeaturedBefore")
-  featuredInAftercareAfter  AftercareSummary[] @relation("AftercareFeaturedAfter")
-  primaryService Service             @relation("MediaPrimaryService", fields: [primaryServiceId], references: [id])
-  phase          MediaPhase          @default(OTHER)
-  uploadedByUser User?               @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])
+  featuredInAftercareBefore AftercareSummary[]    @relation("AftercareFeaturedBefore")
+  featuredInAftercareAfter  AftercareSummary[]    @relation("AftercareFeaturedAfter")
+  // Back-relation for the pro-profile cover banner (§18): which pro profiles use
+  // this asset as their cover. onDelete SetNull on the owning side clears it.
+  coverForProfiles          ProfessionalProfile[] @relation("ProfessionalCoverMedia")
+  primaryService            Service               @relation("MediaPrimaryService", fields: [primaryServiceId], references: [id])
+  phase                     MediaPhase            @default(OTHER)
+  uploadedByUser            User?                 @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])
 
   services MediaServiceTag[]
   likes    MediaLike[]

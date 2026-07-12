@@ -20,6 +20,7 @@ function makeSeo(overrides?: Partial<ProProfileSeo>): ProProfileSeo {
       businessName: 'Tori Beauty Studio',
       bio: 'Balayage specialist.',
       avatarUrl: 'https://cdn.test/avatar.jpg',
+      coverUrl: null,
       professionType: null,
       professionLabel: 'Hairstylist',
       location: 'Los Angeles, CA',

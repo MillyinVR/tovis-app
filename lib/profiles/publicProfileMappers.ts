@@ -83,6 +83,10 @@ export type PublicProfileHeaderDto = {
   businessName: string | null
   bio: string | null
   avatarUrl: string | null
+  // Creator-page cover banner (§18): a pro-chosen portfolio photo shown behind
+  // the identity block, or null when unset (the profile then renders a branded
+  // fallback, never the stretched avatar). Rendered URL, resolved by the loader.
+  coverUrl: string | null
   professionType: ProfessionType | null
   professionLabel: string
   location: string | null
@@ -310,8 +314,34 @@ async function renderAssetUrls(
   }
 }
 
+/**
+ * Resolves the display URL for a pro's cover banner (§18) from its render
+ * pointers, or null when no cover is set. Kept separate from the (sync) header
+ * mapper so the SEO/JSON-LD path — which never needs the cover — pays nothing;
+ * the profile loader awaits this and passes the result into the mapper.
+ */
+export async function renderPublicProfileCoverUrl(
+  profile: Pick<PublicProfessionalProfileRow, 'coverMediaAsset'>,
+): Promise<string | null> {
+  const cover = profile.coverMediaAsset
+  if (!cover) return null
+
+  const rendered = await renderAssetUrls({
+    storageBucket: cover.storageBucket,
+    storagePath: cover.storagePath,
+    thumbBucket: cover.thumbBucket,
+    thumbPath: cover.thumbPath,
+    url: cover.url,
+    thumbUrl: cover.thumbUrl,
+  })
+
+  // Prefer the full-size render for a banner; fall back to the thumb.
+  return rendered.url ?? rendered.thumbUrl
+}
+
 export function mapPublicProfileHeaderToDto(
   profile: PublicProfessionalProfileRow,
+  coverUrl: string | null = null,
 ): PublicProfileHeaderDto {
   const businessName = formatBusinessName(profile.businessName)
   const handle = pickString(profile.handle)
@@ -340,6 +370,7 @@ export function mapPublicProfileHeaderToDto(
     businessName,
     bio: formatBio(profile.bio),
     avatarUrl: formatAvatarUrl(profile.avatarUrl),
+    coverUrl,
     professionType: profile.professionType,
     professionLabel: formatProfessionLabel(profile.professionType),
     location: formatProfileLocation(profile.location),

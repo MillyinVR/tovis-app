@@ -31,6 +31,7 @@ import {
   mapPublicProfileHeaderToDto,
   mapPublicProfileStatsToDto,
   mapPublicReviewsToDtos,
+  renderPublicProfileCoverUrl,
   type PublicOfferingDto,
   type PublicPortfolioTileDto,
   type PublicProfileHeaderDto,
@@ -109,6 +110,7 @@ export async function loadProPublicProfileBase(args: {
     offeringRows,
     favoriteRow,
     paymentSettingsRow,
+    coverUrl,
   ] = await Promise.all([
     prisma.review.aggregate({
       where: { professionalId: profileRow.id, ...visibleReviewsWhere },
@@ -157,6 +159,10 @@ export async function loadProPublicProfileBase(args: {
       where: { professionalId: profileRow.id },
       select: publicPaymentMethodsSelect,
     }),
+
+    // §18 cover banner: render the pro-chosen cover photo's display URL (null
+    // when unset → branded fallback). Parallel with the other base aggregates.
+    renderPublicProfileCoverUrl(profileRow),
   ])
 
   const reviewCount = reviewStats._count._all
@@ -179,7 +185,7 @@ export async function loadProPublicProfileBase(args: {
     base: {
       professionalId: profileRow.id,
       verificationStatus: profileRow.verificationStatus,
-      header: mapPublicProfileHeaderToDto(profileRow),
+      header: mapPublicProfileHeaderToDto(profileRow, coverUrl),
       offerings: mapPublicOfferingsToDtos(offeringRows, favoritedServiceIds),
       acceptedPayments: listPublicAcceptedMethods(paymentSettingsRow),
       stats: mapPublicProfileStatsToDto({
