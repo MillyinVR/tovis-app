@@ -914,13 +914,23 @@ grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
   looks feed/search/boards, so it's Tori's call when to run (like the Voyage
   backfill). ⚠️ ordering: this catches up *existing* data; the going-forward
   write-path unify is 19b.
-- [ ] **19b — unify the write path**: featuring to portfolio auto-creates/publishes
-  a `LookPost`; publishing a look marks it grid-visible. Collapse
-  `isEligibleForLooks`/`isFeaturedInPortfolio` to a single derived state; keep a
-  `pinned`/ordering concept to preserve "★ FEAT". Retire the standalone portfolio
-  toggle in favor of the looks publish action (or make it call it). Make
-  `isEligibleForLooks=false` (unpublish) also retract the live `LookPost`
-  (fix divergence b).
+- [x] **19b — unify the write path** *(shipped — backend write invariant; deploy-held)*.
+  `LookPost` is now the single public-content atom on every pro write path.
+  Featuring to portfolio (POST `/pro/media/[id]/portfolio`), the media-edit PATCH,
+  and the upload route publish/reconcile a `LookPost` via the new
+  `reconcilePortfolioLookForMediaAsset` (`lib/looks/publication/portfolioLookSync.ts`);
+  publishing/unpublishing a look mirrors its state back onto the asset's
+  `isFeaturedInPortfolio`/`isEligibleForLooks`/visibility (in
+  `createOrUpdateProLookFromMediaAsset` + `updateProLookPublication`) so the flags
+  and the `LookPost` can't diverge. Un-featuring / `isEligibleForLooks=false` now
+  retracts the live `LookPost` (**fixes divergence b**). Took the "(or make it call
+  it)" path: kept both columns + both management toggles, wired to converge via the
+  backend invariant. **Deferred to §19c/§19f (both gated on §18b):** the physical
+  column collapse to one derived state, the `pinned`/ordering flag for "★ FEAT", and
+  retiring the standalone toggle in the UI. No migration; grid read path untouched.
+  Shared service-id resolver relocated into `portfolioLookSync` + reused by the §19a
+  backfill. iOS parity N/A (native unified grid + single publish action pairs with
+  §19c/§19g).
 - [ ] **19c — unify the read path**: public profile grid renders the pro's
   `LookPost`s (add a *Looks* tab or make *Portfolio* = looks grid) so grid + feed
   draw from the same rows; mirror the `/u/[handle]` client-grid shape for pros.
