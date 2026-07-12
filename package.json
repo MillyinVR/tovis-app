@@ -96,6 +96,7 @@
     "backfill:search-index": "tsx scripts/backfill-search-index.ts",
     "recompute:look-rank": "tsx scripts/recompute-look-rank-scores.ts",
     "backfill:look-embeddings": "tsx scripts/backfill-look-embeddings.ts",
+    "backfill:portfolio-looks": "tsx scripts/backfill-portfolio-looks.ts",
     "import:license-permissions": "tsx scripts/importLicensePermissions.ts"
   },
   "dependencies": {
