@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => {
   const mediaAssetFindUnique = vi.fn()
   const mediaAssetUpdate = vi.fn()
+  const mediaServiceTagCreateMany = vi.fn()
   const createOrUpdateProLookFromMediaAsset = vi.fn()
   const updateProLookPublication = vi.fn()
 
@@ -13,11 +14,15 @@ const mocks = vi.hoisted(() => {
       findUnique: mediaAssetFindUnique,
       update: mediaAssetUpdate,
     },
+    mediaServiceTag: {
+      createMany: mediaServiceTagCreateMany,
+    },
   }
 
   return {
     mediaAssetFindUnique,
     mediaAssetUpdate,
+    mediaServiceTagCreateMany,
     createOrUpdateProLookFromMediaAsset,
     updateProLookPublication,
     db,
@@ -86,6 +91,7 @@ describe('reconcilePortfolioLookForMediaAsset', () => {
     vi.clearAllMocks()
     mocks.mediaAssetFindUnique.mockResolvedValue(makeMedia())
     mocks.mediaAssetUpdate.mockResolvedValue({ id: 'media_1' })
+    mocks.mediaServiceTagCreateMany.mockResolvedValue({ count: 1 })
     mocks.createOrUpdateProLookFromMediaAsset.mockResolvedValue({})
     mocks.updateProLookPublication.mockResolvedValue({})
   })
@@ -176,14 +182,34 @@ describe('reconcilePortfolioLookForMediaAsset', () => {
     )
   })
 
-  it('does not publish an asset with no bookable service tag', async () => {
+  it('§19d: adopts the primary service tag for a tagless review photo, then publishes', async () => {
+    // Review media carries a primaryServiceId but no MediaServiceTag M2M row.
     mocks.mediaAssetFindUnique.mockResolvedValueOnce(
-      makeMedia({ primaryServiceId: 'service_x', services: [] }),
+      makeMedia({
+        reviewId: 'review_1',
+        primaryServiceId: 'service_booking',
+        services: [],
+      }),
     )
 
-    await expect(run()).resolves.toBe('SKIPPED_NOT_BACKABLE')
-    expect(mocks.createOrUpdateProLookFromMediaAsset).not.toHaveBeenCalled()
-    expect(mocks.updateProLookPublication).not.toHaveBeenCalled()
+    await expect(run()).resolves.toBe('PUBLISHED')
+
+    expect(mocks.mediaServiceTagCreateMany).toHaveBeenCalledWith({
+      data: [{ mediaId: 'media_1', serviceId: 'service_booking' }],
+      skipDuplicates: true,
+    })
+    expect(mocks.createOrUpdateProLookFromMediaAsset).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        request: expect.objectContaining({ primaryServiceId: 'service_booking' }),
+      }),
+    )
+  })
+
+  it('does not adopt a tag / publish when an already-tagged asset resolves a service', async () => {
+    // The default (tagged) asset resolves via the M2M — no adoption write.
+    await expect(run()).resolves.toBe('PUBLISHED')
+    expect(mocks.mediaServiceTagCreateMany).not.toHaveBeenCalled()
   })
 
   it('does not publish unpromoted private (client) media even when flagged public', async () => {
@@ -233,11 +259,14 @@ describe('reconcilePortfolioLookForMediaAsset', () => {
     expect(mocks.createOrUpdateProLookFromMediaAsset).not.toHaveBeenCalled()
   })
 
-  it('retracts a published look that can no longer back a look (tag removed)', async () => {
+  it('retracts a published look when consent is revoked (now unpromoted private)', async () => {
+    // Flags still say public, but the asset is private-bucket with no review /
+    // consent → no longer shareable → the live look must be retracted.
     mocks.mediaAssetFindUnique.mockResolvedValueOnce(
       makeMedia({
-        services: [],
-        primaryServiceId: 'service_x',
+        storageBucket: 'media-private',
+        reviewId: null,
+        booking: null,
         lookPostPrimaryFor: [
           {
             id: 'look_1',
@@ -250,6 +279,7 @@ describe('reconcilePortfolioLookForMediaAsset', () => {
 
     await expect(run()).resolves.toBe('RETRACTED')
     expect(mocks.updateProLookPublication).toHaveBeenCalledTimes(1)
+    expect(mocks.mediaServiceTagCreateMany).not.toHaveBeenCalled()
   })
 
   it('is a no-op for a private asset with no existing look', async () => {

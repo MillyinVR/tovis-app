@@ -128,22 +128,42 @@ export async function reconcilePortfolioLookForMediaAsset(
       return 'SKIPPED_CLIENT_LOOK'
     }
 
-    const serviceId = resolvePortfolioLookServiceId(media)
-
     const wantsPublic =
       media.visibility === MediaVisibility.PUBLIC &&
       (media.isFeaturedInPortfolio || media.isEligibleForLooks)
 
-    const backable =
-      wantsPublic &&
-      serviceId !== null &&
-      !isUnpromotedPrivateMedia({
-        storageBucket: media.storageBucket,
-        reviewId: media.reviewId,
-        clientUseConsentAt: media.booking?.mediaUseConsentAt ?? null,
-      })
+    const consentOk = !isUnpromotedPrivateMedia({
+      storageBucket: media.storageBucket,
+      reviewId: media.reviewId,
+      clientUseConsentAt: media.booking?.mediaUseConsentAt ?? null,
+    })
+
+    // Resolve the service the look anchors to. §19d — review/session media carries
+    // a canonical `primaryServiceId` but no `MediaServiceTag` M2M row (only the
+    // upload path populates it), so promoting a consented review photo would have
+    // nothing to anchor a look to. Adopt the primary bookable service into the M2M
+    // in that case (below, inside the publishable branch) so the exact §19b path
+    // can publish it — no new public-by-default surface, just the missing tag.
+    let serviceId = resolvePortfolioLookServiceId(media)
+    let adoptPrimaryServiceTag = false
+    if (serviceId === null && media.primaryServiceId) {
+      serviceId = media.primaryServiceId
+      adoptPrimaryServiceTag = true
+    }
+
+    const backable = wantsPublic && consentOk && serviceId !== null
 
     if (backable && serviceId) {
+      if (adoptPrimaryServiceTag) {
+        // Tag the tagless (review/session) photo with its bookable service so the
+        // published look is service-anchored for the feed/search/boards. Idempotent
+        // (unique [mediaId, serviceId]).
+        await tx.mediaServiceTag.createMany({
+          data: [{ mediaId: mediaAssetId, serviceId }],
+          skipDuplicates: true,
+        })
+      }
+
       // Featuring implies Looks-eligible under the unified model; set it in the
       // same tx so the publication assert passes when the asset was featured-only.
       if (!media.isEligibleForLooks) {
