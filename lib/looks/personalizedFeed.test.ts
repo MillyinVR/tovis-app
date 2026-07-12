@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     proFollow: { findMany: vi.fn() },
     lookLike: { findMany: vi.fn() },
+    lookHide: { findMany: vi.fn() },
     boardItem: { findMany: vi.fn() },
     board: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
@@ -29,6 +30,7 @@ import { BOARD_EVENT_PROXIMITY } from '@/lib/boards/context'
 import {
   AFFINITY_HALF_LIFE_DAYS,
   BOARD_GLOBAL_BLEED_WEIGHT,
+  HIDE_SUPPRESSION_HALF_LIFE_DAYS,
   aggregateBoardContextSignals,
   aggregateCategoryWeights,
   buildPersonalizedFeedPage,
@@ -61,6 +63,7 @@ describe('lib/looks/personalizedFeed', () => {
     vi.clearAllMocks()
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
+    mocks.prisma.lookHide.findMany.mockResolvedValue([])
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.board.findMany.mockResolvedValue([])
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
@@ -280,6 +283,39 @@ describe('lib/looks/personalizedFeed', () => {
       // (2 × 0.15 × 0.5) — decay and the §6.2 bleed fraction compose
       expect(affinity.categoryWeights.get('balayage')).toBeCloseTo(
         1 + 2 * BOARD_GLOBAL_BLEED_WEIGHT * 0.5,
+        5,
+      )
+    })
+
+    it('collects hidden look ids and decayed category suppression (spec §2.2)', async () => {
+      const hideHalfLifeAgo = new Date(
+        NOW.getTime() - HIDE_SUPPRESSION_HALF_LIFE_DAYS * 24 * 60 * 60 * 1000,
+      )
+      mocks.prisma.lookHide.findMany.mockResolvedValue([
+        { lookPostId: 'hidden_a', createdAt: NOW, ...catRow('bridal') },
+        {
+          lookPostId: 'hidden_b',
+          createdAt: hideHalfLifeAgo,
+          ...catRow('bridal'),
+        },
+        // No category → contributes to the exclusion list but not suppression.
+        { lookPostId: 'hidden_c', createdAt: NOW, ...catRow(null) },
+      ])
+
+      const affinity = await loadPersonalizedAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.hiddenLookIds).toEqual([
+        'hidden_a',
+        'hidden_b',
+        'hidden_c',
+      ])
+      // fresh hide (1.0) + one-half-life-old hide (0.5) on the same category.
+      expect(affinity.categorySuppressionWeights?.get('bridal')).toBeCloseTo(
+        1 + 0.5,
         5,
       )
     })
@@ -544,6 +580,40 @@ describe('lib/looks/personalizedFeed', () => {
       expect(page.items.map((i) => i.id)).toEqual(['b1'])
       expect(page.meta.injectedCount).toBe(0)
       expect(page.nextCursor).toBeNull()
+    })
+
+    it('excludes the viewer’s hidden looks from the backbone and reports the count (§2.2)', async () => {
+      mocks.prisma.lookHide.findMany.mockResolvedValue([
+        { lookPostId: 'hidden_a', createdAt: NOW, ...catRow('bridal') },
+        { lookPostId: 'hidden_b', createdAt: NOW, ...catRow(null) },
+      ])
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b1', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(['seen_x']),
+        now: NOW,
+      })
+
+      const backboneWhere =
+        mocks.prisma.lookPost.findMany.mock.calls[0]?.[0]?.where
+      const idExclusion = backboneWhere?.AND?.find(
+        (clause: Record<string, unknown>) =>
+          clause && typeof clause === 'object' && 'id' in clause,
+      )
+      expect(idExclusion).toEqual({
+        id: {
+          notIn: expect.arrayContaining(['hidden_a', 'hidden_b', 'seen_x']),
+        },
+      })
+      expect(page.meta.hiddenExcludedCount).toBe(2)
+      expect(page.meta.categorySuppressionCount).toBe(1)
     })
 
     it('skips the candidate-embedding query when the viewer has no taste vector', async () => {

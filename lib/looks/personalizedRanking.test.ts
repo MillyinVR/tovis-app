@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   PERSONALIZED_RANK_WEIGHTS,
+  computeCategorySuppressionPenalty,
   computePersonalizedFreshnessBoost,
   computePersonalizedScore,
   computeVisualSimilarityBoost,
@@ -29,6 +30,7 @@ function affinity(
   overrides: Partial<{
     followed: string[]
     categories: Array<[string, number]>
+    suppressions: Array<[string, number]>
     occasions: Array<[string, number]>
     tasteVector: number[] | null
     tasteSignalCount: number
@@ -37,6 +39,7 @@ function affinity(
   return {
     followedProfessionalIds: new Set(overrides.followed ?? []),
     categoryWeights: new Map(overrides.categories ?? []),
+    categorySuppressionWeights: new Map(overrides.suppressions ?? []),
     occasionTagWeights: new Map(overrides.occasions ?? []),
     tasteVector: overrides.tasteVector ?? null,
     tasteSignalCount: overrides.tasteSignalCount ?? 0,
@@ -398,6 +401,98 @@ describe('lib/looks/personalizedRanking', () => {
 
     it('returns 0 for a missing publishedAt', () => {
       expect(computePersonalizedFreshnessBoost(null, NOW)).toBe(0)
+    })
+  })
+
+  describe('computeCategorySuppressionPenalty (§2.2)', () => {
+    const { hideCategoryThreshold, hideCategoryFull, hideCategoryMax } =
+      PERSONALIZED_RANK_WEIGHTS
+
+    it('is 0 below the repeated-hide threshold (one dismissal never suppresses)', () => {
+      expect(computeCategorySuppressionPenalty(0)).toBe(0)
+      expect(computeCategorySuppressionPenalty(1)).toBe(0)
+      expect(computeCategorySuppressionPenalty(hideCategoryThreshold)).toBe(0)
+    })
+
+    it('ramps from threshold to the cap and clamps beyond', () => {
+      const mid = (hideCategoryThreshold + hideCategoryFull) / 2
+      expect(computeCategorySuppressionPenalty(mid)).toBeCloseTo(
+        hideCategoryMax / 2,
+        5,
+      )
+      expect(computeCategorySuppressionPenalty(hideCategoryFull)).toBeCloseTo(
+        hideCategoryMax,
+        5,
+      )
+      expect(computeCategorySuppressionPenalty(999)).toBeCloseTo(
+        hideCategoryMax,
+        5,
+      )
+    })
+
+    it('never returns a negative penalty', () => {
+      expect(computeCategorySuppressionPenalty(-5)).toBe(0)
+      expect(computeCategorySuppressionPenalty(Number.NaN)).toBe(0)
+    })
+  })
+
+  describe('computePersonalizedScore hide suppression (§2.2)', () => {
+    it('down-ranks a look in a repeatedly-hidden category', () => {
+      const context = {
+        affinity: affinity({ suppressions: [['balayage', 6]] }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+      const suppressed = computePersonalizedScore(row({ id: 'a' }), context)
+      const baseline = computePersonalizedScore(row({ id: 'a' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+
+      expect(baseline - suppressed).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.hideCategoryMax,
+        5,
+      )
+    })
+
+    it('leaves other categories untouched', () => {
+      const context = {
+        affinity: affinity({ suppressions: [['bridal', 6]] }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+      // The row is 'balayage'; suppression on 'bridal' doesn't apply.
+      const score = computePersonalizedScore(row({ id: 'a' }), context)
+      const baseline = computePersonalizedScore(row({ id: 'a' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(score).toBeCloseTo(baseline, 5)
+    })
+
+    it('does not penalize a look with no service category', () => {
+      const context = {
+        affinity: affinity({ suppressions: [['balayage', 6]] }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+      // A look whose service resolves to no category slug (the row() helper's
+      // `??` coerces a null service back to its default, so target the category).
+      const score = computePersonalizedScore(
+        row({ id: 'a', service: { category: null } }),
+        context,
+      )
+      const baseline = computePersonalizedScore(
+        row({ id: 'a', service: { category: null } }),
+        {
+          affinity: affinity(),
+          seenLookIds: EMPTY_SEEN,
+          now: NOW,
+        },
+      )
+      expect(score).toBeCloseTo(baseline, 5)
     })
   })
 

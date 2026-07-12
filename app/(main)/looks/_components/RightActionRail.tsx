@@ -9,6 +9,7 @@ import {
   MessageCircle,
   Upload,
   CalendarDays,
+  EyeOff,
 } from 'lucide-react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
@@ -67,6 +68,8 @@ type RightActionRailProps = {
   onToggleLike: () => void
   onOpenComments: () => void
   onShare: () => void
+  // One-tap "not for me" hide (spec §2.2). Absent → the control isn't rendered.
+  onHide?: () => void
   onSaveStateChange?: (state: LooksSaveStateResponseDto) => void
 }
 
@@ -143,6 +146,7 @@ export default function RightActionRail({
   onToggleLike,
   onOpenComments,
   onShare,
+  onHide,
   onSaveStateChange,
 }: RightActionRailProps) {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
@@ -356,6 +360,16 @@ export default function RightActionRail({
         <RailButton ariaLabel="Share" onClick={onShare}>
           <Upload size={28} style={{ color: PAPER }} />
         </RailButton>
+
+        {onHide ? (
+          <RailButton
+            ariaLabel="Not for me"
+            testId="hide-look-button"
+            onClick={onHide}
+          >
+            <EyeOff size={26} style={{ color: PAPER }} />
+          </RailButton>
+        ) : null}
       </div>
 
       <SaveToBoardModal

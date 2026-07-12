@@ -63,6 +63,7 @@ export async function GET(req: Request, ctx: RouteContext) {
         eventDate: board.eventDate,
         answers: board.answers,
       },
+      viewerUserId: auth.user.id,
       limit,
       cursor,
       seenLookIds,
@@ -104,6 +105,7 @@ export async function GET(req: Request, ctx: RouteContext) {
       answerTagCount: page.meta.answerTagCount,
       feasibilityTagCount: page.meta.feasibilityTagCount,
       savedExcludedCount: page.meta.savedExcludedCount,
+      hiddenExcludedCount: page.meta.hiddenExcludedCount,
     })
 
     const body: LooksFeedResponseDto & { ok: true } = {

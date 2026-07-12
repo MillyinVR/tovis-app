@@ -20,6 +20,9 @@
 //                                 signals built the taste vector)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
+//         - suppressionPenalty   (viewer keeps hiding this look's category — the
+//                                 explicit "not for me" negative signal, spec
+//                                 §2.2; decayed, only past repeated hides)
 //
 // Follow and category boosts are ADDITIVE (not multiplicative) so a fresh
 // followed-pro look with zero engagement — rankScore 0 — still gets lifted into
@@ -65,6 +68,19 @@ export const PERSONALIZED_RANK_WEIGHTS = {
   freshnessHalfLifeDays: 1,
   // Large enough to sink an already-seen look beneath everything unseen.
   seen: 1_000,
+  // Category-level suppression from explicit "not for me" hides (spec §2.2).
+  // A NEGATIVE boost, never a hard filter (guardrail #10 — item hides are the
+  // hard exclusion; this is the softer "you keep hiding this category" signal
+  // and it decays). Input is the summed DECAYED hide weight in the look's
+  // category (computed in personalizedFeed.ts with a slower-than-positive
+  // half-life). A single dismissed card (~weight 1) stays below the threshold so
+  // it never tars the whole category; the penalty ramps from threshold→full and
+  // caps at hideCategoryMax. Peak sits alongside the follow boost (25) so a
+  // strongly-suppressed category is pushed down hard but a followed pro's look
+  // in it can still surface.
+  hideCategoryThreshold: 2,
+  hideCategoryFull: 6,
+  hideCategoryMax: 30,
 } as const
 
 export type PersonalizedViewerAffinity = {
@@ -72,6 +88,11 @@ export type PersonalizedViewerAffinity = {
   // slug → affinity weight (raw count of the viewer's likes/saves in that
   // category; capped inside the ranker).
   categoryWeights: ReadonlyMap<string, number>
+  // slug → summed DECAYED explicit-hide weight in that category (spec §2.2).
+  // Down-ranks categories the viewer keeps hiding, past a threshold, decaying
+  // over weeks (guardrail #10). Optional so non-suppression callers (unit tests,
+  // follow-only paths) omit it → no penalty.
+  categorySuppressionWeights?: ReadonlyMap<string, number>
   // LookTag slug → occasion weight in [0, 1], derived from the viewer's
   // declared board purposes and scaled by event proximity at load time
   // (lib/looks/personalizedFeed.ts + lib/boards/context.ts). A look matching any of
@@ -211,6 +232,24 @@ export function computeVisualSimilarityBoost(args: {
   return PERSONALIZED_RANK_WEIGHTS.visualMax * clampedCosine * confidence
 }
 
+/**
+ * Category-suppression penalty from explicit hides (spec §2.2). Zero until the
+ * decayed hide weight for the category crosses `hideCategoryThreshold` (so one
+ * dismissed card doesn't suppress the category), then ramps linearly to
+ * `hideCategoryMax` at `hideCategoryFull`. Never negative; capped. Pure +
+ * exported for unit testing.
+ */
+export function computeCategorySuppressionPenalty(weight: number): number {
+  const w = safeNumber(weight)
+  const { hideCategoryThreshold, hideCategoryFull, hideCategoryMax } =
+    PERSONALIZED_RANK_WEIGHTS
+  if (w <= hideCategoryThreshold) return 0
+
+  const span = hideCategoryFull - hideCategoryThreshold
+  const ramp = span > 0 ? Math.min((w - hideCategoryThreshold) / span, 1) : 1
+  return hideCategoryMax * Math.max(0, ramp)
+}
+
 export function computePersonalizedScore(
   row: PersonalizedRankableRow,
   context: PersonalizedRankContext,
@@ -232,6 +271,14 @@ export function computePersonalizedScore(
       Math.max(rawCategoryWeight, 0),
       PERSONALIZED_RANK_WEIGHTS.categoryWeightCap,
     ) * PERSONALIZED_RANK_WEIGHTS.categoryUnit
+
+  // §2.2 explicit-hide category suppression — pushes down categories the viewer
+  // keeps saying "not for me" to (decayed; only past the repeated-hide threshold).
+  const suppressionPenalty = slug
+    ? computeCategorySuppressionPenalty(
+        context.affinity.categorySuppressionWeights?.get(slug) ?? 0,
+      )
+    : 0
 
   const occasionBoost =
     PERSONALIZED_RANK_WEIGHTS.occasionMax *
@@ -259,7 +306,8 @@ export function computePersonalizedScore(
     occasionBoost +
     visualBoost +
     freshnessBoost -
-    seenPenalty
+    seenPenalty -
+    suppressionPenalty
   )
 }
 
