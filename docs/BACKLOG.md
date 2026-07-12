@@ -51,7 +51,8 @@ blocking/degrading for a real user right now → least.**
    already shipped** (per §15's 2026-07-08 audit, which supersedes A1's "biggest gap"
    framing); remaining = pro onboarding checklist + license/doc verification — §9 /
    iOS §5 **A1** *(iOS)*  ·  *(the real auth gaps A7/A8 are Tier 1 & item 9)*
-9. iOS Google Sign-In — §15 **A8** *(iOS)*
+9. ~~iOS Google Sign-In — §15 **A8**~~ ✅ **DONE** (iOS #110; iOS-only — GoogleSignIn-iOS
+   9.2.0 SPM dep + `POST /auth/google`, gated on configured client ids) *(iOS)*
 10. iOS first-class client screens — §9 / iOS §5 **A2** *(iOS)*
 11. iOS client booking-detail rebuild — §9 / iOS **A3** *(iOS)*
 12. iOS full pro parity + home→Calendar — §9 / iOS **A4/A5** *(iOS)*
@@ -663,16 +664,24 @@ TikTok ➖ absent on both platforms, parked (A9) · client→Looks landing ✅.
   + `onOpenURL`). Mirror web `app/(auth)/verify-phone/page.tsx` (handles phone +
   email resend/status). Endpoints already exist: `/auth/email/send`,
   `/auth/email/verify`, `/auth/verification/status`.
-- [ ] **A8 — Google Sign-In (web-parity port; mostly client-side).** Web offers
-  Google account creation on client signup; iOS has none (no Google SDK anywhere).
-  The server endpoint already exists and is documented native-reusable: `POST
-  /api/v1/auth/google` verifies the Google identity token, find-or-creates a CLIENT
-  user (email pre-verified, phone not), and returns the same session payload as Apple
-  (`app/api/v1/auth/google/route.ts`, `lib/auth/findOrCreateGoogleUser.ts`). iOS work
-  ≈ clone the working Apple path: Google Sign-In SDK → ID token → `POST /auth/google`
-  with `deviceId` → `handleAuthResult` (lands at phone verify → Looks). Gate the
-  button on a configured client id (parity with web's inert-until-provisioned
-  `NEXT_PUBLIC_GOOGLE_CLIENT_ID`).
+- [x] **A8 — Google Sign-In (web-parity port; mostly client-side).** ✅ **DONE
+  2026-07-11 (iOS #110; iOS-only, no web change).** Cloned the Apple path exactly as
+  scoped: added **GoogleSignIn-iOS 9.2.0** as the app target's second remote SPM dep
+  (kept off the UI-free TovisKit package), TovisKit gained
+  `AuthService.googleLogin(identityToken:deviceId:)` → the already-live `POST
+  /api/v1/auth/google` → `handleAuthResult` (lands at phone verify → Looks), and
+  `LoginView` shows a "Continue with Google" button **gated on configured OAuth
+  client ids** (`googleClientID`/`googleServerClientID` in `TovisConfig`, both nil
+  today → button hidden; parity with web's inert `NEXT_PUBLIC_GOOGLE_CLIENT_ID`).
+  Key verifier detail confirmed: the SDK stamps `serverClientID` (the web OAuth id)
+  as the id-token's `aud`, which `lib/auth/googleIdentity.ts` pins — so **no web
+  change was needed**. Provisioning to light it up (deferred, Tori's call): set both
+  ids in `TovisConfig.swift` from one Google Cloud project + add the iOS client's
+  reverse-client-id URL scheme to `Tovis/Info.plist`. Original scope kept for
+  reference: The server endpoint already exists and is documented native-reusable:
+  `POST /api/v1/auth/google` verifies the Google identity token, find-or-creates a
+  CLIENT user (email pre-verified, phone not), and returns the same session payload
+  as Apple (`app/api/v1/auth/google/route.ts`, `lib/auth/findOrCreateGoogleUser.ts`).
 - [ ] **A9 — TikTok login (PARKED, Tori 2026-07-08; greenfield, NOT a drop-in).**
   Exists on neither platform (TikTok is only a pro profile social link today). ⚠️
   Unlike Apple/Google (verifiable `id_token` carrying a verified email), TikTok Login
