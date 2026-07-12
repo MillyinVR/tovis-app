@@ -43,6 +43,7 @@ describe('lib/clientActions/actionRegistry', () => {
           notificationEventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
           notificationRecipientKind: NotificationRecipientKind.CLIENT,
           createFreshDeliveryOnResend: true,
+          allowsNullProfessional: true,
         },
         link: {
           target: 'CLAIM',

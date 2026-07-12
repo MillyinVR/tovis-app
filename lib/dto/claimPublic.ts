@@ -23,5 +23,11 @@ export type ClaimPublicViewResponseDTO = {
   invitedName: string | null
   invitedEmail: string | null
   invitedPhone: string | null
-  booking: ClaimPublicBookingDTO
+  /**
+   * Pro's public display name resolved from the booking OR the invite's own pro
+   * (respects nameDisplay); null for a pro-less claim (cold self-serve orphan).
+   */
+  professionalName: string | null
+  /** Booking context, or null for a booking-less claim. */
+  booking: ClaimPublicBookingDTO | null
 }

@@ -21,7 +21,7 @@ export type AcceptClientClaimFromLinkResult =
   | { kind: 'client_not_found' }
   | { kind: 'client_mismatch' }
   | { kind: 'conflict' }
-  | { kind: 'ok'; bookingId: string }
+  | { kind: 'ok'; bookingId: string | null }
 
 const actingClientSelect = Prisma.validator<Prisma.ClientProfileSelect>()({
   id: true,

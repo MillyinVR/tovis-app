@@ -323,7 +323,9 @@ export function validateClientActionRecipient(
   }
 
   const professionalId = asTrimmedString(recipient.professionalId)
-  if (!professionalId) {
+  const allowsNullProfessional =
+    getClientActionDefinition(actionType).delivery.allowsNullProfessional ?? false
+  if (!professionalId && !allowsNullProfessional) {
     return fail(
       'CLIENT_ACTION_MISSING_PROFESSIONAL_ID',
       `clientActions/policies: ${actionType} requires recipient.professionalId.`,
@@ -344,4 +346,23 @@ export function validateClientActionRecipient(
       userId: asTrimmedString(recipient.userId),
     },
   }
+}
+
+/**
+ * Read a required professionalId from a validated recipient snapshot. Aftercare /
+ * consultation token issuance needs a non-null pro (their ClientActionToken column
+ * is non-null); only CLIENT_CLAIM_INVITE recipients may be pro-less
+ * (`allowsNullProfessional`), and those never reach these token paths. Throws on
+ * the (invariant-violating) null.
+ */
+export function requireRecipientProfessionalId(
+  recipient: Pick<ClientActionRecipientSnapshot, 'professionalId'>,
+): string {
+  const professionalId = asTrimmedString(recipient.professionalId)
+  if (!professionalId) {
+    throw new Error(
+      'clientActions/policies: recipient.professionalId is required for this action.',
+    )
+  }
+  return professionalId
 }

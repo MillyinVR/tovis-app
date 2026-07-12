@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     booking: { findFirst: vi.fn() },
   },
   issueClaimLinkForBooking: vi.fn(),
+  issueClaimLinkForClient: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
   kickNotificationDrain: vi.fn(),
 }))
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }))
 vi.mock('./clientClaimLinks', () => ({
   issueClaimLinkForBooking: mocks.issueClaimLinkForBooking,
+  issueClaimLinkForClient: mocks.issueClaimLinkForClient,
 }))
 vi.mock('@/lib/clientActions/createClientClaimInviteDelivery', () => ({
   createClientClaimInviteDelivery: mocks.createClientClaimInviteDelivery,
@@ -103,7 +105,7 @@ describe('selfServeClaim', () => {
       expect(result).toBeNull()
     })
 
-    it('returns null when the matched profile has no booking', async () => {
+    it('returns a booking-less claimable profile when the match has no booking', async () => {
       mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([
         { id: 'client_1', ...emailHashRow(), phoneHashV2: null, phoneHashKeyVersion: null },
       ])
@@ -114,7 +116,11 @@ describe('selfServeClaim', () => {
         phone: null,
       })
 
-      expect(result).toBeNull()
+      expect(result).toEqual({
+        clientId: 'client_1',
+        bookingId: null,
+        maskedDestination: 't***@example.com',
+      })
     })
 
     it('returns the claimable profile with a masked email when the email matches', async () => {
@@ -174,11 +180,16 @@ describe('selfServeClaim', () => {
       })
 
       const result = await sendSelfServeClaimLink({
+        clientId: 'client_1',
         bookingId: 'booking_1',
         tenantContext: tenantContext as never,
       })
 
       expect(result).toEqual({ sent: true })
+      expect(mocks.issueClaimLinkForBooking).toHaveBeenCalledWith({
+        bookingId: 'booking_1',
+      })
+      expect(mocks.issueClaimLinkForClient).not.toHaveBeenCalled()
       expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith(
         expect.objectContaining({
           professionalId: 'pro_1',
@@ -194,12 +205,53 @@ describe('selfServeClaim', () => {
       expect(mocks.kickNotificationDrain).toHaveBeenCalledTimes(1)
     })
 
+    it('mints a booking-less, pro-less link when there is no booking', async () => {
+      mocks.issueClaimLinkForClient.mockResolvedValueOnce({
+        kind: 'ok',
+        rawToken: 'rawtok_2',
+        invite: {
+          id: 'invite_2',
+          professionalId: null,
+          clientId: 'client_1',
+          bookingId: null,
+          invitedName: 'Tori Morales',
+          invitedEmail: TEST_EMAIL,
+          invitedPhone: null,
+          preferredContactMethod: ContactMethod.EMAIL,
+        },
+      })
+
+      const result = await sendSelfServeClaimLink({
+        clientId: 'client_1',
+        bookingId: null,
+        tenantContext: tenantContext as never,
+      })
+
+      expect(result).toEqual({ sent: true })
+      expect(mocks.issueClaimLinkForClient).toHaveBeenCalledWith({
+        clientId: 'client_1',
+        professionalId: null,
+      })
+      expect(mocks.issueClaimLinkForBooking).not.toHaveBeenCalled()
+      expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          professionalId: null,
+          clientId: 'client_1',
+          bookingId: null,
+          inviteId: 'invite_2',
+          rawToken: 'rawtok_2',
+        }),
+      )
+      expect(mocks.kickNotificationDrain).toHaveBeenCalledTimes(1)
+    })
+
     it('does not deliver when the invite can no longer be issued', async () => {
       mocks.issueClaimLinkForBooking.mockResolvedValueOnce({
         kind: 'already_claimed',
       })
 
       const result = await sendSelfServeClaimLink({
+        clientId: 'client_1',
         bookingId: 'booking_1',
         tenantContext: tenantContext as never,
       })

@@ -153,6 +153,18 @@ describe('lib/clientActions/policies', () => {
           'clientActions/policies: CONSULTATION_ACTION requires recipient.professionalId.',
       })
     })
+
+    it('allows a null professionalId for CLIENT_CLAIM_INVITE (pro-less claim)', () => {
+      const result = validateClientActionRecipient(
+        'CLIENT_CLAIM_INVITE',
+        buildRecipient({ professionalId: null }),
+      )
+
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.value.professionalId).toBeNull()
+      }
+    })
   })
 
   describe('resolveClientActionDeliveryMethod', () => {

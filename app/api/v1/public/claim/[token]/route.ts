@@ -19,6 +19,7 @@ import {
   buildClaimLocationLabel,
   buildClaimProfessionalLabel,
   resolveClaimBookingTimeZone,
+  resolveClaimProfessionalName,
 } from '@/lib/clients/claimPublicView'
 import { getClientClaimLinkPublicState } from '@/lib/clients/clientClaimLinks'
 import {
@@ -64,11 +65,13 @@ export async function GET(
 
     const state = await getClientClaimLinkPublicState({ token: rawToken })
 
-    if (state.kind === 'not_found' || !state.link.booking) {
+    if (state.kind === 'not_found') {
       return jsonFail(404, 'Claim link not found.', { code: 'NOT_FOUND' })
     }
 
     const link = state.link
+    // A booking-less claim (directory-created / migration-imported client) has no
+    // booking context — render a pro/brand-level claim instead of 404-ing.
     const booking = link.booking
 
     const viewState: ClaimPublicViewState =
@@ -79,7 +82,7 @@ export async function GET(
           : 'ready'
 
     const scheduledFor =
-      booking.scheduledFor instanceof Date
+      booking?.scheduledFor instanceof Date
         ? booking.scheduledFor.toISOString()
         : null
 
@@ -88,13 +91,16 @@ export async function GET(
       invitedName: link.invitedName ?? null,
       invitedEmail: link.invitedEmail ?? null,
       invitedPhone: link.invitedPhone ?? null,
-      booking: {
-        serviceName: booking.service?.name?.trim() || null,
-        professionalName: buildClaimProfessionalLabel(booking),
-        scheduledFor,
-        timeZone: resolveClaimBookingTimeZone(booking),
-        locationLabel: buildClaimLocationLabel(booking),
-      },
+      professionalName: resolveClaimProfessionalName(link),
+      booking: booking
+        ? {
+            serviceName: booking.service?.name?.trim() || null,
+            professionalName: buildClaimProfessionalLabel(booking),
+            scheduledFor,
+            timeZone: resolveClaimBookingTimeZone(booking),
+            locationLabel: buildClaimLocationLabel(booking),
+          }
+        : null,
     }
 
     return jsonOk(body, 200)

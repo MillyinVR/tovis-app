@@ -335,7 +335,7 @@ describe('app/claim/[token]/page.tsx', () => {
     expect(mocks.notFound).toHaveBeenCalledTimes(1)
   })
 
-  it('calls notFound when invite is missing booking relation', async () => {
+  it('renders a booking-less claim (no 404) when the invite has no booking', async () => {
     mockInviteState(
       'ready',
       makeInvite({
@@ -343,9 +343,14 @@ describe('app/claim/[token]/page.tsx', () => {
       }),
     )
 
-    await expect(renderPage()).rejects.toThrow('NOT_FOUND')
+    const html = await renderPage()
 
-    expect(mocks.notFound).toHaveBeenCalledTimes(1)
+    expect(mocks.notFound).not.toHaveBeenCalled()
+    // Booking-less frame: "Your history" pill + generic claim header instead of
+    // the booking overview.
+    expect(html).toContain('Your history')
+    expect(html).toContain('Claim your client history')
+    expect(html).toContain('This profile was created for')
   })
 
   it('renders the booking overview for an unauthenticated ready invite without redirecting', async () => {

@@ -1097,6 +1097,7 @@ export async function POST(request: Request) {
         if (!claimSendLimited) {
           try {
             await sendSelfServeClaimLink({
+              clientId: claimable.clientId,
               bookingId: claimable.bookingId,
               tenantContext,
             })

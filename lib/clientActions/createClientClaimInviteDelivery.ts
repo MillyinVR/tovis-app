@@ -22,9 +22,11 @@ import type {
 } from './types'
 
 export type CreateClientClaimInviteDeliveryArgs = {
-  professionalId: string
+  // Nullable: a claim invite can be pro-less (cold self-serve) and/or
+  // booking-less (directory-created / migration-imported client).
+  professionalId: string | null
   clientId: string
-  bookingId: string
+  bookingId: string | null
   inviteId: string
   rawToken: string
   tenantContext: TenantContext
@@ -49,14 +51,21 @@ export type CreateClientClaimInviteDeliveryResult = {
 
 // §12 NC1 #39: this is the client's highest-stakes first touch, so lead with the
 // PRO (their actual relationship), falling back to the brand only when the pro
-// name is unavailable.
+// name is unavailable. Booking-less invites (no appointment) get profile-claim
+// copy instead of "you're booked".
 function buildInviteTitle(args: {
   proName: string | null
   brandName: string
+  hasBooking: boolean
 }): string {
+  if (args.hasBooking) {
+    return args.proName
+      ? `You're booked with ${args.proName}`
+      : `You've been booked with ${args.brandName}`
+  }
   return args.proName
-    ? `You're booked with ${args.proName}`
-    : `You've been booked with ${args.brandName}`
+    ? `${args.proName} added you on ${args.brandName}`
+    : `Claim your ${args.brandName} account`
 }
 
 function buildInviteBody(args: {
@@ -65,13 +74,26 @@ function buildInviteBody(args: {
   serviceName: string | null
   whenClause: string
   brandName: string
+  hasBooking: boolean
 }): string {
   const invitedName = asTrimmedString(args.invitedName)
-  const lead = invitedName ? `${invitedName}, your` : 'Your'
-  const withWhom = args.proName ?? args.brandName
-  const service = args.serviceName?.trim() || 'appointment'
 
-  return `${lead} ${service} with ${withWhom}${args.whenClause} is booked. Tap to view details and set up your profile.`
+  if (args.hasBooking) {
+    const lead = invitedName ? `${invitedName}, your` : 'Your'
+    const withWhom = args.proName ?? args.brandName
+    const service = args.serviceName?.trim() || 'appointment'
+    return `${lead} ${service} with ${withWhom}${args.whenClause} is booked. Tap to view details and set up your profile.`
+  }
+
+  // Booking-less, pro attributed: a pro added/imported this client.
+  if (args.proName) {
+    const lead = invitedName ? `${invitedName}, ` : ''
+    return `${lead}${args.proName} added you as a client on ${args.brandName}. Tap to set up your profile and keep your history together.`
+  }
+
+  // Booking-less, pro-less (cold self-serve): brand-level.
+  const opener = invitedName ? `${invitedName}, we` : 'We'
+  return `${opener} found existing history for your contact on ${args.brandName}. Tap to claim your account and keep your history together.`
 }
 
 async function loadInviteBookingContext(
@@ -117,19 +139,42 @@ async function loadInviteBookingContext(
   }
 }
 
+/**
+ * Resolve just the pro's public display name for a booking-less invite (there's
+ * no booking to read it from). Null when the invite is pro-less.
+ */
+async function loadInviteProfessionalName(
+  db: Prisma.TransactionClient | typeof prisma,
+  professionalId: string | null,
+): Promise<string | null> {
+  if (!professionalId) {
+    return null
+  }
+
+  const professional = await db.professionalProfile
+    .findUnique({
+      where: { id: professionalId },
+      select: professionalPublicDisplayNameSelect,
+    })
+    .catch(() => null)
+
+  return professional ? pickProfessionalPublicDisplayName(professional) : null
+}
+
 function buildInvitePayload(
   args: Pick<
     CreateClientClaimInviteDeliveryArgs,
     'professionalId' | 'clientId' | 'bookingId' | 'inviteId'
   >,
 ): Prisma.InputJsonValue {
+  // Omit null pro/booking (JSON metadata carries only known refs).
   return {
     source: 'proClientInvite',
     actionType: 'CLIENT_CLAIM_INVITE',
-    professionalId: args.professionalId,
     clientId: args.clientId,
-    bookingId: args.bookingId,
     inviteId: args.inviteId,
+    ...(args.professionalId ? { professionalId: args.professionalId } : {}),
+    ...(args.bookingId ? { bookingId: args.bookingId } : {}),
   } satisfies Prisma.InputJsonObject
 }
 
@@ -177,10 +222,19 @@ export async function createClientClaimInviteDelivery(
 ): Promise<CreateClientClaimInviteDeliveryResult> {
   const plan = buildOrchestrationPlan(args)
   const brand = getBrandForTenantContext(args.tenantContext)
-  const bookingContext = await loadInviteBookingContext(
-    args.tx ?? prisma,
-    args.bookingId,
-  )
+  const db = args.tx ?? prisma
+  const hasBooking = args.bookingId != null
+
+  // Booking-bearing invites read the pro/service/when from the booking;
+  // booking-less invites resolve just the pro name (null when pro-less).
+  const bookingContext = args.bookingId
+    ? await loadInviteBookingContext(db, args.bookingId)
+    : {
+        proName: await loadInviteProfessionalName(db, args.professionalId),
+        serviceName: null,
+        scheduledFor: null,
+        timeZone: DEFAULT_TIME_ZONE,
+      }
   const whenClause = formatBookingWhenClause(
     bookingContext.scheduledFor,
     bookingContext.timeZone,
@@ -197,6 +251,7 @@ export async function createClientClaimInviteDelivery(
     title: buildInviteTitle({
       proName: bookingContext.proName,
       brandName: brand.displayName,
+      hasBooking,
     }),
     body: buildInviteBody({
       invitedName: asTrimmedString(args.invitedName),
@@ -204,6 +259,7 @@ export async function createClientClaimInviteDelivery(
       serviceName: bookingContext.serviceName,
       whenClause,
       brandName: brand.displayName,
+      hasBooking,
     }),
     payload: buildInvitePayload(args),
     tx: args.tx,

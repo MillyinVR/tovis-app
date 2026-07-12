@@ -13,6 +13,7 @@ import {
   buildClaimLocationLabel,
   buildClaimProfessionalLabel,
   resolveClaimBookingTimeZone,
+  resolveClaimProfessionalName,
 } from '@/lib/clients/claimPublicView'
 import { getCurrentUser } from '@/lib/currentUser'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
@@ -183,7 +184,9 @@ export default async function ClaimInvitePage(props: PageProps) {
 
   const invite = inviteState.link
 
-  if (!invite.client || !invite.booking) {
+  // A booking-less claim (directory-created / migration-imported client) still
+  // renders — only a missing client identity is a hard 404.
+  if (!invite.client) {
     notFound()
   }
 
@@ -217,7 +220,10 @@ export default async function ClaimInvitePage(props: PageProps) {
   const loginLink = loginHref(token)
   const signupLink = signupHref(invite, token)
   const verifyLink = verifyHref(token)
-  const backToBookingHref = bookingHref(invite.booking.id)
+  // Booking-less claims land on the client home after claiming.
+  const claimedDestinationHref = invite.booking
+    ? bookingHref(invite.booking.id)
+    : '/client'
 
   async function claimAction() {
     'use server'
@@ -244,7 +250,7 @@ export default async function ClaimInvitePage(props: PageProps) {
 
     switch (result.kind) {
       case 'ok':
-        redirect(bookingHref(result.bookingId))
+        redirect(result.bookingId ? bookingHref(result.bookingId) : '/client')
 
       case 'not_found':
         notFound()
@@ -266,33 +272,43 @@ export default async function ClaimInvitePage(props: PageProps) {
     }
   }
 
-  const serviceTitle = invite.booking.service?.name?.trim() || 'Service'
-  const professionalLabel = buildClaimProfessionalLabel(invite.booking)
-  const locationLabel = buildClaimLocationLabel(invite.booking)
-  const appointmentLabel = buildAppointmentLabel(invite.booking)
+  const booking = invite.booking
+  const professionalName = resolveClaimProfessionalName(invite)
+  const serviceTitle = booking?.service?.name?.trim() || 'Service'
+  const professionalLabel = booking
+    ? buildClaimProfessionalLabel(booking)
+    : professionalName
+  const locationLabel = booking ? buildClaimLocationLabel(booking) : null
+  const appointmentLabel = booking ? buildAppointmentLabel(booking) : null
 
   return (
     <main className="mx-auto w-full max-w-[720px] px-4 pb-16 pt-16 text-textPrimary">
       <header>
         <div className="inline-flex rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-textSecondary">
-          Your booking
+          {booking ? 'Your booking' : 'Your history'}
         </div>
 
         <h1 className="mt-4 text-[24px] font-black leading-tight">
-          {serviceTitle} with {professionalLabel}
+          {booking
+            ? `${serviceTitle} with ${professionalLabel}`
+            : professionalLabel
+              ? `Claim your history with ${professionalLabel}`
+              : 'Claim your client history'}
         </h1>
 
         <div className="mt-2 text-sm text-textSecondary">
           {invite.invitedName ? (
             <>
-              This booking was created for{' '}
+              {booking ? 'This booking was created for' : 'This profile was created for'}{' '}
               <span className="font-black text-textPrimary">
                 {invite.invitedName}
               </span>
               .
             </>
-          ) : (
+          ) : booking ? (
             'Here are the details for your booking.'
+          ) : (
+            'Create your account to attach this history to your identity.'
           )}
         </div>
 
@@ -352,10 +368,10 @@ export default async function ClaimInvitePage(props: PageProps) {
           >
             {isMatchingClient ? (
               <Link
-                href={backToBookingHref}
+                href={claimedDestinationHref}
                 className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
               >
-                Go to booking
+                {invite.booking ? 'Go to booking' : 'Go to your account'}
               </Link>
             ) : null}
           </StatusCard>

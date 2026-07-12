@@ -22,12 +22,20 @@ import {
 } from '@/lib/security/contactLookup'
 import type { TenantContext } from '@/lib/tenant/context'
 
-import { issueClaimLinkForBooking } from './clientClaimLinks'
+import {
+  issueClaimLinkForBooking,
+  issueClaimLinkForClient,
+} from './clientClaimLinks'
 import { buildClientProfileLookupOrConditions } from './upsertProClient'
 
 export type SelfServeClaimableProfile = {
   clientId: string
-  bookingId: string
+  /**
+   * The profile's most recent booking, or null for a booking-less profile
+   * (directory-created / migration-imported). The sender mints a booking-bearing
+   * claim link when present, else a booking-less one.
+   */
+  bookingId: string | null
   /**
    * A masked hint (e.g. "t***@example.com and ********4567") built ONLY from the
    * registering contact the caller already typed, for the channels that matched
@@ -53,9 +61,9 @@ function maskEmail(email: string): string {
 
 /**
  * Find an UNCLAIMED, unowned ClientProfile whose email or phone matches the
- * registering contact AND that has at least one booking (a claim link is minted
- * per booking). Returns null when there's no match, an ambiguous multi-profile
- * match, or no booking — the caller should fall back to normal registration.
+ * registering contact. Returns null when there's no match or an ambiguous
+ * multi-profile match — the caller should fall back to normal registration. A
+ * matched profile with no booking is still claimable (booking-less link).
  *
  * Only lookup HASHES are read from the profile (never plaintext email/phone); the
  * masked hint is derived from the caller's own already-typed contact.
@@ -100,15 +108,13 @@ export async function findSelfServeClaimableProfile(args: {
     return null
   }
 
+  // A booking is preferred (its context enriches the claim link) but not
+  // required — a booking-less profile still gets a booking-less claim link.
   const booking = await prisma.booking.findFirst({
     where: { clientId: profile.id },
     orderBy: { scheduledFor: 'desc' },
     select: { id: true },
   })
-
-  if (!booking) {
-    return null
-  }
 
   const emailHash = buildEmailLookupHashV2ForContactInput(args.email) // pii-plaintext-read-ok: hashes the caller's own registering email into the security blind index to identify the matched channel (no DB PII read), mirrors upsertProClient
   const phoneHash = buildPhoneLookupHashV2ForContactInput(args.phone) // pii-plaintext-read-ok: hashes the caller's own registering phone into the security blind index to identify the matched channel (no DB PII read), mirrors upsertProClient
@@ -130,22 +136,30 @@ export async function findSelfServeClaimableProfile(args: {
 
   return {
     clientId: profile.id,
-    bookingId: booking.id,
+    bookingId: booking?.id ?? null,
     maskedDestination: maskedParts.join(' and ') || null,
   }
 }
 
 /**
- * Mint a claim link for the booking and deliver it to the client's on-file
- * contact (email/SMS) via the existing CLIENT_CLAIM_INVITE pipeline, then kick
- * the notification drain. Returns `{ sent: false }` if the profile turned out to
- * be claimed/revoked between detection and send.
+ * Mint a claim link for the matched profile and deliver it to the client's
+ * on-file contact (email/SMS) via the existing CLIENT_CLAIM_INVITE pipeline,
+ * then kick the notification drain. Mints a booking-bearing link when the
+ * profile has a booking, else a pro-less booking-less link. Returns
+ * `{ sent: false }` if the profile turned out to be claimed/revoked between
+ * detection and send.
  */
 export async function sendSelfServeClaimLink(args: {
-  bookingId: string
+  clientId: string
+  bookingId: string | null
   tenantContext: TenantContext
 }): Promise<{ sent: boolean }> {
-  const issued = await issueClaimLinkForBooking({ bookingId: args.bookingId })
+  const issued = args.bookingId
+    ? await issueClaimLinkForBooking({ bookingId: args.bookingId })
+    : await issueClaimLinkForClient({
+        clientId: args.clientId,
+        professionalId: null,
+      })
 
   if (issued.kind !== 'ok') {
     return { sent: false }

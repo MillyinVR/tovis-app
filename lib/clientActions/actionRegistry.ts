@@ -120,6 +120,9 @@ export const CLIENT_ACTION_REGISTRY: Record<
       notificationEventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
       notificationRecipientKind: NotificationRecipientKind.CLIENT,
       createFreshDeliveryOnResend: true,
+      // A cold self-serve / orphan claim can be pro-less (no pro in context);
+      // the delivery degrades to brand-level copy.
+      allowsNullProfessional: true,
     },
     link: {
       target: 'CLAIM',

@@ -12,6 +12,7 @@ import {
 } from '@/lib/clients/proClientInviteTokens'
 import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
+import { professionalPublicDisplayNameSelect } from '@/lib/privacy/professionalDisplayName'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -109,6 +110,14 @@ const clientClaimLinkSelect = Prisma.validator<Prisma.ProClientInviteSelect>()({
       claimStatus: true,
       claimedAt: true,
       preferredContactMethod: true,
+    },
+  },
+  // Top-level pro (nullable) so the claim view can name the professional even
+  // when there's no booking to read it from (booking-less invite).
+  professional: {
+    select: {
+      id: true,
+      ...professionalPublicDisplayNameSelect,
     },
   },
   booking: {
@@ -418,6 +427,130 @@ export async function issueClaimLinkForBooking(
     data: {
       professionalId: booking.professionalId,
       clientId: client.id,
+      invitedName,
+      invitedEmail,
+      invitedPhone,
+      preferredContactMethod,
+      status: ProClientInviteStatus.PENDING,
+      token: null,
+      tokenHash,
+    },
+    select: clientClaimLinkSelect,
+  })
+
+  return { kind: 'ok', rawToken, invite: updated }
+}
+
+export type IssueClaimLinkForClientArgs = {
+  clientId: string
+  /**
+   * The pro attributed to this invite, or null. Cold self-serve passes null
+   * (no pro in context); the pro-facing directory invite passes the acting pro.
+   */
+  professionalId?: string | null
+  tx?: Prisma.TransactionClient
+}
+
+export type IssueClaimLinkForClientResult =
+  | { kind: 'ok'; rawToken: string; invite: ClientClaimLinkRow }
+  | { kind: 'not_found' }
+  | { kind: 'already_claimed' }
+  | { kind: 'revoked' }
+
+/**
+ * Mint (or rotate) a BOOKING-LESS claim link for an UNCLAIMED client, returning a
+ * fresh raw token usable at /claim/{token}. The sibling of
+ * issueClaimLinkForBooking for clients with no appointment (directory-created or
+ * migration-imported). invitedName/email/phone are derived from the client
+ * profile, exactly as the booking path derives them from booking.client.
+ *
+ * At most one booking-less invite per client: an existing one is rotated (its
+ * token regenerated) rather than duplicated. Respects revocation. A provided
+ * professionalId is set; a null one never clobbers an existing attribution.
+ */
+export async function issueClaimLinkForClient(
+  args: IssueClaimLinkForClientArgs,
+): Promise<IssueClaimLinkForClientResult> {
+  const db = getDb(args.tx)
+  const clientId = normalizeRequiredString(args.clientId, 'clientId')
+  const professionalId = asTrimmedString(args.professionalId)
+
+  const client = await db.clientProfile.findUnique({
+    where: { id: clientId },
+    select: {
+      id: true,
+      userId: true,
+      firstName: true, // pii-plaintext-read-ok: composes required ProClientInvite.invitedName for the claim link
+      lastName: true, // pii-plaintext-read-ok: composes required ProClientInvite.invitedName for the claim link
+      email: true, // pii-plaintext-read-ok: seeds invitedEmail for claim-link prefill, mirrors issueClaimLinkForBooking
+      phone: true, // pii-plaintext-read-ok: seeds invitedPhone for claim-link prefill, mirrors issueClaimLinkForBooking
+      claimStatus: true,
+    },
+  })
+
+  if (!client) {
+    return { kind: 'not_found' }
+  }
+
+  if (client.userId != null || client.claimStatus === ClientClaimStatus.CLAIMED) {
+    return { kind: 'already_claimed' }
+  }
+
+  const invitedName =
+    [client.firstName, client.lastName] // pii-plaintext-read-ok: composes required ProClientInvite.invitedName for the claim link
+      .map((part) => asTrimmedString(part))
+      .filter((part): part is string => Boolean(part))
+      .join(' ') || 'Client'
+  const invitedEmail = asTrimmedString(client.email) // pii-plaintext-read-ok: seeds invitedEmail for claim-link prefill, mirrors issueClaimLinkForBooking
+  const invitedPhone = asTrimmedString(client.phone) // pii-plaintext-read-ok: seeds invitedPhone for claim-link prefill, mirrors issueClaimLinkForBooking
+  const preferredContactMethod = invitedEmail
+    ? ContactMethod.EMAIL
+    : invitedPhone
+      ? ContactMethod.SMS
+      : null
+
+  // One booking-less invite per client — rotate an existing one rather than
+  // minting a duplicate. (A booking-BEARING invite for the same client is a
+  // distinct row keyed by its bookingId and is left untouched.)
+  const existing = await db.proClientInvite.findFirst({
+    where: { clientId, bookingId: null },
+    select: clientClaimLinkSelect,
+  })
+
+  if (existing && isLinkRevoked(existing)) {
+    return { kind: 'revoked' }
+  }
+
+  const rawToken = createProClientInviteToken()
+  const tokenHash = hashProClientInviteToken(rawToken)
+
+  if (!existing) {
+    const created = await db.proClientInvite.create({
+      data: {
+        professionalId,
+        clientId,
+        bookingId: null,
+        invitedName,
+        invitedEmail,
+        invitedPhone,
+        preferredContactMethod,
+        status: ProClientInviteStatus.PENDING,
+        token: null,
+        tokenHash,
+      },
+      select: clientClaimLinkSelect,
+    })
+
+    return { kind: 'ok', rawToken, invite: created }
+  }
+
+  const updated = await db.proClientInvite.update({
+    where: { id: existing.id },
+    data: {
+      // A null professionalId (cold self-serve) never wipes an existing pro
+      // attribution from an earlier pro-facing invite.
+      professionalId: professionalId ?? existing.professionalId,
+      clientId,
       invitedName,
       invitedEmail,
       invitedPhone,

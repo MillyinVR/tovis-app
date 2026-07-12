@@ -11,6 +11,7 @@ import { asTrimmedString } from '@/lib/guards'
 import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
 import { orchestrateClientActionDelivery } from './orchestrateClientActionDelivery'
+import { requireRecipientProfessionalId } from './policies'
 import type {
   ClientActionBuildLinkResult,
   ClientActionIssuedToken,
@@ -161,7 +162,7 @@ async function issueConsultationToken(args: {
     bookingId: args.bookingId,
     consultationApprovalId: args.consultationApprovalId,
     clientId: args.plan.recipient.clientId,
-    professionalId: args.plan.recipient.professionalId,
+    professionalId: requireRecipientProfessionalId(args.plan.recipient),
     issuedByUserId: args.plan.issuedByUserId,
     deliveryMethod: args.plan.resolvedDelivery.method,
     recipientEmailSnapshot: asTrimmedString(
