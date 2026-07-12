@@ -11,7 +11,9 @@ import 'server-only'
 
 import {
   BookingStatus,
-  MediaVisibility,
+  LookPostStatus,
+  LookPostVisibility,
+  ModerationStatus,
   Role,
   type VerificationStatus,
 } from '@prisma/client'
@@ -41,7 +43,7 @@ import {
 import {
   PUBLIC_PROFILE_LIMITS,
   publicOfferingSelect,
-  publicPortfolioMediaAssetSelect,
+  publicPortfolioLookSelect,
   publicProfessionalProfileSelect,
   publicReviewSelect,
 } from '@/lib/profiles/publicProfileSelects'
@@ -205,18 +207,44 @@ export async function loadProPublicProfileBase(args: {
 export async function loadPortfolioTiles(
   professionalId: string,
 ): Promise<PublicPortfolioTileDto[]> {
-  const portfolioRows = await prisma.mediaAsset.findMany({
-    where: {
-      professionalId,
-      visibility: MediaVisibility.PUBLIC,
-      isFeaturedInPortfolio: true,
+  // §19c — the grid now reads the pro's own `LookPost`s (the unified public-content
+  // atom the feed/search/boards also read), not `MediaAsset.isFeaturedInPortfolio`.
+  // Since §19b featuring publishes a look and un-featuring retracts it, this yields
+  // the same set of tiles — except the moderation gate below now (correctly) hides
+  // anything not yet APPROVED, so nothing renders public pre-approval (§19 divergence
+  // a). Each tile still renders from the look's `primaryMediaAsset`, so the tile DTO
+  // is unchanged.
+  //
+  // Read the looks through the owner relation (`professionalProfile.lookPosts`), not
+  // a top-level looks discovery query, so it's an owner-scoped read (this one pro's
+  // rows) — not cross-tenant looks discovery — and mirrors the `/u/[handle]` client
+  // grid's `clientProfile.authoredLooks` shape (§19c). See the tenant-aware-discovery
+  // guard: owner-relation reads are tenant-safe by construction.
+  const row = await prisma.professionalProfile.findUnique({
+    where: { id: professionalId },
+    select: {
+      lookPosts: {
+        where: {
+          // Pro-authored looks only — a client-authored look points at this pro but
+          // belongs on the client's own /u/[handle] grid, not the pro's portfolio.
+          clientAuthorId: null,
+          status: LookPostStatus.PUBLISHED,
+          moderationStatus: ModerationStatus.APPROVED,
+          visibility: LookPostVisibility.PUBLIC,
+          removedAt: null,
+        },
+        orderBy: { publishedAt: 'desc' },
+        take: PUBLIC_PROFILE_LIMITS.portfolioTiles,
+        select: publicPortfolioLookSelect,
+      },
     },
-    orderBy: { createdAt: 'desc' },
-    take: PUBLIC_PROFILE_LIMITS.portfolioTiles,
-    select: publicPortfolioMediaAssetSelect,
   })
 
-  return mapPublicPortfolioTilesToDtos(portfolioRows)
+  if (!row) return []
+
+  return mapPublicPortfolioTilesToDtos(
+    row.lookPosts.map((look) => look.primaryMediaAsset),
+  )
 }
 
 export async function loadReviewsForUi(args: {

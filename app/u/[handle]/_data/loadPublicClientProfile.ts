@@ -1,7 +1,12 @@
 // app/u/[handle]/_data/loadPublicClientProfile.ts
 import 'server-only'
 
-import { LookPostStatus, LookPostVisibility, Prisma } from '@prisma/client'
+import {
+  LookPostStatus,
+  LookPostVisibility,
+  ModerationStatus,
+  Prisma,
+} from '@prisma/client'
 
 import { getViewerClientFollowState } from '@/lib/follows'
 import { asTrimmedString } from '@/lib/guards'
@@ -92,6 +97,13 @@ async function loadPublicClientProfileWhere(
         where: {
           status: LookPostStatus.PUBLISHED,
           visibility: LookPostVisibility.PUBLIC,
+          // §19c — reconcile the moderation gate: client-authored looks are created
+          // PENDING_REVIEW (clientLookService), so filtering only status+visibility
+          // exposed them on this public grid before a human approved them (§19
+          // divergence a — pre-moderation public exposure). Require APPROVED so
+          // nothing renders public pre-approval, matching the global feed.
+          moderationStatus: ModerationStatus.APPROVED,
+          removedAt: null,
         },
         orderBy: { publishedAt: 'desc' },
         take: 60,

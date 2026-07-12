@@ -946,11 +946,23 @@ grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
   Shared service-id resolver relocated into `portfolioLookSync` + reused by the §19a
   backfill. iOS parity N/A (native unified grid + single publish action pairs with
   §19c/§19g).
-- [ ] **19c — unify the read path**: public profile grid renders the pro's
-  `LookPost`s (add a *Looks* tab or make *Portfolio* = looks grid) so grid + feed
-  draw from the same rows; mirror the `/u/[handle]` client-grid shape for pros.
-  Reconcile the moderation gate so nothing renders public pre-`APPROVED`
-  (fix divergence a).
+- [x] **19c — unify the read path** *(shipped 2026-07-12; deploy-held)*. The public
+  profile grid (`loadPortfolioTiles`) now reads the pro's own `LookPost`s — the same
+  unified atom the feed/search/boards read — instead of `MediaAsset.isFeaturedInPortfolio`,
+  so grid + feed can't diverge. New `publicPortfolioLookSelect` (LookPost →
+  `primaryMediaAsset` via the existing `publicPortfolioMediaAssetSelect`); the query
+  gates on **pro-authored** (`clientAuthorId: null`) + `PUBLISHED` + `APPROVED` +
+  `PUBLIC` + `removedAt: null`, newest-`publishedAt` first (preserves the "★ FEAT"
+  first tile). Each tile still maps from the look's `primaryMediaAsset`, so
+  `PublicPortfolioTileDto` (and the native `/professionals/[id]` route) are **unchanged**
+  — no api-schema churn, tile `id` stays the MediaAsset id → `/media/[id]` link intact.
+  **Divergence (a) fixed both ways:** the pro grid's `APPROVED` gate hides pro looks that
+  tripped moderation, and the `/u/[handle]` client grid (`loadPublicClientProfile`) gained
+  the same `moderationStatus: APPROVED` + `removedAt: null` gate (client looks are created
+  `PENDING_REVIEW`, so it was exposing them pre-approval). +5 unit tests. **Deferred to
+  §19f:** linking tiles to `/looks/[id]` (feed detail) instead of `/media/[id]`, retiring
+  the "temporary bridge" copy, and removing dead `isFeaturedInPortfolio`-only read paths
+  (the flag is still the write-path sync mirror — do not delete it yet). iOS parity = §19g.
 - [x] **19d — review-photo opt-in** *(shipped — reuses §19b write path; deploy-held)*.
   The existing pro **"Add to portfolio"** control on a consented review photo
   (`/pro/reviews` `MediaPortfolioToggle` + `app/pro/profile/ReviewsPanel`) already POSTs
