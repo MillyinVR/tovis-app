@@ -821,19 +821,34 @@ blank (nothing for client viewers). Sequencing: 18a lands before 18b/18e (both
 clients read the cover DTO); 18c (BottomSheet extraction) is independent.
 
 ### Web
-- [ ] **18a — schema + API**: `ProfessionalProfile.coverMediaAssetId String?`
-  (nullable FK → MediaAsset) + relation; expose `cover` in public-profile +
-  pro self-profile DTOs; set/clear mutation; regen api-schema. (1 migration, additive)
-- [ ] **18b — hero rework**: short cover banner (cover-or-branded-fallback, reuse
-  `.brand-profile-hero-fallback`) + contained avatar w/ verified badge + identity
-  block + bordered stats card; relocate Share/Favorite (+ back) onto cover overlay;
-  reorder page so the grid rides high (Portfolio default tab). New brand.css;
-  retire full-bleed `.brand-profile-hero-media`.
+- [x] **18a — schema + read DTO** *(shipped read-side — PR #596; deploy-held)*.
+  `ProfessionalProfile.coverMediaAssetId String?` (nullable FK → MediaAsset,
+  `onDelete SetNull` + index; migration `20260720000000_add_professional_cover_media`,
+  additive). `publicProfessionalProfileSelect` selects the cover render pointers;
+  `PublicProfileHeaderDto` gains `coverUrl` (new async `renderPublicProfileCoverUrl`
+  keeps the header mapper sync so the SEO/JSON-LD path pays nothing; the loader
+  resolves it in parallel). Regen'd api-schema — `coverUrl` also flows to the native
+  `GET /api/v1/professionals/[id]` route (forward-compat for 18e). **Moved to 18d:**
+  the **set/clear mutation** + **pro self-profile cover DTO** (they only matter with
+  the owner editor; the read path ships now with a graceful blank fallback).
+- [x] **18b — hero rework** *(shipped — PR #596; deploy-held)*. `ProfileHero.tsx`
+  rebuilt to the creator-page pattern: short cover banner (cover-or-branded-fallback,
+  reuse `.brand-profile-hero-fallback`) + contained overlapping avatar w/ verified
+  badge **on it** + identity block + bordered stats card; back/Share/Favorite
+  relocated onto the cover overlay; portfolio grid rides high (Portfolio already the
+  default tab). New `brand.css` (`.brand-profile-cover*` / `-avatar*` / `-stats-card`);
+  retired the full-bleed `.brand-profile-hero` / `-hero-media` / `-hero-overlay` /
+  `-hero-content` (kept shared `-hero-fallback` + `-hero-actions`). ⚠️ Until 18d ships
+  the owner editor, every pro renders the branded fallback cover (intended "graceful
+  blank" v1). Worth a phone-width eyeball post-deploy.
 - [ ] **18c — payments sheet**: extract a shared `BottomSheet` primitive from
   `AvailabilityDrawer/DrawerShell`; replace pill row with an "Accepted payments"
   button → sheet (same `publicAcceptedMethods` data).
-- [ ] **18d — owner cover editor**: "Cover photo" control (pick from portfolio /
-  clear) in the `/pro/profile` media manager. (confirm media-manager location)
+- [ ] **18d — owner cover editor + cover write path**: "Cover photo" control (pick
+  from portfolio / clear) in the `/pro/profile` media manager (confirm media-manager
+  location) **+ the set/clear mutation + pro self-profile cover DTO deferred from 18a**
+  (the read side + schema already shipped in #596, so this is the write half that lets
+  a pro actually set a cover — until then every profile shows the branded fallback).
 
 ### iOS (detail → tovis-ios/BACKLOG.md §5)
 - [ ] **18e — native pro profile redesign**: cover + overlapping avatar +
