@@ -32,6 +32,7 @@ export default function ProPortfolioGrid({
             key={tile.id}
             tile={tile}
             featured={index === 0}
+            isCover={tile.id === portfolio.coverMediaAssetId}
             serviceOptions={portfolio.serviceOptions}
           />
         ))}
@@ -73,10 +74,12 @@ function UploadTile({ uploadHref }: { uploadHref: string }) {
 function PortfolioMediaTile({
   tile,
   featured,
+  isCover,
   serviceOptions,
 }: {
   tile: PortfolioTile
   featured: boolean
+  isCover: boolean
   serviceOptions: ProProfileManagementPortfolio['serviceOptions']
 }) {
   const title = tile.caption ?? 'Open portfolio media'
@@ -114,6 +117,7 @@ function PortfolioMediaTile({
           mediaId={tile.id}
           serviceOptions={serviceOptions}
           isVideo={tile.isVideo}
+          isCover={isCover}
           initial={{
             caption: tile.caption ?? null,
             visibility: tile.visibility,
@@ -126,6 +130,10 @@ function PortfolioMediaTile({
       </div>
 
       <div className="brand-pro-profile-media-badges">
+        {isCover ? (
+          <span className="brand-pro-profile-portfolio-badge">Cover</span>
+        ) : null}
+
         {tile.visibility === MediaVisibility.PRO_CLIENT ? (
           <span className="brand-profile-pill">Only you</span>
         ) : null}

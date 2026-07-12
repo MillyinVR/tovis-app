@@ -844,11 +844,19 @@ clients read the cover DTO); 18c (BottomSheet extraction) is independent.
 - [ ] **18c — payments sheet**: extract a shared `BottomSheet` primitive from
   `AvailabilityDrawer/DrawerShell`; replace pill row with an "Accepted payments"
   button → sheet (same `publicAcceptedMethods` data).
-- [ ] **18d — owner cover editor + cover write path**: "Cover photo" control (pick
-  from portfolio / clear) in the `/pro/profile` media manager (confirm media-manager
-  location) **+ the set/clear mutation + pro self-profile cover DTO deferred from 18a**
-  (the read side + schema already shipped in #596, so this is the write half that lets
-  a pro actually set a cover — until then every profile shows the branded fallback).
+- [x] **18d — owner cover editor + cover write path** *(shipped; deploy-held)*.
+  New `POST/DELETE /api/v1/pro/media/[id]/cover` set/clears
+  `ProfessionalProfile.coverMediaAssetId`; POST gates on owned + **image** + the same
+  `canProSharePublicly` client-consent guard the portfolio route uses (a private
+  session photo can't leak onto a public banner), DELETE clears only when this media
+  is the current cover (idempotent). The shared `OwnerMediaMenu` gained an `isCover`
+  prop + a "Set as cover photo" ↔ "Remove cover photo" action (images only), wired on
+  the pro portfolio-management grid (`ProPortfolioGrid` — + a "Cover" tile badge) and
+  both `/media/[id]` + `/pro/media/[id]` detail pages; the management loader now selects
+  `coverMediaAssetId`. **Pro self-profile cover DTO:** native `GET /api/v1/pro/media`
+  items gained `isCoverMedia` (regen'd api-schema — forward-compat for §18e). +8 route
+  tests. Now a pro can set a real cover so the §18b hero shows their photo, not just the
+  branded fallback.
 
 ### iOS (detail → tovis-ios/BACKLOG.md §5)
 - [ ] **18e — native pro profile redesign**: cover + overlapping avatar +

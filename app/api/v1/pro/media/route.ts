@@ -445,7 +445,7 @@ export async function GET() {
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const [media, serviceRows] = await Promise.all([
+    const [media, serviceRows, profile] = await Promise.all([
       prisma.mediaAsset.findMany({
         where: { professionalId },
         orderBy: { createdAt: 'desc' },
@@ -479,7 +479,14 @@ export async function GET() {
         take: 500,
         select: { id: true, name: true },
       }),
+      // §18d — the pro's current cover banner, to flag the cover tile (§18e).
+      prisma.professionalProfile.findUnique({
+        where: { id: professionalId },
+        select: { coverMediaAssetId: true },
+      }),
     ])
+
+    const coverMediaAssetId = profile?.coverMediaAssetId ?? null
 
     // Sign every private object in one round-trip per bucket (avoids an N+1
     // waterfall across the library).
@@ -504,6 +511,7 @@ export async function GET() {
         reviewId: m.reviewId ?? null,
         isEligibleForLooks: Boolean(m.isEligibleForLooks),
         isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
+        isCoverMedia: m.id === coverMediaAssetId,
         beforeAssetId: m.beforeAssetId ?? null,
         services: m.services.map((tag) => ({
           serviceId: tag.serviceId,

@@ -10085,6 +10085,9 @@
         "id": {
           "type": "string"
         },
+        "isCoverMedia": {
+          "type": "boolean"
+        },
         "isEligibleForLooks": {
           "type": "boolean"
         },
@@ -10143,6 +10146,7 @@
         "reviewId",
         "isEligibleForLooks",
         "isFeaturedInPortfolio",
+        "isCoverMedia",
         "beforeAssetId",
         "services",
         "url",

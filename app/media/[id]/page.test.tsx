@@ -22,6 +22,10 @@ const mocks = vi.hoisted(() => ({
     service: {
       findMany: vi.fn(),
     },
+    // §18d — the owner path reads the pro's cover id to flag the cover tile.
+    professionalProfile: {
+      findUnique: vi.fn(),
+    },
   },
 }))
 
