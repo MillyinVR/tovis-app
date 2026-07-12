@@ -11,6 +11,7 @@ function makeTile(
 ): PublicPortfolioTileDto {
   return {
     id: 'tile_1',
+    lookId: null,
     caption: null,
     src: 'https://cdn.example.com/after.jpg',
     thumbUrl: 'https://cdn.example.com/after_thumb.jpg',
@@ -47,10 +48,18 @@ describe('PortfolioGrid', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
-  it('renders a post link (no slider) for an unpaired tile', () => {
-    render(<PortfolioGrid tiles={[makeTile()]} emptyMessage="none" />)
+  it('links an unpaired tile to its look detail (§19f)', () => {
+    render(
+      <PortfolioGrid tiles={[makeTile({ lookId: 'look_1' })]} emptyMessage="none" />,
+    )
 
     expect(screen.queryByRole('slider')).not.toBeInTheDocument()
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/looks/look_1')
+  })
+
+  it('falls back to the media page when a tile has no backing look', () => {
+    render(<PortfolioGrid tiles={[makeTile({ lookId: null })]} emptyMessage="none" />)
+
     expect(screen.getByRole('link')).toHaveAttribute('href', '/media/tile_1')
   })
 })

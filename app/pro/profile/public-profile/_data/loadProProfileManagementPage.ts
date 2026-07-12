@@ -340,7 +340,6 @@ async function loadPortfolio(
   return {
     tiles,
     serviceOptions,
-    hasLooksEligibleBridge: tiles.some((tile) => tile.isEligibleForLooks),
     coverMediaAssetId,
   }
 }
@@ -349,7 +348,6 @@ async function emptyPortfolio(): Promise<ProProfileManagementPortfolio> {
   return {
     tiles: [],
     serviceOptions: [],
-    hasLooksEligibleBridge: false,
     coverMediaAssetId: null,
   }
 }

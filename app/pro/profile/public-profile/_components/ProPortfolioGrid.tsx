@@ -38,13 +38,6 @@ export default function ProPortfolioGrid({
         ))}
       </div>
 
-      {portfolio.hasLooksEligibleBridge ? (
-        <div className="brand-pro-profile-empty">
-          “Looks eligible” is a temporary media-level bridge. Published Looks are
-          still counted from canonical look posts.
-        </div>
-      ) : null}
-
       {portfolio.tiles.length === 0 ? (
         <div className="brand-pro-profile-empty">
           No portfolio assets yet. Upload your best work to start building your
@@ -136,10 +129,6 @@ function PortfolioMediaTile({
 
         {tile.visibility === MediaVisibility.PRO_CLIENT ? (
           <span className="brand-profile-pill">Only you</span>
-        ) : null}
-
-        {tile.isEligibleForLooks ? (
-          <span className="brand-profile-pill">Looks eligible</span>
         ) : null}
 
         {tile.isFeaturedInPortfolio ? (

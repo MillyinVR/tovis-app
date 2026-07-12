@@ -1000,14 +1000,35 @@ grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
   if the look re-publishes. +4 tests. Remaining last MediaAsset-based grid = the owner
   management grid (`loadProProfileManagementPage.loadPortfolio`), intentionally kept so a
   pro still sees featured media whose look tripped moderation (to manage it).
-- [ ] **19f — cleanup**: remove the "temporary media-level bridge" copy + dead
-  `isFeaturedInPortfolio`-only query paths once 19c ships. (do NOT delete the flag
-  until the grid reads `LookPost`.)
+- [x] **19f — cleanup** *(shipped; deploy-held)*. (1) **Public grid tile → look
+  detail:** `PublicPortfolioTileDto` gained an additive `lookId` (threaded from the
+  §19c `professionalProfile.lookPosts` read through `mapPublicPortfolioTilesToDtos`);
+  the public `PortfolioGrid` now links a tile to `/looks/[lookId]` (feed post w/
+  engagement, mirroring `/u/[handle]`), falling back to `/media/[id]` when a tile has
+  no backing look. Regen'd api-schema (`lookId` also on the native `/professionals/[id]`
+  route — forward-compat). (2) **Retired the "temporary media-level bridge" copy** + the
+  now-redundant "Looks eligible" badge in `ProPortfolioGrid`, and dropped the
+  `hasLooksEligibleBridge` plumbing (loader + type + test). +4 tests. **Deliberately
+  kept** (not "dead"): the `isFeaturedInPortfolio`/`isEligibleForLooks` columns + write
+  mirror, and the owner *management* grid's `isFeaturedInPortfolio` read (so a pro still
+  sees featured media whose look tripped moderation, to manage it) — the physical column
+  collapse + the two-toggle→one-action UI change stay deferred (they pair with §19g/iOS
+  to avoid breaking parity). Owner mgmt tiles still link to `/media/[id]` by design.
 
 ### iOS (detail → tovis-ios/BACKLOG.md §5)
-- [ ] **19g — native parity**: native pro profile shows the unified looks grid
-  (consumes the same DTO as 19c); publish/feature is one action; review-photo
-  "add to grid/feed" opt-in mirrors 19d. Ships with the web change (parity rule).
+- [x] **19g — native parity** *(NO-OP for the read swap — scout-verified 2026-07-12)*.
+  The §19c grid read-swap is **server-transparent**: the native `GET /professionals/[id]`
+  `portfolioTiles` contract is byte-identical, and `ProProfileView`/`ProProfileTabView`
+  already render whatever the array contains (★-FEAT first-tile ordering preserved), so
+  the native grid becomes the unified looks grid the moment the web deploy lands — **no
+  iOS PR needed**. The remaining clauses are **intentionally deferred** to pair with the
+  (also-deferred) web toggle-collapse: "publish/feature is one action" would mean
+  collapsing `ProMediaEditSheet`'s two toggles, but web still shows both — doing it
+  natively now would *break* parity; and the review-photo "add to grid/feed" opt-in
+  already works natively against the same route web §19d re-wired (only a copy relabel
+  remains). A native look-detail screen (for tile→look navigation, web §19f's
+  `/looks/[id]` link) is the only real future build — no native look-detail view exists
+  today; revisit when iOS decides native-detail vs deep-link into the `LooksView` feed.
 
 ---
 
