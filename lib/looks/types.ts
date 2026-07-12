@@ -55,6 +55,28 @@ export type LooksClientAuthorDto = {
   profileHref: string | null
 }
 
+// One computed, live-data badge on a feed card (personalization spec §5).
+// Always engine-selected — never pro-settable (spec §5.7.1). `label` arrives
+// fully composed (brand-, viewer-, and count-aware) so clients render it
+// verbatim; `tone` is a presentation hint mapping onto the canonical badge
+// tone scale.
+export type LookBadgeKind =
+  | 'BOOKING_FAST'
+  | 'LOOK_BOOKED_RECENTLY'
+  | 'BOOKED_30D'
+  | 'REBOOK_RATE'
+  | 'NEW_TO_PLATFORM'
+  | 'EVENT_COUNTDOWN'
+  | 'DISTANCE'
+
+export type LookBadgeTone = 'accent' | 'info' | 'success' | 'warn' | 'neutral'
+
+export type LookBadgeDto = {
+  kind: LookBadgeKind
+  label: string
+  tone: LookBadgeTone
+}
+
 export type LooksFeedItemDto = {
   id: string
   url: string
@@ -98,6 +120,11 @@ export type LooksFeedItemDto = {
   // (GET /api/v1/pro/looks); public feed surfaces omit both fields.
   status?: LookPostStatus
   visibility?: LookPostVisibility
+
+  // Computed live-data badge (spec §5), attached by GET /api/v1/looks only —
+  // other DTO producers omit the field. null = no badge earned, or the
+  // viewer-look pair landed in the permanent 5% measurement holdout (§9).
+  badge?: LookBadgeDto | null
 }
 
 export type LooksFeedViewerContextDto = {

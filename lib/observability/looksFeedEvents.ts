@@ -49,6 +49,14 @@ export type LooksFeedServeEvent = {
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
   savedExcludedCount?: number | null
+  // Badge engine detail (spec §5 + the §9 holdout): looks that EARNED a
+  // badge, how many rendered, how many were suppressed by the measurement
+  // holdout, and the shown mix by kind. eligible = shown + holdout; per-kind
+  // causal lift compares booking outcomes of shown vs holdout exposures.
+  badgeEligibleCount?: number | null
+  badgeShownCount?: number | null
+  badgeHoldoutCount?: number | null
+  badgeKindCounts?: Record<string, number> | null
 }
 
 export function hashViewerId(userId: string | null | undefined): string | null {
@@ -80,6 +88,10 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,
+    badgeEligibleCount: input.badgeEligibleCount ?? null,
+    badgeShownCount: input.badgeShownCount ?? null,
+    badgeHoldoutCount: input.badgeHoldoutCount ?? null,
+    badgeKindCounts: input.badgeKindCounts ?? null,
   })
 
   console.info(line)

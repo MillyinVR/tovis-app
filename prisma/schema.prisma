@@ -1815,6 +1815,8 @@ model ProfessionalProfile {
 
   referrals Referral[]
 
+  badgeStat ProfessionalBadgeStat?
+
   @@index([handleNormalized])
   @@index([verificationStatus])
   @@index([homeTenantId])
@@ -2474,6 +2476,32 @@ model LookCategoryRankStat {
   computedAt         DateTime
 
   category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
+// Per-pro live-booking aggregates behind the Looks feed badge engine
+// (personalization spec §5). Refreshed hourly by the pro-badge-stats job and
+// read (batched by page) at feed-serve time; a missing row reads the same as
+// all-zero, so this table can never invent a badge — only earn one. computedAt
+// gates time-sensitive badges (spec §5.7.4): stale stats DISQUALIFY urgency
+// badges rather than render a stale "Booking fast". Consumed via
+// lib/looks/badges/*.
+model ProfessionalBadgeStat {
+  professionalId String @id
+
+  // Non-cancelled bookings CREATED in the trailing 48h (booking velocity —
+  // the "Booking fast" urgency signal).
+  recentBookingCount Int @default(0)
+  // COMPLETED bookings scheduled in the trailing 30 days (social proof).
+  completedBookingCount30d Int @default(0)
+  // Distinct clients with >=1 COMPLETED booking in the trailing 180 days, and
+  // how many of them came back (>=2 COMPLETED in the window) — the rebook-rate
+  // numerator/denominator, stored as counts so the rate math stays in code.
+  servedClientCount   Int @default(0)
+  rebookedClientCount Int @default(0)
+
+  computedAt DateTime
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
 }
 
 model ProfessionalFavorite {

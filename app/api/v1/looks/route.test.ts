@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
 
   const getCurrentUser = vi.fn()
   const resolveTenantContextForRequest = vi.fn()
+  const attachLookBadges = vi.fn()
   const resolveLooksFeedKind = vi.fn()
   const buildLooksFeedWhere = vi.fn()
   const buildLooksFeedCursorWhere = vi.fn()
@@ -56,6 +57,7 @@ const mocks = vi.hoisted(() => {
     prisma,
     getCurrentUser,
     resolveTenantContextForRequest,
+    attachLookBadges,
     resolveLooksFeedKind,
     buildLooksFeedWhere,
     buildLooksFeedCursorWhere,
@@ -93,6 +95,14 @@ vi.mock('@/lib/currentUser', () => ({
 
 vi.mock('@/lib/tenant', () => ({
   resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
+}))
+
+vi.mock('@/lib/brand/forTenant', () => ({
+  getBrandForTenantContext: () => ({ displayName: 'BrandCo' }),
+}))
+
+vi.mock('@/lib/looks/badges/attach', () => ({
+  attachLookBadges: mocks.attachLookBadges,
 }))
 
 vi.mock('@/lib/looks/feed', () => ({
@@ -218,6 +228,16 @@ describe('app/api/v1/looks/route.ts', () => {
     mocks.prisma.clientFollow.findMany.mockResolvedValue([])
 
     mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
+
+    mocks.attachLookBadges.mockResolvedValue({
+      badges: new Map(),
+      meta: {
+        eligibleCount: 0,
+        shownCount: 0,
+        holdoutCount: 0,
+        kindCounts: {},
+      },
+    })
   })
 
   it('queries the default feed through shared look-post helpers and returns the new envelope', async () => {
@@ -361,7 +381,10 @@ describe('app/api/v1/looks/route.ts', () => {
 
     expect(body).toEqual({
       ok: true,
-      items: [dto1, dto2],
+      items: [
+        { ...dto1, badge: null },
+        { ...dto2, badge: null },
+      ],
       nextCursor: 'next_cursor_1',
       viewerContext: {
         isAuthenticated: true,
@@ -496,7 +519,7 @@ describe('app/api/v1/looks/route.ts', () => {
 
     expect(body).toEqual({
       ok: true,
-      items: [dto1],
+      items: [{ ...dto1, badge: null }],
       nextCursor: null,
     })
 
@@ -578,6 +601,87 @@ describe('app/api/v1/looks/route.ts', () => {
       items: [],
       nextCursor: null,
     })
+  })
+
+  it('attaches engine badges to mapped items and forwards parsed viewer coords', async () => {
+    const look1 = makeLookRow('look_1')
+    const look2 = makeLookRow('look_2')
+    const dto1 = makeMappedDto('look_1')
+    const dto2 = makeMappedDto('look_2')
+
+    mocks.getCurrentUser.mockResolvedValue({
+      id: 'user_1',
+      clientProfile: { id: 'client_1' },
+    })
+
+    mocks.prisma.lookPost.findMany.mockResolvedValue([look1, look2])
+    mocks.mapLooksFeedMediaToDto
+      .mockResolvedValueOnce(dto1)
+      .mockResolvedValueOnce(dto2)
+
+    const badge = {
+      kind: 'BOOKING_FAST',
+      label: 'Booking fast',
+      tone: 'warn',
+    }
+    mocks.attachLookBadges.mockResolvedValue({
+      badges: new Map([['look_1', badge]]),
+      meta: {
+        eligibleCount: 1,
+        shownCount: 1,
+        holdoutCount: 0,
+        kindCounts: { BOOKING_FAST: 1 },
+      },
+    })
+
+    const res = await GET(
+      makeRequest('/api/v1/looks?viewerLat=45.52&viewerLng=-122.67'),
+    )
+    const body = await readJson(res)
+
+    expect(res.status).toBe(200)
+
+    expect(mocks.attachLookBadges).toHaveBeenCalledTimes(1)
+    expect(mocks.attachLookBadges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rows: [look1, look2],
+        viewer: {
+          userId: 'user_1',
+          clientId: 'client_1',
+          lat: 45.52,
+          lng: -122.67,
+        },
+        brandName: 'BrandCo',
+      }),
+    )
+
+    expect(body).toEqual({
+      ok: true,
+      items: [
+        { ...dto1, badge },
+        { ...dto2, badge: null },
+      ],
+      nextCursor: null,
+      viewerContext: {
+        isAuthenticated: true,
+      },
+    })
+  })
+
+  it('treats half-provided or out-of-range viewer coords as absent', async () => {
+    mocks.prisma.lookPost.findMany.mockResolvedValue([makeLookRow('look_1')])
+    mocks.mapLooksFeedMediaToDto.mockResolvedValueOnce(makeMappedDto('look_1'))
+
+    const res = await GET(
+      makeRequest('/api/v1/looks?viewerLat=91&viewerLng=-122.67'),
+    )
+
+    expect(res.status).toBe(200)
+    expect(mocks.attachLookBadges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        viewer: expect.objectContaining({ lat: null, lng: null }),
+      }),
+    )
   })
 
   it('returns 400 for an invalid filter', async () => {

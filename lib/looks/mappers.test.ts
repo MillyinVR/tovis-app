@@ -89,6 +89,7 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
       location: 'San Diego, CA',
       verificationStatus: VerificationStatus.APPROVED,
       isPremium: true,
+      user: { createdAt: new Date('2024-01-01T00:00:00.000Z') },
       _count: { followers: 128 },
     },
     service: {

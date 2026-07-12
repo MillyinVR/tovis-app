@@ -6196,6 +6196,47 @@
     "LocationType": {
       "$ref": "#/definitions/ProfessionalLocationType"
     },
+    "LookBadgeDto": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/LookBadgeKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "tone": {
+          "$ref": "#/definitions/LookBadgeTone"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "tone"
+      ],
+      "type": "object"
+    },
+    "LookBadgeKind": {
+      "enum": [
+        "BOOKING_FAST",
+        "LOOK_BOOKED_RECENTLY",
+        "BOOKED_30D",
+        "REBOOK_RATE",
+        "NEW_TO_PLATFORM",
+        "EVENT_COUNTDOWN",
+        "DISTANCE"
+      ],
+      "type": "string"
+    },
+    "LookBadgeTone": {
+      "enum": [
+        "accent",
+        "info",
+        "success",
+        "warn",
+        "neutral"
+      ],
+      "type": "string"
+    },
     "LookPostStatus": {
       "$ref": "#/definitions/%24Enums.LookPostStatus"
     },
@@ -7277,6 +7318,16 @@
       "properties": {
         "_count": {
           "$ref": "#/definitions/LooksCountsDto"
+        },
+        "badge": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LookBadgeDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "before": {
           "anyOf": [

@@ -139,6 +139,20 @@ function getNavigatorShare() {
     : null
 }
 
+// Viewer coordinates ride along on feed requests so the server can compute
+// the distance badge (spec §5.2 convenience class) for this page — same
+// localStorage location the availability drawer already uses. Absent
+// location → param omitted → no distance badges, nothing else changes.
+function applyViewerCoordParams(
+  qs: URLSearchParams,
+  viewerLoc: ViewerLocation | null,
+): void {
+  if (!viewerLoc) return
+  if (!Number.isFinite(viewerLoc.lat) || !Number.isFinite(viewerLoc.lng)) return
+  qs.set('viewerLat', String(viewerLoc.lat))
+  qs.set('viewerLng', String(viewerLoc.lng))
+}
+
 function buildAvailabilityDrawerContext(
   item: FeedItem,
   viewerLoc: ViewerLocation | null,
@@ -296,6 +310,7 @@ export default function LooksFeed() {
       qs.set('limit', String(FEED_LIMIT))
 
       applyFeedScopeParams(qs, activeCategorySlug)
+      applyViewerCoordParams(qs, viewerLoc)
 
       if (query.trim()) {
         qs.set('q', query.trim())
@@ -336,7 +351,7 @@ export default function LooksFeed() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [activeCategorySlug, query])
+  }, [activeCategorySlug, query, viewerLoc])
 
   const loadMore = useCallback(async () => {
     if (loadMoreInFlight.current) return
@@ -355,6 +370,7 @@ export default function LooksFeed() {
       qs.set('cursor', nextCursor)
 
       applyFeedScopeParams(qs, activeCategorySlug)
+      applyViewerCoordParams(qs, viewerLoc)
 
       if (query.trim()) {
         qs.set('q', query.trim())
@@ -411,7 +427,7 @@ export default function LooksFeed() {
       loadMoreInFlight.current = false
       setLoadingMore(false)
     }
-  }, [activeCategorySlug, nextCursor, query])
+  }, [activeCategorySlug, nextCursor, query, viewerLoc])
 
   // Mirror the loaded set into a ref so loadMore can read the current seen
   // list without being recreated (and re-triggering prefetch) on every append.

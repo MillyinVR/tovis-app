@@ -12,6 +12,9 @@ import {
 
 import { isRecord } from '@/lib/guards'
 import type {
+  LookBadgeDto,
+  LookBadgeKind,
+  LookBadgeTone,
   LooksClientAuthorDto,
   LooksCommentDto,
   LooksDetailAdminDto,
@@ -50,6 +53,39 @@ function parsePairedBefore(raw: unknown): PairedBeforeDto | null {
   const fullUrl = pickString(raw.fullUrl)
   if (!id || (!thumbUrl && !fullUrl)) return null
   return { id, thumbUrl, fullUrl }
+}
+
+function isLookBadgeKind(value: unknown): value is LookBadgeKind {
+  return (
+    value === 'BOOKING_FAST' ||
+    value === 'LOOK_BOOKED_RECENTLY' ||
+    value === 'BOOKED_30D' ||
+    value === 'REBOOK_RATE' ||
+    value === 'NEW_TO_PLATFORM' ||
+    value === 'EVENT_COUNTDOWN' ||
+    value === 'DISTANCE'
+  )
+}
+
+function isLookBadgeTone(value: unknown): value is LookBadgeTone {
+  return (
+    value === 'accent' ||
+    value === 'info' ||
+    value === 'success' ||
+    value === 'warn' ||
+    value === 'neutral'
+  )
+}
+
+// Parse the computed feed badge (spec §5). Tolerant of absence (older
+// payloads / non-badging surfaces → null); an unknown kind or tone drops the
+// badge rather than the item.
+function parseLookBadge(raw: unknown): LookBadgeDto | null {
+  if (!isRecord(raw)) return null
+  const label = pickString(raw.label)
+  if (!label) return null
+  if (!isLookBadgeKind(raw.kind) || !isLookBadgeTone(raw.tone)) return null
+  return { kind: raw.kind, label, tone: raw.tone }
 }
 
 function parseLooksClientAuthor(raw: unknown): LooksClientAuthorDto | null {
@@ -247,6 +283,8 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
       reviewHelpfulCount: pickNumber(item.reviewHelpfulCount),
       reviewRating: pickNumber(item.reviewRating),
       reviewHeadline: pickString(item.reviewHeadline),
+
+      badge: parseLookBadge(item.badge),
     })
   }
 
