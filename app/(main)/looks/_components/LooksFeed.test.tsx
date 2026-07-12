@@ -598,8 +598,9 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hair' }))
 
     await waitFor(() => {
+      // The mocked viewer location rides along for the distance badge.
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/looks?limit=24&category=hair',
+        '/api/v1/looks?limit=24&category=hair&viewerLat=32.7157&viewerLng=-117.1611',
         expect.objectContaining({
           cache: 'no-store',
           headers: { Accept: 'application/json' },
@@ -627,8 +628,9 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Following' }))
 
     await waitFor(() => {
+      // The mocked viewer location rides along for the distance badge.
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/looks?limit=24&following=true',
+        '/api/v1/looks?limit=24&following=true&viewerLat=32.7157&viewerLng=-117.1611',
         expect.objectContaining({
           cache: 'no-store',
           headers: { Accept: 'application/json' },
