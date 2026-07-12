@@ -86,6 +86,33 @@ export function hasOverlap(
   return overlapMilliseconds(first, second) > 0
 }
 
+export type IdentifiedOverlapRange = OverlapRangeInput & { id: string }
+
+/**
+ * The ids among `events` whose time ranges overlap at least one other event —
+ * the pro calendar's passive double-book highlight. Half-open (via
+ * `overlapMilliseconds`): back-to-back events that merely touch do NOT count.
+ */
+export function overlappingEventIds(
+  events: readonly IdentifiedOverlapRange[],
+): Set<string> {
+  const ids = new Set<string>()
+
+  for (let i = 0; i < events.length; i += 1) {
+    for (let j = i + 1; j < events.length; j += 1) {
+      const first = events[i]
+      const second = events[j]
+
+      if (first && second && hasOverlap(first, second)) {
+        ids.add(first.id)
+        ids.add(second.id)
+      }
+    }
+  }
+
+  return ids
+}
+
 export function overlapMinutesForRange<TEvent extends OverlapRangeInput>(
   args: OverlapMinutesForRangeArgs<TEvent>,
 ): number {

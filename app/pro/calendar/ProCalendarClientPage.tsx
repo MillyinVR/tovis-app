@@ -385,6 +385,7 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         change={cal.pendingChange}
         applying={cal.applyingChange}
         outsideWorkingHours={cal.pendingOutsideWorkingHours}
+        overlapName={cal.pendingOverlapName}
         overrideReason={cal.overrideReason}
         onChangeOverrideReason={cal.setOverrideReason}
         onCancel={cal.cancelConfirm}

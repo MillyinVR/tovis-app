@@ -31,6 +31,8 @@ type EventCardProps = {
   ev: CalendarEvent
   entityType: EntityType
   apiId: string | null
+  /** Passive double-book signal: this booking overlaps another (amber ring + glyph). */
+  conflict: boolean
 
   topPx: number
   heightPx: number
@@ -210,6 +212,31 @@ function PendingBadge(props: { label: string }) {
   )
 }
 
+function ConflictBadge(props: { label: string }) {
+  return (
+    <span
+      className="brand-pro-calendar-event-conflict"
+      title={props.label}
+      aria-hidden="true"
+    >
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M10.29 3.86 1.82 18a1 1 0 0 0 .86 1.5h16.64a1 1 0 0 0 .86-1.5L13.71 3.86a1 1 0 0 0-1.72 0z" />
+        <line x1="12" y1="9" x2="12" y2="13" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+    </span>
+  )
+}
+
 function CompletedCheck() {
   return (
     <span
@@ -240,6 +267,7 @@ export function EventCard(props: EventCardProps) {
     ev,
     entityType,
     apiId,
+    conflict,
     topPx,
     heightPx,
     timeLabel,
@@ -265,7 +293,10 @@ export function EventCard(props: EventCardProps) {
   })
 
   const canDragOrResize = apiId !== null
-  const accessibleLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
+  const baseLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
+  const accessibleLabel = conflict
+    ? `${baseLabel}, ${copy.labels.overlapWarning}`
+    : baseLabel
 
   return (
     <div
@@ -276,6 +307,7 @@ export function EventCard(props: EventCardProps) {
       data-calendar-event-compact={compact ? 'true' : 'false'}
       data-calendar-event-micro={micro ? 'true' : 'false'}
       data-calendar-event-blocked={isBlocked ? 'true' : 'false'}
+      data-calendar-event-conflict={conflict ? 'true' : 'false'}
       role="button"
       tabIndex={0}
       aria-label={accessibleLabel}
@@ -361,6 +393,10 @@ export function EventCard(props: EventCardProps) {
               ) : null}
 
               {statusMeta.isCompleted ? <CompletedCheck /> : null}
+
+              {conflict ? (
+                <ConflictBadge label={copy.labels.overlapWarning} />
+              ) : null}
             </div>
 
             {!isBlocked ? (
