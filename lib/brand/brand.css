@@ -481,7 +481,9 @@ button {
   border-radius: var(--radius-pill);
   border: 3px solid rgb(var(--bg-primary));
   background: rgb(var(--color-acid));
-  color: rgb(var(--bg-primary));
+  /* Cream check on the acid badge — the legible, conventional verified look
+     (dark ink on this purple is only ~3.4:1). */
+  color: rgb(var(--text-primary));
   font-size: 12px;
   font-weight: 900;
   line-height: 1;
