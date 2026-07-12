@@ -509,6 +509,7 @@ export async function upsertProClient(
         data: {
           userId: matchedUser.id,
           homeTenantId,
+          createdByProfessionalId: args.professionalId,
           firstName,
           lastName,
           claimStatus: ClientClaimStatus.CLAIMED,
@@ -552,6 +553,7 @@ export async function upsertProClient(
       data: {
         userId: null,
         homeTenantId,
+        createdByProfessionalId: args.professionalId,
         firstName,
         lastName,
         claimStatus: ClientClaimStatus.UNCLAIMED,

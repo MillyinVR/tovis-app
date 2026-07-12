@@ -1532,6 +1532,13 @@ model ClientProfile {
   photoReleaseAt               DateTime?
   photoReleaseByProfessionalId String?
 
+  // The pro who created this client record (bare directory add or migration
+  // import — both via upsertProClient). A soft reference (like
+  // photoReleaseByProfessionalId): the pro↔client link is otherwise expressed
+  // only through bookings/threads, so this is what lets the directory surface a
+  // booking-less client to its creator and authorize a pro-facing claim invite.
+  createdByProfessionalId String?
+
   // Personalization self-profile (spec §6.6): optional, fully user-entered chip
   // answers (hair type/length/color, skin type/concern) plus declared category
   // interests. Validated by lib/personalization/selfProfile.ts (the SSOT) on
@@ -1593,6 +1600,7 @@ model ClientProfile {
   @@index([phoneHashKeyVersion])
   @@index([homeTenantId])
   @@index([handleNormalized])
+  @@index([createdByProfessionalId])
 }
 
 /// A card a client has saved on file for card-on-file / no-show protection

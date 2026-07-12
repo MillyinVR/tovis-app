@@ -1,11 +1,12 @@
 // app/api/v1/pro/clients/route.ts
-import { Prisma } from '@prisma/client'
+import { ClientClaimStatus, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { bookinglessClaimEnabled } from '@/lib/clients/bookinglessClaimFlag'
 import { proClientVisibilityWhere } from '@/lib/clientVisibility'
 import { formatLastBookingLabel } from '@/lib/clients/lastBookingLabel'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
@@ -18,6 +19,8 @@ const DIRECTORY_SELECT = {
   firstName: true, // pii-plaintext-read-ok: authorized pro client directory; plaintext-by-schema.
   lastName: true, // pii-plaintext-read-ok: authorized pro client directory; plaintext-by-schema.
   phone: true, // pii-plaintext-read-ok: authorized pro client directory; plaintext-by-schema.
+  userId: true,
+  claimStatus: true,
   user: { select: { email: true } },
 } satisfies Prisma.ClientProfileSelect
 
@@ -51,8 +54,21 @@ export async function GET() {
       ...proClientVisibilityWhere(now),
     }
 
+    // With booking-less claims enabled, also surface clients this pro CREATED
+    // (bare directory add / migration import) that have no qualifying booking —
+    // otherwise they're invisible to the pro who made them.
+    const bookinglessClaims = bookinglessClaimEnabled()
+    const where: Prisma.ClientProfileWhereInput = bookinglessClaims
+      ? {
+          OR: [
+            { bookings: { some: visibleBookingWhere } },
+            { createdByProfessionalId: proId },
+          ],
+        }
+      : { bookings: { some: visibleBookingWhere } }
+
     const clients = await prisma.clientProfile.findMany({
-      where: { bookings: { some: visibleBookingWhere } },
+      where,
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
       take: 500,
       select: {
@@ -70,6 +86,13 @@ export async function GET() {
       const fullName =
         `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || c.user?.email || 'Client' // pii-plaintext-read-ok: authorized pro client directory display name; plaintext-by-schema.
 
+      // Invitable = an UNCLAIMED, unowned client the pro can send a claim link to
+      // (booking-less or not). Only exposed when the feature is on.
+      const invitable =
+        bookinglessClaims &&
+        c.userId == null &&
+        c.claimStatus === ClientClaimStatus.UNCLAIMED
+
       return {
         id: String(c.id),
         fullName,
@@ -78,6 +101,7 @@ export async function GET() {
         email: c.user?.email ?? null,
         phone: c.phone ?? null,
         lastBookingLabel: formatLastBookingLabel(c.bookings[0] ?? null, scheduleTz),
+        invitable,
       }
     })
 
