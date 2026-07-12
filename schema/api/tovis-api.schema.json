@@ -2047,6 +2047,90 @@
       ],
       "type": "object"
     },
+    "ClaimPublicBookingDTO": {
+      "properties": {
+        "locationLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "professionalName": {
+          "description": "Pro's public display name (respects nameDisplay); never null.",
+          "type": "string"
+        },
+        "scheduledFor": {
+          "description": "ISO-8601 instant, or null when the booking has no scheduled time.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZone": {
+          "description": "IANA timezone the appointment should be rendered in; clients format it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "serviceName",
+        "professionalName",
+        "scheduledFor",
+        "timeZone",
+        "locationLabel"
+      ],
+      "type": "object"
+    },
+    "ClaimPublicViewResponseDTO": {
+      "properties": {
+        "booking": {
+          "$ref": "#/definitions/ClaimPublicBookingDTO"
+        },
+        "invitedEmail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invitedName": {
+          "description": "The name/contact the pro put on file for this claim (invite snapshot).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invitedPhone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/ClaimPublicViewState"
+        }
+      },
+      "required": [
+        "state",
+        "invitedName",
+        "invitedEmail",
+        "invitedPhone",
+        "booking"
+      ],
+      "type": "object"
+    },
+    "ClaimPublicViewState": {
+      "enum": [
+        "ready",
+        "revoked",
+        "already_claimed"
+      ],
+      "type": "string"
+    },
     "ClientAddressDTO": {
       "properties": {
         "addressLine1": {

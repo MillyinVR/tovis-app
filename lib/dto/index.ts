@@ -204,6 +204,13 @@ export type {
 // ── Client invite link (GET /api/v1/client/referrals/invite-link) ────────────
 export type { ClientInviteLinkResponseDTO } from '@/lib/dto/clientInviteLink'
 
+// ── Public claim read (GET /api/v1/public/claim/[token]) ─────────────────────
+export type {
+  ClaimPublicViewState,
+  ClaimPublicBookingDTO,
+  ClaimPublicViewResponseDTO,
+} from '@/lib/dto/claimPublic'
+
 // ── Client card-on-file (Phase 2 no-show protection) ─────────────────────────
 export type {
   ClientPaymentMethodDTO,
