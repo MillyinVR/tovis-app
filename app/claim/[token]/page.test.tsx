@@ -143,6 +143,14 @@ function makeInvite(overrides?: {
   clientClaimStatus?: ClientClaimStatus
   client?: ReturnType<typeof makeClient> | null
   booking?: ReturnType<typeof makeBooking> | null
+  professional?: {
+    id?: string
+    businessName?: string | null
+    firstName?: string | null
+    lastName?: string | null
+    handle?: string | null
+    nameDisplay?: null
+  } | null
 }) {
   const token = overrides && 'token' in overrides ? overrides.token : null
   const tokenHash =
@@ -203,6 +211,10 @@ function makeInvite(overrides?: {
       overrides && 'booking' in overrides
         ? overrides.booking
         : makeBooking(clientId),
+    // Top-level pro (nullable) — used to name the professional on a booking-less
+    // invite. Defaults to null; the booking path names the pro off the booking.
+    professional:
+      overrides && 'professional' in overrides ? overrides.professional : null,
   }
 }
 
@@ -351,6 +363,42 @@ describe('app/claim/[token]/page.tsx', () => {
     expect(html).toContain('Your history')
     expect(html).toContain('Claim your client history')
     expect(html).toContain('This profile was created for')
+  })
+
+  it('uses pro-less ready copy for a booking-less, pro-less cold self-serve orphan', async () => {
+    mockInviteState(
+      'ready',
+      makeInvite({
+        booking: null,
+        professional: null,
+      }),
+    )
+
+    const html = await renderPage()
+
+    // No booking to "manage", no professional to "message" — the copy is about
+    // the history and identity alone.
+    expect(html).toContain('Your history is shown above')
+    expect(html).toContain('attach it to your identity')
+    expect(html).not.toContain('manage this booking')
+    expect(html).not.toContain('message your professional')
+  })
+
+  it('names the professional in ready copy for a booking-less, pro-attributed invite', async () => {
+    mockInviteState(
+      'ready',
+      makeInvite({
+        booking: null,
+        professional: { id: 'pro_1', businessName: 'Glow Bar' },
+      }),
+    )
+
+    const html = await renderPage()
+
+    expect(html).toContain('Your history with Glow Bar is shown above')
+    expect(html).toContain('message your professional')
+    // Still booking-less: no booking to "manage".
+    expect(html).not.toContain('manage this booking')
   })
 
   it('renders the booking overview for an unauthenticated ready invite without redirecting', async () => {
