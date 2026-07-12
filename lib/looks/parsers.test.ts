@@ -47,6 +47,7 @@ function makeFeedDto(
     reviewHelpfulCount: number | null
     reviewRating: number | null
     reviewHeadline: string | null
+    badge: { kind: string; label: string; tone: string } | null
   }>,
 ) {
   return {
@@ -88,6 +89,7 @@ function makeFeedDto(
     reviewHelpfulCount: null,
     reviewRating: null,
     reviewHeadline: null,
+    badge: null,
     ...overrides,
   }
 }
@@ -195,8 +197,34 @@ describe('lib/looks/parsers.ts', () => {
           reviewHelpfulCount: null,
           reviewRating: null,
           reviewHeadline: null,
+          badge: null,
         },
       ])
+    })
+
+    it('round-trips a valid badge and drops junk badges instead of the item', () => {
+      const valid = parseLooksFeedResponse({
+        items: [
+          makeFeedDto({
+            badge: { kind: 'BOOKING_FAST', label: 'Booking fast', tone: 'warn' },
+          }),
+        ],
+      })
+      expect(valid[0]?.badge).toEqual({
+        kind: 'BOOKING_FAST',
+        label: 'Booking fast',
+        tone: 'warn',
+      })
+
+      const junkKind = parseLooksFeedResponse({
+        items: [
+          makeFeedDto({
+            badge: { kind: 'MADE_UP', label: 'Nope', tone: 'warn' },
+          }),
+        ],
+      })
+      expect(junkKind[0]?.badge).toBeNull()
+      expect(junkKind).toHaveLength(1)
     })
   })
 

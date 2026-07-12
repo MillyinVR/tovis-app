@@ -18,6 +18,8 @@ import { listFollowedClientIds } from '@/lib/follows/clientFollows'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { attachLookBadges } from '@/lib/looks/badges/attach'
 import { personalizedFeedEnabled } from '@/lib/looks/personalizedFlag'
 import { buildPersonalizedFeedPage, parseSeenLookIds } from '@/lib/looks/personalizedFeed'
 import {
@@ -41,6 +43,22 @@ function resolveDefaultCohort(args: {
   if (args.kind === 'FOLLOWING') return 'following'
   if (args.categorySlug) return 'category'
   return 'recent'
+}
+
+// Viewer coordinates for the distance badge (spec §5.2 convenience class).
+// Optional, client-supplied from the same localStorage viewer location the
+// availability drawer uses; out-of-range or half-provided pairs read as
+// absent. Never persisted — used only to compute this page's distances.
+function parseCoordinateParam(
+  value: string | null,
+  min: number,
+  max: number,
+): number | null {
+  if (typeof value !== 'string' || value.trim().length === 0) return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  if (parsed < min || parsed > max) return null
+  return parsed
 }
 
 function parseBooleanParam(value: string | null): boolean {
@@ -227,6 +245,39 @@ export async function GET(req: Request) {
       (item): item is NonNullable<typeof item> => item !== null,
     )
 
+    // Badge attachment (spec §5): engine-computed, per-viewer where relevant,
+    // with the §9 measurement holdout. Universal badges apply to every cohort
+    // (signed-out included); viewer-intent badges need coords / a client.
+    const rawViewerLat = parseCoordinateParam(
+      searchParams.get('viewerLat'),
+      -90,
+      90,
+    )
+    const rawViewerLng = parseCoordinateParam(
+      searchParams.get('viewerLng'),
+      -180,
+      180,
+    )
+    const hasViewerCoords = rawViewerLat !== null && rawViewerLng !== null
+
+    const badgeResult = await attachLookBadges({
+      db: prisma,
+      rows: items,
+      viewer: {
+        userId: user?.id ?? null,
+        clientId: user?.clientProfile?.id ?? null,
+        lat: hasViewerCoords ? rawViewerLat : null,
+        lng: hasViewerCoords ? rawViewerLng : null,
+      },
+      brandName: getBrandForTenantContext(tenant).displayName,
+      now: new Date(),
+    })
+
+    const badgedPayload = payload.map((item) => ({
+      ...item,
+      badge: badgeResult.badges.get(item.id) ?? null,
+    }))
+
     logLooksFeedServe({
       cohort,
       authed: Boolean(user),
@@ -242,11 +293,15 @@ export async function GET(req: Request) {
       tasteSignalCount: personalizedMeta?.tasteSignalCount ?? null,
       candidateEmbeddingCount: personalizedMeta?.candidateEmbeddingCount ?? null,
       sessionVisualSignalCount: personalizedMeta?.sessionVisualSignalCount ?? null,
+      badgeEligibleCount: badgeResult.meta.eligibleCount,
+      badgeShownCount: badgeResult.meta.shownCount,
+      badgeHoldoutCount: badgeResult.meta.holdoutCount,
+      badgeKindCounts: badgeResult.meta.kindCounts,
     })
 
     const body: LooksFeedResponseDto & { ok: true } = {
       ok: true,
-      items: payload,
+      items: badgedPayload,
       nextCursor,
       ...(user
         ? {

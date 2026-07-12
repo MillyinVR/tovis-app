@@ -5,6 +5,7 @@ import type { CSSProperties } from 'react'
 import { moneyToString } from '@/lib/money'
 import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import type { LookBadgeTone } from '@/lib/looks/types'
 import type { FeedItem } from './lookTypes'
 
 const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
@@ -32,6 +33,17 @@ function formatRating(r: number) {
 
 function formatHelpful(n: number) {
   return `${n} ${n === 1 ? 'helpful' : 'helpfuls'}`
+}
+
+// Border tint per badge tone — the same token families the canonical <Badge>
+// tones use, expressed as the overlay pills' inline CSS-var style (these glass
+// pills predate <Badge> and keep their own look).
+const BADGE_BORDER_BY_TONE: Record<LookBadgeTone, string> = {
+  accent: 'rgb(var(--accent-primary) / 0.45)',
+  info: 'rgb(var(--tone-info) / 0.45)',
+  success: 'rgb(var(--tone-success) / 0.45)',
+  warn: 'rgb(var(--tone-warn) / 0.45)',
+  neutral: 'rgb(var(--surface-glass) / 0.18)',
 }
 
 export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow }: Props) {
@@ -85,8 +97,11 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
   const proHref = pro?.id ? `/professionals/${encodeURIComponent(pro.id)}` : null
   const profileHref = posterHref
 
+  // Engine-computed live-data badge (spec §5) — one per card, server-selected.
+  const badge = m.badge ?? null
+
   const hasAnyContent = Boolean(
-    displayName || captionText || serviceLabel || priceLabel,
+    displayName || captionText || serviceLabel || priceLabel || badge,
   )
   if (!hasAnyContent) return null
 
@@ -259,8 +274,29 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
       ) : null}
 
       {/* Row 3: Pills */}
-      {(serviceLabel || priceLabel || spotlightMeta) ? (
+      {(badge || serviceLabel || priceLabel || spotlightMeta) ? (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {badge ? (
+            <div
+              style={{
+                padding: '4px 10px',
+                background: 'rgb(var(--bg-secondary) / 0.65)',
+                border: `1px solid ${BADGE_BORDER_BY_TONE[badge.tone]}`,
+                borderRadius: 999,
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase' as const,
+                color: 'rgb(var(--text-primary) / 0.9)',
+              }}
+            >
+              {badge.label}
+            </div>
+          ) : null}
+
           {serviceLabel ? (
             <div
               style={{

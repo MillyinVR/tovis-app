@@ -93,9 +93,16 @@ export type LooksClientAuthorPreviewRow =
 
 // Feed cards surface a live follower count next to the Follow control, so the
 // feed variant adds an index-backed `followers` count on top of the preview.
+// The pro's account age (user.createdAt — server-side only, never mapped into
+// a DTO) feeds the "New to {brand}" badge (spec §5.2) without a second query.
 export const looksFeedProProfileSelect =
   Prisma.validator<Prisma.ProfessionalProfileSelect>()({
     ...looksProProfilePreviewSelect,
+    user: {
+      select: {
+        createdAt: true,
+      },
+    },
     _count: {
       select: {
         followers: true,
