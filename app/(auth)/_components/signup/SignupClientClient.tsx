@@ -207,6 +207,12 @@ export default function SignupClientClient() {
   const [tosAccepted, setTosAccepted] = useState(false)
   const [transactionalSmsConsent, setTransactionalSmsConsent] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Set alongside `error` when signup collided with an existing account for the
+  // typed contact — bridges the dead end with a log-in link carrying that
+  // contact as a prefill instead of leaving the user stuck on the error.
+  const [accountExistsLoginHref, setAccountExistsLoginHref] = useState<
+    string | null
+  >(null)
   const [claimableInfo, setClaimableInfo] = useState<{
     maskedDestination: string | null
   } | null>(null)
@@ -297,6 +303,7 @@ export default function SignupClientClient() {
     e.preventDefault()
     if (loading) return
     setError(null)
+    setAccountExistsLoginHref(null)
     setClaimableInfo(null)
 
     const errors: Partial<Record<ClientField, string>> = {}
@@ -391,6 +398,21 @@ export default function SignupClientClient() {
             maskedDestination: readStringField(data, 'maskedDestination'),
           })
           return
+        }
+
+        if (readStringField(data, 'code') === 'ACCOUNT_EXISTS') {
+          setAccountExistsLoginHref(
+            buildLoginHref({
+              role: 'CLIENT',
+              ti,
+              from,
+              next: nextFromQuery,
+              intent,
+              inviteToken,
+              email: email.trim() || null,
+              phone: compactPhoneInputForSubmit(phone) || null,
+            }),
+          )
         }
 
         setError(readErrorMessage(data) ?? 'Signup failed.')
@@ -715,6 +737,18 @@ export default function SignupClientClient() {
         {error ? (
           <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
             {error}
+            {accountExistsLoginHref ? (
+              <div className="mt-1.5 text-sm font-bold text-textPrimary">
+                That account may already be yours —{' '}
+                <Link
+                  href={accountExistsLoginHref}
+                  className="underline underline-offset-2"
+                >
+                  log in to continue
+                </Link>
+                .
+              </div>
+            ) : null}
           </div>
         ) : null}
 
