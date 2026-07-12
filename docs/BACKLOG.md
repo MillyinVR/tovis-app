@@ -975,10 +975,23 @@ grid to read `LookPost`s — land §18b first, then 19c re-points the same grid.
   (`isUnpromotedPrivateMedia`); **no new public-by-default path; no migration.** Promoting
   a consented review photo now surfaces it in the grid **and** the feed/search/boards,
   service-anchored. (UI "grid/feed" relabel rides §19f.)
-- [ ] **19e — downstream coverage**: with everything a `LookPost`, verify boards
-  (`BoardItem`→`LookPost`) can now save formerly-portfolio-only media; confirm
-  search/tags/personalized feed pick up backfilled looks; audit the owner board
-  view showing stale-status saved looks.
+- [x] **19e — downstream coverage** *(shipped; deploy-held)*. Audit outcome:
+  boards (`BoardItem`→`LookPost`) already save formerly-portfolio-only media —
+  §19b/§19c make every featured asset a real published+APPROVED pro `LookPost`, which
+  passes `canSaveLookPost`; and search/tags/personalized/board-rec feeds already read
+  `LookPost` via `buildLooksFeedWhere`, so backfilled/featured looks surface with no
+  change. **The one real gap fixed:** the OWNER board views (`getBoardDetail` /
+  `getBoardSummaries` via `looksBoardDetailSelect` / `looksBoardPreviewSelect`) fetched
+  every `BoardItem` with no look-status filter, so a saved look that got
+  unpublished/rejected/removed rendered stale AND inflated `_count.items` — while the
+  public/shared board view already gated (inline). Extracted that gate into a shared
+  `boardVisibleLookItemWhere` (PUBLISHED + APPROVED + PUBLIC + `removedAt: null`),
+  applied to the `items` sub-query **and** the filtered `_count` in both owner selects,
+  and reused it in `publicBoard.ts` (retires the inline dup). Retracted looks stay saved
+  (the `BoardItem` row persists) — they just don't render while non-public, and reappear
+  if the look re-publishes. +4 tests. Remaining last MediaAsset-based grid = the owner
+  management grid (`loadProProfileManagementPage.loadPortfolio`), intentionally kept so a
+  pro still sees featured media whose look tripped moderation (to manage it).
 - [ ] **19f — cleanup**: remove the "temporary media-level bridge" copy + dead
   `isFeaturedInPortfolio`-only query paths once 19c ships. (do NOT delete the flag
   until the grid reads `LookPost`.)

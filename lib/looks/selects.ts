@@ -1,7 +1,30 @@
 // lib/looks/selects.ts
-import { Prisma } from '@prisma/client'
+import {
+  LookPostStatus,
+  LookPostVisibility,
+  ModerationStatus,
+  Prisma,
+} from '@prisma/client'
 
 import { pairedBeforeAssetSelect } from '@/lib/profiles/publicProfileSelects'
+
+// §19e — a BoardItem is renderable only when its saved look is still publicly
+// visible: PUBLISHED + APPROVED + PUBLIC + not removed. Owner board views
+// (detail + preview) previously fetched every BoardItem and over-counted, so a
+// saved look that got unpublished/rejected/removed rendered stale. This shared
+// filter is applied to the `items` sub-query AND the `_count` in both owner
+// selects, and reused by the public-board read (which had it inline). Keeping
+// the retracted BoardItem row is intentional — if the look re-publishes it
+// reappears — we just don't surface it while it isn't public.
+export const boardVisibleLookItemWhere =
+  Prisma.validator<Prisma.BoardItemWhereInput>()({
+    lookPost: {
+      status: LookPostStatus.PUBLISHED,
+      visibility: LookPostVisibility.PUBLIC,
+      moderationStatus: ModerationStatus.APPROVED,
+      removedAt: null,
+    },
+  })
 
 const looksServiceCategorySelect =
   Prisma.validator<Prisma.ServiceCategorySelect>()({
@@ -271,11 +294,12 @@ export const looksBoardPreviewSelect =
 
     _count: {
       select: {
-        items: true,
+        items: { where: boardVisibleLookItemWhere },
       },
     },
 
     items: {
+      where: boardVisibleLookItemWhere,
       orderBy: {
         createdAt: 'desc',
       },
@@ -320,11 +344,12 @@ export const looksBoardDetailSelect =
 
     _count: {
       select: {
-        items: true,
+        items: { where: boardVisibleLookItemWhere },
       },
     },
 
     items: {
+      where: boardVisibleLookItemWhere,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: {
         id: true,
