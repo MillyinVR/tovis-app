@@ -15,7 +15,10 @@ import { asTrimmedString } from '@/lib/guards'
 import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
 import { orchestrateClientActionDelivery } from './orchestrateClientActionDelivery'
-import { resolveClientActionExpiresAt } from './policies'
+import {
+  requireRecipientProfessionalId,
+  resolveClientActionExpiresAt,
+} from './policies'
 import type {
   ClientActionBuildLinkResult,
   ClientActionIssuedToken,
@@ -173,7 +176,7 @@ async function revokeOutstandingAftercareTokens(args: {
       bookingId: args.bookingId,
       aftercareSummaryId: args.aftercareId,
       clientId: args.plan.recipient.clientId,
-      professionalId: args.plan.recipient.professionalId,
+      professionalId: requireRecipientProfessionalId(args.plan.recipient),
       revokedAt: null,
     },
     data: {
@@ -216,7 +219,7 @@ async function issueAftercareAccessToken(args: {
       aftercareSummaryId: args.aftercareId,
       consultationApprovalId: null,
       clientId: args.plan.recipient.clientId,
-      professionalId: args.plan.recipient.professionalId,
+      professionalId: requireRecipientProfessionalId(args.plan.recipient),
       deliveryMethod: args.plan.resolvedDelivery.method,
       recipientEmailSnapshot: asTrimmedString(
         args.plan.recipient.recipientEmail,

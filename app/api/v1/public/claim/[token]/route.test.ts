@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   buildClaimLocationLabel: vi.fn(),
   buildClaimProfessionalLabel: vi.fn(),
   resolveClaimBookingTimeZone: vi.fn(),
+  resolveClaimProfessionalName: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -48,6 +49,7 @@ vi.mock('@/lib/clients/claimPublicView', () => ({
   buildClaimLocationLabel: mocks.buildClaimLocationLabel,
   buildClaimProfessionalLabel: mocks.buildClaimProfessionalLabel,
   resolveClaimBookingTimeZone: mocks.resolveClaimBookingTimeZone,
+  resolveClaimProfessionalName: mocks.resolveClaimProfessionalName,
 }))
 
 import { GET } from './route'
@@ -84,6 +86,7 @@ beforeEach(() => {
   mocks.buildClaimLocationLabel.mockReturnValue('Studio A, San Diego')
   mocks.buildClaimProfessionalLabel.mockReturnValue('Glow Studio')
   mocks.resolveClaimBookingTimeZone.mockReturnValue('America/Los_Angeles')
+  mocks.resolveClaimProfessionalName.mockReturnValue('Glow Studio')
   mocks.getClientClaimLinkPublicState.mockResolvedValue({
     kind: 'ready',
     link: makeLink(),
@@ -147,6 +150,7 @@ describe('GET /api/v1/public/claim/[token]', () => {
       invitedName: 'Tori Morales',
       invitedEmail: 'tori@example.com',
       invitedPhone: '+16195551234',
+      professionalName: 'Glow Studio',
       booking: {
         serviceName: 'Balayage',
         professionalName: 'Glow Studio',
@@ -154,6 +158,24 @@ describe('GET /api/v1/public/claim/[token]', () => {
         timeZone: 'America/Los_Angeles',
         locationLabel: 'Studio A, San Diego',
       },
+    })
+  })
+
+  it('returns a booking-less claim (200, booking: null) instead of 404', async () => {
+    mocks.getClientClaimLinkPublicState.mockResolvedValueOnce({
+      kind: 'ready',
+      link: makeLink({ booking: null }),
+    })
+    mocks.resolveClaimProfessionalName.mockReturnValueOnce(null)
+
+    const res = await GET(new Request('http://localhost'), makeCtx())
+
+    expect(res).toMatchObject({
+      ok: true,
+      state: 'ready',
+      invitedName: 'Tori Morales',
+      professionalName: null,
+      booking: null,
     })
   })
 

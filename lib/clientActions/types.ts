@@ -50,12 +50,13 @@ export type ClientActionEntityRefs = {
   inviteId?: string | null
 }
 
+// (professionalId is nullable: CLIENT_CLAIM_INVITE allows a pro-less recipient.)
 export type ClientActionRecipientSnapshot = {
   /**
    * Internal identities, when known.
    */
   clientId: string
-  professionalId: string
+  professionalId: string | null
   userId?: string | null
 
   /**
@@ -112,6 +113,15 @@ export type ClientActionDeliveryPolicy = {
    * resent, instead of only updating an existing deduped inbox row.
    */
   createFreshDeliveryOnResend: boolean
+
+  /**
+   * Whether a null recipient.professionalId is allowed. Absent/false keeps the
+   * strict default (every other action requires a pro). Only CLIENT_CLAIM_INVITE
+   * opts in — a booking-less/orphan claim can be pro-less (cold self-serve), and
+   * the copy degrades to brand-level. The idempotency + dispatch layers already
+   * tolerate a null professionalId.
+   */
+  allowsNullProfessional?: boolean
 }
 
 export type ClientActionLinkPolicy = {

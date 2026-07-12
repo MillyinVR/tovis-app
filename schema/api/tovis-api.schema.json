@@ -2089,7 +2089,15 @@
     "ClaimPublicViewResponseDTO": {
       "properties": {
         "booking": {
-          "$ref": "#/definitions/ClaimPublicBookingDTO"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClaimPublicBookingDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Booking context, or null for a booking-less claim."
         },
         "invitedEmail": {
           "type": [
@@ -2110,6 +2118,13 @@
             "null"
           ]
         },
+        "professionalName": {
+          "description": "Pro's public display name resolved from the booking OR the invite's own pro (respects nameDisplay); null for a pro-less claim (cold self-serve orphan).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "state": {
           "$ref": "#/definitions/ClaimPublicViewState"
         }
@@ -2119,6 +2134,7 @@
         "invitedName",
         "invitedEmail",
         "invitedPhone",
+        "professionalName",
         "booking"
       ],
       "type": "object"

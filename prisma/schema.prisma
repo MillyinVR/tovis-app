@@ -3384,9 +3384,13 @@ model ProClientInvite {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  professionalId String
+  // Nullable: a claim invite can be pro-less (cold self-serve, no pro in context)
+  // and/or booking-less (a directory-created / migration-imported client with no
+  // appointment). Postgres treats NULLs as distinct, so `bookingId @unique` still
+  // enforces one invite per real booking while allowing many booking-less invites.
+  professionalId String?
   clientId       String
-  bookingId      String @unique
+  bookingId      String? @unique
 
   invitedName  String
   invitedEmail String?
@@ -3411,9 +3415,11 @@ model ProClientInvite {
 
   preferredContactMethod ContactMethod?
 
-  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
-  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  booking      Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  // SetNull (was Cascade): deleting the pro/booking demotes the invite to
+  // pro-less/booking-less rather than destroying a still-valid claim link.
+  professional ProfessionalProfile? @relation(fields: [professionalId], references: [id], onDelete: SetNull)
+  client       ClientProfile        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  booking      Booking?             @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
   @@index([professionalId])
   @@index([clientId])

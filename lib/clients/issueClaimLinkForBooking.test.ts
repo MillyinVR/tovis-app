@@ -11,8 +11,12 @@ const mocks = vi.hoisted(() => ({
     booking: {
       findUnique: vi.fn(),
     },
+    clientProfile: {
+      findUnique: vi.fn(),
+    },
     proClientInvite: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
@@ -32,7 +36,10 @@ vi.mock('@/lib/clients/proClientInviteTokens', () => ({
   normalizeProClientInviteToken: mocks.normalizeProClientInviteToken,
 }))
 
-import { issueClaimLinkForBooking } from './clientClaimLinks'
+import {
+  issueClaimLinkForBooking,
+  issueClaimLinkForClient,
+} from './clientClaimLinks'
 
 function makeBooking(overrides?: {
   clientOverrides?: Record<string, unknown>
@@ -189,5 +196,123 @@ describe('issueClaimLinkForBooking', () => {
         }),
       }),
     )
+  })
+})
+
+function makeClient(overrides?: Record<string, unknown>) {
+  return {
+    id: 'client_1',
+    userId: null,
+    firstName: 'Tori',
+    lastName: 'Morales',
+    email: 'tori@example.com',
+    phone: null,
+    claimStatus: ClientClaimStatus.UNCLAIMED,
+    ...(overrides ?? {}),
+  }
+}
+
+describe('issueClaimLinkForClient', () => {
+  it('returns not_found when the client is missing', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
+
+    const result = await issueClaimLinkForClient({ clientId: 'client_1' })
+
+    expect(result).toEqual({ kind: 'not_found' })
+    expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+  })
+
+  it('returns already_claimed when the client already has a user', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue(
+      makeClient({ userId: 'user_9' }),
+    )
+
+    const result = await issueClaimLinkForClient({ clientId: 'client_1' })
+
+    expect(result).toEqual({ kind: 'already_claimed' })
+  })
+
+  it('creates a fresh PRO-LESS booking-less invite (bookingId null) when none exists', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue(makeClient())
+    mocks.prisma.proClientInvite.findFirst.mockResolvedValue(null)
+    mocks.prisma.proClientInvite.create.mockResolvedValue({ id: 'invite_new' })
+
+    const result = await issueClaimLinkForClient({ clientId: 'client_1' })
+
+    expect(result.kind).toBe('ok')
+    expect(result).toMatchObject({ rawToken: 'raw-token-123' })
+    expect(mocks.prisma.proClientInvite.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { clientId: 'client_1', bookingId: null },
+      }),
+    )
+    expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          professionalId: null,
+          clientId: 'client_1',
+          bookingId: null,
+          invitedName: 'Tori Morales',
+          invitedEmail: 'tori@example.com',
+          preferredContactMethod: ContactMethod.EMAIL,
+          status: ProClientInviteStatus.PENDING,
+          tokenHash: 'hash-token-123',
+        }),
+      }),
+    )
+  })
+
+  it('attributes a provided professionalId (pro-facing invite)', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue(makeClient())
+    mocks.prisma.proClientInvite.findFirst.mockResolvedValue(null)
+    mocks.prisma.proClientInvite.create.mockResolvedValue({ id: 'invite_new' })
+
+    await issueClaimLinkForClient({ clientId: 'client_1', professionalId: 'pro_7' })
+
+    expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ professionalId: 'pro_7', bookingId: null }),
+      }),
+    )
+  })
+
+  it('rotates an existing booking-less invite and keeps its pro when passed null', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue(makeClient())
+    mocks.prisma.proClientInvite.findFirst.mockResolvedValue({
+      id: 'invite_existing',
+      professionalId: 'pro_earlier',
+      status: ProClientInviteStatus.PENDING,
+      revokedAt: null,
+    })
+    mocks.prisma.proClientInvite.update.mockResolvedValue({ id: 'invite_existing' })
+
+    const result = await issueClaimLinkForClient({ clientId: 'client_1' })
+
+    expect(result.kind).toBe('ok')
+    expect(mocks.prisma.proClientInvite.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'invite_existing' },
+        data: expect.objectContaining({
+          professionalId: 'pro_earlier',
+          tokenHash: 'hash-token-123',
+        }),
+      }),
+    )
+  })
+
+  it('returns revoked when the existing booking-less invite is revoked', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue(makeClient())
+    mocks.prisma.proClientInvite.findFirst.mockResolvedValue({
+      id: 'invite_existing',
+      professionalId: null,
+      status: ProClientInviteStatus.REVOKED,
+      revokedAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+
+    const result = await issueClaimLinkForClient({ clientId: 'client_1' })
+
+    expect(result).toEqual({ kind: 'revoked' })
+    expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+    expect(mocks.prisma.proClientInvite.update).not.toHaveBeenCalled()
   })
 })
