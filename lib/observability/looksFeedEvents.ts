@@ -45,6 +45,12 @@ export type LooksFeedServeEvent = {
   // §6.3 in-session responsiveness: fresh same-session like/save embeddings
   // folded into the taste vector for this serve (0 = stored vector unchanged).
   sessionVisualSignalCount?: number | null
+  // §2.2 "not for me": hidden looks excluded from this serve and categories
+  // currently under decayed suppression. Rising hide rate = personalization
+  // degrading — the cheapest early-warning signal (spec §9). Present on the
+  // personalized, chronological, and board cohorts for a signed-in viewer.
+  hiddenExcludedCount?: number | null
+  categorySuppressionCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -85,6 +91,8 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     tasteSignalCount: input.tasteSignalCount ?? null,
     candidateEmbeddingCount: input.candidateEmbeddingCount ?? null,
     sessionVisualSignalCount: input.sessionVisualSignalCount ?? null,
+    hiddenExcludedCount: input.hiddenExcludedCount ?? null,
+    categorySuppressionCount: input.categorySuppressionCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

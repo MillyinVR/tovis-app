@@ -24,6 +24,9 @@ const mocks = vi.hoisted(() => {
     lookLike: {
       findMany: vi.fn(),
     },
+    lookHide: {
+      findMany: vi.fn(),
+    },
     boardItem: {
       findMany: vi.fn(),
     },
@@ -223,6 +226,7 @@ describe('app/api/v1/looks/route.ts', () => {
 
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
+    mocks.prisma.lookHide.findMany.mockResolvedValue([])
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
     mocks.prisma.clientFollow.findMany.mockResolvedValue([])

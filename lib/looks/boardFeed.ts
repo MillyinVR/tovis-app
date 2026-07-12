@@ -47,6 +47,7 @@ import {
   type LooksFeedCursor,
 } from '@/lib/looks/feed'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
+import { loadHiddenLookIds } from '@/lib/looks/hides'
 import {
   rankBoardFeedRows,
   type BoardFeedContext,
@@ -143,6 +144,8 @@ export type BoardFeedPage = {
     feasibilityTagCount: number
     tasteSignalCount: number
     candidateEmbeddingCount: number
+    // §2.2: the owner's "not for me" hides excluded from this board feed too.
+    hiddenExcludedCount: number
   }
 }
 
@@ -154,6 +157,10 @@ export type BoardFeedPage = {
 export async function buildBoardFeedPage(args: {
   tenant: TenantContext
   board: BoardFeedBoard
+  // The board owner's user id (the feed is owner-only). Used to exclude the
+  // owner's §2.2 "not for me" hides. Optional so a caller without it (or a test)
+  // just skips hide exclusion.
+  viewerUserId?: string | null
   limit: number
   cursor: LooksFeedCursor | null
   seenLookIds: ReadonlySet<string>
@@ -161,17 +168,23 @@ export async function buildBoardFeedPage(args: {
 }): Promise<BoardFeedPage> {
   const ctx = await loadBoardFeedContext({ board: args.board, now: args.now })
 
-  // A board recommends looks the owner hasn't already saved to it.
-  const savedItems = await prisma.boardItem.findMany({
-    where: { boardId: args.board.id },
-    orderBy: { createdAt: 'desc' },
-    take: SAVED_EXCLUSION_CAP,
-    select: { lookPostId: true },
-  })
+  // A board recommends looks the owner hasn't already saved to it, and never a
+  // look the owner explicitly hid (§2.2).
+  const [savedItems, hiddenLookIds] = await Promise.all([
+    prisma.boardItem.findMany({
+      where: { boardId: args.board.id },
+      orderBy: { createdAt: 'desc' },
+      take: SAVED_EXCLUSION_CAP,
+      select: { lookPostId: true },
+    }),
+    args.viewerUserId
+      ? loadHiddenLookIds(prisma, { userId: args.viewerUserId })
+      : Promise.resolve<string[]>([]),
+  ])
   const savedLookIds = savedItems.map((item) => item.lookPostId)
 
   const seenIds = [...args.seenLookIds].slice(0, SEEN_IDS_CAP)
-  const excludeIds = [...new Set([...savedLookIds, ...seenIds])]
+  const excludeIds = [...new Set([...savedLookIds, ...seenIds, ...hiddenLookIds])]
 
   const baseWhere = buildLooksFeedWhere({ kind: 'ALL', tenant: args.tenant })
   const exclusion: Prisma.LookPostWhereInput | null =
@@ -295,6 +308,7 @@ export async function buildBoardFeedPage(args: {
       feasibilityTagCount: ctx.feasibilityTagSlugs.size,
       tasteSignalCount: ctx.tasteSignalCount,
       candidateEmbeddingCount: candidateEmbeddings.size,
+      hiddenExcludedCount: hiddenLookIds.length,
     },
   }
 }

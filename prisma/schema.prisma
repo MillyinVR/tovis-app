@@ -1312,6 +1312,7 @@ model User {
   emailSendPermanentlyFailedAt DateTime?
 
   lookLikes        LookLike[]
+  lookHides        LookHide[]
   lookComments     LookComment[]
   lookCommentLikes LookCommentLike[]
 
@@ -4130,6 +4131,11 @@ model LookPost {
 
   assets           LookPostAsset[]
   likes            LookLike[]
+  // Per-viewer "not for me" hides (spec §2.2). An explicit, reversible negative
+  // signal: a hidden look is excluded from that viewer's feeds, and repeated
+  // hides in a category apply a decayed category-level suppression. See
+  // lib/looks/hides.ts + lib/looks/personalizedFeed.ts.
+  hides            LookHide[]
   comments         LookComment[]
   reports          LookPostReport[]
   boardItems       BoardItem[]
@@ -4193,6 +4199,28 @@ model LookPostAsset {
 }
 
 model LookLike {
+  id         String   @id @default(cuid())
+  lookPostId String
+  userId     String
+  createdAt  DateTime @default(now())
+
+  lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lookPostId, userId])
+  @@index([lookPostId, createdAt])
+  @@index([userId, createdAt])
+}
+
+// Per-viewer explicit "not for me" hide (spec §2.2). One row = this user does
+// not want to see this look. Unambiguous, reversible negative signal (unlike an
+// inferred skip): the look is excluded from that viewer's personalized,
+// chronological, and board feeds, and — after repeated hides in a category — the
+// category is down-ranked by a DECAYED penalty (guardrail #10, no permanent
+// invisible penalty; the decay lives in lib/looks/personalizedFeed.ts). Shape
+// mirrors LookLike (per-user, unique per look) so the read/exclusion paths reuse
+// the same patterns. createdAt is the decay input.
+model LookHide {
   id         String   @id @default(cuid())
   lookPostId String
   userId     String

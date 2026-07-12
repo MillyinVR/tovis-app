@@ -1,4 +1,6 @@
 // app/api/v1/looks/route.ts
+import { Prisma } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickInt, pickString } from '@/app/api/_utils'
 import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
@@ -22,6 +24,7 @@ import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { attachLookBadges } from '@/lib/looks/badges/attach'
 import { personalizedFeedEnabled } from '@/lib/looks/personalizedFlag'
 import { buildPersonalizedFeedPage, parseSeenLookIds } from '@/lib/looks/personalizedFeed'
+import { loadHiddenLookIds } from '@/lib/looks/hides'
 import {
   logLooksFeedServe,
   type LooksFeedCohort,
@@ -147,6 +150,10 @@ export async function GET(req: Request) {
     let cohort: LooksFeedCohort
     let personalizedMeta: Awaited<ReturnType<typeof buildPersonalizedFeedPage>>['meta'] | null =
       null
+    // §2.2: how many of the signed-in viewer's hidden looks were excluded from a
+    // NON-personalized serve (the personalized path reports its own count in
+    // personalizedMeta). null for a signed-out viewer (no hides).
+    let chronoHiddenExcludedCount: number | null = null
 
     if (usePersonalized && user) {
       const seenLookIds = parseSeenLookIds(searchParams.get('seen'))
@@ -187,17 +194,29 @@ export async function GET(req: Request) {
         followingClientIds,
       })
 
+      // §2.2: exclude the signed-in viewer's hidden looks from every
+      // non-personalized feed too (following / spotlight / category / search /
+      // sort=recent). Signed-out viewers have no hides — skip the query.
+      const hiddenLookIds = user
+        ? await loadHiddenLookIds(prisma, { userId: user.id })
+        : []
+      chronoHiddenExcludedCount = user ? hiddenLookIds.length : null
+
       const cursorWhere = buildLooksFeedCursorWhere({
         kind,
         sort,
         cursor,
       })
 
-      const pageWhere = cursorWhere
-        ? {
-            AND: [where, cursorWhere],
-          }
-        : where
+      const andParts: Prisma.LookPostWhereInput[] = [
+        ...(cursorWhere ? [cursorWhere] : []),
+        ...(hiddenLookIds.length > 0
+          ? [{ id: { notIn: hiddenLookIds } }]
+          : []),
+      ]
+
+      const pageWhere =
+        andParts.length > 0 ? { AND: [where, ...andParts] } : where
 
       const orderBy = buildLooksFeedOrderBy({ kind, sort })
 
@@ -293,6 +312,10 @@ export async function GET(req: Request) {
       tasteSignalCount: personalizedMeta?.tasteSignalCount ?? null,
       candidateEmbeddingCount: personalizedMeta?.candidateEmbeddingCount ?? null,
       sessionVisualSignalCount: personalizedMeta?.sessionVisualSignalCount ?? null,
+      hiddenExcludedCount:
+        personalizedMeta?.hiddenExcludedCount ?? chronoHiddenExcludedCount,
+      categorySuppressionCount:
+        personalizedMeta?.categorySuppressionCount ?? null,
       badgeEligibleCount: badgeResult.meta.eligibleCount,
       badgeShownCount: badgeResult.meta.shownCount,
       badgeHoldoutCount: badgeResult.meta.holdoutCount,

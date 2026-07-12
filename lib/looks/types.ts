@@ -265,6 +265,12 @@ export type LooksLikeResponseDto = {
   likeCount: number
 }
 
+/** Response for the per-viewer "not for me" hide toggle (spec §2.2). */
+export type LooksHideResponseDto = {
+  lookPostId: string
+  hidden: boolean
+}
+
 export type LooksShareResponseDto = {
   lookPostId: string
   shareCount: number

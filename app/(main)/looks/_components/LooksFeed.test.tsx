@@ -104,6 +104,7 @@ vi.mock('./RightActionRail', () => ({
     onToggleLike,
     onOpenComments,
     onShare,
+    onHide,
   }: {
     viewerLiked: boolean
     likeCount: number
@@ -112,6 +113,7 @@ vi.mock('./RightActionRail', () => ({
     onToggleLike: () => void
     onOpenComments: () => void
     onShare: () => void
+    onHide?: () => void
   }) => (
     <div data-testid="right-rail">
       <div data-testid="viewer-liked">{viewerLiked ? 'true' : 'false'}</div>
@@ -130,6 +132,11 @@ vi.mock('./RightActionRail', () => ({
       <button type="button" onClick={onShare}>
         Share
       </button>
+      {onHide ? (
+        <button type="button" onClick={onHide}>
+          Not for me
+        </button>
+      ) : null}
     </div>
   ),
 }))
@@ -340,6 +347,7 @@ function installFetchMock(args?: {
   feedByCategory?: Record<string, FeedItem[]>
   commentsByLookId?: Record<string, UiComment[]>
   categories?: Array<{ name: string; slug: string }>
+  hideStatus?: number
 }) {
   const categories = args?.categories ?? [{ name: 'Hair', slug: 'hair' }]
 
@@ -428,6 +436,19 @@ function installFetchMock(args?: {
             likeCount: next.likeCount,
           })
         }
+      }
+
+      const hideMatch = url.match(/^\/api\/v1\/looks\/([^/]+)\/hide$/)
+      if (hideMatch) {
+        const lookPostId = decodeURIComponent(hideMatch[1] ?? '')
+        const hideStatus = args?.hideStatus ?? 200
+        if (hideStatus !== 200) {
+          return jsonResponse({ ok: false, error: 'nope' }, hideStatus)
+        }
+        return jsonResponse({
+          lookPostId,
+          hidden: method !== 'DELETE',
+        })
       }
 
       const commentsMatch = url.match(/^\/api\/v1\/looks\/([^/]+)\/comments$/)
@@ -546,6 +567,68 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
       expect(within(slide).getByTestId('like-count')).toHaveTextContent('4')
       expect(within(slide).getByTestId('viewer-liked')).toHaveTextContent('true')
     })
+  })
+
+  it('hides a look on "Not for me": POSTs the hide and removes the card (§2.2)', async () => {
+    const { fetchMock } = installFetchMock({
+      feedByCategory: {
+        all: [
+          makeFeedItem({ id: 'look_hide_1' }),
+          makeFeedItem({ id: 'look_keep_1' }),
+        ],
+      },
+    })
+
+    render(<LooksFeed />)
+
+    const slide = await screen.findByTestId('look-slide-look_hide_1')
+
+    fireEvent.click(within(slide).getByRole('button', { name: 'Not for me' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/looks/look_hide_1/hide', {
+        method: 'POST',
+      })
+    })
+
+    // Card is removed optimistically; the untouched sibling stays.
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('look-slide-look_hide_1'),
+      ).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('look-slide-look_keep_1')).toBeInTheDocument()
+  })
+
+  it('restores the card and redirects to login when a guest hides (§2.2)', async () => {
+    const { fetchMock } = installFetchMock({
+      feedByCategory: {
+        all: [makeFeedItem({ id: 'look_guest_1' })],
+      },
+      // 401 on the hide → guest, card should come back.
+      hideStatus: 401,
+    })
+
+    render(<LooksFeed />)
+
+    const slide = await screen.findByTestId('look-slide-look_guest_1')
+    fireEvent.click(within(slide).getByRole('button', { name: 'Not for me' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/looks/look_guest_1/hide', {
+        method: 'POST',
+      })
+    })
+
+    // Guest → login redirect, and the card is restored (not lost).
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(
+        expect.stringContaining('/login?'),
+      )
+    })
+    expect(
+      await screen.findByTestId('look-slide-look_guest_1'),
+    ).toBeInTheDocument()
   })
 
   it('opens the comment sheet for the canonical lookPostId and syncs the rail count', async () => {

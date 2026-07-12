@@ -205,6 +205,7 @@ export default function LooksFeed() {
 
   const likeInFlight = useRef<Record<string, boolean>>({})
   const followInFlight = useRef<Record<string, boolean>>({})
+  const hideInFlight = useRef<Record<string, boolean>>({})
   const lastTapRef = useRef<Record<string, number>>({})
   const feedScrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -701,6 +702,70 @@ export default function LooksFeed() {
     [redirectToLogin],
   )
 
+  // §2.2 explicit "not for me": remove the card immediately and tell the server.
+  // A hidden look is excluded from every future feed serve for this viewer, so
+  // the removal is durable; we also prune it from the in-memory feed cache so a
+  // cache-hit refresh within the TTL doesn't resurrect it. Guests are bounced to
+  // login and the card is restored (mirrors like/follow).
+  const hideLook = useCallback(
+    async (lookPostId: string) => {
+      if (hideInFlight.current[lookPostId]) return
+
+      const snapshot = itemsRef.current
+      const removedIndex = snapshot.findIndex((item) => item.id === lookPostId)
+      if (removedIndex < 0) return
+      const removedItem = snapshot[removedIndex]
+      if (!removedItem) return
+
+      hideInFlight.current[lookPostId] = true
+
+      const restore = () =>
+        setItems((prev) => {
+          if (prev.some((item) => item.id === lookPostId)) return prev
+          const next = [...prev]
+          const at = Math.min(Math.max(removedIndex, 0), next.length)
+          next.splice(at, 0, removedItem)
+          return next
+        })
+
+      // Optimistic removal.
+      setItems((prev) => prev.filter((item) => item.id !== lookPostId))
+
+      try {
+        const res = await fetch(`/api/v1/looks/${lookPostId}/hide`, {
+          method: 'POST',
+        })
+
+        if (isGuestBlocked(res.status)) {
+          restore()
+          redirectToLogin('hide')
+          return
+        }
+
+        if (!res.ok) {
+          restore()
+          return
+        }
+
+        // Success — drop it from every cached page so a refresh within the TTL
+        // doesn't bring it back this session (the server excludes it thereafter).
+        for (const [key, entry] of feedCacheRef.current.entries()) {
+          if (entry.items.some((item) => item.id === lookPostId)) {
+            feedCacheRef.current.set(key, {
+              ...entry,
+              items: entry.items.filter((item) => item.id !== lookPostId),
+            })
+          }
+        }
+      } catch {
+        restore()
+      } finally {
+        hideInFlight.current[lookPostId] = false
+      }
+    },
+    [redirectToLogin],
+  )
+
   const likeOnly = useCallback(
     (lookPostId: string) => {
       const item = items.find((value) => value.id === lookPostId)
@@ -883,6 +948,7 @@ export default function LooksFeed() {
                 onToggleLike={() => void toggleLike(item.id)}
                 onOpenComments={() => setOpenCommentsFor(item.id)}
                 onShare={() => void shareLook(item)}
+                onHide={() => void hideLook(item.id)}
                 onSaveStateChange={(state) =>
                   setItems((prev) =>
                     prev.map((feedItem) =>

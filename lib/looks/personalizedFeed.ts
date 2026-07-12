@@ -32,6 +32,7 @@ import {
   type LooksFeedCursor,
 } from '@/lib/looks/feed'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
+import { HIDDEN_LOOK_IDS_CAP, hideCategorySelect } from '@/lib/looks/hides'
 import {
   normalizeSelfProfile,
   selfProfileInterestCategorySlugs,
@@ -68,6 +69,16 @@ export const AFFINITY_SAVE_WEIGHT = 2
 // fade); booking-driven affinity should decay slowest (~6–12 months) when
 // bookings become an affinity source.
 export const AFFINITY_HALF_LIFE_DAYS = 75
+
+// Half-life for explicit "not for me" hide suppression (spec §2.2 "suppressions
+// decay over weeks, not forever … explicit hides decay slower than inferred
+// skips"). We have no inferred-skip signal yet, so this is the explicit-hide
+// rate: a category hidden today suppresses at full weight, half as much in 30
+// days, and is nearly gone by ~90 — "one bad veil week shouldn't permanently
+// kill veils." Longer than an inferred skip would warrant, shorter than the
+// 75-day POSITIVE affinity half-life (a mistaken hide should fade faster than a
+// genuine like).
+export const HIDE_SUPPRESSION_HALF_LIFE_DAYS = 30
 
 // Spec §6.2 separation rule ("board activity should NOT flood the general Looks
 // feed"): a board save fully updates that board's LOCAL taste — its
@@ -110,19 +121,25 @@ const INTEREST_CATEGORY_WEIGHT = 3
 /**
  * Exponential time-decay factor in (0, 1] for a behavioral affinity signal of
  * the given age (spec §6.2). Missing/invalid timestamps decay as brand-new —
- * over-weighting is the safe failure for a taste signal. Pure + exported for
- * unit testing.
+ * over-weighting is the safe failure for a taste signal. `halfLifeDays` defaults
+ * to the positive-affinity half-life; the hide-suppression path passes the
+ * slower explicit-hide half-life (§2.2). Pure + exported for unit testing.
  */
 export function computeAffinityDecayFactor(
   createdAt: Date | null | undefined,
   now: Date,
+  halfLifeDays: number = AFFINITY_HALF_LIFE_DAYS,
 ): number {
   if (!(createdAt instanceof Date) || Number.isNaN(createdAt.getTime())) {
     return 1
   }
 
+  const effectiveHalfLife =
+    Number.isFinite(halfLifeDays) && halfLifeDays > 0
+      ? halfLifeDays
+      : AFFINITY_HALF_LIFE_DAYS
   const ageDays = Math.max(0, now.getTime() - createdAt.getTime()) / DAY_MS
-  return 2 ** (-ageDays / AFFINITY_HALF_LIFE_DAYS)
+  return 2 ** (-ageDays / effectiveHalfLife)
 }
 
 // How many of the viewer's purposed boards feed occasion/category signals.
@@ -338,7 +355,7 @@ export async function loadPersonalizedAffinity(args: {
   userId: string
   clientId: string | null | undefined
   now: Date
-}): Promise<PersonalizedViewerAffinity> {
+}): Promise<PersonalizedViewerAffinity & { hiddenLookIds: string[] }> {
   const clientId = args.clientId ?? null
 
   const [
@@ -348,6 +365,7 @@ export async function loadPersonalizedAffinity(args: {
     boardContexts,
     selfProfileRow,
     tasteVectorRow,
+    hides,
   ] = await Promise.all([
       clientId
         ? prisma.proFollow.findMany({
@@ -392,6 +410,16 @@ export async function loadPersonalizedAffinity(args: {
       clientId
         ? fetchClientTasteVector(prisma, clientId)
         : Promise.resolve(null),
+      // §2.2 explicit "not for me" hides. Keyed by userId (like lookLike), so
+      // loaded for any signed-in viewer — a pro-only account can hide looks too.
+      // Serves both the hard feed exclusion (hiddenLookIds) and the decayed
+      // category suppression below.
+      prisma.lookHide.findMany({
+        where: { userId: args.userId },
+        orderBy: { createdAt: 'desc' },
+        take: HIDDEN_LOOK_IDS_CAP,
+        select: hideCategorySelect,
+      }),
     ])
 
   // Behavioral signals decay with age (spec §6.2) so stale taste fades.
@@ -458,15 +486,39 @@ export async function loadPersonalizedAffinity(args: {
     sessionSignals,
   })
 
+  // §2.2 hides → hard-exclusion id list + decayed category-suppression weights.
+  // Every hide contributes its id (feed exclusion); those whose look resolves to
+  // a service category also add a decayed weight to that category (the softer,
+  // repeated-hides suppression, ranked in personalizedRanking with a
+  // slower-than-positive half-life so a mistaken hide fades).
+  const hiddenLookIds: string[] = []
+  const categorySuppressionWeights = new Map<string, number>()
+  for (const hide of hides) {
+    hiddenLookIds.push(hide.lookPostId)
+    const slug = slugFromCategoryRow(hide)
+    if (!slug) continue
+    categorySuppressionWeights.set(
+      slug,
+      (categorySuppressionWeights.get(slug) ?? 0) +
+        computeAffinityDecayFactor(
+          hide.createdAt,
+          args.now,
+          HIDE_SUPPRESSION_HALF_LIFE_DAYS,
+        ),
+    )
+  }
+
   return {
     followedProfessionalIds: new Set(
       follows.map((follow) => follow.professionalId),
     ),
     categoryWeights: aggregateCategoryWeights(entries),
+    categorySuppressionWeights,
     occasionTagWeights: boardSignals.occasionTagWeights,
     tasteVector: tasteBlend.vector,
     tasteSignalCount: tasteBlend.signalCount,
     sessionVisualSignalCount: sessionSignals.length,
+    hiddenLookIds,
   }
 }
 
@@ -490,6 +542,11 @@ export type PersonalizedFeedPage = {
     // embeddings folded into the taste vector for this request (0 = the vector
     // is the stored one unchanged).
     sessionVisualSignalCount: number
+    // §2.2 "not for me": how many hidden looks were excluded from this serve,
+    // and how many categories are currently under decayed suppression. Feed the
+    // §9 hide-rate early-warning signal.
+    hiddenExcludedCount: number
+    categorySuppressionCount: number
   }
 }
 
@@ -519,8 +576,12 @@ export async function buildPersonalizedFeedPage(args: {
   })
 
   const seenIds = [...args.seenLookIds]
-  const seenExclusion: Prisma.LookPostWhereInput | null =
-    seenIds.length > 0 ? { id: { notIn: seenIds } } : null
+  // §2.2: hidden looks are hard-excluded (never re-served), alongside the
+  // session seen list. Both are folded into one bounded `notIn`.
+  const hiddenLookIds = affinity.hiddenLookIds
+  const excludedIds = [...new Set([...seenIds, ...hiddenLookIds])]
+  const idExclusion: Prisma.LookPostWhereInput | null =
+    excludedIds.length > 0 ? { id: { notIn: excludedIds } } : null
 
   const cursorWhere = buildLooksFeedCursorWhere({
     kind: 'ALL',
@@ -532,7 +593,7 @@ export async function buildPersonalizedFeedPage(args: {
     AND: [
       baseWhere,
       ...(cursorWhere ? [cursorWhere] : []),
-      ...(seenExclusion ? [seenExclusion] : []),
+      ...(idExclusion ? [idExclusion] : []),
     ],
   }
 
@@ -570,7 +631,8 @@ export async function buildPersonalizedFeedPage(args: {
 
   if (isEntryLoad && followedIds.length > 0) {
     const alreadyOnPage = new Set(backbonePage.map((row) => row.id))
-    const excludeIds = [...new Set([...seenIds, ...alreadyOnPage])]
+    // Hidden + seen + already-on-page all excluded from the injection too.
+    const excludeIds = [...new Set([...excludedIds, ...alreadyOnPage])]
 
     injectedRows = await prisma.lookPost.findMany({
       where: {
@@ -619,6 +681,8 @@ export async function buildPersonalizedFeedPage(args: {
       tasteSignalCount: affinity.tasteSignalCount ?? 0,
       candidateEmbeddingCount: candidateEmbeddings.size,
       sessionVisualSignalCount: affinity.sessionVisualSignalCount ?? 0,
+      hiddenExcludedCount: hiddenLookIds.length,
+      categorySuppressionCount: affinity.categorySuppressionWeights?.size ?? 0,
     },
   }
 }
