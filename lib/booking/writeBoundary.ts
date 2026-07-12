@@ -4328,6 +4328,9 @@ async function enforceUpdateBookingScheduling(args: {
     allowFarFuture: args.allowFarFuture,
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
     excludeBookingId: args.bookingId,
+    // Booking/hold overlaps are decided by enforceBookingOverlapPolicy in the
+    // update path (a pro may intentionally double-book their own calendar).
+    deferBusyConflictsToOverlapPolicy: true,
   })
 
     if (decision.ok) {
@@ -5255,6 +5258,10 @@ async function enforceProCreateScheduling(args: {
     allowShortNotice: args.allowShortNotice,
     allowFarFuture: args.allowFarFuture,
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    // Booking/hold overlaps are decided by enforceBookingOverlapPolicy right
+    // after this gate (a pro may intentionally double-book their own calendar;
+    // an aftercare pre-selected slot may land on a conflict).
+    deferBusyConflictsToOverlapPolicy: true,
   })
 
   if (decision.ok) {
@@ -10677,45 +10684,58 @@ if (args.notifyClient) {
     nextServiceSubtotal: computedSubtotal,
   })
 
-  const updated = await args.tx.booking.update({
-    where: { id: existing.id },
-    data: {
-      ...(args.nextStatus === BookingStatus.ACCEPTED
-        ? { status: BookingStatus.ACCEPTED }
-        : {}),
-      // Track the latest override's client-visible note: a fresh override
-      // replaces (or clears) whatever an earlier override left behind.
-      ...(schedulingDecision.appliedOverrides.length > 0
-        ? { clientVisibleOverrideNote: normalizedOverrideReason }
-        : {}),
-      // Re-stamp overlap exemption when the occupied range changed: a pro who
-      // reschedules onto an occupied slot is an authorized overlap; one who
-      // reschedules into a free slot returns the booking to constraint coverage.
-      ...(rescheduleAllowsOverlap !== undefined
-        ? { allowsOverlap: rescheduleAllowsOverlap }
-        : {}),
-      scheduledFor: finalStart,
-      bufferMinutes: finalBuffer,
-      totalDurationMinutes: finalDuration,
-      subtotalSnapshot: checkoutRollup.subtotalSnapshot,
-      serviceSubtotalSnapshot: checkoutRollup.serviceSubtotalSnapshot,
-      productSubtotalSnapshot: checkoutRollup.productSubtotalSnapshot,
-      tipAmount: checkoutRollup.tipAmount,
-      taxAmount: checkoutRollup.taxAmount,
-      discountAmount: checkoutRollup.discountAmount,
-      totalAmount: checkoutRollup.totalAmount,
-      serviceId: primaryServiceId,
-      offeringId: primaryOfferingId,
-    },
-    select: {
-      id: true,
-      scheduledFor: true,
-      bufferMinutes: true,
-      totalDurationMinutes: true,
-      status: true,
-      subtotalSnapshot: true,
-    } satisfies Prisma.BookingSelect,
-  })
+  const updatedBookingSelect = {
+    id: true,
+    scheduledFor: true,
+    bufferMinutes: true,
+    totalDurationMinutes: true,
+    status: true,
+    subtotalSnapshot: true,
+  } satisfies Prisma.BookingSelect
+
+  let updated: Prisma.BookingGetPayload<{ select: typeof updatedBookingSelect }>
+
+  try {
+    updated = await args.tx.booking.update({
+      where: { id: existing.id },
+      data: {
+        ...(args.nextStatus === BookingStatus.ACCEPTED
+          ? { status: BookingStatus.ACCEPTED }
+          : {}),
+        // Track the latest override's client-visible note: a fresh override
+        // replaces (or clears) whatever an earlier override left behind.
+        ...(schedulingDecision.appliedOverrides.length > 0
+          ? { clientVisibleOverrideNote: normalizedOverrideReason }
+          : {}),
+        // Re-stamp overlap exemption when the occupied range changed: a pro who
+        // reschedules onto an occupied slot is an authorized overlap; one who
+        // reschedules into a free slot returns the booking to constraint coverage.
+        ...(rescheduleAllowsOverlap !== undefined
+          ? { allowsOverlap: rescheduleAllowsOverlap }
+          : {}),
+        scheduledFor: finalStart,
+        bufferMinutes: finalBuffer,
+        totalDurationMinutes: finalDuration,
+        subtotalSnapshot: checkoutRollup.subtotalSnapshot,
+        serviceSubtotalSnapshot: checkoutRollup.serviceSubtotalSnapshot,
+        productSubtotalSnapshot: checkoutRollup.productSubtotalSnapshot,
+        tipAmount: checkoutRollup.tipAmount,
+        taxAmount: checkoutRollup.taxAmount,
+        discountAmount: checkoutRollup.discountAmount,
+        totalAmount: checkoutRollup.totalAmount,
+        serviceId: primaryServiceId,
+        offeringId: primaryOfferingId,
+      },
+      select: updatedBookingSelect,
+    })
+  } catch (error) {
+    // 23P01: DB overlap EXCLUDE rejected the move (race the app check missed).
+    if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
+      throw bookingError('TIME_BOOKED')
+    }
+
+    throw error
+  }
 
     if (schedulingDecision.appliedOverrides.length > 0) {
   await createBookingOverrideAuditLogs({

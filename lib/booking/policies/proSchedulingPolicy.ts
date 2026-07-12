@@ -70,6 +70,12 @@ export type EvaluateProSchedulingDecisionArgs = {
   allowOutsideWorkingHours: boolean
   excludeBookingId?: string | null
   excludeHoldId?: string | null
+  // Booking/hold overlaps are owned by decideBookingOverlapPermission, which
+  // can authorize a PRO/ADMIN double-book (or an aftercare pre-selected slot).
+  // Callers that run the overlap policy right after this gate set this so the
+  // actor-blind busy check here doesn't shadow that decision. Calendar blocks
+  // stay fatal either way — the overlap policy has no concept of blocks.
+  deferBusyConflictsToOverlapPolicy?: boolean
 }
 
 export type ProSchedulingDecision = {
@@ -257,20 +263,22 @@ export async function evaluateProSchedulingDecision(
     })
   }
 
-  if (conflict === 'BOOKING') {
-    return policyFail('TIME_BOOKED', {
-      requestedStart: args.requestedStart,
-      requestedEnd,
-      conflictType: 'BOOKING',
-    })
-  }
+  if (!args.deferBusyConflictsToOverlapPolicy) {
+    if (conflict === 'BOOKING') {
+      return policyFail('TIME_BOOKED', {
+        requestedStart: args.requestedStart,
+        requestedEnd,
+        conflictType: 'BOOKING',
+      })
+    }
 
-  if (conflict === 'HOLD') {
-    return policyFail('TIME_HELD', {
-      requestedStart: args.requestedStart,
-      requestedEnd,
-      conflictType: 'HOLD',
-    })
+    if (conflict === 'HOLD') {
+      return policyFail('TIME_HELD', {
+        requestedStart: args.requestedStart,
+        requestedEnd,
+        conflictType: 'HOLD',
+      })
+    }
   }
 
   return policyOk({

@@ -1156,6 +1156,12 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       conflicts: [existingConflict],
     })
 
+    // The actor-blind busy gate must defer booking/hold conflicts to the overlap
+    // policy, or the PRO_AUTHORIZED_OVERLAP above is unreachable in production.
+    expect(mocks.evaluateProSchedulingDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ deferBusyConflictsToOverlapPolicy: true }),
+    )
+
     expect(mocks.txBookingUpdate).toHaveBeenCalled()
   })
 
@@ -1365,6 +1371,12 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       },
       conflicts: [existingConflict],
     })
+
+    // The actor-blind busy gate must defer booking/hold conflicts to the overlap
+    // policy, or the PRO_AUTHORIZED_OVERLAP above is unreachable in production.
+    expect(mocks.evaluateProSchedulingDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ deferBusyConflictsToOverlapPolicy: true }),
+    )
 
     expect(mocks.txBookingCreate).toHaveBeenCalled()
     expect(mocks.txBookingServiceItemCreate).toHaveBeenCalled()
