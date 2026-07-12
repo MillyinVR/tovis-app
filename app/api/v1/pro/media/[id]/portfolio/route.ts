@@ -11,6 +11,7 @@ import {
   resolveFeaturePairing,
 } from '@/lib/media/portfolioPairing'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
+import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -156,6 +157,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       },
     })
 
+    // §19b: featuring to portfolio publishes a Look (the single public-content
+    // atom) so featured work reaches the feed/search/boards, not just the grid.
+    await reconcilePortfolioLookForMediaAsset(prisma, {
+      professionalId,
+      mediaAssetId: mediaId,
+    })
+
     const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated)
 
     return jsonOk(
@@ -195,8 +203,12 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
     const updated = await prisma.mediaAsset.update({
       where: { id: mediaId },
       data: {
+        // §19b: removing from the portfolio is the unified "unpublish" — the grid
+        // and the feed are one surface now, so clear Looks-eligibility too and let
+        // the reconcile below retract the live LookPost (fixes divergence b).
         isFeaturedInPortfolio: false,
-        visibility: computeVisibility(false, owned.media.isEligibleForLooks),
+        isEligibleForLooks: false,
+        visibility: computeVisibility(false, false),
         // Unpair on removal — a tile that's no longer featured shouldn't keep a
         // dangling before/after pairing.
         beforeAssetId: null,
@@ -215,6 +227,12 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
         url: true,
         thumbUrl: true,
       },
+    })
+
+    // §19b: retract the published Look now that the asset is no longer public.
+    await reconcilePortfolioLookForMediaAsset(prisma, {
+      professionalId,
+      mediaAssetId: mediaId,
     })
 
     const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated)

@@ -25,6 +25,12 @@
 import { MediaVisibility, Prisma, PrismaClient } from '@prisma/client'
 
 import { createOrUpdateProLookFromMediaAsset } from './service'
+import { resolvePortfolioLookServiceId } from './portfolioLookSync'
+
+// §19b relocated the service-id resolver to the shared live write-path module so
+// live-publish and this backfill resolve identically. Kept exported under the
+// historical name for callers/tests that reference it here.
+export { resolvePortfolioLookServiceId as resolveBackfillServiceId } from './portfolioLookSync'
 
 export type BackfillPortfolioLookStatus =
   | 'CREATED'
@@ -59,27 +65,6 @@ const backfillMediaSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
   lookPostPrimaryFor: { select: { id: true }, take: 1 },
 })
 
-type BackfillMediaRow = Prisma.MediaAssetGetPayload<{
-  select: typeof backfillMediaSelect
-}>
-
-/**
- * Picks the service id to attach to the backfilled look. It must be one of the
- * media asset's `services` M2M tags (that is what the publication helper
- * validates against), so we prefer the canonical `primaryServiceId` when it is
- * tagged and otherwise fall back to the first tag. Returns `null` when the asset
- * has no bookable service tag at all — such media can't back a look.
- */
-export function resolveBackfillServiceId(
-  media: Pick<BackfillMediaRow, 'primaryServiceId' | 'services'>,
-): string | null {
-  const taggedServiceIds = new Set(media.services.map((s) => s.serviceId))
-  if (taggedServiceIds.has(media.primaryServiceId)) {
-    return media.primaryServiceId
-  }
-  return media.services[0]?.serviceId ?? null
-}
-
 /**
  * Backfills a single featured MediaAsset into a published LookPost. Reads the
  * asset, gates it against everything the interactive publish path requires, and
@@ -103,7 +88,7 @@ export async function processBackfillPortfolioLook(
     return { status: 'SKIPPED_NOT_PUBLIC' }
   }
 
-  const serviceId = resolveBackfillServiceId(media)
+  const serviceId = resolvePortfolioLookServiceId(media)
   if (!serviceId) return { status: 'SKIPPED_NO_SERVICE' }
 
   if (args.dryRun) return { status: 'WOULD_CREATE', serviceId }

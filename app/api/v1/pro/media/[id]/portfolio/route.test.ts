@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
     mediaAssetFindUnique: vi.fn(),
     mediaAssetUpdate: vi.fn(),
     loadPrimaryBeforeAssetId: vi.fn(),
+    reconcilePortfolioLookForMediaAsset: vi.fn(),
 
     safeUrl: vi.fn((value: unknown) =>
       typeof value === 'string' && value.trim() ? value.trim() : null,
@@ -65,6 +66,11 @@ vi.mock('@/lib/media/renderUrls', () => ({
 
 vi.mock('@/lib/media/bookingBeforeAfter', () => ({
   loadPrimaryBeforeAssetId: mocks.loadPrimaryBeforeAssetId,
+}))
+
+vi.mock('@/lib/looks/publication/portfolioLookSync', () => ({
+  reconcilePortfolioLookForMediaAsset:
+    mocks.reconcilePortfolioLookForMediaAsset,
 }))
 
 vi.mock('@/lib/security/logging', () => ({
@@ -202,6 +208,8 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       thumbBucket: null,
       thumbPath: null,
     })
+
+    mocks.reconcilePortfolioLookForMediaAsset.mockResolvedValue('PUBLISHED')
   })
 
   describe('POST', () => {
@@ -357,6 +365,14 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
           url: true,
           thumbUrl: true,
         },
+      })
+
+      // §19b: featuring publishes a Look via the reconcile.
+      expect(
+        mocks.reconcilePortfolioLookForMediaAsset,
+      ).toHaveBeenCalledWith(expect.anything(), {
+        professionalId: 'pro_1',
+        mediaAssetId: 'media_1',
       })
 
       expect(mocks.renderMediaUrls).toHaveBeenCalledWith(updated)
@@ -749,6 +765,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         where: { id: 'media_1' },
         data: {
           isFeaturedInPortfolio: false,
+          isEligibleForLooks: false,
           visibility: MediaVisibility.PRO_CLIENT,
           beforeAssetId: null,
         },
@@ -767,6 +784,15 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         },
       })
 
+      // §19b: un-featuring retracts the unified public state — reconcile drops
+      // the live LookPost.
+      expect(
+        mocks.reconcilePortfolioLookForMediaAsset,
+      ).toHaveBeenCalledWith(expect.anything(), {
+        professionalId: 'pro_1',
+        mediaAssetId: 'media_1',
+      })
+
       expect(mocks.renderMediaUrls).toHaveBeenCalledWith(updated)
 
       expect(res.status).toBe(200)
@@ -780,7 +806,10 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       })
     })
 
-    it('keeps media public when removing from portfolio but still eligible for Looks', async () => {
+    it('fully retracts a Looks-eligible asset when removed from the portfolio (§19b unified state)', async () => {
+      // Pre-§19b this stayed PUBLIC/Looks-eligible; the grid and the feed are one
+      // surface now, so removing from the portfolio clears both flags and the
+      // reconcile below retracts the live LookPost.
       mocks.mediaAssetFindUnique.mockResolvedValueOnce(
         makeOwnedMedia({
           isFeaturedInPortfolio: true,
@@ -791,8 +820,8 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
 
       const updated = makeUpdatedMedia({
         isFeaturedInPortfolio: false,
-        isEligibleForLooks: true,
-        visibility: MediaVisibility.PUBLIC,
+        isEligibleForLooks: false,
+        visibility: MediaVisibility.PRO_CLIENT,
       })
 
       mocks.mediaAssetUpdate.mockResolvedValueOnce(updated)
@@ -803,11 +832,19 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         expect.objectContaining({
           data: {
             isFeaturedInPortfolio: false,
-            visibility: MediaVisibility.PUBLIC,
+            isEligibleForLooks: false,
+            visibility: MediaVisibility.PRO_CLIENT,
             beforeAssetId: null,
           },
         }),
       )
+
+      expect(
+        mocks.reconcilePortfolioLookForMediaAsset,
+      ).toHaveBeenCalledWith(expect.anything(), {
+        professionalId: 'pro_1',
+        mediaAssetId: 'media_1',
+      })
 
       expect(res.status).toBe(200)
     })

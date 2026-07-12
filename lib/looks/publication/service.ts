@@ -233,7 +233,7 @@ function canUseRootTransaction(
   return '$transaction' in db
 }
 
-async function withPublicationTx<T>(
+export async function withPublicationTx<T>(
   db: LookPublicationDb,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
@@ -242,6 +242,47 @@ async function withPublicationTx<T>(
   }
 
   return fn(db)
+}
+
+/**
+ * §19b — social-first write-path unification. `LookPost` is the single public
+ * content atom: a *published* look is exactly what the profile grid shows
+ * ("featuring to portfolio publishes a look" / "publishing a look marks it
+ * grid-visible"). So whenever a pro-authored look's published state changes, we
+ * mirror it back onto the backing `MediaAsset`'s portfolio flags so the grid
+ * (which still reads `visibility=PUBLIC && isFeaturedInPortfolio`, until the
+ * §19c read swap) and the feed can never diverge again.
+ *
+ * - published  → featured + Looks-eligible + PUBLIC (grid + feed both show it).
+ * - unpublished → un-featured (drops out of the grid; the DRAFT status already
+ *   drops it from the feed). We intentionally do NOT force `PRO_CLIENT` here —
+ *   a plain draft edit shouldn't privatise the asset; the media-side retract
+ *   (portfolio remove / reconcile) owns the full flags/visibility teardown.
+ */
+async function mirrorMediaAssetPublicationState(
+  tx: Prisma.TransactionClient,
+  args: { mediaAssetId: string; published: boolean },
+): Promise<void> {
+  await tx.mediaAsset.update({
+    where: { id: args.mediaAssetId },
+    data: args.published
+      ? {
+          isFeaturedInPortfolio: true,
+          isEligibleForLooks: true,
+          visibility: MediaVisibility.PUBLIC,
+        }
+      : { isFeaturedInPortfolio: false },
+  })
+}
+
+function isPublishedLookRow(
+  row: Pick<ProLookPublicationRow, 'status' | 'publishedAt' | 'removedAt'>,
+): boolean {
+  return (
+    row.status === LookPostStatus.PUBLISHED &&
+    row.publishedAt !== null &&
+    row.removedAt === null
+  )
 }
 
 async function getMediaAssetForPublicationOrThrow(
@@ -802,6 +843,14 @@ export async function createOrUpdateProLookFromMediaAsset(
       throw new Error('Look post not found after save.')
     }
 
+    // §19b: keep the backing MediaAsset's portfolio flags in lockstep with the
+    // look's published state (pro-authored looks only — this helper never runs
+    // for client-authored looks, which use clientLookService).
+    await mirrorMediaAssetPublicationState(tx, {
+      mediaAssetId: refreshed.primaryMediaAssetId,
+      published: isPublishedLookRow(refreshed),
+    })
+
     const policyArgs = buildMutationPolicyArgs({
       lookPostId: refreshed.id,
       action: plan.action,
@@ -856,6 +905,13 @@ export async function updateProLookPublication(
     if (!refreshed) {
       throw new Error('Look post not found after update.')
     }
+
+    // §19b: mirror the look's published state back onto the backing MediaAsset's
+    // portfolio flags (publish → grid-visible; unpublish/archive → drops out).
+    await mirrorMediaAssetPublicationState(tx, {
+      mediaAssetId: refreshed.primaryMediaAssetId,
+      published: isPublishedLookRow(refreshed),
+    })
 
     const policyArgs = buildMutationPolicyArgs({
       lookPostId: refreshed.id,
