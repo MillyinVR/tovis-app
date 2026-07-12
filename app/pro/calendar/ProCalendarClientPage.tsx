@@ -228,6 +228,17 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
 
   return (
     <main className="brand-pro-calendar-page">
+      {/* Calendar-level errors (failed loads, rejected drag-reschedules) land in
+          cal.error; without this toast a rejected move just snaps back silently. */}
+      {cal.error ? (
+        <div
+          role="alert"
+          className="fixed inset-x-0 top-4 z-70 mx-auto w-fit max-w-[92vw] rounded-card border border-toneDanger/30 bg-bgSecondary px-4 py-2.5 text-[13px] font-semibold text-toneDanger shadow-lg"
+        >
+          {cal.error}
+        </div>
+      ) : null}
+
       <CalendarMobileShell
         copy={copy}
         view={view}

@@ -570,6 +570,59 @@ describe('evaluateProSchedulingDecision', () => {
     })
   })
 
+  it('defers a booking conflict to the overlap policy when deferBusyConflictsToOverlapPolicy is set', async () => {
+    mocks.getTimeRangeConflict.mockResolvedValueOnce('BOOKING')
+
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      deferBusyConflictsToOverlapPolicy: true,
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        requestedEnd,
+        appliedOverrides: [],
+      },
+    })
+  })
+
+  it('defers a hold conflict to the overlap policy when deferBusyConflictsToOverlapPolicy is set', async () => {
+    mocks.getTimeRangeConflict.mockResolvedValueOnce('HOLD')
+
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      deferBusyConflictsToOverlapPolicy: true,
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        requestedEnd,
+        appliedOverrides: [],
+      },
+    })
+  })
+
+  it('still returns TIME_BLOCKED with deferBusyConflictsToOverlapPolicy set (overlap policy has no block concept)', async () => {
+    mocks.getTimeRangeConflict.mockResolvedValueOnce('BLOCKED')
+
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      deferBusyConflictsToOverlapPolicy: true,
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'TIME_BLOCKED',
+      logHint: {
+        requestedStart,
+        requestedEnd,
+        conflictType: 'BLOCKED',
+      },
+    })
+  })
+
   it('passes exclude ids through to conflict lookup when provided', async () => {
     await evaluateProSchedulingDecision({
       ...makeArgs(),
