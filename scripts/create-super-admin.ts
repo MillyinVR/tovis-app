@@ -1,6 +1,7 @@
-import { PrismaClient, Role, AdminPermissionRole } from '@prisma/client'
+import { PrismaClient, Role } from '@prisma/client'
 import { hashPassword } from '../lib/auth'
 import { normalizeEmail } from '../app/api/_utils/email'
+import { ensureGlobalSuperAdminPermission } from '../lib/adminPermissions'
 
 const prisma = new PrismaClient()
 
@@ -46,28 +47,7 @@ async function main() {
     },
   })
 
-  const existingSuperAdmin = await prisma.adminPermission.findFirst({
-    where: {
-      adminUserId: user.id,
-      role: AdminPermissionRole.SUPER_ADMIN,
-      professionalId: null,
-      serviceId: null,
-      categoryId: null,
-    },
-    select: { id: true },
-  })
-
-  if (!existingSuperAdmin) {
-    await prisma.adminPermission.create({
-      data: {
-        adminUserId: user.id,
-        role: AdminPermissionRole.SUPER_ADMIN,
-        professionalId: null,
-        serviceId: null,
-        categoryId: null,
-      },
-    })
-  }
+  await ensureGlobalSuperAdminPermission(prisma, user.id)
 
   console.log('Super admin ensured:')
   console.log(`email: ${user.email}`)

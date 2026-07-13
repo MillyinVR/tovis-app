@@ -2,7 +2,7 @@
 import { Role } from '@prisma/client'
 
 import { jsonFail } from '@/app/api/_utils'
-import { canActAs } from '@/lib/auth/workspaces'
+import { canActAs, workspaceCapabilityOf } from '@/lib/auth/workspaces'
 import { getCurrentUser } from '@/lib/currentUser'
 import { captureAuthException } from '@/lib/observability/authEvents'
 
@@ -20,11 +20,7 @@ function buildRoleMismatchResponse(
   user: CurrentUser,
   roles: readonly Role[],
 ): Response {
-  const capability = {
-    homeRole: user.homeRole,
-    clientProfile: user.clientProfile,
-    professionalProfile: user.professionalProfile,
-  }
+  const capability = workspaceCapabilityOf(user)
 
   const switchableTarget = roles.find((role) => canActAs(capability, role))
 

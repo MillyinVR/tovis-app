@@ -43,6 +43,7 @@ function activeUser(overrides: Record<string, unknown> = {}) {
     authVersion: 4,
     role: Role.ADMIN,
     homeRole: Role.ADMIN,
+    canAccessAdmin: false,
     sessionKind: 'ACTIVE',
     isFullyVerified: true,
     clientProfile: null,
@@ -144,5 +145,43 @@ describe('POST /api/v1/workspace/switch', () => {
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toMatchObject({ href: '/pro/calendar' })
     expect(mockPrisma.clientProfile.create).not.toHaveBeenCalled()
+  })
+
+  it('switches a pro who holds a super-admin grant into the admin console', async () => {
+    // The founder case: home role PRO, licensed, plus a SUPER_ADMIN grant.
+    mockGetCurrentUser.mockResolvedValue(
+      activeUser({
+        role: Role.PRO,
+        homeRole: Role.PRO,
+        canAccessAdmin: true,
+        professionalProfile: { verificationStatus: 'APPROVED' },
+      }),
+    )
+
+    const res = await POST(request({ workspace: 'ADMIN' }))
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({ href: '/admin' })
+    expect(mockCreateActiveToken).toHaveBeenCalledWith({
+      userId: 'user_1',
+      role: 'ADMIN',
+      authVersion: 4,
+    })
+  })
+
+  it('403s when a pro without a super-admin grant tries to switch to admin', async () => {
+    mockGetCurrentUser.mockResolvedValue(
+      activeUser({
+        role: Role.PRO,
+        homeRole: Role.PRO,
+        canAccessAdmin: false,
+        professionalProfile: { verificationStatus: 'APPROVED' },
+      }),
+    )
+
+    const res = await POST(request({ workspace: 'ADMIN' }))
+
+    expect(res.status).toBe(403)
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
   })
 })

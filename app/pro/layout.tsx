@@ -11,7 +11,7 @@ import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate'
 import { isProMigrationEnabled } from '@/lib/migration/featureFlag'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
-import { buildWorkspaceOptions } from '@/lib/auth/workspaces'
+import { buildWorkspaceOptions, workspaceCapabilityOf } from '@/lib/auth/workspaces'
 import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
 import { LiveRefresh } from '@/app/_components/live/LiveRefresh'
 import { liveChannelForPro, liveChannelForUser } from '@/lib/live/broadcast'
@@ -90,11 +90,7 @@ export default async function ProRootLayout({
     : null
 
   const workspaceOptions = buildWorkspaceOptions(
-    {
-      homeRole: user.homeRole,
-      clientProfile: user.clientProfile,
-      professionalProfile: user.professionalProfile,
-    },
+    workspaceCapabilityOf(user),
     user.role,
   )
 

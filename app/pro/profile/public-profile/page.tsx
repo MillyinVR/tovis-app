@@ -1,6 +1,10 @@
 // app/pro/profile/public-profile/page.tsx
 import { getCurrentUser } from '@/lib/currentUser'
-import { buildWorkspaceOptions, type WorkspaceOption } from '@/lib/auth/workspaces'
+import {
+  buildWorkspaceOptions,
+  workspaceCapabilityOf,
+  type WorkspaceOption,
+} from '@/lib/auth/workspaces'
 
 import ProProfileManagementShell from './_components/ProProfileManagementShell'
 import { loadProProfileManagementPage } from './_data/loadProProfileManagementPage'
@@ -19,14 +23,7 @@ export default async function ProPublicProfilePage({
 
   const currentUser = await getCurrentUser().catch(() => null)
   const workspaces: WorkspaceOption[] = currentUser
-    ? buildWorkspaceOptions(
-        {
-          homeRole: currentUser.homeRole,
-          clientProfile: currentUser.clientProfile,
-          professionalProfile: currentUser.professionalProfile,
-        },
-        currentUser.role,
-      )
+    ? buildWorkspaceOptions(workspaceCapabilityOf(currentUser), currentUser.role)
     : []
 
   return <ProProfileManagementShell model={model} workspaces={workspaces} />

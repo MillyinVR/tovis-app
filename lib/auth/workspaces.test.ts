@@ -5,6 +5,7 @@ import {
   canActAs,
   listAvailableWorkspaces,
   WORKSPACE_HOME,
+  workspaceCapabilityOf,
   type WorkspaceCapabilityUser,
 } from './workspaces'
 
@@ -15,15 +16,31 @@ function user(
     homeRole: 'CLIENT',
     clientProfile: { id: 'cp_1' },
     professionalProfile: null,
+    hasAdminGrant: false,
     ...overrides,
   }
 }
 
 describe('canActAs', () => {
-  it('allows ADMIN only when the home role is ADMIN', () => {
+  it('allows ADMIN when the home role is ADMIN', () => {
     expect(canActAs(user({ homeRole: 'ADMIN' }), 'ADMIN')).toBe(true)
     expect(canActAs(user({ homeRole: 'PRO' }), 'ADMIN')).toBe(false)
     expect(canActAs(user({ homeRole: 'CLIENT' }), 'ADMIN')).toBe(false)
+  })
+
+  it('allows ADMIN for a non-admin home role that holds a super-admin grant', () => {
+    // A pro (home role PRO) who is also a super admin can act as Admin without
+    // giving up Pro as their home workspace.
+    expect(canActAs(user({ homeRole: 'PRO', hasAdminGrant: true }), 'ADMIN')).toBe(
+      true,
+    )
+    expect(
+      canActAs(user({ homeRole: 'CLIENT', hasAdminGrant: true }), 'ADMIN'),
+    ).toBe(true)
+    // No grant → still denied.
+    expect(canActAs(user({ homeRole: 'PRO', hasAdminGrant: false }), 'ADMIN')).toBe(
+      false,
+    )
   })
 
   it('allows PRO only with an APPROVED professional profile', () => {
@@ -84,6 +101,19 @@ describe('listAvailableWorkspaces', () => {
       ),
     ).toEqual(['ADMIN', 'PRO', 'CLIENT'])
   })
+
+  it('returns ADMIN + PRO + CLIENT for a pro who holds a super-admin grant', () => {
+    // The founder case: home role PRO, licensed, plus a SUPER_ADMIN grant.
+    expect(
+      listAvailableWorkspaces(
+        user({
+          homeRole: 'PRO',
+          professionalProfile: { verificationStatus: 'APPROVED' },
+          hasAdminGrant: true,
+        }),
+      ),
+    ).toEqual(['ADMIN', 'PRO', 'CLIENT'])
+  })
 })
 
 describe('buildWorkspaceOptions', () => {
@@ -107,5 +137,23 @@ describe('buildWorkspaceOptions', () => {
     for (const option of options) {
       expect(option.href).toBe(WORKSPACE_HOME[option.role])
     }
+  })
+})
+
+describe('workspaceCapabilityOf', () => {
+  it('maps a CurrentUser-shaped record, folding canAccessAdmin → hasAdminGrant', () => {
+    expect(
+      workspaceCapabilityOf({
+        homeRole: 'PRO',
+        clientProfile: { id: 'cp_1' },
+        professionalProfile: { verificationStatus: 'APPROVED' },
+        canAccessAdmin: true,
+      }),
+    ).toEqual({
+      homeRole: 'PRO',
+      clientProfile: { id: 'cp_1' },
+      professionalProfile: { verificationStatus: 'APPROVED' },
+      hasAdminGrant: true,
+    })
   })
 })

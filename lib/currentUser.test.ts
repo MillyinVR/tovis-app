@@ -37,6 +37,7 @@ function makeDbUser(args?: {
   authVersion?: number
   phoneVerifiedAt?: Date | null
   emailVerifiedAt?: Date | null
+  adminPermissions?: { id: string }[]
 }) {
   const role = args?.role ?? Role.CLIENT
   const phoneVerifiedAt =
@@ -56,6 +57,7 @@ function makeDbUser(args?: {
     authVersion: args?.authVersion ?? 1,
     phoneVerifiedAt,
     emailVerifiedAt,
+    adminPermissions: args?.adminPermissions ?? [],
     clientProfile:
       role === Role.CLIENT
         ? {
@@ -317,6 +319,7 @@ describe('lib/currentUser', () => {
       phone: '+15551234567',
       role: Role.CLIENT,
       homeRole: Role.CLIENT,
+      canAccessAdmin: false,
       authVersion: 1,
       phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
       emailVerifiedAt: null,
@@ -363,6 +366,7 @@ describe('lib/currentUser', () => {
       phone: '+15551234567',
       role: Role.PRO,
       homeRole: Role.PRO,
+      canAccessAdmin: false,
       authVersion: 3,
       phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
       emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
@@ -401,6 +405,7 @@ describe('lib/currentUser — acting role (workspace switching)', () => {
     homeRole: Role
     hasClientProfile?: boolean
     proStatus?: 'APPROVED' | 'PENDING' | null
+    hasAdminGrant?: boolean
   }) {
     return {
       id: 'user_1',
@@ -410,6 +415,7 @@ describe('lib/currentUser — acting role (workspace switching)', () => {
       authVersion: 1,
       phoneVerifiedAt: verified,
       emailVerifiedAt: verified,
+      adminPermissions: args.hasAdminGrant ? [{ id: 'ap_1' }] : [],
       clientProfile: args.hasClientProfile
         ? {
             id: 'client_1',
@@ -474,6 +480,45 @@ describe('lib/currentUser — acting role (workspace switching)', () => {
 
     expect(result?.role).toBe(Role.CLIENT)
     expect(result?.homeRole).toBe(Role.CLIENT)
+  })
+
+  it('honors an ADMIN acting role for a PRO home role that holds a super-admin grant', async () => {
+    // The founder case: home role PRO, licensed, plus a SUPER_ADMIN grant. The
+    // token carries the ADMIN acting role after a workspace switch.
+    mockCookies.mockResolvedValue(cookieWith('admin_switch_token'))
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.ADMIN, // acting role after switch
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(
+      dbUser({ homeRole: Role.PRO, proStatus: 'APPROVED', hasAdminGrant: true }),
+    )
+
+    const result = await getCurrentUser()
+
+    expect(result?.role).toBe(Role.ADMIN)
+    expect(result?.homeRole).toBe(Role.PRO)
+    expect(result?.canAccessAdmin).toBe(true)
+  })
+
+  it('drops an ADMIN acting role back home when the PRO has no super-admin grant', async () => {
+    mockCookies.mockResolvedValue(cookieWith('forged_admin_token'))
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.ADMIN, // forged/stale — not entitled without a grant
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(
+      dbUser({ homeRole: Role.PRO, proStatus: 'APPROVED', hasAdminGrant: false }),
+    )
+
+    const result = await getCurrentUser()
+
+    expect(result?.role).toBe(Role.PRO)
+    expect(result?.canAccessAdmin).toBe(false)
   })
 
   it('honors PRO acting role only when the professional profile is APPROVED', async () => {
