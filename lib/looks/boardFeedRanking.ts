@@ -14,26 +14,32 @@
 //         + visual_similarity(BoardTasteVector)   // cosine vs saved-look taste
 //                                                 //   (§6.0; dark pre-backfill)
 //         + feasibility_match(self_profile)       // §6.6 person-attributes
+//         + availability_boost                    // §4.4 — the look's pro has a
+//                                                 //   real near-term opening
+//                                                 //   (per-pro primitive; soft)
 //         + freshnessBoost                        // nudge very recent looks
 //         - seenPenalty                           // already-seen this session
 //
-// Spec §4.4 also lists availability_boost. There is no per-look availability
-// primitive yet (neither does the personalized feed use one), so that term is deliberately
-// omitted here rather than faked; it lands when a look-side availability signal
-// exists. All other terms are additive and null-safe — a board with no event
-// date, no answers, no taste vector, or an owner with no self-profile simply
-// sees those terms contribute 0 and falls back to the engagement backbone.
+// availability_boost (spec §4.4) reads the per-pro ProfessionalAvailabilityStat
+// primitive (next opening + 14-day fullness, cron-refreshed) — a SOFT weight,
+// never a hard filter (guardrail #8). It is 0 until the pro has an availability
+// row, so a board feed stays byte-identical until the primitive is populated.
+// All terms are additive and null-safe — a board with no event date, no answers,
+// no taste vector, or an owner with no self-profile simply sees those terms
+// contribute 0 and falls back to the engagement backbone.
 //
 // Reuses the personalized-feed primitives (cosineSimilarity, computeVisualSimilarityBoost,
-// computePersonalizedFreshnessBoost, strongestTagWeightMatch) so the two feeds share
-// one visual/occasion/freshness implementation. Pure (clock injected) so the
-// whole score is unit-testable without Prisma.
+// computeAvailabilityBoost, computePersonalizedFreshnessBoost, strongestTagWeightMatch)
+// so the two feeds share one visual/occasion/availability/freshness implementation.
+// Pure (clock injected) so the whole score is unit-testable without Prisma.
 
 import {
+  computeAvailabilityBoost,
   computePersonalizedFreshnessBoost,
   computeVisualSimilarityBoost,
   strongestTagWeightMatch,
   type PersonalizedRankableRow,
+  type ProAvailabilitySignal,
 } from '@/lib/looks/personalizedRanking'
 
 // A board-feed candidate is the same row shape the personalized ranker scores.
@@ -56,6 +62,11 @@ export const BOARD_FEED_RANK_WEIGHTS = {
   // attributes ("hair like mine"). Below the answer term; the buildable
   // tag-level approximation until look-side start-state attributes exist.
   feasibilityMax: 10,
+  // availability_boost (spec §4.4): the look's pro has a real near-term opening
+  // and an un-booked-out calendar. Shares the personalized feed's peak/curve
+  // (computeAvailabilityBoost) so both feeds calibrate against the same band —
+  // a soft nudge, never a hard filter (guardrail #8).
+  availabilityMax: 12,
   // Peak visual-similarity boost (spec §6.0) — realized as visualMax × clamped
   // cosine × confidence, so a typical genuine match contributes single digits.
   // Reuses the personalized-feed visual weight/scale.
@@ -85,6 +96,10 @@ export type BoardFeedContext = {
   // Candidate look image embeddings keyed by look id (fetched by PK for the
   // page). A look absent from the map is unembedded → 0 visual boost.
   candidateEmbeddings: ReadonlyMap<string, readonly number[]>
+  // Per-pro availability signals keyed by professionalId (spec §4.4). A pro
+  // absent from the map — no opening in the horizon — earns no availability
+  // boost. Empty until the pro-availability-stats cron populates the primitive.
+  availabilitySignals: ReadonlyMap<string, ProAvailabilitySignal>
   seenLookIds: ReadonlySet<string>
   now: Date
 }
@@ -135,6 +150,13 @@ export function computeBoardFeedScore(
     candidateEmbedding: context.candidateEmbeddings.get(row.id),
   })
 
+  // §4.4 availability_boost — shares the personalized feed's peak/curve, so 0
+  // until the pro has an availability row (no opening in the horizon).
+  const availabilityBoost = computeAvailabilityBoost({
+    signal: context.availabilitySignals.get(row.professionalId),
+    now: context.now,
+  })
+
   const freshnessBoost = computePersonalizedFreshnessBoost(row.publishedAt, context.now)
 
   const seenPenalty = context.seenLookIds.has(row.id)
@@ -147,6 +169,7 @@ export function computeBoardFeedScore(
     serviceAnswerBoost +
     feasibilityBoost +
     visualBoost +
+    availabilityBoost +
     freshnessBoost -
     seenPenalty
   )

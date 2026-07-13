@@ -102,6 +102,7 @@ export async function GET(req: Request, ctx: RouteContext) {
       occasionTagCount: page.meta.occasionTagCount,
       tasteSignalCount: page.meta.tasteSignalCount,
       candidateEmbeddingCount: page.meta.candidateEmbeddingCount,
+      availabilitySignalCount: page.meta.availabilitySignalCount,
       answerTagCount: page.meta.answerTagCount,
       feasibilityTagCount: page.meta.feasibilityTagCount,
       savedExcludedCount: page.meta.savedExcludedCount,

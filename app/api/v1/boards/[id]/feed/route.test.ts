@@ -127,6 +127,7 @@ beforeEach(() => {
       feasibilityTagCount: 0,
       tasteSignalCount: 0,
       candidateEmbeddingCount: 0,
+      availabilitySignalCount: 0,
     },
   })
   mocks.buildLooksViewerFlagResolver.mockResolvedValue(() => ({

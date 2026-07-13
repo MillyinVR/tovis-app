@@ -49,6 +49,7 @@ import {
   rankPersonalizedRows,
   type PersonalizedViewerAffinity,
 } from '@/lib/looks/personalizedRanking'
+import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
 
 // How many of the viewer's most recent likes / saves feed category affinity.
 // Bounded so the signal query stays cheap regardless of a power user's history.
@@ -538,6 +539,10 @@ export type PersonalizedFeedPage = {
     // looks on this page had an embedding to score against.
     tasteSignalCount: number
     candidateEmbeddingCount: number
+    // §4.2/§4.4 availability_boost: how many of the page's pros had an
+    // availability row (a real near-term opening) to boost against. 0 = the
+    // primitive is unpopulated (pre-cron) or every candidate's pro is booked out.
+    availabilitySignalCount: number
     // §6.3 in-session responsiveness: how many fresh same-session like/save
     // embeddings folded into the taste vector for this request (0 = the vector
     // is the stored one unchanged).
@@ -661,11 +666,23 @@ export async function buildPersonalizedFeedPage(args: {
         )
       : new Map<string, number[]>()
 
+  // §4.2/§4.4 availability_boost: per-pro next-opening + 14-day fullness for the
+  // page's pros. One indexed read by PK; empty until the pro-availability-stats
+  // cron populates the primitive, so the feed is byte-identical until then.
+  const availabilitySignals =
+    candidateRows.length > 0
+      ? await fetchProAvailabilitySignals(
+          prisma,
+          candidateRows.map((row) => row.professionalId),
+        )
+      : new Map<string, never>()
+
   const items = rankPersonalizedRows(candidateRows, {
     affinity,
     seenLookIds: args.seenLookIds,
     now: args.now,
     candidateEmbeddings,
+    availabilitySignals,
   })
 
   return {
@@ -680,6 +697,7 @@ export async function buildPersonalizedFeedPage(args: {
       occasionTagCount: affinity.occasionTagWeights.size,
       tasteSignalCount: affinity.tasteSignalCount ?? 0,
       candidateEmbeddingCount: candidateEmbeddings.size,
+      availabilitySignalCount: availabilitySignals.size,
       sessionVisualSignalCount: affinity.sessionVisualSignalCount ?? 0,
       hiddenExcludedCount: hiddenLookIds.length,
       categorySuppressionCount: affinity.categorySuppressionWeights?.size ?? 0,

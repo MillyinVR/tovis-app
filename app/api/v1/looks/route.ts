@@ -311,6 +311,7 @@ export async function GET(req: Request) {
       occasionTagCount: personalizedMeta?.occasionTagCount ?? null,
       tasteSignalCount: personalizedMeta?.tasteSignalCount ?? null,
       candidateEmbeddingCount: personalizedMeta?.candidateEmbeddingCount ?? null,
+      availabilitySignalCount: personalizedMeta?.availabilitySignalCount ?? null,
       sessionVisualSignalCount: personalizedMeta?.sessionVisualSignalCount ?? null,
       hiddenExcludedCount:
         personalizedMeta?.hiddenExcludedCount ?? chronoHiddenExcludedCount,

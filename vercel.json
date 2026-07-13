@@ -88,6 +88,10 @@
     {
       "path": "/api/internal/jobs/pro-badge-stats",
       "schedule": "10 * * * *"
+    },
+    {
+      "path": "/api/internal/jobs/pro-availability-stats",
+      "schedule": "25 * * * *"
     }
   ]
 }

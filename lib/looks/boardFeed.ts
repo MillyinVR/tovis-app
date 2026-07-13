@@ -52,6 +52,7 @@ import {
   rankBoardFeedRows,
   type BoardFeedContext,
 } from '@/lib/looks/boardFeedRanking'
+import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
 
 // How many occasion/answer-matched looks are retrieved and injected at entry.
 const BOARD_FEED_RETRIEVAL_LIMIT = 24
@@ -144,6 +145,8 @@ export type BoardFeedPage = {
     feasibilityTagCount: number
     tasteSignalCount: number
     candidateEmbeddingCount: number
+    // §4.4 availability_boost: pros on the page with a near-term-opening row.
+    availabilitySignalCount: number
     // §2.2: the owner's "not for me" hides excluded from this board feed too.
     hiddenExcludedCount: number
   }
@@ -282,6 +285,17 @@ export async function buildBoardFeedPage(args: {
         )
       : new Map<string, number[]>()
 
+  // §4.4 availability_boost: per-pro next-opening + 14-day fullness for the
+  // page's pros. Empty until the pro-availability-stats cron populates the
+  // primitive, so the board feed is byte-identical until then.
+  const availabilitySignals =
+    candidateRows.length > 0
+      ? await fetchProAvailabilitySignals(
+          prisma,
+          candidateRows.map((row) => row.professionalId),
+        )
+      : new Map<string, never>()
+
   const boardContext: BoardFeedContext = {
     occasionTagWeights: ctx.occasionTagWeights,
     answerTagSlugs: ctx.answerTagSlugs,
@@ -289,6 +303,7 @@ export async function buildBoardFeedPage(args: {
     tasteVector: ctx.tasteVector,
     tasteSignalCount: ctx.tasteSignalCount,
     candidateEmbeddings,
+    availabilitySignals,
     seenLookIds: args.seenLookIds,
     now: args.now,
   }
@@ -308,6 +323,7 @@ export async function buildBoardFeedPage(args: {
       feasibilityTagCount: ctx.feasibilityTagSlugs.size,
       tasteSignalCount: ctx.tasteSignalCount,
       candidateEmbeddingCount: candidateEmbeddings.size,
+      availabilitySignalCount: availabilitySignals.size,
       hiddenExcludedCount: hiddenLookIds.length,
     },
   }

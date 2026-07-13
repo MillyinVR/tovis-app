@@ -1816,7 +1816,8 @@ model ProfessionalProfile {
 
   referrals Referral[]
 
-  badgeStat ProfessionalBadgeStat?
+  badgeStat        ProfessionalBadgeStat?
+  availabilityStat ProfessionalAvailabilityStat?
 
   @@index([handleNormalized])
   @@index([verificationStatus])
@@ -2491,14 +2492,49 @@ model ProfessionalBadgeStat {
 
   // Non-cancelled bookings CREATED in the trailing 48h (booking velocity —
   // the "Booking fast" urgency signal).
-  recentBookingCount Int @default(0)
+  recentBookingCount       Int @default(0)
   // COMPLETED bookings scheduled in the trailing 30 days (social proof).
   completedBookingCount30d Int @default(0)
   // Distinct clients with >=1 COMPLETED booking in the trailing 180 days, and
   // how many of them came back (>=2 COMPLETED in the window) — the rebook-rate
   // numerator/denominator, stored as counts so the rate math stays in code.
-  servedClientCount   Int @default(0)
-  rebookedClientCount Int @default(0)
+  servedClientCount        Int @default(0)
+  rebookedClientCount      Int @default(0)
+
+  computedAt DateTime
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+}
+
+// Per-pro calendar-availability summary behind the Looks feed availability_boost
+// term (personalization spec §4.2/§4.4). Refreshed hourly by the
+// pro-availability-stats job (lib/looks/availabilityStats.ts) from real working
+// hours + bookings/holds/blocks — a coarse, soft ranking weight, never a hard
+// filter (guardrail #8). Only pros with a real opening in the scan horizon get a
+// row; a missing row reads as "no availability signal" (boost 0) at serve time,
+// keeping the table proportional to bookable pros.
+model ProfessionalAvailabilityStat {
+  professionalId String @id
+
+  // Start-of-local-day UTC instant of the first day within the scan horizon that
+  // still has spare working-hours capacity (>= PRO_AVAILABILITY_STAT.minOpeningMinutes
+  // free). Null is never stored — a pro with no opening in the horizon is dropped
+  // from the table entirely — but the column is nullable so the shape stays
+  // honest if that rule ever relaxes.
+  nextOpeningDate DateTime?
+
+  // Days in the next `fullnessWindowDays` (14) with spare capacity — a robust,
+  // count-based openness read alongside the minute-ratio below.
+  openDayCount14d Int @default(0)
+
+  // bookedMinutes / capacityMinutes over the next 14 working days, clamped [0,1]:
+  // 0 = wide open, 1 = fully booked. 0 when the window holds no working capacity.
+  fullness14d Float @default(0)
+
+  // Total working-hours capacity minutes over the next 14 days (0 = no bookable
+  // schedule in the window) — lets the reader tell "wide open" from "no hours"
+  // and powers observability.
+  capacityMinutes14d Int @default(0)
 
   computedAt DateTime
 
