@@ -63,6 +63,12 @@ export type LooksFeedServeEvent = {
   explorationInjectedCount?: number | null
   bookableCount?: number | null
   inspirationCount?: number | null
+  // §6.7 post-booking relationship layer (personalized cohort only): pros the
+  // viewer has a completed-booking relationship with, and how many of the
+  // displayed page's looks came from one — the relationship-working /
+  // on-platform rebook-rate metric (spec §9).
+  relationshipProCount?: number | null
+  relationshipBoostedCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -111,6 +117,8 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     explorationInjectedCount: input.explorationInjectedCount ?? null,
     bookableCount: input.bookableCount ?? null,
     inspirationCount: input.inspirationCount ?? null,
+    relationshipProCount: input.relationshipProCount ?? null,
+    relationshipBoostedCount: input.relationshipBoostedCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

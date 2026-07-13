@@ -333,6 +333,10 @@ export async function GET(req: Request) {
         personalizedMeta?.explorationInjectedCount ?? null,
       bookableCount: personalizedMeta?.bookableCount ?? null,
       inspirationCount: personalizedMeta?.inspirationCount ?? null,
+      // §6.7 post-booking relationship layer (personalized cohort only).
+      relationshipProCount: personalizedMeta?.relationshipProCount ?? null,
+      relationshipBoostedCount:
+        personalizedMeta?.relationshipBoostedCount ?? null,
       badgeEligibleCount: badgeResult.meta.eligibleCount,
       badgeShownCount: badgeResult.meta.shownCount,
       badgeHoldoutCount: badgeResult.meta.holdoutCount,
