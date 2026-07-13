@@ -5,6 +5,7 @@ import {
   BookingStatus,
   ConsultationApprovalStatus,
   ContactMethod,
+  MediaPhase,
   NotificationEventKey,
   Prisma,
   Role,
@@ -33,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   txBookingFindUnique: vi.fn(),
   txActiveOfferingsFindMany: vi.fn(),
   txConsultationApprovalUpsert: vi.fn(),
+  txMediaAssetCount: vi.fn(),
 
   transitionSessionStepInTransaction: vi.fn(),
 
@@ -581,6 +583,7 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
           consultationApproval: {
             upsert: typeof mocks.txConsultationApprovalUpsert
           }
+          mediaAsset: { count: typeof mocks.txMediaAssetCount }
         }) => Promise<unknown>,
       ) =>
         callback({
@@ -593,6 +596,9 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
           consultationApproval: {
             upsert: mocks.txConsultationApprovalUpsert,
           },
+          mediaAsset: {
+            count: mocks.txMediaAssetCount,
+          },
         }),
     )
 
@@ -604,6 +610,9 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     mocks.txBookingFindUnique.mockResolvedValue(makeTxBooking())
     mocks.txActiveOfferingsFindMany.mockResolvedValue(makeActiveOfferings())
     mocks.txConsultationApprovalUpsert.mockResolvedValue(makeApproval())
+    // Default: no session photos captured (the §22 MS1 pre-capture guard reads
+    // this only on the post-consultation reopen path).
+    mocks.txMediaAssetCount.mockResolvedValue(0)
 
     mocks.transitionSessionStepInTransaction.mockResolvedValue({
       ok: true,
@@ -1100,6 +1109,97 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
 
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.createConsultationActionDelivery).not.toHaveBeenCalled()
+  })
+
+  // §22 MS1 — a pro re-opening the consultation to change the service from a
+  // post-consultation step, gated on "no session photos captured yet".
+  it('re-opens the consultation from BEFORE_PHOTOS when no photos are captured', async () => {
+    expectIdempotencyStarted('idem_reopen_before_1')
+
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeTxBooking({ sessionStep: SessionStep.BEFORE_PHOTOS }),
+    )
+    mocks.txMediaAssetCount.mockResolvedValueOnce(0)
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_reopen_before_1',
+        body: makeRawProposalBody(),
+      }),
+      makeCtx(),
+    )
+
+    // The pre-capture guard reads only PRO before/after photos on this booking.
+    expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        uploadedByRole: Role.PRO,
+        phase: { in: [MediaPhase.BEFORE, MediaPhase.AFTER] },
+      },
+    })
+
+    // The re-sent proposal drops the step back to waiting-on-client for
+    // re-approval (never a bare serviceId write — that happens on approval).
+    expect(mocks.transitionSessionStepInTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+      }),
+    )
+    expect(mocks.txConsultationApprovalUpsert).toHaveBeenCalled()
+    expect(result.status).toBe(200)
+  })
+
+  it('re-opens the consultation from SERVICE_IN_PROGRESS when no photos are captured', async () => {
+    expectIdempotencyStarted('idem_reopen_service_1')
+
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeTxBooking({ sessionStep: SessionStep.SERVICE_IN_PROGRESS }),
+    )
+    mocks.txMediaAssetCount.mockResolvedValueOnce(0)
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_reopen_service_1',
+        body: makeRawProposalBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.transitionSessionStepInTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+      }),
+    )
+    expect(result.status).toBe(200)
+  })
+
+  it('blocks the service change once a session photo is captured (409)', async () => {
+    expectIdempotencyStarted('idem_reopen_blocked_1')
+
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeTxBooking({ sessionStep: SessionStep.BEFORE_PHOTOS }),
+    )
+    mocks.txMediaAssetCount.mockResolvedValueOnce(1)
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_reopen_blocked_1',
+        body: makeRawProposalBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(409)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'You can’t change the service once session photos are captured.',
+    })
+
+    // The proposal never lands and the step never moves.
+    expect(mocks.txConsultationApprovalUpsert).not.toHaveBeenCalled()
+    expect(mocks.transitionSessionStepInTransaction).not.toHaveBeenCalled()
   })
 
   it('maps BookingError through bookingJsonFail and marks idempotency failed', async () => {

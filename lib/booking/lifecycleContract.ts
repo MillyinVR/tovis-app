@@ -111,11 +111,21 @@ export const SESSION_STEP_TRANSITIONS: Map<
   ],
   [
     SessionStep.BEFORE_PHOTOS,
-    new Map<SessionStep, LifecycleActor[]>([[SessionStep.SERVICE_IN_PROGRESS, ['PRO']]]),
+    new Map<SessionStep, LifecycleActor[]>([
+      [SessionStep.SERVICE_IN_PROGRESS, ['PRO']],
+      // §22 MS1: a pre-capture mid-session service change re-opens the
+      // consultation for client re-approval (guarded server-side on "no photos
+      // captured yet"); the re-sent proposal drops the step back here.
+      [SessionStep.CONSULTATION_PENDING_CLIENT, ['PRO']],
+    ]),
   ],
   [
     SessionStep.SERVICE_IN_PROGRESS,
-    new Map<SessionStep, LifecycleActor[]>([[SessionStep.FINISH_REVIEW, ['PRO']]]),
+    new Map<SessionStep, LifecycleActor[]>([
+      [SessionStep.FINISH_REVIEW, ['PRO']],
+      // §22 MS1 (see BEFORE_PHOTOS above).
+      [SessionStep.CONSULTATION_PENDING_CLIENT, ['PRO']],
+    ]),
   ],
   [
     SessionStep.FINISH_REVIEW,
