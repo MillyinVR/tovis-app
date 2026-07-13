@@ -54,6 +54,15 @@ export type LooksFeedServeEvent = {
   // personalized, chronological, and board cohorts for a signed-in viewer.
   hiddenExcludedCount?: number | null
   categorySuppressionCount?: number | null
+  // §4.3/§4.3.1/§4.3.2 feed composition (personalized cohort only): the resolved
+  // session intent, its lean on the bookable term, the reserved off-graph
+  // exploration slice actually placed, and the displayed bookable/inspiration
+  // blend — the composition-ratio + diversity metrics (spec §9).
+  sessionIntent?: string | null
+  availabilityWeightMultiplier?: number | null
+  explorationInjectedCount?: number | null
+  bookableCount?: number | null
+  inspirationCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -97,6 +106,11 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     sessionVisualSignalCount: input.sessionVisualSignalCount ?? null,
     hiddenExcludedCount: input.hiddenExcludedCount ?? null,
     categorySuppressionCount: input.categorySuppressionCount ?? null,
+    sessionIntent: input.sessionIntent ?? null,
+    availabilityWeightMultiplier: input.availabilityWeightMultiplier ?? null,
+    explorationInjectedCount: input.explorationInjectedCount ?? null,
+    bookableCount: input.bookableCount ?? null,
+    inspirationCount: input.inspirationCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

@@ -50,6 +50,12 @@ import {
   type PersonalizedViewerAffinity,
 } from '@/lib/looks/personalizedRanking'
 import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
+import { feedDiversityInjectionEnabled } from '@/lib/looks/feedDiversityFlag'
+import {
+  interleaveExploration,
+  resolveCompositionPlan,
+  type SessionIntent,
+} from '@/lib/looks/feedComposition'
 
 // How many of the viewer's most recent likes / saves feed category affinity.
 // Bounded so the signal query stays cheap regardless of a power user's history.
@@ -154,6 +160,16 @@ const BOARD_TYPE_CATEGORY_WEIGHT = 3
 // Max fresh followed-pro looks injected at entry. Kept small so the feed stays
 // discovery-led rather than a followed-only timeline (that is the Following tab).
 const FOLLOWED_INJECTION_LIMIT = 6
+
+// §4.3.1 diversity injection: the exploration slice is fetched by GLOBAL rankScore
+// (highest-quality content first) from categories OUTSIDE the viewer's affinity
+// set — so the anti-filter-bubble content is still good, not random. The count of
+// reserved slots comes from the composition plan (0 unless the flag is on, this is
+// an entry load, and the graph is confident). This bound caps the affinity-slug
+// `notIn` list so a viewer with a sprawling graph can't blow up the exploration
+// query; the excluded categories beyond it just aren't excluded (they'd rarely be
+// the highest-rankScore exploration candidates anyway).
+const EXPLORATION_AFFINITY_EXCLUSION_CAP = 60
 
 // Upper bound on the session seen list a client may send, so the exclusion
 // clause can't blow up the query.
@@ -552,6 +568,18 @@ export type PersonalizedFeedPage = {
     // §9 hide-rate early-warning signal.
     hiddenExcludedCount: number
     categorySuppressionCount: number
+    // §4.3/§4.3.2 session intent + §4.3.1 diversity injection.
+    // `sessionIntent` is the resolved per-session mood; `availabilityWeightMultiplier`
+    // the intent lean applied to the bookable term. `explorationInjectedCount` is
+    // the reserved off-graph slice actually placed this load (0 = flag off / thin
+    // graph / paginated). `bookableCount`/`inspirationCount` are the §4.3 blend of
+    // the DISPLAYED page — looks whose pro has a real near-term opening vs the rest
+    // (dark until the availability cron runs) — the composition-ratio metric.
+    sessionIntent: SessionIntent
+    availabilityWeightMultiplier: number
+    explorationInjectedCount: number
+    bookableCount: number
+    inspirationCount: number
   }
 }
 
@@ -568,11 +596,27 @@ export async function buildPersonalizedFeedPage(args: {
   cursor: LooksFeedCursor | null
   seenLookIds: ReadonlySet<string>
   now: Date
+  // §4.3.2 session intent. Absent → 'default' (neutral lean). Only the entry
+  // point / in-session behavior sends a non-default hint (see the route).
+  intent?: SessionIntent
 }): Promise<PersonalizedFeedPage> {
   const affinity = await loadPersonalizedAffinity({
     userId: args.userId,
     clientId: args.clientId,
     now: args.now,
+  })
+
+  const isEntryLoad = args.cursor === null
+  const intent: SessionIntent = args.intent ?? 'default'
+  // §4.3/§4.3.1/§4.3.2: resolve the composition plan (intent lean +
+  // reserved-exploration size) for this load. Slots are 0 unless diversity
+  // injection is flagged on, this is an entry load, and the graph is confident.
+  const plan = resolveCompositionPlan({
+    intent,
+    limit: args.limit,
+    affinityCategoryCount: affinity.categoryWeights.size,
+    diversityEnabled: feedDiversityInjectionEnabled(),
+    isEntryLoad,
   })
 
   const baseWhere = buildLooksFeedWhere({
@@ -631,7 +675,6 @@ export async function buildPersonalizedFeedPage(args: {
   // the backbone page (never displacing it), so the cursor stays honest and
   // nothing is dropped; they appear once, then land in the session seen set.
   let injectedRows: LooksFeedRow[] = []
-  const isEntryLoad = args.cursor === null
   const followedIds = [...affinity.followedProfessionalIds]
 
   if (isEntryLoad && followedIds.length > 0) {
@@ -653,10 +696,54 @@ export async function buildPersonalizedFeedPage(args: {
     })
   }
 
-  // Fetch candidate embeddings by PK for the page's rows — only when the viewer
+  // §4.3.1 diversity injection: reserve a small slice of the entry page for
+  // high-quality content OUTSIDE the viewer's affinity categories (and off their
+  // followed pros), so a confident graph doesn't narrow into a bubble. Fetched by
+  // GLOBAL rankScore — exploration content is still good, not random — and ridden
+  // ON TOP of the backbone (like the followed injection), so the cursor and
+  // pagination are untouched. Gated by the plan: 0 slots unless the flag is on,
+  // this is an entry load, and the graph is confident.
+  let explorationRows: LooksFeedRow[] = []
+  if (plan.explorationSlots > 0) {
+    const onPageIds = new Set([
+      ...backbonePage.map((row) => row.id),
+      ...injectedRows.map((row) => row.id),
+    ])
+    const exploreExcludeIds = [...new Set([...excludedIds, ...onPageIds])]
+    const affinityCategorySlugs = [...affinity.categoryWeights.keys()].slice(
+      0,
+      EXPLORATION_AFFINITY_EXCLUSION_CAP,
+    )
+
+    explorationRows = await prisma.lookPost.findMany({
+      where: {
+        AND: [
+          baseWhere,
+          // Off-graph: outside the viewer's affinity categories. A look with no
+          // service/category doesn't match this nested to-one filter, so
+          // exploration is drawn only from real, unexplored categories.
+          ...(affinityCategorySlugs.length > 0
+            ? [{ service: { category: { slug: { notIn: affinityCategorySlugs } } } }]
+            : []),
+          ...(followedIds.length > 0
+            ? [{ professionalId: { notIn: followedIds } }]
+            : []),
+          ...(exploreExcludeIds.length > 0
+            ? [{ id: { notIn: exploreExcludeIds } }]
+            : []),
+        ],
+      },
+      orderBy: buildLooksFeedOrderBy({ kind: 'ALL', sort: 'RANKED' }),
+      take: plan.explorationSlots,
+      select: looksFeedSelect,
+    })
+  }
+
+  // Fetch candidate embeddings by PK for the RE-RANKED rows — only when the viewer
   // actually has a taste vector to compare against (otherwise every row scores 0
   // visually, so the query would be pure overhead). No corpus-wide ANN: the set
-  // is just this page's ids, and no vector index exists yet by design.
+  // is just this page's ids, and no vector index exists yet by design. Exploration
+  // rows are placed by quality, not re-ranked, so they're not fetched here.
   const candidateRows = [...backbonePage, ...injectedRows]
   const candidateEmbeddings =
     affinity.tasteVector && candidateRows.length > 0
@@ -666,24 +753,43 @@ export async function buildPersonalizedFeedPage(args: {
         )
       : new Map<string, number[]>()
 
-  // §4.2/§4.4 availability_boost: per-pro next-opening + 14-day fullness for the
-  // page's pros. One indexed read by PK; empty until the pro-availability-stats
-  // cron populates the primitive, so the feed is byte-identical until then.
+  // §4.2/§4.4 availability_boost: per-pro next-opening + 14-day fullness. One
+  // indexed read by PK; empty until the pro-availability-stats cron populates the
+  // primitive, so the feed is byte-identical until then. Fetched for the whole
+  // DISPLAYED page (re-ranked + exploration pros) so both the re-rank and the
+  // §4.3 bookable/inspiration composition metric read the same map.
+  const displayedRows = [...candidateRows, ...explorationRows]
   const availabilitySignals =
-    candidateRows.length > 0
+    displayedRows.length > 0
       ? await fetchProAvailabilitySignals(
           prisma,
-          candidateRows.map((row) => row.professionalId),
+          displayedRows.map((row) => row.professionalId),
         )
       : new Map<string, never>()
 
-  const items = rankPersonalizedRows(candidateRows, {
+  const rankedItems = rankPersonalizedRows(candidateRows, {
     affinity,
     seenLookIds: args.seenLookIds,
     now: args.now,
     candidateEmbeddings,
     availabilitySignals,
+    // §4.3/§4.3.2: lean the bookable term by session intent.
+    availabilityWeightMultiplier: plan.availabilityWeightMultiplier,
   })
+
+  // §4.3.1: interleave the reserved exploration slice into the re-ranked page.
+  const items = interleaveExploration(
+    rankedItems,
+    explorationRows,
+    plan.explorationSlots,
+  )
+
+  // §4.3 composition metric: the displayed blend of bookable-now (pro has a real
+  // near-term opening) vs inspiration (everything else). Dark until the cron runs.
+  let bookableCount = 0
+  for (const row of items) {
+    if (availabilitySignals.has(row.professionalId)) bookableCount += 1
+  }
 
   return {
     items,
@@ -701,6 +807,11 @@ export async function buildPersonalizedFeedPage(args: {
       sessionVisualSignalCount: affinity.sessionVisualSignalCount ?? 0,
       hiddenExcludedCount: hiddenLookIds.length,
       categorySuppressionCount: affinity.categorySuppressionWeights?.size ?? 0,
+      sessionIntent: intent,
+      availabilityWeightMultiplier: plan.availabilityWeightMultiplier,
+      explorationInjectedCount: explorationRows.length,
+      bookableCount,
+      inspirationCount: items.length - bookableCount,
     },
   }
 }

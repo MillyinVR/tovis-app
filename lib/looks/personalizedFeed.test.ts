@@ -1,5 +1,5 @@
 // lib/looks/personalizedFeed.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   prisma: {
@@ -671,6 +671,177 @@ describe('lib/looks/personalizedFeed', () => {
       expect(page.items.map((i) => i.id)).toEqual(['b_match', 'b_miss'])
       expect(page.meta.candidateEmbeddingCount).toBe(2)
       expect(page.meta.tasteSignalCount).toBe(50)
+    })
+  })
+
+  describe('buildPersonalizedFeedPage — §4.3 composition + §4.3.1 diversity', () => {
+    const OLD = new Date('2026-01-01T00:00:00.000Z')
+
+    // Four distinct liked categories → a confident graph (>= the exploration
+    // gate). Old timestamps keep them out of the §6.3 session window.
+    function confidentGraphLikes() {
+      return ['balayage', 'lashes', 'nails', 'brows'].map((slug, i) => ({
+        lookPostId: `like_${i}`,
+        createdAt: OLD,
+        ...catRow(slug),
+      }))
+    }
+
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('is byte-identical (no exploration) with the flag off, even on a confident graph', async () => {
+      mocks.prisma.lookLike.findMany.mockResolvedValue(confidentGraphLikes())
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b1', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 12,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // Only the backbone query ran — no exploration query.
+      expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledTimes(1)
+      expect(page.items.map((i) => i.id)).toEqual(['b1'])
+      expect(page.meta.explorationInjectedCount).toBe(0)
+      expect(page.meta.sessionIntent).toBe('default')
+      expect(page.meta.availabilityWeightMultiplier).toBe(1)
+    })
+
+    it('does not reserve exploration slots for a thin graph even with the flag on', async () => {
+      vi.stubEnv('ENABLE_FEED_DIVERSITY_INJECTION', '1')
+      // Two liked categories → below the confidence gate.
+      mocks.prisma.lookLike.findMany.mockResolvedValue([
+        { lookPostId: 'l0', createdAt: OLD, ...catRow('balayage') },
+        { lookPostId: 'l1', createdAt: OLD, ...catRow('lashes') },
+      ])
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b1', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 12,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledTimes(1)
+      expect(page.meta.explorationInjectedCount).toBe(0)
+    })
+
+    it('injects an off-graph exploration slice on a confident graph and interleaves it', async () => {
+      vi.stubEnv('ENABLE_FEED_DIVERSITY_INJECTION', '1')
+      mocks.prisma.lookLike.findMany.mockResolvedValue(confidentGraphLikes())
+
+      mocks.prisma.lookPost.findMany
+        // Backbone.
+        .mockResolvedValueOnce([
+          feedRow({ id: 'b1', professionalId: 'pro_x', rankScore: 9 }),
+          feedRow({ id: 'b2', professionalId: 'pro_y', rankScore: 7 }),
+          feedRow({ id: 'b3', professionalId: 'pro_z', rankScore: 5 }),
+        ])
+        // Exploration (off-graph, quality-ranked).
+        .mockResolvedValueOnce([
+          feedRow({
+            id: 'exp1',
+            professionalId: 'pro_new',
+            rankScore: 100,
+            service: { category: { slug: 'microblading' } },
+          }),
+        ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 12,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      const ids = page.items.map((i) => i.id)
+      expect(ids).toContain('exp1')
+      // Every backbone row is still present (exploration rides on top).
+      expect(ids).toEqual(expect.arrayContaining(['b1', 'b2', 'b3']))
+      expect(page.meta.explorationInjectedCount).toBe(1)
+
+      // The exploration query excludes the viewer's affinity categories.
+      const exploreWhere =
+        mocks.prisma.lookPost.findMany.mock.calls[1]?.[0]?.where
+      const categoryClause = exploreWhere?.AND?.find(
+        (clause: Record<string, unknown>) =>
+          clause && typeof clause === 'object' && 'service' in clause,
+      )
+      expect(categoryClause?.service?.category?.slug?.notIn).toEqual(
+        expect.arrayContaining(['balayage', 'lashes', 'nails', 'brows']),
+      )
+      // …and it excludes the backbone ids already on the page.
+      const idClause = exploreWhere?.AND?.find(
+        (clause: Record<string, unknown>) =>
+          clause && typeof clause === 'object' && 'id' in clause,
+      )
+      expect(idClause?.id?.notIn).toEqual(
+        expect.arrayContaining(['b1', 'b2', 'b3']),
+      )
+    })
+
+    it('leans the availability multiplier by session intent and reports it', async () => {
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b1', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 12,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+        intent: 'book',
+      })
+
+      expect(page.meta.sessionIntent).toBe('book')
+      expect(page.meta.availabilityWeightMultiplier).toBe(1.75)
+    })
+
+    it('reports the displayed bookable/inspiration split (§4.3 composition metric)', async () => {
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b1', professionalId: 'pro_open', rankScore: 5 }),
+        feedRow({ id: 'b2', professionalId: 'pro_booked', rankScore: 3 }),
+      ])
+      // pro_open has a real near-term opening; pro_booked has no row.
+      mocks.prisma.professionalAvailabilityStat.findMany.mockResolvedValue([
+        { professionalId: 'pro_open', nextOpeningDate: NOW, fullness14d: 0 },
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 12,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      expect(page.meta.bookableCount).toBe(1)
+      expect(page.meta.inspirationCount).toBe(1)
+      expect(page.meta.bookableCount + page.meta.inspirationCount).toBe(
+        page.items.length,
+      )
     })
   })
 })
