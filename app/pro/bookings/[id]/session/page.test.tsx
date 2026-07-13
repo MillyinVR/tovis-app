@@ -454,6 +454,57 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
     expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
+  // §22 MS1 — the pre-capture "Change service" affordance.
+  it('offers "Change service" on the before-photos screen while no photos are captured', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+        consultationStatus: ConsultationApprovalStatus.APPROVED,
+        proof: {
+          id: 'proof_remote_1',
+          decision: 'APPROVED',
+          method: 'REMOTE_SECURE_LINK',
+          actedAt: new Date('2026-04-12T19:00:00.000Z'),
+          recordedByUserId: null,
+          clientActionTokenId: 'token_1',
+          contactMethod: 'EMAIL',
+          destinationSnapshot: 'client@example.com',
+        },
+      }),
+      beforeCount: 0,
+      afterCount: 0,
+      aftercare: null,
+    })
+
+    expect(hasText(page, 'Change service')).toBe(true)
+    // It reuses the consultation editor (rendered here as the mocked stand-in).
+    expect(hasText(page, 'ConsultationForm')).toBe(true)
+  })
+
+  it('hides "Change service" once a before photo is captured', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+        consultationStatus: ConsultationApprovalStatus.APPROVED,
+        proof: {
+          id: 'proof_remote_1',
+          decision: 'APPROVED',
+          method: 'REMOTE_SECURE_LINK',
+          actedAt: new Date('2026-04-12T19:00:00.000Z'),
+          recordedByUserId: null,
+          clientActionTokenId: 'token_1',
+          contactMethod: 'EMAIL',
+          destinationSnapshot: 'client@example.com',
+        },
+      }),
+      beforeCount: 1,
+      afterCount: 0,
+      aftercare: null,
+    })
+
+    expect(hasText(page, 'Change service')).toBe(false)
+  })
+
   it('shows proof details and suppresses in-person fallback when proof already exists', async () => {
     const page = await renderPage({
       booking: makeBooking({

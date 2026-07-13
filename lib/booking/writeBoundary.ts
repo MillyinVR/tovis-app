@@ -2855,12 +2855,19 @@ function isAllowedSessionTransition(
   if (from === SessionStep.BEFORE_PHOTOS) {
     return (
       to === SessionStep.SERVICE_IN_PROGRESS ||
-      to === SessionStep.CONSULTATION
+      to === SessionStep.CONSULTATION ||
+      // §22 MS1: pre-capture mid-session service change → re-open the
+      // consultation for client re-approval (the re-sent proposal moves here).
+      to === SessionStep.CONSULTATION_PENDING_CLIENT
     )
   }
 
   if (from === SessionStep.SERVICE_IN_PROGRESS) {
-    return to === SessionStep.FINISH_REVIEW
+    return (
+      to === SessionStep.FINISH_REVIEW ||
+      // §22 MS1 (see BEFORE_PHOTOS above).
+      to === SessionStep.CONSULTATION_PENDING_CLIENT
+    )
   }
 
   if (from === SessionStep.FINISH_REVIEW) {

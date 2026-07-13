@@ -848,6 +848,46 @@ function ConsultationView({
   )
 }
 
+// §22 MS1 — a pre-capture mid-session "Change service" affordance. Reuses the
+// consultation editor wholesale (same base+add-on picker, same recompute-safe
+// proposal route — never a bare Booking.serviceId write); on submit it re-opens
+// the consultation so the client re-approves the new price/duration before it
+// commits. Only rendered while no session photos are captured (the proposal
+// route enforces the same guard); collapsed by default so it never competes
+// with the primary before-photos / service actions.
+function ChangeServiceSection({
+  bookingId,
+  initialNotes,
+  initialPrice,
+  initialItems,
+}: {
+  bookingId: string
+  initialNotes: string
+  initialPrice: string | number | null
+  initialItems: ConsultationInitialItem[]
+}) {
+  return (
+    <details className="brand-pro-session-change-service mt-4 mb-4">
+      <summary className="brand-pro-session-section-title cursor-pointer select-none">
+        Change service
+      </summary>
+
+      <div className="brand-pro-session-card-body mt-1 mb-3">
+        Changing the service re-opens the consultation — your client approves the
+        new price and time before it takes effect. Available until you capture
+        photos.
+      </div>
+
+      <ConsultationForm
+        bookingId={bookingId}
+        initialNotes={initialNotes}
+        initialPrice={initialPrice}
+        initialItems={initialItems}
+      />
+    </details>
+  )
+}
+
 function WaitingBeforePhotosView({
   bookingId,
   effectiveStep,
@@ -857,6 +897,7 @@ function WaitingBeforePhotosView({
   approvalStatus,
   beforeCount,
   canUseInPersonFallback,
+  changeService,
   approveInPerson,
   rejectInPerson,
   toConsult,
@@ -870,6 +911,7 @@ function WaitingBeforePhotosView({
   approvalStatus: ConsultationApprovalStatus | null
   beforeCount: number
   canUseInPersonFallback: boolean
+  changeService?: React.ReactNode
   approveInPerson: ServerAction
   rejectInPerson: ServerAction
   toConsult: ServerAction
@@ -941,6 +983,8 @@ function WaitingBeforePhotosView({
           </div>
         </section>
 
+        {changeService}
+
         {approved ? (
           canContinue ? (
             <form action={toService}>
@@ -1004,6 +1048,7 @@ function ServiceInProgressView({
   startedAt,
   durationLabel,
   beforeCount,
+  changeService,
   onFinish,
   timeZone,
 }: {
@@ -1013,6 +1058,7 @@ function ServiceInProgressView({
   startedAt: Date | null
   durationLabel: string
   beforeCount: number
+  changeService?: React.ReactNode
   onFinish: ServerAction
   timeZone: string
 }) {
@@ -1072,6 +1118,8 @@ function ServiceInProgressView({
             </span>
           </div>
         </Card>
+
+        {changeService}
 
         <form action={onFinish}>
           <PendingActionButton pendingLabel="Finishing…" transitionLabel="Finishing service…">
@@ -1688,6 +1736,20 @@ export default async function ProBookingSessionPage(props: PageProps) {
 
   const screenKey = getSessionScreenKey({ effectiveStep })
 
+  // §22 MS1 — the "Change service" affordance is offered only while the session
+  // has captured no photos yet (matching the proposal route's pre-capture
+  // guard). Built once here and injected into the before-photos / service
+  // screens; null hides it everywhere.
+  const canChangeService = beforeCount === 0 && afterCount === 0
+  const changeServiceSlot = canChangeService ? (
+    <ChangeServiceSection
+      bookingId={booking.id}
+      initialNotes={initialNotes}
+      initialPrice={initialPrice}
+      initialItems={initialItems}
+    />
+  ) : null
+
   const subtitle = formatAppointmentLine({
     clientName,
     scheduledFor: booking.scheduledFor,
@@ -1784,6 +1846,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
           canUseInPersonFallback={
             isConsultationPending(approvalStatus) && !hasConsultationProof
           }
+          changeService={changeServiceSlot}
           approveInPerson={approveInPerson}
           rejectInPerson={rejectInPerson}
           toConsult={toConsult}
@@ -1803,6 +1866,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
         startedAt={booking.startedAt}
         durationLabel={durationLabel}
         beforeCount={beforeCount}
+        changeService={changeServiceSlot}
         onFinish={finishService}
         timeZone={appointmentTimeZone}
       />

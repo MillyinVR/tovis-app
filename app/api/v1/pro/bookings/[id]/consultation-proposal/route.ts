@@ -12,6 +12,7 @@ import {
   BookingStatus,
   ConsultationApprovalStatus,
   ContactMethod,
+  MediaPhase,
   NotificationEventKey,
   Prisma,
   Role,
@@ -379,7 +380,21 @@ function parseProposalPayload(raw: unknown): ParsedProposalPayload | null {
 function canProSendProposal(step: SessionStep | null): boolean {
   return (
     step === SessionStep.CONSULTATION ||
-    step === SessionStep.CONSULTATION_PENDING_CLIENT
+    step === SessionStep.CONSULTATION_PENDING_CLIENT ||
+    // §22 MS1: a pro may re-open the consultation to change the service after
+    // approval, but only from a post-consultation step that has captured no
+    // photos yet — that pre-capture guard is enforced separately (the step
+    // alone isn't sufficient authorization). See isPostConsultationReopenStep.
+    isPostConsultationReopenStep(step)
+  )
+}
+
+// The post-consultation steps from which §22 MS1 allows re-opening the
+// consultation to change the service. Gated on "no photos captured yet".
+function isPostConsultationReopenStep(step: SessionStep | null): boolean {
+  return (
+    step === SessionStep.BEFORE_PHOTOS ||
+    step === SessionStep.SERVICE_IN_PROGRESS
   )
 }
 
@@ -662,6 +677,31 @@ export async function POST(req: Request, ctx: RouteContext) {
           ok: false,
           status: 409,
           error: 'Booking is not in a consultation stage.',
+        }
+      }
+
+      // §22 MS1 — pre-capture-only guard. Re-opening the consultation from a
+      // post-consultation step (before-photos / service-in-progress) is allowed
+      // ONLY while no session photos have been captured: once the pro has shot
+      // before/after photos of the agreed service, changing it would desync the
+      // record (and the captured-payment case is deferred to MS3). The step
+      // guard above lets these steps through; this is the actual authorization.
+      if (isPostConsultationReopenStep(booking.sessionStep ?? null)) {
+        const capturedPhotos = await tx.mediaAsset.count({
+          where: {
+            bookingId: booking.id,
+            uploadedByRole: Role.PRO,
+            phase: { in: [MediaPhase.BEFORE, MediaPhase.AFTER] },
+          },
+        })
+
+        if (capturedPhotos > 0) {
+          return {
+            ok: false,
+            status: 409,
+            error:
+              'You can’t change the service once session photos are captured.',
+          }
         }
       }
 
