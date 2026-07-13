@@ -10,7 +10,11 @@
 // switch) share one source of truth.
 //
 // Entitlement rules:
-//   ADMIN  — only if the home role is ADMIN (admin is never granted by acting).
+//   ADMIN  — if the home role is ADMIN, OR the user holds a global SUPER_ADMIN
+//            grant (an AdminPermission row). The grant is the deliberate act of
+//            provisioning; acting-as alone never conjures it. This lets a pro
+//            (home role PRO) who is also a super admin switch into the console
+//            without giving up Pro as their home workspace.
 //   PRO    — only with an APPROVED ProfessionalProfile (i.e. licensed).
 //   CLIENT — anyone; a missing ClientProfile is provisioned on first switch.
 
@@ -22,6 +26,35 @@ export type WorkspaceCapabilityUser = {
   homeRole: Role
   clientProfile: { id: string } | null
   professionalProfile: { verificationStatus: VerificationStatus } | null
+  /**
+   * Whether the user holds a global SUPER_ADMIN grant. Lets a non-ADMIN home
+   * role reach the Admin console workspace (see the ADMIN entitlement rule).
+   */
+  hasAdminGrant: boolean
+}
+
+/**
+ * Structural view of a resolved CurrentUser carrying just the fields needed to
+ * derive workspace capability. Kept structural (not `Pick<CurrentUser>`) so this
+ * module never imports currentUser.ts and creates a cycle.
+ */
+export type WorkspaceCapabilitySource = {
+  homeRole: Role
+  clientProfile: { id: string } | null
+  professionalProfile: { verificationStatus: VerificationStatus } | null
+  canAccessAdmin: boolean
+}
+
+/** Extract the stable capability inputs from a resolved CurrentUser. */
+export function workspaceCapabilityOf(
+  user: WorkspaceCapabilitySource,
+): WorkspaceCapabilityUser {
+  return {
+    homeRole: user.homeRole,
+    clientProfile: user.clientProfile,
+    professionalProfile: user.professionalProfile,
+    hasAdminGrant: user.canAccessAdmin,
+  }
 }
 
 /** Serializable description of a switchable workspace (safe to pass server→client). */
@@ -57,7 +90,7 @@ const WORKSPACE_ORDER: Role[] = ['ADMIN', 'PRO', 'CLIENT']
 export function canActAs(user: WorkspaceCapabilityUser, role: Role): boolean {
   switch (role) {
     case 'ADMIN':
-      return user.homeRole === 'ADMIN'
+      return user.homeRole === 'ADMIN' || user.hasAdminGrant
     case 'PRO':
       return user.professionalProfile?.verificationStatus === 'APPROVED'
     case 'CLIENT':

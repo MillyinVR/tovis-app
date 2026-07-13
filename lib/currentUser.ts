@@ -10,7 +10,7 @@
 //   revocation flows (sign out everywhere, password reset, authVersion bump)
 //   can be bypassed.
 
-import { Prisma, type Role } from '@prisma/client'
+import { AdminPermissionRole, Prisma, type Role } from '@prisma/client'
 import { cookies, headers } from 'next/headers'
 
 import { type AuthSessionKind, type AuthRole, verifyToken } from './auth'
@@ -28,6 +28,17 @@ export const currentUserSelect = {
   createdAt: true,
   phoneVerifiedAt: true,
   emailVerifiedAt: true,
+
+  // Existence probe for a global super-admin grant — powers the "act as Admin"
+  // workspace switch for a non-ADMIN home role (e.g. a pro who is also a super
+  // admin). Filtered + capped so it stays a cheap indexed lookup, never the
+  // whole permission set. SUPER_ADMIN is unscoped by design (it always wins in
+  // hasAdminPermission), so no scope filter is needed here.
+  adminPermissions: {
+    where: { role: AdminPermissionRole.SUPER_ADMIN },
+    select: { id: true },
+    take: 1,
+  },
 
   clientProfile: {
     select: {
@@ -60,7 +71,7 @@ type CurrentUserRecord = Prisma.UserGetPayload<{
   select: typeof currentUserSelect
 }>
 
-export type CurrentUser = CurrentUserRecord & {
+export type CurrentUser = Omit<CurrentUserRecord, 'adminPermissions'> & {
   /**
    * The workspace the user is acting in right now. Equals `homeRole` unless the
    * user has switched workspaces (the acting role rides in the JWT and is only
@@ -70,6 +81,13 @@ export type CurrentUser = CurrentUserRecord & {
   role: Role
   /** The permanent DB role — the user's home workspace and entitlement anchor. */
   homeRole: Role
+  /**
+   * Whether the user holds a global SUPER_ADMIN grant. Lets a non-ADMIN home
+   * role (e.g. a pro who is also a super admin) switch into the Admin console —
+   * feeds canActAs('ADMIN') via workspaceCapabilityOf. The raw permission rows
+   * are collapsed to this boolean and never exposed on CurrentUser.
+   */
+  canAccessAdmin: boolean
   sessionKind: AuthSessionKind
   isPhoneVerified: boolean
   isEmailVerified: boolean
@@ -100,6 +118,7 @@ function resolveActingRole(
       homeRole: user.role,
       clientProfile: user.clientProfile,
       professionalProfile: user.professionalProfile,
+      hasAdminGrant: user.adminPermissions.length > 0,
     },
     tokenRole,
   )
@@ -116,10 +135,15 @@ function toCurrentUser(
   const isPhoneVerified = Boolean(user.phoneVerifiedAt)
   const isEmailVerified = Boolean(user.emailVerifiedAt)
 
+  // Collapse the SUPER_ADMIN existence probe to a boolean; the raw rows never
+  // ride along on CurrentUser.
+  const { adminPermissions, ...rest } = user
+
   return {
-    ...user,
+    ...rest,
     role: actingRole,
     homeRole: user.role,
+    canAccessAdmin: adminPermissions.length > 0,
     sessionKind,
     isPhoneVerified,
     isEmailVerified,

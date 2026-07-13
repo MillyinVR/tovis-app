@@ -1,11 +1,56 @@
 // lib/adminPermissions.ts
 import { prisma } from '@/lib/prisma'
-import { AdminPermissionRole } from '@prisma/client'
+import { AdminPermissionRole, type PrismaClient } from '@prisma/client'
 
 type Scope = {
   professionalId?: string | null
   serviceId?: string | null
   categoryId?: string | null
+}
+
+/**
+ * Minimal client surface `ensureGlobalSuperAdminPermission` needs. Satisfied by
+ * both the shared `prisma` singleton and a script-owned `new PrismaClient()`,
+ * so ops scripts that manage their own connection can pass their client.
+ */
+type AdminPermissionDb = Pick<PrismaClient, 'adminPermission'>
+
+/**
+ * Idempotently ensure `adminUserId` holds a GLOBAL super-admin grant — an
+ * AdminPermission row scoped to nothing, which hasAdminPermission treats as
+ * "always allows". Returns whether a new row was created.
+ *
+ * Deliberately does NOT touch `User.role`: the home role is the caller's
+ * decision. This lets a non-ADMIN home role (e.g. a pro who is also a super
+ * admin) hold the grant and switch into the Admin workspace via canActAs,
+ * without giving up their home workspace.
+ */
+export async function ensureGlobalSuperAdminPermission(
+  db: AdminPermissionDb,
+  adminUserId: string,
+): Promise<{ created: boolean }> {
+  const existing = await db.adminPermission.findFirst({
+    where: {
+      adminUserId,
+      role: AdminPermissionRole.SUPER_ADMIN,
+      professionalId: null,
+      serviceId: null,
+      categoryId: null,
+    },
+    select: { id: true },
+  })
+  if (existing) return { created: false }
+
+  await db.adminPermission.create({
+    data: {
+      adminUserId,
+      role: AdminPermissionRole.SUPER_ADMIN,
+      professionalId: null,
+      serviceId: null,
+      categoryId: null,
+    },
+  })
+  return { created: true }
 }
 
 /**

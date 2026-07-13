@@ -1,6 +1,6 @@
 // app/_components/WorkspaceSwitchLauncher/WorkspaceSwitchLauncher.tsx
 import { getCurrentUser } from '@/lib/currentUser'
-import { buildWorkspaceOptions } from '@/lib/auth/workspaces'
+import { buildWorkspaceOptions, workspaceCapabilityOf } from '@/lib/auth/workspaces'
 
 import WorkspaceSwitchLauncherClient from './WorkspaceSwitchLauncherClient'
 
@@ -16,14 +16,7 @@ export default async function WorkspaceSwitchLauncher() {
   const user = await getCurrentUser().catch(() => null)
   if (!user) return null
 
-  const options = buildWorkspaceOptions(
-    {
-      homeRole: user.homeRole,
-      clientProfile: user.clientProfile,
-      professionalProfile: user.professionalProfile,
-    },
-    user.role,
-  )
+  const options = buildWorkspaceOptions(workspaceCapabilityOf(user), user.role)
 
   // buildWorkspaceOptions returns [] when there is only one workspace.
   if (options.length <= 1) return null

@@ -15,7 +15,7 @@ import type { WorkspaceSwitchResponseDTO } from '@/lib/dto/auth'
 import { setSessionCookie } from '@/app/api/_utils/auth/sessionCookie'
 import { createActiveToken } from '@/lib/auth'
 import { getCurrentUser } from '@/lib/currentUser'
-import { canActAs, WORKSPACE_HOME } from '@/lib/auth/workspaces'
+import { canActAs, workspaceCapabilityOf, WORKSPACE_HOME } from '@/lib/auth/workspaces'
 import { prisma } from '@/lib/prisma'
 import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
@@ -93,14 +93,7 @@ export async function POST(request: Request) {
   const target = parseWorkspace(body)
   if (!target) return jsonFail(400, 'Unknown workspace')
 
-  const entitled = canActAs(
-    {
-      homeRole: user.homeRole,
-      clientProfile: user.clientProfile,
-      professionalProfile: user.professionalProfile,
-    },
-    target,
-  )
+  const entitled = canActAs(workspaceCapabilityOf(user), target)
   if (!entitled) return jsonFail(403, 'Workspace not available')
 
   if (target === Role.CLIENT && !user.clientProfile) {

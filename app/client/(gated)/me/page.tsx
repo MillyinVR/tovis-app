@@ -3,7 +3,11 @@ import { isNonEmptyString } from '@/lib/guards'
 import { formatRoundedDollars } from '@/lib/money'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { getCurrentUser } from '@/lib/currentUser'
-import { buildWorkspaceOptions, type WorkspaceOption } from '@/lib/auth/workspaces'
+import {
+  buildWorkspaceOptions,
+  workspaceCapabilityOf,
+  type WorkspaceOption,
+} from '@/lib/auth/workspaces'
 import { formatInTimeZone } from '@/lib/time'
 
 import ClientMeDashboard from '../ClientMeDashboard'
@@ -88,14 +92,7 @@ export default async function ClientMePage() {
 
   const currentUser = await getCurrentUser().catch(() => null)
   const workspaces: WorkspaceOption[] = currentUser
-    ? buildWorkspaceOptions(
-        {
-          homeRole: currentUser.homeRole,
-          clientProfile: currentUser.clientProfile,
-          professionalProfile: currentUser.professionalProfile,
-        },
-        currentUser.role,
-      )
+    ? buildWorkspaceOptions(workspaceCapabilityOf(currentUser), currentUser.role)
     : []
 
   const displayName = buildDisplayName({
