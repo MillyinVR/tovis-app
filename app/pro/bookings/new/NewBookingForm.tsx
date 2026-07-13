@@ -25,6 +25,7 @@ import {
   type PlacePrediction,
 } from '@/lib/clientAddresses/placesAutocomplete'
 import { moneyToString } from '@/lib/money'
+import { overlappingClientNamesForRange } from '@/lib/calendar/overlap'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import {
   datetimeLocalToUtcIsoStrict,
@@ -416,6 +417,67 @@ function normalizeServiceAddresses(data: unknown): ClientServiceAddressOption[] 
   }
 
   return out
+}
+
+// Passive double-book heads-up. When the pro picks a custom time that collides
+// with an existing appointment, we surface a soft "overlaps {client}" note —
+// the pre-submit mirror of the calendar grid's amber signal + the reschedule
+// confirm modal's `pendingOverlapName`. The server still allows a pro overlap
+// (PRO_AUTHORIZED_OVERLAP); this only surfaces it before submit. Non-blocking.
+
+// A generous window around the proposed start to fetch candidate bookings; the
+// precise half-open `hasOverlap` check does the real filtering. ±1 day comfortably
+// covers the longest possible appointment (MAX_SLOT_DURATION 12h + buffer).
+const CONFLICT_FETCH_WINDOW_MS = 24 * 60 * 60 * 1000
+// Matches the calendar confirm modal's fallback for a nameless overlapping event.
+const OVERLAP_FALLBACK_NAME = 'another appointment'
+
+type CalendarOverlapEvent = {
+  id: string
+  startsAt: string
+  endsAt: string
+  clientName: string | null
+}
+
+// Reads the /api/v1/pro/calendar `events` array down to what the overlap check
+// needs. BLOCK-kind events (the pro's own blocked time) are dropped so the note
+// only ever warns about client-vs-client collisions, mirroring the confirm modal.
+function normalizeCalendarOverlapEvents(data: unknown): CalendarOverlapEvent[] {
+  if (!isRecord(data)) return []
+
+  const raw = data.events
+  if (!Array.isArray(raw)) return []
+
+  const out: CalendarOverlapEvent[] = []
+
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    if (item.kind === 'BLOCK') continue
+
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const startsAt = typeof item.startsAt === 'string' ? item.startsAt : ''
+    const endsAt = typeof item.endsAt === 'string' ? item.endsAt : ''
+    if (!id || !startsAt || !endsAt) continue
+
+    const clientName =
+      typeof item.clientName === 'string' && item.clientName.trim()
+        ? item.clientName.trim()
+        : null
+
+    out.push({ id, startsAt, endsAt, clientName })
+  }
+
+  return out
+}
+
+// "Sam" / "Sam and Alex" / "Sam, Alex, and 1 other" — a plain-English join for
+// the overlap note.
+function formatOverlapNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? ''
+  if (names.length === 2) return `${names[0]} and ${names[1]}`
+
+  const head = names.slice(0, -1).join(', ')
+  return `${head}, and ${names[names.length - 1]}`
 }
 
 const SUMMARY_MONTHS = [
@@ -1058,6 +1120,101 @@ export default function NewBookingForm({
     [selectedAddOns],
   )
 
+  // Total appointment length (base service in the chosen mode + add-ons). Drives
+  // both the summary rail and the proposed window for the double-book check.
+  const proposedDurationMinutes = useMemo(
+    () =>
+      selectedOffering
+        ? pickDisplayDurationMinutes(selectedOffering, locationType) +
+          addOnMinutesTotal
+        : 0,
+    [selectedOffering, locationType, addOnMinutesTotal],
+  )
+
+  // The proposed booking's start instant as UTC ISO, or null when it can't be
+  // resolved yet (no slot picked, or an off-grid custom wall time). Slots mode
+  // submits the chosen instant directly; custom mode converts the wall-clock in
+  // the booking-location timezone — the same resolution `handleSubmit` does, but
+  // read-only (no error surfacing) so the passive check can run as the pro types.
+  const proposedStartISO = useMemo<string | null>(() => {
+    if (timeMode === 'slots') return selectedSlot
+    if (!scheduledAt) return null
+
+    const resolved = datetimeLocalToUtcIsoStrict(scheduledAt, bookingTimeZone)
+    return resolved.ok ? resolved.iso : null
+  }, [timeMode, selectedSlot, scheduledAt, bookingTimeZone])
+
+  // Clients the proposed time collides with (empty when clear). Fetched from the
+  // pro calendar so it stays in lockstep with the grid's own overlap signal.
+  const [overlapNames, setOverlapNames] = useState<string[]>([])
+  const overlapLocationId = selectedLocation?.id ?? null
+
+  useEffect(() => {
+    if (
+      loading ||
+      !overlapLocationId ||
+      !proposedStartISO ||
+      proposedDurationMinutes <= 0
+    ) {
+      setOverlapNames([])
+      return
+    }
+
+    const startMs = new Date(proposedStartISO).getTime()
+    if (!Number.isFinite(startMs)) {
+      setOverlapNames([])
+      return
+    }
+
+    const endISO = new Date(
+      startMs + proposedDurationMinutes * 60_000,
+    ).toISOString()
+    const fromISO = new Date(startMs - CONFLICT_FETCH_WINDOW_MS).toISOString()
+    const toISO = new Date(startMs + CONFLICT_FETCH_WINDOW_MS).toISOString()
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      try {
+        const qs = new URLSearchParams({
+          from: fromISO,
+          to: toISO,
+          locationId: overlapLocationId,
+        })
+
+        const res = await fetch(`/api/v1/pro/calendar?${qs.toString()}`, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        })
+
+        // A background check never redirects or errors the form — on any
+        // non-OK response (expired session, etc.) we just clear the note.
+        if (!res.ok) {
+          setOverlapNames([])
+          return
+        }
+
+        const data = await safeJson(res)
+        setOverlapNames(
+          overlappingClientNamesForRange(
+            { startsAt: proposedStartISO, endsAt: endISO },
+            normalizeCalendarOverlapEvents(data),
+            OVERLAP_FALLBACK_NAME,
+          ),
+        )
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setOverlapNames([])
+      }
+    }, 300)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [loading, overlapLocationId, proposedStartISO, proposedDurationMinutes])
+
   function handleCancel() {
     if (loading) return
 
@@ -1325,10 +1482,7 @@ export default function NewBookingForm({
   const summaryService = selectedOffering
     ? selectedOffering.title || selectedOffering.service.name
     : ''
-  const summaryDuration = selectedOffering
-    ? pickDisplayDurationMinutes(selectedOffering, locationType) +
-      addOnMinutesTotal
-    : 0
+  const summaryDuration = proposedDurationMinutes
   const summaryPrice = selectedOffering
     ? moneyToString(
         pickDisplayPrice(selectedOffering, locationType) + addOnPriceTotal,
@@ -2101,6 +2255,21 @@ export default function NewBookingForm({
             </div>
           </div>
         )}
+
+        {overlapNames.length > 0 ? (
+          <div
+            role="status"
+            className="rounded-xl border border-toneWarn/25 bg-toneWarn/10 p-3"
+          >
+            <div className="text-[12px] font-black uppercase tracking-wide text-toneWarn">
+              Schedule conflict
+            </div>
+            <div className="mt-1 text-[12px] text-textSecondary">
+              This overlaps {formatOverlapNames(overlapNames)}. You can still
+              book it.
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-2">

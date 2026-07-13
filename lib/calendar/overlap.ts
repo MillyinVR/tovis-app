@@ -113,6 +113,40 @@ export function overlappingEventIds(
   return ids
 }
 
+export type IdentifiedNamedRange = IdentifiedOverlapRange & {
+  clientName?: string | null
+}
+
+/**
+ * The client names of the events whose time ranges overlap `range` — the pro
+ * new-booking form's passive double-book heads-up (mirror of the calendar
+ * confirm modal's `pendingOverlapName`). Half-open (via `hasOverlap`), so a
+ * back-to-back booking that merely touches does NOT warn. Order-preserving and
+ * de-duplicated by name; an event without a client name falls back to
+ * `fallbackName`. Callers filter out BLOCK-kind events first so this only
+ * surfaces client-vs-client collisions, never the pro's own blocked time.
+ */
+export function overlappingClientNamesForRange(
+  range: OverlapRangeInput,
+  events: readonly IdentifiedNamedRange[],
+  fallbackName: string,
+): string[] {
+  const names: string[] = []
+  const seen = new Set<string>()
+
+  for (const event of events) {
+    if (!hasOverlap(range, event)) continue
+
+    const name = event.clientName?.trim() || fallbackName
+    if (seen.has(name)) continue
+
+    seen.add(name)
+    names.push(name)
+  }
+
+  return names
+}
+
 export function overlapMinutesForRange<TEvent extends OverlapRangeInput>(
   args: OverlapMinutesForRangeArgs<TEvent>,
 ): number {

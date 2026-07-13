@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { overlappingEventIds } from './overlap'
+import { overlappingClientNamesForRange, overlappingEventIds } from './overlap'
 
 // The pro calendar's passive double-book highlight. Half-open [start, end):
 // back-to-back appointments that merely touch do NOT count as an overlap.
@@ -31,5 +31,98 @@ describe('overlappingEventIds', () => {
       { id: 'c', startsAt: '2026-07-15T18:15:00Z', endsAt: '2026-07-15T20:00:00Z' },
     ])
     expect([...ids].sort()).toEqual(['a', 'b', 'c'])
+  })
+})
+
+// The pro new-booking form's passive double-book heads-up: which existing
+// clients does a proposed time range collide with?
+describe('overlappingClientNamesForRange', () => {
+  const range = {
+    startsAt: '2026-07-15T17:00:00Z',
+    endsAt: '2026-07-15T18:00:00Z',
+  }
+
+  it('returns every overlapping client (the husband + wife double-book)', () => {
+    const names = overlappingClientNamesForRange(
+      range,
+      [
+        {
+          id: 'a',
+          startsAt: '2026-07-15T17:30:00Z',
+          endsAt: '2026-07-15T18:30:00Z',
+          clientName: 'Sam Rivera',
+        },
+        {
+          id: 'b',
+          startsAt: '2026-07-15T16:30:00Z',
+          endsAt: '2026-07-15T17:15:00Z',
+          clientName: 'Alex Rivera',
+        },
+        {
+          id: 'c',
+          startsAt: '2026-07-15T19:00:00Z',
+          endsAt: '2026-07-15T20:00:00Z',
+          clientName: 'Jordan Lee',
+        },
+      ],
+      'another appointment',
+    )
+    expect(names).toEqual(['Sam Rivera', 'Alex Rivera'])
+  })
+
+  it('does not warn on a back-to-back (touching) booking', () => {
+    const names = overlappingClientNamesForRange(
+      range,
+      [
+        {
+          id: 'a',
+          startsAt: '2026-07-15T18:00:00Z',
+          endsAt: '2026-07-15T19:00:00Z',
+          clientName: 'Sam Rivera',
+        },
+      ],
+      'another appointment',
+    )
+    expect(names).toEqual([])
+  })
+
+  it('falls back when the overlapping event has no client name', () => {
+    const names = overlappingClientNamesForRange(
+      range,
+      [
+        {
+          id: 'a',
+          startsAt: '2026-07-15T17:30:00Z',
+          endsAt: '2026-07-15T18:30:00Z',
+          clientName: null,
+        },
+      ],
+      'another appointment',
+    )
+    expect(names).toEqual(['another appointment'])
+  })
+
+  it('de-duplicates repeated names and the empty set', () => {
+    expect(overlappingClientNamesForRange(range, [], 'x')).toEqual([])
+
+    const names = overlappingClientNamesForRange(
+      range,
+      [
+        {
+          id: 'a',
+          startsAt: '2026-07-15T17:10:00Z',
+          endsAt: '2026-07-15T17:40:00Z',
+          clientName: 'Sam Rivera',
+        },
+        {
+          id: 'b',
+          startsAt: '2026-07-15T17:45:00Z',
+          endsAt: '2026-07-15T18:30:00Z',
+          clientName: 'Sam Rivera',
+        },
+      ],
+      'another appointment',
+    )
+    expect(names).toEqual(['Sam Rivera'])
   })
 })
