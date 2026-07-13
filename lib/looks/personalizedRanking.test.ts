@@ -7,12 +7,14 @@ import {
   computeCategorySuppressionPenalty,
   computePersonalizedFreshnessBoost,
   computePersonalizedScore,
+  computeRelationshipBoost,
   computeVisualSimilarityBoost,
   cosineSimilarity,
   rankPersonalizedRows,
   type PersonalizedRankableRow,
   type PersonalizedViewerAffinity,
   type ProAvailabilitySignal,
+  type ProRelationshipSignal,
 } from './personalizedRanking'
 
 const NOW = new Date('2026-07-04T12:00:00.000Z')
@@ -36,6 +38,7 @@ function affinity(
     occasions: Array<[string, number]>
     tasteVector: number[] | null
     tasteSignalCount: number
+    relationships: Array<[string, ProRelationshipSignal]>
   }> = {},
 ): PersonalizedViewerAffinity {
   return {
@@ -45,6 +48,9 @@ function affinity(
     occasionTagWeights: new Map(overrides.occasions ?? []),
     tasteVector: overrides.tasteVector ?? null,
     tasteSignalCount: overrides.tasteSignalCount ?? 0,
+    relationshipSignals: overrides.relationships
+      ? new Map(overrides.relationships)
+      : undefined,
   }
 }
 
@@ -676,6 +682,116 @@ describe('lib/looks/personalizedRanking', () => {
         PERSONALIZED_RANK_WEIGHTS.availabilityMax,
         5,
       )
+    })
+  })
+
+  describe('computeRelationshipBoost', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const rel = (
+      overrides: Partial<ProRelationshipSignal> = {},
+    ): ProRelationshipSignal => ({
+      lastVisitAt: overrides.lastVisitAt ?? NOW,
+      completedVisits: overrides.completedVisits ?? 1,
+    })
+
+    it('is 0 for a missing signal or an invalid last-visit date', () => {
+      expect(computeRelationshipBoost({ signal: null, now: NOW })).toBe(0)
+      expect(computeRelationshipBoost({ signal: undefined, now: NOW })).toBe(0)
+      expect(
+        computeRelationshipBoost({
+          signal: rel({ lastVisitAt: new Date('nope') }),
+          now: NOW,
+        }),
+      ).toBe(0)
+    })
+
+    it('peaks for a loyal client who just visited', () => {
+      // recency 1 + loyalty 1 (3+ visits) → full relationshipMax.
+      expect(
+        computeRelationshipBoost({
+          signal: rel({ lastVisitAt: NOW, completedVisits: 5 }),
+          now: NOW,
+        }),
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.relationshipMax, 5)
+    })
+
+    it('a single recent visit earns the recency half plus a third of loyalty', () => {
+      // recency 1, loyalty 1/3 → strength 0.5×1 + 0.5×(1/3) = 2/3 of the max.
+      expect(
+        computeRelationshipBoost({
+          signal: rel({ lastVisitAt: NOW, completedVisits: 1 }),
+          now: NOW,
+        }),
+      ).toBeCloseTo((PERSONALIZED_RANK_WEIGHTS.relationshipMax * 2) / 3, 5)
+    })
+
+    it('keeps a lapsed-but-loyal pair surfacing (recency decays, loyalty holds)', () => {
+      const oneHalfLife =
+        PERSONALIZED_RANK_WEIGHTS.relationshipRecencyHalfLifeDays * DAY_MS
+      // recency 0.5 (one half-life), loyalty 1 → 0.5×0.5 + 0.5×1 = 0.75 of max.
+      expect(
+        computeRelationshipBoost({
+          signal: rel({
+            lastVisitAt: new Date(NOW.getTime() - oneHalfLife),
+            completedVisits: 3,
+          }),
+          now: NOW,
+        }),
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.relationshipMax * 0.75, 5)
+    })
+
+    it('a future-skewed clock never boosts past the recency peak', () => {
+      const future = new Date(NOW.getTime() + DAY_MS)
+      const boost = computeRelationshipBoost({
+        signal: rel({ lastVisitAt: future, completedVisits: 5 }),
+        now: NOW,
+      })
+      expect(boost).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.relationshipMax, 5)
+    })
+
+    it('adds into the personalized score, keyed by professionalId', () => {
+      const context = {
+        affinity: affinity({
+          relationships: [
+            ['pro_booked', rel({ lastVisitAt: NOW, completedVisits: 5 })],
+          ],
+        }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+
+      const booked = computePersonalizedScore(
+        row({ professionalId: 'pro_booked' }),
+        context,
+      )
+      const other = computePersonalizedScore(
+        row({ professionalId: 'pro_other' }),
+        context,
+      )
+      expect(booked - other).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.relationshipMax,
+        5,
+      )
+    })
+
+    it('a booked pro outranks a higher-rankScore non-booked peer', () => {
+      const context = {
+        affinity: affinity({
+          relationships: [
+            ['pro_booked', rel({ lastVisitAt: NOW, completedVisits: 4 })],
+          ],
+        }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+      const ranked = rankPersonalizedRows(
+        [
+          row({ id: 'peer', professionalId: 'pro_other', rankScore: 20 }),
+          row({ id: 'mine', professionalId: 'pro_booked', rankScore: 5 }),
+        ],
+        context,
+      )
+      expect(ranked[0]?.id).toBe('mine')
     })
   })
 })

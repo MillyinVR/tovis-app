@@ -48,8 +48,10 @@ import {
 import {
   rankPersonalizedRows,
   type PersonalizedViewerAffinity,
+  type ProRelationshipSignal,
 } from '@/lib/looks/personalizedRanking'
 import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
+import { fetchClientRelationshipSignals } from '@/lib/looks/relationshipSignals'
 import { feedDiversityInjectionEnabled } from '@/lib/looks/feedDiversityFlag'
 import {
   interleaveExploration,
@@ -383,6 +385,7 @@ export async function loadPersonalizedAffinity(args: {
     selfProfileRow,
     tasteVectorRow,
     hides,
+    relationshipSignals,
   ] = await Promise.all([
       clientId
         ? prisma.proFollow.findMany({
@@ -437,6 +440,13 @@ export async function loadPersonalizedAffinity(args: {
         take: HIDDEN_LOOK_IDS_CAP,
         select: hideCategorySelect,
       }),
+      // §6.7 post-booking relationship layer: which pros the viewer has actually
+      // BOOKED (completed visits), so their new looks surface. Client-gated (a
+      // booking is keyed to a client profile) → empty map for a no-client viewer,
+      // byte-identical to the pre-§6.7 feed.
+      clientId
+        ? fetchClientRelationshipSignals(prisma, clientId)
+        : Promise.resolve(new Map<string, ProRelationshipSignal>()),
     ])
 
   // Behavioral signals decay with age (spec §6.2) so stale taste fades.
@@ -535,6 +545,7 @@ export async function loadPersonalizedAffinity(args: {
     tasteVector: tasteBlend.vector,
     tasteSignalCount: tasteBlend.signalCount,
     sessionVisualSignalCount: sessionSignals.length,
+    relationshipSignals,
     hiddenLookIds,
   }
 }
@@ -580,6 +591,12 @@ export type PersonalizedFeedPage = {
     explorationInjectedCount: number
     bookableCount: number
     inspirationCount: number
+    // §6.7 post-booking relationship layer: how many pros the viewer has a
+    // completed-booking relationship with (0 = no bookings / no client), and how
+    // many of the DISPLAYED page's looks came from one of those pros. Feeds the
+    // §9 on-platform rebook-rate / relationship-working metric.
+    relationshipProCount: number
+    relationshipBoostedCount: number
   }
 }
 
@@ -787,8 +804,12 @@ export async function buildPersonalizedFeedPage(args: {
   // §4.3 composition metric: the displayed blend of bookable-now (pro has a real
   // near-term opening) vs inspiration (everything else). Dark until the cron runs.
   let bookableCount = 0
+  // §6.7 relationship metric: displayed looks from a pro the viewer has booked.
+  let relationshipBoostedCount = 0
+  const relationshipSignals = affinity.relationshipSignals
   for (const row of items) {
     if (availabilitySignals.has(row.professionalId)) bookableCount += 1
+    if (relationshipSignals?.has(row.professionalId)) relationshipBoostedCount += 1
   }
 
   return {
@@ -812,6 +833,8 @@ export async function buildPersonalizedFeedPage(args: {
       explorationInjectedCount: explorationRows.length,
       bookableCount,
       inspirationCount: items.length - bookableCount,
+      relationshipProCount: relationshipSignals?.size ?? 0,
+      relationshipBoostedCount,
     },
   }
 }

@@ -22,6 +22,12 @@
 //                                 an un-booked-out calendar — spec §4.2/§4.4; a
 //                                 SOFT weight off the per-pro availability
 //                                 primitive, never a hard filter, guardrail #8)
+//         + relationshipBoost    (the look is from a pro the viewer has actually
+//                                 BOOKED — a completed visit — spec §6.7
+//                                 post-booking relationship layer. A booking is
+//                                 the strongest, nearly un-fakeable signal in the
+//                                 hierarchy (spec §2), so a booked pro's new looks
+//                                 reliably surface; graded by recency × loyalty)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
 //         - suppressionPenalty   (viewer keeps hiding this look's category — the
@@ -80,6 +86,28 @@ export const PERSONALIZED_RANK_WEIGHTS = {
   // ~7 days out ~0.5, decaying smoothly. Blended at equal weight with 14-day
   // openness (1 - fullness) inside computeAvailabilityBoost.
   availabilitySoonHalfLifeDays: 7,
+  // relationship_boost (spec §6.7 post-booking relationship layer): a pro the
+  // viewer has actually BOOKED (a completed visit) is the strongest, nearly
+  // un-fakeable relationship signal — the spec's §2 hierarchy puts a booking
+  // above every save/share/like, and above an explicit follow (just a tap). So a
+  // booked pro's NEW looks should reliably surface in that client's feed. Peak
+  // sits at/just above the follow boost (25): at full strength a paid-for
+  // relationship out-pulls a followed pro, but the realized boost is graded by
+  // recency × loyalty (computeRelationshipBoost), so a single old visit
+  // contributes only a fraction. Additive (like follow) so a fresh booked-pro
+  // look at rankScore 0 still lifts into view. Dark-safe: a viewer with no
+  // completed bookings has an empty relationship map → boost 0 → byte-identical.
+  relationshipMax: 30,
+  // Recency half-life for the relationship boost. Booking-driven affinity decays
+  // the SLOWEST of any signal (spec §6.2 / the note in personalizedFeed.ts —
+  // "~6–12 months"): a visit today scores ~1.0, ~120 days ago ~0.5, a year ago
+  // ~0.12, so a lapsed-but-loyal client's pro keeps surfacing (the feed side of
+  // the §6.7 re-engagement moment) while a one-and-done from long ago fades.
+  relationshipRecencyHalfLifeDays: 120,
+  // Completed-visit count at which the loyalty half of the blend saturates. One
+  // visit is already a real relationship (0.33); a repeat client (3+) is a full
+  // one — the spec treats repeat bookings as the deepest personalization signal.
+  relationshipFullVisits: 3,
   // Peak nudge for a brand-new look; decays with a 1-day half-life.
   freshnessMax: 6,
   freshnessHalfLifeDays: 1,
@@ -128,6 +156,13 @@ export type PersonalizedViewerAffinity = {
   // Observability only (ignored by scoring): how many fresh same-session
   // like/save embeddings folded into the taste vector this request (spec §6.3).
   sessionVisualSignalCount?: number
+  // Per-pro post-booking relationship signals (spec §6.7), keyed by
+  // professionalId — the pros the viewer has a completed booking with, loaded
+  // once per request (like followedProfessionalIds, viewer state, not
+  // per-candidate). A pro absent from the map earns no relationship boost.
+  // Optional so non-relationship callers (unit tests, follow-only paths) omit it
+  // → byte-identical to the pre-§6.7 feed.
+  relationshipSignals?: ReadonlyMap<string, ProRelationshipSignal>
 }
 
 export type PersonalizedRankableRow = {
@@ -152,6 +187,19 @@ export type ProAvailabilitySignal = {
   nextOpeningDate: Date | null
   // Booked/capacity over the next 14 working days, [0, 1] (0 = wide open).
   fullness14d: number
+}
+
+// Per-pro post-booking relationship summary (spec §6.7), keyed by professionalId
+// and derived from the VIEWER's completed bookings (lib/looks/relationshipSignals.ts).
+// A pro absent from the map — the viewer has never completed a visit with them —
+// earns no relationship boost. Plain data shape (no Prisma import) so the ranker
+// stays pure.
+export type ProRelationshipSignal = {
+  // Most recent COMPLETED visit with this pro (finishedAt ?? scheduledFor);
+  // drives the recency half of the boost.
+  lastVisitAt: Date
+  // Count of COMPLETED visits with this pro; drives the loyalty half.
+  completedVisits: number
 }
 
 export type PersonalizedRankContext = {
@@ -321,6 +369,54 @@ export function computeAvailabilityBoost(args: {
 }
 
 /**
+ * Additive post-booking relationship boost (spec §6.7): rewards a look from a
+ * pro the viewer has actually BOOKED (a completed visit), so "your pro"'s new
+ * content reliably surfaces in their feed. A booking is the strongest signal in
+ * the hierarchy (spec §2), so this sits at the top of the additive band.
+ *
+ *   relationshipMax × clamp(0.5 × recencyScore + 0.5 × loyaltyScore, 0, 1)
+ *
+ * `recencyScore` = 2^(−daysSinceLastVisit / recencyHalfLife) — 1.0 for a visit
+ * today, decaying with the slowest half-life of any signal (booking affinity
+ * lasts months). `loyaltyScore` = clamp(completedVisits / fullVisits, 0, 1) — one
+ * visit is already a third of the way, a repeat client saturates. Blended at
+ * equal weight (mirrors computeAvailabilityBoost), so a recent one-off still
+ * boosts meaningfully while a lapsed-but-loyal pair keeps surfacing (the feed
+ * side of the §6.7 re-engagement moment). A missing/invalid signal yields 0 —
+ * this is a SOFT weight, never a hard filter. Pure + exported for unit testing.
+ */
+export function computeRelationshipBoost(args: {
+  signal: ProRelationshipSignal | null | undefined
+  now: Date
+}): number {
+  const { signal, now } = args
+  if (!signal) return 0
+
+  const lastVisit = signal.lastVisitAt
+  if (!(lastVisit instanceof Date) || Number.isNaN(lastVisit.getTime())) {
+    return 0
+  }
+
+  const daysSince = Math.max(0, (now.getTime() - lastVisit.getTime()) / DAY_MS)
+  const recencyScore =
+    2 ** (-daysSince / PERSONALIZED_RANK_WEIGHTS.relationshipRecencyHalfLifeDays)
+
+  const visits = Number.isFinite(signal.completedVisits)
+    ? Math.max(0, signal.completedVisits)
+    : 0
+  const loyaltyScore = Math.min(
+    visits / PERSONALIZED_RANK_WEIGHTS.relationshipFullVisits,
+    1,
+  )
+
+  const strength = Math.min(
+    Math.max(0.5 * recencyScore + 0.5 * loyaltyScore, 0),
+    1,
+  )
+  return PERSONALIZED_RANK_WEIGHTS.relationshipMax * strength
+}
+
+/**
  * Category-suppression penalty from explicit hides (spec §2.2). Zero until the
  * decayed hide weight for the category crosses `hideCategoryThreshold` (so one
  * dismissed card doesn't suppress the category), then ramps linearly to
@@ -387,6 +483,13 @@ export function computePersonalizedScore(
     weightMultiplier: context.availabilityWeightMultiplier,
   })
 
+  // §6.7 post-booking relationship — a pro the viewer has completed a visit with;
+  // 0 when the viewer has no booked relationship with this pro (empty map).
+  const relationshipBoost = computeRelationshipBoost({
+    signal: context.affinity.relationshipSignals?.get(row.professionalId),
+    now: context.now,
+  })
+
   const freshnessBoost = computePersonalizedFreshnessBoost(
     row.publishedAt,
     context.now,
@@ -403,6 +506,7 @@ export function computePersonalizedScore(
     occasionBoost +
     visualBoost +
     availabilityBoost +
+    relationshipBoost +
     freshnessBoost -
     seenPenalty -
     suppressionPenalty

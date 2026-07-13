@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     board: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
     professionalAvailabilityStat: { findMany: vi.fn() },
+    booking: { findMany: vi.fn() },
     clientProfile: { findUnique: vi.fn() },
     // Raw-SQL surface for the pgvector store (taste vector + candidate
     // embeddings). Routed by SQL text in beforeEach; default returns nothing.
@@ -69,6 +70,7 @@ describe('lib/looks/personalizedFeed', () => {
     mocks.prisma.board.findMany.mockResolvedValue([])
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.professionalAvailabilityStat.findMany.mockResolvedValue([])
+    mocks.prisma.booking.findMany.mockResolvedValue([])
     mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
     // No taste vector and no candidate embeddings by default.
     mocks.prisma.$queryRaw.mockResolvedValue([])
@@ -260,8 +262,43 @@ describe('lib/looks/personalizedFeed', () => {
       expect(mocks.prisma.boardItem.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.board.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.clientProfile.findUnique).not.toHaveBeenCalled()
+      // Bookings are keyed on the client id (spec §6.7) → skipped too.
+      expect(mocks.prisma.booking.findMany).not.toHaveBeenCalled()
       // Likes are keyed on userId, so they still run.
       expect(mocks.prisma.lookLike.findMany).toHaveBeenCalledTimes(1)
+    })
+
+    it('loads a per-pro relationship map from the viewer completed bookings (spec §6.7)', async () => {
+      const older = new Date('2026-05-01T12:00:00.000Z')
+      const newer = new Date('2026-06-20T12:00:00.000Z')
+      mocks.prisma.booking.findMany.mockResolvedValue([
+        // Two completed visits with pro_a; the reader keeps the latest instant.
+        { professionalId: 'pro_a', scheduledFor: newer, finishedAt: null },
+        {
+          professionalId: 'pro_a',
+          scheduledFor: older,
+          finishedAt: older,
+        },
+        { professionalId: 'pro_b', scheduledFor: older, finishedAt: null },
+      ])
+
+      const affinity = await loadPersonalizedAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      // Only COMPLETED bookings are queried (status filter is the reader's job).
+      expect(mocks.prisma.booking.findMany).toHaveBeenCalledTimes(1)
+      const signals = affinity.relationshipSignals
+      expect(signals?.get('pro_a')).toEqual({
+        lastVisitAt: newer,
+        completedVisits: 2,
+      })
+      expect(signals?.get('pro_b')).toEqual({
+        lastVisitAt: older,
+        completedVisits: 1,
+      })
     })
 
     it('time-decays like/save signals by age (spec §6.2)', async () => {
@@ -557,6 +594,36 @@ describe('lib/looks/personalizedFeed', () => {
       expect(page.meta.injectedCount).toBe(1)
       expect(page.meta.backboneCount).toBe(2)
       expect(page.meta.followedCount).toBe(1)
+    })
+
+    it('boosts a booked-pro look above a higher-rankScore peer and reports the §6.7 counts', async () => {
+      mocks.prisma.booking.findMany.mockResolvedValue([
+        {
+          professionalId: 'pro_booked',
+          scheduledFor: NOW,
+          finishedAt: NOW,
+        },
+      ])
+      // Backbone: a non-booked pro leads on rankScore; the booked pro trails.
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_other', professionalId: 'pro_other', rankScore: 8 }),
+        feedRow({ id: 'b_booked', professionalId: 'pro_booked', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // A recent booking out-pulls the +3 rankScore gap → the booked pro leads.
+      expect(page.items[0]?.id).toBe('b_booked')
+      expect(page.meta.relationshipProCount).toBe(1)
+      expect(page.meta.relationshipBoostedCount).toBe(1)
     })
 
     it('does not inject on a paginated continuation', async () => {
