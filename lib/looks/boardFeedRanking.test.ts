@@ -35,6 +35,7 @@ function ctx(overrides: Partial<BoardFeedContext> = {}): BoardFeedContext {
     tasteVector: overrides.tasteVector ?? null,
     tasteSignalCount: overrides.tasteSignalCount ?? 0,
     candidateEmbeddings: overrides.candidateEmbeddings ?? new Map(),
+    availabilitySignals: overrides.availabilitySignals ?? new Map(),
     seenLookIds: overrides.seenLookIds ?? new Set(),
     now: overrides.now ?? NOW,
   }

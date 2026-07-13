@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   PERSONALIZED_RANK_WEIGHTS,
+  computeAvailabilityBoost,
   computeCategorySuppressionPenalty,
   computePersonalizedFreshnessBoost,
   computePersonalizedScore,
@@ -11,6 +12,7 @@ import {
   rankPersonalizedRows,
   type PersonalizedRankableRow,
   type PersonalizedViewerAffinity,
+  type ProAvailabilitySignal,
 } from './personalizedRanking'
 
 const NOW = new Date('2026-07-04T12:00:00.000Z')
@@ -556,6 +558,95 @@ describe('lib/looks/personalizedRanking', () => {
         now: NOW,
       })
       expect(ranked.map((r) => r.id)).toEqual(['high', 'low'])
+    })
+  })
+
+  describe('computeAvailabilityBoost', () => {
+    const signal = (
+      overrides: Partial<ProAvailabilitySignal> = {},
+    ): ProAvailabilitySignal => ({
+      // `in` check so an explicit `nextOpeningDate: null` isn't collapsed to NOW.
+      nextOpeningDate:
+        'nextOpeningDate' in overrides ? overrides.nextOpeningDate ?? null : NOW,
+      fullness14d: overrides.fullness14d ?? 0,
+    })
+
+    it('is 0 for a missing signal or a null next-opening date', () => {
+      expect(computeAvailabilityBoost({ signal: null, now: NOW })).toBe(0)
+      expect(computeAvailabilityBoost({ signal: undefined, now: NOW })).toBe(0)
+      expect(
+        computeAvailabilityBoost({
+          signal: signal({ nextOpeningDate: null }),
+          now: NOW,
+        }),
+      ).toBe(0)
+    })
+
+    it('peaks for an opening today on a wide-open calendar', () => {
+      // soonScore 1 + openness 1 → full availabilityMax.
+      expect(
+        computeAvailabilityBoost({
+          signal: signal({ nextOpeningDate: NOW, fullness14d: 0 }),
+          now: NOW,
+        }),
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.availabilityMax, 5)
+    })
+
+    it('a fully-booked-but-opening-today pro earns only the soon half', () => {
+      // soonScore 1, openness 0 → half the max.
+      expect(
+        computeAvailabilityBoost({
+          signal: signal({ nextOpeningDate: NOW, fullness14d: 1 }),
+          now: NOW,
+        }),
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.availabilityMax * 0.5, 5)
+    })
+
+    it('decays as the next opening moves further out', () => {
+      const halfLifeMs =
+        PERSONALIZED_RANK_WEIGHTS.availabilitySoonHalfLifeDays *
+        24 *
+        60 *
+        60 *
+        1000
+      const soon = computeAvailabilityBoost({
+        signal: signal({ nextOpeningDate: new Date(NOW.getTime() + halfLifeMs) }),
+        now: NOW,
+      })
+      const far = computeAvailabilityBoost({
+        signal: signal({
+          nextOpeningDate: new Date(NOW.getTime() + 6 * halfLifeMs),
+        }),
+        now: NOW,
+      })
+      // soonScore at one half-life is 0.5 → (0.5*0.5 + 0.5*1) = 0.75 of max.
+      expect(soon).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.availabilityMax * 0.75, 5)
+      expect(far).toBeLessThan(soon)
+    })
+
+    it('adds into the personalized score, keyed by professionalId', () => {
+      const availabilitySignals = new Map<string, ProAvailabilitySignal>([
+        ['pro_open', signal({ nextOpeningDate: NOW, fullness14d: 0 })],
+      ])
+      const base = computePersonalizedScore(row({ professionalId: 'pro_none' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        availabilitySignals,
+      })
+      const boosted = computePersonalizedScore(
+        row({ professionalId: 'pro_open' }),
+        {
+          affinity: affinity(),
+          seenLookIds: EMPTY_SEEN,
+          now: NOW,
+          availabilitySignals,
+        },
+      )
+      expect(boosted - base).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.availabilityMax,
+        5,
+      )
     })
   })
 })

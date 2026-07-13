@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     boardItem: { findMany: vi.fn() },
     board: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
+    professionalAvailabilityStat: { findMany: vi.fn() },
     clientProfile: { findUnique: vi.fn() },
     // Raw-SQL surface for the pgvector store (taste vector + candidate
     // embeddings). Routed by SQL text in beforeEach; default returns nothing.
@@ -67,6 +68,7 @@ describe('lib/looks/personalizedFeed', () => {
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.board.findMany.mockResolvedValue([])
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
+    mocks.prisma.professionalAvailabilityStat.findMany.mockResolvedValue([])
     mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
     // No taste vector and no candidate embeddings by default.
     mocks.prisma.$queryRaw.mockResolvedValue([])

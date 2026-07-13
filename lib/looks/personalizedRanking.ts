@@ -18,6 +18,10 @@
 //                                 §6.0; tags retrieve, embeddings RANK within
 //                                 the candidates. Confidence-gated by how many
 //                                 signals built the taste vector)
+//         + availabilityBoost    (the look's pro has a real near-term opening and
+//                                 an un-booked-out calendar — spec §4.2/§4.4; a
+//                                 SOFT weight off the per-pro availability
+//                                 primitive, never a hard filter, guardrail #8)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
 //         - suppressionPenalty   (viewer keeps hiding this look's category — the
@@ -63,6 +67,19 @@ export const PERSONALIZED_RANK_WEIGHTS = {
   // is noisy — one outlier save can swing it — so it barely steers the feed
   // until the taste picture fills in (spec §6.0 "signal-weighted average").
   visualConfidenceFullSignals: 10,
+  // availability_boost (spec §4.2/§4.4): a pro with real open slots should
+  // outrank one booked out for weeks — a SOFT weight off the per-pro
+  // ProfessionalAvailabilityStat primitive (next opening + 14-day fullness),
+  // never a hard filter (guardrail #8). Peak sits below the category cap (15):
+  // calendar health nudges ordering within a rankScore band but never buries
+  // accumulated taste or a followed pro. Applied feed-wide today — every look
+  // links to a bookable pro and there is no inspiration/bookable split yet (spec
+  // §4.3, step 10) — so it stays modest, a tie-breaker rather than a directory sort.
+  availabilityMax: 12,
+  // Soonness half-life for the availability boost: an opening today scores ~1.0,
+  // ~7 days out ~0.5, decaying smoothly. Blended at equal weight with 14-day
+  // openness (1 - fullness) inside computeAvailabilityBoost.
+  availabilitySoonHalfLifeDays: 7,
   // Peak nudge for a brand-new look; decays with a 1-day half-life.
   freshnessMax: 6,
   freshnessHalfLifeDays: 1,
@@ -126,6 +143,17 @@ export type PersonalizedRankableRow = {
   tags?: ReadonlyArray<{ slug?: string | null }> | null
 }
 
+// Per-pro availability summary (spec §4.2/§4.4), read from ProfessionalAvailabilityStat
+// at serve time (lib/looks/availabilitySignal.ts). A pro absent from the map — no
+// row, i.e. no opening in the scan horizon — earns no availability boost. Kept a
+// plain data shape (no Prisma import) so the ranker stays pure.
+export type ProAvailabilitySignal = {
+  // Start-of-local-day UTC instant of the pro's next open day; null = no opening.
+  nextOpeningDate: Date | null
+  // Booked/capacity over the next 14 working days, [0, 1] (0 = wide open).
+  fullness14d: number
+}
+
 export type PersonalizedRankContext = {
   affinity: PersonalizedViewerAffinity
   seenLookIds: ReadonlySet<string>
@@ -135,6 +163,10 @@ export type PersonalizedRankContext = {
   // the map is not yet embedded → 0 visual boost. Optional/empty when the viewer
   // has no taste vector to compare against (the fetch is skipped entirely then).
   candidateEmbeddings?: ReadonlyMap<string, readonly number[]>
+  // Per-pro availability signals keyed by professionalId (spec §4.2/§4.4). Absent
+  // pro or empty map → no availability boost (byte-identical to the pre-primitive
+  // feed until the pro-availability-stats cron populates the table).
+  availabilitySignals?: ReadonlyMap<string, ProAvailabilitySignal>
 }
 
 function safeNumber(value: number): number {
@@ -233,6 +265,45 @@ export function computeVisualSimilarityBoost(args: {
 }
 
 /**
+ * Additive availability boost (spec §4.2/§4.4): rewards a pro with a real
+ * near-term opening and an un-booked-out calendar, so the bookable-feeling half
+ * of discovery leans toward pros a client can actually book soon.
+ *
+ *   availabilityMax × (0.5 × soonScore + 0.5 × openness)
+ *
+ * `soonScore` = 1 / (1 + daysUntilNextOpening / soonHalfLife) — 1.0 for an
+ * opening today, decaying smoothly (a pro booked out weeks trends toward 0).
+ * `openness` = clamp(1 − fullness14d, 0, 1) — 1.0 for a wide-open 14-day window,
+ * 0 for fully booked. A missing signal (no row = no opening in the horizon) or a
+ * missing/invalid next-opening date yields 0 — this is a SOFT weight, never a
+ * hard filter (guardrail #8). Pure + exported for unit testing.
+ */
+export function computeAvailabilityBoost(args: {
+  signal: ProAvailabilitySignal | null | undefined
+  now: Date
+}): number {
+  const { signal, now } = args
+  if (!signal) return 0
+
+  const nextOpening = signal.nextOpeningDate
+  if (
+    !(nextOpening instanceof Date) ||
+    Number.isNaN(nextOpening.getTime())
+  ) {
+    return 0
+  }
+
+  const daysUntil = Math.max(0, (nextOpening.getTime() - now.getTime()) / DAY_MS)
+  const soonScore =
+    1 / (1 + daysUntil / PERSONALIZED_RANK_WEIGHTS.availabilitySoonHalfLifeDays)
+
+  const openness = Math.min(Math.max(1 - safeNumber(signal.fullness14d), 0), 1)
+
+  const blended = Math.min(Math.max(0.5 * soonScore + 0.5 * openness, 0), 1)
+  return PERSONALIZED_RANK_WEIGHTS.availabilityMax * blended
+}
+
+/**
  * Category-suppression penalty from explicit hides (spec §2.2). Zero until the
  * decayed hide weight for the category crosses `hideCategoryThreshold` (so one
  * dismissed card doesn't suppress the category), then ramps linearly to
@@ -290,6 +361,13 @@ export function computePersonalizedScore(
     candidateEmbedding: context.candidateEmbeddings?.get(row.id),
   })
 
+  // §4.2/§4.4 availability_boost — a soft nudge toward pros with real near-term
+  // openings; 0 when the pro has no availability row (no opening in the horizon).
+  const availabilityBoost = computeAvailabilityBoost({
+    signal: context.availabilitySignals?.get(row.professionalId),
+    now: context.now,
+  })
+
   const freshnessBoost = computePersonalizedFreshnessBoost(
     row.publishedAt,
     context.now,
@@ -305,6 +383,7 @@ export function computePersonalizedScore(
     categoryBoost +
     occasionBoost +
     visualBoost +
+    availabilityBoost +
     freshnessBoost -
     seenPenalty -
     suppressionPenalty
