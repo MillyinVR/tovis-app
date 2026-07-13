@@ -624,6 +624,35 @@ describe('lib/looks/personalizedRanking', () => {
       expect(far).toBeLessThan(soon)
     })
 
+    it('scales by the session-intent weight multiplier', () => {
+      const s = signal({ nextOpeningDate: NOW, fullness14d: 0 })
+      const neutral = computeAvailabilityBoost({ signal: s, now: NOW })
+      const book = computeAvailabilityBoost({
+        signal: s,
+        now: NOW,
+        weightMultiplier: 1.75,
+      })
+      const dream = computeAvailabilityBoost({
+        signal: s,
+        now: NOW,
+        weightMultiplier: 0.5,
+      })
+      expect(book).toBeCloseTo(neutral * 1.75, 5)
+      expect(dream).toBeCloseTo(neutral * 0.5, 5)
+    })
+
+    it('treats a missing / non-finite / negative multiplier as neutral (1)', () => {
+      const s = signal({ nextOpeningDate: NOW, fullness14d: 0 })
+      const neutral = computeAvailabilityBoost({ signal: s, now: NOW })
+      for (const weightMultiplier of [undefined, Number.NaN, Infinity, -3]) {
+        const got = computeAvailabilityBoost({ signal: s, now: NOW, weightMultiplier })
+        // A negative multiplier clamps to 0 (never a NEGATIVE availability term);
+        // undefined / non-finite fall back to the neutral peak.
+        if (weightMultiplier === -3) expect(got).toBe(0)
+        else expect(got).toBeCloseTo(neutral, 5)
+      }
+    })
+
     it('adds into the personalized score, keyed by professionalId', () => {
       const availabilitySignals = new Map<string, ProAvailabilitySignal>([
         ['pro_open', signal({ nextOpeningDate: NOW, fullness14d: 0 })],

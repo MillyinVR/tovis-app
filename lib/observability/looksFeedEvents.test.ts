@@ -56,4 +56,41 @@ describe('logLooksFeedServe', () => {
     expect(payload.viewerHash).toHaveLength(16)
     expect(JSON.stringify(payload)).not.toContain('user_abc')
   })
+
+  it('carries the §4.3 composition fields when present, null otherwise', () => {
+    const spy = vi.spyOn(console, 'info').mockImplementation(() => {})
+
+    logLooksFeedServe({
+      cohort: 'personalized',
+      authed: true,
+      page: 'entry',
+      itemCount: 13,
+      userId: 'user_abc',
+      sessionIntent: 'book',
+      availabilityWeightMultiplier: 1.75,
+      explorationInjectedCount: 2,
+      bookableCount: 5,
+      inspirationCount: 8,
+    })
+
+    const withComposition = JSON.parse(spy.mock.calls[0]?.[0] as string)
+    expect(withComposition).toMatchObject({
+      sessionIntent: 'book',
+      availabilityWeightMultiplier: 1.75,
+      explorationInjectedCount: 2,
+      bookableCount: 5,
+      inspirationCount: 8,
+    })
+
+    // A serve that omits them logs explicit nulls (a chronological serve).
+    logLooksFeedServe({
+      cohort: 'recent',
+      authed: false,
+      page: 'entry',
+      itemCount: 4,
+    })
+    const withoutComposition = JSON.parse(spy.mock.calls[1]?.[0] as string)
+    expect(withoutComposition.sessionIntent).toBeNull()
+    expect(withoutComposition.explorationInjectedCount).toBeNull()
+  })
 })

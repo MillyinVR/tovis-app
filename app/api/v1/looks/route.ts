@@ -24,6 +24,7 @@ import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { attachLookBadges } from '@/lib/looks/badges/attach'
 import { personalizedFeedEnabled } from '@/lib/looks/personalizedFlag'
 import { buildPersonalizedFeedPage, parseSeenLookIds } from '@/lib/looks/personalizedFeed'
+import { parseSessionIntent } from '@/lib/looks/feedComposition'
 import { loadHiddenLookIds } from '@/lib/looks/hides'
 import {
   logLooksFeedServe,
@@ -157,6 +158,12 @@ export async function GET(req: Request) {
 
     if (usePersonalized && user) {
       const seenLookIds = parseSeenLookIds(searchParams.get('seen'))
+      // §4.3.2 session intent: an optional client hint (opened from an opening
+      // push → 'book'; repeated availability/pricing taps escalate the same way).
+      // Absent / unknown → 'default' (neutral lean), so today's requests are
+      // unchanged. Search intent lives on the non-personalized path (an explicit
+      // `q` bypasses the personalized feed entirely), so it isn't handled here.
+      const intent = parseSessionIntent(searchParams.get('intent'))
 
       const page = await buildPersonalizedFeedPage({
         tenant,
@@ -166,6 +173,7 @@ export async function GET(req: Request) {
         cursor,
         seenLookIds,
         now: new Date(),
+        intent,
       })
 
       items = page.items
@@ -317,6 +325,14 @@ export async function GET(req: Request) {
         personalizedMeta?.hiddenExcludedCount ?? chronoHiddenExcludedCount,
       categorySuppressionCount:
         personalizedMeta?.categorySuppressionCount ?? null,
+      // §4.3/§4.3.1/§4.3.2 composition (personalized cohort only).
+      sessionIntent: personalizedMeta?.sessionIntent ?? null,
+      availabilityWeightMultiplier:
+        personalizedMeta?.availabilityWeightMultiplier ?? null,
+      explorationInjectedCount:
+        personalizedMeta?.explorationInjectedCount ?? null,
+      bookableCount: personalizedMeta?.bookableCount ?? null,
+      inspirationCount: personalizedMeta?.inspirationCount ?? null,
       badgeEligibleCount: badgeResult.meta.eligibleCount,
       badgeShownCount: badgeResult.meta.shownCount,
       badgeHoldoutCount: badgeResult.meta.holdoutCount,

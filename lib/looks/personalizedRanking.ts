@@ -167,6 +167,10 @@ export type PersonalizedRankContext = {
   // pro or empty map → no availability boost (byte-identical to the pre-primitive
   // feed until the pro-availability-stats cron populates the table).
   availabilitySignals?: ReadonlyMap<string, ProAvailabilitySignal>
+  // Session-intent multiplier on the availability boost (spec §4.3/§4.3.2). >1
+  // leans the feed bookable-heavy, <1 inspiration-heavy. Absent → 1 (neutral),
+  // so a caller that doesn't shift by intent is byte-identical.
+  availabilityWeightMultiplier?: number
 }
 
 function safeNumber(value: number): number {
@@ -276,11 +280,19 @@ export function computeVisualSimilarityBoost(args: {
  * `openness` = clamp(1 − fullness14d, 0, 1) — 1.0 for a wide-open 14-day window,
  * 0 for fully booked. A missing signal (no row = no opening in the horizon) or a
  * missing/invalid next-opening date yields 0 — this is a SOFT weight, never a
- * hard filter (guardrail #8). Pure + exported for unit testing.
+ * hard filter (guardrail #8).
+ *
+ * `weightMultiplier` (spec §4.3/§4.3.2 session intent) scales the whole term: a
+ * booking-minded session (>1) leans the bookable-vs-inspiration blend toward
+ * pros with real openings; an idle-browse/dream session (<1) damps it so
+ * inspiration leads. Defaults to 1 (calibrated peak) — the board feed and every
+ * non-intent caller pass nothing, so their availability boost is unchanged.
+ * Pure + exported for unit testing.
  */
 export function computeAvailabilityBoost(args: {
   signal: ProAvailabilitySignal | null | undefined
   now: Date
+  weightMultiplier?: number
 }): number {
   const { signal, now } = args
   if (!signal) return 0
@@ -300,7 +312,12 @@ export function computeAvailabilityBoost(args: {
   const openness = Math.min(Math.max(1 - safeNumber(signal.fullness14d), 0), 1)
 
   const blended = Math.min(Math.max(0.5 * soonScore + 0.5 * openness, 0), 1)
-  return PERSONALIZED_RANK_WEIGHTS.availabilityMax * blended
+  const rawMultiplier = args.weightMultiplier
+  const multiplier =
+    typeof rawMultiplier === 'number' && Number.isFinite(rawMultiplier)
+      ? Math.max(0, rawMultiplier)
+      : 1
+  return PERSONALIZED_RANK_WEIGHTS.availabilityMax * blended * multiplier
 }
 
 /**
@@ -363,9 +380,11 @@ export function computePersonalizedScore(
 
   // §4.2/§4.4 availability_boost — a soft nudge toward pros with real near-term
   // openings; 0 when the pro has no availability row (no opening in the horizon).
+  // §4.3/§4.3.2: the session-intent multiplier leans the bookable/inspiration mix.
   const availabilityBoost = computeAvailabilityBoost({
     signal: context.availabilitySignals?.get(row.professionalId),
     now: context.now,
+    weightMultiplier: context.availabilityWeightMultiplier,
   })
 
   const freshnessBoost = computePersonalizedFreshnessBoost(
