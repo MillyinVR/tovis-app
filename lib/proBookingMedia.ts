@@ -41,6 +41,11 @@ export type ListProBookingMediaInput = {
 export type ListProBookingMediaSuccess = {
   ok: true
   items: ProBookingMediaItem[]
+  // Booking.mediaUseConsentAt — when set, the client granted media-use consent
+  // unlocking public sharing for the whole session's media (see
+  // lib/media/publicShareGuard.ts). Carried raw (Date | null) so the route can
+  // shape it to the wire boolean (`clientUseConsent`).
+  mediaUseConsentAt: Date | null
 }
 
 export type ListProBookingMediaFailure = {
@@ -74,6 +79,7 @@ export async function listProBookingMedia(
     select: {
       id: true,
       professionalId: true,
+      mediaUseConsentAt: true,
     },
   })
 
@@ -137,5 +143,5 @@ export async function listProBookingMedia(
     }),
   )
 
-  return { ok: true, items }
+  return { ok: true, items, mediaUseConsentAt: booking.mediaUseConsentAt }
 }

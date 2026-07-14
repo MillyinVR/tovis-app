@@ -9150,6 +9150,9 @@
     },
     "ProBookingMediaListResponseDTO": {
       "properties": {
+        "clientUseConsent": {
+          "type": "boolean"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/ProBookingMediaItemDTO"
@@ -9158,7 +9161,8 @@
         }
       },
       "required": [
-        "items"
+        "items",
+        "clientUseConsent"
       ],
       "type": "object"
     },

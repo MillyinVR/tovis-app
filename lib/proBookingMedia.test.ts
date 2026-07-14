@@ -27,6 +27,7 @@ import { listProBookingMedia, parseMediaPhase } from './proBookingMedia'
 const bookingRow = {
   id: 'booking_1',
   professionalId: 'pro_1',
+  mediaUseConsentAt: null as Date | null,
 }
 
 const mediaRow = {
@@ -118,7 +119,7 @@ describe('listProBookingMedia', () => {
 
     expect(mocks.prisma.booking.findUnique).toHaveBeenCalledWith({
       where: { id: 'booking_1' },
-      select: { id: true, professionalId: true },
+      select: { id: true, professionalId: true, mediaUseConsentAt: true },
     })
 
     expect(mocks.prisma.mediaAsset.findMany).toHaveBeenCalledWith({
@@ -141,6 +142,7 @@ describe('listProBookingMedia', () => {
 
     expect(outcome).toEqual({
       ok: true,
+      mediaUseConsentAt: null,
       items: [
         {
           ...mediaRow,
@@ -150,6 +152,26 @@ describe('listProBookingMedia', () => {
           thumbUrl: renderedUrls.renderThumbUrl,
         },
       ],
+    })
+  })
+
+  it('carries the booking media-use consent timestamp through to the outcome', async () => {
+    const consentAt = new Date('2026-04-13T12:00:00.000Z')
+    mocks.prisma.booking.findUnique.mockResolvedValue({
+      ...bookingRow,
+      mediaUseConsentAt: consentAt,
+    })
+    mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
+
+    const outcome = await listProBookingMedia({
+      bookingId: 'booking_1',
+      professionalId: 'pro_1',
+    })
+
+    expect(outcome).toEqual({
+      ok: true,
+      items: [],
+      mediaUseConsentAt: consentAt,
     })
   })
 
@@ -168,6 +190,6 @@ describe('listProBookingMedia', () => {
       }),
     )
 
-    expect(outcome).toEqual({ ok: true, items: [] })
+    expect(outcome).toEqual({ ok: true, items: [], mediaUseConsentAt: null })
   })
 })
