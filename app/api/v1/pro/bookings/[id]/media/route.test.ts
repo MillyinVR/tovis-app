@@ -85,6 +85,15 @@ const validSession = {
   mediaAssetId: null,
 }
 
+// A second presigned session for a video's poster frame (same booking/phase,
+// image content type) — what the iOS camera sends as `thumbUploadSessionId`.
+const thumbUploadSession = {
+  ...validSession,
+  id: 'us_thumb_1',
+  storagePath: 'bookings/booking_1/before/poster.jpg',
+  contentType: 'image/jpeg',
+}
+
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
   jsonFail: vi.fn(),
@@ -797,6 +806,7 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
         actorUserId: 'user_1',
         bookingId: 'booking_1',
         uploadSessionId: 'us_1',
+        thumbUploadSessionId: null,
         caption: 'Before photo',
         phase: MediaPhase.BEFORE,
         mediaType: MediaType.IMAGE,
@@ -942,6 +952,7 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
         actorUserId: 'user_1',
         bookingId: 'booking_1',
         uploadSessionId: 'us_1',
+        thumbUploadSessionId: null,
         caption: 'Before photo',
         phase: MediaPhase.BEFORE,
         mediaType: MediaType.IMAGE,
@@ -1008,6 +1019,160 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
       ok: true,
       ...expectedPostResponseBody,
     })
+  })
+
+  it('POST rejects thumbUploadSessionId equal to uploadSessionId before idempotency', async () => {
+    const result = await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_thumb_same_1',
+        body: { ...validBody, thumbUploadSessionId: 'us_1' },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'thumbUploadSessionId must be a separate upload.',
+    })
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.validateUploadSession).not.toHaveBeenCalled()
+  })
+
+  it('POST with a thumb session validates it, checks both objects, and stores the poster pointer', async () => {
+    mocks.validateUploadSession
+      .mockResolvedValueOnce(validSession)
+      .mockResolvedValueOnce(thumbUploadSession)
+
+    const result = await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_thumb_ok_1',
+        body: {
+          ...validBody,
+          mediaType: 'VIDEO',
+          thumbUploadSessionId: 'us_thumb_1',
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(200)
+
+    expect(mocks.validateUploadSession).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      {
+        uploadSessionId: 'us_thumb_1',
+        surface: 'PRO_BOOKING_MEDIA',
+        professionalId: 'pro_1',
+        bookingId: 'booking_1',
+        phase: MediaPhase.BEFORE,
+        now: expect.any(Date),
+      },
+    )
+
+    // Both the main object and the poster are verified in storage.
+    expect(mocks.createSignedUrl).toHaveBeenCalledTimes(2)
+
+    expect(mocks.uploadProBookingMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaType: MediaType.VIDEO,
+        thumbBucket: BUCKETS.mediaPrivate,
+        thumbPath: 'bookings/booking_1/before/poster.jpg',
+      }),
+    )
+
+    // Both sessions are consumed against the created asset.
+    expect(mocks.consumeUploadSession).toHaveBeenCalledTimes(2)
+    expect(mocks.consumeUploadSession).toHaveBeenLastCalledWith(
+      expect.anything(),
+      {
+        uploadSessionId: 'us_thumb_1',
+        mediaAssetId: 'media_1',
+        now: expect.any(Date),
+      },
+    )
+  })
+
+  it('POST rejects a thumb session that is not an image under the booking phase prefix', async () => {
+    mocks.validateUploadSession
+      .mockResolvedValueOnce(validSession)
+      .mockResolvedValueOnce({
+        ...thumbUploadSession,
+        contentType: 'video/quicktime',
+      })
+
+    const result = await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_thumb_bad_1',
+        body: { ...validBody, thumbUploadSessionId: 'us_thumb_1' },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Invalid thumbnail upload session.',
+    })
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/v1/pro/bookings/[id]/media',
+    })
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+  })
+
+  it('POST maps thumb-session validation errors and marks idempotency failed', async () => {
+    mocks.validateUploadSession
+      .mockResolvedValueOnce(validSession)
+      .mockRejectedValueOnce(
+        new UploadSessionError(
+          'EXPIRED',
+          'This upload session has expired. Please re-upload.',
+        ),
+      )
+
+    const result = await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_thumb_expired_1',
+        body: { ...validBody, thumbUploadSessionId: 'us_thumb_1' },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(
+      new UploadSessionError('EXPIRED', 'x').httpStatus,
+    )
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/v1/pro/bookings/[id]/media',
+    })
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+  })
+
+  it('POST returns 400 when the uploaded thumbnail object is missing', async () => {
+    mocks.validateUploadSession
+      .mockResolvedValueOnce(validSession)
+      .mockResolvedValueOnce(thumbUploadSession)
+
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+
+    const result = await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_thumb_missing_1',
+        body: { ...validBody, thumbUploadSessionId: 'us_thumb_1' },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Uploaded thumbnail not found in storage.',
+    })
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
   it('POST maps booking errors and marks idempotency failed', async () => {

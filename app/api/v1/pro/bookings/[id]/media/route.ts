@@ -266,6 +266,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     const body = (await req.json().catch(() => ({}))) as {
       uploadSessionId?: unknown
+      thumbUploadSessionId?: unknown
       caption?: unknown
       phase?: unknown
       mediaType?: unknown
@@ -275,6 +276,15 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     if (!uploadSessionId) {
       return jsonFail(400, 'Missing uploadSessionId.')
+    }
+
+    // Optional poster/thumbnail upload (a second presigned session — the iOS
+    // camera sends a poster frame alongside a recorded clip so video rows get
+    // a real thumbnail instead of falling back to the raw video URL).
+    const thumbUploadSessionId = pickString(body.thumbUploadSessionId)
+
+    if (thumbUploadSessionId && thumbUploadSessionId === uploadSessionId) {
+      return jsonFail(400, 'thumbUploadSessionId must be a separate upload.')
     }
 
     const phase = parseMediaPhase(body.phase)
@@ -310,6 +320,7 @@ export async function POST(req: Request, ctx: RouteContext) {
         actorUserId,
         bookingId,
         uploadSessionId,
+        thumbUploadSessionId,
         caption,
         phase,
         mediaType,
@@ -356,8 +367,58 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     const storageBucket = session.storageBucket
     const storagePath = session.storagePath
-    const thumbBucket: string | null = null
-    const thumbPath: string | null = null
+    let thumbBucket: string | null = null
+    let thumbPath: string | null = null
+
+    // Resolve the optional poster session the same way as the main one — the
+    // pointer comes from the UploadSession the signing route minted, never from
+    // the client. It must be an image in the same booking/phase prefix.
+    let thumbSession: Awaited<ReturnType<typeof validateUploadSession>> | null =
+      null
+
+    if (thumbUploadSessionId) {
+      try {
+        thumbSession = await validateUploadSession(prisma, {
+          uploadSessionId: thumbUploadSessionId,
+          surface: UploadSurface.PRO_BOOKING_MEDIA,
+          professionalId,
+          bookingId,
+          phase,
+          now: new Date(),
+        })
+      } catch (sessionError: unknown) {
+        await failStartedRouteIdempotency({
+          idempotencyRecordId,
+          operation: 'POST /api/v1/pro/bookings/[id]/media',
+        })
+        idempotencyRecordId = null
+
+        if (sessionError instanceof UploadSessionError) {
+          return jsonFail(sessionError.httpStatus, sessionError.message)
+        }
+        throw sessionError
+      }
+
+      if (
+        thumbSession.storageBucket !== SESSION_BUCKET ||
+        !mustStartWithBookingPhasePrefix(
+          thumbSession.storagePath,
+          bookingId,
+          phase,
+        ) ||
+        !thumbSession.contentType.startsWith('image/')
+      ) {
+        await failStartedRouteIdempotency({
+          idempotencyRecordId,
+          operation: 'POST /api/v1/pro/bookings/[id]/media',
+        })
+        idempotencyRecordId = null
+        return jsonFail(400, 'Invalid thumbnail upload session.')
+      }
+
+      thumbBucket = thumbSession.storageBucket
+      thumbPath = thumbSession.storagePath
+    }
 
     if (storageBucket !== SESSION_BUCKET) {
       await failStartedRouteIdempotency({
@@ -391,6 +452,20 @@ export async function POST(req: Request, ctx: RouteContext) {
       idempotencyRecordId = null
 
       return jsonFail(400, 'Uploaded file not found in storage.')
+    }
+
+    if (thumbBucket && thumbPath) {
+      const thumbExists = await objectExistsViaSignedUrl(thumbBucket, thumbPath)
+
+      if (!thumbExists) {
+        await failStartedRouteIdempotency({
+          idempotencyRecordId,
+          operation: 'POST /api/v1/pro/bookings/[id]/media',
+        })
+        idempotencyRecordId = null
+
+        return jsonFail(400, 'Uploaded thumbnail not found in storage.')
+      }
     }
 
     const result = await uploadProBookingMedia({
@@ -427,6 +502,23 @@ export async function POST(req: Request, ctx: RouteContext) {
       console.error('POST /api/v1/pro/bookings/[id]/media consume', {
         code: consumeError.code,
       })
+    }
+
+    if (thumbUploadSessionId) {
+      try {
+        await consumeUploadSession(prisma, {
+          uploadSessionId: thumbUploadSessionId,
+          mediaAssetId: result.created.id,
+          now: new Date(),
+        })
+      } catch (consumeError: unknown) {
+        if (!(consumeError instanceof UploadSessionError)) {
+          throw consumeError
+        }
+        console.error('POST /api/v1/pro/bookings/[id]/media thumb consume', {
+          code: consumeError.code,
+        })
+      }
     }
 
     const { renderUrl, renderThumbUrl } = await renderMediaUrls({
