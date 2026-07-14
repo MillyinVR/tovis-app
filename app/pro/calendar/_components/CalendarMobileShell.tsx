@@ -196,6 +196,7 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
               onDragStart={cal.drag.onDragStart}
               onDropOnDayColumn={cal.drag.onDropOnDayColumn}
               onBeginResize={cal.resize.beginResize}
+              onEdgePage={(direction) => (direction < 0 ? onBack() : onNext())}
               suppressClickRef={cal.ui.suppressClickRef}
               isBusy={cal.ui.isOverlayOpen}
             />

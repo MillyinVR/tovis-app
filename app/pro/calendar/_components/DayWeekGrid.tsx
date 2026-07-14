@@ -26,6 +26,8 @@ import {
 import { PX_PER_MINUTE } from '../_utils/calendarMath'
 import { DEFAULT_TIME_ZONE, isValidIanaTimeZone } from '@/lib/timeZone'
 
+import { useDragEdgePagination } from '../_hooks/useDragEdgePagination'
+
 import { DayColumn } from './_grid/DayColumn'
 import { DayHeaderRow } from './_grid/DayHeaderRow'
 import { NowLineOverlay } from './_grid/NowLineOverlay'
@@ -65,6 +67,12 @@ type DayWeekGridProps = {
     originalDuration: number
     columnTop: number
   }) => void
+  /**
+   * Cross-week drag: while a booking is dragged to the timeline's left/right edge
+   * in week view, paginate one week (−1 previous, +1 next) so it can be dropped on
+   * a day in another week. Omitted → no edge pagination (day/month views).
+   */
+  onEdgePage?: (direction: -1 | 1) => void
   suppressClickRef: MutableRefObject<boolean>
   isBusy: boolean
 }
@@ -276,9 +284,15 @@ export function DayWeekGrid(props: DayWeekGridProps) {
     onDragStart,
     onDropOnDayColumn,
     onBeginResize,
+    onEdgePage,
     suppressClickRef,
     isBusy,
   } = props
+
+  const { onDragOver: onEdgeDragOver } = useDragEdgePagination({
+    view,
+    onEdgePage,
+  })
 
   const isTimelineView = view === 'day' || view === 'week'
 
@@ -363,6 +377,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
         ref={scrollRef}
         className="brand-pro-calendar-timeline-scroll"
         data-calendar-scroll="timeline"
+        onDragOver={onEdgeDragOver}
       >
         <div
           className="brand-pro-calendar-timeline-surface"

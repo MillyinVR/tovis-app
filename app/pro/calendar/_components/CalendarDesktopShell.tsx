@@ -16,6 +16,7 @@ import type {
   ViewMode,
 } from '../_types'
 import type { CalendarData } from '../_hooks/useCalendarData'
+import { useCalendarNavigation } from '../_hooks/useCalendarNavigation'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 
 import { formatInTimeZone } from '@/lib/time'
@@ -446,6 +447,13 @@ function CalendarDesktopBody(props: CalendarDesktopBodyProps) {
     cal,
   } = props
 
+  // Cross-week drag paginates the week via the same nav the header buttons use.
+  const { goBack, goNext } = useCalendarNavigation({
+    view,
+    timeZone: calendarTimeZone,
+    setCurrentDate,
+  })
+
   return (
     <div className="brand-pro-calendar-desktop-content-inner">
       <div className="brand-pro-calendar-desktop-state-list">
@@ -476,6 +484,7 @@ function CalendarDesktopBody(props: CalendarDesktopBodyProps) {
           onDragStart={cal.drag.onDragStart}
           onDropOnDayColumn={cal.drag.onDropOnDayColumn}
           onBeginResize={cal.resize.beginResize}
+          onEdgePage={(direction) => (direction < 0 ? goBack() : goNext())}
           suppressClickRef={cal.ui.suppressClickRef}
           isBusy={cal.ui.isOverlayOpen}
         />
