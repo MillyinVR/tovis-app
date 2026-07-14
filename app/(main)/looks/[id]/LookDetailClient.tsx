@@ -23,6 +23,7 @@ import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/A
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
@@ -539,6 +540,10 @@ export default function LookDetailClient({
                       mediaType={asset.media.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'}
                       alt={asset.media.caption || 'Look asset'}
                       caption={asset.media.caption}
+                      focalPoint={resolveFocalPoint(
+                        asset.media.focalX,
+                        asset.media.focalY,
+                      )}
                       className="h-24 w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary"
                     />
                   ))}

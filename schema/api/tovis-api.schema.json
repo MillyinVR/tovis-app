@@ -6639,6 +6639,18 @@
     },
     "LooksBoardPreviewPrimaryMediaDto": {
       "properties": {
+        "focalX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -6662,7 +6674,9 @@
         "id",
         "url",
         "thumbUrl",
-        "mediaType"
+        "mediaType",
+        "focalX",
+        "focalY"
       ],
       "type": "object"
     },
@@ -7183,6 +7197,18 @@
         "createdAt": {
           "type": "string"
         },
+        "focalX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -7216,6 +7242,8 @@
         "mediaType",
         "caption",
         "createdAt",
+        "focalX",
+        "focalY",
         "review"
       ],
       "type": "object"
@@ -7364,6 +7392,18 @@
         "createdAt": {
           "type": "string"
         },
+        "focalX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -7486,6 +7526,8 @@
         "serviceName",
         "category",
         "serviceIds",
+        "focalX",
+        "focalY",
         "priceStartingAt",
         "uploadedByRole",
         "reviewId",
@@ -10980,6 +11022,18 @@
     },
     "PublicBoardLook": {
       "properties": {
+        "focalX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "href": {
           "type": "string"
         },
@@ -11000,7 +11054,9 @@
         "id",
         "name",
         "imageUrl",
-        "href"
+        "href",
+        "focalX",
+        "focalY"
       ],
       "type": "object"
     },

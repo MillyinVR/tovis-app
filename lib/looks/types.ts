@@ -98,6 +98,12 @@ export type LooksFeedItemDto = {
   category: string | null
   serviceIds: string[]
 
+  // Normalized subject focal point of the primary asset (camera C6), [0,1]
+  // top-left. Cover-cropped surfaces (the full-screen feed) center on it via
+  // CSS object-position; null = center (byte-identical to pre-C6).
+  focalX: number | null
+  focalY: number | null
+
   // Pro-set starting price for the look, surfaced on bookable discover tiles as
   // "from $X". Null when the look has no price tag (tiles fall back to "Book").
   priceStartingAt: number | null
@@ -151,6 +157,9 @@ export type LooksDetailMediaDto = {
   mediaType: MediaType
   caption: string | null
   createdAt: string
+  // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
+  focalX: number | null
+  focalY: number | null
   review: LooksDetailReviewDto | null
 }
 
@@ -349,6 +358,9 @@ export type LooksBoardPreviewPrimaryMediaDto = {
   url: string | null
   thumbUrl: string | null
   mediaType: MediaType
+  // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
+  focalX: number | null
+  focalY: number | null
 }
 
 export type LooksBoardPreviewLookPostDto = {

@@ -3941,6 +3941,15 @@ model MediaAsset {
   thumbUrl         String?
   mediaType        MediaType
   caption          String?
+  // Normalized focal point of the subject (a face, per C6) in the original,
+  // EXIF-corrected upright image — both in [0,1] from the TOP-LEFT origin. Lets
+  // cover-cropped surfaces (the full-screen Looks feed above all) center their
+  // visible window on the subject via CSS `object-position` / SwiftUI UnitPoint
+  // instead of the blind geometric center. Null = center = pre-C6 behavior, so
+  // legacy rows and every surface render byte-identically until a focal is set.
+  // Written at the media-confirm choke point (lib/media/recordMediaAsset.ts).
+  focalX           Float?
+  focalY           Float?
   createdAt        DateTime            @default(now())
   intentEvents     ClientIntentEvent[]
 

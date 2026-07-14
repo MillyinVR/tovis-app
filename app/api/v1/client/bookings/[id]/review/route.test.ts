@@ -818,6 +818,8 @@ describe('app/api/v1/client/bookings/[id]/review/route.ts POST', () => {
           thumbPath: null,
           url: null,
           thumbUrl: null,
+          focalX: null,
+          focalY: null,
           caption: null,
         },
       ],

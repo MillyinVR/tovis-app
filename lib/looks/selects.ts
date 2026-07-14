@@ -122,6 +122,10 @@ const looksMediaPreviewSelect =
     mediaType: true,
     caption: true,
     createdAt: true,
+    // Smart cover-crop focal point (camera C6) → object-position on cover-cropped
+    // surfaces (feed, board tiles). Null = center.
+    focalX: true,
+    focalY: true,
   })
 
 // The feed card's primary media additionally carries its opt-in before/after
@@ -147,6 +151,9 @@ const looksDetailMediaAssetSelect =
     mediaType: true,
     caption: true,
     createdAt: true,
+    // Smart cover-crop focal point (camera C6). Null = center.
+    focalX: true,
+    focalY: true,
 
     visibility: true,
     isEligibleForLooks: true,

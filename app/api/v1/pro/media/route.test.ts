@@ -474,6 +474,8 @@ describe('app/api/v1/pro/media/route.ts', () => {
         primaryServiceId: 'service_1',
         url: 'https://supabase.example/storage/v1/object/public/media-public/pros/pro_1/media_1.jpg',
         thumbUrl: null,
+        focalX: null,
+        focalY: null,
         caption: 'Portfolio upload',
         mediaType: MediaType.IMAGE,
         visibility: MediaVisibility.PUBLIC,

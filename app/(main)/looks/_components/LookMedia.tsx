@@ -4,6 +4,7 @@
 import type { FeedItem } from './lookTypes'
 import MediaFill from '@/app/_components/media/MediaFill'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 
 type FeedItemWithRender = FeedItem & {
   renderUrl?: string | null
@@ -56,12 +57,19 @@ export default function LookMedia({ item, isActive }: { item: FeedItemWithRender
     )
   }
 
+  // Smart 9:16 crop (camera C6): the feed is a full-screen cover crop, so a 3:4
+  // capture loses ~40% of its width blind-center. Center the visible window on
+  // the subject's focal point. Null → center. (Before/after reveal above stays
+  // center in v1 — a dual-image focal is ambiguous.)
+  const focalPoint = resolveFocalPoint(item.focalX, item.focalY)
+
   return (
     <MediaFill
       src={src}
       mediaType={mediaType}
       alt={item.caption || 'Look'}
       fit="cover"
+      focalPoint={focalPoint}
       videoProps={{
         muted: true,
         loop: true,

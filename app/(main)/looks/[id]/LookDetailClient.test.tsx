@@ -251,6 +251,8 @@ function makeDetailItem(): LooksDetailItemDto {
       mediaType: 'IMAGE',
       caption: 'Primary detail caption',
       createdAt: '2026-04-20T17:00:00.000Z',
+      focalX: null,
+      focalY: null,
       review: {
         id: 'review_1',
         rating: 5,
@@ -272,6 +274,8 @@ function makeDetailItem(): LooksDetailItemDto {
           mediaType: 'IMAGE',
           caption: 'Primary detail caption',
           createdAt: '2026-04-20T17:00:00.000Z',
+          focalX: null,
+          focalY: null,
           review: {
             id: 'review_1',
             rating: 5,
@@ -291,6 +295,8 @@ function makeDetailItem(): LooksDetailItemDto {
           mediaType: 'IMAGE',
           caption: 'Secondary detail caption',
           createdAt: '2026-04-20T17:05:00.000Z',
+          focalX: null,
+          focalY: null,
           review: null,
         },
       },

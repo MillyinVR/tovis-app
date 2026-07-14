@@ -34,6 +34,7 @@ import {
   type JsonObjectPayload,
 } from '@/app/api/_utils/jsonPayload'
 import { uploadProBookingMedia } from '@/lib/booking/writeBoundary'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -273,6 +274,8 @@ export async function POST(req: Request, ctx: RouteContext) {
       caption?: unknown
       phase?: unknown
       mediaType?: unknown
+      focalX?: unknown
+      focalY?: unknown
     }
 
     const uploadSessionId = pickString(body.uploadSessionId)
@@ -304,6 +307,14 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     const caption = safeCaption(body.caption)
 
+    // Optional normalized subject focal point (camera C6): [0,1] top-left, sent
+    // by the iOS capture path (C6b) so the Looks feed can smart-crop to the face.
+    // Lenient — a missing/invalid focal degrades to null (center), never a 400.
+    const focal = resolveFocalPoint(
+      typeof body.focalX === 'number' ? body.focalX : null,
+      typeof body.focalY === 'number' ? body.focalY : null,
+    )
+
     const { requestId } = readRequestMeta(req)
 
     // Idempotency is keyed on the upload session (not the storage pointer, which
@@ -327,6 +338,8 @@ export async function POST(req: Request, ctx: RouteContext) {
         caption,
         phase,
         mediaType,
+        focalX: focal?.x ?? null,
+        focalY: focal?.y ?? null,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -482,6 +495,8 @@ export async function POST(req: Request, ctx: RouteContext) {
       caption,
       phase,
       mediaType,
+      focalX: focal?.x ?? null,
+      focalY: focal?.y ?? null,
       requestId,
       idempotencyKey: req.headers.get('idempotency-key'),
     })

@@ -910,6 +910,9 @@ type UploadProBookingMediaArgs = {
   caption: string | null
   phase: MediaPhase
   mediaType: MediaType
+  // Normalized subject focal point (camera C6), [0,1] top-left. Null → center.
+  focalX?: number | null
+  focalY?: number | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -6920,6 +6923,8 @@ async function performLockedUploadProBookingMedia(args: {
   caption: string | null
   phase: MediaPhase
   mediaType: MediaType
+  focalX?: number | null
+  focalY?: number | null
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<UploadProBookingMediaResult> {
@@ -6992,6 +6997,9 @@ async function performLockedUploadProBookingMedia(args: {
         mediaType: args.mediaType,
         phase: args.phase,
         caption: args.caption,
+
+        focalX: args.focalX ?? null,
+        focalY: args.focalY ?? null,
 
         visibility: MediaVisibility.PRO_CLIENT,
       }),
@@ -13178,6 +13186,8 @@ export async function uploadProBookingMedia(
         caption: args.caption,
         phase: args.phase,
         mediaType: args.mediaType,
+        focalX: args.focalX ?? null,
+        focalY: args.focalY ?? null,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),

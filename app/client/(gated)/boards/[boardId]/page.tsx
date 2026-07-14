@@ -6,6 +6,7 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { getBoardDetail, getBoardErrorMeta } from '@/lib/boards'
+import { resolveFocalPoint, type FocalPoint } from '@/lib/media/focalPoint'
 import type { LooksBoardDetailDto, LooksBoardDetailItemDto } from '@/lib/looks/types'
 import { BOARD_TYPE_LABELS } from '@/lib/boards/context'
 import { BoardType } from '@prisma/client'
@@ -64,6 +65,12 @@ function boardImageUrl(item: LooksBoardDetailItemDto): string | null {
     item.lookPost?.primaryMedia?.url ??
     null
   )
+}
+
+// Smart cover-crop focal point (camera C6) for a board tile, or null → center.
+function boardImageFocal(item: LooksBoardDetailItemDto): FocalPoint | null {
+  const media = item.lookPost?.primaryMedia
+  return resolveFocalPoint(media?.focalX ?? null, media?.focalY ?? null)
 }
 
 function boardItemHref(_item: LooksBoardDetailItemDto): string {
@@ -192,6 +199,7 @@ export default async function ClientBoardDetailPage(props: {
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {board.items.map((item) => {
             const imageUrl = boardImageUrl(item)
+            const focalPoint = boardImageFocal(item)
             const itemHref = boardItemHref(item)
             const caption = item.lookPost?.caption?.trim() || board.name
 
@@ -213,6 +221,7 @@ export default async function ClientBoardDetailPage(props: {
                       width={300}
                       height={400}
                       className="absolute inset-0 h-full w-full object-cover"
+                      focalPoint={focalPoint}
                     />
                   ) : (
                     <div className="absolute inset-0 bg-gradient-to-br from-bgSurface to-bgPrimary" />

@@ -576,6 +576,8 @@ describe('app/api/v1/client/reviews/[id]/media/route.ts', () => {
         thumbPath: null,
         url: null,
         thumbUrl: null,
+        focalX: null,
+        focalY: null,
         mediaType: MediaType.IMAGE,
         caption: null,
         phase: MediaPhase.OTHER,

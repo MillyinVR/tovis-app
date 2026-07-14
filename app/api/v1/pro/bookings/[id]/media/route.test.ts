@@ -834,6 +834,8 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
         caption: 'Before photo',
         phase: MediaPhase.BEFORE,
         mediaType: MediaType.IMAGE,
+        focalX: null,
+        focalY: null,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -980,6 +982,8 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
         caption: 'Before photo',
         phase: MediaPhase.BEFORE,
         mediaType: MediaType.IMAGE,
+        focalX: null,
+        focalY: null,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -1013,6 +1017,8 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
       caption: 'Before photo',
       phase: MediaPhase.BEFORE,
       mediaType: MediaType.IMAGE,
+      focalX: null,
+      focalY: null,
       requestId: 'req_media_success_1',
       idempotencyKey: 'idem_media_success_1',
     })
@@ -1043,6 +1049,34 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
       ok: true,
       ...expectedPostResponseBody,
     })
+  })
+
+  it('POST threads a valid focal point (camera C6) through to the write boundary', async () => {
+    await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_focal_1',
+        body: { ...validBody, focalX: 0.42, focalY: 0.18 },
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.uploadProBookingMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ focalX: 0.42, focalY: 0.18 }),
+    )
+  })
+
+  it('POST drops an out-of-range focal to null (center) without failing the upload', async () => {
+    await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_focal_bad_1',
+        body: { ...validBody, focalX: 1.5, focalY: 0.5 },
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.uploadProBookingMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ focalX: null, focalY: null }),
+    )
   })
 
   it('POST rejects thumbUploadSessionId equal to uploadSessionId before idempotency', async () => {
