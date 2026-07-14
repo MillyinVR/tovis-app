@@ -128,6 +128,13 @@ export type ProBookingMediaItemDTO = {
 // GET — the list for a booking (optionally filtered by phase).
 export type ProBookingMediaListResponseDTO = {
   items: ProBookingMediaItemDTO[]
+  // True when the client has granted media-use consent for this session
+  // (`Booking.mediaUseConsentAt` is set) — i.e. the pro's publish action is
+  // unlocked for the whole session's media (alongside review-promotion; see
+  // lib/media/publicShareGuard.ts). Booking-scoped, not per-item: lets the pro
+  // see "client approved sharing ✓ / not yet" before a publish attempt fails
+  // the share guard, rather than only discovering consent at publish time.
+  clientUseConsent: boolean
 }
 
 // POST — the freshly-attached item plus the session step it advanced to (null

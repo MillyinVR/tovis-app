@@ -331,6 +331,7 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
     mocks.bookingFindUnique.mockResolvedValue({
       id: 'booking_1',
       professionalId: 'pro_1',
+      mediaUseConsentAt: null,
     })
 
     mocks.mediaAssetFindMany.mockResolvedValue([
@@ -486,7 +487,7 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
 
     expect(mocks.bookingFindUnique).toHaveBeenCalledWith({
       where: { id: 'booking_1' },
-      select: { id: true, professionalId: true },
+      select: { id: true, professionalId: true, mediaUseConsentAt: true },
     })
 
     expect(mocks.mediaAssetFindMany).toHaveBeenCalledWith({
@@ -513,6 +514,29 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
     await expect(result.json()).resolves.toEqual({
       ok: true,
       items: [expectedItem],
+      clientUseConsent: false,
+    })
+  })
+
+  it('GET reports clientUseConsent true when the booking has media-use consent', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      id: 'booking_1',
+      professionalId: 'pro_1',
+      mediaUseConsentAt: new Date('2026-04-13T12:00:00.000Z'),
+    })
+
+    const result = await GET(
+      makeGetRequest(
+        'http://localhost/api/v1/pro/bookings/booking_1/media?phase=BEFORE',
+      ),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      items: [expectedItem],
+      clientUseConsent: true,
     })
   })
 

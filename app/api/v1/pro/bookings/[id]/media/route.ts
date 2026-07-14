@@ -207,7 +207,10 @@ export async function GET(req: Request, ctx: RouteContext) {
     const items = outcome.items.map(toProBookingMediaItemDTO)
 
     return jsonOk(
-      { items } satisfies ProBookingMediaListResponseDTO,
+      {
+        items,
+        clientUseConsent: outcome.mediaUseConsentAt !== null,
+      } satisfies ProBookingMediaListResponseDTO,
       200,
     )
   } catch (error: unknown) {
