@@ -9,6 +9,7 @@ import { MonthGrid } from './MonthGrid'
 import { PendingRequestSurface } from './PendingRequestSurface'
 import { EditScheduleOverlay } from './EditScheduleOverlay'
 import type { CalendarData } from '../_hooks/useCalendarData'
+import { useCalendarNavigation } from '../_hooks/useCalendarNavigation'
 import type { ViewMode } from '../_types'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 
@@ -357,6 +358,13 @@ function TabletCalendarBody(props: TabletCalendarBodyProps) {
     cal,
   } = props
 
+  // Cross-week drag paginates the week via the same nav the header buttons use.
+  const { goBack, goNext } = useCalendarNavigation({
+    view,
+    timeZone: calendarTimeZone,
+    setCurrentDate,
+  })
+
   return (
     <section className="brand-pro-calendar-tablet-calendar-area">
       <div className="brand-pro-calendar-tablet-state-list">
@@ -387,6 +395,7 @@ function TabletCalendarBody(props: TabletCalendarBodyProps) {
           onDragStart={cal.drag.onDragStart}
           onDropOnDayColumn={cal.drag.onDropOnDayColumn}
           onBeginResize={cal.resize.beginResize}
+          onEdgePage={(direction) => (direction < 0 ? goBack() : goNext())}
           suppressClickRef={cal.ui.suppressClickRef}
           isBusy={cal.ui.isOverlayOpen}
         />
