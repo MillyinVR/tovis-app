@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import MediaLoading from '@/app/_components/media/MediaLoading'
+import { focalObjectPosition, type FocalPoint } from '@/lib/media/focalPoint'
 import { cn } from '@/lib/utils'
 
 type MediaType = 'IMAGE' | 'VIDEO'
@@ -24,6 +25,11 @@ type Props = {
   videoProps?: React.VideoHTMLAttributes<HTMLVideoElement> & Record<string, unknown>
   imgProps?: React.ImgHTMLAttributes<HTMLImageElement> & Record<string, unknown>
   showPlaceholder?: boolean
+  // Normalized subject focal point (camera C6), [0,1] top-left. With fit="cover"
+  // it becomes the image's `object-position` so the visible window centers on
+  // the subject instead of the geometric center. Null/undefined → center (the
+  // pre-C6 default), so it's byte-identical when no focal is supplied.
+  focalPoint?: FocalPoint | null
 }
 
 function isHttpUrl(value: unknown): value is string {
@@ -54,9 +60,14 @@ export default function MediaFill(props: Props) {
     videoProps,
     imgProps,
     showPlaceholder = true,
+    focalPoint,
   } = props
 
   const objectClass = fit === 'contain' ? 'object-contain' : 'object-cover'
+  // Only a cover crop has spare pixels to shift; a contain fit shows the whole
+  // frame, so a focal point is a no-op there.
+  const objectPosition =
+    fit === 'cover' ? focalObjectPosition(focalPoint) : undefined
   const directUrl = useMemo(() => (isHttpUrl(src) ? src : null), [src])
 
   const [resolvedMediaId, setResolvedMediaId] = useState<string | null>(null)
@@ -168,8 +179,16 @@ export default function MediaFill(props: Props) {
     sizes: _ignoredImgSizes,
     loading: _ignoredImgLoading,
     decoding: _ignoredImgDecoding,
+    style: imgStyle,
     ...safeImgProps
   } = imgProps ?? {}
+
+  // Merge the focal object-position over any caller style. When there's no focal
+  // AND no caller style, `mergedStyle` stays undefined → no style attribute →
+  // byte-identical to pre-C6.
+  const mergedStyle: React.CSSProperties | undefined = objectPosition
+    ? { ...imgStyle, objectPosition }
+    : imgStyle
 
   return (
     <Image
@@ -179,6 +198,7 @@ export default function MediaFill(props: Props) {
       sizes="100vw"
       draggable={false}
       className={cn(objectClass, className)}
+      style={mergedStyle}
       unoptimized
       {...safeImgProps}
     />

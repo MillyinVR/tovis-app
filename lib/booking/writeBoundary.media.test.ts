@@ -150,6 +150,8 @@ function expectMediaCreateCalledWith(args: {
       thumbPath: null,
       url: null,
       thumbUrl: null,
+      focalX: null,
+      focalY: null,
       caption: args.caption,
       phase: args.phase,
       mediaType: args.mediaType ?? MediaType.IMAGE,

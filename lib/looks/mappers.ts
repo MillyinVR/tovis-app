@@ -142,6 +142,9 @@ type StoredMediaShape = {
   mediaType: MediaType
   caption: string | null
   createdAt: Date
+  // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
+  focalX: number | null
+  focalY: number | null
 }
 
 type FeedPrimaryMediaShape = StoredMediaShape & {
@@ -394,6 +397,8 @@ async function mapStoredMediaToPreviewDto(
     url: rendered.url,
     thumbUrl: rendered.thumbUrl,
     mediaType: item.mediaType,
+    focalX: item.focalX ?? null,
+    focalY: item.focalY ?? null,
   }
 }
 
@@ -468,6 +473,9 @@ export async function mapLooksFeedMediaToDto(args: {
     serviceName: primaryService?.name ?? null,
     category: primaryService?.categoryName ?? null,
     serviceIds: resolvedPrimaryService.serviceIds,
+
+    focalX: primaryMedia.focalX ?? null,
+    focalY: primaryMedia.focalY ?? null,
 
     priceStartingAt: toFinitePrice(item.priceStartingAt),
 
@@ -665,6 +673,8 @@ function mapRenderableLooksDetailMediaToDto(input: {
   mediaType: MediaType
   caption: string | null
   createdAt: Date
+  focalX: number | null
+  focalY: number | null
   review: {
     id: string
     rating: number
@@ -680,6 +690,8 @@ function mapRenderableLooksDetailMediaToDto(input: {
     mediaType: input.mediaType,
     caption: input.caption ?? null,
     createdAt: input.createdAt.toISOString(),
+    focalX: input.focalX ?? null,
+    focalY: input.focalY ?? null,
     review: mapLooksDetailReviewToDto(input.review),
   }
 }

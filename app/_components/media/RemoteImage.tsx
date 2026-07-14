@@ -3,6 +3,7 @@
 
 import React from 'react'
 import Image from 'next/image'
+import { focalObjectPosition, type FocalPoint } from '@/lib/media/focalPoint'
 
 /**
  * The single place a raw <img> may live.
@@ -42,6 +43,11 @@ type RemoteImageProps = {
   loading?: 'lazy' | 'eager'
   draggable?: boolean
   style?: React.CSSProperties
+  // Normalized subject focal point (camera C6), [0,1] top-left. When the caller
+  // renders a cover crop (an `object-cover` className) it becomes the image's
+  // `object-position` so the crop centers on the subject. Null/undefined →
+  // center (byte-identical to pre-C6).
+  focalPoint?: FocalPoint | null
   onLoad?: React.ReactEventHandler<HTMLImageElement>
   onError?: React.ReactEventHandler<HTMLImageElement>
 }
@@ -62,9 +68,17 @@ export default function RemoteImage(props: RemoteImageProps) {
     loading,
     draggable,
     style,
+    focalPoint,
     onLoad,
     onError,
   } = props
+
+  // Merge the focal object-position over any caller style. No focal + no caller
+  // style → `mergedStyle` stays undefined → no style attribute (byte-identical).
+  const objectPosition = focalObjectPosition(focalPoint)
+  const mergedStyle: React.CSSProperties | undefined = objectPosition
+    ? { ...style, objectPosition }
+    : style
 
   const mustRenderRaw =
     intrinsic ||
@@ -79,7 +93,7 @@ export default function RemoteImage(props: RemoteImageProps) {
         src={src}
         alt={alt}
         className={className}
-        style={style}
+        style={mergedStyle}
         width={width}
         height={height}
         draggable={draggable}
@@ -99,7 +113,7 @@ export default function RemoteImage(props: RemoteImageProps) {
       height={height}
       sizes={sizes}
       className={className}
-      style={style}
+      style={mergedStyle}
       draggable={draggable}
       loading={loading}
       onLoad={onLoad}

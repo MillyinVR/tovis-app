@@ -294,6 +294,8 @@ function makeFeedItem(
     serviceName: 'Fade',
     category: 'Hair',
     serviceIds: ['service_1'],
+    focalX: null,
+    focalY: null,
     priceStartingAt: null,
     before: null,
     tags: [],

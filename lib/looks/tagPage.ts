@@ -17,6 +17,9 @@ export type LookTagTile = {
   id: string
   caption: string | null
   thumbUrl: string | null
+  // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
+  focalX: number | null
+  focalY: number | null
 }
 
 export type LookTagPageData = {
@@ -35,6 +38,8 @@ const tileMediaSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
   url: true,
   storageBucket: true,
   storagePath: true,
+  focalX: true,
+  focalY: true,
 })
 
 export async function loadLookTagPage(args: {
@@ -77,6 +82,8 @@ export async function loadLookTagPage(args: {
         id: row.id,
         caption: row.caption,
         thumbUrl: rendered.renderThumbUrl ?? rendered.renderUrl ?? null,
+        focalX: media.focalX ?? null,
+        focalY: media.focalY ?? null,
       }
     }),
   )

@@ -16,6 +16,9 @@ export type PublicBoardLook = {
   name: string
   imageUrl: string | null
   href: string
+  // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
+  focalX: number | null
+  focalY: number | null
 }
 
 export type PublicBoardData = {
@@ -94,6 +97,8 @@ export async function loadPublicBoard(
                   thumbPath: true,
                   url: true,
                   thumbUrl: true,
+                  focalX: true,
+                  focalY: true,
                 },
               },
             },
@@ -126,6 +131,8 @@ export async function loadPublicBoard(
         name: lookNameFromCaption(lookPost.caption),
         imageUrl: renderThumbUrl ?? renderUrl,
         href: `/looks/${encodeURIComponent(lookPost.id)}`,
+        focalX: lookPost.primaryMediaAsset.focalX ?? null,
+        focalY: lookPost.primaryMediaAsset.focalY ?? null,
       }
     }),
   )

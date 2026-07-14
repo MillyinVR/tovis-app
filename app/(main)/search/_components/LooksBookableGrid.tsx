@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { formatRoundedDollars } from '@/lib/money'
@@ -214,6 +215,7 @@ export default function LooksBookableGrid({
                       width={300}
                       height={400}
                       className="h-full w-full object-cover"
+                      focalPoint={resolveFocalPoint(look.focalX, look.focalY)}
                       loading="lazy"
                     />
 

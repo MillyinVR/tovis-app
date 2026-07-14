@@ -61,6 +61,12 @@ export type MediaAssetWriteInput = {
   thumbUrl?: string | null
   caption?: string | null
 
+  // Normalized focal point of the subject (a face) in the EXIF-corrected upright
+  // image, both in [0,1] from the top-left origin (camera C6). Drives the smart
+  // cover-crop on the Looks feed. Omit / null → center (byte-identical to pre-C6).
+  focalX?: number | null
+  focalY?: number | null
+
   // Optional, schema-defaulted fields.
   phase?: MediaPhase
   isEligibleForLooks?: boolean
@@ -142,6 +148,9 @@ export function buildMediaAssetCreateData(
 
     url: input.url ?? null,
     thumbUrl: input.thumbUrl ?? null,
+
+    focalX: input.focalX ?? null,
+    focalY: input.focalY ?? null,
 
     mediaType: input.mediaType,
     caption: input.caption ?? null,

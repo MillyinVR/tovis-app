@@ -272,6 +272,11 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
             .filter((value): value is string => value !== null)
         : [],
 
+      // Smart cover-crop focal (camera C6). Tolerant of absence (older payloads
+      // → null → center); out-of-range values are re-validated at render.
+      focalX: pickNumber(item.focalX),
+      focalY: pickNumber(item.focalY),
+
       priceStartingAt: pickNumber(item.priceStartingAt),
 
       before: parsePairedBefore(item.before),
@@ -439,6 +444,9 @@ function parseLooksDetailMedia(raw: unknown): LooksDetailMediaDto | null {
     mediaType,
     caption,
     createdAt,
+    // Smart cover-crop focal (camera C6). Tolerant of absence → null → center.
+    focalX: pickNumber(raw.focalX),
+    focalY: pickNumber(raw.focalY),
     review,
   }
 }

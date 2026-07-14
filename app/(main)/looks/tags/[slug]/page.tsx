@@ -8,6 +8,7 @@ import { notFound } from 'next/navigation'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { loadLookTagPage } from '@/lib/looks/tagPage'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
@@ -85,6 +86,7 @@ export default async function LookTagPage({
                   width={400}
                   height={500}
                   className="h-full w-full object-cover transition hover:opacity-90"
+                  focalPoint={resolveFocalPoint(tile.focalX, tile.focalY)}
                 />
               ) : null}
             </Link>

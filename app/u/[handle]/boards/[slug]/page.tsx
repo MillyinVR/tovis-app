@@ -7,6 +7,7 @@ import { Role } from '@prisma/client'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { getBrandConfig } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/currentUser'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { loadPublicBoard } from '@/lib/boards/publicBoard'
 
 export const dynamic = 'force-dynamic'
@@ -134,6 +135,7 @@ export default async function PublicBoardPage({
                       width={300}
                       height={400}
                       className="absolute inset-0 h-full w-full object-cover"
+                      focalPoint={resolveFocalPoint(look.focalX, look.focalY)}
                     />
                   ) : (
                     <div className="absolute inset-0 bg-gradient-to-br from-bgSurface to-bgPrimary" />

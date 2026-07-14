@@ -70,6 +70,8 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
       thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
       storageBucket: 'media-public',
       storagePath: 'looks/media_1.jpg',
+      focalX: null,
+      focalY: null,
       thumbBucket: 'media-public',
       thumbPath: 'looks/media_1-thumb.jpg',
       mediaType: MediaType.IMAGE,
@@ -157,6 +159,8 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
       thumbUrl: 'https://cdn.example.com/detail-thumb.jpg',
       storageBucket: 'media-public',
       storagePath: 'looks/detail.jpg',
+      focalX: null,
+      focalY: null,
       thumbBucket: 'media-public',
       thumbPath: 'looks/detail-thumb.jpg',
       mediaType: MediaType.IMAGE,
@@ -187,6 +191,8 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
           thumbUrl: 'https://cdn.example.com/detail-thumb.jpg',
           storageBucket: 'media-public',
           storagePath: 'looks/detail.jpg',
+          focalX: null,
+          focalY: null,
           thumbBucket: 'media-public',
           thumbPath: 'looks/detail-thumb.jpg',
           mediaType: MediaType.IMAGE,
@@ -246,6 +252,8 @@ function makeBoardPreviewRow(
             thumbUrl: 'https://cdn.example.com/look-thumb.jpg',
             storageBucket: 'media-public',
             storagePath: 'looks/look.jpg',
+            focalX: null,
+            focalY: null,
             thumbBucket: 'media-public',
             thumbPath: 'looks/look-thumb.jpg',
             mediaType: MediaType.IMAGE,
@@ -294,6 +302,8 @@ function makeBoardDetailRow(
             thumbUrl: 'https://cdn.example.com/look-2-thumb.jpg',
             storageBucket: 'media-public',
             storagePath: 'looks/look-2.jpg',
+            focalX: null,
+            focalY: null,
             thumbBucket: 'media-public',
             thumbPath: 'looks/look-2-thumb.jpg',
             mediaType: MediaType.IMAGE,
@@ -319,6 +329,8 @@ function makeBoardDetailRow(
             thumbUrl: 'https://cdn.example.com/look-thumb.jpg',
             storageBucket: 'media-public',
             storagePath: 'looks/look.jpg',
+            focalX: null,
+            focalY: null,
             thumbBucket: 'media-public',
             thumbPath: 'looks/look-thumb.jpg',
             mediaType: MediaType.IMAGE,
@@ -405,6 +417,8 @@ describe('lib/looks/mappers.ts', () => {
         serviceName: null,
         category: null,
         serviceIds: ['service_1'],
+        focalX: null,
+        focalY: null,
         priceStartingAt: null,
         before: null,
         tags: [],
@@ -457,6 +471,8 @@ describe('lib/looks/mappers.ts', () => {
         serviceName: 'Fade',
         category: 'Hair',
         serviceIds: ['service_1'],
+        focalX: null,
+        focalY: null,
         priceStartingAt: null,
         before: null,
         tags: [],
@@ -468,6 +484,22 @@ describe('lib/looks/mappers.ts', () => {
       })
 
       expect(mocks.renderMediaUrls).not.toHaveBeenCalled()
+    })
+
+    it('carries the primary asset focal point onto the feed DTO (camera C6)', async () => {
+      const row = makeFeedRow()
+      row.primaryMediaAsset.focalX = 0.42
+      row.primaryMediaAsset.focalY = 0.18
+
+      const result = await mapLooksFeedMediaToDto({
+        item: row,
+        viewerLiked: false,
+        viewerSaved: false,
+        viewerFollows: false,
+      })
+
+      expect(result?.focalX).toBe(0.42)
+      expect(result?.focalY).toBe(0.18)
     })
 
     it('converts a pro-set Decimal price into a finite number on the DTO', async () => {
@@ -554,6 +586,8 @@ describe('lib/looks/mappers.ts', () => {
           thumbUrl: null,
           storageBucket: 'media-public',
           storagePath: 'looks/media_1.jpg',
+          focalX: null,
+          focalY: null,
           thumbBucket: 'media-public',
           thumbPath: 'looks/media_1-thumb.jpg',
           mediaType: MediaType.IMAGE,
@@ -593,6 +627,8 @@ describe('lib/looks/mappers.ts', () => {
           thumbUrl: null,
           storageBucket: 'media-public',
           storagePath: 'looks/media_1.jpg',
+          focalX: null,
+          focalY: null,
           thumbBucket: 'media-public',
           thumbPath: 'looks/media_1-thumb.jpg',
           mediaType: MediaType.IMAGE,
@@ -1051,6 +1087,8 @@ describe('lib/looks/mappers.ts', () => {
           thumbUrl: null,
           storageBucket: 'media-public',
           storagePath: 'looks/detail.jpg',
+          focalX: null,
+          focalY: null,
           thumbBucket: 'media-public',
           thumbPath: 'looks/detail-thumb.jpg',
           mediaType: MediaType.IMAGE,
@@ -1081,6 +1119,8 @@ describe('lib/looks/mappers.ts', () => {
               thumbUrl: null,
               storageBucket: 'media-public',
               storagePath: 'looks/detail.jpg',
+              focalX: null,
+              focalY: null,
               thumbBucket: 'media-public',
               thumbPath: 'looks/detail-thumb.jpg',
               mediaType: MediaType.IMAGE,
@@ -1271,6 +1311,8 @@ describe('lib/looks/mappers.ts', () => {
           mediaType: MediaType.IMAGE,
           caption: 'Primary detail caption',
           createdAt: '2026-04-18T10:30:00.000Z',
+          focalX: null,
+          focalY: null,
           review: {
             id: 'review_1',
             rating: 5,
@@ -1292,6 +1334,8 @@ describe('lib/looks/mappers.ts', () => {
               mediaType: MediaType.IMAGE,
               caption: 'Primary detail caption',
               createdAt: '2026-04-18T10:30:00.000Z',
+              focalX: null,
+              focalY: null,
               review: {
                 id: 'review_1',
                 rating: 5,
@@ -1387,6 +1431,8 @@ describe('lib/looks/mappers.ts', () => {
                 url: 'https://cdn.example.com/look.jpg',
                 thumbUrl: 'https://cdn.example.com/look-thumb.jpg',
                 mediaType: MediaType.IMAGE,
+                focalX: null,
+                focalY: null,
               },
             },
           },
@@ -1430,6 +1476,8 @@ describe('lib/looks/mappers.ts', () => {
                 url: 'https://cdn.example.com/look-2.jpg',
                 thumbUrl: 'https://cdn.example.com/look-2-thumb.jpg',
                 mediaType: MediaType.IMAGE,
+                focalX: null,
+                focalY: null,
               },
             },
           },
@@ -1449,6 +1497,8 @@ describe('lib/looks/mappers.ts', () => {
                 url: 'https://cdn.example.com/look.jpg',
                 thumbUrl: 'https://cdn.example.com/look-thumb.jpg',
                 mediaType: MediaType.IMAGE,
+                focalX: null,
+                focalY: null,
               },
             },
           },

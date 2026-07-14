@@ -4,6 +4,7 @@
 import React, { useState } from 'react'
 import MediaFill from '@/app/_components/media/MediaFill'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
+import { type FocalPoint } from '@/lib/media/focalPoint'
 import { cn } from '@/lib/utils'
 
 type MediaType = 'IMAGE' | 'VIDEO'
@@ -16,6 +17,13 @@ type Props = {
   mediaType: MediaType
   alt?: string
   caption?: string | null
+
+  /**
+   * Normalized subject focal point (camera C6) for the cover-cropped thumbnail,
+   * [0,1] top-left. Null/undefined → center. The full-screen viewer is `contain`,
+   * so the focal only affects the thumbnail.
+   */
+  focalPoint?: FocalPoint | null
 
   /** How the thumbnail fills its box. Default `cover`. */
   fit?: 'cover' | 'contain'
@@ -42,6 +50,7 @@ export default function ClickableMedia({
   mediaType,
   alt,
   caption,
+  focalPoint,
   fit = 'cover',
   className,
   children,
@@ -90,6 +99,7 @@ export default function ClickableMedia({
           mediaType={mediaType}
           alt={alt || 'Media'}
           fit={fit}
+          focalPoint={focalPoint}
           className="absolute inset-0 h-full w-full"
           videoProps={{
             muted: true,
