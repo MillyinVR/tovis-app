@@ -868,6 +868,57 @@ describe('lib/looks/personalizedFeed', () => {
       expect(page.meta.conversionBoostedCount).toBe(0)
     })
 
+    it('lifts a reliable pro over a frequent canceller and reports the §4.2 reliability count', async () => {
+      // No availability rows (default) → nobody is bookable → the underbooked
+      // on-ramp is gated OFF, isolating the reliability term. pro_reliable: 20/20
+      // completed → full-ish boost. pro_flaky: 12/20 (60%) → below the 0.75 floor
+      // → no lift.
+      mocks.prisma.professionalBadgeStat.findMany.mockResolvedValue([
+        {
+          professionalId: 'pro_reliable',
+          completedBookingCount30d: 20,
+          resolvedBookingCount: 20,
+          completedResolvedCount: 20,
+        },
+        {
+          professionalId: 'pro_flaky',
+          completedBookingCount30d: 20,
+          resolvedBookingCount: 20,
+          completedResolvedCount: 12,
+        },
+      ])
+      // Backbone: the flaky pro leads on rankScore; the reliable pro trails.
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_flaky', professionalId: 'pro_flaky', rankScore: 8 }),
+        feedRow({ id: 'b_reliable', professionalId: 'pro_reliable', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // The reliability boost (~+5.2) out-pulls the +3 rankScore gap → reliable leads.
+      expect(page.items[0]?.id).toBe('b_reliable')
+      // Only the reliable pro clears the floor; the canceller earns nothing.
+      expect(page.meta.reliabilityBoostedCount).toBe(1)
+      // The reliability reader queries the badge-stat table with its OWN select
+      // (distinct from the underbooked read on the same table).
+      expect(mocks.prisma.professionalBadgeStat.findMany).toHaveBeenCalledWith({
+        where: { professionalId: { in: ['pro_flaky', 'pro_reliable'] } },
+        select: {
+          professionalId: true,
+          resolvedBookingCount: true,
+          completedResolvedCount: true,
+        },
+      })
+    })
+
     it('does not inject on a paginated continuation', async () => {
       mocks.prisma.proFollow.findMany.mockResolvedValue([
         { professionalId: 'pro_followed' },

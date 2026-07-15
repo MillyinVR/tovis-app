@@ -2608,6 +2608,16 @@ model ProfessionalBadgeStat {
   // numerator/denominator, stored as counts so the rate math stays in code.
   servedClientCount        Int @default(0)
   rebookedClientCount      Int @default(0)
+  // Booking follow-through (spec §4.2 pro_reliability). resolvedBookingCount =
+  // bookings in the trailing 180 days that reached an outcome the pro is
+  // accountable for — COMPLETED or CANCELLED. completedResolvedCount = the
+  // COMPLETED subset. NO_SHOW is DELIBERATELY excluded from both: it is client
+  // behaviour, not the pro's reliability, so it must not down-rank the pro. The
+  // completion rate (completedResolvedCount / resolvedBookingCount) is
+  // Bayesian-smoothed into the ranking boost, so counts live here and the rate
+  // math stays in personalizedRanking.ts.
+  resolvedBookingCount     Int @default(0)
+  completedResolvedCount   Int @default(0)
 
   computedAt DateTime
 

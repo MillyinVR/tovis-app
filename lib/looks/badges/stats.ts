@@ -1,11 +1,12 @@
 // lib/looks/badges/stats.ts
 //
 // ProfessionalBadgeStat refresh — the hourly aggregate behind the stat-derived
-// badges (spec §5.2 urgency + social proof). Three grouped queries over
-// Booking, merged in code and swapped in atomically (the same replace-contents
-// pattern as lib/looks/categoryRankStats.ts). Only pros with at least one
-// non-zero count get a row — a missing row reads as all-zero at serve time,
-// so skipping the zeros keeps the table proportional to ACTIVE pros.
+// badges (spec §5.2 urgency + social proof) AND the §4.2 bookable-score ranking
+// terms (underbooked fairness on-ramp + pro_reliability). Four grouped queries
+// over Booking, merged in code and swapped in atomically (the same
+// replace-contents pattern as lib/looks/categoryRankStats.ts). Only pros with at
+// least one non-zero count get a row — a missing row reads as all-zero at serve
+// time, so skipping the zeros keeps the table proportional to ACTIVE pros.
 //
 // Window semantics (documented here because the labels must stay honest):
 // - recentBookingCount: bookings CREATED in the trailing 48h, any status but
@@ -16,15 +17,32 @@
 // - servedClientCount / rebookedClientCount: distinct clients with >=1
 //   COMPLETED booking scheduled in the trailing 180 days, and the subset who
 //   completed >=2 in that window. The rate is computed at read time.
+// - resolvedBookingCount / completedResolvedCount (spec §4.2 pro_reliability):
+//   bookings SCHEDULED in the trailing 180 days that reached an outcome the pro
+//   is accountable for — COMPLETED or CANCELLED — and the COMPLETED subset. The
+//   completion rate (completed / resolved) is Bayesian-smoothed into the ranking
+//   boost at read time. NO_SHOW is DELIBERATELY excluded from both counts: it is
+//   client behaviour, not the pro's reliability, and must not down-rank the pro
+//   (cancellations are not split by initiating party — attribution lives only in
+//   notification event keys, not on Booking — so this is a booking-completion
+//   proxy, kept a modest, smoothed soft weight per the §4.2 "burns client trust"
+//   guardrail).
 
 import type { PrismaClient } from '@prisma/client'
 
-import type { ProUnderbookedSignal } from '@/lib/looks/personalizedRanking'
+import type {
+  ProReliabilitySignal,
+  ProUnderbookedSignal,
+} from '@/lib/looks/personalizedRanking'
 
 export const PRO_BADGE_STAT_WINDOWS = {
   recentBookingHours: 48,
   completedBookingDays: 30,
   rebookWindowDays: 180,
+  // Reliability samples a slow, stable trait, so it uses the SAME 180-day span as
+  // the rebook window (the refresh already scans that far back). Named separately
+  // so the window can be tuned without touching rebook semantics.
+  reliabilityWindowDays: 180,
 } as const
 
 export type ProBadgeStatCountRow = {
@@ -38,12 +56,20 @@ export type ProBadgeStatRebookRow = {
   rebookedClientCount: number
 }
 
+export type ProBadgeStatReliabilityRow = {
+  professionalId: string
+  resolvedBookingCount: number
+  completedResolvedCount: number
+}
+
 export type ProfessionalBadgeStatInput = {
   professionalId: string
   recentBookingCount: number
   completedBookingCount30d: number
   servedClientCount: number
   rebookedClientCount: number
+  resolvedBookingCount: number
+  completedResolvedCount: number
 }
 
 /**
@@ -54,6 +80,7 @@ export function mergeProfessionalBadgeStatRows(args: {
   recent: readonly ProBadgeStatCountRow[]
   completed30d: readonly ProBadgeStatCountRow[]
   rebook: readonly ProBadgeStatRebookRow[]
+  reliability: readonly ProBadgeStatReliabilityRow[]
 }): ProfessionalBadgeStatInput[] {
   const byPro = new Map<string, ProfessionalBadgeStatInput>()
 
@@ -66,6 +93,8 @@ export function mergeProfessionalBadgeStatRows(args: {
       completedBookingCount30d: 0,
       servedClientCount: 0,
       rebookedClientCount: 0,
+      resolvedBookingCount: 0,
+      completedResolvedCount: 0,
     }
     byPro.set(professionalId, created)
     return created
@@ -82,7 +111,19 @@ export function mergeProfessionalBadgeStatRows(args: {
     entry.servedClientCount = row.servedClientCount
     entry.rebookedClientCount = row.rebookedClientCount
   }
+  for (const row of args.reliability) {
+    const entry = ensure(row.professionalId)
+    entry.resolvedBookingCount = row.resolvedBookingCount
+    entry.completedResolvedCount = row.completedResolvedCount
+  }
 
+  // Keep-filter is INTENTIONALLY unchanged: a pro known ONLY from the reliability
+  // window (e.g. one cancellation, no completions) has no completed/served/recent
+  // count, so they are dropped — and the reliability boost is 0 for an absent pro
+  // anyway (the boost gates on resolvedBookingCount > 0 and only ever LIFTS, so a
+  // dropped all-cancel pro earns exactly what a stored one would). Any pro
+  // reliable enough to boost has COMPLETED bookings → a non-zero served/completed
+  // count → is kept.
   return Array.from(byPro.values()).filter(
     (row) =>
       row.recentBookingCount > 0 ||
@@ -111,8 +152,12 @@ export async function refreshProfessionalBadgeStats(
     now.getTime() -
       PRO_BADGE_STAT_WINDOWS.rebookWindowDays * 24 * 60 * 60 * 1000,
   )
+  const reliabilitySince = new Date(
+    now.getTime() -
+      PRO_BADGE_STAT_WINDOWS.reliabilityWindowDays * 24 * 60 * 60 * 1000,
+  )
 
-  const [recent, completed30d, rebook] = await Promise.all([
+  const [recent, completed30d, rebook, reliability] = await Promise.all([
     db.$queryRaw<ProBadgeStatCountRow[]>`
       SELECT b."professionalId" AS "professionalId", COUNT(*)::int AS "count"
       FROM "Booking" b
@@ -145,9 +190,33 @@ export async function refreshProfessionalBadgeStats(
       ) per
       GROUP BY per."professionalId"
     `,
+    // Reliability (spec §4.2 pro_reliability): per pro, bookings scheduled in the
+    // trailing 180 days that RESOLVED to an accountable outcome — COMPLETED or
+    // CANCELLED — and the COMPLETED subset. NO_SHOW is excluded (client
+    // behaviour, not the pro's reliability). Grouping over these statuses means a
+    // pro with no resolved bookings simply has no reliability row (0/0).
+    db.$queryRaw<ProBadgeStatReliabilityRow[]>`
+      SELECT
+        b."professionalId" AS "professionalId",
+        COUNT(*)::int AS "resolvedBookingCount",
+        (COUNT(*) FILTER (WHERE b."status" = 'COMPLETED'::"BookingStatus"))::int
+          AS "completedResolvedCount"
+      FROM "Booking" b
+      WHERE b."scheduledFor" >= ${reliabilitySince}
+        AND b."status" IN (
+          'COMPLETED'::"BookingStatus",
+          'CANCELLED'::"BookingStatus"
+        )
+      GROUP BY b."professionalId"
+    `,
   ])
 
-  const rows = mergeProfessionalBadgeStatRows({ recent, completed30d, rebook })
+  const rows = mergeProfessionalBadgeStatRows({
+    recent,
+    completed30d,
+    rebook,
+    reliability,
+  })
 
   await db.$transaction([
     db.professionalBadgeStat.deleteMany({}),
@@ -203,6 +272,69 @@ export async function fetchProUnderbookedSignals(
   for (const row of rows) {
     map.set(row.professionalId, {
       completedBookingCount30d: row.completedBookingCount30d,
+    })
+  }
+  return map
+}
+
+/**
+ * The exact ProfessionalBadgeStat read the reliability serve-time reader needs,
+ * expressed structurally so both PrismaClient and a plain test mock satisfy it
+ * without a type escape (the ProUnderbookedReaderDb pattern).
+ */
+export type ProReliabilityReaderDb = {
+  professionalBadgeStat: {
+    findMany(args: {
+      where: { professionalId: { in: string[] } }
+      select: {
+        professionalId: true
+        resolvedBookingCount: true
+        completedResolvedCount: true
+      }
+    }): PromiseLike<
+      Array<{
+        professionalId: string
+        resolvedBookingCount: number
+        completedResolvedCount: number
+      }>
+    >
+  }
+}
+
+/**
+ * Serve-time reader for the §4.2 pro_reliability boost: the recent
+ * completed/resolved booking counts for a page's pros, keyed by professionalId.
+ * A pro without a row is simply ABSENT from the map — the reliability boost gates
+ * on resolvedBookingCount > 0 (no resolved bookings → no evidence → no lift), so
+ * an absent pro reads as "no reliability signal", NOT "reliable by default".
+ *
+ * Reads the SAME ProfessionalBadgeStat table as fetchProUnderbookedSignals but as
+ * its OWN indexed IN-list, kept deliberately separate so the two orthogonal §4.2
+ * terms stay independently gated (a caller can wire one without the other, and
+ * each is byte-identical until its cron column populates). Both run inside one
+ * Promise.all, so the extra round-trip adds no wall-clock latency.
+ */
+export async function fetchProReliabilitySignals(
+  db: ProReliabilityReaderDb,
+  professionalIds: readonly string[],
+): Promise<Map<string, ProReliabilitySignal>> {
+  const ids = [...new Set(professionalIds)].filter((id) => id.length > 0)
+  if (ids.length === 0) return new Map()
+
+  const rows = await db.professionalBadgeStat.findMany({
+    where: { professionalId: { in: ids } },
+    select: {
+      professionalId: true,
+      resolvedBookingCount: true,
+      completedResolvedCount: true,
+    },
+  })
+
+  const map = new Map<string, ProReliabilitySignal>()
+  for (const row of rows) {
+    map.set(row.professionalId, {
+      resolvedBookingCount: row.resolvedBookingCount,
+      completedResolvedCount: row.completedResolvedCount,
     })
   }
   return map

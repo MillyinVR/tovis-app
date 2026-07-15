@@ -44,6 +44,14 @@
 //                                 rewards "content that fills chairs" — a Bayesian-
 //                                 smoothed bookings-per-(saves+views) rate, off unless
 //                                 the look has actually driven a booking)
+//         + reliabilityBoost     (a trust lift for a pro who SEES BOOKINGS THROUGH —
+//                                 spec §4.2 pro_reliability. A pro who frequently
+//                                 cancels burns the client's trust in the platform,
+//                                 so a high completed-vs-cancelled follow-through
+//                                 rate earns a modest per-pro lift; a Bayesian-
+//                                 smoothed completion rate above a floor, off unless
+//                                 the pro has resolved bookings to grade. NO_SHOW is
+//                                 excluded — that is client behaviour, not the pro's)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
 //         - suppressionPenalty   (viewer keeps hiding this look's category — the
@@ -171,6 +179,37 @@ export const PERSONALIZED_RANK_WEIGHTS = {
   // peak) yet reachable. A look converting ~1 booking per 25 interest-events tops
   // out; a heavily-exposed, rarely-booked look stays near 0. Tunable.
   conversionTargetRate: 0.04,
+  // pro_reliability (spec §4.2): a modest per-pro TRUST lift for a pro who sees
+  // bookings through — a high completed-vs-cancelled follow-through rate. "Boosting
+  // a pro who cancels burns the client's trust in the platform," so an unreliable
+  // pro forgoes this lift (a soft relative penalty), while a reliable one surfaces
+  // a touch higher. The SMALLEST bookable-score term — below conversion (8) and
+  // well under accumulated taste (category cap 15) / a followed (25) / booked (30)
+  // pro — because the guardrail is explicit that reliability is a modest, smoothed
+  // weight, never a hard filter or a directory sort (over-penalizing a pro for
+  // CLIENT-side cancels would burn trust in the other direction). Orthogonal to the
+  // REBOOK_RATE badge (that grades loyalty — do clients return; this grades
+  // follow-through — do appointments happen). NOT availability-gated (a trust
+  // signal, like conversion, not a calendar-health floor like underbooked).
+  reliabilityMax: 6,
+  // Bayesian prior for the completion rate (spec §4.1 rate-smoothing applied to
+  // §4.2). A pro's raw completed/(completed+cancelled) is regressed toward this
+  // typical rate until they accrue enough resolved bookings, so a pro who cancelled
+  // their one-and-only booking isn't nuked and one lucky completion isn't rewarded
+  // as flawless. `rate` 0.9 = most resolved bookings complete; cancellations are the
+  // exception. `strength` 10 = a pro needs ~10 resolved bookings before their own
+  // rate dominates the prior. Both tunable + dark until the pro-badge-stats cron
+  // populates the reliability columns.
+  reliabilityPriorRate: 0.9,
+  reliabilityPriorStrength: 10,
+  // Completion-rate floor below which the reliability boost is 0: the realized
+  // boost is reliabilityMax × clamp((smoothedRate − floor) / (1 − floor), 0, 1), so
+  // a pro cancelling more than ~1 in 4 resolved bookings (smoothed rate < 0.75)
+  // earns nothing, a typical ~0.9 pro earns ~60% of the max, and a near-perfect pro
+  // approaches the peak. Differentiates the genuinely reliable from the average
+  // without harshly penalizing thin evidence (the prior + strength keep small
+  // samples near neutral). Tunable.
+  reliabilityFloorRate: 0.75,
   // Peak nudge for a brand-new look; decays with a 1-day half-life.
   freshnessMax: 6,
   freshnessHalfLifeDays: 1,
@@ -277,6 +316,20 @@ export type ProUnderbookedSignal = {
   completedBookingCount30d: number
 }
 
+// Per-pro booking follow-through summary (spec §4.2 pro_reliability), keyed by
+// professionalId and read from ProfessionalBadgeStat at serve time
+// (lib/looks/badges/stats.ts). A pro ABSENT from the map has no reliability row —
+// no resolved bookings in the window — so the boost is 0 (no evidence), NOT
+// "reliable by default". Plain data shape (no Prisma import) so the ranker stays
+// pure.
+export type ProReliabilitySignal = {
+  // COMPLETED + CANCELLED bookings in the trailing 180 days (the completion-rate
+  // denominator; NO_SHOW is excluded — client behaviour, not pro reliability).
+  resolvedBookingCount: number
+  // The COMPLETED subset (the numerator).
+  completedResolvedCount: number
+}
+
 // Per-LOOK booking-conversion summary (spec §4.2 booking_conversion_rate), keyed
 // by lookPostId and read from LookPostConversionStat at serve time
 // (lib/looks/conversionStats.ts). A look ABSENT from the map has no conversion
@@ -324,6 +377,15 @@ export type PersonalizedRankContext = {
   // no attributed bookings → boost 0. Keyed by look id (like candidateEmbeddings),
   // fetched for the re-ranked candidate set only.
   conversionSignals?: ReadonlyMap<string, LookConversionSignal>
+  // Per-pro booking-reliability signals keyed by professionalId (spec §4.2
+  // pro_reliability), for the follow-through trust boost. ABSENT (undefined) → the
+  // term is off entirely (byte-identical to the pre-reliability feed; unit tests +
+  // non-personalized callers omit it). PRESENT but a pro missing from it → no
+  // reliability row → no resolved bookings → boost 0 (no evidence). Read from the
+  // same ProfessionalBadgeStat aggregate as underbookedSignals but independently
+  // gated. NOT availability-gated — reliability is a trust signal, not a
+  // calendar-health floor.
+  reliabilitySignals?: ReadonlyMap<string, ProReliabilitySignal>
 }
 
 function safeNumber(value: number): number {
@@ -618,6 +680,65 @@ export function computeBookingConversionBoost(args: {
 }
 
 /**
+ * Additive per-pro reliability boost (spec §4.2 pro_reliability): rewards a pro
+ * who sees bookings through to completion, so a pro who reliably shows up surfaces
+ * a touch higher and a frequent canceller forgoes the lift (a soft relative
+ * penalty — "boosting a pro who cancels burns the client's trust in the platform").
+ *
+ *   reliabilityMax × clamp((smoothedRate − floorRate) / (1 − floorRate), 0, 1)
+ *
+ * `smoothedRate` = (completed + priorRate × priorStrength) / (resolved +
+ * priorStrength) — the Bayesian-smoothed completion rate, so a pro who cancelled
+ * their one-and-only booking isn't nuked and one lucky completion isn't rewarded as
+ * flawless; as resolved bookings accrue the pro's own rate takes over. `resolved`
+ * counts COMPLETED + CANCELLED bookings; NO_SHOW is already excluded upstream (it
+ * is client behaviour). Below `floorRate` the boost is 0, so only a genuinely
+ * reliable pro (smoothed completion above the floor) earns anything.
+ *
+ * GATED on resolvedBookingCount > 0: a pro with no resolved bookings has NO
+ * reliability evidence and earns exactly 0 — NOT smoothed toward the prior (that
+ * would hand every unknown pro a spurious lift). The refresh only writes counts for
+ * pros with resolved bookings, so an absent pro reads {0,0} here → 0. Deliberately
+ * ORTHOGONAL to the other bookable-score terms and the REBOOK_RATE badge:
+ * underbooked grades a pro's booking VOLUME, availability FORWARD openness,
+ * conversion a LOOK's booking efficiency, and REBOOK_RATE loyalty (do clients
+ * return); this grades FOLLOW-THROUGH (do committed appointments actually happen).
+ * A missing/non-finite count is treated as 0. Pure + exported for unit testing.
+ */
+export function computeProReliabilityBoost(args: {
+  resolvedBookingCount: number
+  completedResolvedCount: number
+}): number {
+  const resolved = Number.isFinite(args.resolvedBookingCount)
+    ? Math.max(0, args.resolvedBookingCount)
+    : 0
+  if (resolved <= 0) return 0
+
+  const completed = Number.isFinite(args.completedResolvedCount)
+    ? Math.max(0, Math.min(args.completedResolvedCount, resolved))
+    : 0
+
+  const {
+    reliabilityPriorRate,
+    reliabilityPriorStrength,
+    reliabilityFloorRate,
+    reliabilityMax,
+  } = PERSONALIZED_RANK_WEIGHTS
+  const smoothedRate =
+    (completed + reliabilityPriorRate * reliabilityPriorStrength) /
+    (resolved + reliabilityPriorStrength)
+
+  const span = 1 - reliabilityFloorRate
+  const score =
+    span > 0
+      ? Math.min(Math.max((smoothedRate - reliabilityFloorRate) / span, 0), 1)
+      : 0
+  if (score <= 0) return 0
+
+  return reliabilityMax * score
+}
+
+/**
  * Category-suppression penalty from explicit hides (spec §2.2). Zero until the
  * decayed hide weight for the category crosses `hideCategoryThreshold` (so one
  * dismissed card doesn't suppress the category), then ramps linearly to
@@ -720,6 +841,19 @@ export function computePersonalizedScore(
       )
     : 0
 
+  // §4.2 pro_reliability — a soft per-pro trust lift for a pro who sees bookings
+  // through (high completed-vs-cancelled follow-through). Off entirely unless the
+  // caller wired reliabilitySignals (byte-identical otherwise). A pro absent from
+  // the map has no reliability row → {0,0} → boost 0 (the gate is inside the fn).
+  const reliabilityBoost = context.reliabilitySignals
+    ? computeProReliabilityBoost(
+        context.reliabilitySignals.get(row.professionalId) ?? {
+          resolvedBookingCount: 0,
+          completedResolvedCount: 0,
+        },
+      )
+    : 0
+
   const freshnessBoost = computePersonalizedFreshnessBoost(
     row.publishedAt,
     context.now,
@@ -739,6 +873,7 @@ export function computePersonalizedScore(
     relationshipBoost +
     underbookedBoost +
     conversionBoost +
+    reliabilityBoost +
     freshnessBoost -
     seenPenalty -
     suppressionPenalty
