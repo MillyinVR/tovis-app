@@ -46,6 +46,7 @@ import {
   type TasteVectorSignal,
 } from '@/lib/personalization/tasteVectorMath'
 import {
+  computeBookingConversionBoost,
   computeUnderbookedProBoost,
   rankPersonalizedRows,
   type PersonalizedViewerAffinity,
@@ -53,6 +54,7 @@ import {
 } from '@/lib/looks/personalizedRanking'
 import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
 import { fetchProUnderbookedSignals } from '@/lib/looks/badges/stats'
+import { fetchLookConversionSignals } from '@/lib/looks/conversionStats'
 import {
   completedVisitInstant,
   fetchClientBookingSignals,
@@ -671,6 +673,12 @@ export type PersonalizedFeedPage = {
     // populated yet, or every displayed pro is either unbookable or established.
     // The §9 "is the fairness floor reaching new/underbooked pros" metric.
     underbookedBoostedCount: number
+    // §4.2 booking_conversion_rate: how many of the DISPLAYED page's looks
+    // received a non-zero conversion boost (the look has driven >=1 booking).
+    // 0 = the look-conversion-stats cron hasn't populated yet, or no displayed
+    // look has converted. The §9 "is the feed surfacing content that fills
+    // chairs, not just pretty content" metric.
+    conversionBoostedCount: number
   }
 }
 
@@ -854,15 +862,27 @@ export async function buildPersonalizedFeedPage(args: {
   // (the under-discovery grade) is loaded in one indexed IN-list read, and the
   // bookability gate reuses `availabilitySignals` (no extra query). Empty until
   // the pro-badge-stats cron populates the table — byte-identical until then.
+  // §4.2 booking_conversion_rate reads the per-LOOK conversion aggregate for the
+  // RE-RANKED candidate set (by look id, like candidateEmbeddings — exploration
+  // rows are placed by quality, not re-ranked, so they don't need it). One indexed
+  // IN-list read; empty until the look-conversion-stats cron populates the table.
   const displayedRows = [...candidateRows, ...explorationRows]
   const displayedProIds = displayedRows.map((row) => row.professionalId)
-  const [availabilitySignals, underbookedSignals] =
+  const [availabilitySignals, underbookedSignals, conversionSignals] =
     displayedRows.length > 0
       ? await Promise.all([
           fetchProAvailabilitySignals(prisma, displayedProIds),
           fetchProUnderbookedSignals(prisma, displayedProIds),
+          fetchLookConversionSignals(
+            prisma,
+            candidateRows.map((row) => row.id),
+          ),
         ])
-      : [new Map<string, never>(), new Map<string, never>()]
+      : [
+          new Map<string, never>(),
+          new Map<string, never>(),
+          new Map<string, never>(),
+        ]
 
   const rankedItems = rankPersonalizedRows(candidateRows, {
     affinity,
@@ -874,6 +894,8 @@ export async function buildPersonalizedFeedPage(args: {
     availabilityWeightMultiplier: plan.availabilityWeightMultiplier,
     // §4.2/§4.5 underbooked fairness on-ramp (gated on availability presence).
     underbookedSignals,
+    // §4.2 booking_conversion_rate — per-look "fills chairs" quality lift.
+    conversionSignals,
   })
 
   // §4.3.1: interleave the reserved exploration slice into the re-ranked page.
@@ -890,6 +912,8 @@ export async function buildPersonalizedFeedPage(args: {
   let relationshipBoostedCount = 0
   // §4.2/§4.5 fairness metric: displayed looks the underbooked on-ramp lifted.
   let underbookedBoostedCount = 0
+  // §4.2 conversion metric: displayed looks the booking-conversion boost lifted.
+  let conversionBoostedCount = 0
   const relationshipSignals = affinity.relationshipSignals
   for (const row of items) {
     if (availabilitySignals.has(row.professionalId)) bookableCount += 1
@@ -903,6 +927,16 @@ export async function buildPersonalizedFeedPage(args: {
       }) > 0
     ) {
       underbookedBoostedCount += 1
+    }
+    if (
+      computeBookingConversionBoost(
+        conversionSignals.get(row.id) ?? {
+          bookingCount: 0,
+          interestCount: 0,
+        },
+      ) > 0
+    ) {
+      conversionBoostedCount += 1
     }
   }
 
@@ -930,6 +964,7 @@ export async function buildPersonalizedFeedPage(args: {
       relationshipProCount: relationshipSignals?.size ?? 0,
       relationshipBoostedCount,
       underbookedBoostedCount,
+      conversionBoostedCount,
     },
   }
 }

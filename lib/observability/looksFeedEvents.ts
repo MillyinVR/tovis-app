@@ -73,6 +73,10 @@ export type LooksFeedServeEvent = {
   // looks lifted by the on-ramp (bookable AND still under-discovered pro) — the
   // "is the fairness floor reaching new/underbooked pros" metric (spec §9).
   underbookedBoostedCount?: number | null
+  // §4.2 booking_conversion_rate (personalized cohort only): displayed looks
+  // lifted by the conversion boost (the look has driven >=1 booking) — the "is the
+  // feed surfacing content that fills chairs, not just pretty content" metric.
+  conversionBoostedCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -124,6 +128,7 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     relationshipProCount: input.relationshipProCount ?? null,
     relationshipBoostedCount: input.relationshipBoostedCount ?? null,
     underbookedBoostedCount: input.underbookedBoostedCount ?? null,
+    conversionBoostedCount: input.conversionBoostedCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

@@ -98,6 +98,10 @@
       "schedule": "25 * * * *"
     },
     {
+      "path": "/api/internal/jobs/look-conversion-stats",
+      "schedule": "40 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/event-countdown",
       "schedule": "5 10 * * *"
     },

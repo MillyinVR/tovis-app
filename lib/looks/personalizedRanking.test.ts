@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PERSONALIZED_RANK_WEIGHTS,
   computeAvailabilityBoost,
+  computeBookingConversionBoost,
   computeCategorySuppressionPenalty,
   computePersonalizedFreshnessBoost,
   computePersonalizedScore,
@@ -12,6 +13,7 @@ import {
   computeVisualSimilarityBoost,
   cosineSimilarity,
   rankPersonalizedRows,
+  type LookConversionSignal,
   type PersonalizedRankableRow,
   type PersonalizedViewerAffinity,
   type ProAvailabilitySignal,
@@ -912,6 +914,129 @@ describe('lib/looks/personalizedRanking', () => {
         PERSONALIZED_RANK_WEIGHTS.availabilityMax,
         5,
       )
+    })
+  })
+
+  describe('computeBookingConversionBoost (§4.2)', () => {
+    it('is 0 for a look with no attributed booking (no conversion evidence)', () => {
+      expect(
+        computeBookingConversionBoost({ bookingCount: 0, interestCount: 0 }),
+      ).toBe(0)
+      // Even a heavily-exposed look earns nothing until it drives a booking —
+      // the gate is bookingCount > 0, NOT a prior-smoothed baseline.
+      expect(
+        computeBookingConversionBoost({ bookingCount: 0, interestCount: 5_000 }),
+      ).toBe(0)
+    })
+
+    it('caps at conversionMax for a highly efficient converter', () => {
+      // Low exposure, several bookings → smoothed rate above the target → full boost.
+      expect(
+        computeBookingConversionBoost({ bookingCount: 10, interestCount: 5 }),
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.conversionMax, 5)
+    })
+
+    it('stays near 0 for a heavily-saved but rarely-booked "pretty" look', () => {
+      // 1 booking on 2,000 interest — the exact failure mode the term guards
+      // against — earns only a sliver of the max.
+      const boost = computeBookingConversionBoost({
+        bookingCount: 1,
+        interestCount: 2_000,
+      })
+      expect(boost).toBeGreaterThan(0)
+      expect(boost).toBeLessThan(PERSONALIZED_RANK_WEIGHTS.conversionMax * 0.1)
+    })
+
+    it('regresses a thin-evidence lucky conversion toward the prior', () => {
+      // 1 booking / 1 save is raw rate 1.0, but Bayesian smoothing pulls it far
+      // below the full boost until real exposure accrues.
+      const thin = computeBookingConversionBoost({
+        bookingCount: 1,
+        interestCount: 1,
+      })
+      expect(thin).toBeLessThan(PERSONALIZED_RANK_WEIGHTS.conversionMax)
+      // Matches the closed-form smoothed rate → target ramp.
+      const {
+        conversionPriorRate,
+        conversionPriorStrength,
+        conversionTargetRate,
+        conversionMax,
+      } = PERSONALIZED_RANK_WEIGHTS
+      const smoothed =
+        (1 + conversionPriorRate * conversionPriorStrength) /
+        (1 + conversionPriorStrength)
+      expect(thin).toBeCloseTo(
+        conversionMax * Math.min(smoothed / conversionTargetRate, 1),
+        5,
+      )
+    })
+
+    it('rises monotonically as exposure shrinks for a fixed booking count', () => {
+      const wide = computeBookingConversionBoost({
+        bookingCount: 3,
+        interestCount: 400,
+      })
+      const mid = computeBookingConversionBoost({
+        bookingCount: 3,
+        interestCount: 100,
+      })
+      const tight = computeBookingConversionBoost({
+        bookingCount: 3,
+        interestCount: 20,
+      })
+      expect(mid).toBeGreaterThan(wide)
+      expect(tight).toBeGreaterThan(mid)
+    })
+
+    it('treats a non-finite / negative interest as 0 exposure', () => {
+      for (const interestCount of [Number.NaN, Infinity, -100]) {
+        expect(
+          computeBookingConversionBoost({ bookingCount: 4, interestCount }),
+        ).toBeCloseTo(
+          computeBookingConversionBoost({ bookingCount: 4, interestCount: 0 }),
+          5,
+        )
+      }
+    })
+
+    it('is off entirely in computePersonalizedScore when the caller omits conversionSignals', () => {
+      const conversionSignals = new Map<string, LookConversionSignal>([
+        ['look_hi', { bookingCount: 8, interestCount: 10 }],
+      ])
+      const withConversion = computePersonalizedScore(row({ id: 'look_hi' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        conversionSignals,
+      })
+      const bare = computePersonalizedScore(row({ id: 'look_hi' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(withConversion).toBeGreaterThan(bare)
+      expect(withConversion - bare).toBeCloseTo(
+        computeBookingConversionBoost({ bookingCount: 8, interestCount: 10 }),
+        5,
+      )
+    })
+
+    it('adds nothing for a look absent from a present conversion map', () => {
+      const conversionSignals = new Map<string, LookConversionSignal>([
+        ['look_other', { bookingCount: 8, interestCount: 10 }],
+      ])
+      const withMap = computePersonalizedScore(row({ id: 'look_none' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        conversionSignals,
+      })
+      const bare = computePersonalizedScore(row({ id: 'look_none' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(withMap).toBeCloseTo(bare, 5)
     })
   })
 })

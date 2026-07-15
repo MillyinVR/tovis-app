@@ -2492,7 +2492,7 @@ model ServiceCategory {
 
   viralRequests   ViralServiceRequest[]
   services        Service[]
-  adminActionLogs AdminActionLog[]      @relation("CategoryLogs")
+  adminActionLogs AdminActionLog[]       @relation("CategoryLogs")
   lookRankStat    LookCategoryRankStat?
   lookTrendStat   LookCategoryTrendStat?
 }
@@ -2517,6 +2517,43 @@ model LookCategoryRankStat {
   category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 }
 
+// Per-LOOK booking-conversion aggregate behind the Looks feed
+// booking_conversion_rate term (personalization spec §4.2). Refreshed hourly by
+// the look-conversion-stats job (lib/looks/conversionStats.ts) and read (batched
+// by page) at feed-serve time. The spec defines the rate as
+// `bookings_from_this_look / (saves + remix_clicks on this look)` — it protects
+// against optimizing for "pretty content" (heavily saved, rarely booked) over
+// "content that fills chairs". A look that turns interest into real bookings
+// efficiently earns a small additive re-rank boost; the rankScore backbone blends
+// likes/saves/comments/shares but NOT bookings, so this is genuinely new signal.
+//
+// Only looks with >=1 attributed non-cancelled booking get a row (the same "skip
+// the zeros" rule the badge/availability stats use) — a look that has never
+// driven a booking has no conversion evidence and reads as boost 0 at serve time.
+// That keeps the table sparse (proportional to CONVERTING looks, not all looks).
+// A stale row (job stopped) degrades gracefully — conversion is a SOFT weight.
+model LookPostConversionStat {
+  lookPostId String @id
+
+  // Attributed bookings (numerator): non-cancelled bookings whose sourceLookPostId
+  // is this look — a booking is a conversion whether or not the client later
+  // showed up (that's a separate reliability signal). Lifetime, matching the
+  // lifetime interest denominator below; the rankScore backbone already decays old
+  // looks by recency, so an old high-converter isn't kept artificially hot.
+  bookingCount Int @default(0)
+
+  // Interest / exposure (denominator): saveCount + viewCount snapshot from the
+  // look at refresh time — the spec's "saves + remix_clicks", with feed/detail
+  // views standing in for the untracked remix-click signal. Saves must be in the
+  // denominator so a heavily-saved-but-rarely-booked look scores LOW (the "pretty
+  // content" case the term guards against); views add passive exposure.
+  interestCount Int @default(0)
+
+  computedAt DateTime
+
+  lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
+}
+
 // Per-family RECENT engagement-trend aggregate — the data source behind the
 // engagement-driven ordering of the camera "shot packs" (camera-perfect C10;
 // lib/looks/categoryTrendStats.ts → lib/pro/cameraShotPacks.ts). Sibling of
@@ -2531,10 +2568,10 @@ model LookCategoryRankStat {
 // packs, never break the camera.
 model LookCategoryTrendStat {
   // Top-level (root) service category id — the family this row summarizes.
-  categoryId String @id
+  categoryId         String   @id
   // Denormalized root slug so the serve path can read by slug in one indexed
   // query without re-walking the category tree (kept 1:1 with categoryId).
-  categorySlug String @unique
+  categorySlug       String   @unique
   // Sums over eligible (published + approved) looks PUBLISHED in the trailing
   // `windowDays`, rolled up from every descendant category to this root:
   // intent-weighted engagement (the rate numerator, same weights as rank
@@ -2545,8 +2582,8 @@ model LookCategoryTrendStat {
   lookCount          Int
   // The trailing-publish window (days) this row covers — stored so the row
   // documents its own recency semantics if the config ever changes.
-  windowDays Int
-  computedAt DateTime
+  windowDays         Int
+  computedAt         DateTime
 
   category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 }
@@ -4262,6 +4299,9 @@ model LookPost {
   // APPLY_LOOK_VIEWS job); the anti-gaming velocity-check denominator breakdown.
   impressionStats  LookPostImpressionStat[]
   inspiredBookings Booking[]                @relation("LookInspiredBookings")
+  // §4.2 per-look booking-conversion aggregate (written hourly by the
+  // look-conversion-stats job; absent until the look has driven >=1 booking).
+  conversionStat   LookPostConversionStat?
   // User-facing hashtags / style tags parsed from the caption at publish
   // (social-first D1). Implicit M2M; banned tags are dropped at publish and
   // their tag pages 404. See lib/looks/tags.ts.

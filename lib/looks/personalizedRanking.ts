@@ -36,6 +36,14 @@
 //                                 the pro's completed-booking volume and gated on a
 //                                 real near-term opening, so it tapers off as they
 //                                 gain traction and never lifts an unbookable pro)
+//         + conversionBoost      (a quality lift for a look that turns interest
+//                                 into real BOOKINGS — spec §4.2 booking_conversion_rate.
+//                                 rankScore blends likes/saves/comments/shares but
+//                                 never bookings, so a "pretty" look with many saves
+//                                 and no bookings would win on engagement alone; this
+//                                 rewards "content that fills chairs" — a Bayesian-
+//                                 smoothed bookings-per-(saves+views) rate, off unless
+//                                 the look has actually driven a booking)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
 //         - suppressionPenalty   (viewer keeps hiding this look's category — the
@@ -136,6 +144,33 @@ export const PERSONALIZED_RANK_WEIGHTS = {
   // fades exactly as the pro crosses into "established / earns social proof"
   // territory. 0 completed → full boost; 4 → half; 8+ → none.
   underbookedFullBookings: 8,
+  // booking_conversion_rate (spec §4.2): a per-LOOK quality lift for content that
+  // turns interest into real bookings, so the feed doesn't optimize for "pretty"
+  // (heavily saved, rarely booked) over "fills chairs". The rankScore backbone
+  // blends likes/saves/comments/shares but NOT bookings, so this adds genuinely
+  // new signal rather than double-counting engagement. Peak sits BELOW the
+  // availability boost (12) and well under accumulated taste (category cap 15) /
+  // a followed (25) / booked (30) pro — a soft quality tie-breaker within a
+  // rankScore band, never a takeover (spec keeps bookable-score terms below the
+  // taste/relationship band). Off entirely for a look that has never driven a
+  // booking (no conversion evidence → boost 0).
+  conversionMax: 8,
+  // Bayesian prior for the per-look conversion rate (spec §4.1 rate-smoothing
+  // applied to §4.2). A look's raw bookings/(saves+views) is regressed toward this
+  // typical rate until it earns enough exposure, so a look with 1 booking on 1 save
+  // (raw rate 1.0) doesn't win on a single lucky conversion. `rate` is bookings per
+  // interest — bookings are far rarer than engagement, so this is much smaller than
+  // the engagement prior (LOOK_POST_RANK_PRIOR.rate 0.08). `strength` is the
+  // pseudo-exposure count of prior evidence. Both tunable + dark until the
+  // look-conversion-stats cron populates real data.
+  conversionPriorRate: 0.01,
+  conversionPriorStrength: 40,
+  // The smoothed conversion rate at which a look earns the FULL conversion boost;
+  // the realized boost is conversionMax × clamp(smoothedRate / target, 0, 1). Set
+  // above the prior rate (efficient converters, not merely typical ones, earn the
+  // peak) yet reachable. A look converting ~1 booking per 25 interest-events tops
+  // out; a heavily-exposed, rarely-booked look stays near 0. Tunable.
+  conversionTargetRate: 0.04,
   // Peak nudge for a brand-new look; decays with a 1-day half-life.
   freshnessMax: 6,
   freshnessHalfLifeDays: 1,
@@ -242,6 +277,20 @@ export type ProUnderbookedSignal = {
   completedBookingCount30d: number
 }
 
+// Per-LOOK booking-conversion summary (spec §4.2 booking_conversion_rate), keyed
+// by lookPostId and read from LookPostConversionStat at serve time
+// (lib/looks/conversionStats.ts). A look ABSENT from the map has no conversion
+// stat row, which the "skip the zeros" refresh gives only to looks with zero
+// attributed bookings — i.e. no conversion evidence, boost 0 (NOT smoothed toward
+// the prior, unlike the rankScore). Plain data shape (no Prisma import) so the
+// ranker stays pure.
+export type LookConversionSignal = {
+  // Attributed non-cancelled bookings (the rate numerator).
+  bookingCount: number
+  // saveCount + viewCount snapshot — interest/exposure (the rate denominator).
+  interestCount: number
+}
+
 export type PersonalizedRankContext = {
   affinity: PersonalizedViewerAffinity
   seenLookIds: ReadonlySet<string>
@@ -268,6 +317,13 @@ export type PersonalizedRankContext = {
   // (a pro with an availability row has a real near-term opening), so no extra
   // read funds the gate.
   underbookedSignals?: ReadonlyMap<string, ProUnderbookedSignal>
+  // Per-look booking-conversion signals keyed by lookPostId (spec §4.2), for the
+  // booking_conversion_rate boost. ABSENT (undefined) → the term is off entirely
+  // (byte-identical to the pre-§4.2-conversion feed; unit tests + non-personalized
+  // callers omit it). PRESENT but a look missing from it → no conversion stat row →
+  // no attributed bookings → boost 0. Keyed by look id (like candidateEmbeddings),
+  // fetched for the re-ranked candidate set only.
+  conversionSignals?: ReadonlyMap<string, LookConversionSignal>
 }
 
 function safeNumber(value: number): number {
@@ -507,6 +563,61 @@ export function computeUnderbookedProBoost(args: {
 }
 
 /**
+ * Additive per-look booking-conversion boost (spec §4.2 booking_conversion_rate):
+ * rewards a look that turns interest into real BOOKINGS, so the feed doesn't
+ * optimize for "pretty content" (heavily saved, rarely booked) over "content that
+ * fills chairs".
+ *
+ *   conversionMax × clamp(smoothedRate / targetRate, 0, 1)
+ *
+ * `smoothedRate` = (bookingCount + priorRate × priorStrength) / (interestCount +
+ * priorStrength) — the Bayesian-smoothed bookings-per-interest rate (spec §4.1
+ * rate-smoothing applied to conversion), so a look with 1 booking on 1 save (raw
+ * rate 1.0) is regressed toward the typical rate instead of winning on a single
+ * lucky conversion; as interest accrues the look's own rate takes over. `interest`
+ * = saves + views (the spec's "saves + remix_clicks", with views standing in for
+ * the untracked remix-click signal).
+ *
+ * GATED on bookingCount > 0: a look with no attributed booking has NO conversion
+ * evidence and earns exactly 0 — it is NOT smoothed toward the prior (that would
+ * hand every un-booked look a spurious baseline). The refresh only writes rows for
+ * looks with >=1 booking, so an absent look reads {0,0} here → 0. Deliberately
+ * ORTHOGONAL to the other bookable-score terms: underbooked grades a PRO's total
+ * booking VOLUME (low = fairness lift), availability grades FORWARD openness; this
+ * grades THIS LOOK's booking-per-exposure EFFICIENCY. A new pro's high-converting
+ * look legitimately earns both — that's good content from a new pro rising, not a
+ * double-count. A missing/non-finite count is treated as 0. Pure + exported for
+ * unit testing.
+ */
+export function computeBookingConversionBoost(args: {
+  bookingCount: number
+  interestCount: number
+}): number {
+  const bookings = Number.isFinite(args.bookingCount)
+    ? Math.max(0, args.bookingCount)
+    : 0
+  if (bookings <= 0) return 0
+
+  const interest = Number.isFinite(args.interestCount)
+    ? Math.max(0, args.interestCount)
+    : 0
+
+  const { conversionPriorRate, conversionPriorStrength, conversionTargetRate } =
+    PERSONALIZED_RANK_WEIGHTS
+  const smoothedRate =
+    (bookings + conversionPriorRate * conversionPriorStrength) /
+    (interest + conversionPriorStrength)
+
+  const score =
+    conversionTargetRate > 0
+      ? Math.min(Math.max(smoothedRate / conversionTargetRate, 0), 1)
+      : 0
+  if (score <= 0) return 0
+
+  return PERSONALIZED_RANK_WEIGHTS.conversionMax * score
+}
+
+/**
  * Category-suppression penalty from explicit hides (spec §2.2). Zero until the
  * decayed hide weight for the category crosses `hideCategoryThreshold` (so one
  * dismissed card doesn't suppress the category), then ramps linearly to
@@ -596,6 +707,19 @@ export function computePersonalizedScore(
       })
     : 0
 
+  // §4.2 booking_conversion_rate — a soft quality lift for a look that converts
+  // interest into real bookings. Off entirely unless the caller wired
+  // conversionSignals (byte-identical otherwise). A look absent from the map has
+  // no conversion row → {0,0} → boost 0 (the gate is inside the boost fn).
+  const conversionBoost = context.conversionSignals
+    ? computeBookingConversionBoost(
+        context.conversionSignals.get(row.id) ?? {
+          bookingCount: 0,
+          interestCount: 0,
+        },
+      )
+    : 0
+
   const freshnessBoost = computePersonalizedFreshnessBoost(
     row.publishedAt,
     context.now,
@@ -614,6 +738,7 @@ export function computePersonalizedScore(
     availabilityBoost +
     relationshipBoost +
     underbookedBoost +
+    conversionBoost +
     freshnessBoost -
     seenPenalty -
     suppressionPenalty
