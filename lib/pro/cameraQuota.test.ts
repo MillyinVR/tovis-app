@@ -19,6 +19,7 @@ import {
   enforceCameraImageQuota,
   getProCameraUsage,
   grantCameraBonusImages,
+  recordCameraImageUse,
 } from './cameraQuota'
 
 const NOW = new Date('2026-07-15T00:00:00.000Z')
@@ -81,6 +82,57 @@ describe('grantCameraBonusImages', () => {
 
     mocks.getRedis.mockReturnValue(null)
     expect(await grantCameraBonusImages({ professionalId: 'pro-1', count: 5, now: NOW })).toBeNull()
+  })
+})
+
+// The flag is OFF by default in prod (and in vitest.setup.ts) — metering is
+// inert until ENABLE_MEMBERSHIP_ENFORCEMENT is turned on. Every other test here
+// runs with it forced ON, so these lock the disabled-path short-circuit: it must
+// allow/no-op WITHOUT ever touching Redis or the plan-quota lookup.
+describe('enforcement disabled (flag OFF) short-circuits', () => {
+  beforeEach(() => {
+    mocks.enforcementEnabled.mockReturnValue(false)
+  })
+
+  it('enforceCameraImageQuota allows without reading Redis or the plan quota, even when way over', async () => {
+    mocks.getRedis.mockReturnValue(makeRedis({ [USED_KEY]: 100, [BONUS_KEY]: 0 }))
+
+    const decision = await enforceCameraImageQuota({
+      professionalId: 'pro-1',
+      imageCount: 5,
+      now: NOW,
+    })
+
+    expect(decision).toEqual({ allowed: true })
+    // Short-circuits at the flag check — before any metering infrastructure runs.
+    expect(mocks.getRedis).not.toHaveBeenCalled()
+    expect(mocks.getQuota).not.toHaveBeenCalled()
+  })
+
+  it('recordCameraImageUse records nothing when metering is off', async () => {
+    const redis = makeRedis({})
+    mocks.getRedis.mockReturnValue(redis)
+
+    await recordCameraImageUse({ professionalId: 'pro-1', imageCount: 3, now: NOW })
+
+    expect(mocks.getRedis).not.toHaveBeenCalled()
+    expect(redis.incrby).not.toHaveBeenCalled()
+    expect(redis.expire).not.toHaveBeenCalled()
+  })
+
+  it('getProCameraUsage still reports real usage but flags enforced:false', async () => {
+    mocks.getRedis.mockReturnValue(makeRedis({ [USED_KEY]: 4, [BONUS_KEY]: 2 }))
+
+    const usage = await getProCameraUsage({ professionalId: 'pro-1', now: NOW })
+
+    expect(usage).toMatchObject({
+      used: 4,
+      baseQuota: 6,
+      bonus: 2,
+      quota: 8,
+      remaining: 4,
+      enforced: false,
+    })
   })
 })
 
