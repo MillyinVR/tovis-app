@@ -38,6 +38,7 @@ export type NotificationCategoryKey =
   | 'LAST_MINUTE'
   | 'SAVED_LOOKS'
   | 'EVENT_COUNTDOWNS'
+  | 'REBOOK_REMINDERS'
   | 'MESSAGES'
   | 'SOCIAL'
 
@@ -86,6 +87,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED]:
     'Openings for looks you saved',
   [NotificationEventKey.EVENT_DATE_COUNTDOWN]: 'Event countdown reminders',
+  [NotificationEventKey.REBOOK_CADENCE_DUE]: 'Time-for-a-refresh reminders',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: 'Payment action needed',
@@ -183,6 +185,13 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     description:
       'Gentle reminders as a wedding or prom board you created counts down, so you have time to book. Muting this turns off event countdowns only.',
     eventKeys: [NotificationEventKey.EVENT_DATE_COUNTDOWN],
+  },
+  {
+    key: 'REBOOK_REMINDERS',
+    label: 'Rebook reminders',
+    description:
+      "Gentle nudges when you're due for a refresh with a pro you've booked before and they have an opening. Muting this turns off rebook reminders only.",
+    eventKeys: [NotificationEventKey.REBOOK_CADENCE_DUE],
   },
   {
     key: 'MESSAGES',

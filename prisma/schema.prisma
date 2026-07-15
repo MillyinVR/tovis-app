@@ -636,6 +636,16 @@ enum NotificationEventKey {
   // lib/notifications/eventCountdownNotifications.ts). Never day-of or past.
   EVENT_DATE_COUNTDOWN
 
+  // §6.7 cadence-timed rebook prompt, gated by the §8.1 re-engagement budget: a
+  // client is now due for a refresh with a pro they've visited before (past that
+  // pair's learned cadence — lib/clients/relationshipIntelligence.ts — or the
+  // offering's static rebookIntervalDays) and the pro has a near-term opening. A
+  // gentle "time for a refresh?" nudge, one per (client, pro) per cooldown window,
+  // pooled under the re-engagement budget (emitter
+  // lib/notifications/rebookCadenceNotifications.ts). Excludes pairs with an
+  // upcoming booking; never fires for a churned (far-overdue) relationship.
+  REBOOK_CADENCE_DUE
+
   // A new message landed in a thread the recipient participates in. Routed to
   // the OTHER participant (client or pro). Debounced per thread per recipient so
   // a rapid burst refreshes one inbox row / fires one push rather than spamming.

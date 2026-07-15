@@ -104,6 +104,10 @@
     {
       "path": "/api/internal/jobs/saved-look-activation",
       "schedule": "20 10 * * *"
+    },
+    {
+      "path": "/api/internal/jobs/rebook-cadence",
+      "schedule": "35 10 * * *"
     }
   ]
 }

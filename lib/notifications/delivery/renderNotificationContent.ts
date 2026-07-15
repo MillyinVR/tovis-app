@@ -368,6 +368,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   waitlist_time_offered: 'Confirm your time',
   saved_look_availability_opened: 'View opening',
   event_date_countdown: 'View your board',
+  rebook_cadence_due: 'Book again',
   viral_request_approved: 'View request',
   payment_collected: 'View payment',
   payment_action_required: 'Resolve payment',
@@ -450,6 +451,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   event_date_countdown: buildStandardTemplateRenderer(
     templateCtaLabels.event_date_countdown,
+  ),
+  rebook_cadence_due: buildStandardTemplateRenderer(
+    templateCtaLabels.rebook_cadence_due,
   ),
   viral_request_approved: buildStandardTemplateRenderer(
     templateCtaLabels.viral_request_approved,

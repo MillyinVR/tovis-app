@@ -36,11 +36,16 @@ import {
 
 import { createClientNotification } from '@/lib/notifications/clientNotifications'
 import {
-  RE_ENGAGEMENT_EVENT_KEYS,
   RE_ENGAGEMENT_WEEKLY_CAP,
   allocateBudgetToCandidates,
   reEngagementBudgetWindowStart,
 } from '@/lib/notifications/reEngagementBudget'
+import {
+  loadAlreadyNotifiedDedupeKeys,
+  loadMutedClientsForEvent,
+  loadOpenProAvailability,
+  loadReEngagementBudgetCounts,
+} from '@/lib/notifications/reEngagementLedger'
 import {
   formatProfessionalPublicDisplayName,
   professionalPublicDisplayNameSelect,
@@ -275,27 +280,6 @@ export type SavedLookActivationSummary = {
 }
 
 /**
- * Load the set of pros with a near-term opening (nextOpeningDate within the
- * horizon), keyed professionalId → nextOpeningDate. Only pros with a row (an
- * opening in the #604 horizon) are present; a booked-out pro is simply absent.
- */
-async function loadOpenPros(
-  db: PrismaClient,
-  horizonEnd: Date,
-): Promise<Map<string, Date>> {
-  const rows = await db.professionalAvailabilityStat.findMany({
-    where: { nextOpeningDate: { not: null, lte: horizonEnd } },
-    select: { professionalId: true, nextOpeningDate: true },
-  })
-
-  const map = new Map<string, Date>()
-  for (const row of rows) {
-    if (row.nextOpeningDate) map.set(row.professionalId, row.nextOpeningDate)
-  }
-  return map
-}
-
-/**
  * Aging saves on the given open pros' PUBLISHED looks, newest-first, bounded.
  * Pro-anchored (the open-pro set is small) so the scan is proportional to
  * bookable-soon pros, not the whole BoardItem table. The pro's public display
@@ -384,84 +368,6 @@ async function loadBookedPairs(
   return booked
 }
 
-/** dedupeKeys already used this cooldown window → don't re-nudge. */
-async function loadAlreadyNotified(
-  db: PrismaClient,
-  dedupeKeys: string[],
-): Promise<Set<string>> {
-  if (dedupeKeys.length === 0) return new Set()
-
-  const rows = await db.clientNotification.findMany({
-    where: {
-      eventKey: NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
-      dedupeKey: { in: dedupeKeys },
-    },
-    select: { dedupeKey: true },
-  })
-
-  const seen = new Set<string>()
-  for (const row of rows) {
-    if (row.dedupeKey) seen.add(row.dedupeKey)
-  }
-  return seen
-}
-
-/** Pooled re-engagement send counts per client inside the budget window. */
-async function loadBudgetCounts(
-  db: PrismaClient,
-  args: { clientIds: string[]; windowStart: Date },
-): Promise<Map<string, number>> {
-  if (args.clientIds.length === 0) return new Map()
-
-  const grouped = await db.notificationDispatch.groupBy({
-    by: ['clientId'],
-    where: {
-      clientId: { in: args.clientIds },
-      eventKey: { in: [...RE_ENGAGEMENT_EVENT_KEYS] },
-      createdAt: { gte: args.windowStart },
-      cancelledAt: null,
-    },
-    _count: { _all: true },
-  })
-
-  const counts = new Map<string, number>()
-  for (const group of grouped) {
-    if (group.clientId) counts.set(group.clientId, group._count._all)
-  }
-  return counts
-}
-
-/** Clients who muted the trigger (all supported channels off) → opt-out, skip. */
-async function loadMutedClients(
-  db: PrismaClient,
-  clientIds: string[],
-): Promise<Set<string>> {
-  if (clientIds.length === 0) return new Set()
-
-  const prefs = await db.clientNotificationPreference.findMany({
-    where: {
-      clientId: { in: clientIds },
-      eventKey: NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
-    },
-    select: {
-      clientId: true,
-      inAppEnabled: true,
-      emailEnabled: true,
-      pushEnabled: true,
-    },
-  })
-
-  const muted = new Set<string>()
-  for (const pref of prefs) {
-    // The trigger's channels are IN_APP + EMAIL + PUSH (no SMS). All three off
-    // = the recipient opted out of this trigger entirely.
-    if (!pref.inAppEnabled && !pref.emailEnabled && !pref.pushEnabled) {
-      muted.add(pref.clientId)
-    }
-  }
-  return muted
-}
-
 /**
  * Run one saved-not-booked activation pass (§6.8). Reads via `db`; sends via
  * createClientNotification (global prisma). Returns a summary for the cron
@@ -482,7 +388,7 @@ export async function runSavedLookActivation(
     now.getTime() - SAVED_LOOK_ACTIVATION.maxSaveAgeDays * DAY_MS,
   )
 
-  const openingByPro = await loadOpenPros(db, horizonEnd)
+  const openingByPro = await loadOpenProAvailability(db, horizonEnd)
   if (openingByPro.size === 0) {
     return {
       openPros: 0,
@@ -527,10 +433,10 @@ export async function runSavedLookActivation(
     alreadyNotifiedDedupeKeys: new Set(),
     now,
   })
-  const alreadyNotifiedDedupeKeys = await loadAlreadyNotified(
-    db,
-    provisional.map((c) => c.dedupeKey),
-  )
+  const alreadyNotifiedDedupeKeys = await loadAlreadyNotifiedDedupeKeys(db, {
+    eventKey: NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
+    dedupeKeys: provisional.map((c) => c.dedupeKey),
+  })
 
   const candidates = selectSavedActivationCandidates({
     saves,
@@ -542,11 +448,14 @@ export async function runSavedLookActivation(
 
   const candidateClientIds = [...new Set(candidates.map((c) => c.clientId))]
   const [sentCountByClient, mutedClients] = await Promise.all([
-    loadBudgetCounts(db, {
+    loadReEngagementBudgetCounts(db, {
       clientIds: candidateClientIds,
       windowStart: reEngagementBudgetWindowStart(now),
     }),
-    loadMutedClients(db, candidateClientIds),
+    loadMutedClientsForEvent(db, {
+      clientIds: candidateClientIds,
+      eventKey: NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
+    }),
   ])
 
   const allocation = allocateSavedActivations({

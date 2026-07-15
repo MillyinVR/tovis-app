@@ -33,6 +33,13 @@ describe('reEngagementBudget — taxonomy', () => {
     expect(isReEngagementEventKey(NotificationEventKey.EVENT_DATE_COUNTDOWN)).toBe(
       true,
     )
+    // §6.7 cadence rebook prompt — the third pooled trigger (its emitter is live).
+    expect(
+      reEngagementTriggerForEventKey(NotificationEventKey.REBOOK_CADENCE_DUE),
+    ).toBe('REBOOK_CADENCE')
+    expect(isReEngagementEventKey(NotificationEventKey.REBOOK_CADENCE_DUE)).toBe(
+      true,
+    )
   })
 
   it('counts the event-countdown key toward the pooled budget', () => {
