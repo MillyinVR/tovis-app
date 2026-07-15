@@ -37,11 +37,15 @@ import {
 import { BOARD_EVENT_NOUNS, boardEventDateToYmd } from '@/lib/boards/context'
 import { createClientNotification } from '@/lib/notifications/clientNotifications'
 import {
-  RE_ENGAGEMENT_EVENT_KEYS,
   RE_ENGAGEMENT_WEEKLY_CAP,
   allocateBudgetToCandidates,
   reEngagementBudgetWindowStart,
 } from '@/lib/notifications/reEngagementBudget'
+import {
+  loadAlreadyNotifiedDedupeKeys,
+  loadMutedClientsForEvent,
+  loadReEngagementBudgetCounts,
+} from '@/lib/notifications/reEngagementLedger'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -321,84 +325,6 @@ async function loadDatedBoards(
   return { boards, capped }
 }
 
-/** dedupeKeys already used → don't re-nudge that (board, milestone). */
-async function loadAlreadyNotified(
-  db: PrismaClient,
-  dedupeKeys: string[],
-): Promise<Set<string>> {
-  if (dedupeKeys.length === 0) return new Set()
-
-  const rows = await db.clientNotification.findMany({
-    where: {
-      eventKey: NotificationEventKey.EVENT_DATE_COUNTDOWN,
-      dedupeKey: { in: dedupeKeys },
-    },
-    select: { dedupeKey: true },
-  })
-
-  const seen = new Set<string>()
-  for (const row of rows) {
-    if (row.dedupeKey) seen.add(row.dedupeKey)
-  }
-  return seen
-}
-
-/** Pooled re-engagement send counts per client inside the budget window. */
-async function loadBudgetCounts(
-  db: PrismaClient,
-  args: { clientIds: string[]; windowStart: Date },
-): Promise<Map<string, number>> {
-  if (args.clientIds.length === 0) return new Map()
-
-  const grouped = await db.notificationDispatch.groupBy({
-    by: ['clientId'],
-    where: {
-      clientId: { in: args.clientIds },
-      eventKey: { in: [...RE_ENGAGEMENT_EVENT_KEYS] },
-      createdAt: { gte: args.windowStart },
-      cancelledAt: null,
-    },
-    _count: { _all: true },
-  })
-
-  const counts = new Map<string, number>()
-  for (const group of grouped) {
-    if (group.clientId) counts.set(group.clientId, group._count._all)
-  }
-  return counts
-}
-
-/** Clients who muted the trigger (all supported channels off) → opt-out, skip. */
-async function loadMutedClients(
-  db: PrismaClient,
-  clientIds: string[],
-): Promise<Set<string>> {
-  if (clientIds.length === 0) return new Set()
-
-  const prefs = await db.clientNotificationPreference.findMany({
-    where: {
-      clientId: { in: clientIds },
-      eventKey: NotificationEventKey.EVENT_DATE_COUNTDOWN,
-    },
-    select: {
-      clientId: true,
-      inAppEnabled: true,
-      emailEnabled: true,
-      pushEnabled: true,
-    },
-  })
-
-  const muted = new Set<string>()
-  for (const pref of prefs) {
-    // The trigger's channels are IN_APP + EMAIL + PUSH (no SMS). All three off
-    // = the recipient opted out of this trigger entirely.
-    if (!pref.inAppEnabled && !pref.emailEnabled && !pref.pushEnabled) {
-      muted.add(pref.clientId)
-    }
-  }
-  return muted
-}
-
 /**
  * Run one event-countdown pass (§8). Reads via `db`; sends via
  * createClientNotification (global prisma). Returns a summary for the cron
@@ -433,10 +359,10 @@ export async function runEventCountdownNotifications(
     alreadyNotifiedDedupeKeys: new Set(),
     now,
   })
-  const alreadyNotifiedDedupeKeys = await loadAlreadyNotified(
-    db,
-    provisional.map((c) => c.dedupeKey),
-  )
+  const alreadyNotifiedDedupeKeys = await loadAlreadyNotifiedDedupeKeys(db, {
+    eventKey: NotificationEventKey.EVENT_DATE_COUNTDOWN,
+    dedupeKeys: provisional.map((c) => c.dedupeKey),
+  })
 
   const candidates = selectEventCountdownCandidates({
     boards,
@@ -446,11 +372,14 @@ export async function runEventCountdownNotifications(
 
   const candidateClientIds = [...new Set(candidates.map((c) => c.clientId))]
   const [sentCountByClient, mutedClients] = await Promise.all([
-    loadBudgetCounts(db, {
+    loadReEngagementBudgetCounts(db, {
       clientIds: candidateClientIds,
       windowStart: reEngagementBudgetWindowStart(now),
     }),
-    loadMutedClients(db, candidateClientIds),
+    loadMutedClientsForEvent(db, {
+      clientIds: candidateClientIds,
+      eventKey: NotificationEventKey.EVENT_DATE_COUNTDOWN,
+    }),
   ])
 
   const allocation = allocateEventCountdowns({

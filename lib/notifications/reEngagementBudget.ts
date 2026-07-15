@@ -76,6 +76,10 @@ export const RE_ENGAGEMENT_EVENT_KEY_TRIGGER: Partial<
   [NotificationEventKey.EVENT_DATE_COUNTDOWN]: 'EVENT_COUNTDOWN',
   [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED]:
     'AVAILABILITY_OPENED_ON_SAVE',
+  // §6.7 — below the two time-sensitive triggers above: a cadence rebook prompt
+  // has no hard deadline, so it yields the last pooled slot to a countdown or a
+  // saved-pro opening.
+  [NotificationEventKey.REBOOK_CADENCE_DUE]: 'REBOOK_CADENCE',
 }
 
 /**
