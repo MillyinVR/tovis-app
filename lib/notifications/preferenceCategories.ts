@@ -39,6 +39,7 @@ export type NotificationCategoryKey =
   | 'SAVED_LOOKS'
   | 'EVENT_COUNTDOWNS'
   | 'REBOOK_REMINDERS'
+  | 'CONSULT_NUDGES'
   | 'MESSAGES'
   | 'SOCIAL'
 
@@ -88,6 +89,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
     'Openings for looks you saved',
   [NotificationEventKey.EVENT_DATE_COUNTDOWN]: 'Event countdown reminders',
   [NotificationEventKey.REBOOK_CADENCE_DUE]: 'Time-for-a-refresh reminders',
+  [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: 'Consult reminders for big decisions',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: 'Payment action needed',
@@ -192,6 +194,13 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     description:
       "Gentle nudges when you're due for a refresh with a pro you've booked before and they have an opening. Muting this turns off rebook reminders only.",
     eventKeys: [NotificationEventKey.REBOOK_CADENCE_DUE],
+  },
+  {
+    key: 'CONSULT_NUDGES',
+    label: 'Consult reminders',
+    description:
+      'Gentle, no-pressure reminders to ask questions or book a consult on a big-decision look you saved (like permanent makeup, color, or extensions). Muting this turns off consult reminders only.',
+    eventKeys: [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE],
   },
   {
     key: 'MESSAGES',

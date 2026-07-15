@@ -110,6 +110,10 @@
       "schedule": "35 10 * * *"
     },
     {
+      "path": "/api/internal/jobs/hesitation-consult",
+      "schedule": "40 10 * * *"
+    },
+    {
       "path": "/api/internal/jobs/re-engagement-dispatch",
       "schedule": "50 10 * * *"
     }

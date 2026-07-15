@@ -41,22 +41,29 @@ export type ReEngagementTrigger =
   | 'EVENT_COUNTDOWN' // §8    — "18 days until prom — here's who still has openings"
   | 'AVAILABILITY_OPENED_ON_SAVE' // §6.8/§5.7.5 — a saved pro just opened up
   | 'REBOOK_CADENCE' // §6.7   — cadence-timed "time for a refresh?"
+  | 'HESITATION_CONSULT' // §6.8 — saved a high-commitment look, never booked → consult nudge
   | 'BOARD_ARCHIVE' // §7.5   — "how did it go? leave a review?"
   | 'OTHER' // catch-all for future low-priority re-engagement nudges
 
 /**
  * Priority rank — LOWER number = higher priority (wins the last budget slot).
- * Exactly the spec §8.1 ordering:
+ * Follows the spec §8.1 ordering:
  *   event-date countdowns > availability-opened-on-a-save > rebook cadence >
  *   everything else.
+ *
+ * The three time-sensitive triggers (a deadline, an opening, an overdue cadence)
+ * rank above the two that have no clock. Among the clockless "everything else"
+ * band, a hesitation consult is a saved-not-booked CONVERSION nudge (funnel:
+ * Want→Book), so it outranks the post-event BOARD_ARCHIVE housekeeping prompt.
  */
 export const RE_ENGAGEMENT_TRIGGER_PRIORITY: Record<ReEngagementTrigger, number> =
   {
     EVENT_COUNTDOWN: 0,
     AVAILABILITY_OPENED_ON_SAVE: 1,
     REBOOK_CADENCE: 2,
-    BOARD_ARCHIVE: 3,
-    OTHER: 4,
+    HESITATION_CONSULT: 3,
+    BOARD_ARCHIVE: 4,
+    OTHER: 5,
   }
 
 /**
@@ -80,6 +87,10 @@ export const RE_ENGAGEMENT_EVENT_KEY_TRIGGER: Partial<
   // has no hard deadline, so it yields the last pooled slot to a countdown or a
   // saved-pro opening.
   [NotificationEventKey.REBOOK_CADENCE_DUE]: 'REBOOK_CADENCE',
+  // §6.8 — the hesitation blocker response: a saved high-commitment look the
+  // client never booked earns a gentle consult/education nudge. Lowest of the
+  // live tiers (no clock at all), so it yields to every time-sensitive trigger.
+  [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: 'HESITATION_CONSULT',
 }
 
 /**

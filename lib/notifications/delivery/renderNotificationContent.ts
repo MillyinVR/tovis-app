@@ -369,6 +369,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   saved_look_availability_opened: 'View opening',
   event_date_countdown: 'View your board',
   rebook_cadence_due: 'Book again',
+  saved_look_consult_nudge: 'Ask a question',
   viral_request_approved: 'View request',
   payment_collected: 'View payment',
   payment_action_required: 'Resolve payment',
@@ -454,6 +455,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   rebook_cadence_due: buildStandardTemplateRenderer(
     templateCtaLabels.rebook_cadence_due,
+  ),
+  saved_look_consult_nudge: buildStandardTemplateRenderer(
+    templateCtaLabels.saved_look_consult_nudge,
   ),
   viral_request_approved: buildStandardTemplateRenderer(
     templateCtaLabels.viral_request_approved,
