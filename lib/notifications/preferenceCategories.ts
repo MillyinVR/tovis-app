@@ -37,6 +37,7 @@ export type NotificationCategoryKey =
   | 'PAYMENTS'
   | 'LAST_MINUTE'
   | 'SAVED_LOOKS'
+  | 'EVENT_COUNTDOWNS'
   | 'MESSAGES'
   | 'SOCIAL'
 
@@ -84,6 +85,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.WAITLIST_TIME_OFFERED]: 'Waitlist time offered',
   [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED]:
     'Openings for looks you saved',
+  [NotificationEventKey.EVENT_DATE_COUNTDOWN]: 'Event countdown reminders',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: 'Payment action needed',
@@ -174,6 +176,13 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     description:
       'Gentle nudges when a pro whose look you saved has a new opening. Muting this turns off saved-look re-engagement only.',
     eventKeys: [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED],
+  },
+  {
+    key: 'EVENT_COUNTDOWNS',
+    label: 'Event countdowns',
+    description:
+      'Gentle reminders as a wedding or prom board you created counts down, so you have time to book. Muting this turns off event countdowns only.',
+    eventKeys: [NotificationEventKey.EVENT_DATE_COUNTDOWN],
   },
   {
     key: 'MESSAGES',

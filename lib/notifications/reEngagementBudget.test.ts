@@ -26,6 +26,19 @@ describe('reEngagementBudget — taxonomy', () => {
     expect(isReEngagementEventKey(NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED)).toBe(
       true,
     )
+    // §8 event countdown — the top-priority trigger (its emitter is live).
+    expect(
+      reEngagementTriggerForEventKey(NotificationEventKey.EVENT_DATE_COUNTDOWN),
+    ).toBe('EVENT_COUNTDOWN')
+    expect(isReEngagementEventKey(NotificationEventKey.EVENT_DATE_COUNTDOWN)).toBe(
+      true,
+    )
+  })
+
+  it('counts the event-countdown key toward the pooled budget', () => {
+    expect(RE_ENGAGEMENT_EVENT_KEYS).toContain(
+      NotificationEventKey.EVENT_DATE_COUNTDOWN,
+    )
   })
 
   it('does not treat transactional / social events as re-engagement', () => {

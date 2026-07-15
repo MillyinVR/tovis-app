@@ -64,14 +64,16 @@ export const RE_ENGAGEMENT_TRIGGER_PRIORITY: Record<ReEngagementTrigger, number>
  * A key present here is a "re-engagement" notification: it both counts against
  * the pooled weekly budget AND is gated by it before send.
  *
- * Only keys with a shipped emitter appear. The event-countdown / rebook-cadence
- * / board-archive keys are intentionally absent until their emitters land — the
- * budget still reserves their priority tiers above, so when they ship they slot
- * in without recalibrating the cap.
+ * Only keys with a shipped emitter appear. The rebook-cadence / board-archive
+ * keys are intentionally absent until their emitters land — the budget still
+ * reserves their priority tiers above, so when they ship they slot in without
+ * recalibrating the cap.
  */
 export const RE_ENGAGEMENT_EVENT_KEY_TRIGGER: Partial<
   Record<NotificationEventKey, ReEngagementTrigger>
 > = {
+  // §8 — highest priority: wins the last budget slot over every other trigger.
+  [NotificationEventKey.EVENT_DATE_COUNTDOWN]: 'EVENT_COUNTDOWN',
   [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED]:
     'AVAILABILITY_OPENED_ON_SAVE',
 }
