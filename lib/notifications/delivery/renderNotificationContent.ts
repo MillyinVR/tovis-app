@@ -367,6 +367,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   last_minute_opening_available: 'View opening',
   waitlist_time_offered: 'Confirm your time',
   saved_look_availability_opened: 'View opening',
+  event_date_countdown: 'View your board',
   viral_request_approved: 'View request',
   payment_collected: 'View payment',
   payment_action_required: 'Resolve payment',
@@ -446,6 +447,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   saved_look_availability_opened: buildStandardTemplateRenderer(
     templateCtaLabels.saved_look_availability_opened,
+  ),
+  event_date_countdown: buildStandardTemplateRenderer(
+    templateCtaLabels.event_date_countdown,
   ),
   viral_request_approved: buildStandardTemplateRenderer(
     templateCtaLabels.viral_request_approved,

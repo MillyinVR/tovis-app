@@ -628,6 +628,14 @@ enum NotificationEventKey {
   // emitter lib/notifications/savedLookActivation.ts).
   SAVED_LOOK_AVAILABILITY_OPENED
 
+  // §8 event-date countdown, the HIGHEST-priority re-engagement trigger under the
+  // §8.1 budget: a client's dated board (Board.eventDate — a bridal/prom board) is
+  // approaching a milestone (30/14/7/3 days out), so gently nudge them to book
+  // their looks while there's still time. One per (board, milestone), pooled under
+  // the re-engagement budget (lib/notifications/reEngagementBudget.ts, emitter
+  // lib/notifications/eventCountdownNotifications.ts). Never day-of or past.
+  EVENT_DATE_COUNTDOWN
+
   // A new message landed in a thread the recipient participates in. Routed to
   // the OTHER participant (client or pro). Debounced per thread per recipient so
   // a rapid burst refreshes one inbox row / fires one push rather than spamming.

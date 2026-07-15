@@ -24,6 +24,7 @@ export type NotificationTemplateKey =
   | 'last_minute_opening_available'
   | 'waitlist_time_offered'
   | 'saved_look_availability_opened'
+  | 'event_date_countdown'
   | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
@@ -177,6 +178,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
   NotificationEventKey.WAITLIST_TIME_OFFERED,
   NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
+  NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
@@ -505,6 +507,25 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: false,
     allowQuietHoursBypass: false,
     templateKey: 'saved_look_availability_opened',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // In-app inbox + email + push (push inert until APNs is live). No SMS —
+      // re-engagement nudges are not an approved transactional SMS use case.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.EVENT_DATE_COUNTDOWN]: {
+    // §8 event-date countdown — the HIGHEST-priority re-engagement trigger under
+    // the §8.1 budget. Like SAVED_LOOK_AVAILABILITY_OPENED it is a gentle,
+    // promotional-adjacent nudge (NOT transactional — no SMS, no quiet-hours
+    // bypass): a client's dated bridal/prom board is approaching a milestone, so
+    // remind them to book their looks while there's still time.
+    key: NotificationEventKey.EVENT_DATE_COUNTDOWN,
+    defaultPriority: NotificationPriority.LOW,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'event_date_countdown',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
       // In-app inbox + email + push (push inert until APNs is live). No SMS —
@@ -903,6 +924,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
   NotificationEventKey.WAITLIST_TIME_OFFERED,
   NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
+  NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
