@@ -49,10 +49,12 @@ import {
   computeBookingConversionBoost,
   computePriceFitBoost,
   computeProReliabilityBoost,
+  computeProximityFitBoost,
   computeUnderbookedProBoost,
   rankPersonalizedRows,
   type LearnedPriceBand,
   type PersonalizedViewerAffinity,
+  type ProProximitySignal,
   type ProRelationshipSignal,
 } from '@/lib/looks/personalizedRanking'
 import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
@@ -61,6 +63,10 @@ import {
   fetchProUnderbookedSignals,
 } from '@/lib/looks/badges/stats'
 import { fetchLookConversionSignals } from '@/lib/looks/conversionStats'
+import {
+  fetchProProximitySignals,
+  type ProximityViewerLocation,
+} from '@/lib/looks/proximityStats'
 import {
   completedVisitInstant,
   fetchClientBookingSignals,
@@ -749,6 +755,14 @@ export type PersonalizedFeedPage = {
     // look scores >0 against the Gaussian; ordering, not this count, buries a
     // far-out-of-band look. The §9 "is the price signal reaching the feed" metric.
     priceFitBoostedCount: number
+    // §4.5 proximity_fit: how many of the DISPLAYED page's looks were proximity-
+    // matched — the request carried the viewer's location AND the look's pro had a
+    // primary-location coordinate within the Gaussian's reach (>0). 0 = no viewer
+    // location on the request, or no displayed pro had a locatable primary location.
+    // A COVERAGE metric (is the distance signal firing, and on how many looks), NOT a
+    // closeness measure — ordering, not this count, buries a far pro. The §9 "is the
+    // proximity signal reaching the feed" metric.
+    proximityFitBoostedCount: number
   }
 }
 
@@ -768,6 +782,11 @@ export async function buildPersonalizedFeedPage(args: {
   // §4.3.2 session intent. Absent → 'default' (neutral lean). Only the entry
   // point / in-session behavior sends a non-default hint (see the route).
   intent?: SessionIntent
+  // §4.5 proximity_fit: the viewer's current location (the request's optional,
+  // range-checked viewerLat/Lng). Absent/null → the proximity term is off entirely
+  // (no distance to measure), and the pro-location read is skipped — byte-identical
+  // to the pre-§4.5-proximity feed.
+  viewerLocation?: ProximityViewerLocation | null
 }): Promise<PersonalizedFeedPage> {
   const affinity = await loadPersonalizedAffinity({
     userId: args.userId,
@@ -940,13 +959,20 @@ export async function buildPersonalizedFeedPage(args: {
   // off the same ProfessionalBadgeStat aggregate but a separate indexed IN-list
   // (the two §4.2 terms stay independently gated). Empty until the pro-badge-stats
   // cron populates the reliability columns — byte-identical until then.
+  // §4.5 proximity_fit reads each displayed pro's primary-location coordinate and
+  // computes the viewer→pro distance — only when the request carried the viewer's
+  // location (otherwise there is no "here" to measure from, so the read is skipped
+  // and the term is byte-identical off). It joins the same parallel batch as the
+  // other displayed-pro reads.
   const displayedRows = [...candidateRows, ...explorationRows]
   const displayedProIds = displayedRows.map((row) => row.professionalId)
+  const viewerLocation = args.viewerLocation ?? null
   const [
     availabilitySignals,
     underbookedSignals,
     conversionSignals,
     reliabilitySignals,
+    proximitySignals,
   ] =
     displayedRows.length > 0
       ? await Promise.all([
@@ -957,8 +983,12 @@ export async function buildPersonalizedFeedPage(args: {
             candidateRows.map((row) => row.id),
           ),
           fetchProReliabilitySignals(prisma, displayedProIds),
+          viewerLocation
+            ? fetchProProximitySignals(prisma, displayedProIds, viewerLocation)
+            : Promise.resolve(new Map<string, ProProximitySignal>()),
         ])
       : [
+          new Map<string, never>(),
           new Map<string, never>(),
           new Map<string, never>(),
           new Map<string, never>(),
@@ -979,6 +1009,9 @@ export async function buildPersonalizedFeedPage(args: {
     conversionSignals,
     // §4.2 pro_reliability — per-pro follow-through trust lift.
     reliabilitySignals,
+    // §4.5 proximity_fit — per-pro "close enough to book" lift (empty when the
+    // request carried no viewer location).
+    proximitySignals,
   })
 
   // §4.3.1: interleave the reserved exploration slice into the re-ranked page.
@@ -1001,6 +1034,8 @@ export async function buildPersonalizedFeedPage(args: {
   let reliabilityBoostedCount = 0
   // §4.5 price_fit metric: displayed looks the learned-price-band boost lifted.
   let priceFitBoostedCount = 0
+  // §4.5 proximity_fit metric: displayed looks the viewer→pro distance boost lifted.
+  let proximityFitBoostedCount = 0
   const relationshipSignals = affinity.relationshipSignals
   const priceBand = affinity.priceBand
   for (const row of items) {
@@ -1042,6 +1077,13 @@ export async function buildPersonalizedFeedPage(args: {
     ) {
       priceFitBoostedCount += 1
     }
+    if (
+      computeProximityFitBoost({
+        signal: proximitySignals.get(row.professionalId),
+      }) > 0
+    ) {
+      proximityFitBoostedCount += 1
+    }
   }
 
   return {
@@ -1071,6 +1113,7 @@ export async function buildPersonalizedFeedPage(args: {
       conversionBoostedCount,
       reliabilityBoostedCount,
       priceFitBoostedCount,
+      proximityFitBoostedCount,
     },
   }
 }

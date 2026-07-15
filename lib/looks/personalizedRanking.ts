@@ -61,6 +61,14 @@
 //                                 client actually pays for services, a WEIGHT not a
 //                                 filter — an out-of-band look is not lifted, never
 //                                 hidden. Off unless the viewer has a learned band)
+//         + proximityFitBoost    (the look's pro is near the viewer's current
+//                                 location — spec §4.5 travel radius. Pros "40 minutes
+//                                 away" break the "knows me" illusion, so the bookable
+//                                 feed leans toward pros a client can get to; a
+//                                 Gaussian falloff in miles off the viewer→pro
+//                                 distance, a WEIGHT not a filter — a far look is not
+//                                 lifted, never hidden. Off unless the request carries
+//                                 the viewer's location)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
 //         - suppressionPenalty   (viewer keeps hiding this look's category — the
@@ -243,6 +251,32 @@ export const PERSONALIZED_RANK_WEIGHTS = {
   // one-off splurge or a cheap trial, so it barely steers the feed until the price
   // picture fills in (mirrors visualConfidenceFullSignals / relationshipFullVisits).
   priceFitFullBookings: 3,
+  // proximity_fit (spec §4.5 learned travel radius): a soft "close enough to book"
+  // lift for a look whose pro's primary location sits near the viewer's current
+  // location. Surfacing pros "40 minutes away instantly breaks the knows-me
+  // illusion"; this nudges the bookable feed toward pros a client can realistically
+  // get to. A WEIGHT, never a filter (guardrail #8) — a far pro is simply not lifted
+  // (additive 0), never hidden, because inspiration content is fine from anywhere
+  // (spec §4.7 "content from anywhere is fine for dreaming; only bookable content
+  // needs to be local"). Peak sits alongside price_fit (its §4.5 sibling) in the
+  // bookable-term band, below availability (12) / accumulated taste (category cap 15)
+  // / a followed (25) / booked (30) pro — a tie-breaker within a rankScore band,
+  // never a directory sort. Off entirely for a viewer with no location (the request
+  // carries no viewer coords) or a pro with no primary-location coordinate.
+  //
+  // v1 uses the viewer's CURRENT request location (the optional viewerLat/Lng feed
+  // params, range-checked at the route) as the "here", with a fixed metro-sensible
+  // radius — the spec's "Default to a metro-sensible radius pre-data" prong. A LEARNED
+  // per-user radius (widen for a bridal board, learn from booking-location history) is
+  // deferred, mirroring how price_fit shipped a global v1 before the per-category band.
+  proximityFitMax: 8,
+  // Gaussian tolerance of the proximity falloff, in MILES: the boost decays as
+  // exp(−miles² / (2 σ²)) from a full lift at the viewer's doorstep. σ 8mi (the spec's
+  // metro-sensible default travel radius) gives fit ≈0.61 at 8mi, ≈0.14 at 16mi,
+  // ≈0.01 at 24mi — a gentle band that all but vanishes by ~30 min out, matching the
+  // "pros 40 minutes away break the illusion" failure it targets, without a hard
+  // cutoff (aspirational/inspiration content still surfaces, just unlifted). Tunable.
+  proximityFitSigmaMiles: 8,
   // Peak nudge for a brand-new look; decays with a 1-day half-life.
   freshnessMax: 6,
   freshnessHalfLifeDays: 1,
@@ -401,6 +435,17 @@ export type LookConversionSignal = {
   interestCount: number
 }
 
+// Per-pro proximity summary (spec §4.5 travel radius), keyed by professionalId and
+// computed at serve time (lib/looks/proximityStats.ts) as the great-circle distance
+// from the VIEWER's current location to the pro's primary location. A pro ABSENT
+// from the map has no primary-location coordinate (or the viewer sent no location),
+// so the proximity boost is 0 (no distance to measure). Plain data shape (no Prisma
+// import, and the geo math stays out of the pure ranker) so the ranker stays pure.
+export type ProProximitySignal = {
+  // Viewer→pro great-circle distance in miles (>= 0).
+  distanceMiles: number
+}
+
 export type PersonalizedRankContext = {
   affinity: PersonalizedViewerAffinity
   seenLookIds: ReadonlySet<string>
@@ -443,6 +488,14 @@ export type PersonalizedRankContext = {
   // gated. NOT availability-gated — reliability is a trust signal, not a
   // calendar-health floor.
   reliabilitySignals?: ReadonlyMap<string, ProReliabilitySignal>
+  // Per-pro proximity signals keyed by professionalId (spec §4.5 travel radius), for
+  // the proximity_fit boost — the precomputed viewer→pro distance. ABSENT (undefined)
+  // → the term is off entirely (byte-identical to the pre-§4.5-proximity feed; unit
+  // tests + non-personalized callers, and any request without viewer coords, omit it).
+  // PRESENT but a pro missing from it → no primary-location coordinate → boost 0. The
+  // geo read + haversine live in the reader (lib/looks/proximityStats.ts), so the pure
+  // ranker only ever sees a plain distance (like ProAvailabilitySignal), never coords.
+  proximitySignals?: ReadonlyMap<string, ProProximitySignal>
 }
 
 function safeNumber(value: number): number {
@@ -857,6 +910,42 @@ export function computePriceFitBoost(args: {
 }
 
 /**
+ * Additive learned proximity-fit boost (spec §4.5): rewards a look whose pro's
+ * primary location sits close to the viewer's current location, so the bookable
+ * feed leans toward pros a client can realistically get to — without ever hiding
+ * far looks (a WEIGHT, not a filter; inspiration content is fine from anywhere).
+ *
+ *   proximityFitMax × fit
+ *
+ * `fit` = exp(−miles² / (2 σ²)) — a Gaussian in miles, centered at the viewer's
+ * doorstep (1.0 at 0 miles, decaying smoothly with distance; σ = proximityFitSigmaMiles,
+ * the metro-sensible radius). No confidence ramp — unlike the LEARNED price band, the
+ * viewer's location is a current fact when provided, not accrued from history, so a
+ * present distance is fully trusted. The distance itself is precomputed in the reader
+ * (viewer→pro haversine), keeping the geo math and Prisma out of the pure ranker.
+ * Any missing input — no signal (pro has no coordinate, or the viewer sent no
+ * location), or a non-finite/negative distance — yields 0. Pure + exported for
+ * unit testing.
+ */
+export function computeProximityFitBoost(args: {
+  signal: ProProximitySignal | null | undefined
+}): number {
+  const signal = args.signal
+  if (!signal) return 0
+
+  const miles = signal.distanceMiles
+  if (!Number.isFinite(miles) || miles < 0) return 0
+
+  const sigma = PERSONALIZED_RANK_WEIGHTS.proximityFitSigmaMiles
+  if (!(sigma > 0)) return 0
+
+  const fit = Math.exp(-(miles * miles) / (2 * sigma * sigma))
+  if (!(fit > 0)) return 0
+
+  return PERSONALIZED_RANK_WEIGHTS.proximityFitMax * fit
+}
+
+/**
  * Category-suppression penalty from explicit hides (spec §2.2). Zero until the
  * decayed hide weight for the category crosses `hideCategoryThreshold` (so one
  * dismissed card doesn't suppress the category), then ramps linearly to
@@ -984,6 +1073,17 @@ export function computePersonalizedScore(
       })
     : 0
 
+  // §4.5 proximity_fit — a soft "close enough to book" lift for a look whose pro is
+  // near the viewer's current location. Off entirely unless the caller wired
+  // proximitySignals (byte-identical otherwise — a request with no viewer coords, or
+  // a non-personalized caller, omits it). A pro absent from the map has no primary-
+  // location coordinate → boost 0 (the gate is inside the boost fn).
+  const proximityFitBoost = context.proximitySignals
+    ? computeProximityFitBoost({
+        signal: context.proximitySignals.get(row.professionalId),
+      })
+    : 0
+
   const freshnessBoost = computePersonalizedFreshnessBoost(
     row.publishedAt,
     context.now,
@@ -1005,6 +1105,7 @@ export function computePersonalizedScore(
     conversionBoost +
     reliabilityBoost +
     priceFitBoost +
+    proximityFitBoost +
     freshnessBoost -
     seenPenalty -
     suppressionPenalty
