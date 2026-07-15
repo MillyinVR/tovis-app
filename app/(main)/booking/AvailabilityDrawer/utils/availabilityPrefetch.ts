@@ -8,9 +8,7 @@ import type {
 import { parseAvailabilityBootstrapResponse } from '../contract'
 import { safeJson } from './safeJson'
 import { INITIAL_WINDOW_DAYS } from './availabilityWindow'
-
-import { isRecord } from '@/lib/guards'
-import { pickString } from '@/lib/pick'
+import { BookingApiRequestError, parseBookingApiError } from './bookingError'
 
 type BootstrapOk = Extract<AvailabilityBootstrapResponse, { ok: true }>
 
@@ -45,11 +43,6 @@ const MAX_CACHE_ENTRIES = 200
 
 const bootstrapWindowCache = new Map<string, CacheEntry>()
 const inFlightByKey = new Map<string, Promise<BootstrapOk>>()
-
-function pickApiError(raw: unknown): string | null {
-  if (!isRecord(raw)) return null
-  return pickString(raw.error)
-}
 
 function normalizeTrimmed(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -302,8 +295,10 @@ export async function fetchAvailabilitySummaryWindow(
       }
 
       if (!res.ok) {
-        throw new Error(
-          pickApiError(raw) ?? `Availability request failed (${res.status}).`,
+        const apiError = parseBookingApiError(raw)
+        throw new BookingApiRequestError(
+          apiError?.message ?? `Availability request failed (${res.status}).`,
+          apiError?.code ?? null,
         )
       }
 
@@ -313,7 +308,10 @@ export async function fetchAvailabilitySummaryWindow(
       }
 
       if (!parsed.ok) {
-        throw new Error(parsed.error)
+        throw new BookingApiRequestError(
+          parsed.error,
+          parseBookingApiError(raw)?.code ?? null,
+        )
       }
 
       if (parsed.mode !== 'BOOTSTRAP') {

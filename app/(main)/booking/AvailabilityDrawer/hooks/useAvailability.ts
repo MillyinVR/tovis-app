@@ -11,6 +11,7 @@ import type {
 } from '../types'
 
 import { redirectToLogin } from '../utils/authRedirect'
+import { bookingErrorCodeFromUnknown } from '../utils/bookingError'
 import {
   INITIAL_WINDOW_DAYS,
   NEXT_WINDOW_DAYS,
@@ -170,8 +171,21 @@ export function useAvailability(
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setErrorMessage] = useState<string | null>(null)
+  const [errorCode, setErrorCode] = useState<string | null>(null)
   const [data, setData] = useState<BootstrapOk | null>(null)
+
+  /**
+   * Message and machine-readable booking error code travel together: clearing
+   * or replacing the message without an explicit code also resets the code.
+   */
+  const setError = useCallback(
+    (message: string | null, code: string | null = null) => {
+      setErrorMessage(message)
+      setErrorCode(message == null ? null : code)
+    },
+    [],
+  )
 
   const dataRef = useRef<BootstrapOk | null>(null)
   dataRef.current = data
@@ -311,7 +325,7 @@ export function useAvailability(
   )
 
   const handleAvailabilityError = useCallback(
-    (message: string, preserveVisibleData: boolean) => {
+    (message: string, code: string | null, preserveVisibleData: boolean) => {
       if (message === 'Unauthorized.') {
         redirectToLogin(router, 'availability')
 
@@ -323,10 +337,10 @@ export function useAvailability(
       }
 
       if (!preserveVisibleData) {
-        setError(message)
+        setError(message, code)
       }
     },
-    [router, clearBootstrapData],
+    [router, clearBootstrapData, setError],
   )
 
   const primaryPrefetchArgs = useMemo(
@@ -471,7 +485,7 @@ export function useAvailability(
         e instanceof Error ? e.message : 'Failed to load availability.'
 
       cancelBackgroundRefresh(message)
-      handleAvailabilityError(message, true)
+      handleAvailabilityError(message, bookingErrorCodeFromUnknown(e), true)
     } finally {
       if (seq === requestSeqRef.current) {
         setRefreshing(false)
@@ -576,7 +590,11 @@ export function useAvailability(
           cancelBackgroundRefresh(message)
         }
 
-        handleAvailabilityError(message, preserveVisibleData)
+        handleAvailabilityError(
+          message,
+          bookingErrorCodeFromUnknown(e),
+          preserveVisibleData,
+        )
       } finally {
         if (seq === requestSeqRef.current) {
           setLoading(false)
@@ -644,7 +662,7 @@ export function useAvailability(
       const message =
         e instanceof Error ? e.message : 'Failed to load more availability.'
 
-      handleAvailabilityError(message, true)
+      handleAvailabilityError(message, bookingErrorCodeFromUnknown(e), true)
     } finally {
       setLoadingMore(false)
     }
@@ -849,6 +867,7 @@ export function useAvailability(
     loadingMore,
     refreshing,
     error,
+    errorCode,
     data,
     hasMoreDays: Boolean(data?.hasMoreDays),
     loadMore,
