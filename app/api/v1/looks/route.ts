@@ -345,6 +345,8 @@ export async function GET(req: Request) {
       // §4.2 pro_reliability (personalized cohort only).
       reliabilityBoostedCount:
         personalizedMeta?.reliabilityBoostedCount ?? null,
+      // §4.5 price_fit learned price band (personalized cohort only).
+      priceFitBoostedCount: personalizedMeta?.priceFitBoostedCount ?? null,
       badgeEligibleCount: badgeResult.meta.eligibleCount,
       badgeShownCount: badgeResult.meta.shownCount,
       badgeHoldoutCount: badgeResult.meta.holdoutCount,

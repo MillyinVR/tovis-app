@@ -19,7 +19,7 @@
 // realized signal. The cadence-timed rebook PROMPTS and the "how did it go?"
 // outcome loop of §6.7 are a separate, notification-budget-gated (§8.1) build.
 
-import { BookingStatus, type PrismaClient } from '@prisma/client'
+import { BookingStatus, Prisma, type PrismaClient } from '@prisma/client'
 
 import type { ProRelationshipSignal } from '@/lib/looks/personalizedRanking'
 
@@ -89,17 +89,40 @@ export function aggregateRelationshipSignals(
 }
 
 /**
- * One COMPLETED booking, projected for both ranking channels: the professional
- * (per-pro relationship) plus the booked service's category slug (per-category
- * taste). `categorySlug` is null only if a booking's service is somehow
- * uncategorized — service→category is a required relation, so in practice it's
- * always present.
+ * The service-portion price a client paid for a completed booking, as a plain
+ * positive number: the service subtotal (serviceSubtotalSnapshot) when present,
+ * else the booking subtotal (subtotalSnapshot, always set) — the same resolution
+ * the client-booking DTO uses (lib/dto/clientBooking.ts). This is the closest
+ * analog to a look's service `priceStartingAt`, so the §4.5 learned price band
+ * (learnPriceBand, personalizedFeed.ts) compares like with like. Returns null for
+ * a missing/non-finite/non-positive amount (a $0 or malformed snapshot carries no
+ * price signal). Pure + exported for unit testing.
+ */
+export function resolveBookingServicePrice(row: {
+  subtotalSnapshot: Prisma.Decimal | null
+  serviceSubtotalSnapshot: Prisma.Decimal | null
+}): number | null {
+  const decimal = row.serviceSubtotalSnapshot ?? row.subtotalSnapshot
+  if (decimal === null || decimal === undefined) return null
+  const value = decimal.toNumber()
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+/**
+ * One COMPLETED booking, projected for the ranking channels it feeds: the
+ * professional (per-pro relationship), the booked service's category slug
+ * (per-category taste), and the service price paid (per-user price band).
+ * `categorySlug` is null only if a booking's service is somehow uncategorized —
+ * service→category is a required relation, so in practice it's always present.
+ * `servicePrice` is null when the booking carries no usable price snapshot.
  */
 export type CompletedBookingSignalRow = {
   professionalId: string
   scheduledFor: Date
   finishedAt: Date | null
   categorySlug: string | null
+  // Service-portion price paid (spec §4.5 price band); null if unresolvable.
+  servicePrice: number | null
 }
 
 export type ClientBookingSignals = {
@@ -138,6 +161,10 @@ export async function fetchClientBookingSignals(
       finishedAt: true,
       // Required service→category relation → the slug for the §2 taste fold.
       service: { select: { category: { select: { slug: true } } } },
+      // Pricing snapshots → the §4.5 learned price band (service portion; the
+      // required subtotal always backs the optional service subtotal).
+      subtotalSnapshot: true,
+      serviceSubtotalSnapshot: true,
     },
   })
 
@@ -146,6 +173,7 @@ export async function fetchClientBookingSignals(
     scheduledFor: row.scheduledFor,
     finishedAt: row.finishedAt,
     categorySlug: row.service?.category?.slug ?? null,
+    servicePrice: resolveBookingServicePrice(row),
   }))
 
   return {
