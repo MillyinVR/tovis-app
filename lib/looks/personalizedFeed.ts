@@ -51,7 +51,11 @@ import {
   type ProRelationshipSignal,
 } from '@/lib/looks/personalizedRanking'
 import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
-import { fetchClientRelationshipSignals } from '@/lib/looks/relationshipSignals'
+import {
+  completedVisitInstant,
+  fetchClientBookingSignals,
+  type CompletedBookingSignalRow,
+} from '@/lib/looks/relationshipSignals'
 import { feedDiversityInjectionEnabled } from '@/lib/looks/feedDiversityFlag'
 import {
   interleaveExploration,
@@ -75,9 +79,26 @@ export const AFFINITY_SAVE_WEIGHT = 2
 // like/save contributes at full weight today and half as much 75 days from
 // now, so last year's prom obsession stops shaping this year's feed. Event
 // signals decay separately (computeBoardEventProximity's sharp post-event
-// fade); booking-driven affinity should decay slowest (~6–12 months) when
-// bookings become an affinity source.
+// fade); booking-driven affinity decays slowest (~6–12 months) — see
+// AFFINITY_BOOKING_HALF_LIFE_DAYS.
 export const AFFINITY_HALF_LIFE_DAYS = 75
+
+// A completed booking is the strongest, hardest-to-fake taste signal in the §2
+// hierarchy — stronger booking intent than a save (which outweighs a like), so a
+// booking feeds category affinity at the heaviest behavioral weight of any
+// source. It even outweighs a declared self-profile interest (3): that's a stated
+// preference, a booking is behavioral proof. The summed per-category weight is
+// capped in the ranker (categoryWeightCap 5), so a repeat client can't let one
+// category bury the feed — at weight 4 a single fresh booking lands just under
+// that cap and a second saturates it.
+export const AFFINITY_BOOKING_WEIGHT = 4
+
+// Booking-driven affinity decays the SLOWEST of any signal — the note above bands
+// it at ~6–12 months. 180 days (≈ the low end) is clearly slower than the 75-day
+// like/save half-life and comparable to the §6.7 relationship recency half-life
+// (120d): a client who booked balayage keeps seeing color content for months,
+// long after a single like would have faded.
+export const AFFINITY_BOOKING_HALF_LIFE_DAYS = 180
 
 // Half-life for explicit "not for me" hide suppression (spec §2.2 "suppressions
 // decay over weeks, not forever … explicit hides decay slower than inferred
@@ -365,10 +386,43 @@ function collectSessionSignals(
 }
 
 /**
+ * Fold the viewer's COMPLETED bookings into category-affinity entries (spec §2 /
+ * §6.7): each booking contributes AFFINITY_BOOKING_WEIGHT to its service
+ * category, decayed by the visit's age at the slow booking half-life
+ * (AFFINITY_BOOKING_HALF_LIFE_DAYS). The signal instant is the visit's finishedAt
+ * (else its scheduledFor slot — completedVisitInstant, the same rule the §6.7
+ * per-pro recency uses). Rows with no resolvable category are skipped; the ranker
+ * caps the summed per-category weight. Pure + exported for unit testing.
+ */
+export function bookingCategoryAffinityEntries(
+  bookings: readonly CompletedBookingSignalRow[],
+  now: Date,
+): PersonalizedCategoryAffinityEntry[] {
+  const entries: PersonalizedCategoryAffinityEntry[] = []
+  for (const booking of bookings) {
+    const slug =
+      typeof booking.categorySlug === 'string' ? booking.categorySlug.trim() : ''
+    if (!slug) continue
+    entries.push({
+      slug,
+      weight:
+        AFFINITY_BOOKING_WEIGHT *
+        computeAffinityDecayFactor(
+          completedVisitInstant(booking),
+          now,
+          AFFINITY_BOOKING_HALF_LIFE_DAYS,
+        ),
+    })
+  }
+  return entries
+}
+
+/**
  * Load the viewer's personalized-feed signals: which pros they follow, how strongly they
- * lean toward each service category (from their likes + saved-board items),
- * and their declared board purposes/event dates (occasion signals, spec §7–8).
- * Every query is bounded; missing signals just yield an empty affinity.
+ * lean toward each service category (from their likes + saved-board items +
+ * completed bookings), and their declared board purposes/event dates (occasion
+ * signals, spec §7–8). Every query is bounded; missing signals just yield an
+ * empty affinity.
  */
 export async function loadPersonalizedAffinity(args: {
   userId: string
@@ -385,7 +439,7 @@ export async function loadPersonalizedAffinity(args: {
     selfProfileRow,
     tasteVectorRow,
     hides,
-    relationshipSignals,
+    bookingSignals,
   ] = await Promise.all([
       clientId
         ? prisma.proFollow.findMany({
@@ -440,13 +494,17 @@ export async function loadPersonalizedAffinity(args: {
         take: HIDDEN_LOOK_IDS_CAP,
         select: hideCategorySelect,
       }),
-      // §6.7 post-booking relationship layer: which pros the viewer has actually
-      // BOOKED (completed visits), so their new looks surface. Client-gated (a
-      // booking is keyed to a client profile) → empty map for a no-client viewer,
-      // byte-identical to the pre-§6.7 feed.
+      // The viewer's COMPLETED bookings, in ONE bounded read: which pros they've
+      // BOOKED (§6.7 relationship_boost) AND which categories they've booked (§2
+      // booking→category taste). Client-gated (a booking is keyed to a client
+      // profile) → empty signals for a no-client viewer, byte-identical to the
+      // pre-booking feed.
       clientId
-        ? fetchClientRelationshipSignals(prisma, clientId)
-        : Promise.resolve(new Map<string, ProRelationshipSignal>()),
+        ? fetchClientBookingSignals(prisma, clientId)
+        : Promise.resolve({
+            relationshipSignals: new Map<string, ProRelationshipSignal>(),
+            completedBookings: [] as CompletedBookingSignalRow[],
+          }),
     ])
 
   // Behavioral signals decay with age (spec §6.2) so stale taste fades.
@@ -485,6 +543,14 @@ export async function loadPersonalizedAffinity(args: {
   for (const slug of selfProfileInterestCategorySlugs(selfProfile)) {
     entries.push({ slug, weight: INTEREST_CATEGORY_WEIGHT })
   }
+
+  // §2 booking→category taste: a completed booking is the strongest signal in the
+  // hierarchy, so it lifts its service category at the heaviest behavioral weight,
+  // decayed slowest (bookingCategoryAffinityEntries). Empty — byte-identical to
+  // the pre-booking feed — when the viewer has no completed bookings / no client.
+  entries.push(
+    ...bookingCategoryAffinityEntries(bookingSignals.completedBookings, args.now),
+  )
 
   // §6.3 in-session responsiveness: fold this sitting's freshest like/save
   // embeddings into the (daily-cron) taste vector at request time. Client-gated
@@ -545,7 +611,7 @@ export async function loadPersonalizedAffinity(args: {
     tasteVector: tasteBlend.vector,
     tasteSignalCount: tasteBlend.signalCount,
     sessionVisualSignalCount: sessionSignals.length,
-    relationshipSignals,
+    relationshipSignals: bookingSignals.relationshipSignals,
     hiddenLookIds,
   }
 }

@@ -30,11 +30,14 @@ import { BoardType } from '@prisma/client'
 import { rootTenantContext } from '@/lib/tenant/context'
 import { BOARD_EVENT_PROXIMITY } from '@/lib/boards/context'
 import {
+  AFFINITY_BOOKING_HALF_LIFE_DAYS,
+  AFFINITY_BOOKING_WEIGHT,
   AFFINITY_HALF_LIFE_DAYS,
   BOARD_GLOBAL_BLEED_WEIGHT,
   HIDE_SUPPRESSION_HALF_LIFE_DAYS,
   aggregateBoardContextSignals,
   aggregateCategoryWeights,
+  bookingCategoryAffinityEntries,
   buildPersonalizedFeedPage,
   computeAffinityDecayFactor,
   loadPersonalizedAffinity,
@@ -182,6 +185,93 @@ describe('lib/looks/personalizedFeed', () => {
     })
   })
 
+  describe('bookingCategoryAffinityEntries', () => {
+    const DAY = 24 * 60 * 60 * 1000
+
+    function bookingRow(args: {
+      scheduledFor: Date
+      finishedAt?: Date | null
+      categorySlug?: string | null
+    }) {
+      return {
+        professionalId: 'pro',
+        scheduledFor: args.scheduledFor,
+        finishedAt: args.finishedAt ?? null,
+        categorySlug: args.categorySlug ?? null,
+      }
+    }
+
+    it('weights a fresh completed booking at the heaviest behavioral weight (spec §2)', () => {
+      const entries = bookingCategoryAffinityEntries(
+        [bookingRow({ scheduledFor: NOW, finishedAt: NOW, categorySlug: 'balayage' })],
+        NOW,
+      )
+      expect(entries).toEqual([
+        { slug: 'balayage', weight: AFFINITY_BOOKING_WEIGHT },
+      ])
+      // A booking outweighs a like (1) or a save (2) on the same category.
+      expect(AFFINITY_BOOKING_WEIGHT).toBeGreaterThan(2)
+    })
+
+    it('ages the signal by finishedAt (else scheduledFor) at the slow booking half-life', () => {
+      const halfLifeAgo = new Date(
+        NOW.getTime() - AFFINITY_BOOKING_HALF_LIFE_DAYS * DAY,
+      )
+      const entries = bookingCategoryAffinityEntries(
+        [
+          // Scheduled long ago but FINISHED now → full weight (finishedAt wins).
+          bookingRow({
+            scheduledFor: halfLifeAgo,
+            finishedAt: NOW,
+            categorySlug: 'balayage',
+          }),
+          // No finishedAt → the scheduledFor slot ages it one half-life → ×0.5.
+          bookingRow({
+            scheduledFor: halfLifeAgo,
+            finishedAt: null,
+            categorySlug: 'nails',
+          }),
+        ],
+        NOW,
+      )
+      expect(
+        entries.find((e) => e.slug === 'balayage')?.weight,
+      ).toBeCloseTo(AFFINITY_BOOKING_WEIGHT, 5)
+      expect(entries.find((e) => e.slug === 'nails')?.weight).toBeCloseTo(
+        AFFINITY_BOOKING_WEIGHT * 0.5,
+        5,
+      )
+    })
+
+    it('skips a booking with no resolvable category', () => {
+      expect(
+        bookingCategoryAffinityEntries(
+          [
+            bookingRow({ scheduledFor: NOW, categorySlug: null }),
+            bookingRow({ scheduledFor: NOW, categorySlug: '   ' }),
+          ],
+          NOW,
+        ),
+      ).toEqual([])
+    })
+
+    it('emits one entry per booking so repeat visits sum in the category graph', () => {
+      const entries = bookingCategoryAffinityEntries(
+        [
+          bookingRow({ scheduledFor: NOW, finishedAt: NOW, categorySlug: 'balayage' }),
+          bookingRow({ scheduledFor: NOW, finishedAt: NOW, categorySlug: 'balayage' }),
+        ],
+        NOW,
+      )
+      expect(entries).toHaveLength(2)
+      // Two fresh bookings sum to 2× the weight (the ranker caps the total).
+      expect(aggregateCategoryWeights(entries).get('balayage')).toBeCloseTo(
+        2 * AFFINITY_BOOKING_WEIGHT,
+        5,
+      )
+    })
+  })
+
   describe('loadPersonalizedAffinity', () => {
     it('folds declared board purposes into category + occasion weights', async () => {
       mocks.prisma.board.findMany.mockResolvedValue([
@@ -297,6 +387,39 @@ describe('lib/looks/personalizedFeed', () => {
       })
       expect(signals?.get('pro_b')).toEqual({
         lastVisitAt: older,
+        completedVisits: 1,
+      })
+    })
+
+    it('folds completed bookings into category affinity from the SAME read (spec §2)', async () => {
+      // A completed balayage booking + one balayage like. The booking is the
+      // strongest signal, so it dominates: full like (1) + fresh booking (4).
+      // One booking read serves both the category fold and the §6.7 relationship
+      // map — no second query.
+      mocks.prisma.lookLike.findMany.mockResolvedValue([catRow('balayage')])
+      mocks.prisma.booking.findMany.mockResolvedValue([
+        {
+          professionalId: 'pro_a',
+          scheduledFor: NOW,
+          finishedAt: NOW,
+          service: { category: { slug: 'balayage' } },
+        },
+      ])
+
+      const affinity = await loadPersonalizedAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(mocks.prisma.booking.findMany).toHaveBeenCalledTimes(1)
+      expect(affinity.categoryWeights.get('balayage')).toBeCloseTo(
+        1 + AFFINITY_BOOKING_WEIGHT,
+        5,
+      )
+      // The same read still builds the per-pro relationship map.
+      expect(affinity.relationshipSignals?.get('pro_a')).toEqual({
+        lastVisitAt: NOW,
         completedVisits: 1,
       })
     })

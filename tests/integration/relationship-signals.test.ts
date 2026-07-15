@@ -1,11 +1,13 @@
 // tests/integration/relationship-signals.test.ts
 //
-// Real-Postgres coverage for fetchClientRelationshipSignals (personalization
-// spec §6.7 post-booking relationship layer). The reader powers the Looks feed
-// relationship_boost: it loads, per VIEWER, which pros they've completed a
-// booking with, how recently, and how often. Unit mocks can't exercise the real
-// WHERE semantics — the status filter (only COMPLETED counts) and the clientId
-// scoping (one client's bookings never leak into another's). Runs via
+// Real-Postgres coverage for fetchClientBookingSignals (personalization spec §6.7
+// post-booking relationship layer + §2 booking→category taste). The reader powers
+// the Looks feed relationship_boost AND the booking→category affinity fold: in one
+// bounded read it loads, per VIEWER, which pros they've completed a booking with
+// (how recently / how often) plus each visit's service-category slug. Unit mocks
+// can't exercise the real WHERE + nested-relation semantics — the status filter
+// (only COMPLETED counts), the clientId scoping (one client's bookings never leak
+// into another's), and the service→category slug projection. Runs via
 // `npm run test:integration` (test DB :5433).
 //
 // The shared test DB is seeded, so every query is scoped to this fixture's own
@@ -22,7 +24,7 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
-import { fetchClientRelationshipSignals } from '@/lib/looks/relationshipSignals'
+import { fetchClientBookingSignals } from '@/lib/looks/relationshipSignals'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -47,6 +49,7 @@ type Fixtures = {
   clientBUserId: string
   serviceId: string
   categoryId: string
+  categorySlug: string
   locationId: string
 }
 
@@ -124,8 +127,9 @@ async function seed(): Promise<Fixtures> {
   const clientA = await makeClient('a')
   const clientB = await makeClient('b')
 
+  const categorySlug = `${tag}-category`
   const category = await db.serviceCategory.create({
-    data: { name: `${tag} Category`, slug: `${tag}-category`, isActive: true },
+    data: { name: `${tag} Category`, slug: categorySlug, isActive: true },
     select: { id: true },
   })
 
@@ -175,6 +179,7 @@ async function seed(): Promise<Fixtures> {
     clientBUserId: clientB.userId,
     serviceId: service.id,
     categoryId: category.id,
+    categorySlug,
     locationId: location.id,
   }
 }
@@ -222,7 +227,7 @@ afterAll(async () => {
   await db.$disconnect()
 })
 
-describe('fetchClientRelationshipSignals (real DB)', () => {
+describe('fetchClientBookingSignals (real DB)', () => {
   it('aggregates a viewer’s COMPLETED bookings per pro, preferring finishedAt', async () => {
     if (!fx) throw new Error('Fixtures not initialized')
 
@@ -254,25 +259,40 @@ describe('fetchClientRelationshipSignals (real DB)', () => {
       status: BookingStatus.COMPLETED,
     })
 
-    const aSignals = await fetchClientRelationshipSignals(db, fx.clientAId)
-    const a = aSignals.get(fx.professionalId)
+    const aSignals = await fetchClientBookingSignals(db, fx.clientAId)
+    const a = aSignals.relationshipSignals.get(fx.professionalId)
     expect(a).toBeDefined()
     // The PENDING booking is excluded; only the two COMPLETED count.
     expect(a?.completedVisits).toBe(2)
     // The latest instant prefers finishedAt over scheduledFor.
     expect(a?.lastVisitAt.getTime()).toBe(finishedInstant.getTime())
 
+    // §2 booking→category taste: each COMPLETED visit carries its booked
+    // service's category slug (via the service→category relation), and the
+    // PENDING booking is excluded from these rows too.
+    expect(aSignals.completedBookings).toHaveLength(2)
+    expect(
+      aSignals.completedBookings.every(
+        (b) => b.categorySlug === fx?.categorySlug,
+      ),
+    ).toBe(true)
+
     // Client B's booking with the same pro stays on B — the reader is scoped by
     // clientId, so A's count is unaffected.
-    const bSignals = await fetchClientRelationshipSignals(db, fx.clientBId)
-    expect(bSignals.get(fx.professionalId)?.completedVisits).toBe(1)
+    const bSignals = await fetchClientBookingSignals(db, fx.clientBId)
+    expect(bSignals.relationshipSignals.get(fx.professionalId)?.completedVisits).toBe(
+      1,
+    )
+    expect(bSignals.completedBookings).toHaveLength(1)
   })
 
-  it('returns an empty map for a viewer with no completed bookings', async () => {
+  it('returns empty signals for a viewer with no completed bookings', async () => {
     if (!fx) throw new Error('Fixtures not initialized')
-    // Wipe A's bookings; a client with none gets no relationship signal (boost 0).
+    // Wipe A's bookings; a client with none gets no relationship signal (boost 0)
+    // and no booking-driven category weight.
     await db.booking.deleteMany({ where: { clientId: fx.clientAId } })
-    const signals = await fetchClientRelationshipSignals(db, fx.clientAId)
-    expect(signals.size).toBe(0)
+    const signals = await fetchClientBookingSignals(db, fx.clientAId)
+    expect(signals.relationshipSignals.size).toBe(0)
+    expect(signals.completedBookings).toHaveLength(0)
   })
 })
