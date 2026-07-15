@@ -325,15 +325,25 @@ async function loadDatedBoards(
   return { boards, capped }
 }
 
+export type EventCountdownGathered = {
+  /** Boards inside a milestone window, not yet nudged for it. Ready to allocate. */
+  candidates: EventCountdownCandidate[]
+  datedBoards: number
+  scanCapped: boolean
+}
+
 /**
- * Run one event-countdown pass (§8). Reads via `db`; sends via
- * createClientNotification (global prisma). Returns a summary for the cron
- * response + observability log.
+ * Gather the event-countdown candidates (§8) for one pass: load dated boards,
+ * resolve their milestone windows, and drop boards already nudged for their
+ * current milestone. This is the reusable candidate-selection half of the pass —
+ * both the per-trigger orchestrator below and the unified re-engagement dispatcher
+ * (reEngagementDispatcher.ts) call it, then apply the pooled budget themselves, so
+ * the budget/allocation policy has a single home.
  */
-export async function runEventCountdownNotifications(
+export async function gatherEventCountdownCandidates(
   db: PrismaClient,
   options: { now: Date },
-): Promise<EventCountdownSummary> {
+): Promise<EventCountdownGathered> {
   const now = options.now
 
   const { boards, capped } = await loadDatedBoards(db, {
@@ -342,15 +352,7 @@ export async function runEventCountdownNotifications(
   })
 
   if (boards.length === 0) {
-    return {
-      datedBoards: 0,
-      scanCapped: capped,
-      candidateBoards: 0,
-      mutedOptOut: 0,
-      budgetBlocked: 0,
-      sent: 0,
-      computedAt: now,
-    }
+    return { candidates: [], datedBoards: 0, scanCapped: capped }
   }
 
   // Provisional candidates (pre already-notified) → dedupeKeys for the check.
@@ -369,6 +371,23 @@ export async function runEventCountdownNotifications(
     alreadyNotifiedDedupeKeys,
     now,
   })
+
+  return { candidates, datedBoards: boards.length, scanCapped: capped }
+}
+
+/**
+ * Run one event-countdown pass (§8). Reads via `db`; sends via
+ * createClientNotification (global prisma). Returns a summary for the cron
+ * response + observability log.
+ */
+export async function runEventCountdownNotifications(
+  db: PrismaClient,
+  options: { now: Date },
+): Promise<EventCountdownSummary> {
+  const now = options.now
+
+  const { candidates, datedBoards, scanCapped } =
+    await gatherEventCountdownCandidates(db, { now })
 
   const candidateClientIds = [...new Set(candidates.map((c) => c.clientId))]
   const [sentCountByClient, mutedClients] = await Promise.all([
@@ -404,8 +423,8 @@ export async function runEventCountdownNotifications(
   }
 
   return {
-    datedBoards: boards.length,
-    scanCapped: capped,
+    datedBoards,
+    scanCapped,
     candidateBoards: candidates.length,
     mutedOptOut: allocation.mutedOptOut,
     budgetBlocked: allocation.budgetBlocked,

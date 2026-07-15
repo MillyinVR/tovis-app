@@ -460,15 +460,29 @@ async function loadUpcomingPairs(
   return upcoming
 }
 
+export type RebookCadenceGathered = {
+  /** DUE (client, pro) pairs, not excluded and not yet nudged. Ready to allocate. */
+  candidates: RebookCadenceCandidate[]
+  /** professionalId → public display name, for the copy (read via the relation). */
+  proNames: Map<string, string>
+  openPros: number
+  completedVisits: number
+  scanCapped: boolean
+}
+
 /**
- * Run one rebook-cadence pass (§6.7). Reads via `db`; sends via
- * createClientNotification (global prisma). Returns a summary for the cron
- * response + observability log.
+ * Gather the rebook-cadence candidates (§6.7) for one pass: find pros with a
+ * near-term opening, their completed visits, the (client, pro) pairs now DUE for a
+ * refresh (past cadence, not churned), then drop pairs with an upcoming booking and
+ * pairs already nudged this cooldown window. This is the reusable candidate-
+ * selection half of the pass — both the per-trigger orchestrator below and the
+ * unified re-engagement dispatcher (reEngagementDispatcher.ts) call it, then apply
+ * the pooled budget themselves.
  */
-export async function runRebookCadenceNotifications(
+export async function gatherRebookCadenceCandidates(
   db: PrismaClient,
   options: { now: Date },
-): Promise<RebookCadenceSummary> {
+): Promise<RebookCadenceGathered> {
   const now = options.now
   const horizonEnd = new Date(
     now.getTime() + REBOOK_CADENCE.openingHorizonDays * DAY_MS,
@@ -477,16 +491,11 @@ export async function runRebookCadenceNotifications(
   const openingByPro = await loadOpenProAvailability(db, horizonEnd)
   if (openingByPro.size === 0) {
     return {
+      candidates: [],
+      proNames: new Map(),
       openPros: 0,
       completedVisits: 0,
       scanCapped: false,
-      candidatePairs: 0,
-      learnedCadencePairs: 0,
-      offeringCadencePairs: 0,
-      mutedOptOut: 0,
-      budgetBlocked: 0,
-      sent: 0,
-      computedAt: now,
     }
   }
 
@@ -535,6 +544,29 @@ export async function runRebookCadenceNotifications(
     now,
   })
 
+  return {
+    candidates,
+    proNames,
+    openPros: openingByPro.size,
+    completedVisits: visits.length,
+    scanCapped: capped,
+  }
+}
+
+/**
+ * Run one rebook-cadence pass (§6.7). Reads via `db`; sends via
+ * createClientNotification (global prisma). Returns a summary for the cron
+ * response + observability log.
+ */
+export async function runRebookCadenceNotifications(
+  db: PrismaClient,
+  options: { now: Date },
+): Promise<RebookCadenceSummary> {
+  const now = options.now
+
+  const { candidates, proNames, openPros, completedVisits, scanCapped } =
+    await gatherRebookCadenceCandidates(db, { now })
+
   const candidateClientIds = [...new Set(candidates.map((c) => c.clientId))]
   const [sentCountByClient, mutedClients] = await Promise.all([
     loadReEngagementBudgetCounts(db, {
@@ -572,9 +604,9 @@ export async function runRebookCadenceNotifications(
   }
 
   return {
-    openPros: openingByPro.size,
-    completedVisits: visits.length,
-    scanCapped: capped,
+    openPros,
+    completedVisits,
+    scanCapped,
     candidatePairs: candidates.length,
     learnedCadencePairs: candidates.filter((c) => c.cadenceSource === 'learned')
       .length,
