@@ -42,6 +42,7 @@ import {
   bookingCategoryAffinityEntries,
   buildPersonalizedFeedPage,
   computeAffinityDecayFactor,
+  learnPriceBand,
   loadPersonalizedAffinity,
   parseSeenLookIds,
 } from './personalizedFeed'
@@ -196,12 +197,14 @@ describe('lib/looks/personalizedFeed', () => {
       scheduledFor: Date
       finishedAt?: Date | null
       categorySlug?: string | null
+      servicePrice?: number | null
     }) {
       return {
         professionalId: 'pro',
         scheduledFor: args.scheduledFor,
         finishedAt: args.finishedAt ?? null,
         categorySlug: args.categorySlug ?? null,
+        servicePrice: args.servicePrice ?? null,
       }
     }
 
@@ -273,6 +276,88 @@ describe('lib/looks/personalizedFeed', () => {
         2 * AFFINITY_BOOKING_WEIGHT,
         5,
       )
+    })
+  })
+
+  describe('learnPriceBand', () => {
+    const DAY = 24 * 60 * 60 * 1000
+
+    function pricedRow(args: {
+      scheduledFor: Date
+      finishedAt?: Date | null
+      servicePrice: number | null
+    }) {
+      return {
+        professionalId: 'pro',
+        scheduledFor: args.scheduledFor,
+        finishedAt: args.finishedAt ?? null,
+        categorySlug: 'balayage',
+        servicePrice: args.servicePrice,
+      }
+    }
+
+    it('returns null when no booking carries a usable price', () => {
+      expect(
+        learnPriceBand(
+          [
+            pricedRow({ scheduledFor: NOW, servicePrice: null }),
+            pricedRow({ scheduledFor: NOW, servicePrice: 0 }),
+            pricedRow({ scheduledFor: NOW, servicePrice: -50 }),
+          ],
+          NOW,
+        ),
+      ).toBeNull()
+      expect(learnPriceBand([], NOW)).toBeNull()
+    })
+
+    it('centers on the LOG-mean of equal-age prices and counts the priced bookings', () => {
+      // Two same-day bookings at $50 and $200 → geometric mean $100 (log space).
+      const band = learnPriceBand(
+        [
+          pricedRow({ scheduledFor: NOW, finishedAt: NOW, servicePrice: 50 }),
+          pricedRow({ scheduledFor: NOW, finishedAt: NOW, servicePrice: 200 }),
+        ],
+        NOW,
+      )
+      expect(band).not.toBeNull()
+      expect(Math.exp(band!.logCenter)).toBeCloseTo(100, 5)
+      expect(band!.sampleCount).toBe(2)
+    })
+
+    it('recency-weights the center toward recent visits (slow booking half-life)', () => {
+      // A fresh $200 visit vs one a half-life old at $50: the old one counts ×0.5,
+      // so the log-center leans toward $200. weighted = (1·ln200 + 0.5·ln50)/1.5.
+      const halfLifeAgo = new Date(
+        NOW.getTime() - AFFINITY_BOOKING_HALF_LIFE_DAYS * DAY,
+      )
+      const band = learnPriceBand(
+        [
+          pricedRow({ scheduledFor: NOW, finishedAt: NOW, servicePrice: 200 }),
+          pricedRow({
+            scheduledFor: halfLifeAgo,
+            finishedAt: halfLifeAgo,
+            servicePrice: 50,
+          }),
+        ],
+        NOW,
+      )
+      const expected = (Math.log(200) + 0.5 * Math.log(50)) / 1.5
+      expect(band!.logCenter).toBeCloseTo(expected, 5)
+      // Both bookings are priced, so confidence counts both (recency shifts the
+      // center, not the sample count).
+      expect(band!.sampleCount).toBe(2)
+    })
+
+    it('skips unpriced rows but still counts the priced ones', () => {
+      const band = learnPriceBand(
+        [
+          pricedRow({ scheduledFor: NOW, finishedAt: NOW, servicePrice: 100 }),
+          pricedRow({ scheduledFor: NOW, finishedAt: NOW, servicePrice: null }),
+        ],
+        NOW,
+      )
+      expect(band!.sampleCount).toBe(1)
+      expect(Math.exp(band!.logCenter)).toBeCloseTo(100, 5)
     })
   })
 
@@ -426,6 +511,66 @@ describe('lib/looks/personalizedFeed', () => {
         lastVisitAt: NOW,
         completedVisits: 1,
       })
+    })
+
+    it('learns a price band from the SAME booking read (spec §4.5)', async () => {
+      // A Decimal-like price snapshot: the reader resolves serviceSubtotal ??
+      // subtotal, then .toNumber(). Two same-day bookings at $80 and $120 →
+      // geometric-mean center $~98, both priced.
+      const dec = (n: number) => ({ toNumber: () => n })
+      mocks.prisma.booking.findMany.mockResolvedValue([
+        {
+          professionalId: 'pro_a',
+          scheduledFor: NOW,
+          finishedAt: NOW,
+          service: { category: { slug: 'balayage' } },
+          subtotalSnapshot: dec(80),
+          serviceSubtotalSnapshot: null,
+        },
+        {
+          professionalId: 'pro_a',
+          scheduledFor: NOW,
+          finishedAt: NOW,
+          service: { category: { slug: 'balayage' } },
+          // Service subtotal wins over the booking subtotal when present.
+          subtotalSnapshot: dec(999),
+          serviceSubtotalSnapshot: dec(120),
+        },
+      ])
+
+      const affinity = await loadPersonalizedAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.priceBand).not.toBeNull()
+      expect(Math.exp(affinity.priceBand!.logCenter)).toBeCloseTo(
+        Math.sqrt(80 * 120),
+        5,
+      )
+      expect(affinity.priceBand!.sampleCount).toBe(2)
+    })
+
+    it('leaves the price band null when bookings carry no usable price (spec §4.5)', async () => {
+      mocks.prisma.booking.findMany.mockResolvedValue([
+        {
+          professionalId: 'pro_a',
+          scheduledFor: NOW,
+          finishedAt: NOW,
+          service: { category: { slug: 'balayage' } },
+          subtotalSnapshot: { toNumber: () => 0 },
+          serviceSubtotalSnapshot: null,
+        },
+      ])
+
+      const affinity = await loadPersonalizedAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.priceBand).toBeNull()
     })
 
     it('time-decays like/save signals by age (spec §6.2)', async () => {
@@ -917,6 +1062,109 @@ describe('lib/looks/personalizedFeed', () => {
           completedResolvedCount: true,
         },
       })
+    })
+
+    it('lifts an in-budget look over a pricier peer via the learned band and reports the §4.5 count', async () => {
+      // Three $100 completed bookings with an UNRELATED pro + category (lashes) →
+      // a confident band centered on ln(100), with no relationship/category bleed
+      // into the two 'balayage' feed looks (so price_fit is what differs).
+      const dec = (n: number) => ({ toNumber: () => n })
+      mocks.prisma.booking.findMany.mockResolvedValue(
+        [100, 100, 100].map(() => ({
+          professionalId: 'pro_elsewhere',
+          scheduledFor: NOW,
+          finishedAt: NOW,
+          service: { category: { slug: 'lashes' } },
+          subtotalSnapshot: dec(100),
+          serviceSubtotalSnapshot: null,
+        })),
+      )
+      // Backbone: a pricey out-of-band look leads on rankScore; the in-band look
+      // trails. priceStartingAt is a plain number here (a Decimal at runtime).
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({
+          id: 'b_pricey',
+          professionalId: 'pro_x',
+          rankScore: 8,
+          priceStartingAt: 1500,
+        }),
+        feedRow({
+          id: 'b_inbudget',
+          professionalId: 'pro_y',
+          rankScore: 5,
+          priceStartingAt: 100,
+        }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // The price-fit boost (~+8 at full confidence) out-pulls the +3 rankScore
+      // gap → the in-budget look leads.
+      expect(page.items[0]?.id).toBe('b_inbudget')
+      // Coverage metric: both looks carry a price + the viewer has a band, so both
+      // were price-matched (the far-out $1500 look still earns a ~0.09 Gaussian
+      // tail — it's buried by ordering, not zeroed).
+      expect(page.meta.priceFitBoostedCount).toBe(2)
+    })
+
+    it('excludes an unpriced look from the price-fit coverage count', async () => {
+      const dec = (n: number) => ({ toNumber: () => n })
+      mocks.prisma.booking.findMany.mockResolvedValue([
+        {
+          professionalId: 'pro_elsewhere',
+          scheduledFor: NOW,
+          finishedAt: NOW,
+          service: { category: { slug: 'lashes' } },
+          subtotalSnapshot: dec(100),
+          serviceSubtotalSnapshot: null,
+        },
+      ])
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_priced', professionalId: 'pro_x', rankScore: 8, priceStartingAt: 100 }),
+        feedRow({ id: 'b_unpriced', professionalId: 'pro_y', rankScore: 5, priceStartingAt: null }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // Only the priced look is matchable against the band.
+      expect(page.meta.priceFitBoostedCount).toBe(1)
+    })
+
+    it('reports zero price-fit lift when the viewer has no learned band', async () => {
+      // No priced bookings → no band → the term is dark; order tracks rankScore.
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_hi', professionalId: 'pro_a', rankScore: 8, priceStartingAt: 100 }),
+        feedRow({ id: 'b_lo', professionalId: 'pro_b', rankScore: 5, priceStartingAt: 100 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      expect(page.items.map((item) => item.id)).toEqual(['b_hi', 'b_lo'])
+      expect(page.meta.priceFitBoostedCount).toBe(0)
     })
 
     it('does not inject on a paginated continuation', async () => {

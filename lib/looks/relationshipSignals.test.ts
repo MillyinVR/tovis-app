@@ -1,7 +1,11 @@
 // lib/looks/relationshipSignals.test.ts
+import { Prisma } from '@prisma/client'
 import { describe, expect, it } from 'vitest'
 
-import { aggregateRelationshipSignals } from './relationshipSignals'
+import {
+  aggregateRelationshipSignals,
+  resolveBookingServicePrice,
+} from './relationshipSignals'
 
 const A = new Date('2026-05-01T12:00:00.000Z')
 const B = new Date('2026-06-20T12:00:00.000Z')
@@ -47,6 +51,41 @@ describe('lib/looks/relationshipSignals', () => {
 
     it('returns an empty map for no rows', () => {
       expect(aggregateRelationshipSignals([]).size).toBe(0)
+    })
+  })
+
+  describe('resolveBookingServicePrice (§4.5)', () => {
+    it('prefers the service subtotal over the booking subtotal', () => {
+      expect(
+        resolveBookingServicePrice({
+          subtotalSnapshot: new Prisma.Decimal(260),
+          serviceSubtotalSnapshot: new Prisma.Decimal(120),
+        }),
+      ).toBe(120)
+    })
+
+    it('falls back to the booking subtotal when the service subtotal is absent', () => {
+      expect(
+        resolveBookingServicePrice({
+          subtotalSnapshot: new Prisma.Decimal(85),
+          serviceSubtotalSnapshot: null,
+        }),
+      ).toBe(85)
+    })
+
+    it('returns null for a null or non-positive amount', () => {
+      expect(
+        resolveBookingServicePrice({
+          subtotalSnapshot: null,
+          serviceSubtotalSnapshot: null,
+        }),
+      ).toBeNull()
+      expect(
+        resolveBookingServicePrice({
+          subtotalSnapshot: new Prisma.Decimal(0),
+          serviceSubtotalSnapshot: null,
+        }),
+      ).toBeNull()
     })
   })
 })

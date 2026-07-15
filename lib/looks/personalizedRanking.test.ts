@@ -8,12 +8,15 @@ import {
   computeCategorySuppressionPenalty,
   computePersonalizedFreshnessBoost,
   computePersonalizedScore,
+  computePriceFitBoost,
   computeProReliabilityBoost,
   computeRelationshipBoost,
   computeUnderbookedProBoost,
   computeVisualSimilarityBoost,
   cosineSimilarity,
   rankPersonalizedRows,
+  resolveLookPriceNumber,
+  type LearnedPriceBand,
   type LookConversionSignal,
   type PersonalizedRankableRow,
   type PersonalizedViewerAffinity,
@@ -33,6 +36,7 @@ function row(overrides: Partial<PersonalizedRankableRow> = {}): PersonalizedRank
     rankScore: overrides.rankScore ?? 10,
     service: overrides.service ?? { category: { slug: 'balayage' } },
     tags: overrides.tags ?? null,
+    priceStartingAt: overrides.priceStartingAt ?? null,
   }
 }
 
@@ -45,6 +49,7 @@ function affinity(
     tasteVector: number[] | null
     tasteSignalCount: number
     relationships: Array<[string, ProRelationshipSignal]>
+    priceBand: LearnedPriceBand | null
   }> = {},
 ): PersonalizedViewerAffinity {
   return {
@@ -57,6 +62,7 @@ function affinity(
     relationshipSignals: overrides.relationships
       ? new Map(overrides.relationships)
       : undefined,
+    priceBand: overrides.priceBand ?? null,
   }
 }
 
@@ -1200,6 +1206,153 @@ describe('lib/looks/personalizedRanking', () => {
         now: NOW,
       })
       expect(withMap).toBeCloseTo(bare, 5)
+    })
+  })
+
+  describe('resolveLookPriceNumber (§4.5)', () => {
+    it('passes through a positive number', () => {
+      expect(resolveLookPriceNumber(120)).toBe(120)
+    })
+
+    it('reads a Prisma-Decimal-like value via toNumber', () => {
+      expect(resolveLookPriceNumber({ toNumber: () => 85.5 })).toBe(85.5)
+    })
+
+    it('returns null for missing / non-positive / non-finite prices', () => {
+      expect(resolveLookPriceNumber(null)).toBeNull()
+      expect(resolveLookPriceNumber(undefined)).toBeNull()
+      expect(resolveLookPriceNumber(0)).toBeNull()
+      expect(resolveLookPriceNumber(-40)).toBeNull()
+      expect(resolveLookPriceNumber({ toNumber: () => Number.NaN })).toBeNull()
+    })
+  })
+
+  describe('computePriceFitBoost (§4.5)', () => {
+    const FULL = PERSONALIZED_RANK_WEIGHTS.priceFitFullBookings
+    const band = (
+      center: number,
+      sampleCount: number = FULL,
+    ): LearnedPriceBand => ({
+      logCenter: Math.log(center),
+      sampleCount,
+    })
+
+    it('is 0 with no band, an empty band, or no look price', () => {
+      expect(computePriceFitBoost({ priceBand: null, price: 100 })).toBe(0)
+      expect(computePriceFitBoost({ priceBand: undefined, price: 100 })).toBe(0)
+      expect(
+        computePriceFitBoost({ priceBand: band(100, 0), price: 100 }),
+      ).toBe(0)
+      expect(computePriceFitBoost({ priceBand: band(100), price: null })).toBe(0)
+      expect(computePriceFitBoost({ priceBand: band(100), price: 0 })).toBe(0)
+    })
+
+    it('pays the full boost for a look at the band center at full confidence', () => {
+      expect(
+        computePriceFitBoost({ priceBand: band(100), price: 100 }),
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.priceFitMax, 5)
+    })
+
+    it('ramps by confidence as the band accrues priced bookings', () => {
+      const oneBooking = computePriceFitBoost({
+        priceBand: band(100, 1),
+        price: 100,
+      })
+      expect(oneBooking).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.priceFitMax / FULL,
+        5,
+      )
+    })
+
+    it('is symmetric in LOG price space (2× vs ½ the center match equally)', () => {
+      const pricier = computePriceFitBoost({ priceBand: band(100), price: 200 })
+      const cheaper = computePriceFitBoost({ priceBand: band(100), price: 50 })
+      expect(pricier).toBeCloseTo(cheaper, 5)
+      // 2× off-center → the σ-0.9 Gaussian gives ~0.74 of the peak.
+      const sigma = PERSONALIZED_RANK_WEIGHTS.priceFitLogSigma
+      const expected =
+        PERSONALIZED_RANK_WEIGHTS.priceFitMax *
+        Math.exp(-(Math.log(2) ** 2) / (2 * sigma * sigma))
+      expect(pricier).toBeCloseTo(expected, 5)
+    })
+
+    it('decays monotonically as the look price moves away from the band center', () => {
+      const atCenter = computePriceFitBoost({ priceBand: band(100), price: 100 })
+      const near = computePriceFitBoost({ priceBand: band(100), price: 150 })
+      const far = computePriceFitBoost({ priceBand: band(100), price: 600 })
+      const veryFar = computePriceFitBoost({ priceBand: band(100), price: 2000 })
+      expect(atCenter).toBeGreaterThan(near)
+      expect(near).toBeGreaterThan(far)
+      expect(far).toBeGreaterThan(veryFar)
+      // A far-out-of-band look earns essentially nothing.
+      expect(veryFar).toBeLessThan(0.2)
+    })
+
+    it('accepts a Prisma-Decimal-like look price', () => {
+      const asNumber = computePriceFitBoost({ priceBand: band(100), price: 120 })
+      const asDecimal = computePriceFitBoost({
+        priceBand: band(100),
+        price: { toNumber: () => 120 },
+      })
+      expect(asDecimal).toBeCloseTo(asNumber, 6)
+    })
+  })
+
+  describe('computePersonalizedScore price fit (§4.5)', () => {
+    it('adds exactly the price-fit boost when the affinity carries a learned band', () => {
+      const priceBand: LearnedPriceBand = {
+        logCenter: Math.log(100),
+        sampleCount: PERSONALIZED_RANK_WEIGHTS.priceFitFullBookings,
+      }
+      const withBand = computePersonalizedScore(row({ priceStartingAt: 100 }), {
+        affinity: affinity({ priceBand }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      const bare = computePersonalizedScore(row({ priceStartingAt: 100 }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(withBand - bare).toBeCloseTo(
+        computePriceFitBoost({ priceBand, price: 100 }),
+        5,
+      )
+    })
+
+    it('lifts an in-budget look above a pricier peer at the same rankScore', () => {
+      const priceBand: LearnedPriceBand = {
+        logCenter: Math.log(100),
+        sampleCount: PERSONALIZED_RANK_WEIGHTS.priceFitFullBookings,
+      }
+      const context = {
+        affinity: affinity({ priceBand }),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      }
+      const inBudget = computePersonalizedScore(
+        row({ id: 'a', priceStartingAt: 100 }),
+        context,
+      )
+      const pricey = computePersonalizedScore(
+        row({ id: 'b', priceStartingAt: 1500 }),
+        context,
+      )
+      expect(inBudget).toBeGreaterThan(pricey)
+    })
+
+    it('contributes nothing for a priced look when the band is absent', () => {
+      const withPrice = computePersonalizedScore(row({ priceStartingAt: 100 }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      const noPrice = computePersonalizedScore(row({ priceStartingAt: null }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(withPrice).toBeCloseTo(noPrice, 5)
     })
   })
 })

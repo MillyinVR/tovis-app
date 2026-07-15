@@ -276,6 +276,11 @@ describe('fetchClientBookingSignals (real DB)', () => {
         (b) => b.categorySlug === fx?.categorySlug,
       ),
     ).toBe(true)
+    // §4.5 price band: each row resolves its service price from the booking
+    // snapshot Decimal ($50.00 → 50), the same read the price band learns from.
+    expect(
+      aSignals.completedBookings.every((b) => b.servicePrice === 50),
+    ).toBe(true)
 
     // Client B's booking with the same pro stays on B — the reader is scoped by
     // clientId, so A's count is unaffected.

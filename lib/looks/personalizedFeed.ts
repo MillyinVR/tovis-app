@@ -47,9 +47,11 @@ import {
 } from '@/lib/personalization/tasteVectorMath'
 import {
   computeBookingConversionBoost,
+  computePriceFitBoost,
   computeProReliabilityBoost,
   computeUnderbookedProBoost,
   rankPersonalizedRows,
+  type LearnedPriceBand,
   type PersonalizedViewerAffinity,
   type ProRelationshipSignal,
 } from '@/lib/looks/personalizedRanking'
@@ -426,6 +428,49 @@ export function bookingCategoryAffinityEntries(
 }
 
 /**
+ * Learn the viewer's price band (spec §4.5) from their COMPLETED bookings: the
+ * recency-weighted center of ln(servicePrice) across bookings that carry a
+ * positive service price, plus the count of those priced bookings (the confidence
+ * ramp the ranker applies). Works in LOG space because price perception is
+ * multiplicative — the $50→$100 gap feels like $200→$400, so a symmetric band in
+ * ratio, not dollars. Each booking is weighted by its age at the slow booking
+ * half-life (AFFINITY_BOOKING_HALF_LIFE_DAYS, the same decay the §2 category fold
+ * uses): recent visits dominate the center — a client's price comfort drifts
+ * slowly and what they pay NOW matters most — while older visits still count,
+ * faded. Returns null when no booking carries a usable price → the ranker's
+ * price_fit term stays off (byte-identical to the pre-§4.5 feed). Pure + exported
+ * for unit testing.
+ */
+export function learnPriceBand(
+  bookings: readonly CompletedBookingSignalRow[],
+  now: Date,
+): LearnedPriceBand | null {
+  let weightedLogSum = 0
+  let weightSum = 0
+  let sampleCount = 0
+
+  for (const booking of bookings) {
+    const price = booking.servicePrice
+    if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0) {
+      continue
+    }
+    const weight = computeAffinityDecayFactor(
+      completedVisitInstant(booking),
+      now,
+      AFFINITY_BOOKING_HALF_LIFE_DAYS,
+    )
+    if (!(weight > 0)) continue
+
+    weightedLogSum += weight * Math.log(price)
+    weightSum += weight
+    sampleCount += 1
+  }
+
+  if (sampleCount <= 0 || !(weightSum > 0)) return null
+  return { logCenter: weightedLogSum / weightSum, sampleCount }
+}
+
+/**
  * Load the viewer's personalized-feed signals: which pros they follow, how strongly they
  * lean toward each service category (from their likes + saved-board items +
  * completed bookings), and their declared board purposes/event dates (occasion
@@ -560,6 +605,12 @@ export async function loadPersonalizedAffinity(args: {
     ...bookingCategoryAffinityEntries(bookingSignals.completedBookings, args.now),
   )
 
+  // §4.5 price_fit: learn the viewer's price band from the SAME completed-booking
+  // read (recency-weighted log-center of service prices + count). null when no
+  // booking carries a usable price / no client → the ranker's price_fit term stays
+  // off (byte-identical to the pre-§4.5 feed).
+  const priceBand = learnPriceBand(bookingSignals.completedBookings, args.now)
+
   // §6.3 in-session responsiveness: fold this sitting's freshest like/save
   // embeddings into the (daily-cron) taste vector at request time. Client-gated
   // so a viewer without a client profile stays on today's exact path (no taste
@@ -620,6 +671,7 @@ export async function loadPersonalizedAffinity(args: {
     tasteSignalCount: tasteBlend.signalCount,
     sessionVisualSignalCount: sessionSignals.length,
     relationshipSignals: bookingSignals.relationshipSignals,
+    priceBand,
     hiddenLookIds,
   }
 }
@@ -689,6 +741,14 @@ export type PersonalizedFeedPage = {
     // populated the reliability columns yet, or no displayed pro clears the floor.
     // The §9 "is the feed favouring pros who see bookings through" metric.
     reliabilityBoostedCount: number
+    // §4.5 price_fit: how many of the DISPLAYED page's looks were price-matched —
+    // carried a price AND the viewer has a learned band (so the Gaussian scored
+    // them >0). 0 = no learned band (no priced bookings / no client) or no
+    // displayed look carried a price. A COVERAGE metric (is the price signal
+    // firing, and on how many looks), NOT a fit-quality measure — every priced
+    // look scores >0 against the Gaussian; ordering, not this count, buries a
+    // far-out-of-band look. The §9 "is the price signal reaching the feed" metric.
+    priceFitBoostedCount: number
   }
 }
 
@@ -939,7 +999,10 @@ export async function buildPersonalizedFeedPage(args: {
   let conversionBoostedCount = 0
   // §4.2 reliability metric: displayed looks the pro_reliability boost lifted.
   let reliabilityBoostedCount = 0
+  // §4.5 price_fit metric: displayed looks the learned-price-band boost lifted.
+  let priceFitBoostedCount = 0
   const relationshipSignals = affinity.relationshipSignals
+  const priceBand = affinity.priceBand
   for (const row of items) {
     if (availabilitySignals.has(row.professionalId)) bookableCount += 1
     if (relationshipSignals?.has(row.professionalId)) relationshipBoostedCount += 1
@@ -973,6 +1036,12 @@ export async function buildPersonalizedFeedPage(args: {
     ) {
       reliabilityBoostedCount += 1
     }
+    if (
+      priceBand &&
+      computePriceFitBoost({ priceBand, price: row.priceStartingAt }) > 0
+    ) {
+      priceFitBoostedCount += 1
+    }
   }
 
   return {
@@ -1001,6 +1070,7 @@ export async function buildPersonalizedFeedPage(args: {
       underbookedBoostedCount,
       conversionBoostedCount,
       reliabilityBoostedCount,
+      priceFitBoostedCount,
     },
   }
 }

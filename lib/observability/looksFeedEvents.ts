@@ -81,6 +81,11 @@ export type LooksFeedServeEvent = {
   // reliability boost (the pro has resolved bookings and a completion rate above
   // the floor) — the "is the feed favouring pros who see bookings through" metric.
   reliabilityBoostedCount?: number | null
+  // §4.5 price_fit (personalized cohort only): displayed looks that were
+  // price-matched — carried a price AND the viewer has a learned band — the
+  // coverage metric for whether the price signal is reaching the feed (not a
+  // fit-quality measure; ordering buries far-out-of-band looks, this counts them).
+  priceFitBoostedCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -134,6 +139,7 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     underbookedBoostedCount: input.underbookedBoostedCount ?? null,
     conversionBoostedCount: input.conversionBoostedCount ?? null,
     reliabilityBoostedCount: input.reliabilityBoostedCount ?? null,
+    priceFitBoostedCount: input.priceFitBoostedCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

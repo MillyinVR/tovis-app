@@ -52,6 +52,15 @@
 //                                 smoothed completion rate above a floor, off unless
 //                                 the pro has resolved bookings to grade. NO_SHOW is
 //                                 excluded — that is client behaviour, not the pro's)
+//         + priceFitBoost        (the look's starting price sits near the client's
+//                                 LEARNED price band — spec §4.5. Surfacing $400
+//                                 colorists to a $60 client breaks the "knows me"
+//                                 illusion, so the bookable feed leans toward
+//                                 in-budget work; a Gaussian falloff in log price
+//                                 space off the recency-weighted center of what the
+//                                 client actually pays for services, a WEIGHT not a
+//                                 filter — an out-of-band look is not lifted, never
+//                                 hidden. Off unless the viewer has a learned band)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
 //         - suppressionPenalty   (viewer keeps hiding this look's category — the
@@ -210,6 +219,30 @@ export const PERSONALIZED_RANK_WEIGHTS = {
   // without harshly penalizing thin evidence (the prior + strength keep small
   // samples near neutral). Tunable.
   reliabilityFloorRate: 0.75,
+  // price_fit (spec §4.5 learned price band): a soft "knows my budget" lift for a
+  // look whose starting service price sits near the center of the client's LEARNED
+  // price band — the recency-weighted center of what they actually pay for services
+  // (learnPriceBand, personalizedFeed.ts, from completed bookings). Surfacing $400
+  // colorists to a $60 client "instantly breaks the knows-me illusion"; this nudges
+  // the bookable feed toward in-budget work. A WEIGHT, never a filter — an
+  // out-of-band look is simply not lifted (additive 0), never hidden, because
+  // "aspirational saving is real; a client saving expensive looks is still telling
+  // you something." Peak sits in the bookable-term band (alongside conversion 8),
+  // below accumulated taste (category cap 15) / a followed (25) / booked (30) pro —
+  // a tie-breaker within a rankScore band, never a directory sort. Off entirely for
+  // a viewer with no learned band or a look with no price.
+  priceFitMax: 8,
+  // Gaussian tolerance of the price-fit falloff, in NATURAL-LOG price units (price
+  // perception is multiplicative — the $50→$100 gap feels like $200→$400, so the
+  // band is symmetric in log space, not dollars). fit = exp(−(ln price − logCenter)²
+  // / (2 σ²)); σ 0.9 gives fit ≈0.74 at 2× off-center (or half), ≈0.47 at 3×, ≈0.30
+  // at 4× — a gentle, forgiving band (aspirational saving), not a hard cutoff. Tunable.
+  priceFitLogSigma: 0.9,
+  // Confidence ramp: the price-fit boost reaches full strength only once the band is
+  // learned from this many priced completed bookings. A one-booking band could be a
+  // one-off splurge or a cheap trial, so it barely steers the feed until the price
+  // picture fills in (mirrors visualConfidenceFullSignals / relationshipFullVisits).
+  priceFitFullBookings: 3,
   // Peak nudge for a brand-new look; decays with a 1-day half-life.
   freshnessMax: 6,
   freshnessHalfLifeDays: 1,
@@ -265,6 +298,25 @@ export type PersonalizedViewerAffinity = {
   // Optional so non-relationship callers (unit tests, follow-only paths) omit it
   // → byte-identical to the pre-§6.7 feed.
   relationshipSignals?: ReadonlyMap<string, ProRelationshipSignal>
+  // The viewer's LEARNED price band (spec §4.5), derived once per request from
+  // their completed-booking service prices (learnPriceBand, personalizedFeed.ts).
+  // Viewer state, like relationshipSignals — a single band, not per-candidate.
+  // null/absent when no booking carries a usable price (a pre-booking viewer, or a
+  // viewer with no client) → the price_fit boost is 0 (byte-identical to the
+  // pre-§4.5 feed). Optional so non-price callers (unit tests, follow-only paths)
+  // omit it.
+  priceBand?: LearnedPriceBand | null
+}
+
+// The viewer's LEARNED price band (spec §4.5), derived from their completed-booking
+// service prices (learnPriceBand, lib/looks/personalizedFeed.ts). `logCenter` is the
+// recency-weighted mean of ln(servicePrice) — the center of what they pay, in LOG
+// space (price perception is multiplicative). `sampleCount` is how many priced
+// bookings built it, driving the confidence ramp. Plain data shape (no Prisma
+// import) so the ranker stays pure.
+export type LearnedPriceBand = {
+  logCenter: number
+  sampleCount: number
 }
 
 export type PersonalizedRankableRow = {
@@ -278,6 +330,11 @@ export type PersonalizedRankableRow = {
     } | null
   } | null
   tags?: ReadonlyArray<{ slug?: string | null }> | null
+  // The look's own starting service price (LookPost.priceStartingAt), for the
+  // §4.5 price_fit boost. A Prisma Decimal at runtime — accepted as a structural
+  // { toNumber } (or a plain number in tests) so the pure ranker never imports
+  // Prisma. Absent/null/non-positive → no price to match → 0 price-fit boost.
+  priceStartingAt?: number | { toNumber(): number } | null
 }
 
 // Per-pro availability summary (spec §4.2/§4.4), read from ProfessionalAvailabilityStat
@@ -739,6 +796,67 @@ export function computeProReliabilityBoost(args: {
 }
 
 /**
+ * Coerce a look price — a plain number or a Prisma Decimal (structural
+ * { toNumber }) — to a positive finite number, else null. Structural so the pure
+ * ranker never imports Prisma. Pure + exported for unit testing.
+ */
+export function resolveLookPriceNumber(
+  value: number | { toNumber(): number } | null | undefined,
+): number | null {
+  if (value === null || value === undefined) return null
+  const n = typeof value === 'number' ? value : value.toNumber()
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/**
+ * Additive learned price-fit boost (spec §4.5): rewards a look whose starting
+ * service price sits near the center of the client's LEARNED price band, so the
+ * bookable feed leans toward work in their actual budget — without ever hiding
+ * out-of-band looks (a WEIGHT, not a filter; aspirational saving is real).
+ *
+ *   priceFitMax × fit × confidence
+ *
+ * `fit` = exp(−(ln price − logCenter)² / (2 σ²)) — a Gaussian in LOG price space
+ * (price perception is multiplicative, so the band is symmetric in ratio, not
+ * dollars): 1.0 at the band center, decaying smoothly for pricier/cheaper looks
+ * (σ = priceFitLogSigma). `confidence` ramps 0→1 as the band accrues priced
+ * bookings (priceFitFullBookings), so a one-booking band barely moves the feed.
+ * Any missing input — no learned band, an empty band (sampleCount 0), or a
+ * missing/non-positive look price — yields 0. Pure + exported for unit testing.
+ */
+export function computePriceFitBoost(args: {
+  priceBand: LearnedPriceBand | null | undefined
+  price: number | { toNumber(): number } | null | undefined
+}): number {
+  const band = args.priceBand
+  if (!band) return 0
+
+  const sampleCount = Number.isFinite(band.sampleCount)
+    ? Math.max(0, band.sampleCount)
+    : 0
+  if (sampleCount <= 0) return 0
+  if (!Number.isFinite(band.logCenter)) return 0
+
+  const price = resolveLookPriceNumber(args.price)
+  if (price === null) return 0
+
+  const sigma = PERSONALIZED_RANK_WEIGHTS.priceFitLogSigma
+  if (!(sigma > 0)) return 0
+
+  const d = Math.log(price) - band.logCenter
+  const fit = Math.exp(-(d * d) / (2 * sigma * sigma))
+  if (!(fit > 0)) return 0
+
+  const confidence = Math.min(
+    sampleCount / PERSONALIZED_RANK_WEIGHTS.priceFitFullBookings,
+    1,
+  )
+  if (confidence <= 0) return 0
+
+  return PERSONALIZED_RANK_WEIGHTS.priceFitMax * fit * confidence
+}
+
+/**
  * Category-suppression penalty from explicit hides (spec §2.2). Zero until the
  * decayed hide weight for the category crosses `hideCategoryThreshold` (so one
  * dismissed card doesn't suppress the category), then ramps linearly to
@@ -854,6 +972,18 @@ export function computePersonalizedScore(
       )
     : 0
 
+  // §4.5 price_fit — a soft "in my budget" lift for a look whose price sits near
+  // the client's learned price band. Off entirely unless the affinity carries a
+  // learned band (byte-identical to the pre-§4.5 feed otherwise); a look with no
+  // price contributes 0. The band is viewer state (on affinity), the price is on
+  // the row — like categoryBoost (viewer weights × the row's category).
+  const priceFitBoost = context.affinity.priceBand
+    ? computePriceFitBoost({
+        priceBand: context.affinity.priceBand,
+        price: row.priceStartingAt,
+      })
+    : 0
+
   const freshnessBoost = computePersonalizedFreshnessBoost(
     row.publishedAt,
     context.now,
@@ -874,6 +1004,7 @@ export function computePersonalizedScore(
     underbookedBoost +
     conversionBoost +
     reliabilityBoost +
+    priceFitBoost +
     freshnessBoost -
     seenPenalty -
     suppressionPenalty
