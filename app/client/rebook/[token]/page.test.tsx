@@ -1,7 +1,12 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AftercareRebookMode, BookingStatus, MediaPhase } from '@prisma/client'
+import {
+  AftercareRebookMode,
+  BookingStatus,
+  ClientAddressKind,
+  MediaPhase,
+} from '@prisma/client'
 
 const TOKEN = 'token_1'
 
@@ -11,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   professionalServiceOfferingFindFirst: vi.fn(),
   professionalServiceOfferingFindUnique: vi.fn(),
   mediaAssetFindMany: vi.fn(),
+  clientAddressFindMany: vi.fn(),
   clientProfileFindUnique: vi.fn(),
   getPublicCheckoutAvailability: vi.fn(),
 
@@ -58,6 +64,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     mediaAsset: {
       findMany: mocks.mediaAssetFindMany,
+    },
+    clientAddress: {
+      findMany: mocks.clientAddressFindMany,
     },
     clientProfile: {
       findUnique: mocks.clientProfileFindUnique,
@@ -212,6 +221,33 @@ function makeResolvedAftercareAccess(overrides?: {
   }
 }
 
+// A full CLIENT_ADDRESS_SELECT-shaped row: the page maps it through the real
+// sortClientAddresses/mapClientAddress helpers, which need every column.
+function makeSavedServiceAddressRow(
+  overrides?: Partial<{ lat: number | null; lng: number | null }>,
+) {
+  return {
+    id: 'client_address_1',
+    clientId: 'client_1',
+    kind: ClientAddressKind.SERVICE_ADDRESS,
+    label: 'Home',
+    isDefault: true,
+    formattedAddress: '456 Client St, Los Angeles, CA',
+    addressLine1: '456 Client St',
+    addressLine2: null,
+    city: 'Los Angeles',
+    state: 'CA',
+    postalCode: '90001',
+    countryCode: 'US',
+    placeId: null,
+    lat: overrides && 'lat' in overrides ? overrides.lat : 34.05,
+    lng: overrides && 'lng' in overrides ? overrides.lng : -118.24,
+    radiusMiles: null,
+    createdAt: new Date('2026-04-01T18:00:00.000Z'),
+    updatedAt: new Date('2026-04-01T18:00:00.000Z'),
+  }
+}
+
 async function renderPage(args?: {
   resolved?: ReturnType<typeof makeResolvedAftercareAccess>
   nextBooking?: {
@@ -276,6 +312,7 @@ describe('app/client/rebook/[token]/page.tsx', () => {
 
     mocks.isBookingError.mockReturnValue(false)
     mocks.mediaAssetFindMany.mockResolvedValue([])
+    mocks.clientAddressFindMany.mockResolvedValue([])
     mocks.renderMediaUrls.mockImplementation(
       (row: { storagePath?: string | null; url?: string | null }) => ({
         renderUrl: `https://cdn.test/${row?.storagePath ?? row?.url ?? 'x'}`,
@@ -633,7 +670,7 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).toContain('Mobile')
   })
 
-  it('shows no location toggle for a salon-origin booking with no client address', async () => {
+  it('shows no location toggle for a salon-origin booking with no client address and no saved addresses', async () => {
     const page = await renderPage({
       resolved: makeResolvedAftercareAccess({
         offeringId: 'offering_1',
@@ -647,8 +684,88 @@ describe('app/client/rebook/[token]/page.tsx', () => {
 
     const markup = renderMarkup(page)
 
-    // Mobile needs the client's address, which a salon-origin booking lacks, so
-    // the toggle collapses to a single mode (no "Where" switcher).
+    // Mobile needs a client address — the salon-origin booking has none and
+    // the client has no saved service addresses to pick from, so the toggle
+    // collapses to a single mode (no "Where" switcher).
+    expect(markup).not.toContain('>Mobile<')
+  })
+
+  it('offers the mobile toggle for a salon-origin booking when the client has a bookable saved address', async () => {
+    mocks.clientAddressFindMany.mockResolvedValueOnce([
+      makeSavedServiceAddressRow(),
+    ])
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({
+        offeringId: 'offering_1',
+        locationType: 'SALON',
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+      }),
+      nextBooking: null,
+      offeringCaps: { offersInSalon: true, offersMobile: true },
+    })
+
+    const markup = renderMarkup(page)
+
+    // The saved SERVICE_ADDRESS unlocks the mobile mode even though the
+    // original visit was in-salon (the pre-#617 gap this page had).
+    expect(markup).toContain('>Mobile<')
+    expect(mocks.clientAddressFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          clientId: 'client_1',
+          kind: ClientAddressKind.SERVICE_ADDRESS,
+        }),
+      }),
+    )
+  })
+
+  it('renders the saved-address picker for a mobile-origin booking with saved addresses', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      clientAddressId: 'client_address_1',
+    })
+    mocks.clientAddressFindMany.mockResolvedValueOnce([
+      makeSavedServiceAddressRow(),
+    ])
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({
+        offeringId: 'offering_1',
+        locationType: 'MOBILE',
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+      }),
+      nextBooking: null,
+      offeringCaps: { offersInSalon: false, offersMobile: true },
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).toContain('Service address')
+    expect(markup).toContain('456 Client St, Los Angeles, CA')
+  })
+
+  it('skips unbookable saved addresses (no coordinates) when building the picker', async () => {
+    mocks.clientAddressFindMany.mockResolvedValueOnce([
+      makeSavedServiceAddressRow({ lat: null, lng: null }),
+    ])
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({
+        offeringId: 'offering_1',
+        locationType: 'SALON',
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+      }),
+      nextBooking: null,
+      offeringCaps: { offersInSalon: true, offersMobile: true },
+    })
+
+    const markup = renderMarkup(page)
+
+    // The row can't pass the write path's coordinate check, so it doesn't
+    // unlock the mobile mode either.
     expect(markup).not.toContain('>Mobile<')
   })
 
