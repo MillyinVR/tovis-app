@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     lookPost: { findMany: vi.fn() },
     professionalAvailabilityStat: { findMany: vi.fn() },
     professionalBadgeStat: { findMany: vi.fn() },
+    lookPostConversionStat: { findMany: vi.fn() },
     booking: { findMany: vi.fn() },
     clientProfile: { findUnique: vi.fn() },
     // Raw-SQL surface for the pgvector store (taste vector + candidate
@@ -75,6 +76,7 @@ describe('lib/looks/personalizedFeed', () => {
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.professionalAvailabilityStat.findMany.mockResolvedValue([])
     mocks.prisma.professionalBadgeStat.findMany.mockResolvedValue([])
+    mocks.prisma.lookPostConversionStat.findMany.mockResolvedValue([])
     mocks.prisma.booking.findMany.mockResolvedValue([])
     mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
     // No taste vector and no candidate embeddings by default.
@@ -810,6 +812,60 @@ describe('lib/looks/personalizedFeed', () => {
       // Order tracks rankScore (no on-ramp lift), and nothing is reported.
       expect(page.items.map((item) => item.id)).toEqual(['b_hi', 'b_lo'])
       expect(page.meta.underbookedBoostedCount).toBe(0)
+    })
+
+    it('lifts an efficiently-converting look over a heavily-saved non-converter and reports the §4.2 count', async () => {
+      // b_converts: few exposures, several bookings → efficient converter → full boost.
+      // b_pretty: many saves/views, one booking → near-0 conversion boost.
+      mocks.prisma.lookPostConversionStat.findMany.mockResolvedValue([
+        { lookPostId: 'b_converts', bookingCount: 8, interestCount: 12 },
+        { lookPostId: 'b_pretty', bookingCount: 1, interestCount: 3_000 },
+      ])
+      // Backbone: the "pretty" look leads on rankScore; the converter trails.
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_pretty', professionalId: 'pro_a', rankScore: 9 }),
+        feedRow({ id: 'b_converts', professionalId: 'pro_b', rankScore: 6 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // The conversion boost (~+8) out-pulls the +3 rankScore gap → converter leads.
+      expect(page.items[0]?.id).toBe('b_converts')
+      // Both looks have a row (>=1 booking), so both count toward the §4.2 metric.
+      expect(page.meta.conversionBoostedCount).toBe(2)
+      expect(mocks.prisma.lookPostConversionStat.findMany).toHaveBeenCalledWith({
+        where: { lookPostId: { in: ['b_pretty', 'b_converts'] } },
+        select: { lookPostId: true, bookingCount: true, interestCount: true },
+      })
+    })
+
+    it('reports zero conversion lift when no displayed look has driven a booking', async () => {
+      mocks.prisma.lookPostConversionStat.findMany.mockResolvedValue([])
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_1', professionalId: 'pro_a', rankScore: 8 }),
+        feedRow({ id: 'b_2', professionalId: 'pro_b', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      expect(page.items.map((item) => item.id)).toEqual(['b_1', 'b_2'])
+      expect(page.meta.conversionBoostedCount).toBe(0)
     })
 
     it('does not inject on a paginated continuation', async () => {
