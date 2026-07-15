@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     professionalAvailabilityStat: { findMany: vi.fn() },
     professionalBadgeStat: { findMany: vi.fn() },
     lookPostConversionStat: { findMany: vi.fn() },
+    professionalLocation: { findMany: vi.fn() },
     booking: { findMany: vi.fn() },
     clientProfile: { findUnique: vi.fn() },
     // Raw-SQL surface for the pgvector store (taste vector + candidate
@@ -78,6 +79,7 @@ describe('lib/looks/personalizedFeed', () => {
     mocks.prisma.professionalAvailabilityStat.findMany.mockResolvedValue([])
     mocks.prisma.professionalBadgeStat.findMany.mockResolvedValue([])
     mocks.prisma.lookPostConversionStat.findMany.mockResolvedValue([])
+    mocks.prisma.professionalLocation.findMany.mockResolvedValue([])
     mocks.prisma.booking.findMany.mockResolvedValue([])
     mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
     // No taste vector and no candidate embeddings by default.
@@ -1165,6 +1167,69 @@ describe('lib/looks/personalizedFeed', () => {
 
       expect(page.items.map((item) => item.id)).toEqual(['b_hi', 'b_lo'])
       expect(page.meta.priceFitBoostedCount).toBe(0)
+    })
+
+    it('lifts a nearby pro over a far peer via viewer location and reports the §4.5 proximity count', async () => {
+      // Two pros with the same rankScore; one near the viewer, one across town.
+      const viewer = { lat: 37.7749, lng: -122.4194 }
+      mocks.prisma.professionalLocation.findMany.mockResolvedValue([
+        { professionalId: 'pro_near', lat: 37.7799, lng: -122.4144 }, // ~0.4mi
+        { professionalId: 'pro_far', lat: 38.5816, lng: -121.4944 }, // ~75mi (Sacramento)
+      ])
+      // Backbone: the far pro leads on rankScore; the near pro trails.
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_far', professionalId: 'pro_far', rankScore: 8 }),
+        feedRow({ id: 'b_near', professionalId: 'pro_near', rankScore: 6 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+        viewerLocation: viewer,
+      })
+
+      // The proximity boost (~+8 for the doorstep pro) out-pulls the +2 rankScore
+      // gap → the near pro leads.
+      expect(page.items[0]?.id).toBe('b_near')
+      // Coverage metric: both pros have a locatable primary location, so both count
+      // (the Gaussian never truly zeroes) — ORDERING, not this count, buries the far
+      // pro. A pro with no coordinate is what drops out (covered in proximityStats).
+      expect(page.meta.proximityFitBoostedCount).toBe(2)
+      expect(mocks.prisma.professionalLocation.findMany).toHaveBeenCalledWith({
+        where: {
+          professionalId: { in: ['pro_far', 'pro_near'] },
+          isPrimary: true,
+          archivedAt: null,
+        },
+        select: { professionalId: true, lat: true, lng: true },
+      })
+    })
+
+    it('skips the proximity read and reports zero lift when the request carries no viewer location', async () => {
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_1', professionalId: 'pro_a', rankScore: 8 }),
+        feedRow({ id: 'b_2', professionalId: 'pro_b', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // No viewer location → the pro-location read is skipped and the term is dark.
+      expect(mocks.prisma.professionalLocation.findMany).not.toHaveBeenCalled()
+      expect(page.items.map((item) => item.id)).toEqual(['b_1', 'b_2'])
+      expect(page.meta.proximityFitBoostedCount).toBe(0)
     })
 
     it('does not inject on a paginated continuation', async () => {

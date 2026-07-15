@@ -10,6 +10,7 @@ import {
   computePersonalizedScore,
   computePriceFitBoost,
   computeProReliabilityBoost,
+  computeProximityFitBoost,
   computeRelationshipBoost,
   computeUnderbookedProBoost,
   computeVisualSimilarityBoost,
@@ -21,6 +22,7 @@ import {
   type PersonalizedRankableRow,
   type PersonalizedViewerAffinity,
   type ProAvailabilitySignal,
+  type ProProximitySignal,
   type ProRelationshipSignal,
   type ProReliabilitySignal,
   type ProUnderbookedSignal,
@@ -1353,6 +1355,115 @@ describe('lib/looks/personalizedRanking', () => {
         now: NOW,
       })
       expect(withPrice).toBeCloseTo(noPrice, 5)
+    })
+  })
+
+  describe('computeProximityFitBoost (§4.5)', () => {
+    const near = (miles: number): ProProximitySignal => ({ distanceMiles: miles })
+
+    it('is 0 with no signal, or a non-finite/negative distance', () => {
+      expect(computeProximityFitBoost({ signal: null })).toBe(0)
+      expect(computeProximityFitBoost({ signal: undefined })).toBe(0)
+      expect(computeProximityFitBoost({ signal: near(Number.NaN) })).toBe(0)
+      expect(
+        computeProximityFitBoost({ signal: near(Number.POSITIVE_INFINITY) }),
+      ).toBe(0)
+      expect(computeProximityFitBoost({ signal: near(-1) })).toBe(0)
+    })
+
+    it('pays the full boost for a pro at the viewer’s doorstep', () => {
+      expect(computeProximityFitBoost({ signal: near(0) })).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.proximityFitMax,
+        5,
+      )
+    })
+
+    it('decays as the Gaussian in miles off the σ radius', () => {
+      const sigma = PERSONALIZED_RANK_WEIGHTS.proximityFitSigmaMiles
+      const atSigma = computeProximityFitBoost({ signal: near(sigma) })
+      const expected =
+        PERSONALIZED_RANK_WEIGHTS.proximityFitMax *
+        Math.exp(-(sigma * sigma) / (2 * sigma * sigma))
+      expect(atSigma).toBeCloseTo(expected, 5)
+      // At the metro radius (σ), ~0.61 of the peak survives.
+      expect(atSigma).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.proximityFitMax * Math.exp(-0.5),
+        5,
+      )
+    })
+
+    it('decays monotonically as the pro gets farther away', () => {
+      const close = computeProximityFitBoost({ signal: near(1) })
+      const mid = computeProximityFitBoost({ signal: near(10) })
+      const far = computeProximityFitBoost({ signal: near(25) })
+      const veryFar = computeProximityFitBoost({ signal: near(50) })
+      expect(close).toBeGreaterThan(mid)
+      expect(mid).toBeGreaterThan(far)
+      expect(far).toBeGreaterThan(veryFar)
+      // A pro ~40+ min away earns essentially nothing.
+      expect(veryFar).toBeLessThan(0.01)
+    })
+  })
+
+  describe('computePersonalizedScore proximity fit (§4.5)', () => {
+    const proximity = (
+      entries: Array<[string, ProProximitySignal]>,
+    ): ReadonlyMap<string, ProProximitySignal> => new Map(entries)
+
+    it('adds exactly the proximity-fit boost when the context carries a distance', () => {
+      const signal: ProProximitySignal = { distanceMiles: 4 }
+      const withProx = computePersonalizedScore(row({ professionalId: 'pro_1' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        proximitySignals: proximity([['pro_1', signal]]),
+      })
+      const bare = computePersonalizedScore(row({ professionalId: 'pro_1' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(withProx - bare).toBeCloseTo(
+        computeProximityFitBoost({ signal }),
+        5,
+      )
+    })
+
+    it('lifts a nearby pro above a far peer at the same rankScore', () => {
+      const context = {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        proximitySignals: proximity([
+          ['pro_near', { distanceMiles: 2 }],
+          ['pro_far', { distanceMiles: 40 }],
+        ]),
+      }
+      const nearScore = computePersonalizedScore(
+        row({ id: 'a', professionalId: 'pro_near' }),
+        context,
+      )
+      const farScore = computePersonalizedScore(
+        row({ id: 'b', professionalId: 'pro_far' }),
+        context,
+      )
+      expect(nearScore).toBeGreaterThan(farScore)
+    })
+
+    it('contributes nothing when the context omits proximity signals', () => {
+      const bare = computePersonalizedScore(row({ professionalId: 'pro_1' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      const emptyMap = computePersonalizedScore(row({ professionalId: 'pro_1' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        proximitySignals: proximity([]),
+      })
+      // An empty map is wired but a pro absent from it earns 0 — same score.
+      expect(bare).toBeCloseTo(emptyMap, 5)
     })
   })
 })

@@ -134,6 +134,26 @@ export async function GET(req: Request) {
 
     const tenant = await resolveTenantContextForRequest(req)
 
+    // Optional viewer location (the client's localStorage geolocation, both-or-neither,
+    // range-checked). Powers the §5 DISTANCE badge AND the §4.5 proximity_fit ranking
+    // term — parsed once, up front, so both the personalized feed and badge attach read
+    // the same coordinates. Absent → both proximity surfaces stay off (byte-identical).
+    const rawViewerLat = parseCoordinateParam(
+      searchParams.get('viewerLat'),
+      -90,
+      90,
+    )
+    const rawViewerLng = parseCoordinateParam(
+      searchParams.get('viewerLng'),
+      -180,
+      180,
+    )
+    const hasViewerCoords = rawViewerLat !== null && rawViewerLng !== null
+    const viewerLocation =
+      rawViewerLat !== null && rawViewerLng !== null
+        ? { lat: rawViewerLat, lng: rawViewerLng }
+        : null
+
     // The personalized feed gates the DEFAULT Look tab only: signed-in viewer, no explicit
     // sort/search/category, flag on. An explicit `sort=recent` (or the flag off)
     // always falls through to the chronological feed — the capability is never
@@ -174,6 +194,8 @@ export async function GET(req: Request) {
         seenLookIds,
         now: new Date(),
         intent,
+        // §4.5 proximity_fit: lean the bookable feed toward pros near the viewer.
+        viewerLocation,
       })
 
       items = page.items
@@ -274,19 +296,8 @@ export async function GET(req: Request) {
 
     // Badge attachment (spec §5): engine-computed, per-viewer where relevant,
     // with the §9 measurement holdout. Universal badges apply to every cohort
-    // (signed-out included); viewer-intent badges need coords / a client.
-    const rawViewerLat = parseCoordinateParam(
-      searchParams.get('viewerLat'),
-      -90,
-      90,
-    )
-    const rawViewerLng = parseCoordinateParam(
-      searchParams.get('viewerLng'),
-      -180,
-      180,
-    )
-    const hasViewerCoords = rawViewerLat !== null && rawViewerLng !== null
-
+    // (signed-out included); viewer-intent badges need coords / a client. The
+    // viewer coordinates were parsed once up front (shared with §4.5 proximity_fit).
     const badgeResult = await attachLookBadges({
       db: prisma,
       rows: items,
@@ -347,6 +358,9 @@ export async function GET(req: Request) {
         personalizedMeta?.reliabilityBoostedCount ?? null,
       // §4.5 price_fit learned price band (personalized cohort only).
       priceFitBoostedCount: personalizedMeta?.priceFitBoostedCount ?? null,
+      // §4.5 proximity_fit viewer→pro distance (personalized cohort only).
+      proximityFitBoostedCount:
+        personalizedMeta?.proximityFitBoostedCount ?? null,
       badgeEligibleCount: badgeResult.meta.eligibleCount,
       badgeShownCount: badgeResult.meta.shownCount,
       badgeHoldoutCount: badgeResult.meta.holdoutCount,

@@ -86,6 +86,11 @@ export type LooksFeedServeEvent = {
   // coverage metric for whether the price signal is reaching the feed (not a
   // fit-quality measure; ordering buries far-out-of-band looks, this counts them).
   priceFitBoostedCount?: number | null
+  // §4.5 proximity_fit (personalized cohort only): displayed looks that were
+  // proximity-matched — the request carried viewer coords AND the look's pro had a
+  // primary location within reach — the coverage metric for whether the distance
+  // signal is reaching the feed (ordering, not this count, buries far pros).
+  proximityFitBoostedCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -140,6 +145,7 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     conversionBoostedCount: input.conversionBoostedCount ?? null,
     reliabilityBoostedCount: input.reliabilityBoostedCount ?? null,
     priceFitBoostedCount: input.priceFitBoostedCount ?? null,
+    proximityFitBoostedCount: input.proximityFitBoostedCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,
