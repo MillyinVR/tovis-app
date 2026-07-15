@@ -620,6 +620,14 @@ enum NotificationEventKey {
   REFERRAL_CONFIRMED
   REFERRAL_CONVERTED
 
+  // §6.8 saved-not-booked activation, gated by the §8.1 re-engagement budget: a
+  // pro whose look a client saved (but never booked) now has a near-term calendar
+  // opening. A gentle client-facing nudge to book that saved look — one per
+  // (client, pro) per cooldown window, pooled under the re-engagement budget with
+  // event countdowns and rebook prompts (lib/notifications/reEngagementBudget.ts,
+  // emitter lib/notifications/savedLookActivation.ts).
+  SAVED_LOOK_AVAILABILITY_OPENED
+
   // A new message landed in a thread the recipient participates in. Routed to
   // the OTHER participant (client or pro). Debounced per thread per recipient so
   // a rapid burst refreshes one inbox row / fires one push rather than spamming.

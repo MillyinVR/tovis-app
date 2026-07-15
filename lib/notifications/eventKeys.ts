@@ -23,6 +23,7 @@ export type NotificationTemplateKey =
   | 'aftercare_ready'
   | 'last_minute_opening_available'
   | 'waitlist_time_offered'
+  | 'saved_look_availability_opened'
   | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
@@ -175,6 +176,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.AFTERCARE_READY,
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
   NotificationEventKey.WAITLIST_TIME_OFFERED,
+  NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
@@ -490,6 +492,24 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED]: {
+    // §6.8 saved-not-booked activation, pooled under the §8.1 re-engagement
+    // budget. A gentle, promotional-adjacent nudge (NOT transactional — no SMS,
+    // no quiet-hours bypass, mirrors REVIEW_REQUESTED / LAST_MINUTE_OPENING): the
+    // pro whose look you saved but never booked now has a near-term opening.
+    key: NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
+    defaultPriority: NotificationPriority.LOW,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'saved_look_availability_opened',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // In-app inbox + email + push (push inert until APNs is live). No SMS —
+      // re-engagement nudges are not an approved transactional SMS use case.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -882,6 +902,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.AFTERCARE_READY,
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
   NotificationEventKey.WAITLIST_TIME_OFFERED,
+  NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
