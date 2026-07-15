@@ -766,6 +766,15 @@ type CreateClientRebookedBookingFromAftercareArgs = {
    * Only honored for single-service rebooks. Null/omitted clones the original.
    */
   requestedLocationType?: ServiceLocationType | null
+  /**
+   * Client-chosen saved service address for a MOBILE rebook. Must be a live
+   * SERVICE_ADDRESS row owned by the token's client (ownership, coordinates,
+   * and mobile radius are validated inside the locked transaction) — this is
+   * what lets a SALON original rebook as mobile, where the source booking has
+   * no client address to clone. Null/omitted keeps today's behavior of cloning
+   * the source booking's address FK + snapshot. Ignored for SALON rebooks.
+   */
+  requestedClientAddressId?: string | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -782,6 +791,8 @@ type PerformLockedCreateRebookedBookingArgs = {
   aftercareClientActionTokenId?: string | null
   /** See {@link CreateClientRebookedBookingFromAftercareArgs.requestedLocationType}. */
   requestedLocationType?: ServiceLocationType | null
+  /** See {@link CreateClientRebookedBookingFromAftercareArgs.requestedClientAddressId}. */
+  requestedClientAddressId?: string | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -9764,6 +9775,32 @@ assertCanCreateRebookFromSourceBooking({
     throw bookingError('OFFERING_NOT_FOUND')
   }
 
+  // Client-chosen saved address for a MOBILE rebook (e.g. a SALON original
+  // rebooked as mobile from the public aftercare link, where the source
+  // booking has no client address to clone). The clientId + SERVICE_ADDRESS
+  // scoped load enforces ownership; coordinates and radius are validated in
+  // assertMobileBookingWithinRadius below.
+  const requestedClientAddressId =
+    effectiveLocationType === ServiceLocationType.MOBILE
+      ? normalizeReason(args.requestedClientAddressId)
+      : null
+
+  const requestedClientAddress = requestedClientAddressId
+    ? await loadClientServiceAddress({
+        tx: args.tx,
+        clientId: source.clientId,
+        clientAddressId: requestedClientAddressId,
+      })
+    : null
+
+  if (requestedClientAddressId && !requestedClientAddress) {
+    throw bookingError('CLIENT_SERVICE_ADDRESS_INVALID', {
+      message:
+        'Requested client service address was not found or is not owned by this client.',
+      userMessage: 'Please choose a valid saved service address.',
+    })
+  }
+
   const validatedContextResult = await resolveValidatedBookingContext({
     tx: args.tx,
     professionalId: source.professionalId,
@@ -9834,13 +9871,20 @@ assertCanCreateRebookFromSourceBooking({
     tx: args.tx,
     professionalId: source.professionalId,
     locationType: effectiveLocationType,
-    locationLat:
-      decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
-    locationLng:
-      decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
+    // Switching modes re-resolves the location, so the source booking's
+    // snapshot (the OTHER mode's coordinates) must not shadow it — mirrors the
+    // locationLat/LngSnapshot writes on the created booking below.
+    locationLat: isLocationOverride
+      ? decimalToNumber(locationContext.lat)
+      : decimalToNumber(source.locationLatSnapshot) ??
+        decimalToNumber(locationContext.lat),
+    locationLng: isLocationOverride
+      ? decimalToNumber(locationContext.lng)
+      : decimalToNumber(source.locationLngSnapshot) ??
+        decimalToNumber(locationContext.lng),
     clientAddressId:
       effectiveLocationType === ServiceLocationType.MOBILE
-        ? source.clientAddressId
+        ? requestedClientAddress?.id ?? source.clientAddressId
         : null,
     // A completed mobile booking whose saved ClientAddress was later deleted
     // keeps its address snapshot on the Booking row (onDelete: SetNull nulls
@@ -9849,15 +9893,20 @@ assertCanCreateRebookFromSourceBooking({
     // dead-ending on CLIENT_SERVICE_ADDRESS_REQUIRED with no way to re-enter it.
     hasSnapshotAddress:
       effectiveLocationType === ServiceLocationType.MOBILE &&
+      !requestedClientAddress &&
       (source.clientAddressSnapshot != null ||
         source.encryptedClientAddressSnapshotJson != null),
     clientLat:
       effectiveLocationType === ServiceLocationType.MOBILE
-        ? decimalToNumber(source.clientAddressLatSnapshot)
+        ? requestedClientAddress
+          ? decimalToNumber(requestedClientAddress.lat)
+          : decimalToNumber(source.clientAddressLatSnapshot)
         : null,
     clientLng:
       effectiveLocationType === ServiceLocationType.MOBILE
-        ? decimalToNumber(source.clientAddressLngSnapshot)
+        ? requestedClientAddress
+          ? decimalToNumber(requestedClientAddress.lng)
+          : decimalToNumber(source.clientAddressLngSnapshot)
         : null,
   })
 
@@ -9972,16 +10021,25 @@ assertCanCreateRebookFromSourceBooking({
 
   const mobileClientAddressSnapshotData =
     effectiveLocationType === ServiceLocationType.MOBILE
-      ? reuseEncryptedAddressSnapshotData({
-          legacySnapshot: source.clientAddressSnapshot,
-          dedicatedEncryptedSnapshot: source.encryptedClientAddressSnapshotJson,
-          keyVersion: source.clientAddressSnapshotKeyVersion,
-          encryptedAt: source.addressSnapshotsEncryptedAt,
-          latApprox: source.clientAddressLatApprox,
-          lngApprox: source.clientAddressLngApprox,
-          legacyLat: source.clientAddressLatSnapshot,
-          legacyLng: source.clientAddressLngSnapshot,
-        })
+      ? requestedClientAddress
+        ? // Client picked a saved address for this rebook: snapshot the live
+          // row rather than cloning the source booking's (possibly different
+          // or absent) address snapshot.
+          buildEncryptedAddressSnapshotData({
+            formattedAddress: requestedClientAddress.formattedAddress,
+            lat: requestedClientAddress.lat,
+            lng: requestedClientAddress.lng,
+          })
+        : reuseEncryptedAddressSnapshotData({
+            legacySnapshot: source.clientAddressSnapshot,
+            dedicatedEncryptedSnapshot: source.encryptedClientAddressSnapshotJson,
+            keyVersion: source.clientAddressSnapshotKeyVersion,
+            encryptedAt: source.addressSnapshotsEncryptedAt,
+            latApprox: source.clientAddressLatApprox,
+            lngApprox: source.clientAddressLngApprox,
+            legacyLat: source.clientAddressLatSnapshot,
+            legacyLng: source.clientAddressLngSnapshot,
+          })
       : buildNullAddressSnapshotData()
 
   let createdBooking: {
@@ -10034,7 +10092,7 @@ assertCanCreateRebookFromSourceBooking({
 
         clientAddressId:
           effectiveLocationType === ServiceLocationType.MOBILE
-            ? source.clientAddressId
+            ? requestedClientAddress?.id ?? source.clientAddressId
             : null,
 
         // Legacy
@@ -10042,11 +10100,15 @@ assertCanCreateRebookFromSourceBooking({
         clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
         clientAddressLatSnapshot:
           effectiveLocationType === ServiceLocationType.MOBILE
-            ? decimalToNumber(source.clientAddressLatSnapshot)
+            ? requestedClientAddress
+              ? decimalToNumber(requestedClientAddress.lat)
+              : decimalToNumber(source.clientAddressLatSnapshot)
             : null,
         clientAddressLngSnapshot:
           effectiveLocationType === ServiceLocationType.MOBILE
-            ? decimalToNumber(source.clientAddressLngSnapshot)
+            ? requestedClientAddress
+              ? decimalToNumber(requestedClientAddress.lng)
+              : decimalToNumber(source.clientAddressLngSnapshot)
             : null,
 
         // Dedicated
@@ -13813,6 +13875,7 @@ export async function createClientRebookedBookingFromAftercare(
       aftercareId: args.aftercareId,
       aftercareClientActionTokenId: args.aftercareClientActionTokenId,
       requestedLocationType: args.requestedLocationType ?? null,
+      requestedClientAddressId: args.requestedClientAddressId ?? null,
       requestId: args.requestId ?? null,
       idempotencyKey: args.idempotencyKey ?? null,
     })

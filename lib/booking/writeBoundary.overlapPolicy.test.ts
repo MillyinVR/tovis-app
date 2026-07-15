@@ -6,6 +6,7 @@ import {
   BookingSource,
   BookingStatus,
   BookingServiceItemType,
+  ClientAddressKind,
   PaymentMethod,
   Prisma,
   ProfessionalLocationType,
@@ -1710,5 +1711,263 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     })
 
     expect(mocks.txBookingCreate).not.toHaveBeenCalled()
+  })
+
+  it('rebooks a SALON original as MOBILE using a client-chosen saved service address', async () => {
+    // The public rebook page capability gap: the original visit was in-salon
+    // (no client address on the source booking), the offering supports mobile,
+    // and the client picks one of their saved service addresses.
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(makeCompletedSourceBookingForAftercareRebook())
+      .mockResolvedValueOnce(null)
+
+    // Mode switch re-resolves price/duration from the live offering.
+    mocks.resolveValidatedBookingContext.mockResolvedValueOnce({
+      ok: true,
+      context: makeLocationContext(),
+      durationMinutes: 75,
+      priceStartingAt: new Prisma.Decimal(150),
+    })
+
+    mocks.txBookingCreate.mockResolvedValueOnce({
+      id: 'booking_rebook_1',
+      status: BookingStatus.PENDING,
+      scheduledFor: REQUESTED_START,
+    })
+
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        aftercareId: 'aftercare_1',
+        bookingId: 'booking_source_1',
+        clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
+        scheduledFor: REQUESTED_START,
+        requestedLocationType: ServiceLocationType.MOBILE,
+        requestedClientAddressId: 'client_address_1',
+        requestId: 'req_salon_to_mobile_rebook',
+        idempotencyKey: 'idem_salon_to_mobile_rebook',
+      }),
+    ).resolves.toMatchObject({
+      booking: { id: 'booking_rebook_1' },
+      meta: { mutated: true, noOp: false },
+    })
+
+    // Address load is ownership-scoped to the token's client and restricted to
+    // live SERVICE_ADDRESS rows.
+    expect(mocks.txClientAddressFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'client_address_1',
+          clientId: 'client_1',
+          kind: ClientAddressKind.SERVICE_ADDRESS,
+        }),
+      }),
+    )
+
+    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          locationType: ServiceLocationType.MOBILE,
+          clientAddressId: 'client_address_1',
+          clientAddressSnapshot: {
+            formattedAddress: '456 Client St, Los Angeles, CA',
+          },
+          clientAddressLatSnapshot: 34.05,
+          clientAddressLngSnapshot: -118.24,
+          totalDurationMinutes: 75,
+        }),
+      }),
+    )
+  })
+
+  it('rejects a mobile rebook when the requested address is not owned by the client', async () => {
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(makeCompletedSourceBookingForAftercareRebook())
+      .mockResolvedValueOnce(null)
+
+    // loadClientServiceAddress scopes by clientId + SERVICE_ADDRESS, so a
+    // foreign / missing / non-service address all come back null.
+    mocks.txClientAddressFindFirst.mockResolvedValueOnce(null)
+
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        aftercareId: 'aftercare_1',
+        bookingId: 'booking_source_1',
+        clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
+        scheduledFor: REQUESTED_START,
+        requestedLocationType: ServiceLocationType.MOBILE,
+        requestedClientAddressId: 'client_address_foreign',
+        requestId: 'req_mobile_rebook_foreign_addr',
+        idempotencyKey: 'idem_mobile_rebook_foreign_addr',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CLIENT_SERVICE_ADDRESS_INVALID',
+    })
+
+    expect(mocks.txBookingCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a mobile rebook when the requested address has no coordinates', async () => {
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(makeCompletedSourceBookingForAftercareRebook())
+      .mockResolvedValueOnce(null)
+
+    mocks.txClientAddressFindFirst.mockResolvedValueOnce({
+      id: 'client_address_1',
+      formattedAddress: '456 Client St, Los Angeles, CA',
+      lat: null,
+      lng: null,
+    })
+
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        aftercareId: 'aftercare_1',
+        bookingId: 'booking_source_1',
+        clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
+        scheduledFor: REQUESTED_START,
+        requestedLocationType: ServiceLocationType.MOBILE,
+        requestedClientAddressId: 'client_address_1',
+        requestId: 'req_mobile_rebook_no_coords',
+        idempotencyKey: 'idem_mobile_rebook_no_coords',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CLIENT_SERVICE_ADDRESS_INVALID',
+    })
+
+    expect(mocks.txBookingCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a mobile rebook when the requested address is outside the mobile service radius', async () => {
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(makeCompletedSourceBookingForAftercareRebook())
+      .mockResolvedValueOnce(null)
+
+    // NYC destination vs the LA mobile base with a 25-mile radius.
+    mocks.txClientAddressFindFirst.mockResolvedValueOnce({
+      id: 'client_address_1',
+      formattedAddress: '789 Far Away Rd, New York, NY',
+      lat: new Prisma.Decimal(40.7128),
+      lng: new Prisma.Decimal(-74.006),
+    })
+
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        aftercareId: 'aftercare_1',
+        bookingId: 'booking_source_1',
+        clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
+        scheduledFor: REQUESTED_START,
+        requestedLocationType: ServiceLocationType.MOBILE,
+        requestedClientAddressId: 'client_address_1',
+        requestId: 'req_mobile_rebook_out_of_radius',
+        idempotencyKey: 'idem_mobile_rebook_out_of_radius',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CLIENT_SERVICE_ADDRESS_INVALID',
+    })
+
+    expect(mocks.txBookingCreate).not.toHaveBeenCalled()
+  })
+
+  it('ignores a requested client address for a SALON rebook', async () => {
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(makeCompletedSourceBookingForAftercareRebook())
+      .mockResolvedValueOnce(null)
+
+    mocks.txBookingCreate.mockResolvedValueOnce({
+      id: 'booking_rebook_1',
+      status: BookingStatus.PENDING,
+      scheduledFor: REQUESTED_START,
+    })
+
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        aftercareId: 'aftercare_1',
+        bookingId: 'booking_source_1',
+        clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
+        scheduledFor: REQUESTED_START,
+        requestedLocationType: ServiceLocationType.SALON,
+        requestedClientAddressId: 'client_address_1',
+        requestId: 'req_salon_rebook_with_addr',
+        idempotencyKey: 'idem_salon_rebook_with_addr',
+      }),
+    ).resolves.toMatchObject({
+      booking: { id: 'booking_rebook_1' },
+    })
+
+    expect(mocks.txClientAddressFindFirst).not.toHaveBeenCalled()
+    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          locationType: ServiceLocationType.SALON,
+          clientAddressId: null,
+        }),
+      }),
+    )
+  })
+
+  it('lets a mobile rebook switch to a different saved address than the original visit', async () => {
+    const salonSource = makeCompletedSourceBookingForAftercareRebook()
+
+    const mobileSource = {
+      ...salonSource,
+      locationType: ServiceLocationType.MOBILE,
+      clientAddressId: 'client_address_old',
+      clientAddressSnapshot: {
+        formattedAddress: '111 Old Home, Los Angeles, CA',
+      },
+      clientAddressSnapshotKeyVersion: null,
+      encryptedClientAddressSnapshotJson: null,
+      clientAddressLatSnapshot: 34.06,
+      clientAddressLngSnapshot: -118.25,
+      clientAddressLatApprox: null,
+      clientAddressLngApprox: null,
+      addressSnapshotsEncryptedAt: null,
+    }
+
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(mobileSource)
+      .mockResolvedValueOnce(null)
+
+    mocks.txBookingCreate.mockResolvedValueOnce({
+      id: 'booking_rebook_1',
+      status: BookingStatus.PENDING,
+      scheduledFor: REQUESTED_START,
+    })
+
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        aftercareId: 'aftercare_1',
+        bookingId: 'booking_source_1',
+        clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
+        scheduledFor: REQUESTED_START,
+        requestedLocationType: ServiceLocationType.MOBILE,
+        requestedClientAddressId: 'client_address_1',
+        requestId: 'req_mobile_rebook_new_addr',
+        idempotencyKey: 'idem_mobile_rebook_new_addr',
+      }),
+    ).resolves.toMatchObject({
+      booking: { id: 'booking_rebook_1' },
+    })
+
+    // The picked address replaces the original visit's: fresh FK + snapshot
+    // from the live row, not a clone of the source booking's snapshot.
+    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          locationType: ServiceLocationType.MOBILE,
+          clientAddressId: 'client_address_1',
+          clientAddressSnapshot: {
+            formattedAddress: '456 Client St, Los Angeles, CA',
+          },
+          clientAddressLatSnapshot: 34.05,
+          clientAddressLngSnapshot: -118.24,
+        }),
+      }),
+    )
   })
 })

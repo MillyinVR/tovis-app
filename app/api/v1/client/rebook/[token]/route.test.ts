@@ -266,7 +266,10 @@ function expectedRebookResponseBody() {
 }
 
 function expectedIdempotencyRequestBody(
-  overrides: { locationType?: 'SALON' | 'MOBILE' | null } = {},
+  overrides: {
+    locationType?: 'SALON' | 'MOBILE' | null
+    clientAddressId?: string | null
+  } = {},
 ) {
   return {
     aftercareTokenId: 'token_row_1',
@@ -275,6 +278,7 @@ function expectedIdempotencyRequestBody(
     clientId: 'client_1',
     scheduledFor: '2026-04-25T18:00:00.000Z',
     locationType: overrides.locationType ?? null,
+    clientAddressId: overrides.clientAddressId ?? null,
   }
 }
 
@@ -951,6 +955,7 @@ describe('app/api/v1/client/rebook/[token]/route.ts', () => {
       aftercareClientActionTokenId: 'token_row_1',
       scheduledFor: new Date('2026-04-25T18:00:00.000Z'),
       requestedLocationType: null,
+      requestedClientAddressId: null,
       requestId: 'req_1',
       idempotencyKey: 'idem_1',
     })
@@ -1000,6 +1005,72 @@ describe('app/api/v1/client/rebook/[token]/route.ts', () => {
       mocks.createClientRebookedBookingFromAftercare,
     ).toHaveBeenCalledWith(
       expect.objectContaining({ requestedLocationType: 'MOBILE' }),
+    )
+  })
+
+  it('passes a client-chosen mobile address through to the rebook write boundary and idempotency body', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'started',
+      idempotencyRecordId: 'idem_record_1',
+      idempotencyKey: 'idem_1',
+      requestHash: 'hash_1',
+    })
+
+    await POST(
+      makeIdempotentRequest({
+        key: 'idem_1',
+        body: {
+          scheduledFor: '2026-04-25T18:00:00.000Z',
+          locationType: 'mobile',
+          clientAddressId: 'client_address_1',
+        },
+      }),
+      makeCtx('token_1'),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expectedIdempotencyRequestBody({
+          locationType: 'MOBILE',
+          clientAddressId: 'client_address_1',
+        }),
+      }),
+    )
+
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedLocationType: 'MOBILE',
+        requestedClientAddressId: 'client_address_1',
+      }),
+    )
+  })
+
+  it('drops a blank clientAddressId instead of forwarding it to the write boundary', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'started',
+      idempotencyRecordId: 'idem_record_1',
+      idempotencyKey: 'idem_1',
+      requestHash: 'hash_1',
+    })
+
+    await POST(
+      makeIdempotentRequest({
+        key: 'idem_1',
+        body: {
+          scheduledFor: '2026-04-25T18:00:00.000Z',
+          locationType: 'mobile',
+          clientAddressId: '   ',
+        },
+      }),
+      makeCtx('token_1'),
+    )
+
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedClientAddressId: null }),
     )
   })
 

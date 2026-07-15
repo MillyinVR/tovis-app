@@ -70,6 +70,7 @@ type RebookIdempotencyRequestBody = {
   clientId: string
   scheduledFor: string
   locationType: ServiceLocationType | null
+  clientAddressId: string | null
 }
 
 async function getRouteToken(
@@ -172,6 +173,17 @@ function parseRequestedLocationType(body: unknown): ServiceLocationType | null {
   return normalizeLocationType(body.locationType)
 }
 
+/**
+ * Optional client-chosen saved service address for a MOBILE rebook. Returns
+ * null when omitted (clone the original booking's address). Ownership, kind,
+ * coordinates, and mobile radius are enforced downstream in the write
+ * boundary against the token's client.
+ */
+function parseRequestedClientAddressId(body: unknown): string | null {
+  if (!isRecord(body)) return null
+  return pickString(body.clientAddressId)
+}
+
 function validateFutureScheduledFor(
   scheduledFor: Date,
   now: Date,
@@ -244,6 +256,7 @@ function buildRebookIdempotencyRequestBody(args: {
   clientId: string
   scheduledFor: Date
   locationType: ServiceLocationType | null
+  clientAddressId: string | null
 }): RebookIdempotencyRequestBody {
   return {
     aftercareTokenId: args.aftercareTokenId,
@@ -252,6 +265,7 @@ function buildRebookIdempotencyRequestBody(args: {
     clientId: args.clientId,
     scheduledFor: args.scheduledFor.toISOString(),
     locationType: args.locationType,
+    clientAddressId: args.clientAddressId,
   }
 }
 
@@ -315,6 +329,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
     }
 
     const requestedLocationType = parseRequestedLocationType(rawBody)
+    const requestedClientAddressId = parseRequestedClientAddressId(rawBody)
 
     const now = new Date()
     const invalidFutureTime = validateFutureScheduledFor(scheduledFor, now)
@@ -366,6 +381,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
           clientId: resolved.booking.clientId,
           scheduledFor,
           locationType: requestedLocationType,
+          clientAddressId: requestedClientAddressId,
         }),
         messages: {
           missingKey: 'Missing idempotency key.',
@@ -383,6 +399,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
           aftercareClientActionTokenId: resolved.token.id,
           scheduledFor,
           requestedLocationType,
+          requestedClientAddressId,
           requestId,
           idempotencyKey: idem.idempotencyKey,
         })

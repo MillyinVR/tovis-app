@@ -34,8 +34,21 @@ export type PublicRebookLocationMode = {
   label: string
   /** Empty string lets the availability API resolve the pro's default location. */
   locationId: string
-  /** Required for MOBILE (resolves coordinates); null for SALON. */
+  /** The ORIGINAL visit's saved address (MOBILE); null for SALON or when the
+   * original had none — a picker selection from `savedAddresses` wins over it. */
   clientAddressId: string | null
+}
+
+/**
+ * A saved client service address offered as the destination of a MOBILE
+ * rebook. Loaded server-side from the token's client, so this public card
+ * never calls an authenticated address API.
+ */
+export type PublicRebookSavedAddress = {
+  id: string
+  label: string | null
+  formattedAddress: string
+  isDefault: boolean
 }
 
 type Props = {
@@ -50,6 +63,8 @@ type Props = {
   /** Bookable location modes (1 = no toggle, 2 = in-salon/mobile toggle). */
   locationModes: PublicRebookLocationMode[]
   initialLocationType: 'SALON' | 'MOBILE'
+  /** Pickable destinations for MOBILE (empty = fall back to the original visit's address). */
+  savedAddresses: PublicRebookSavedAddress[]
 }
 
 type SlotsState =
@@ -109,6 +124,7 @@ export function RebookCard({
   windowEndIso,
   locationModes,
   initialLocationType,
+  savedAddresses,
 }: Props) {
   const [locationType, setLocationType] = useState<'SALON' | 'MOBILE'>(
     initialLocationType,
@@ -120,6 +136,37 @@ export function RebookCard({
       locationModes[0],
     [locationModes, locationType],
   )
+
+  // Mobile destination: default to the original visit's address when it's
+  // still in the saved list, else the client's default/first saved address.
+  // Null only when the list is empty (the server then reuses the original
+  // visit's address snapshot).
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
+    () => {
+      const originalAddressId =
+        locationModes.find((mode) => mode.type === 'MOBILE')?.clientAddressId ??
+        null
+      if (
+        originalAddressId &&
+        savedAddresses.some((address) => address.id === originalAddressId)
+      ) {
+        return originalAddressId
+      }
+      return (
+        savedAddresses.find((address) => address.isDefault)?.id ??
+        savedAddresses[0]?.id ??
+        null
+      )
+    },
+  )
+
+  // The address availability + booking use for MOBILE: the picker selection,
+  // falling back to the original visit's address id (may be null — the
+  // availability API and write path then work from the original's snapshot).
+  const activeClientAddressId =
+    activeMode?.type === 'MOBILE'
+      ? selectedAddressId ?? activeMode.clientAddressId
+      : null
 
   const todayYmd = useMemo(
     () => ymdInTimeZone(new Date(), timeZone),
@@ -179,8 +226,8 @@ export function RebookCard({
         locationId: mode.locationId,
         date,
       })
-      if (mode.clientAddressId) {
-        params.set('clientAddressId', mode.clientAddressId)
+      if (activeClientAddressId) {
+        params.set('clientAddressId', activeClientAddressId)
       }
 
       try {
@@ -220,7 +267,14 @@ export function RebookCard({
     return () => {
       cancelled = true
     }
-  }, [date, professionalId, serviceId, activeMode, withinWindow])
+  }, [
+    date,
+    professionalId,
+    serviceId,
+    activeMode,
+    activeClientAddressId,
+    withinWindow,
+  ])
 
   const slotsByPeriod = useMemo(
     () =>
@@ -252,9 +306,15 @@ export function RebookCard({
             'Idempotency-Key': idempotencyKey,
             'x-idempotency-key': idempotencyKey,
           },
+          // clientAddressId is sent only for an explicit picker selection —
+          // omitting it keeps the server's behavior of reusing the original
+          // visit's address (FK or preserved snapshot).
           body: JSON.stringify({
             scheduledFor: slotIso,
             locationType: activeMode.type,
+            ...(activeMode.type === 'MOBILE' && selectedAddressId
+              ? { clientAddressId: selectedAddressId }
+              : {}),
           }),
         },
       )
@@ -327,6 +387,55 @@ export function RebookCard({
               )
             })}
           </div>
+        </div>
+      ) : null}
+
+      {locationType === 'MOBILE' && savedAddresses.length > 0 ? (
+        <div className="mb-4">
+          <div className="mb-1.5 text-[12px] font-black text-textSecondary">
+            Service address
+          </div>
+          <div className="grid gap-1.5">
+            {savedAddresses.map((address) => {
+              const active = address.id === selectedAddressId
+              return (
+                <button
+                  key={address.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    if (active) return
+                    setBooking({ kind: 'idle' })
+                    setSelectedAddressId(address.id)
+                  }}
+                  className={[
+                    'rounded-card border px-3 py-2 text-left transition',
+                    active
+                      ? 'border-accentPrimary/50 bg-accentPrimary/10'
+                      : 'border-white/10 bg-bgPrimary/35 hover:bg-white/10',
+                  ].join(' ')}
+                >
+                  <div className="text-[12px] font-black text-textPrimary">
+                    {address.label ?? 'Saved address'}
+                    {address.isDefault ? (
+                      <span className="ml-1.5 font-semibold text-textSecondary/75">
+                        · Default
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-0.5 text-[12px] text-textSecondary">
+                    {address.formattedAddress}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {locationType === 'MOBILE' && savedAddresses.length === 0 ? (
+        <div className="mb-4 text-[12px] text-textSecondary/75">
+          We’ll come to the same address as your original visit.
         </div>
       ) : null}
 

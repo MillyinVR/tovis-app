@@ -6,6 +6,7 @@ import {
   AftercareRebookMode,
   BookingSource,
   BookingStatus,
+  ClientAddressKind,
   ClientClaimStatus,
   MediaPhase,
   ServiceLocationType,
@@ -16,7 +17,13 @@ import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInvit
 import {
   RebookCard,
   type PublicRebookLocationMode,
+  type PublicRebookSavedAddress,
 } from '@/app/client/_public/RebookCard'
+import {
+  CLIENT_ADDRESS_SELECT,
+  mapClientAddress,
+  sortClientAddresses,
+} from '@/lib/clientAddresses/addressInput'
 import { getPublicCheckoutAvailability } from '@/lib/booking/publicCheckoutAvailability'
 import { prisma } from '@/lib/prisma'
 import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
@@ -183,12 +190,47 @@ function SectionCard(props: {
   )
 }
 
+/**
+ * Saved service addresses the token's client can pick as the destination of a
+ * MOBILE rebook. Loaded server-side — this page is already token-gated to the
+ * client, so the public link needs no authenticated address API. Only rows the
+ * write path can actually book (live coordinates + a formatted address) are
+ * offered.
+ */
+async function loadBookableServiceAddresses(
+  clientId: string,
+): Promise<PublicRebookSavedAddress[]> {
+  const rows = await prisma.clientAddress.findMany({
+    where: {
+      clientId,
+      kind: ClientAddressKind.SERVICE_ADDRESS,
+    },
+    select: CLIENT_ADDRESS_SELECT,
+  })
+
+  return sortClientAddresses(rows)
+    .map(mapClientAddress)
+    .flatMap((address) =>
+      address.lat != null && address.lng != null && address.formattedAddress
+        ? [
+            {
+              id: address.id,
+              label: address.label,
+              formattedAddress: address.formattedAddress,
+              isDefault: address.isDefault,
+            },
+          ]
+        : [],
+    )
+}
+
 function buildPublicRebookLocationModes(args: {
   originalType: ServiceLocationType
   originalLocationId: string
   clientAddressId: string | null
   offersInSalon: boolean | null
   offersMobile: boolean | null
+  savedAddressCount: number
 }): PublicRebookLocationMode[] {
   const {
     originalType,
@@ -196,6 +238,7 @@ function buildPublicRebookLocationModes(args: {
     clientAddressId,
     offersInSalon,
     offersMobile,
+    savedAddressCount,
   } = args
 
   const salonMode: PublicRebookLocationMode = {
@@ -214,12 +257,13 @@ function buildPublicRebookLocationModes(args: {
     clientAddressId,
   }
 
-  // In-salon needs no client data; mobile needs the saved address (only present
-  // when the original visit was mobile). The original mode is always bookable.
+  // In-salon needs no client data; mobile needs a client address — either the
+  // original visit's (cloned server-side) or any saved service address the
+  // client can pick from. The original mode is always bookable.
   const salonFeasible =
     originalType === ServiceLocationType.SALON || offersInSalon === true
   const mobileFeasible =
-    Boolean(clientAddressId) &&
+    (Boolean(clientAddressId) || savedAddressCount > 0) &&
     (originalType === ServiceLocationType.MOBILE || offersMobile === true)
 
   const modes: PublicRebookLocationMode[] = []
@@ -362,12 +406,24 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
     : null
 
   const rebookClientAddressId = bookingLocation?.clientAddressId ?? null
+
+  // Saved addresses power the mobile mode (and its picker) even when the
+  // original visit was in-salon; skip the lookup when mobile isn't on the
+  // table at all.
+  const mobilePossible =
+    booking.locationType === ServiceLocationType.MOBILE ||
+    offeringCaps?.offersMobile === true
+  const savedAddresses = mobilePossible
+    ? await loadBookableServiceAddresses(booking.clientId)
+    : []
+
   const locationModes = buildPublicRebookLocationModes({
     originalType: booking.locationType,
     originalLocationId: booking.locationId ?? '',
     clientAddressId: rebookClientAddressId,
     offersInSalon: offeringCaps?.offersInSalon ?? null,
     offersMobile: offeringCaps?.offersMobile ?? null,
+    savedAddressCount: savedAddresses.length,
   })
 
   const inviteClient = await prisma.clientProfile.findUnique({
@@ -656,6 +712,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
                 }
                 locationModes={locationModes}
                 initialLocationType={booking.locationType}
+                savedAddresses={savedAddresses}
               />
 
               <div className="mt-3 text-xs text-textSecondary/75">
