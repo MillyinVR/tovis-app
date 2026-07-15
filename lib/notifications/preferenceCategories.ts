@@ -36,6 +36,7 @@ export type NotificationCategoryKey =
   | 'REMINDERS'
   | 'PAYMENTS'
   | 'LAST_MINUTE'
+  | 'SAVED_LOOKS'
   | 'MESSAGES'
   | 'SOCIAL'
 
@@ -81,6 +82,8 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.AFTERCARE_READY]: 'Aftercare ready',
   [NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE]: 'Last-minute opening',
   [NotificationEventKey.WAITLIST_TIME_OFFERED]: 'Waitlist time offered',
+  [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED]:
+    'Openings for looks you saved',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: 'Payment action needed',
@@ -164,6 +167,13 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
       NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
       NotificationEventKey.WAITLIST_TIME_OFFERED,
     ],
+  },
+  {
+    key: 'SAVED_LOOKS',
+    label: 'Saved looks',
+    description:
+      'Gentle nudges when a pro whose look you saved has a new opening. Muting this turns off saved-look re-engagement only.',
+    eventKeys: [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED],
   },
   {
     key: 'MESSAGES',
