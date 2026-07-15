@@ -29,6 +29,9 @@ type FakeDbOptions = {
   locationRows?: Awaited<
     ReturnType<LookBadgeAttachDb['professionalLocation']['findMany']>
   >
+  availabilityRows?: Awaited<
+    ReturnType<LookBadgeAttachDb['professionalAvailabilityStat']['findMany']>
+  >
   boardRows?: Awaited<ReturnType<LookBadgeAttachDb['board']['findMany']>>
   bookedRows?: Array<{ lookPostId: string; count: number }>
 }
@@ -36,6 +39,7 @@ type FakeDbOptions = {
 function makeFakeDb(options: FakeDbOptions = {}) {
   const statFindMany = vi.fn(async () => options.statRows ?? [])
   const locationFindMany = vi.fn(async () => options.locationRows ?? [])
+  const availabilityFindMany = vi.fn(async () => options.availabilityRows ?? [])
   const boardFindMany = vi.fn(async () => options.boardRows ?? [])
   const queryRaw = vi.fn(
     async () => options.bookedRows ?? [],
@@ -44,6 +48,7 @@ function makeFakeDb(options: FakeDbOptions = {}) {
   const db: LookBadgeAttachDb = {
     professionalBadgeStat: { findMany: statFindMany },
     professionalLocation: { findMany: locationFindMany },
+    professionalAvailabilityStat: { findMany: availabilityFindMany },
     board: { findMany: boardFindMany },
     $queryRaw: queryRaw,
   }
@@ -52,6 +57,7 @@ function makeFakeDb(options: FakeDbOptions = {}) {
     db,
     statFindMany,
     locationFindMany,
+    availabilityFindMany,
     boardFindMany,
     queryRaw,
   }
@@ -107,6 +113,7 @@ describe('attachLookBadges', () => {
     expect(fake.locationFindMany).not.toHaveBeenCalled()
     expect(fake.boardFindMany).not.toHaveBeenCalled()
     expect(fake.statFindMany).toHaveBeenCalledTimes(1)
+    expect(fake.availabilityFindMany).toHaveBeenCalledTimes(1)
     expect(fake.queryRaw).toHaveBeenCalledTimes(1)
   })
 
@@ -225,5 +232,36 @@ describe('attachLookBadges', () => {
     const badge = result.badges.get('look_1')
     expect(badge?.kind).toBe('EVENT_COUNTDOWN')
     expect(badge?.label).toBe('42 days until your wedding')
+  })
+
+  it('attaches an availability badge from the ProfessionalAvailabilityStat row', async () => {
+    const viewerKey = pickShownViewerKey(['look_1'])
+
+    const fake = makeFakeDb({
+      availabilityRows: [
+        {
+          professionalId: 'pro_a',
+          // A start-of-local-day instant already behind NOW → "today"; a wide
+          // open calendar so BOOKING_OUT stays silent and AVAILABLE_SOON wins.
+          nextOpeningDate: new Date(NOW.getTime() - HOUR_MS),
+          fullness14d: 0.2,
+          computedAt: new Date(NOW.getTime() - HOUR_MS),
+        },
+      ],
+    })
+
+    const result = await attachLookBadges({
+      db: fake.db,
+      rows: [makeRow()],
+      viewer: { userId: viewerKey, clientId: null, lat: null, lng: null },
+      brandName: 'BrandCo',
+      now: NOW,
+    })
+
+    expect(fake.availabilityFindMany).toHaveBeenCalledTimes(1)
+    const badge = result.badges.get('look_1')
+    expect(badge?.kind).toBe('AVAILABLE_SOON')
+    expect(badge?.label).toBe('Available today')
+    expect(badge?.tone).toBe('info')
   })
 })

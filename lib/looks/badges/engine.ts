@@ -55,7 +55,17 @@ export const LOOK_BADGE_THRESHOLDS = {
   eventMaxDays: 120,
   /** Distance badge qualifies inside this radius (miles). */
   distanceMaxMiles: 5,
+  /** "Available …": next opening must land inside this many days. */
+  availableSoonMaxDays: 7,
+  /**
+   * "Almost booked out": the pro STILL has an opening in the horizon (they have
+   * a stat row), but their next 14 working days are at least this booked. A
+   * scarcity read, so it never renders on HIGH-commitment categories (§5.3).
+   */
+  bookingOutMinFullness: 0.8,
 } as const
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
  * §5.7.4 TTLs, expressed as maximum stat-row age. The urgency window is tight
@@ -64,6 +74,13 @@ export const LOOK_BADGE_THRESHOLDS = {
  */
 export const LOOK_BADGE_URGENCY_STAT_MAX_AGE_MS = 6 * 60 * 60 * 1000
 export const LOOK_BADGE_STAT_MAX_AGE_MS = 48 * 60 * 60 * 1000
+/**
+ * Availability badges answer "right now?" ("Available today" is the most
+ * trust-fragile label in the whole library), so they carry the tight urgency
+ * TTL against the SEPARATE ProfessionalAvailabilityStat.computedAt clock (its
+ * own hourly cron). Six hourly refreshes of slack before we stop asserting it.
+ */
+export const LOOK_BADGE_AVAILABILITY_STAT_MAX_AGE_MS = 6 * 60 * 60 * 1000
 
 /** §9: fraction of (viewer, look) pairs that never see an earned badge. */
 export const LOOK_BADGE_HOLDOUT_RATE = 0.05
@@ -80,11 +97,13 @@ export type LookBadgeClass =
 
 export const LOOK_BADGE_CLASS_BY_KIND: Record<LookBadgeKind, LookBadgeClass> = {
   BOOKING_FAST: 'URGENCY',
+  BOOKING_OUT: 'URGENCY',
   LOOK_BOOKED_RECENTLY: 'TREND',
   BOOKED_30D: 'TRUST',
   REBOOK_RATE: 'TRUST',
   NEW_TO_PLATFORM: 'TRUST',
   EVENT_COUNTDOWN: 'EVENT',
+  AVAILABLE_SOON: 'CONVENIENCE',
   DISTANCE: 'CONVENIENCE',
 }
 
@@ -118,6 +137,19 @@ const TRUST_KIND_ORDER: readonly LookBadgeKind[] = [
   'NEW_TO_PLATFORM',
 ]
 
+/**
+ * The slice of ProfessionalAvailabilityStat the availability badges read (spec
+ * §4.2/§5.2), carried on ProBadgeSignals so the whole per-pro signal bundle
+ * stays one object. null = no stat row → the pro is booked out (or unscheduled)
+ * over the scan horizon → no availability badge. `computedAt` is the §5.7.4 TTL
+ * clock against this table's OWN hourly cron, independent of the booking stats.
+ */
+export type ProAvailabilityBadgeSignal = {
+  nextOpeningDate: Date | null
+  fullness14d: number
+  computedAt: Date | null
+}
+
 export type ProBadgeSignals = {
   recentBookingCount: number
   completedBookingCount30d: number
@@ -129,6 +161,8 @@ export type ProBadgeSignals = {
   accountCreatedAt: Date | null
   /** Viewer→pro primary-location distance; null = unknown/not computed. */
   distanceMiles: number | null
+  /** Near-term calendar availability (spec §4.2); null = booked out / no row. */
+  availability: ProAvailabilityBadgeSignal | null
 }
 
 export type ViewerEventSignal = {
@@ -350,6 +384,76 @@ function evaluateDistance(signals: ProBadgeSignals | null): EvaluatedBadge | nul
   return { kind: 'DISTANCE', badgeClass: 'CONVENIENCE', label }
 }
 
+/** §5.7.4 freshness gate for the availability stat's own hourly-cron clock. */
+function isAvailabilityFresh(
+  availability: ProAvailabilityBadgeSignal,
+  now: Date,
+): boolean {
+  if (!availability.computedAt) return false
+  const age = now.getTime() - availability.computedAt.getTime()
+  return age >= 0 && age <= LOOK_BADGE_AVAILABILITY_STAT_MAX_AGE_MS
+}
+
+/**
+ * §5.2 Convenience — a real near-term opening on the pro's calendar. Reads the
+ * ProfessionalAvailabilityStat next-opening instant (start-of-local-day, so a
+ * same-day opening floors to 0). Buckets into coarse, honest copy — the day
+ * count can drift ±1 near a midnight/refresh boundary, so the labels stay
+ * "today / tomorrow / in N days" rather than an exact hour. Beyond the
+ * availableSoonMaxDays horizon it stays silent (BOOKING_OUT may still fire).
+ */
+function evaluateAvailableSoon(
+  signals: ProBadgeSignals | null,
+  now: Date,
+): EvaluatedBadge | null {
+  const availability = signals?.availability
+  if (!availability) return null
+  if (!isAvailabilityFresh(availability, now)) return null
+
+  const opening = availability.nextOpeningDate
+  if (!(opening instanceof Date) || Number.isNaN(opening.getTime())) return null
+
+  const daysUntil = Math.max(
+    0,
+    Math.ceil((opening.getTime() - now.getTime()) / DAY_MS),
+  )
+  if (daysUntil > LOOK_BADGE_THRESHOLDS.availableSoonMaxDays) return null
+
+  const label =
+    daysUntil <= 0
+      ? 'Available today'
+      : daysUntil === 1
+        ? 'Available tomorrow'
+        : `Available in ${daysUntil} days`
+  return { kind: 'AVAILABLE_SOON', badgeClass: 'CONVENIENCE', label }
+}
+
+/**
+ * §5.2 Urgency — the pro is filling up. Honest scarcity: they STILL have an
+ * opening in the horizon (a stat row exists at all), but their next 14 working
+ * days are booked past the bookingOutMinFullness bar. URGENCY-classed, so §5.3
+ * suppresses it outright on HIGH-commitment categories (never scarcity-pressure
+ * a semi-permanent decision).
+ */
+function evaluateBookingOut(
+  signals: ProBadgeSignals | null,
+  now: Date,
+): EvaluatedBadge | null {
+  const availability = signals?.availability
+  if (!availability) return null
+  if (!isAvailabilityFresh(availability, now)) return null
+
+  // A row implies an opening in the horizon; guard defensively all the same.
+  const opening = availability.nextOpeningDate
+  if (!(opening instanceof Date) || Number.isNaN(opening.getTime())) return null
+
+  const fullness = availability.fullness14d
+  if (typeof fullness !== 'number' || !Number.isFinite(fullness)) return null
+  if (fullness < LOOK_BADGE_THRESHOLDS.bookingOutMinFullness) return null
+
+  return { kind: 'BOOKING_OUT', badgeClass: 'URGENCY', label: 'Almost booked out' }
+}
+
 // ---------------------------------------------------------------------------
 // Selection
 
@@ -373,11 +477,15 @@ export function evaluateBadgePool(
   }
 
   push(evaluateBookingFast(signals, ctx.now))
+  push(evaluateBookingOut(signals, ctx.now))
   push(evaluateLookBookedRecently(ctx.bookedLast7dByLookId.get(candidate.lookPostId)))
   push(evaluateRebookRate(signals, ctx.now))
   push(evaluateBooked30d(signals, ctx.now))
   push(evaluateNewToPlatform(signals, ctx.now, ctx.brandName))
   push(evaluateEventCountdown(candidate, ctx.viewerEvents, ctx.now))
+  // §5.3 orders availability before distance within CONVENIENCE — pushed in
+  // that order so it holds for the pool[0] fallback (rotation aside).
+  push(evaluateAvailableSoon(signals, ctx.now))
   push(evaluateDistance(signals))
 
   const tier = resolveCommitmentTier(candidate.categorySlug)

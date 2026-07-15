@@ -5,13 +5,13 @@
 // family, all in parallel), run the pure engine per look, and hand back a
 // lookPostId → badge map plus the §9 serve-log counts.
 //
-// Cost profile per page: at most 4 queries, each bounded by the page's pro /
+// Cost profile per page: at most 5 queries, each bounded by the page's pro /
 // look id lists — no per-row queries, no unbounded scans, and no
 // pro-ENUMERATING reads (account age rides along on the feed select; the id
 // lists come from an already-tenant-scoped feed query). Signals whose
 // precondition is absent (no viewer coords → no location query; no client →
 // no boards query) are skipped entirely, so an anonymous chronological serve
-// pays two small IN-list queries.
+// pays three small IN-list queries (badge stats, availability, look-booked).
 
 import { Prisma, type BoardType } from '@prisma/client'
 
@@ -21,6 +21,7 @@ import type { LookBadgeDto } from '@/lib/looks/types'
 import {
   selectLookBadge,
   type LookBadgeEngineContext,
+  type ProAvailabilityBadgeSignal,
   type ProBadgeSignals,
   type ViewerEventSignal,
 } from '@/lib/looks/badges/engine'
@@ -63,6 +64,24 @@ export type LookBadgeAttachDb = {
       select: { professionalId: true; lat: true; lng: true }
     }): PromiseLike<
       Array<{ professionalId: string; lat: unknown; lng: unknown }>
+    >
+  }
+  professionalAvailabilityStat: {
+    findMany(args: {
+      where: { professionalId: { in: string[] } }
+      select: {
+        professionalId: true
+        nextOpeningDate: true
+        fullness14d: true
+        computedAt: true
+      }
+    }): PromiseLike<
+      Array<{
+        professionalId: string
+        nextOpeningDate: Date | null
+        fullness14d: number
+        computedAt: Date
+      }>
     >
   }
   board: {
@@ -169,7 +188,7 @@ export async function attachLookBadges(args: {
     now.getTime() - LOOK_BOOKED_WINDOW_DAYS * 24 * 60 * 60 * 1000,
   )
 
-  const [statRows, locationRows, boardRows, bookedRows] =
+  const [statRows, locationRows, availabilityRows, boardRows, bookedRows] =
     await Promise.all([
       professionalIds.length > 0
         ? db.professionalBadgeStat.findMany({
@@ -192,6 +211,17 @@ export async function attachLookBadges(args: {
               archivedAt: null,
             },
             select: { professionalId: true, lat: true, lng: true },
+          })
+        : Promise.resolve([]),
+      professionalIds.length > 0
+        ? db.professionalAvailabilityStat.findMany({
+            where: { professionalId: { in: professionalIds } },
+            select: {
+              professionalId: true,
+              nextOpeningDate: true,
+              fullness14d: true,
+              computedAt: true,
+            },
           })
         : Promise.resolve([]),
       viewer.clientId
@@ -241,6 +271,16 @@ export async function attachLookBadges(args: {
     }
   }
 
+  const availabilityByPro = new Map<string, ProAvailabilityBadgeSignal>()
+  for (const row of availabilityRows) {
+    if (availabilityByPro.has(row.professionalId)) continue
+    availabilityByPro.set(row.professionalId, {
+      nextOpeningDate: row.nextOpeningDate,
+      fullness14d: row.fullness14d,
+      computedAt: row.computedAt,
+    })
+  }
+
   const proSignals = new Map<string, ProBadgeSignals>()
   for (const professionalId of professionalIds) {
     const stat = statRows.find((row) => row.professionalId === professionalId)
@@ -252,6 +292,7 @@ export async function attachLookBadges(args: {
       statComputedAt: stat?.computedAt ?? null,
       accountCreatedAt: accountCreatedAtByPro.get(professionalId) ?? null,
       distanceMiles: distanceByPro.get(professionalId) ?? null,
+      availability: availabilityByPro.get(professionalId) ?? null,
     })
   }
 
