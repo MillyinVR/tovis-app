@@ -1,17 +1,35 @@
 // Trending "shot packs" for the native AI-photographer camera — server-driven
-// pose/shot recipes the camera turns into a directed shoot (guide steps +
-// per-step expectations + pose rules the on-device coach enforces).
+// pose/shot recipes (guide steps + per-step expectations + pose rules the
+// on-device coach enforces).
 //
 // WHY SERVER-SIDE: what's going viral changes weekly; the app ships a fixed
 // VOCABULARY of pose-rule kinds it knows how to measure (see `PoseRuleKind`),
 // and packs compose those primitives into current trends. Updating this file
-// (or later, generating packs from Looks-feed engagement) refreshes every
-// pro's camera without an app release. The app SKIPS rule kinds it doesn't
-// recognize, so new vocabulary can ship here ahead of older app builds.
+// refreshes every pro's camera without an app release. The app SKIPS rule kinds
+// it doesn't recognize, so new vocabulary can ship here ahead of older builds.
 //
-// v1 is editorially curated around evergreen-viral beauty formats (the reveal,
-// the over-shoulder glance, hands-framing-face nail shots, golden-hour glow).
-// Bump `SHOT_PACKS_VERSION` on every content change — clients use it to cache.
+// The pack CONTENT (steps + pose rules) stays editorially curated around
+// evergreen-viral beauty formats (the reveal, the over-shoulder glance,
+// hands-framing-face nail shots, golden-hour glow) — that vocabulary is fixed
+// and app-measured, and nothing in the Looks corpus tags a look by shot format,
+// so it can't be mined from engagement. What IS engagement-driven (C10) is the
+// ORDER packs appear in: each pack carries an editorial `baseTrendScore` and the
+// service families it belongs to, and `loadCameraShotPacks` blends a bounded,
+// field-relative "how hot is this family in the Looks feed right now?" lift on
+// top of the base (lib/looks/categoryTrendStats.ts). With no trend data the lift
+// is zero and the ordering is exactly the editorial base — byte-identical to the
+// pre-C10 payload — so the signal can only reorder packs, never break the camera.
+//
+// Bump `SHOT_PACKS_VERSION` on every CONTENT change (packs/steps/vocabulary);
+// clients cache against the response ETag, which also folds the live ordering so
+// an engagement-driven reorder invalidates a stale cache without a version bump.
+
+import { createHash } from 'node:crypto'
+
+import {
+  fetchCategoryTrendStrengths,
+  type CategoryTrendStatReader,
+} from '@/lib/looks/categoryTrendStats'
 
 /** Pose-rule kinds the iOS coach can currently measure. Adding a kind here
  * requires the matching evaluator in the app (older apps skip unknown kinds).
@@ -60,6 +78,10 @@ export type ShotPackStep = {
   pose: ShotPackPoseRule[]
 }
 
+/** The wire shape served to the app — unchanged by C10 (the client still sorts
+ * by `trendScore` and matches `serviceKeywords`). `trendScore` is now the
+ * editorial base blended with the live engagement lift, rounded to an integer
+ * (the iOS decoder types it as `Int`). */
 export type ShotPack = {
   id: string
   name: string
@@ -67,19 +89,35 @@ export type ShotPack = {
   tagline: string
   /** Lowercased keywords matched against the booking's base service name. */
   serviceKeywords: string[]
-  /** Editorial ranking, higher = hotter — the picker sorts by this. */
+  /** Ranking, higher = hotter — the picker sorts by this. */
   trendScore: number
   steps: ShotPackStep[]
 }
 
+/** Server-only pack authoring shape: the wire fields minus the computed
+ * `trendScore`, plus the editorial base and the service families whose Looks-feed
+ * heat lifts this pack. `categorySlugs` are TOP-LEVEL family slugs (matched
+ * against LookCategoryTrendStat, which is keyed by family root). */
+type ShotPackDefinition = Omit<ShotPack, 'trendScore'> & {
+  baseTrendScore: number
+  categorySlugs: string[]
+}
+
 export const SHOT_PACKS_VERSION = 1
 
-const REVEAL: ShotPack = {
+// The most a maximally-hot family can add to a pack's editorial base. Sized to
+// let a red-hot lower pack overtake a cold higher one (base spread is ~20)
+// without letting engagement obliterate the curation — comparable to the
+// personalization boost bands (follow 25 / relationship 30).
+export const SHOT_PACK_TREND_MAX_LIFT = 30
+
+const REVEAL: ShotPackDefinition = {
   id: 'hair-reveal-v1',
   name: 'The Reveal',
   tagline: 'The transformation money-shot set — back canvas first, then the turn.',
   serviceKeywords: ['hair', 'cut', 'color', 'colour', 'balayage', 'blowout', 'extensions', 'style', 'braid'],
-  trendScore: 100,
+  baseTrendScore: 100,
+  categorySlugs: ['hair'],
   steps: [
     {
       title: 'Back canvas',
@@ -121,12 +159,13 @@ const REVEAL: ShotPack = {
   ],
 }
 
-const OVER_SHOULDER: ShotPack = {
+const OVER_SHOULDER: ShotPackDefinition = {
   id: 'over-shoulder-glance-v1',
   name: 'Over-Shoulder Glance',
   tagline: 'The look-back everyone saves — soft, confident, editorial.',
   serviceKeywords: ['hair', 'makeup', 'glam', 'style', 'braid', 'extensions'],
-  trendScore: 90,
+  baseTrendScore: 90,
+  categorySlugs: ['hair', 'makeup'],
   steps: [
     {
       title: 'Three-quarter back',
@@ -157,12 +196,13 @@ const OVER_SHOULDER: ShotPack = {
   ],
 }
 
-const CLAW_AND_SPARKLE: ShotPack = {
+const CLAW_AND_SPARKLE: ShotPackDefinition = {
   id: 'nails-claw-sparkle-v1',
   name: 'Claw & Sparkle',
   tagline: 'Hands framing the face — the nail set that stops the scroll.',
   serviceKeywords: ['nail', 'mani', 'gel', 'acrylic', 'pedi'],
-  trendScore: 85,
+  baseTrendScore: 85,
+  categorySlugs: ['nails'],
   steps: [
     {
       title: 'Frame the face',
@@ -203,12 +243,13 @@ const CLAW_AND_SPARKLE: ShotPack = {
   ],
 }
 
-const GOLDEN_GLOW: ShotPack = {
+const GOLDEN_GLOW: ShotPackDefinition = {
   id: 'makeup-golden-glow-v1',
   name: 'Golden Glow',
   tagline: 'Soft-light profile + closed-eye shimmer — the glow reel staple.',
   serviceKeywords: ['makeup', 'glam', 'facial', 'skin', 'brow', 'lash'],
-  trendScore: 80,
+  baseTrendScore: 80,
+  categorySlugs: ['makeup', 'skin', 'brows', 'lashes'],
   steps: [
     {
       title: 'Lit profile',
@@ -248,12 +289,105 @@ const GOLDEN_GLOW: ShotPack = {
   ],
 }
 
-const SHOT_PACKS: ShotPack[] = [REVEAL, OVER_SHOULDER, CLAW_AND_SPARKLE, GOLDEN_GLOW]
+const SHOT_PACK_DEFINITIONS: ShotPackDefinition[] = [
+  REVEAL,
+  OVER_SHOULDER,
+  CLAW_AND_SPARKLE,
+  GOLDEN_GLOW,
+]
 
-/** The current trending packs, hottest first. */
-export function loadCameraShotPacks(): { version: number; packs: ShotPack[] } {
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(Math.max(value, 0), 1)
+}
+
+/**
+ * Blend the editorial pack definitions with the live per-family trend strengths
+ * and return the wire packs hottest-first. A pack's lift comes from its HOTTEST
+ * matching family (max over its categorySlugs), so pairing a hot family with a
+ * cold one never dilutes the signal. Deterministic: ties break on the editorial
+ * base then the pack id, so an all-zero (dark) strength map reproduces the exact
+ * editorial ordering. Pure — unit-tested without a DB.
+ */
+export function rankShotPacks(
+  definitions: readonly ShotPackDefinition[],
+  strengthBySlug: ReadonlyMap<string, number>,
+): ShotPack[] {
+  const scored = definitions.map((definition) => {
+    const strength = clamp01(
+      Math.max(
+        0,
+        ...definition.categorySlugs.map((slug) => strengthBySlug.get(slug) ?? 0),
+      ),
+    )
+    const trendScore = Math.round(
+      definition.baseTrendScore + SHOT_PACK_TREND_MAX_LIFT * strength,
+    )
+    return { definition, trendScore }
+  })
+
+  scored.sort((a, b) => {
+    if (b.trendScore !== a.trendScore) return b.trendScore - a.trendScore
+    if (b.definition.baseTrendScore !== a.definition.baseTrendScore) {
+      return b.definition.baseTrendScore - a.definition.baseTrendScore
+    }
+    return a.definition.id < b.definition.id
+      ? -1
+      : a.definition.id > b.definition.id
+        ? 1
+        : 0
+  })
+
+  return scored.map(({ definition, trendScore }) => ({
+    id: definition.id,
+    name: definition.name,
+    tagline: definition.tagline,
+    serviceKeywords: definition.serviceKeywords,
+    trendScore,
+    steps: definition.steps,
+  }))
+}
+
+export type ShotPacksPayload = { version: number; packs: ShotPack[] }
+
+/**
+ * A weak ETag that folds BOTH the content version and the live ordering, so a
+ * pure content change (version bump) AND an engagement-driven reorder each
+ * invalidate a stale client cache. Identical payloads share an ETag, so the
+ * client cache still hits across a day of unchanged rankings. Pure/deterministic.
+ */
+export function buildShotPacksEtag(payload: ShotPacksPayload): string {
+  const signature = payload.packs
+    .map((pack) => `${pack.id}:${pack.trendScore}`)
+    .join('|')
+  const digest = createHash('sha1')
+    .update(`v${payload.version}\n${signature}`)
+    .digest('hex')
+    .slice(0, 12)
+  return `W/"shot-packs-${payload.version}-${digest}"`
+}
+
+/**
+ * The current trending packs, hottest first. Reads the per-family engagement
+ * trend and blends it into the editorial order. The trend read is best-effort:
+ * any failure falls back to the editorial ordering (empty strengths) rather than
+ * failing the camera — mirroring the app's own "silent failure → standard guides
+ * carry the shoot" contract.
+ */
+export async function loadCameraShotPacks(
+  db: CategoryTrendStatReader,
+): Promise<ShotPacksPayload> {
+  let strengthBySlug: ReadonlyMap<string, number> = new Map()
+  try {
+    strengthBySlug = await fetchCategoryTrendStrengths(db)
+  } catch (error) {
+    console.error(
+      'loadCameraShotPacks: trend read failed, using editorial order',
+      error,
+    )
+  }
   return {
     version: SHOT_PACKS_VERSION,
-    packs: [...SHOT_PACKS].sort((a, b) => b.trendScore - a.trendScore),
+    packs: rankShotPacks(SHOT_PACK_DEFINITIONS, strengthBySlug),
   }
 }

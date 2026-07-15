@@ -4,13 +4,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
+  findMany: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requirePro', () => ({
   requirePro: mocks.requirePro,
 }))
 
-import { loadCameraShotPacks } from '@/lib/pro/cameraShotPacks'
+vi.mock('@/lib/prisma', () => ({
+  prisma: { lookCategoryTrendStat: { findMany: mocks.findMany } },
+}))
+
+import { LOOK_CATEGORY_TREND } from '@/lib/looks/categoryTrendStats'
+import { buildShotPacksEtag, loadCameraShotPacks } from '@/lib/pro/cameraShotPacks'
+import { prisma } from '@/lib/prisma'
 
 import { GET } from './route'
 
@@ -30,6 +37,8 @@ beforeEach(() => {
     professionalId: 'pro-1',
     userId: 'user-1',
   })
+  // Default: no trend data → the shot packs keep their editorial order.
+  mocks.findMany.mockResolvedValue([])
 })
 
 const ROUTE = 'http://localhost/api/v1/pro/camera/shot-packs'
@@ -38,8 +47,8 @@ function get(headers?: HeadersInit): Promise<Response> {
   return GET(new Request(ROUTE, { headers }))
 }
 
-function currentEtag(): string {
-  return `W/"shot-packs-${loadCameraShotPacks().version}"`
+async function currentEtag(): Promise<string> {
+  return buildShotPacksEtag(await loadCameraShotPacks(prisma))
 }
 
 describe('GET /api/v1/pro/camera/shot-packs', () => {
@@ -55,7 +64,7 @@ describe('GET /api/v1/pro/camera/shot-packs', () => {
     expect(res.status).toBe(200)
 
     const body = await readJson<ShotPacksBody>(res)
-    const expected = loadCameraShotPacks()
+    const expected = await loadCameraShotPacks(prisma)
 
     expect(body.version).toBe(expected.version)
     expect(body.packs.map((p) => p.id)).toEqual(expected.packs.map((p) => p.id))
@@ -65,17 +74,17 @@ describe('GET /api/v1/pro/camera/shot-packs', () => {
     expect(scores).toEqual([...scores].sort((a, b) => b - a))
   })
 
-  it('serves a version-keyed ETag and a cacheable directive (not no-store)', async () => {
+  it('serves a data-aware ETag and a cacheable directive (not no-store)', async () => {
     const res = await get()
 
-    expect(res.headers.get('etag')).toBe(currentEtag())
+    expect(res.headers.get('etag')).toBe(await currentEtag())
     const cacheControl = res.headers.get('cache-control')
     expect(cacheControl).not.toContain('no-store')
     expect(cacheControl).toContain('max-age')
   })
 
   it('answers a matching If-None-Match with 304 and no body', async () => {
-    const etag = currentEtag()
+    const etag = await currentEtag()
     const res = await get({ 'If-None-Match': etag })
 
     expect(res.status).toBe(304)
@@ -83,12 +92,30 @@ describe('GET /api/v1/pro/camera/shot-packs', () => {
     expect(await res.text()).toBe('')
   })
 
-  it('serves 200 when If-None-Match is a stale version', async () => {
-    const res = await get({ 'If-None-Match': 'W/"shot-packs-0"' })
+  it('serves 200 when If-None-Match is a stale ETag', async () => {
+    const res = await get({ 'If-None-Match': 'W/"shot-packs-0-deadbeef0000"' })
 
     expect(res.status).toBe(200)
     const body = await readJson<ShotPacksBody>(res)
-    expect(body.version).toBe(loadCameraShotPacks().version)
+    expect(body.version).toBe((await loadCameraShotPacks(prisma)).version)
+  })
+
+  it('re-ranks on live engagement and mints a fresh ETag for it', async () => {
+    const editorialEtag = await currentEtag()
+
+    // A red-hot nails family reorders the packs → new content → new ETag.
+    const min = LOOK_CATEGORY_TREND.minImpressions
+    mocks.findMany.mockResolvedValue([
+      { categorySlug: 'nails', weightedEngagement: 0.4 * min * 2, impressions: min * 2 },
+    ])
+
+    const res = await get()
+    const body = await readJson<ShotPacksBody>(res)
+    expect(body.packs[0]?.id).toBe('nails-claw-sparkle-v1')
+    expect(res.headers.get('etag')).not.toBe(editorialEtag)
+    // A client holding the editorial ETag now revalidates to a 200, not a 304.
+    const revalidate = await get({ 'If-None-Match': editorialEtag })
+    expect(revalidate.status).toBe(200)
   })
 
   it('returns 500 when the auth check throws', async () => {
