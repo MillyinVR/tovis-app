@@ -69,6 +69,10 @@ export type LooksFeedServeEvent = {
   // on-platform rebook-rate metric (spec §9).
   relationshipProCount?: number | null
   relationshipBoostedCount?: number | null
+  // §4.2/§4.5 underbooked fairness on-ramp (personalized cohort only): displayed
+  // looks lifted by the on-ramp (bookable AND still under-discovered pro) — the
+  // "is the fairness floor reaching new/underbooked pros" metric (spec §9).
+  underbookedBoostedCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -119,6 +123,7 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     inspirationCount: input.inspirationCount ?? null,
     relationshipProCount: input.relationshipProCount ?? null,
     relationshipBoostedCount: input.relationshipBoostedCount ?? null,
+    underbookedBoostedCount: input.underbookedBoostedCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

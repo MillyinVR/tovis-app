@@ -1,7 +1,11 @@
 // lib/looks/badges/stats.test.ts
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { mergeProfessionalBadgeStatRows } from '@/lib/looks/badges/stats'
+import {
+  fetchProUnderbookedSignals,
+  mergeProfessionalBadgeStatRows,
+  type ProUnderbookedReaderDb,
+} from '@/lib/looks/badges/stats'
 
 describe('mergeProfessionalBadgeStatRows', () => {
   it('merges the three grouped rowsets into one row per pro', () => {
@@ -67,5 +71,61 @@ describe('mergeProfessionalBadgeStatRows', () => {
         rebookedClientCount: 2,
       },
     ])
+  })
+})
+
+describe('fetchProUnderbookedSignals', () => {
+  function mockDb(
+    rows: Array<{ professionalId: string; completedBookingCount30d: number }>,
+  ) {
+    const findMany = vi.fn().mockResolvedValue(rows)
+    const db: ProUnderbookedReaderDb = {
+      professionalBadgeStat: { findMany },
+    }
+    return { db, findMany }
+  }
+
+  it('maps completed-booking volume by professionalId', async () => {
+    const { db } = mockDb([
+      { professionalId: 'pro_a', completedBookingCount30d: 12 },
+      { professionalId: 'pro_b', completedBookingCount30d: 0 },
+    ])
+
+    const signals = await fetchProUnderbookedSignals(db, ['pro_a', 'pro_b'])
+
+    expect(signals.get('pro_a')).toEqual({ completedBookingCount30d: 12 })
+    expect(signals.get('pro_b')).toEqual({ completedBookingCount30d: 0 })
+  })
+
+  it('leaves a pro without a row absent (reads as 0 completed downstream)', async () => {
+    const { db } = mockDb([
+      { professionalId: 'pro_a', completedBookingCount30d: 5 },
+    ])
+
+    const signals = await fetchProUnderbookedSignals(db, ['pro_a', 'pro_missing'])
+
+    expect(signals.has('pro_missing')).toBe(false)
+    expect(signals.size).toBe(1)
+  })
+
+  it('de-dupes and drops empty ids before querying', async () => {
+    const { db, findMany } = mockDb([])
+
+    await fetchProUnderbookedSignals(db, ['pro_a', 'pro_a', '', 'pro_b'])
+
+    expect(findMany).toHaveBeenCalledTimes(1)
+    expect(findMany.mock.calls[0]?.[0].where.professionalId.in).toEqual([
+      'pro_a',
+      'pro_b',
+    ])
+  })
+
+  it('short-circuits without querying for an empty id list', async () => {
+    const { db, findMany } = mockDb([])
+
+    const signals = await fetchProUnderbookedSignals(db, ['', '  '.trim()])
+
+    expect(signals.size).toBe(0)
+    expect(findMany).not.toHaveBeenCalled()
   })
 })

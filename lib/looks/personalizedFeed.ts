@@ -46,11 +46,13 @@ import {
   type TasteVectorSignal,
 } from '@/lib/personalization/tasteVectorMath'
 import {
+  computeUnderbookedProBoost,
   rankPersonalizedRows,
   type PersonalizedViewerAffinity,
   type ProRelationshipSignal,
 } from '@/lib/looks/personalizedRanking'
 import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
+import { fetchProUnderbookedSignals } from '@/lib/looks/badges/stats'
 import {
   completedVisitInstant,
   fetchClientBookingSignals,
@@ -663,6 +665,12 @@ export type PersonalizedFeedPage = {
     // §9 on-platform rebook-rate / relationship-working metric.
     relationshipProCount: number
     relationshipBoostedCount: number
+    // §4.2/§4.5 underbooked fairness on-ramp: how many of the DISPLAYED page's
+    // looks received a non-zero underbooked boost (pro is bookable AND still
+    // under-discovered). 0 = the pro-badge-stats/availability crons haven't
+    // populated yet, or every displayed pro is either unbookable or established.
+    // The §9 "is the fairness floor reaching new/underbooked pros" metric.
+    underbookedBoostedCount: number
   }
 }
 
@@ -841,14 +849,20 @@ export async function buildPersonalizedFeedPage(args: {
   // primitive, so the feed is byte-identical until then. Fetched for the whole
   // DISPLAYED page (re-ranked + exploration pros) so both the re-rank and the
   // §4.3 bookable/inspiration composition metric read the same map.
+  // §4.2/§4.5 underbooked fairness on-ramp reads the same displayed pro set as
+  // the availability boost: the ProfessionalBadgeStat completed-booking volume
+  // (the under-discovery grade) is loaded in one indexed IN-list read, and the
+  // bookability gate reuses `availabilitySignals` (no extra query). Empty until
+  // the pro-badge-stats cron populates the table — byte-identical until then.
   const displayedRows = [...candidateRows, ...explorationRows]
-  const availabilitySignals =
+  const displayedProIds = displayedRows.map((row) => row.professionalId)
+  const [availabilitySignals, underbookedSignals] =
     displayedRows.length > 0
-      ? await fetchProAvailabilitySignals(
-          prisma,
-          displayedRows.map((row) => row.professionalId),
-        )
-      : new Map<string, never>()
+      ? await Promise.all([
+          fetchProAvailabilitySignals(prisma, displayedProIds),
+          fetchProUnderbookedSignals(prisma, displayedProIds),
+        ])
+      : [new Map<string, never>(), new Map<string, never>()]
 
   const rankedItems = rankPersonalizedRows(candidateRows, {
     affinity,
@@ -858,6 +872,8 @@ export async function buildPersonalizedFeedPage(args: {
     availabilitySignals,
     // §4.3/§4.3.2: lean the bookable term by session intent.
     availabilityWeightMultiplier: plan.availabilityWeightMultiplier,
+    // §4.2/§4.5 underbooked fairness on-ramp (gated on availability presence).
+    underbookedSignals,
   })
 
   // §4.3.1: interleave the reserved exploration slice into the re-ranked page.
@@ -872,10 +888,22 @@ export async function buildPersonalizedFeedPage(args: {
   let bookableCount = 0
   // §6.7 relationship metric: displayed looks from a pro the viewer has booked.
   let relationshipBoostedCount = 0
+  // §4.2/§4.5 fairness metric: displayed looks the underbooked on-ramp lifted.
+  let underbookedBoostedCount = 0
   const relationshipSignals = affinity.relationshipSignals
   for (const row of items) {
     if (availabilitySignals.has(row.professionalId)) bookableCount += 1
     if (relationshipSignals?.has(row.professionalId)) relationshipBoostedCount += 1
+    if (
+      computeUnderbookedProBoost({
+        completedBookingCount30d:
+          underbookedSignals.get(row.professionalId)?.completedBookingCount30d ??
+          0,
+        isBookable: availabilitySignals.has(row.professionalId),
+      }) > 0
+    ) {
+      underbookedBoostedCount += 1
+    }
   }
 
   return {
@@ -901,6 +929,7 @@ export async function buildPersonalizedFeedPage(args: {
       inspirationCount: items.length - bookableCount,
       relationshipProCount: relationshipSignals?.size ?? 0,
       relationshipBoostedCount,
+      underbookedBoostedCount,
     },
   }
 }
