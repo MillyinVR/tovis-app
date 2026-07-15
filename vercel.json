@@ -82,6 +82,10 @@
       "schedule": "45 9 * * *"
     },
     {
+      "path": "/api/internal/jobs/looks-category-trend-stats",
+      "schedule": "50 9 * * *"
+    },
+    {
       "path": "/api/internal/jobs/taste-vectors",
       "schedule": "0 10 * * *"
     },

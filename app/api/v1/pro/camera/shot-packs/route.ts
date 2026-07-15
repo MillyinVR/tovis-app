@@ -1,19 +1,23 @@
 // GET /api/v1/pro/camera/shot-packs — trending shot packs for the native
 // AI-photographer camera: server-driven pose/shot recipes (guide steps +
-// per-step expectations + pose rules). Content is curated in
-// lib/pro/cameraShotPacks.ts and refreshes every camera without an app
-// release; the app matches packs to the booking's service client-side.
+// per-step expectations + pose rules). Pack CONTENT is curated in
+// lib/pro/cameraShotPacks.ts; the ORDER is engagement-driven (C10) — packs are
+// re-ranked by how hot their service family is in the Looks feed right now
+// (LookCategoryTrendStat, refreshed daily). The app matches packs to the
+// booking's service client-side; the ranking is global, so the payload is
+// identical for every pro.
 //
-// CACHING: the payload only changes when `SHOT_PACKS_VERSION` bumps, so we
-// expose that version as a weak ETag and let the client revalidate against it
-// (both sides document version-based caching — see ProShotPacks.swift). `no-store`
-// would forbid the very caching the contract promises, so we send a short-lived
-// private cache directive instead and answer a matching `If-None-Match` with 304.
+// CACHING: the payload changes only when the content version bumps OR the live
+// ordering shifts, so the ETag folds BOTH (see buildShotPacksEtag) and the
+// client revalidates against it. `no-store` would forbid the very caching the
+// contract promises, so we send a short-lived private cache directive instead
+// and answer a matching `If-None-Match` with 304.
 import { NextResponse } from 'next/server'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
-import { loadCameraShotPacks } from '@/lib/pro/cameraShotPacks'
+import { buildShotPacksEtag, loadCameraShotPacks } from '@/lib/pro/cameraShotPacks'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -33,8 +37,8 @@ export async function GET(req: Request) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const payload = loadCameraShotPacks()
-    const etag = `W/"shot-packs-${payload.version}"`
+    const payload = await loadCameraShotPacks(prisma)
+    const etag = buildShotPacksEtag(payload)
     const headers = { ETag: etag, 'Cache-Control': CACHE_CONTROL }
 
     if (ifNoneMatch(req, etag)) {

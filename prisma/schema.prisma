@@ -2458,6 +2458,7 @@ model ServiceCategory {
   services        Service[]
   adminActionLogs AdminActionLog[]      @relation("CategoryLogs")
   lookRankStat    LookCategoryRankStat?
+  lookTrendStat   LookCategoryTrendStat?
 }
 
 // Per-service-category engagement-rate aggregate — the data source for the
@@ -2476,6 +2477,40 @@ model LookCategoryRankStat {
   impressions        Int
   lookCount          Int
   computedAt         DateTime
+
+  category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
+// Per-family RECENT engagement-trend aggregate — the data source behind the
+// engagement-driven ordering of the camera "shot packs" (camera-perfect C10;
+// lib/looks/categoryTrendStats.ts → lib/pro/cameraShotPacks.ts). Sibling of
+// LookCategoryRankStat: same category key, but a RECENT publish window instead
+// of an all-time sum, so it answers "which service family is hot right now?"
+// rather than "what rate is typical for this family?". Rows are keyed by the
+// TOP-LEVEL family category (leaf categories are rolled up to their root at
+// refresh time), so one row summarizes a whole family (e.g. all of "hair").
+// Refreshed daily by the looks-category-trend-stats job; an empty/missing row
+// reads as "no trend signal" → the shot packs fall back to their editorial
+// order (byte-identical to the pre-C10 payload), so this table can only reorder
+// packs, never break the camera.
+model LookCategoryTrendStat {
+  // Top-level (root) service category id — the family this row summarizes.
+  categoryId String @id
+  // Denormalized root slug so the serve path can read by slug in one indexed
+  // query without re-walking the category tree (kept 1:1 with categoryId).
+  categorySlug String @unique
+  // Sums over eligible (published + approved) looks PUBLISHED in the trailing
+  // `windowDays`, rolled up from every descendant category to this root:
+  // intent-weighted engagement (the rate numerator, same weights as rank
+  // scoring) and floored impressions (GREATEST(viewCount, raw engagement) — the
+  // same per-look floor the live smoothed rate uses).
+  weightedEngagement Float
+  impressions        Int
+  lookCount          Int
+  // The trailing-publish window (days) this row covers — stored so the row
+  // documents its own recency semantics if the config ever changes.
+  windowDays Int
+  computedAt DateTime
 
   category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 }
