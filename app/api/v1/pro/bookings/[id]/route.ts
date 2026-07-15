@@ -220,6 +220,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
         locationAddressSnapshot: true,
         locationLatSnapshot: true,
         locationLngSnapshot: true,
+        // MOBILE bookings: the client's saved service address, so the native
+        // aftercare rebook slot picker can query mobile availability.
+        clientAddressId: true,
         // Session lifecycle timestamps + step (drive the native Timing timeline).
         sessionStep: true,
         startedAt: true,
@@ -339,6 +342,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
           ).toISOString(),
           locationId: booking.locationId ?? null,
           locationType: booking.locationType,
+          clientAddressId: booking.clientAddressId ?? null,
           locationAddressSnapshot: pickFormattedAddressFromSnapshot(
             booking.locationAddressSnapshot,
           ),
