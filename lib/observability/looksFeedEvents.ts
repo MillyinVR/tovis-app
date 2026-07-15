@@ -77,6 +77,10 @@ export type LooksFeedServeEvent = {
   // lifted by the conversion boost (the look has driven >=1 booking) — the "is the
   // feed surfacing content that fills chairs, not just pretty content" metric.
   conversionBoostedCount?: number | null
+  // §4.2 pro_reliability (personalized cohort only): displayed looks lifted by the
+  // reliability boost (the pro has resolved bookings and a completion rate above
+  // the floor) — the "is the feed favouring pros who see bookings through" metric.
+  reliabilityBoostedCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -129,6 +133,7 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     relationshipBoostedCount: input.relationshipBoostedCount ?? null,
     underbookedBoostedCount: input.underbookedBoostedCount ?? null,
     conversionBoostedCount: input.conversionBoostedCount ?? null,
+    reliabilityBoostedCount: input.reliabilityBoostedCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

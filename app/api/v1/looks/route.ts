@@ -342,6 +342,9 @@ export async function GET(req: Request) {
         personalizedMeta?.underbookedBoostedCount ?? null,
       // §4.2 booking_conversion_rate (personalized cohort only).
       conversionBoostedCount: personalizedMeta?.conversionBoostedCount ?? null,
+      // §4.2 pro_reliability (personalized cohort only).
+      reliabilityBoostedCount:
+        personalizedMeta?.reliabilityBoostedCount ?? null,
       badgeEligibleCount: badgeResult.meta.eligibleCount,
       badgeShownCount: badgeResult.meta.shownCount,
       badgeHoldoutCount: badgeResult.meta.holdoutCount,

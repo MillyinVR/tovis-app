@@ -47,13 +47,17 @@ import {
 } from '@/lib/personalization/tasteVectorMath'
 import {
   computeBookingConversionBoost,
+  computeProReliabilityBoost,
   computeUnderbookedProBoost,
   rankPersonalizedRows,
   type PersonalizedViewerAffinity,
   type ProRelationshipSignal,
 } from '@/lib/looks/personalizedRanking'
 import { fetchProAvailabilitySignals } from '@/lib/looks/availabilityStats'
-import { fetchProUnderbookedSignals } from '@/lib/looks/badges/stats'
+import {
+  fetchProReliabilitySignals,
+  fetchProUnderbookedSignals,
+} from '@/lib/looks/badges/stats'
 import { fetchLookConversionSignals } from '@/lib/looks/conversionStats'
 import {
   completedVisitInstant,
@@ -679,6 +683,12 @@ export type PersonalizedFeedPage = {
     // look has converted. The §9 "is the feed surfacing content that fills
     // chairs, not just pretty content" metric.
     conversionBoostedCount: number
+    // §4.2 pro_reliability: how many of the DISPLAYED page's looks received a
+    // non-zero reliability boost (the look's pro has resolved bookings and a
+    // completion rate above the floor). 0 = the pro-badge-stats cron hasn't
+    // populated the reliability columns yet, or no displayed pro clears the floor.
+    // The §9 "is the feed favouring pros who see bookings through" metric.
+    reliabilityBoostedCount: number
   }
 }
 
@@ -866,9 +876,18 @@ export async function buildPersonalizedFeedPage(args: {
   // RE-RANKED candidate set (by look id, like candidateEmbeddings — exploration
   // rows are placed by quality, not re-ranked, so they don't need it). One indexed
   // IN-list read; empty until the look-conversion-stats cron populates the table.
+  // §4.2 pro_reliability reads the same displayed pro set as the underbooked term,
+  // off the same ProfessionalBadgeStat aggregate but a separate indexed IN-list
+  // (the two §4.2 terms stay independently gated). Empty until the pro-badge-stats
+  // cron populates the reliability columns — byte-identical until then.
   const displayedRows = [...candidateRows, ...explorationRows]
   const displayedProIds = displayedRows.map((row) => row.professionalId)
-  const [availabilitySignals, underbookedSignals, conversionSignals] =
+  const [
+    availabilitySignals,
+    underbookedSignals,
+    conversionSignals,
+    reliabilitySignals,
+  ] =
     displayedRows.length > 0
       ? await Promise.all([
           fetchProAvailabilitySignals(prisma, displayedProIds),
@@ -877,8 +896,10 @@ export async function buildPersonalizedFeedPage(args: {
             prisma,
             candidateRows.map((row) => row.id),
           ),
+          fetchProReliabilitySignals(prisma, displayedProIds),
         ])
       : [
+          new Map<string, never>(),
           new Map<string, never>(),
           new Map<string, never>(),
           new Map<string, never>(),
@@ -896,6 +917,8 @@ export async function buildPersonalizedFeedPage(args: {
     underbookedSignals,
     // §4.2 booking_conversion_rate — per-look "fills chairs" quality lift.
     conversionSignals,
+    // §4.2 pro_reliability — per-pro follow-through trust lift.
+    reliabilitySignals,
   })
 
   // §4.3.1: interleave the reserved exploration slice into the re-ranked page.
@@ -914,6 +937,8 @@ export async function buildPersonalizedFeedPage(args: {
   let underbookedBoostedCount = 0
   // §4.2 conversion metric: displayed looks the booking-conversion boost lifted.
   let conversionBoostedCount = 0
+  // §4.2 reliability metric: displayed looks the pro_reliability boost lifted.
+  let reliabilityBoostedCount = 0
   const relationshipSignals = affinity.relationshipSignals
   for (const row of items) {
     if (availabilitySignals.has(row.professionalId)) bookableCount += 1
@@ -937,6 +962,16 @@ export async function buildPersonalizedFeedPage(args: {
       ) > 0
     ) {
       conversionBoostedCount += 1
+    }
+    if (
+      computeProReliabilityBoost(
+        reliabilitySignals.get(row.professionalId) ?? {
+          resolvedBookingCount: 0,
+          completedResolvedCount: 0,
+        },
+      ) > 0
+    ) {
+      reliabilityBoostedCount += 1
     }
   }
 
@@ -965,6 +1000,7 @@ export async function buildPersonalizedFeedPage(args: {
       relationshipBoostedCount,
       underbookedBoostedCount,
       conversionBoostedCount,
+      reliabilityBoostedCount,
     },
   }
 }

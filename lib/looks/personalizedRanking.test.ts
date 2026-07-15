@@ -8,6 +8,7 @@ import {
   computeCategorySuppressionPenalty,
   computePersonalizedFreshnessBoost,
   computePersonalizedScore,
+  computeProReliabilityBoost,
   computeRelationshipBoost,
   computeUnderbookedProBoost,
   computeVisualSimilarityBoost,
@@ -18,6 +19,7 @@ import {
   type PersonalizedViewerAffinity,
   type ProAvailabilitySignal,
   type ProRelationshipSignal,
+  type ProReliabilitySignal,
   type ProUnderbookedSignal,
 } from './personalizedRanking'
 
@@ -1032,6 +1034,167 @@ describe('lib/looks/personalizedRanking', () => {
         conversionSignals,
       })
       const bare = computePersonalizedScore(row({ id: 'look_none' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(withMap).toBeCloseTo(bare, 5)
+    })
+  })
+
+  describe('computeProReliabilityBoost (§4.2)', () => {
+    it('is 0 for a pro with no resolved bookings (no reliability evidence)', () => {
+      expect(
+        computeProReliabilityBoost({
+          resolvedBookingCount: 0,
+          completedResolvedCount: 0,
+        }),
+      ).toBe(0)
+    })
+
+    it('caps near reliabilityMax for a near-perfect follow-through pro', () => {
+      // 20 resolved, 20 completed → smoothed rate ~0.97, well above the floor.
+      const boost = computeProReliabilityBoost({
+        resolvedBookingCount: 20,
+        completedResolvedCount: 20,
+      })
+      expect(boost).toBeGreaterThan(PERSONALIZED_RANK_WEIGHTS.reliabilityMax * 0.8)
+      expect(boost).toBeLessThanOrEqual(PERSONALIZED_RANK_WEIGHTS.reliabilityMax)
+    })
+
+    it('is 0 for a frequent canceller (completion below the floor)', () => {
+      // 20 resolved, 12 completed → 60% completion → smoothed ~0.7 < floor 0.75.
+      expect(
+        computeProReliabilityBoost({
+          resolvedBookingCount: 20,
+          completedResolvedCount: 12,
+        }),
+      ).toBe(0)
+    })
+
+    it('gives a typical ~90% pro a modest mid-band lift', () => {
+      const boost = computeProReliabilityBoost({
+        resolvedBookingCount: 20,
+        completedResolvedCount: 18,
+      })
+      // Matches the closed-form smoothed rate → floor ramp.
+      const {
+        reliabilityPriorRate,
+        reliabilityPriorStrength,
+        reliabilityFloorRate,
+        reliabilityMax,
+      } = PERSONALIZED_RANK_WEIGHTS
+      const smoothed =
+        (18 + reliabilityPriorRate * reliabilityPriorStrength) /
+        (20 + reliabilityPriorStrength)
+      const expected =
+        reliabilityMax *
+        Math.min(
+          Math.max(
+            (smoothed - reliabilityFloorRate) / (1 - reliabilityFloorRate),
+            0,
+          ),
+          1,
+        )
+      expect(boost).toBeCloseTo(expected, 5)
+      expect(boost).toBeGreaterThan(0)
+      expect(boost).toBeLessThan(reliabilityMax)
+    })
+
+    it('regresses thin evidence toward the neutral prior (one cancel does not nuke)', () => {
+      // A single cancellation (1 resolved, 0 completed) stays close to the prior,
+      // not crushed to 0 — small samples must not harshly penalize (guardrail).
+      const oneCancel = computeProReliabilityBoost({
+        resolvedBookingCount: 1,
+        completedResolvedCount: 0,
+      })
+      const manyCancels = computeProReliabilityBoost({
+        resolvedBookingCount: 20,
+        completedResolvedCount: 0,
+      })
+      expect(manyCancels).toBe(0)
+      // Thin evidence is regressed toward the prior; a sustained cancel pattern is 0.
+      expect(oneCancel).toBeGreaterThanOrEqual(manyCancels)
+    })
+
+    it('rises monotonically with completion rate at a fixed resolved count', () => {
+      const low = computeProReliabilityBoost({
+        resolvedBookingCount: 30,
+        completedResolvedCount: 24,
+      })
+      const mid = computeProReliabilityBoost({
+        resolvedBookingCount: 30,
+        completedResolvedCount: 27,
+      })
+      const high = computeProReliabilityBoost({
+        resolvedBookingCount: 30,
+        completedResolvedCount: 30,
+      })
+      expect(mid).toBeGreaterThan(low)
+      expect(high).toBeGreaterThan(mid)
+    })
+
+    it('clamps a completed count above resolved to the resolved total', () => {
+      // Defensive: a malformed row (completed > resolved) can never exceed rate 1.
+      const boost = computeProReliabilityBoost({
+        resolvedBookingCount: 10,
+        completedResolvedCount: 999,
+      })
+      const capped = computeProReliabilityBoost({
+        resolvedBookingCount: 10,
+        completedResolvedCount: 10,
+      })
+      expect(boost).toBeCloseTo(capped, 5)
+    })
+
+    it('treats non-finite counts as 0', () => {
+      expect(
+        computeProReliabilityBoost({
+          resolvedBookingCount: Number.NaN,
+          completedResolvedCount: 5,
+        }),
+      ).toBe(0)
+    })
+
+    it('is off entirely in computePersonalizedScore when the caller omits reliabilitySignals', () => {
+      const reliabilitySignals = new Map<string, ProReliabilitySignal>([
+        ['pro_1', { resolvedBookingCount: 20, completedResolvedCount: 20 }],
+      ])
+      const withReliability = computePersonalizedScore(
+        row({ professionalId: 'pro_1' }),
+        {
+          affinity: affinity(),
+          seenLookIds: EMPTY_SEEN,
+          now: NOW,
+          reliabilitySignals,
+        },
+      )
+      const bare = computePersonalizedScore(row({ professionalId: 'pro_1' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(withReliability).toBeGreaterThan(bare)
+      expect(withReliability - bare).toBeCloseTo(
+        computeProReliabilityBoost({
+          resolvedBookingCount: 20,
+          completedResolvedCount: 20,
+        }),
+        5,
+      )
+    })
+
+    it('adds nothing for a pro absent from a present reliability map', () => {
+      const reliabilitySignals = new Map<string, ProReliabilitySignal>([
+        ['pro_other', { resolvedBookingCount: 20, completedResolvedCount: 20 }],
+      ])
+      const withMap = computePersonalizedScore(row({ professionalId: 'pro_1' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        reliabilitySignals,
+      })
+      const bare = computePersonalizedScore(row({ professionalId: 'pro_1' }), {
         affinity: affinity(),
         seenLookIds: EMPTY_SEEN,
         now: NOW,

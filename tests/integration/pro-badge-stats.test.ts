@@ -1,10 +1,12 @@
 // tests/integration/pro-badge-stats.test.ts
 //
 // Real-Postgres coverage for refreshProfessionalBadgeStats (personalization
-// spec §5): the three grouped Booking aggregates land in ProfessionalBadgeStat
-// with the documented window semantics, and a refresh REPLACES the table's
-// contents (a pro who goes quiet loses their row, which reads as all-zero at
-// serve time). Runs via `npm run test:integration` (test DB :5433).
+// spec §5 + §4.2): the four grouped Booking aggregates land in
+// ProfessionalBadgeStat with the documented window semantics — including the
+// §4.2 pro_reliability counts (COMPLETED + CANCELLED resolved, with NO_SHOW
+// excluded) — and a refresh REPLACES the table's contents (a pro who goes quiet
+// loses their row, which reads as all-zero at serve time). Runs via
+// `npm run test:integration` (test DB :5433).
 
 import {
   afterAll,
@@ -296,6 +298,16 @@ describe('refreshProfessionalBadgeStats (real DB)', () => {
       createdAt: new Date(NOW.getTime() - 201 * DAY_MS),
     })
 
+    // §4.2 reliability: a NO_SHOW inside the 180d window. It must NOT count toward
+    // resolvedBookingCount (client behaviour, not the pro's reliability) — nor any
+    // other window (created long ago; not COMPLETED).
+    await createBooking({
+      clientId: fx.clientBId,
+      scheduledFor: new Date(NOW.getTime() - 7 * DAY_MS),
+      status: BookingStatus.NO_SHOW,
+      createdAt: oldCreated,
+    })
+
     // The seeded test DB may hold other pros' bookings — assert on OUR pro's
     // row, not table totals.
     const result = await refreshProfessionalBadgeStats(db, NOW)
@@ -310,6 +322,10 @@ describe('refreshProfessionalBadgeStats (real DB)', () => {
     expect(row?.completedBookingCount30d).toBe(3)
     expect(row?.servedClientCount).toBe(2)
     expect(row?.rebookedClientCount).toBe(1)
+    // §4.2 pro_reliability: 3 COMPLETED (within 180d) + 1 CANCELLED = 4 resolved,
+    // 3 completed. The NO_SHOW and the ~200d-old COMPLETED are both excluded.
+    expect(row?.resolvedBookingCount).toBe(4)
+    expect(row?.completedResolvedCount).toBe(3)
     expect(row?.computedAt.getTime()).toBe(NOW.getTime())
   })
 
