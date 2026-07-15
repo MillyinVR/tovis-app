@@ -24,6 +24,7 @@ import {
   isAuthorizedJobRequest,
 } from '@/app/api/_utils/auth/internalJob'
 import { runEventCountdownNotifications } from '@/lib/notifications/eventCountdownNotifications'
+import { unifiedReEngagementDispatchEnabled } from '@/lib/notifications/reEngagementDispatchFlag'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
 
@@ -42,6 +43,13 @@ async function runJob(req: Request) {
 
   if (!isAuthorizedJobRequest(req)) {
     return jsonFail(401, 'Unauthorized')
+  }
+
+  // While the unified re-engagement dispatcher is ON, it owns this trigger's pooled
+  // budget allocation (global priority); this per-trigger cron no-ops to avoid double
+  // work and a duplicate budget spend. Default OFF → runs exactly as before.
+  if (unifiedReEngagementDispatchEnabled()) {
+    return jsonOk({ skipped: true, reason: 'unified-dispatch', sent: 0 })
   }
 
   try {

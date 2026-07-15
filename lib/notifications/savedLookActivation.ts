@@ -368,15 +368,28 @@ async function loadBookedPairs(
   return booked
 }
 
+export type SavedActivationGathered = {
+  /** Eligible (client, pro) pairs, not yet nudged this window. Ready to allocate. */
+  candidates: SavedActivationCandidate[]
+  /** professionalId → public display name, for the copy (read via the relation). */
+  proNames: Map<string, string>
+  openPros: number
+  agingSaves: number
+  scanCapped: boolean
+}
+
 /**
- * Run one saved-not-booked activation pass (§6.8). Reads via `db`; sends via
- * createClientNotification (global prisma). Returns a summary for the cron
- * response + observability log.
+ * Gather the saved-look activation candidates (§6.8) for one pass: find pros with
+ * a near-term opening, their aging unbooked saves, drop already-booked pairs and
+ * pairs already nudged this cooldown window. This is the reusable candidate-
+ * selection half of the pass — both the per-trigger orchestrator below and the
+ * unified re-engagement dispatcher (reEngagementDispatcher.ts) call it, then apply
+ * the pooled budget themselves.
  */
-export async function runSavedLookActivation(
+export async function gatherSavedActivationCandidates(
   db: PrismaClient,
   options: { now: Date },
-): Promise<SavedLookActivationSummary> {
+): Promise<SavedActivationGathered> {
   const now = options.now
   const horizonEnd = new Date(
     now.getTime() + SAVED_LOOK_ACTIVATION.openingHorizonDays * DAY_MS,
@@ -391,14 +404,11 @@ export async function runSavedLookActivation(
   const openingByPro = await loadOpenProAvailability(db, horizonEnd)
   if (openingByPro.size === 0) {
     return {
+      candidates: [],
+      proNames: new Map(),
       openPros: 0,
       agingSaves: 0,
       scanCapped: false,
-      candidatePairs: 0,
-      mutedOptOut: 0,
-      budgetBlocked: 0,
-      sent: 0,
-      computedAt: now,
     }
   }
 
@@ -446,6 +456,29 @@ export async function runSavedLookActivation(
     now,
   })
 
+  return {
+    candidates,
+    proNames,
+    openPros: openingByPro.size,
+    agingSaves: saves.length,
+    scanCapped: capped,
+  }
+}
+
+/**
+ * Run one saved-not-booked activation pass (§6.8). Reads via `db`; sends via
+ * createClientNotification (global prisma). Returns a summary for the cron
+ * response + observability log.
+ */
+export async function runSavedLookActivation(
+  db: PrismaClient,
+  options: { now: Date },
+): Promise<SavedLookActivationSummary> {
+  const now = options.now
+
+  const { candidates, proNames, openPros, agingSaves, scanCapped } =
+    await gatherSavedActivationCandidates(db, { now })
+
   const candidateClientIds = [...new Set(candidates.map((c) => c.clientId))]
   const [sentCountByClient, mutedClients] = await Promise.all([
     loadReEngagementBudgetCounts(db, {
@@ -483,9 +516,9 @@ export async function runSavedLookActivation(
   }
 
   return {
-    openPros: openingByPro.size,
-    agingSaves: saves.length,
-    scanCapped: capped,
+    openPros,
+    agingSaves,
+    scanCapped,
     candidatePairs: candidates.length,
     mutedOptOut: allocation.mutedOptOut,
     budgetBlocked: allocation.budgetBlocked,
