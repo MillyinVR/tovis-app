@@ -203,4 +203,37 @@ test.describe('mobile availability browser flow', () => {
 
     await openAddMobileAddressModal(page)
   })
+
+  test('recovers into the address picker when the offering is mobile-only and the client has no saved address', async ({
+    page,
+  }) => {
+    seed = await seedBookingFlow(
+      { prisma },
+      {
+        withSavedAddress: false,
+        withAddOn: false,
+        offersInSalon: false,
+        offersMobile: true,
+      },
+    )
+
+    if (seed.clientAddress) {
+      throw new Error('Expected no seeded client address for mobile-only test')
+    }
+
+    if (!seed.locations.mobileBase) {
+      throw new Error('Expected seeded mobile base for mobile-only test')
+    }
+
+    await gotoProfessionalServicesPage(page, seed)
+    await openAvailabilityFromSeededService(page, seed)
+
+    // There is no salon mode to land in: the bootstrap rejects with
+    // CLIENT_SERVICE_ADDRESS_REQUIRED and the drawer must recover straight
+    // into the mobile address gate instead of a dead retry card.
+    await expectMobileAddressRequired(page)
+    await expectContinueDisabled(page)
+
+    await openAddMobileAddressModal(page)
+  })
 })

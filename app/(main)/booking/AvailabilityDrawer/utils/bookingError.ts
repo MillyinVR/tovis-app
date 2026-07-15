@@ -47,6 +47,26 @@ export function parseBookingApiError(
   }
 }
 
+/**
+ * Error thrown by the drawer's fetch layers when the API rejects a request.
+ * Carries the machine-readable booking error `code` from the envelope so
+ * callers can branch on it instead of matching userMessage strings (which
+ * differ per route for the same code).
+ */
+export class BookingApiRequestError extends Error {
+  readonly code: string | null
+
+  constructor(message: string, code: string | null = null) {
+    super(message)
+    this.name = 'BookingApiRequestError'
+    this.code = code
+  }
+}
+
+export function bookingErrorCodeFromUnknown(e: unknown): string | null {
+  return e instanceof BookingApiRequestError ? e.code : null
+}
+
 export function getBookingUiMessage(
   parsed: ParsedBookingApiError | null,
   fallback: string,

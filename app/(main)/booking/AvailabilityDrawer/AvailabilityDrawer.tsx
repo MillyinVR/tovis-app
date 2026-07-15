@@ -21,6 +21,7 @@ import type {
 } from './types'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import type { BookingErrorCode } from '@/lib/booking/errors'
 import { asTrimmedString, getRecordProp, isRecord } from '@/lib/guards'
 import { formatRoundedDollars } from '@/lib/money'
 
@@ -62,8 +63,13 @@ import {
 } from '@/lib/time'
 
 const FALLBACK_TZ = 'UTC' as const
-const MOBILE_ADDRESS_REQUIRED_MESSAGE =
-  'Select a saved service address before viewing mobile availability.'
+/**
+ * Availability rejected the request because a MOBILE placement needs a client
+ * service address. Matched on the machine-readable booking error code — the
+ * userMessage wording differs per route, so never compare on it.
+ */
+const MOBILE_ADDRESS_REQUIRED_CODE: BookingErrorCode =
+  'CLIENT_SERVICE_ADDRESS_REQUIRED'
 
 const AVAILABILITY_BACKGROUND_STATUS_TEST_ID =
   'availability-background-status'
@@ -580,6 +586,7 @@ export default function AvailabilityDrawer(props: {
     loadingMore,
     refreshing,
     error: availabilityError,
+    errorCode: availabilityErrorCode,
     data,
     hasMoreDays,
     loadMore,
@@ -605,8 +612,26 @@ export default function AvailabilityDrawer(props: {
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
 
   const previousResetContextKeyRef = useRef<string | null>(null)
+  const mobileAddressRequiredError =
+    availabilityErrorCode === MOBILE_ADDRESS_REQUIRED_CODE
+
+  /**
+   * Latch the mobile-only signal: the availability error clears as soon as
+   * the drawer flips itself to MOBILE (no fetch happens without an address),
+   * but the offering is unknown until a summary loads — without the latch the
+   * type toggle would fall back to offering "Salon" on a mobile-only service.
+   * Cleared on drawer-context reset below.
+   */
+  const [mobileOnlyLock, setMobileOnlyLock] = useState(false)
+
+  useEffect(() => {
+    if (mobileAddressRequiredError) {
+      setMobileOnlyLock(true)
+    }
+  }, [mobileAddressRequiredError])
+
   const forcedMobileOnlyGate =
-    !summary && availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
+    !summary && (mobileAddressRequiredError || mobileOnlyLock)
 
   const allowed = useMemo(() => {
     if (summary?.offering) {
@@ -919,6 +944,7 @@ export default function AvailabilityDrawer(props: {
     setPeriod('AFTERNOON')
     setOtherProsRequested(false)
     setRequestedLocationId(null)
+    setMobileOnlyLock(false)
     clearDaySlots()
     clearAlternates()
 
@@ -1281,10 +1307,7 @@ export default function AvailabilityDrawer(props: {
   const displayError = (() => {
     if (holdError) return holdError
 
-    if (
-      waitingForMobileAddress &&
-      availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
-    ) {
+    if (waitingForMobileAddress && mobileAddressRequiredError) {
       return null
     }
 

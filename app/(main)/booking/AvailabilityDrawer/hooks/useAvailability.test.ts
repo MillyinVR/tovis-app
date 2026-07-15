@@ -743,4 +743,110 @@ describe('useAvailability', () => {
       { date: '2026-03-14', slotCount: 1 },
     ])
   })
+
+  it('exposes the booking error code when the bootstrap rejects the request', async () => {
+    // Mobile-only offering, no locationType selected yet: the server resolves
+    // MOBILE placement itself and rejects for the missing client address.
+    mocks.fetch.mockResolvedValueOnce(
+      makeResponse(
+        {
+          ok: false,
+          error:
+            'Add or select a mobile service address before booking this in-home appointment.',
+          code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
+          retryable: false,
+          uiAction: 'ADD_SERVICE_ADDRESS',
+          message: 'Client service address is required.',
+        },
+        400,
+      ),
+    )
+
+    const { useAvailability } = await import('./useAvailability')
+
+    const { result, rerender } = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          locationType: null,
+          includeOtherPros: false,
+        }),
+      },
+    )
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    expect(result.current.error).toBe(
+      'Add or select a mobile service address before booking this in-home appointment.',
+    )
+    expect(result.current.errorCode).toBe('CLIENT_SERVICE_ADDRESS_REQUIRED')
+    expect(result.current.data).toBeNull()
+
+    // Recovery: the drawer flips to MOBILE with a selected address and the
+    // bootstrap succeeds — both the message and the code must clear.
+    const summary = makeSummary({
+      locationType: 'MOBILE',
+      request: {
+        locationType: 'MOBILE',
+        clientAddressId: 'addr_1',
+      },
+    })
+
+    mocks.fetch.mockResolvedValueOnce(makeResponse(summary))
+
+    rerender(
+      makeHookProps({
+        locationType: 'MOBILE',
+        clientAddressId: 'addr_1',
+        includeOtherPros: false,
+      }),
+    )
+
+    await waitFor(() => {
+      expect(result.current.data).toEqual(summary)
+    })
+
+    expect(result.current.error).toBeNull()
+    expect(result.current.errorCode).toBeNull()
+  })
+
+  it('leaves the error code null on failures without a booking envelope', async () => {
+    mocks.fetch.mockResolvedValueOnce(
+      makeResponse({ ok: false, error: 'Something went wrong.' }, 500),
+    )
+
+    const { useAvailability } = await import('./useAvailability')
+
+    const { result } = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
+    )
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    expect(result.current.error).toBe('Something went wrong.')
+    expect(result.current.errorCode).toBeNull()
+  })
 })
