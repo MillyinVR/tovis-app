@@ -2,18 +2,19 @@
 //
 // §8.1 UNIFIED re-engagement dispatcher — the capstone of the pooled-budget arc.
 //
-// We ship three honest re-engagement triggers, each as its own daily cron:
+// We ship four honest re-engagement triggers, each as its own daily cron:
 //   - §8   event-date countdown        (highest priority)
 //   - §6.8 saved-look availability-opened
-//   - §6.7 rebook-cadence               (lowest of the three)
+//   - §6.7 rebook-cadence
+//   - §6.8 hesitation consult          (lowest — no clock)
 //
 // They already share ONE weekly budget (RE_ENGAGEMENT_WEEKLY_CAP, counted from the
 // NotificationDispatch ledger), but each cron only arbitrates priority WITHIN its
 // own scan. Strict CROSS-trigger priority was approximated by CRON ORDERING (the
-// countdown cron runs first and claims the budget, then saved-look, then rebook —
-// "design decision (a)"). That approximation is fragile: if a client's higher-
-// priority countdown becomes eligible AFTER the rebook cron already spent their last
-// slot on the same day, cron ordering can't undo it.
+// countdown cron runs first and claims the budget, then saved-look, then rebook,
+// then consult — "design decision (a)"). That approximation is fragile: if a
+// client's higher-priority countdown becomes eligible AFTER a lower-priority cron
+// already spent their last slot on the same day, cron ordering can't undo it.
 //
 // This dispatcher removes the approximation. It GATHERS every trigger's candidates
 // (reusing each consumer's pure gather* selection), MERGES them per client, and runs
@@ -42,6 +43,11 @@ import {
   composeEventCountdownCopy,
   gatherEventCountdownCandidates,
 } from '@/lib/notifications/eventCountdownNotifications'
+import {
+  HESITATION_CONSULT_TRIGGER,
+  composeConsultNudgeCopy,
+  gatherConsultNudgeCandidates,
+} from '@/lib/notifications/hesitationConsultNudge'
 import {
   RE_ENGAGEMENT_TRIGGER_PRIORITY,
   RE_ENGAGEMENT_WEEKLY_CAP,
@@ -109,6 +115,7 @@ function zeroTriggerTally(): Record<ReEngagementTrigger, number> {
     EVENT_COUNTDOWN: 0,
     AVAILABILITY_OPENED_ON_SAVE: 0,
     REBOOK_CADENCE: 0,
+    HESITATION_CONSULT: 0,
     BOARD_ARCHIVE: 0,
     OTHER: 0,
   }
@@ -203,6 +210,7 @@ export type ReEngagementDispatchSummary = {
   savedAgingSaves: number
   rebookOpenPros: number
   rebookCompletedVisits: number
+  consultAgingSaves: number
   /** True if any trigger's scan hit its cap (candidates may be incomplete). */
   scanCapped: boolean
   /** Candidates per trigger before the pooled budget was applied. */
@@ -225,6 +233,7 @@ function buildDispatchCandidates(args: {
   countdown: Awaited<ReturnType<typeof gatherEventCountdownCandidates>>
   saved: Awaited<ReturnType<typeof gatherSavedActivationCandidates>>
   rebook: Awaited<ReturnType<typeof gatherRebookCadenceCandidates>>
+  consult: Awaited<ReturnType<typeof gatherConsultNudgeCandidates>>
 }): ReEngagementDispatchCandidate[] {
   const candidates: ReEngagementDispatchCandidate[] = []
 
@@ -267,11 +276,25 @@ function buildDispatchCandidates(args: {
     })
   }
 
+  for (const c of args.consult.candidates) {
+    candidates.push({
+      clientId: c.clientId,
+      trigger: HESITATION_CONSULT_TRIGGER,
+      eventKey: NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+      dedupeKey: c.dedupeKey,
+      tierRank: -c.savedAt.getTime(), // freshest save first (no deadline to rank on)
+      copy: composeConsultNudgeCopy({
+        proName: args.consult.proNames.get(c.professionalId) ?? '',
+        candidate: c,
+      }),
+    })
+  }
+
   return candidates
 }
 
 /**
- * Run one UNIFIED re-engagement pass (§8.1). Gathers all three triggers' candidates,
+ * Run one UNIFIED re-engagement pass (§8.1). Gathers all four triggers' candidates,
  * allocates the pooled weekly budget ONCE per user under global priority, then emits
  * the winners. Reads via `db`; sends via createClientNotification (global prisma).
  * Returns a rich summary for the cron response + observability log.
@@ -282,16 +305,17 @@ export async function runReEngagementDispatch(
 ): Promise<ReEngagementDispatchSummary> {
   const now = options.now
 
-  const [countdown, saved, rebook] = await Promise.all([
+  const [countdown, saved, rebook, consult] = await Promise.all([
     gatherEventCountdownCandidates(db, { now }),
     gatherSavedActivationCandidates(db, { now }),
     gatherRebookCadenceCandidates(db, { now }),
+    gatherConsultNudgeCandidates(db, { now }),
   ])
 
-  const candidates = buildDispatchCandidates({ countdown, saved, rebook })
+  const candidates = buildDispatchCandidates({ countdown, saved, rebook, consult })
   const candidateClientIds = [...new Set(candidates.map((c) => c.clientId))]
 
-  const [sentCountByClient, mutedCountdown, mutedSaved, mutedRebook] =
+  const [sentCountByClient, mutedCountdown, mutedSaved, mutedRebook, mutedConsult] =
     await Promise.all([
       loadReEngagementBudgetCounts(db, {
         clientIds: candidateClientIds,
@@ -309,6 +333,10 @@ export async function runReEngagementDispatch(
         clientIds: candidateClientIds,
         eventKey: NotificationEventKey.REBOOK_CADENCE_DUE,
       }),
+      loadMutedClientsForEvent(db, {
+        clientIds: candidateClientIds,
+        eventKey: NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+      }),
     ])
 
   const mutedClientsByEventKey = new Map<
@@ -318,6 +346,7 @@ export async function runReEngagementDispatch(
     [NotificationEventKey.EVENT_DATE_COUNTDOWN, mutedCountdown],
     [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED, mutedSaved],
     [NotificationEventKey.REBOOK_CADENCE_DUE, mutedRebook],
+    [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE, mutedConsult],
   ])
 
   const allocation = allocateReEngagementDispatch({
@@ -349,8 +378,12 @@ export async function runReEngagementDispatch(
     savedAgingSaves: saved.agingSaves,
     rebookOpenPros: rebook.openPros,
     rebookCompletedVisits: rebook.completedVisits,
+    consultAgingSaves: consult.agingSaves,
     scanCapped:
-      countdown.scanCapped || saved.scanCapped || rebook.scanCapped,
+      countdown.scanCapped ||
+      saved.scanCapped ||
+      rebook.scanCapped ||
+      consult.scanCapped,
     candidatesByTrigger,
     mutedOptOut: allocation.mutedOptOut,
     budgetBlocked: allocation.budgetBlocked,

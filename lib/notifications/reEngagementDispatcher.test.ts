@@ -60,6 +60,21 @@ function rebook(
   }
 }
 
+function consult(
+  clientId: string,
+  tierRank: number,
+  dedupeKey = `co:${clientId}:${tierRank}`,
+): ReEngagementDispatchCandidate {
+  return {
+    clientId,
+    trigger: 'HESITATION_CONSULT',
+    eventKey: NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+    dedupeKey,
+    tierRank,
+    copy: COPY,
+  }
+}
+
 function mutedMap(
   entries: Array<[NotificationEventKey, string[]]>,
 ): Map<NotificationEventKey, ReadonlySet<string>> {
@@ -100,6 +115,43 @@ describe('allocateReEngagementDispatch', () => {
       'REBOOK_CADENCE',
     ])
     expect(result.budgetBlocked).toBe(0)
+  })
+
+  it('ranks the hesitation consult below all three time-sensitive triggers', () => {
+    // Fresh client, cap 4, one candidate per trigger → all four sent, consult last.
+    const result = allocateReEngagementDispatch({
+      candidates: [
+        consult('c1', 0),
+        rebook('c1', 0),
+        countdown('c1', 5),
+        saved('c1', 100),
+      ],
+      sentCountByClient: new Map(),
+      mutedClientsByEventKey: new Map(),
+      cap: 4,
+    })
+
+    expect(result.granted.map((g) => g.trigger)).toEqual([
+      'EVENT_COUNTDOWN',
+      'AVAILABILITY_OPENED_ON_SAVE',
+      'REBOOK_CADENCE',
+      'HESITATION_CONSULT',
+    ])
+    expect(result.budgetBlocked).toBe(0)
+  })
+
+  it('yields the last pooled slot from a hesitation consult to a rebook', () => {
+    // One slot; the clockless consult must lose to the higher-priority rebook.
+    const result = allocateReEngagementDispatch({
+      candidates: [consult('c1', 0), rebook('c1', 0)],
+      sentCountByClient: new Map(),
+      mutedClientsByEventKey: new Map(),
+      cap: 1,
+    })
+
+    expect(result.granted).toHaveLength(1)
+    expect(result.granted[0]!.trigger).toBe('REBOOK_CADENCE')
+    expect(result.budgetBlockedByTrigger.HESITATION_CONSULT).toBe(1)
   })
 
   it('honors the pooled already-sent count across triggers', () => {

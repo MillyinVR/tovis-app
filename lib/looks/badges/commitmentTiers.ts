@@ -62,3 +62,41 @@ export function resolveCommitmentTier(
   if (!categorySlug) return DEFAULT_COMMITMENT_TIER
   return COMMITMENT_TIER_BY_CATEGORY_SLUG[categorySlug] ?? DEFAULT_COMMITMENT_TIER
 }
+
+/**
+ * Whether a category slug names a KNOWN meaningful-commitment service — HIGH or
+ * MEDIUM in the explicit policy map — where an unhurried "have questions? book a
+ * consult" nudge is appropriate for a saved-not-booked look (spec §6.8 hesitation
+ * row). This deliberately reads the explicit map rather than resolveCommitmentTier:
+ *   - LOW categories (haircut, nails, makeup, waxing, brows) are routine and
+ *     easily reversed — no consult needed, so they're excluded;
+ *   - an UNKNOWN / uncategorized slug (which resolveCommitmentTier defaults to
+ *     MEDIUM) is ALSO excluded — we only nudge a consult for a category we can
+ *     name as meaningful-commitment, never one we're merely unsure about.
+ *
+ * The spec's hesitation row is scoped to "(high-commitment)"; we generalize it to
+ * the commitmentTiers SSOT's notion of meaningful commitment (HIGH ∪ MEDIUM), so
+ * a client mulling a big color change or extensions — not just permanent makeup —
+ * gets the same gentle, information-first treatment. Broadening or narrowing this
+ * is a one-line change to the tier map above.
+ */
+export function isConsultWorthyCommitmentSlug(
+  categorySlug: string | null | undefined,
+): boolean {
+  if (!categorySlug) return false
+  const tier = COMMITMENT_TIER_BY_CATEGORY_SLUG[categorySlug]
+  return tier === 'HIGH' || tier === 'MEDIUM'
+}
+
+/**
+ * The explicit list of consult-worthy category slugs (HIGH ∪ MEDIUM in the policy
+ * map). Used to scope the §6.8 hesitation-consult scan's SQL to saved looks in a
+ * meaningful-commitment category — the anchor that keeps that scan bounded, the
+ * way the availability-gated triggers anchor on the open-pro set. Derived from the
+ * single tier map, so it can never drift from isConsultWorthyCommitmentSlug.
+ */
+export function consultWorthyCommitmentSlugs(): string[] {
+  return Object.entries(COMMITMENT_TIER_BY_CATEGORY_SLUG)
+    .filter(([, tier]) => tier === 'HIGH' || tier === 'MEDIUM')
+    .map(([slug]) => slug)
+}

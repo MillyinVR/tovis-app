@@ -40,6 +40,13 @@ describe('reEngagementBudget — taxonomy', () => {
     expect(isReEngagementEventKey(NotificationEventKey.REBOOK_CADENCE_DUE)).toBe(
       true,
     )
+    // §6.8 hesitation consult nudge — the fourth pooled trigger (its emitter is live).
+    expect(
+      reEngagementTriggerForEventKey(NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE),
+    ).toBe('HESITATION_CONSULT')
+    expect(
+      isReEngagementEventKey(NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE),
+    ).toBe(true)
   })
 
   it('counts the event-countdown key toward the pooled budget', () => {
@@ -75,7 +82,10 @@ describe('reEngagementBudget — taxonomy', () => {
     const p = RE_ENGAGEMENT_TRIGGER_PRIORITY
     expect(p.EVENT_COUNTDOWN).toBeLessThan(p.AVAILABILITY_OPENED_ON_SAVE)
     expect(p.AVAILABILITY_OPENED_ON_SAVE).toBeLessThan(p.REBOOK_CADENCE)
-    expect(p.REBOOK_CADENCE).toBeLessThan(p.BOARD_ARCHIVE)
+    // Hesitation consult (a clockless conversion nudge) sits below the three
+    // time-sensitive triggers but above the post-event archive housekeeping.
+    expect(p.REBOOK_CADENCE).toBeLessThan(p.HESITATION_CONSULT)
+    expect(p.HESITATION_CONSULT).toBeLessThan(p.BOARD_ARCHIVE)
     expect(p.BOARD_ARCHIVE).toBeLessThan(p.OTHER)
   })
 })

@@ -26,6 +26,7 @@ export type NotificationTemplateKey =
   | 'saved_look_availability_opened'
   | 'event_date_countdown'
   | 'rebook_cadence_due'
+  | 'saved_look_consult_nudge'
   | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
@@ -181,6 +182,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
   NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.REBOOK_CADENCE_DUE,
+  NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
@@ -547,6 +549,25 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: false,
     allowQuietHoursBypass: false,
     templateKey: 'rebook_cadence_due',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // In-app inbox + email + push (push inert until APNs is live). No SMS —
+      // re-engagement nudges are not an approved transactional SMS use case.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: {
+    // §6.8 hesitation blocker response — the fourth (lowest-priority) re-engagement
+    // trigger under the §8.1 budget. Like its siblings it is a gentle,
+    // promotional-adjacent nudge (NOT transactional — no SMS, no quiet-hours
+    // bypass): a client saved a high-/medium-commitment look but never booked, so
+    // invite them to ask questions / book a consult — information, never urgency.
+    key: NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+    defaultPriority: NotificationPriority.LOW,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'saved_look_consult_nudge',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
       // In-app inbox + email + push (push inert until APNs is live). No SMS —
@@ -947,6 +968,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
   NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.REBOOK_CADENCE_DUE,
+  NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
