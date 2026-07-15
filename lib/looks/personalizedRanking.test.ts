@@ -8,6 +8,7 @@ import {
   computePersonalizedFreshnessBoost,
   computePersonalizedScore,
   computeRelationshipBoost,
+  computeUnderbookedProBoost,
   computeVisualSimilarityBoost,
   cosineSimilarity,
   rankPersonalizedRows,
@@ -15,6 +16,7 @@ import {
   type PersonalizedViewerAffinity,
   type ProAvailabilitySignal,
   type ProRelationshipSignal,
+  type ProUnderbookedSignal,
 } from './personalizedRanking'
 
 const NOW = new Date('2026-07-04T12:00:00.000Z')
@@ -792,6 +794,124 @@ describe('lib/looks/personalizedRanking', () => {
         context,
       )
       expect(ranked[0]?.id).toBe('mine')
+    })
+  })
+
+  describe('computeUnderbookedProBoost', () => {
+    it('is 0 for an unbookable pro regardless of booking history', () => {
+      expect(
+        computeUnderbookedProBoost({
+          completedBookingCount30d: 0,
+          isBookable: false,
+        }),
+      ).toBe(0)
+      expect(
+        computeUnderbookedProBoost({
+          completedBookingCount30d: 100,
+          isBookable: false,
+        }),
+      ).toBe(0)
+    })
+
+    it('peaks at underbookedMax for a bookable pro with no completed bookings', () => {
+      expect(
+        computeUnderbookedProBoost({
+          completedBookingCount30d: 0,
+          isBookable: true,
+        }),
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.underbookedMax, 5)
+    })
+
+    it('tapers linearly toward the established threshold', () => {
+      const full = PERSONALIZED_RANK_WEIGHTS.underbookedFullBookings
+      expect(
+        computeUnderbookedProBoost({
+          completedBookingCount30d: full / 2,
+          isBookable: true,
+        }),
+      ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.underbookedMax * 0.5, 5)
+    })
+
+    it('is 0 once completed bookings reach or exceed the threshold', () => {
+      const full = PERSONALIZED_RANK_WEIGHTS.underbookedFullBookings
+      expect(
+        computeUnderbookedProBoost({
+          completedBookingCount30d: full,
+          isBookable: true,
+        }),
+      ).toBe(0)
+      expect(
+        computeUnderbookedProBoost({
+          completedBookingCount30d: full + 50,
+          isBookable: true,
+        }),
+      ).toBe(0)
+    })
+
+    it('treats a non-finite / negative count as maximally under-discovered', () => {
+      for (const completedBookingCount30d of [Number.NaN, Infinity, -5]) {
+        expect(
+          computeUnderbookedProBoost({ completedBookingCount30d, isBookable: true }),
+        ).toBeCloseTo(PERSONALIZED_RANK_WEIGHTS.underbookedMax, 5)
+      }
+    })
+
+    it('adds the on-ramp only for the bookable under-discovered pro, keyed by professionalId', () => {
+      // Both pros are bookable (equal availability), so the on-ramp is the only
+      // difference: pro_new is absent from the underbooked map (0 completed →
+      // full lift), pro_estab is established (no lift).
+      const availabilitySignals = new Map<string, ProAvailabilitySignal>([
+        ['pro_new', { nextOpeningDate: NOW, fullness14d: 0 }],
+        ['pro_estab', { nextOpeningDate: NOW, fullness14d: 0 }],
+      ])
+      const underbookedSignals = new Map<string, ProUnderbookedSignal>([
+        ['pro_estab', { completedBookingCount30d: 20 }],
+      ])
+      const context = {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+        availabilitySignals,
+        underbookedSignals,
+      }
+      const newPro = computePersonalizedScore(
+        row({ professionalId: 'pro_new' }),
+        context,
+      )
+      const estab = computePersonalizedScore(
+        row({ professionalId: 'pro_estab' }),
+        context,
+      )
+      expect(newPro - estab).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.underbookedMax,
+        5,
+      )
+    })
+
+    it('is off entirely when the caller omits underbookedSignals', () => {
+      const availabilitySignals = new Map<string, ProAvailabilitySignal>([
+        ['pro_new', { nextOpeningDate: NOW, fullness14d: 0 }],
+      ])
+      // Availability present but underbookedSignals absent → only the availability
+      // boost applies (the underbooked term stays dark, byte-identical).
+      const withAvailOnly = computePersonalizedScore(
+        row({ professionalId: 'pro_new' }),
+        {
+          affinity: affinity(),
+          seenLookIds: EMPTY_SEEN,
+          now: NOW,
+          availabilitySignals,
+        },
+      )
+      const bare = computePersonalizedScore(row({ professionalId: 'pro_new' }), {
+        affinity: affinity(),
+        seenLookIds: EMPTY_SEEN,
+        now: NOW,
+      })
+      expect(withAvailOnly - bare).toBeCloseTo(
+        PERSONALIZED_RANK_WEIGHTS.availabilityMax,
+        5,
+      )
     })
   })
 })

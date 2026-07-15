@@ -19,6 +19,8 @@
 
 import type { PrismaClient } from '@prisma/client'
 
+import type { ProUnderbookedSignal } from '@/lib/looks/personalizedRanking'
+
 export const PRO_BADGE_STAT_WINDOWS = {
   recentBookingHours: 48,
   completedBookingDays: 30,
@@ -159,4 +161,49 @@ export async function refreshProfessionalBadgeStats(
   ])
 
   return { professionals: rows.length, computedAt: now }
+}
+
+/**
+ * The exact ProfessionalBadgeStat read the underbooked serve-time reader needs,
+ * expressed structurally so both PrismaClient and a plain test mock satisfy it
+ * without a type escape (the LookBadgeAttachDb pattern).
+ */
+export type ProUnderbookedReaderDb = {
+  professionalBadgeStat: {
+    findMany(args: {
+      where: { professionalId: { in: string[] } }
+      select: { professionalId: true; completedBookingCount30d: true }
+    }): PromiseLike<
+      Array<{ professionalId: string; completedBookingCount30d: number }>
+    >
+  }
+}
+
+/**
+ * Serve-time reader for the §4.2/§4.5 underbooked fairness boost: the recent
+ * completed-booking volume for a page's pros, keyed by professionalId. A pro
+ * without a row (no non-zero counts — the refresh "skips the zeros") is simply
+ * absent from the map; the ranker reads that as 0 completed bookings (maximally
+ * under-discovered), NOT "no signal", so a brand-new pro still earns the on-ramp.
+ * One indexed IN-list read — the same shape as fetchProAvailabilitySignals.
+ */
+export async function fetchProUnderbookedSignals(
+  db: ProUnderbookedReaderDb,
+  professionalIds: readonly string[],
+): Promise<Map<string, ProUnderbookedSignal>> {
+  const ids = [...new Set(professionalIds)].filter((id) => id.length > 0)
+  if (ids.length === 0) return new Map()
+
+  const rows = await db.professionalBadgeStat.findMany({
+    where: { professionalId: { in: ids } },
+    select: { professionalId: true, completedBookingCount30d: true },
+  })
+
+  const map = new Map<string, ProUnderbookedSignal>()
+  for (const row of rows) {
+    map.set(row.professionalId, {
+      completedBookingCount30d: row.completedBookingCount30d,
+    })
+  }
+  return map
 }

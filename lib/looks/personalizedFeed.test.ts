@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     board: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
     professionalAvailabilityStat: { findMany: vi.fn() },
+    professionalBadgeStat: { findMany: vi.fn() },
     booking: { findMany: vi.fn() },
     clientProfile: { findUnique: vi.fn() },
     // Raw-SQL surface for the pgvector store (taste vector + candidate
@@ -73,6 +74,7 @@ describe('lib/looks/personalizedFeed', () => {
     mocks.prisma.board.findMany.mockResolvedValue([])
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.professionalAvailabilityStat.findMany.mockResolvedValue([])
+    mocks.prisma.professionalBadgeStat.findMany.mockResolvedValue([])
     mocks.prisma.booking.findMany.mockResolvedValue([])
     mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
     // No taste vector and no candidate embeddings by default.
@@ -747,6 +749,67 @@ describe('lib/looks/personalizedFeed', () => {
       expect(page.items[0]?.id).toBe('b_booked')
       expect(page.meta.relationshipProCount).toBe(1)
       expect(page.meta.relationshipBoostedCount).toBe(1)
+    })
+
+    it('lifts a bookable but under-discovered pro over an established peer and reports the §4.5 count', async () => {
+      // Both pros have a real near-term opening (same availability → equal
+      // availability boost), so the underbooked on-ramp is what differs.
+      mocks.prisma.professionalAvailabilityStat.findMany.mockResolvedValue([
+        { professionalId: 'pro_established', nextOpeningDate: NOW, fullness14d: 0 },
+        { professionalId: 'pro_new', nextOpeningDate: NOW, fullness14d: 0 },
+      ])
+      // Established pro has plenty of completed bookings (no on-ramp); the new pro
+      // has no badge-stat row → 0 completed → full on-ramp.
+      mocks.prisma.professionalBadgeStat.findMany.mockResolvedValue([
+        { professionalId: 'pro_established', completedBookingCount30d: 20 },
+      ])
+      // Backbone: the established pro leads on rankScore; the new pro trails.
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_established', professionalId: 'pro_established', rankScore: 8 }),
+        feedRow({ id: 'b_new', professionalId: 'pro_new', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // The underbooked on-ramp (+10) out-pulls the +3 rankScore gap → new leads.
+      expect(page.items[0]?.id).toBe('b_new')
+      // Only the under-discovered pro is lifted; the established pro earns nothing.
+      expect(page.meta.underbookedBoostedCount).toBe(1)
+      // Both pros are bookable, so both count toward the §4.3 bookable blend.
+      expect(page.meta.bookableCount).toBe(2)
+    })
+
+    it('never lifts an unbookable pro even with zero completed bookings (calendar-health gate)', async () => {
+      // No availability rows → nobody is bookable → the on-ramp stays dark even
+      // though neither pro has a badge-stat row (0 completed bookings).
+      mocks.prisma.professionalAvailabilityStat.findMany.mockResolvedValue([])
+      mocks.prisma.professionalBadgeStat.findMany.mockResolvedValue([])
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b_hi', professionalId: 'pro_hi', rankScore: 8 }),
+        feedRow({ id: 'b_lo', professionalId: 'pro_lo', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(),
+        now: NOW,
+      })
+
+      // Order tracks rankScore (no on-ramp lift), and nothing is reported.
+      expect(page.items.map((item) => item.id)).toEqual(['b_hi', 'b_lo'])
+      expect(page.meta.underbookedBoostedCount).toBe(0)
     })
 
     it('does not inject on a paginated continuation', async () => {

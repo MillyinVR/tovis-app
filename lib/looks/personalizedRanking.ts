@@ -28,6 +28,14 @@
 //                                 the strongest, nearly un-fakeable signal in the
 //                                 hierarchy (spec §2), so a booked pro's new looks
 //                                 reliably surface; graded by recency × loyalty)
+//         + underbookedBoost     (a fairness / on-ramp lift for a genuinely
+//                                 bookable pro who is still under-discovered — new
+//                                 or chronically underbooked — spec §4.2/§4.5. An
+//                                 anti-winner-take-all floor so discovery doesn't
+//                                 concentrate on already-busy pros; graded DOWN by
+//                                 the pro's completed-booking volume and gated on a
+//                                 real near-term opening, so it tapers off as they
+//                                 gain traction and never lifts an unbookable pro)
 //         + freshnessBoost       (extra nudge for very recent looks)
 //         - seenPenalty          (viewer has already seen this look this session)
 //         - suppressionPenalty   (viewer keeps hiding this look's category — the
@@ -108,6 +116,26 @@ export const PERSONALIZED_RANK_WEIGHTS = {
   // visit is already a real relationship (0.33); a repeat client (3+) is a full
   // one — the spec treats repeat bookings as the deepest personalization signal.
   relationshipFullVisits: 3,
+  // underbooked_pro_boost (spec §4.2/§4.5): a fairness / on-ramp lift for a
+  // genuinely bookable pro who is still under-discovered — either brand new or
+  // chronically underbooked. An anti-winner-take-all floor (the TikTok
+  // new-creator velocity analog, tied here to calendar health) so discovery
+  // doesn't concentrate every impression on already-busy pros; every bookable
+  // pro gets a modest baseline of exposure to gather signal. Graded DOWN by the
+  // pro's completed-booking volume (computeUnderbookedProBoost) and GATED on a
+  // real near-term opening — so it tapers to 0 as the pro books up (self-
+  // correcting: once discovered, the crutch is removed) and never lifts a pro a
+  // client can't actually book. Peak sits BELOW the availability boost (12): a
+  // fairness floor is a touch weaker than the pro's actual openness, and both
+  // stay well under accumulated taste (category cap 15) / a followed (25) /
+  // booked (30) pro — a tie-breaker within a rankScore band, never a takeover.
+  underbookedMax: 10,
+  // Completed bookings (trailing 30 days, ProfessionalBadgeStat) at which the
+  // on-ramp fully tapers out. Matched to the "N bookings in 30 days" social-proof
+  // badge threshold (LOOK_BADGE_THRESHOLDS.booked30dMin = 8): the fairness lift
+  // fades exactly as the pro crosses into "established / earns social proof"
+  // territory. 0 completed → full boost; 4 → half; 8+ → none.
+  underbookedFullBookings: 8,
   // Peak nudge for a brand-new look; decays with a 1-day half-life.
   freshnessMax: 6,
   freshnessHalfLifeDays: 1,
@@ -202,6 +230,18 @@ export type ProRelationshipSignal = {
   completedVisits: number
 }
 
+// Per-pro under-discovery summary (spec §4.2/§4.5), keyed by professionalId and
+// read from ProfessionalBadgeStat at serve time (lib/looks/badges/stats.ts). The
+// only field the fairness boost grades on is the pro's recent completed-booking
+// volume; a pro ABSENT from the map has no badge-stat row, which means zero
+// completed bookings in the window (the "skip the zeros" rule) — i.e. maximally
+// under-discovered, NOT "no signal". Plain data shape (no Prisma import) so the
+// ranker stays pure.
+export type ProUnderbookedSignal = {
+  // COMPLETED bookings in the trailing 30 days (ProfessionalBadgeStat window).
+  completedBookingCount30d: number
+}
+
 export type PersonalizedRankContext = {
   affinity: PersonalizedViewerAffinity
   seenLookIds: ReadonlySet<string>
@@ -219,6 +259,15 @@ export type PersonalizedRankContext = {
   // leans the feed bookable-heavy, <1 inspiration-heavy. Absent → 1 (neutral),
   // so a caller that doesn't shift by intent is byte-identical.
   availabilityWeightMultiplier?: number
+  // Per-pro under-discovery signals keyed by professionalId (spec §4.2/§4.5), for
+  // the underbooked fairness boost. ABSENT (undefined) → the term is off entirely
+  // (byte-identical to the pre-§4.5 feed; unit tests + non-personalized callers
+  // omit it). PRESENT but a pro missing from it → that pro has no badge-stat row →
+  // 0 completed bookings → maximally under-discovered (the boost still applies,
+  // gated on availability). The bookability gate reuses `availabilitySignals`
+  // (a pro with an availability row has a real near-term opening), so no extra
+  // read funds the gate.
+  underbookedSignals?: ReadonlyMap<string, ProUnderbookedSignal>
 }
 
 function safeNumber(value: number): number {
@@ -417,6 +466,47 @@ export function computeRelationshipBoost(args: {
 }
 
 /**
+ * Additive underbooked-pro fairness boost (spec §4.2/§4.5): a modest on-ramp so a
+ * genuinely bookable but under-discovered pro — new or chronically underbooked —
+ * gets a baseline of exposure rather than being buried by already-busy pros
+ * (anti-winner-take-all; the TikTok new-creator velocity analog, tied to calendar
+ * health).
+ *
+ *   underbookedMax × underDiscoveredScore     (0 unless `isBookable`)
+ *
+ * `underDiscoveredScore` = clamp(1 − completedBookingCount30d / fullBookings, 0, 1)
+ * — 1.0 at zero recent completed bookings (a brand-new pro, or one nobody books),
+ * decaying linearly to 0 at `underbookedFullBookings`, so the lift tapers off as
+ * the pro gains traction and vanishes once they'd earn the "N bookings in 30 days"
+ * social-proof badge. `isBookable` is the calendar-health gate (the pro has a
+ * real near-term opening — a ProfessionalAvailabilityStat row): an unbookable pro
+ * earns nothing, since lifting a look a client can't book wastes the impression.
+ *
+ * Deliberately NON-overlapping with computeAvailabilityBoost: that term grades on
+ * FORWARD openness (next opening + 14-day fullness); this one grades on BACKWARD
+ * booking VOLUME. The shared "has an availability row" is a binary bookability
+ * FLOOR both require, not a doubled graded weight. A missing/non-finite count is
+ * treated as 0 (max under-discovery — the safe fairness default). Pure + exported
+ * for unit testing.
+ */
+export function computeUnderbookedProBoost(args: {
+  completedBookingCount30d: number
+  isBookable: boolean
+}): number {
+  if (!args.isBookable) return 0
+
+  const raw = args.completedBookingCount30d
+  const count = Number.isFinite(raw) ? Math.max(0, raw) : 0
+
+  const full = PERSONALIZED_RANK_WEIGHTS.underbookedFullBookings
+  const underDiscovered =
+    full > 0 ? Math.min(Math.max(1 - count / full, 0), 1) : 0
+  if (underDiscovered <= 0) return 0
+
+  return PERSONALIZED_RANK_WEIGHTS.underbookedMax * underDiscovered
+}
+
+/**
  * Category-suppression penalty from explicit hides (spec §2.2). Zero until the
  * decayed hide weight for the category crosses `hideCategoryThreshold` (so one
  * dismissed card doesn't suppress the category), then ramps linearly to
@@ -490,6 +580,22 @@ export function computePersonalizedScore(
     now: context.now,
   })
 
+  // §4.2/§4.5 underbooked fairness on-ramp — a modest lift for a bookable but
+  // under-discovered pro. Off entirely unless the caller wired underbookedSignals
+  // (byte-identical to the pre-§4.5 feed otherwise). The bookability gate reuses
+  // the availability map: a pro with an availability row has a real near-term
+  // opening. Absent-from-the-map pro = no badge-stat row = 0 completed bookings =
+  // maximally under-discovered (so a brand-new pro gets the full on-ramp).
+  const underbookedBoost = context.underbookedSignals
+    ? computeUnderbookedProBoost({
+        completedBookingCount30d:
+          context.underbookedSignals.get(row.professionalId)
+            ?.completedBookingCount30d ?? 0,
+        isBookable:
+          context.availabilitySignals?.has(row.professionalId) ?? false,
+      })
+    : 0
+
   const freshnessBoost = computePersonalizedFreshnessBoost(
     row.publishedAt,
     context.now,
@@ -507,6 +613,7 @@ export function computePersonalizedScore(
     visualBoost +
     availabilityBoost +
     relationshipBoost +
+    underbookedBoost +
     freshnessBoost -
     seenPenalty -
     suppressionPenalty

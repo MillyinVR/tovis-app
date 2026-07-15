@@ -337,6 +337,9 @@ export async function GET(req: Request) {
       relationshipProCount: personalizedMeta?.relationshipProCount ?? null,
       relationshipBoostedCount:
         personalizedMeta?.relationshipBoostedCount ?? null,
+      // §4.2/§4.5 underbooked fairness on-ramp (personalized cohort only).
+      underbookedBoostedCount:
+        personalizedMeta?.underbookedBoostedCount ?? null,
       badgeEligibleCount: badgeResult.meta.eligibleCount,
       badgeShownCount: badgeResult.meta.shownCount,
       badgeHoldoutCount: badgeResult.meta.holdoutCount,
