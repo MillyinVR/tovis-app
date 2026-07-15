@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  LOOK_BADGE_AVAILABILITY_STAT_MAX_AGE_MS,
   LOOK_BADGE_HOLDOUT_RATE,
   LOOK_BADGE_THRESHOLDS,
   evaluateBadgePool,
@@ -27,7 +28,22 @@ function makeSignals(overrides: Partial<ProBadgeSignals> = {}): ProBadgeSignals 
     statComputedAt: new Date(NOW.getTime() - HOUR_MS),
     accountCreatedAt: new Date(NOW.getTime() - 400 * DAY_MS),
     distanceMiles: null,
+    availability: null,
     ...overrides,
+  }
+}
+
+/** A fresh availability signal opening `daysAhead` out, `fullness` booked. */
+function makeAvailability(daysAhead: number, fullness = 0): ProBadgeSignals['availability'] {
+  // Mirror the stat's storage: a start-of-local-day instant. For a same-day
+  // opening (daysAhead 0) the primitive floors the window at `now`, so the
+  // stored instant is the local midnight already behind `now`.
+  const opening = new Date(NOW.getTime() + daysAhead * DAY_MS)
+  if (daysAhead <= 0) opening.setTime(NOW.getTime() - HOUR_MS)
+  return {
+    nextOpeningDate: opening,
+    fullness14d: fullness,
+    computedAt: new Date(NOW.getTime() - HOUR_MS),
   }
 }
 
@@ -275,6 +291,81 @@ describe('badge evaluators', () => {
     expect(poolKinds(makeCandidate(), far)).not.toContain('DISTANCE')
   })
 
+  it('AVAILABLE_SOON buckets the next opening into honest copy', () => {
+    const label = (daysAhead: number) => {
+      const ctx = makeContext({
+        proSignals: new Map([
+          [PRO_ID, makeSignals({ availability: makeAvailability(daysAhead) })],
+        ]),
+      })
+      return evaluateBadgePool(makeCandidate(), ctx).find(
+        (entry) => entry.kind === 'AVAILABLE_SOON',
+      )?.label
+    }
+
+    expect(label(0)).toBe('Available today')
+    expect(label(1)).toBe('Available tomorrow')
+    expect(label(4)).toBe('Available in 4 days')
+  })
+
+  it('AVAILABLE_SOON stays silent beyond the horizon', () => {
+    const far = makeContext({
+      proSignals: new Map([
+        [
+          PRO_ID,
+          makeSignals({
+            availability: makeAvailability(
+              LOOK_BADGE_THRESHOLDS.availableSoonMaxDays + 1,
+            ),
+          }),
+        ],
+      ]),
+    })
+    expect(poolKinds(makeCandidate(), far)).not.toContain('AVAILABLE_SOON')
+  })
+
+  it('BOOKING_OUT fires only when the calendar is filling past the bar', () => {
+    const full = makeContext({
+      proSignals: new Map([
+        [PRO_ID, makeSignals({ availability: makeAvailability(3, 0.85) })],
+      ]),
+    })
+    expect(
+      evaluateBadgePool(makeCandidate(), full).find(
+        (entry) => entry.kind === 'BOOKING_OUT',
+      )?.label,
+    ).toBe('Almost booked out')
+
+    const open = makeContext({
+      proSignals: new Map([
+        [PRO_ID, makeSignals({ availability: makeAvailability(3, 0.5) })],
+      ]),
+    })
+    expect(poolKinds(makeCandidate(), open)).not.toContain('BOOKING_OUT')
+  })
+
+  it('availability badges disqualify on a stale stat row (§5.7.4)', () => {
+    const stale = makeContext({
+      proSignals: new Map([
+        [
+          PRO_ID,
+          makeSignals({
+            availability: {
+              nextOpeningDate: new Date(NOW.getTime() - HOUR_MS),
+              fullness14d: 0.9,
+              computedAt: new Date(
+                NOW.getTime() - LOOK_BADGE_AVAILABILITY_STAT_MAX_AGE_MS - HOUR_MS,
+              ),
+            },
+          }),
+        ],
+      ]),
+    })
+    const kinds = poolKinds(makeCandidate(), stale)
+    expect(kinds).not.toContain('AVAILABLE_SOON')
+    expect(kinds).not.toContain('BOOKING_OUT')
+  })
+
   it('a look with no pro signals and no viewer context earns nothing', () => {
     const decision = selectLookBadge(makeCandidate(), makeContext())
     expect(decision).toEqual({ badge: null, eligible: false, holdout: false })
@@ -319,6 +410,19 @@ describe('commitment-tier suppression (§5.3)', () => {
     const candidate = makeCandidate({ tagSlugs: ['bridal'] })
     const kinds = poolKinds(candidate, everythingQualifies())
     expect(kinds[0]).toBe('BOOKING_FAST')
+  })
+
+  it('HIGH commitment keeps AVAILABLE_SOON but suppresses the BOOKING_OUT scarcity', () => {
+    const ctx = makeContext({
+      proSignals: new Map([
+        // Near opening AND a filling calendar → both availability badges earned.
+        [PRO_ID, makeSignals({ availability: makeAvailability(2, 0.9) })],
+      ]),
+    })
+    const candidate = makeCandidate({ categorySlug: 'permanent-makeup' })
+    const kinds = poolKinds(candidate, ctx)
+    expect(kinds).toContain('AVAILABLE_SOON')
+    expect(kinds).not.toContain('BOOKING_OUT')
   })
 
   it('the §5.4 event override wins on non-HIGH tiers', () => {

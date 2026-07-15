@@ -6227,7 +6227,9 @@
         "REBOOK_RATE",
         "NEW_TO_PLATFORM",
         "EVENT_COUNTDOWN",
-        "DISTANCE"
+        "DISTANCE",
+        "AVAILABLE_SOON",
+        "BOOKING_OUT"
       ],
       "type": "string"
     },

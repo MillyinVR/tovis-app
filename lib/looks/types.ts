@@ -68,6 +68,13 @@ export type LookBadgeKind =
   | 'NEW_TO_PLATFORM'
   | 'EVENT_COUNTDOWN'
   | 'DISTANCE'
+  // Availability-class badges (spec §5.2/§5.3) off the per-pro
+  // ProfessionalAvailabilityStat primitive: AVAILABLE_SOON is a CONVENIENCE
+  // read (a real near-term opening), BOOKING_OUT an URGENCY read (calendar
+  // filling up) — so the §5.3 commitment guard suppresses only the scarcity one
+  // on high-commitment categories.
+  | 'AVAILABLE_SOON'
+  | 'BOOKING_OUT'
 
 export type LookBadgeTone = 'accent' | 'info' | 'success' | 'warn' | 'neutral'
 
