@@ -28,7 +28,6 @@
 // nothing new and never double-spends the budget.
 
 import {
-  BookingStatus,
   NotificationEventKey,
   type Prisma,
   type PrismaClient,
@@ -42,6 +41,7 @@ import {
 } from '@/lib/notifications/reEngagementBudget'
 import {
   loadAlreadyNotifiedDedupeKeys,
+  loadBookedReEngagementPairs,
   loadMutedClientsForEvent,
   loadOpenProAvailability,
   loadReEngagementBudgetCounts,
@@ -256,18 +256,6 @@ export function composeSavedActivationCopy(args: {
 
 // ── impure orchestration ─────────────────────────────────────────────────────
 
-// Bookings that mean the client already engaged this pro — any status counts as
-// "not a saved_not_booked pair" (they converted, tried, or have a relationship;
-// §6.7 owns rebooking). Includes terminal states on purpose.
-const ANY_BOOKING_STATUSES: BookingStatus[] = [
-  BookingStatus.PENDING,
-  BookingStatus.ACCEPTED,
-  BookingStatus.IN_PROGRESS,
-  BookingStatus.COMPLETED,
-  BookingStatus.CANCELLED,
-  BookingStatus.NO_SHOW,
-]
-
 export type SavedLookActivationSummary = {
   openPros: number
   agingSaves: number
@@ -340,34 +328,6 @@ async function loadAgingSaves(
   return { saves, capped, proNames }
 }
 
-/** (client, pro) pairs that already have ANY booking → excluded from nudging. */
-async function loadBookedPairs(
-  db: PrismaClient,
-  args: { clientIds: string[]; professionalIds: string[]; wantedPairs: ReadonlySet<string> },
-): Promise<Set<string>> {
-  if (args.clientIds.length === 0 || args.professionalIds.length === 0) {
-    return new Set()
-  }
-
-  const rows = await db.booking.findMany({
-    where: {
-      clientId: { in: args.clientIds },
-      professionalId: { in: args.professionalIds },
-      status: { in: ANY_BOOKING_STATUSES },
-    },
-    select: { clientId: true, professionalId: true },
-    distinct: ['clientId', 'professionalId'],
-  })
-
-  const booked = new Set<string>()
-  for (const row of rows) {
-    const key = pairKey(row.clientId, row.professionalId)
-    // The in/in query over-fetches the cross product; keep only real candidate pairs.
-    if (args.wantedPairs.has(key)) booked.add(key)
-  }
-  return booked
-}
-
 export type SavedActivationGathered = {
   /** Eligible (client, pro) pairs, not yet nudged this window. Ready to allocate. */
   candidates: SavedActivationCandidate[]
@@ -429,7 +389,7 @@ export async function gatherSavedActivationCandidates(
     proIdSet.add(save.professionalId)
   }
 
-  const bookedPairs = await loadBookedPairs(db, {
+  const bookedPairs = await loadBookedReEngagementPairs(db, {
     clientIds: [...clientIdSet],
     professionalIds: [...proIdSet],
     wantedPairs,

@@ -656,6 +656,17 @@ enum NotificationEventKey {
   // deadline-driven; the lowest-priority live re-engagement trigger.
   SAVED_LOOK_CONSULT_NUDGE
 
+  // §6.8 price blocker response, gated by the §8.1 re-engagement budget: a client
+  // saved a look priced well ABOVE their LEARNED price band (lib/looks/personalizedFeed.ts
+  // learnPriceBand, from completed-booking service prices — spec §4.5) but never
+  // booked that pro. Rather than keep surfacing out-of-budget work, gently point
+  // them at a SIMILAR look (same service category) from a different pro whose price
+  // sits IN their band — "surface in-band similar looks", the §6.8 table's price
+  // row. One per (client, over-budget pro) per cooldown window, pooled under the
+  // re-engagement budget (emitter lib/notifications/savedLookPriceAlternative.ts).
+  // The copy never names price — the band is selection logic, not a judgment.
+  SAVED_LOOK_PRICE_ALTERNATIVE
+
   // A new message landed in a thread the recipient participates in. Routed to
   // the OTHER participant (client or pro). Debounced per thread per recipient so
   // a rapid burst refreshes one inbox row / fires one push rather than spamming.

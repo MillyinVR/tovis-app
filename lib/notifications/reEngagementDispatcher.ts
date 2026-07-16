@@ -69,6 +69,11 @@ import {
   composeSavedActivationCopy,
   gatherSavedActivationCandidates,
 } from '@/lib/notifications/savedLookActivation'
+import {
+  PRICE_ALTERNATIVE_TRIGGER,
+  composePriceAlternativeCopy,
+  gatherPriceAlternativeCandidates,
+} from '@/lib/notifications/savedLookPriceAlternative'
 
 /** The already-composed, white-label-safe notification copy for a candidate. */
 export type ReEngagementDispatchCopy = {
@@ -116,6 +121,7 @@ function zeroTriggerTally(): Record<ReEngagementTrigger, number> {
     AVAILABILITY_OPENED_ON_SAVE: 0,
     REBOOK_CADENCE: 0,
     HESITATION_CONSULT: 0,
+    PRICE_ALTERNATIVE: 0,
     BOARD_ARCHIVE: 0,
     OTHER: 0,
   }
@@ -211,6 +217,7 @@ export type ReEngagementDispatchSummary = {
   rebookOpenPros: number
   rebookCompletedVisits: number
   consultAgingSaves: number
+  priceAltAgingSaves: number
   /** True if any trigger's scan hit its cap (candidates may be incomplete). */
   scanCapped: boolean
   /** Candidates per trigger before the pooled budget was applied. */
@@ -234,6 +241,7 @@ function buildDispatchCandidates(args: {
   saved: Awaited<ReturnType<typeof gatherSavedActivationCandidates>>
   rebook: Awaited<ReturnType<typeof gatherRebookCadenceCandidates>>
   consult: Awaited<ReturnType<typeof gatherConsultNudgeCandidates>>
+  priceAlt: Awaited<ReturnType<typeof gatherPriceAlternativeCandidates>>
 }): ReEngagementDispatchCandidate[] {
   const candidates: ReEngagementDispatchCandidate[] = []
 
@@ -290,6 +298,19 @@ function buildDispatchCandidates(args: {
     })
   }
 
+  for (const c of args.priceAlt.candidates) {
+    candidates.push({
+      clientId: c.clientId,
+      trigger: PRICE_ALTERNATIVE_TRIGGER,
+      eventKey: NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
+      dedupeKey: c.dedupeKey,
+      tierRank: -c.savedAt.getTime(), // freshest save first (no deadline to rank on)
+      // The alternative pro's name is carried on the candidate, so the copy needs
+      // no separate proNames map (unlike the sibling triggers).
+      copy: composePriceAlternativeCopy({ candidate: c }),
+    })
+  }
+
   return candidates
 }
 
@@ -305,39 +326,56 @@ export async function runReEngagementDispatch(
 ): Promise<ReEngagementDispatchSummary> {
   const now = options.now
 
-  const [countdown, saved, rebook, consult] = await Promise.all([
+  const [countdown, saved, rebook, consult, priceAlt] = await Promise.all([
     gatherEventCountdownCandidates(db, { now }),
     gatherSavedActivationCandidates(db, { now }),
     gatherRebookCadenceCandidates(db, { now }),
     gatherConsultNudgeCandidates(db, { now }),
+    gatherPriceAlternativeCandidates(db, { now }),
   ])
 
-  const candidates = buildDispatchCandidates({ countdown, saved, rebook, consult })
+  const candidates = buildDispatchCandidates({
+    countdown,
+    saved,
+    rebook,
+    consult,
+    priceAlt,
+  })
   const candidateClientIds = [...new Set(candidates.map((c) => c.clientId))]
 
-  const [sentCountByClient, mutedCountdown, mutedSaved, mutedRebook, mutedConsult] =
-    await Promise.all([
-      loadReEngagementBudgetCounts(db, {
-        clientIds: candidateClientIds,
-        windowStart: reEngagementBudgetWindowStart(now),
-      }),
-      loadMutedClientsForEvent(db, {
-        clientIds: candidateClientIds,
-        eventKey: NotificationEventKey.EVENT_DATE_COUNTDOWN,
-      }),
-      loadMutedClientsForEvent(db, {
-        clientIds: candidateClientIds,
-        eventKey: NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
-      }),
-      loadMutedClientsForEvent(db, {
-        clientIds: candidateClientIds,
-        eventKey: NotificationEventKey.REBOOK_CADENCE_DUE,
-      }),
-      loadMutedClientsForEvent(db, {
-        clientIds: candidateClientIds,
-        eventKey: NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
-      }),
-    ])
+  const [
+    sentCountByClient,
+    mutedCountdown,
+    mutedSaved,
+    mutedRebook,
+    mutedConsult,
+    mutedPriceAlt,
+  ] = await Promise.all([
+    loadReEngagementBudgetCounts(db, {
+      clientIds: candidateClientIds,
+      windowStart: reEngagementBudgetWindowStart(now),
+    }),
+    loadMutedClientsForEvent(db, {
+      clientIds: candidateClientIds,
+      eventKey: NotificationEventKey.EVENT_DATE_COUNTDOWN,
+    }),
+    loadMutedClientsForEvent(db, {
+      clientIds: candidateClientIds,
+      eventKey: NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED,
+    }),
+    loadMutedClientsForEvent(db, {
+      clientIds: candidateClientIds,
+      eventKey: NotificationEventKey.REBOOK_CADENCE_DUE,
+    }),
+    loadMutedClientsForEvent(db, {
+      clientIds: candidateClientIds,
+      eventKey: NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+    }),
+    loadMutedClientsForEvent(db, {
+      clientIds: candidateClientIds,
+      eventKey: NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
+    }),
+  ])
 
   const mutedClientsByEventKey = new Map<
     NotificationEventKey,
@@ -347,6 +385,7 @@ export async function runReEngagementDispatch(
     [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED, mutedSaved],
     [NotificationEventKey.REBOOK_CADENCE_DUE, mutedRebook],
     [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE, mutedConsult],
+    [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE, mutedPriceAlt],
   ])
 
   const allocation = allocateReEngagementDispatch({
@@ -379,11 +418,13 @@ export async function runReEngagementDispatch(
     rebookOpenPros: rebook.openPros,
     rebookCompletedVisits: rebook.completedVisits,
     consultAgingSaves: consult.agingSaves,
+    priceAltAgingSaves: priceAlt.agingSaves,
     scanCapped:
       countdown.scanCapped ||
       saved.scanCapped ||
       rebook.scanCapped ||
-      consult.scanCapped,
+      consult.scanCapped ||
+      priceAlt.scanCapped,
     candidatesByTrigger,
     mutedOptOut: allocation.mutedOptOut,
     budgetBlocked: allocation.budgetBlocked,
