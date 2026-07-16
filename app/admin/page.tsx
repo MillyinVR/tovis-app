@@ -168,6 +168,12 @@ export default async function AdminHomePage() {
                 tone="highlight"
               />
               <Card
+                title="Engagement anomalies"
+                desc="Anti-gaming review queue: looks whose recent saves & likes outrun their impressions, or spike far above the look's own history — a lead to review, not an auto-penalty."
+                href="/admin/looks/anomalies"
+                cta="Review anomalies"
+              />
+              <Card
                 title="Permissions"
                 desc="Scope what admins can do."
                 href="/admin/permissions"
