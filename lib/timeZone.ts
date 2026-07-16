@@ -15,14 +15,38 @@ export type IanaTimeZone = string
 /** Default fallback when a timezone is missing/invalid. */
 export const DEFAULT_TIME_ZONE: IanaTimeZone = 'UTC'
 
+// An `Intl.DateTimeFormat` is a small JS wrapper over a ~31KB native ICU
+// object. V8 only sees the wrapper, so a formatter built per call in a hot path
+// applies no heap pressure, is never collected, and RSS climbs into the
+// gigabytes while heapUsed stays flat. `sanitizeTimeZone` runs on the first
+// line of `getZonedParts` (slot generation), so building a throwaway validation
+// formatter per call defeated the ZONED_PARTS_FORMATTER_CACHE below and drove
+// the e2e server to ~14GB. Cache the verdict per zone string instead.
+//
+// Bounded: valid IANA ids are a finite set, but invalid inputs reach here from
+// caller-supplied data, so cap the map rather than let it grow without limit.
+const TIME_ZONE_VALIDITY_CACHE = new Map<string, boolean>()
+const TIME_ZONE_VALIDITY_CACHE_MAX = 512
+
 export function isValidIanaTimeZone(tz: string | null | undefined) {
   if (!tz || typeof tz !== 'string') return false
+
+  const cached = TIME_ZONE_VALIDITY_CACHE.get(tz)
+  if (cached !== undefined) return cached
+
+  let valid: boolean
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date())
-    return true
+    valid = true
   } catch {
-    return false
+    valid = false
   }
+
+  if (TIME_ZONE_VALIDITY_CACHE.size < TIME_ZONE_VALIDITY_CACHE_MAX) {
+    TIME_ZONE_VALIDITY_CACHE.set(tz, valid)
+  }
+
+  return valid
 }
 
 /**

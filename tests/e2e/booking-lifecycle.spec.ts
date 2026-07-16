@@ -172,17 +172,26 @@ async function loginProfessionalContext(args: {
     baseURL: args.baseURL,
   })
 
-  const page = await context.newPage()
+  // The caller's try/finally can only close this context once we've returned
+  // it, and the `browser` fixture is worker-scoped — so a throw in here (a
+  // login navigation timeout, say) would strand the context, its page and its
+  // trace recording for the rest of the run, degrading every later spec.
+  try {
+    const page = await context.newPage()
 
-  await loginAs({
-    page,
-    email: args.seed.credentials.professional.email,
-    password: args.seed.credentials.professional.password,
-  })
+    await loginAs({
+      page,
+      email: args.seed.credentials.professional.email,
+      password: args.seed.credentials.professional.password,
+    })
 
-  await page.close()
+    await page.close()
 
-  return context
+    return context
+  } catch (error) {
+    await context.close()
+    throw error
+  }
 }
 
 async function postJson<T = Record<string, unknown>>(args: {
