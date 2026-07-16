@@ -27,6 +27,7 @@ export type NotificationTemplateKey =
   | 'event_date_countdown'
   | 'rebook_cadence_due'
   | 'saved_look_consult_nudge'
+  | 'saved_look_price_alternative'
   | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
@@ -183,6 +184,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+  NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
@@ -568,6 +570,26 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: false,
     allowQuietHoursBypass: false,
     templateKey: 'saved_look_consult_nudge',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // In-app inbox + email + push (push inert until APNs is live). No SMS —
+      // re-engagement nudges are not an approved transactional SMS use case.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE]: {
+    // §6.8 price blocker response — the fifth re-engagement trigger under the §8.1
+    // budget. Like its siblings it is a gentle, promotional-adjacent nudge (NOT
+    // transactional — no SMS, no quiet-hours bypass): a client saved a look priced
+    // well above their learned price band but never booked, so point them at a
+    // similar look from a pro whose price is in their range — help, never a judgment
+    // (the copy never names price).
+    key: NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
+    defaultPriority: NotificationPriority.LOW,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'saved_look_price_alternative',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
       // In-app inbox + email + push (push inert until APNs is live). No SMS —
@@ -969,6 +991,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+  NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,

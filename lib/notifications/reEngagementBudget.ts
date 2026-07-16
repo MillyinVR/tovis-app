@@ -42,6 +42,7 @@ export type ReEngagementTrigger =
   | 'AVAILABILITY_OPENED_ON_SAVE' // §6.8/§5.7.5 — a saved pro just opened up
   | 'REBOOK_CADENCE' // §6.7   — cadence-timed "time for a refresh?"
   | 'HESITATION_CONSULT' // §6.8 — saved a high-commitment look, never booked → consult nudge
+  | 'PRICE_ALTERNATIVE' // §6.8 — saved an over-budget look → similar in-band look from another pro
   | 'BOARD_ARCHIVE' // §7.5   — "how did it go? leave a review?"
   | 'OTHER' // catch-all for future low-priority re-engagement nudges
 
@@ -52,9 +53,12 @@ export type ReEngagementTrigger =
  *   everything else.
  *
  * The three time-sensitive triggers (a deadline, an opening, an overdue cadence)
- * rank above the two that have no clock. Among the clockless "everything else"
- * band, a hesitation consult is a saved-not-booked CONVERSION nudge (funnel:
- * Want→Book), so it outranks the post-event BOARD_ARCHIVE housekeeping prompt.
+ * rank above the clockless ones. Among the clockless band, both §6.8 saved-not
+ * -booked CONVERSION nudges (funnel: Want→Book) outrank the post-event
+ * BOARD_ARCHIVE housekeeping prompt. Between the two §6.8 nudges, the hesitation
+ * consult honors the client's OWN saved choice (same pro, "ask questions"), while
+ * the price alternative steers to a DIFFERENT pro — the more speculative move — so
+ * the consult ranks just above it.
  */
 export const RE_ENGAGEMENT_TRIGGER_PRIORITY: Record<ReEngagementTrigger, number> =
   {
@@ -62,8 +66,9 @@ export const RE_ENGAGEMENT_TRIGGER_PRIORITY: Record<ReEngagementTrigger, number>
     AVAILABILITY_OPENED_ON_SAVE: 1,
     REBOOK_CADENCE: 2,
     HESITATION_CONSULT: 3,
-    BOARD_ARCHIVE: 4,
-    OTHER: 5,
+    PRICE_ALTERNATIVE: 4,
+    BOARD_ARCHIVE: 5,
+    OTHER: 6,
   }
 
 /**
@@ -88,9 +93,15 @@ export const RE_ENGAGEMENT_EVENT_KEY_TRIGGER: Partial<
   // saved-pro opening.
   [NotificationEventKey.REBOOK_CADENCE_DUE]: 'REBOOK_CADENCE',
   // §6.8 — the hesitation blocker response: a saved high-commitment look the
-  // client never booked earns a gentle consult/education nudge. Lowest of the
-  // live tiers (no clock at all), so it yields to every time-sensitive trigger.
+  // client never booked earns a gentle consult/education nudge. Below the three
+  // time-sensitive triggers (no clock at all).
   [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: 'HESITATION_CONSULT',
+  // §6.8 — the price blocker response: a saved OVER-BUDGET look the client never
+  // booked earns a gentle "similar look in your range" nudge pointing at a
+  // different, in-band pro. Lowest of the live tiers — clockless like the consult
+  // nudge, and the more speculative of the two (a different pro), so it yields the
+  // last pooled slot to every other live trigger.
+  [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE]: 'PRICE_ALTERNATIVE',
 }
 
 /**

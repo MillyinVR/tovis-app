@@ -40,6 +40,7 @@ export type NotificationCategoryKey =
   | 'EVENT_COUNTDOWNS'
   | 'REBOOK_REMINDERS'
   | 'CONSULT_NUDGES'
+  | 'PRICE_ALTERNATIVES'
   | 'MESSAGES'
   | 'SOCIAL'
 
@@ -90,6 +91,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.EVENT_DATE_COUNTDOWN]: 'Event countdown reminders',
   [NotificationEventKey.REBOOK_CADENCE_DUE]: 'Time-for-a-refresh reminders',
   [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: 'Consult reminders for big decisions',
+  [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE]: 'Similar looks in your range',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: 'Payment action needed',
@@ -201,6 +203,13 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     description:
       'Gentle, no-pressure reminders to ask questions or book a consult on a big-decision look you saved (like permanent makeup, color, or extensions). Muting this turns off consult reminders only.',
     eventKeys: [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE],
+  },
+  {
+    key: 'PRICE_ALTERNATIVES',
+    label: 'Similar looks in your range',
+    description:
+      'Gentle suggestions of similar looks from pros whose pricing fits your range, when a look you saved runs pricier than what you usually book. Muting this turns off these suggestions only.',
+    eventKeys: [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE],
   },
   {
     key: 'MESSAGES',

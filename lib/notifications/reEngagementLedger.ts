@@ -13,7 +13,11 @@
 // module is the impure counterpart — thin, indexed reads keyed by the trigger's
 // own NotificationEventKey.
 
-import { NotificationEventKey, type PrismaClient } from '@prisma/client'
+import {
+  BookingStatus,
+  NotificationEventKey,
+  type PrismaClient,
+} from '@prisma/client'
 
 import { RE_ENGAGEMENT_EVENT_KEYS } from '@/lib/notifications/reEngagementBudget'
 
@@ -106,6 +110,58 @@ export async function loadAlreadyNotifiedDedupeKeys(
     if (row.dedupeKey) seen.add(row.dedupeKey)
   }
   return seen
+}
+
+/**
+ * Booking statuses that mean a (client, pro) pair has already ENGAGED — any status
+ * counts as "not a saved_not_booked pair" (they converted, tried, or have a
+ * relationship). Includes terminal states on purpose: a cancelled/no-show pair still
+ * has a history, so a saved-not-booked re-engagement nudge would be off-key.
+ */
+export const ANY_RE_ENGAGEMENT_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.PENDING,
+  BookingStatus.ACCEPTED,
+  BookingStatus.IN_PROGRESS,
+  BookingStatus.COMPLETED,
+  BookingStatus.CANCELLED,
+  BookingStatus.NO_SHOW,
+]
+
+/**
+ * (client, pro) pairs that already have ANY booking → excluded from the saved-not
+ * -booked re-engagement triggers (saved-look activation, hesitation consult, price
+ * alternative). The `in`/`in` query over-fetches the cross product, so callers pass
+ * the `wantedPairs` set (keys `${clientId}::${professionalId}`) to keep only the real
+ * candidate pairs. Shared across the three consumers (house rule: no duplicate logic).
+ */
+export async function loadBookedReEngagementPairs(
+  db: PrismaClient,
+  args: {
+    clientIds: string[]
+    professionalIds: string[]
+    wantedPairs: ReadonlySet<string>
+  },
+): Promise<Set<string>> {
+  if (args.clientIds.length === 0 || args.professionalIds.length === 0) {
+    return new Set()
+  }
+
+  const rows = await db.booking.findMany({
+    where: {
+      clientId: { in: args.clientIds },
+      professionalId: { in: args.professionalIds },
+      status: { in: ANY_RE_ENGAGEMENT_BOOKING_STATUSES },
+    },
+    select: { clientId: true, professionalId: true },
+    distinct: ['clientId', 'professionalId'],
+  })
+
+  const booked = new Set<string>()
+  for (const row of rows) {
+    const key = `${row.clientId}::${row.professionalId}`
+    if (args.wantedPairs.has(key)) booked.add(key)
+  }
+  return booked
 }
 
 /**
