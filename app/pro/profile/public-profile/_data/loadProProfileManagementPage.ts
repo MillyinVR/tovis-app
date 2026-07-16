@@ -3,10 +3,7 @@ import 'server-only'
 
 import { redirect } from 'next/navigation'
 import {
-  LookPostStatus,
-  LookPostVisibility,
   MediaType,
-  ModerationStatus,
   Prisma,
   Role,
   type ProfessionType,
@@ -19,6 +16,7 @@ import { isRecord } from '@/lib/guards'
 import { vanityLinkFor } from '@/lib/handles'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
+import { proOwnPublicLooksWhere } from '@/lib/looks/selects'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import {
   resolveClientProfileHref,
@@ -219,17 +217,7 @@ export async function loadProProfileManagementPage({
       where: { professionalId: pro.id },
     }),
     prisma.lookPost.count({
-      where: {
-        professionalId: pro.id,
-        // Pro portfolio count is the pro's OWN work only — exclude looks a client
-        // authored from their visit (clientAuthorId set keeps professionalId as
-        // the tagged pro). See lib/looks/publication/clientLookService.ts.
-        clientAuthorId: null,
-        status: LookPostStatus.PUBLISHED,
-        moderationStatus: ModerationStatus.APPROVED,
-        visibility: LookPostVisibility.PUBLIC,
-        publishedAt: { not: null },
-      },
+      where: { professionalId: pro.id, ...proOwnPublicLooksWhere },
     }),
     countFollowers(prisma, pro.id),
     prisma.notification.count({

@@ -16,6 +16,7 @@ import {
   boardVisibleLookItemWhere,
   looksBoardDetailSelect,
   looksBoardPreviewSelect,
+  proOwnPublicLooksWhere,
 } from './selects'
 
 describe('boardVisibleLookItemWhere (§19e)', () => {
@@ -42,5 +43,24 @@ describe('boardVisibleLookItemWhere (§19e)', () => {
     expect(looksBoardPreviewSelect._count.select.items).toEqual({
       where: boardVisibleLookItemWhere,
     })
+  })
+})
+
+describe('proOwnPublicLooksWhere', () => {
+  it('selects the pro OWN publicly-visible looks only', () => {
+    expect(proOwnPublicLooksWhere).toEqual({
+      clientAuthorId: null,
+      status: LookPostStatus.PUBLISHED,
+      moderationStatus: ModerationStatus.APPROVED,
+      visibility: LookPostVisibility.PUBLIC,
+      publishedAt: { not: null },
+      removedAt: null,
+    })
+  })
+
+  it('excludes client-authored looks, which belong on the client own grid', () => {
+    // A client-authored look keeps `professionalId` pointing at the tagged pro,
+    // so only `clientAuthorId: null` keeps it out of the pro portfolio + count.
+    expect(proOwnPublicLooksWhere.clientAuthorId).toBeNull()
   })
 })

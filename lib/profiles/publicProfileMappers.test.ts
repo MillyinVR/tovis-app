@@ -15,6 +15,7 @@ vi.mock('@/lib/media/renderUrls', () => ({
 import {
   mapPairedBeforeToDto,
   mapPublicPortfolioTileToDto,
+  mapPublicProfileStatsToDto,
   mapPublicReviewMediaAssetToDto,
 } from './publicProfileMappers'
 
@@ -150,5 +151,56 @@ describe('mapPublicReviewMediaAssetToDto before/after pairing', () => {
       makeReviewMediaRow({ mediaType: MediaType.VIDEO, beforeAsset: beforeImage }),
     )
     expect(media?.before).toBeNull()
+  })
+})
+
+describe('mapPublicProfileStatsToDto looks + followers', () => {
+  const baseArgs = {
+    offerings: [],
+    completedBookingCount: 0,
+    favoritesCount: 0,
+    reviewCount: 0,
+    averageRating: null,
+    followerCount: 0,
+    publishedLooksCount: 0,
+  }
+
+  it('formats looks + followers compactly, like the sibling labels', () => {
+    const stats = mapPublicProfileStatsToDto({
+      ...baseArgs,
+      followerCount: 12_480,
+      publishedLooksCount: 1_200,
+    })
+
+    expect(stats.looksLabel).toBe('1.2K')
+    expect(stats.followersLabel).toBe('12.5K')
+  })
+
+  it('keeps followerCount raw for the Follow button optimistic nudge', () => {
+    const stats = mapPublicProfileStatsToDto({
+      ...baseArgs,
+      followerCount: 12_480,
+    })
+
+    // The label is for the static stats tile; the button needs the number.
+    expect(stats.followerCount).toBe(12_480)
+    expect(stats.followersLabel).toBe('12.5K')
+  })
+
+  it('renders a zero look count as "0" rather than hiding the tile', () => {
+    const stats = mapPublicProfileStatsToDto(baseArgs)
+
+    expect(stats.looksLabel).toBe('0')
+    expect(stats.followersLabel).toBe('0')
+  })
+
+  it('floors a negative follower count to zero in both projections', () => {
+    const stats = mapPublicProfileStatsToDto({
+      ...baseArgs,
+      followerCount: -3,
+    })
+
+    expect(stats.followerCount).toBe(0)
+    expect(stats.followersLabel).toBe('0')
   })
 })
