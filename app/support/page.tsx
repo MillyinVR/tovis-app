@@ -1,24 +1,12 @@
 // app/support/page.tsx
-import { getCurrentUser } from '@/lib/currentUser'
 import SupportForm from './supportForm'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
 import { getBrandConfig } from '@/lib/brand'
 
 export const dynamic = 'force-dynamic'
 
-export default async function SupportPage() {
-  const user = await getCurrentUser().catch(() => null)
-
+export default function SupportPage() {
   const brand = getBrandConfig()
-
-  const role =
-    user?.role === 'PRO'
-      ? 'PRO'
-      : user?.role === 'CLIENT'
-        ? 'CLIENT'
-        : user?.role === 'ADMIN'
-          ? 'ADMIN'
-          : 'GUEST'
 
   return (
     <main className="min-h-screen w-full text-textPrimary">
@@ -60,7 +48,7 @@ export default async function SupportPage() {
           </div>
         </div>
 
-        <SupportForm role={role} />
+        <SupportForm />
       </div>
     </main>
   )

@@ -170,6 +170,9 @@ export type {
 // ── Push device registration (POST/DELETE /api/v1/devices) ───────────────────
 export type { DeviceTokenDTO } from '@/lib/dto/deviceToken'
 
+// ── Support ticket create (POST /api/v1/support/tickets) ─────────────────────
+export type { SupportTicketDTO } from '@/lib/dto/supportTicket'
+
 // ── Manage devices / per-device revocation (GET /api/v1/devices) ─────────────
 export type { UserDeviceDTO } from '@/lib/dto/device'
 

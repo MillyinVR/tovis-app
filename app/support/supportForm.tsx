@@ -1,45 +1,30 @@
 // app/support/supportForm.tsx
 import { redirect } from 'next/navigation'
-import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { emitAdminSupportTicketCreated } from '@/lib/notifications/adminNotifications'
+import { pickStringOrEmpty } from '@/lib/pick'
+import {
+  SUPPORT_MESSAGE_MAX_LEN,
+  SUPPORT_SUBJECT_MAX_LEN,
+  createSupportTicket,
+} from '@/lib/support/createSupportTicket'
 
 export const dynamic = 'force-dynamic'
 
-type Props = { role: string }
-
-function pickStr(v: unknown) {
-  return typeof v === 'string' ? v.trim() : ''
-}
-
-export default function SupportForm({ role }: Props) {
+export default function SupportForm() {
   async function submit(formData: FormData) {
     'use server'
 
+    // Re-read the user inside the action rather than trusting a prop: a client
+    // could post this form with any role it liked.
     const user = await getCurrentUser().catch(() => null)
 
-    const subject = pickStr(formData.get('subject'))
-    const message = pickStr(formData.get('message'))
-
-    if (!subject || !message) redirect('/support?error=missing')
-
-    const ticket = await prisma.supportTicket.create({
-      data: {
-        createdByUserId: user?.id ?? null,
-        createdByRole: role,
-        subject,
-        message,
-        status: 'OPEN',
-      },
-      select: { id: true },
+    const result = await createSupportTicket({
+      author: user ? { id: user.id, role: user.role } : null,
+      subject: pickStringOrEmpty(formData.get('subject')),
+      message: pickStringOrEmpty(formData.get('message')),
     })
 
-    // Best-effort admin alert — must never fail the support submission.
-    try {
-      await emitAdminSupportTicketCreated({ ticketId: ticket.id, subject })
-    } catch (notifyError) {
-      console.error('support ticket admin notify error', notifyError)
-    }
+    if (!result.ok) redirect(`/support?error=${result.error.code.toLowerCase()}`)
 
     redirect('/support?sent=1')
   }
@@ -50,6 +35,7 @@ export default function SupportForm({ role }: Props) {
         <div className="text-[12px] font-black">Subject</div>
         <input
           name="subject"
+          maxLength={SUPPORT_SUBJECT_MAX_LEN}
           className="h-11 rounded-xl border border-white/10 bg-bgPrimary/70 px-3 text-[13px] outline-none focus:ring-2 focus:ring-accentPrimary/40"
           placeholder="e.g. Booking not confirming"
         />
@@ -60,6 +46,7 @@ export default function SupportForm({ role }: Props) {
         <textarea
           name="message"
           rows={6}
+          maxLength={SUPPORT_MESSAGE_MAX_LEN}
           className="rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] outline-none focus:ring-2 focus:ring-accentPrimary/40"
           placeholder="Tell us what happened, what you expected, and anything relevant."
         />
