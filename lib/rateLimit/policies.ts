@@ -27,6 +27,7 @@ export type RateLimitBucket =
   | 'pro-license:verify'
   | 'messages:send'
   | 'messages:read'
+  | 'support:tickets:create'
   | 'nfc:tap'
   | 'nfc:code'
   | 'auth:login'
@@ -218,6 +219,18 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 120,
     windowSeconds: 60,
     prefix: 'rl:messages:read',
+    mode: 'redis-only',
+  },
+
+  // Native support-ticket filing, keyed per user (the route is bearer-only, so
+  // there is always a real user). Every ticket fans out an admin notification,
+  // so the ceiling bounds how far a single account can flood the admin queue —
+  // an hour window because a person files a couple of tickets, not a burst.
+  // Fail-open: a Redis outage must not block someone trying to report a problem.
+  'support:tickets:create': {
+    limit: 5,
+    windowSeconds: 60 * 60,
+    prefix: 'rl:support:tickets:create',
     mode: 'redis-only',
   },
 

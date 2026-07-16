@@ -12229,6 +12229,31 @@
     "StripePaymentStatus": {
       "$ref": "#/definitions/%24Enums.StripePaymentStatus"
     },
+    "SupportTicketDTO": {
+      "properties": {
+        "createdAt": {
+          "description": "ISO-8601",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "description": "`OPEN` | `IN_PROGRESS` | `CLOSED` — always `OPEN` on create.",
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "status",
+        "createdAt"
+      ],
+      "type": "object"
+    },
     "UserDeviceDTO": {
       "properties": {
         "deviceId": {
