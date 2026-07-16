@@ -91,6 +91,16 @@ export type LooksFeedServeEvent = {
   // primary location within reach — the coverage metric for whether the distance
   // signal is reaching the feed (ordering, not this count, buries far pros).
   proximityFitBoostedCount?: number | null
+  // §4.6 impression freshness (personalized cohort only): the per-serve fraction of
+  // the requested page filled with never-seen looks (1.0 = fresh supply filled the
+  // page; a sustained fall = supply problem in that viewer's graph). The spec §9
+  // feed-freshness metric — falling freshness predicts a stale feed before churn.
+  freshnessRatio?: number | null
+  // §4.6 retrieval widening (personalized cohort only): previously-seen looks
+  // re-shown to backfill a short fresh page rather than serve a short/empty one
+  // (hidden looks stay excluded). 0 in the healthy case; >0 = the fresh supply ran
+  // out and the feed widened (terminal page only — never an infinite re-show).
+  widenedBackfillCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -146,6 +156,8 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     reliabilityBoostedCount: input.reliabilityBoostedCount ?? null,
     priceFitBoostedCount: input.priceFitBoostedCount ?? null,
     proximityFitBoostedCount: input.proximityFitBoostedCount ?? null,
+    freshnessRatio: input.freshnessRatio ?? null,
+    widenedBackfillCount: input.widenedBackfillCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

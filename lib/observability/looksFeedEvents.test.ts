@@ -78,6 +78,8 @@ describe('logLooksFeedServe', () => {
       reliabilityBoostedCount: 7,
       priceFitBoostedCount: 9,
       proximityFitBoostedCount: 11,
+      freshnessRatio: 0.5,
+      widenedBackfillCount: 3,
     })
 
     const withComposition = JSON.parse(spy.mock.calls[0]?.[0] as string)
@@ -94,6 +96,8 @@ describe('logLooksFeedServe', () => {
       reliabilityBoostedCount: 7,
       priceFitBoostedCount: 9,
       proximityFitBoostedCount: 11,
+      freshnessRatio: 0.5,
+      widenedBackfillCount: 3,
     })
 
     // A serve that omits them logs explicit nulls (a chronological serve).
@@ -112,5 +116,7 @@ describe('logLooksFeedServe', () => {
     expect(withoutComposition.reliabilityBoostedCount).toBeNull()
     expect(withoutComposition.priceFitBoostedCount).toBeNull()
     expect(withoutComposition.proximityFitBoostedCount).toBeNull()
+    expect(withoutComposition.freshnessRatio).toBeNull()
+    expect(withoutComposition.widenedBackfillCount).toBeNull()
   })
 })
