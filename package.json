@@ -47,6 +47,7 @@
     "db:dev:push": "pnpm db:dev:extensions && DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev prisma db push --skip-generate",
     "db:dev:seed": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev ALLOW_SEED_SCRIPT=1 CONFIRM_NON_PRODUCTION_DB=1 node prisma/seed.cjs",
     "db:dev:permissions": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev tsx scripts/importLicensePermissions.ts --write",
+    "dev:mint-jwt": "tsx scripts/dev/mint-dev-jwt.ts",
     "db:dev:setup": "pnpm db:dev:wait && pnpm db:dev:push && pnpm db:dev:seed && pnpm backfill:contact-hash-v2:dev && pnpm db:dev:permissions",
     "db:dev:studio": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev prisma studio",
     "test:integration": "node scripts/with-test-db.mjs npx vitest run --config vitest.integration.config.mts",
