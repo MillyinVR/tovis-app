@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   evaluateClientRow,
   evaluateClientRows,
+  splitFullName,
   summarizeClientRows,
   type ColumnMapping,
   type RawCsvRow,
@@ -81,5 +82,56 @@ describe('summarizeClientRows', () => {
     expect(s.missingName).toBe(1)
     expect(s.missingContact).toBe(1)
     expect(s.invalidContact).toBe(1)
+  })
+})
+
+describe('splitFullName', () => {
+  it('splits first token from the rest', () => {
+    expect(splitFullName('Jane Doe')).toEqual({ firstName: 'Jane', lastName: 'Doe' })
+    expect(splitFullName('  Maria  Garcia Lopez ')).toEqual({
+      firstName: 'Maria',
+      lastName: 'Garcia Lopez',
+    })
+  })
+
+  it('leaves lastName empty for a single token', () => {
+    expect(splitFullName('Cher')).toEqual({ firstName: 'Cher', lastName: '' })
+    expect(splitFullName('   ')).toEqual({ firstName: '', lastName: '' })
+  })
+})
+
+describe('evaluateClientRow with a fullName mapping', () => {
+  const FULL_MAP: ColumnMapping = { fullName: 'Name', email: 'Email' }
+
+  it('derives first/last from the combined column', () => {
+    const r = evaluateClientRow({ Name: 'Jane Q Doe', Email: 'jane@gmail.com' }, FULL_MAP)
+    expect(r.parsed.firstName).toBe('Jane')
+    expect(r.parsed.lastName).toBe('Q Doe')
+    expect(r.importable).toBe(true)
+  })
+
+  it('flags a single-token combined name as missing', () => {
+    const r = evaluateClientRow({ Name: 'Cher', Email: 'cher@gmail.com' }, FULL_MAP)
+    expect(r.issues).toContain('MISSING_NAME')
+    expect(r.importable).toBe(false)
+  })
+
+  it('prefers explicit first/last columns over the combined column', () => {
+    const r = evaluateClientRow(
+      { First: 'Maya', Last: 'Rodriguez', Name: 'Wrong Person', Email: 'maya@gmail.com' },
+      { firstName: 'First', lastName: 'Last', fullName: 'Name', email: 'Email' },
+    )
+    expect(r.parsed.firstName).toBe('Maya')
+    expect(r.parsed.lastName).toBe('Rodriguez')
+  })
+
+  it('fills only the missing half from the combined column', () => {
+    const r = evaluateClientRow(
+      { First: '', Last: '', Name: 'Jane Doe', Email: 'jane@gmail.com' },
+      { firstName: 'First', lastName: 'Last', fullName: 'Name', email: 'Email' },
+    )
+    expect(r.parsed.firstName).toBe('Jane')
+    expect(r.parsed.lastName).toBe('Doe')
+    expect(r.importable).toBe(true)
   })
 })

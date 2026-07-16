@@ -115,9 +115,16 @@ export type MigrationCopy = {
     chooseFile: string
     reparse: string
     parseError: string
+    mixedFilesError: string
     mapTitle: string
     mapHint: string
-    fields: { firstName: string; lastName: string; email: string; phone: string }
+    fields: {
+      firstName: string
+      lastName: string
+      fullName: string
+      email: string
+      phone: string
+    }
     unmapped: string
     previewTitle: string
     importBtn: string
@@ -164,14 +171,15 @@ export function defaultMigrationCopy(wordmark: string): MigrationCopy {
       importedSuffix: 'services imported',
       guideTitle: 'How to bring your menu over',
       guideSteps: [
-        'In your old booking app, export your service or price list as a CSV file.',
-        'Upload it below — we match each service to the catalog so names stay consistent.',
+        'In your old booking app, export your service or price list as a CSV or Excel file.',
+        'Upload it below (several files are fine) — we match each service to the catalog so names stay consistent.',
         "Review each match, set what you charge, and we'll handle prices below the minimum.",
       ],
       upload: 'Upload your service menu',
-      uploadHint: 'A CSV exported from your old booking app',
-      chooseFile: 'Choose CSV file',
-      parseError: "We couldn't read that file. Make sure it's a CSV exported from your booking app.",
+      uploadHint: 'A CSV or Excel export from your old booking app',
+      chooseFile: 'Choose file',
+      parseError:
+        "We couldn't read that file. Make sure it's a CSV or Excel export from your booking app.",
       addBtn: 'Add these services',
       importing: 'Adding…',
       resultTitle: 'Services added',
@@ -270,19 +278,29 @@ export function defaultMigrationCopy(wordmark: string): MigrationCopy {
       noMessages: 'Importing never messages your clients — they stay quiet until you book them.',
       guideTitle: 'How to bring your clients over',
       guideSteps: [
-        'In your old booking app, open your client or customer list and export it as a CSV file.',
+        'In your old booking app, open your client or customer list and export it as a CSV or Excel file.',
         'Upload that file below. It stays in your account — nothing is shared with your old app.',
-        'Match your columns to first name, last name, email, and phone.',
+        'Match your columns to first and last name (or one full-name column), email, and phone.',
         'Review the list and import. Existing clients merge instead of duplicating.',
       ],
       upload: 'Upload your client list',
-      uploadHint: 'A CSV exported from your old booking app',
-      chooseFile: 'Choose CSV file',
+      uploadHint: 'A CSV or Excel export from your old booking app',
+      chooseFile: 'Choose file',
       reparse: 'Choose a different file',
-      parseError: "We couldn't read that file. Make sure it's a CSV exported from your booking app.",
+      parseError:
+        "We couldn't read that file. Make sure it's a CSV or Excel export from your booking app.",
+      mixedFilesError:
+        'Those files have different columns — upload them one at a time and import each batch.',
       mapTitle: 'Match your columns',
-      mapHint: 'Tell us which column is which. First and last name are required.',
-      fields: { firstName: 'First name', lastName: 'Last name', email: 'Email', phone: 'Phone' },
+      mapHint:
+        'Tell us which column is which. Map first and last name — or a single full-name column and we split it.',
+      fields: {
+        firstName: 'First name',
+        lastName: 'Last name',
+        fullName: 'Full name (one column)',
+        email: 'Email',
+        phone: 'Phone',
+      },
       unmapped: 'Not in my file',
       previewTitle: 'Review your clients',
       importBtn: 'Import clients',

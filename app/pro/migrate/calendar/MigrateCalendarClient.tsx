@@ -221,7 +221,9 @@ export function MigrateCalendarClient({ copy }: Props) {
             <p className="mx-auto mt-2 max-w-md text-[13px] text-textMuted">
               Export your bookings from your current booking app as an .ics
               file, then upload it here. We&rsquo;ll match each booking to your
-              menu, hold blocked time, and build your client history.
+              menu, hold blocked time, and build your client history. Exports
+              that don&rsquo;t include client details still hold every slot as
+              blocked time you can convert to bookings later.
             </p>
             <input
               ref={fileRef}

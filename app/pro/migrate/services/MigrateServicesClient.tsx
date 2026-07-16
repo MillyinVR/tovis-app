@@ -6,7 +6,6 @@
 // license-gated catalog (POST /preview) → review/map + tune raises → commit
 // (POST /commit). Server types are type-only imports (erased at build).
 
-import Papa from 'papaparse'
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 
@@ -29,9 +28,12 @@ import {
   type RaiseConfigChange,
 } from './_components/RaisePlanSection'
 import { ServiceMapRow } from './_components/ServiceMapRow'
+import {
+  parseSpreadsheetFiles,
+  type ParsedFileTable,
+} from '../_utils/parseSpreadsheetFile'
 
 type Phase = 'upload' | 'map' | 'done'
-type RawCsvRow = Record<string, string>
 
 type PreviewResponse = {
   ok: boolean
@@ -127,40 +129,47 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
   const catalogById = useMemo(() => new Map(catalog.map((c) => [c.id, c])), [catalog])
   const canonical = useMemo(() => catalog.map(toCanonical), [catalog])
 
-  function handleFile(file: File): void {
+  // Columns are detected per file, so a multi-file pick works even when the
+  // files don't share a layout (e.g. Vagaro's one-spreadsheet-per-stylist
+  // service exports).
+  function menuRowsFromTable(table: ParsedFileTable): Array<{
+    name: string
+    price: number | null
+    durationMinutes: number | null
+  }> {
+    const find = (subs: string[]) =>
+      table.headers.find((h) => subs.some((s) => h.toLowerCase().includes(s)))
+    const nameCol = find(['service', 'name', 'item']) ?? table.headers[0]
+    const priceCol = find(['price', 'cost', 'rate', 'amount'])
+    const durationCol = find(['duration', 'time', 'min', 'length'])
+
+    return table.rows
+      .map((r) => ({
+        name: (nameCol ? r[nameCol] : '')?.trim() ?? '',
+        price: priceCol ? parseNum(r[priceCol]) : null,
+        durationMinutes: durationCol ? parseNum(r[durationCol]) : null,
+      }))
+      .filter((r) => r.name.length > 0)
+  }
+
+  async function handleFiles(files: File[]): Promise<void> {
     setError(null)
-    Papa.parse<RawCsvRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (res) => {
-        const headers = res.meta.fields ?? []
-        const data = res.data.filter((r): r is RawCsvRow => Boolean(r) && typeof r === 'object')
-        if (headers.length === 0 || data.length === 0) {
-          setError(copy.parseError)
-          return
-        }
-        const find = (subs: string[]) =>
-          headers.find((h) => subs.some((s) => h.toLowerCase().includes(s)))
-        const nameCol = find(['service', 'name', 'item']) ?? headers[0]
-        const priceCol = find(['price', 'cost', 'rate', 'amount'])
-        const durationCol = find(['duration', 'time', 'min', 'length'])
-
-        const menuRows = data
-          .map((r) => ({
-            name: (nameCol ? r[nameCol] : '')?.trim() ?? '',
-            price: priceCol ? parseNum(r[priceCol]) : null,
-            durationMinutes: durationCol ? parseNum(r[durationCol]) : null,
-          }))
-          .filter((r) => r.name.length > 0)
-
-        if (menuRows.length === 0) {
-          setError(copy.parseError)
-          return
-        }
-        await runPreview(menuRows)
-      },
-      error: () => setError(copy.parseError),
-    })
+    setBusy(true)
+    try {
+      const result = await parseSpreadsheetFiles(files)
+      if (!result.ok) {
+        setError(result.error ?? copy.parseError)
+        return
+      }
+      const menuRows = result.tables.flatMap(menuRowsFromTable)
+      if (menuRows.length === 0) {
+        setError(copy.parseError)
+        return
+      }
+      await runPreview(menuRows)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function runPreview(
@@ -309,7 +318,9 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
           </div>
         ) : null}
 
-        {phase === 'upload' ? <UploadStep copy={copy} onFile={handleFile} busy={busy} /> : null}
+        {phase === 'upload' ? (
+          <UploadStep copy={copy} onFiles={(files) => void handleFiles(files)} busy={busy} />
+        ) : null}
 
         {phase === 'map' ? (
           <>
@@ -370,11 +381,11 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
 
 function UploadStep({
   copy,
-  onFile,
+  onFiles,
   busy,
 }: {
   copy: MigrationCopy['services']
-  onFile: (file: File) => void
+  onFiles: (files: File[]) => void
   busy: boolean
 }) {
   return (
@@ -403,12 +414,13 @@ function UploadStep({
           {busy ? copy.importing : copy.chooseFile}
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,.xlsm,.xls,text/csv"
+            multiple
             className="sr-only"
             disabled={busy}
             onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) onFile(file)
+              const files = Array.from(e.target.files ?? [])
+              if (files.length > 0) onFiles(files)
               e.target.value = ''
             }}
           />

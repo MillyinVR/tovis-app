@@ -10,10 +10,24 @@
 
 import { normalizeEmail, normalizePhone } from '@/lib/security/contactNormalization'
 
-export type ClientImportField = 'firstName' | 'lastName' | 'email' | 'phone'
+// fullName covers exports that ship one combined name column (support-provided
+// Booksy/StyleSeat CSVs, generic "Name" spreadsheets) — split here rather than
+// making the pro edit the file. Explicit firstName/lastName mappings win.
+export type ClientImportField = 'firstName' | 'lastName' | 'email' | 'phone' | 'fullName'
 
 // Maps a logical field to the CSV header the pro chose for it.
 export type ColumnMapping = Partial<Record<ClientImportField, string>>
+
+// "Jane Marie Doe" → { firstName: "Jane", lastName: "Marie Doe" }. A single
+// token yields an empty lastName so the row surfaces as MISSING_NAME instead of
+// silently inventing one.
+export function splitFullName(raw: string): { firstName: string; lastName: string } {
+  const parts = raw.trim().split(/\s+/).filter(Boolean)
+  return {
+    firstName: parts[0] ?? '',
+    lastName: parts.slice(1).join(' '),
+  }
+}
 
 export type RawCsvRow = Record<string, string>
 
@@ -47,8 +61,13 @@ export function evaluateClientRow(
   raw: RawCsvRow,
   mapping: ColumnMapping,
 ): EvaluatedClientRow {
-  const firstName = readField(raw, mapping, 'firstName')
-  const lastName = readField(raw, mapping, 'lastName')
+  let firstName = readField(raw, mapping, 'firstName')
+  let lastName = readField(raw, mapping, 'lastName')
+  if ((!firstName || !lastName) && mapping.fullName) { // pii-plaintext-read-ok: CSV column-header name, not a contact value
+    const split = splitFullName(readField(raw, mapping, 'fullName'))
+    firstName = firstName || split.firstName // pii-plaintext-read-ok: name from the pro's own uploaded CSV row, same path as readField above
+    lastName = lastName || split.lastName // pii-plaintext-read-ok: name from the pro's own uploaded CSV row, same path as readField above
+  }
   const rawEmail = readField(raw, mapping, 'email')
   const rawPhone = readField(raw, mapping, 'phone')
 

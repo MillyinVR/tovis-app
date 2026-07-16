@@ -36,6 +36,15 @@ describe('parseClientImportRequest', () => {
     ).toBeNull()
   })
 
+  it('accepts a fullName mapping in place of first + last', () => {
+    const parsed = parseClientImportRequest({
+      rows: [{ Name: 'Jane Doe', Email: 'jane@gmail.com' }],
+      mapping: { fullName: 'Name', email: 'Email' },
+    })
+    expect(parsed).not.toBeNull()
+    expect(parsed?.mapping.fullName).toBe('Name')
+  })
+
   it('keeps only string cell values and numeric exclude indices', () => {
     const parsed = parseClientImportRequest({
       rows: [{ First: 'Maya', Last: 'R', Age: 30, Note: null }],

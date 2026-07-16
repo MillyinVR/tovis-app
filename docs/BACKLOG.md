@@ -147,11 +147,11 @@ Foundation shipped (rate-based Bayesian rank scoring); remaining:
     and discovery fee-waiver logic (`lib/booking/resolveDiscoveryFinalize.ts:236`). Policy path —
     support-readiness before flipping.
 - [ ] Pro-migration go-live: confirm catalog min prices; Square/Acuity OAuth (Phase 2); flip `ENABLE_PRO_MIGRATION`.
-  - Export-instructions audit 2026-07-15 (PR #639 fixed the copy + `calendarFeed` flags; sources in that PR). Remaining wizard gaps, in impact order:
-  - [ ] Accept `.xlsx` uploads in the services/clients steps (SheetJS or server-side convert) — Vagaro (the biggest source) and Fresha export Excel by default; today the file picker only takes `.csv` and the copy tells pros to hand-convert.
-  - [ ] Optional full-name column splitting in the clients Map step — the mapper hard-requires separate first+last columns; a single-`Name` export (support-provided Booksy/StyleSeat CSVs) dead-ends the flow.
-  - [ ] Set expectations for attendee-less calendar feeds: most real feeds (Google-relay, Fresha times-only) carry no attendee name/email, so events import as held BLOCKS, not bookings — say so in the calendar step copy instead of implying full booking transfer.
-  - [ ] Consider a concierge fallback ("email us your exports") mirroring Vagaro's import model — their list of ~90 supported sources (screenshots, 2026-07-15) is the market map; self-serve-adjacent additions if we expand the picker: Booker, Boulevard, Goldie, Timely, Setmore, Mindbody.
+  - Export-instructions audit 2026-07-15 (PR #639 fixed the copy + `calendarFeed` flags; sources in that PR). Wizard robustness follow-up shipped web-side 2026-07-16 (`feat/migrate-import-robustness`): `.xlsx`/`.xls` accepted via `POST /pro/migrate/parse` (SheetJS server-side; shared with iOS), multi-file picks (per-employee Vagaro exports), full-name column splitting (`fullName` mapping), attendee-less-feed expectation copy. Remaining, in impact order:
+  - [ ] Appointments-history CSV importer — Square (Appointments → Settings → History), Acuity (Reports → Import/Export → appointments, incl. client contact + type + price), and Vagaro (Reports → Appointments Summary) export richer booking data than any calendar feed; feeding these through the calendar preview/commit pipeline would create REAL bookings + history where attendee-less .ics can only make blocks.
+  - [ ] AI-assisted extraction ("drop anything"): vision/LLM pass turning a PDF price list or a menu screenshot into name/price/duration rows behind the existing review UI — needs a short design spec first (model cost, privacy of client data in prompts).
+  - [ ] "Paste your booking-page link" services import — fetch the pro's own public Booksy/StyleSeat/Vagaro booking page (reuse the SSRF-guarded feed fetcher) and extract the menu.
+  - [ ] Consider a concierge fallback ("email us your exports" → admin queue running the wizard on the pro's behalf) mirroring Vagaro's import model — their list of ~90 supported sources (screenshots, 2026-07-15) is the market map; self-serve-adjacent picker additions: Booker, Boulevard, Goldie, Timely, Setmore, Mindbody.
 
 ## 3. Premortem remediation — Phase 3/4 + operator
 Source (now superseded): `audits/premortem-2026-06-24-remediation-plan.md`, `audits/HANDOFF-premortem-remediation-2026-06-25.md`.
