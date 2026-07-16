@@ -26,6 +26,28 @@ export const boardVisibleLookItemWhere =
     },
   })
 
+// A pro's OWN publicly-visible looks: PUBLISHED + APPROVED + PUBLIC + not
+// removed, authored by the pro rather than by a client. Client-authored looks
+// keep `professionalId` pointing at the tagged pro but belong on that client's
+// own /u/[handle] grid, so they never count as the pro's portfolio (see the
+// LookPost.professionalId comment in prisma/schema.prisma).
+//
+// Shared because the public-profile loader (portfolio grid + the "Looks" stat)
+// and the pro management loader each hand-rolled this clause and had already
+// drifted: one filtered `removedAt: null`, the other `publishedAt: { not: null }`.
+// Both select the same rows today — removal writes `status: REMOVED` and
+// `removedAt` together, and every publish write stamps `publishedAt` — so this
+// keeps the union of the two and changes no call site's result.
+export const proOwnPublicLooksWhere =
+  Prisma.validator<Prisma.LookPostWhereInput>()({
+    clientAuthorId: null,
+    status: LookPostStatus.PUBLISHED,
+    moderationStatus: ModerationStatus.APPROVED,
+    visibility: LookPostVisibility.PUBLIC,
+    publishedAt: { not: null },
+    removedAt: null,
+  })
+
 const looksServiceCategorySelect =
   Prisma.validator<Prisma.ServiceCategorySelect>()({
     name: true,

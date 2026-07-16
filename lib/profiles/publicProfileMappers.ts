@@ -181,6 +181,13 @@ export type PublicProfileStatsDto = {
   // Raw ProFollow count (index-backed) — the Follow button needs a number it
   // can nudge optimistically, so this stays unformatted unlike the labels.
   followerCount: number
+  // The pro-owner stats grid (web /pro/profile/public-profile, iOS
+  // ProProfileTabView) reports published looks and followers as static tiles.
+  // Formatted here, like the labels above, so the two clients can't drift into
+  // separate compact-count implementations; `followerCount` above stays raw for
+  // the Follow button, which is a different surface with live mutation.
+  looksLabel: string
+  followersLabel: string
 }
 
 function isNonNull<T>(value: T | null): value is T {
@@ -591,6 +598,7 @@ export function mapPublicProfileStatsToDto(args: {
   reviewCount: number
   averageRating: number | null
   followerCount: number
+  publishedLooksCount: number
 }): PublicProfileStatsDto {
   return {
     priceFromLabel: getPublicProfilePriceFromLabel(args.offerings),
@@ -599,5 +607,7 @@ export function mapPublicProfileStatsToDto(args: {
     reviewCountLabel: formatCompactCount(args.reviewCount),
     averageRatingLabel: formatAverageRating(args.averageRating),
     followerCount: Math.max(0, Math.trunc(args.followerCount)),
+    looksLabel: formatCompactCount(args.publishedLooksCount),
+    followersLabel: formatCompactCount(args.followerCount),
   }
 }

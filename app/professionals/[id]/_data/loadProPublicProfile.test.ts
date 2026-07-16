@@ -7,13 +7,7 @@
 // (stable DTO).
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  LookPostStatus,
-  LookPostVisibility,
-  MediaType,
-  MediaVisibility,
-  ModerationStatus,
-} from '@prisma/client'
+import { MediaType, MediaVisibility } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   const professionalProfile = { findUnique: vi.fn() }
@@ -23,6 +17,7 @@ const mocks = vi.hoisted(() => {
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }))
 
 import { loadPortfolioTiles } from './loadProPublicProfile'
+import { proOwnPublicLooksWhere } from '@/lib/looks/selects'
 import { PUBLIC_PROFILE_LIMITS } from '@/lib/profiles/publicProfileSelects'
 
 function makeLookRow(mediaOverrides: Record<string, unknown> = {}) {
@@ -75,13 +70,9 @@ describe('loadPortfolioTiles (§19c — grid reads pro LookPosts)', () => {
           lookPosts: expect.objectContaining({
             // The moderation gate is the point: nothing renders public pre-APPROVED,
             // and client-authored looks (clientAuthorId set) stay on /u/[handle].
-            where: {
-              clientAuthorId: null,
-              status: LookPostStatus.PUBLISHED,
-              moderationStatus: ModerationStatus.APPROVED,
-              visibility: LookPostVisibility.PUBLIC,
-              removedAt: null,
-            },
+            // Shared with the "Looks" stat count so the grid and the tile can't
+            // disagree — lib/looks/selects.test.ts locks the clause's contents.
+            where: proOwnPublicLooksWhere,
             orderBy: { publishedAt: 'desc' },
             take: PUBLIC_PROFILE_LIMITS.portfolioTiles,
           }),

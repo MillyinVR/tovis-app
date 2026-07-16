@@ -11,14 +11,12 @@ import 'server-only'
 
 import {
   BookingStatus,
-  LookPostStatus,
-  LookPostVisibility,
-  ModerationStatus,
   Role,
   type VerificationStatus,
 } from '@prisma/client'
 
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
+import { proOwnPublicLooksWhere } from '@/lib/looks/selects'
 import {
   listPublicAcceptedMethods,
   publicPaymentMethodsSelect,
@@ -109,6 +107,7 @@ export async function loadProPublicProfileBase(args: {
     favoritesCount,
     completedBookingCount,
     followerCount,
+    publishedLooksCount,
     offeringRows,
     favoriteRow,
     paymentSettingsRow,
@@ -133,6 +132,12 @@ export async function loadProPublicProfileBase(args: {
 
     prisma.proFollow.count({
       where: { professionalId: profileRow.id },
+    }),
+
+    // Same set the portfolio grid below renders, unbounded by its tile cap — the
+    // pro-owner stats grid reports the true total.
+    prisma.lookPost.count({
+      where: { professionalId: profileRow.id, ...proOwnPublicLooksWhere },
     }),
 
     prisma.professionalServiceOffering.findMany({
@@ -197,6 +202,7 @@ export async function loadProPublicProfileBase(args: {
         reviewCount,
         averageRating,
         followerCount,
+        publishedLooksCount,
       }),
       isFavoritedByMe: Boolean(favoriteRow),
       viewerUserId,
@@ -224,15 +230,7 @@ export async function loadPortfolioTiles(
     where: { id: professionalId },
     select: {
       lookPosts: {
-        where: {
-          // Pro-authored looks only — a client-authored look points at this pro but
-          // belongs on the client's own /u/[handle] grid, not the pro's portfolio.
-          clientAuthorId: null,
-          status: LookPostStatus.PUBLISHED,
-          moderationStatus: ModerationStatus.APPROVED,
-          visibility: LookPostVisibility.PUBLIC,
-          removedAt: null,
-        },
+        where: proOwnPublicLooksWhere,
         orderBy: { publishedAt: 'desc' },
         take: PUBLIC_PROFILE_LIMITS.portfolioTiles,
         select: publicPortfolioLookSelect,

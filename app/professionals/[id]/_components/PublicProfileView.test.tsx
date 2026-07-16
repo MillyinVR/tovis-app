@@ -3,15 +3,14 @@ import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,
-  LookPostStatus,
-  LookPostVisibility,
   MediaType,
   MediaVisibility,
-  ModerationStatus,
   ProfessionType,
   Role,
   VerificationStatus,
 } from '@prisma/client'
+
+import { proOwnPublicLooksWhere } from '@/lib/looks/selects'
 
 // PublicProfileView holds the full public-profile render + data loading. It is
 // rendered by both `/professionals/[id]` and the `/p/[handle]` vanity route, so
@@ -44,6 +43,9 @@ const mocks = vi.hoisted(() => ({
       count: vi.fn(),
     },
     proFollow: {
+      count: vi.fn(),
+    },
+    lookPost: {
       count: vi.fn(),
     },
     professionalServiceOffering: {
@@ -378,6 +380,7 @@ describe('app/professionals/[id] PublicProfileView', () => {
     mocks.prisma.professionalFavorite.findUnique.mockResolvedValue(null)
     mocks.prisma.booking.count.mockResolvedValue(0)
     mocks.prisma.proFollow.count.mockResolvedValue(0)
+    mocks.prisma.lookPost.count.mockResolvedValue(0)
     mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([])
     mocks.prisma.professionalPaymentSettings.findUnique.mockResolvedValue(null)
     mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
@@ -530,13 +533,7 @@ describe('app/professionals/[id] PublicProfileView', () => {
         where: { id: 'pro_1' },
         select: expect.objectContaining({
           lookPosts: expect.objectContaining({
-            where: {
-              clientAuthorId: null,
-              status: LookPostStatus.PUBLISHED,
-              moderationStatus: ModerationStatus.APPROVED,
-              visibility: LookPostVisibility.PUBLIC,
-              removedAt: null,
-            },
+            where: proOwnPublicLooksWhere,
             orderBy: { publishedAt: 'desc' },
           }),
         }),

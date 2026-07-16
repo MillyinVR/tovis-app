@@ -11669,6 +11669,12 @@
         "followerCount": {
           "type": "number"
         },
+        "followersLabel": {
+          "type": "string"
+        },
+        "looksLabel": {
+          "type": "string"
+        },
         "priceFromLabel": {
           "type": [
             "string",
@@ -11685,7 +11691,9 @@
         "favoritesLabel",
         "reviewCountLabel",
         "averageRatingLabel",
-        "followerCount"
+        "followerCount",
+        "looksLabel",
+        "followersLabel"
       ],
       "type": "object"
     },
