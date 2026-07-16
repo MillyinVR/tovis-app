@@ -174,6 +174,12 @@ export default async function AdminHomePage() {
                 cta="Review anomalies"
               />
               <Card
+                title="Personalization metrics"
+                desc="Funnel + health rollup: save→book conversion, the saved-not-booked gap, board→booking, hide rate, per-trigger notification opt-out, and lifetime rebook rate."
+                href="/admin/looks/metrics"
+                cta="View metrics"
+              />
+              <Card
                 title="Permissions"
                 desc="Scope what admins can do."
                 href="/admin/permissions"
