@@ -1516,6 +1516,130 @@ describe('lib/looks/personalizedFeed', () => {
         page.items.length,
       )
     })
+
+    describe('§4.6 impression freshness + retrieval widening', () => {
+      it('reports freshnessRatio 1.0 and does not widen when the fresh supply fills the page', async () => {
+        // Backbone fills the page (limit 2 → 3 rows, hasMore). Even with a seen
+        // set, there is no short slot to backfill.
+        mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+          feedRow({ id: 'b1', rankScore: 9 }),
+          feedRow({ id: 'b2', rankScore: 7 }),
+          feedRow({ id: 'b3', rankScore: 5 }),
+        ])
+
+        const page = await buildPersonalizedFeedPage({
+          tenant: ROOT_TENANT,
+          userId: 'user_1',
+          clientId: 'client_1',
+          limit: 2,
+          cursor: { rankScore: 20, publishedAt: NOW, id: 'prev' },
+          seenLookIds: new Set(['s_old']),
+          now: NOW,
+        })
+
+        expect(page.meta.freshnessRatio).toBe(1)
+        expect(page.meta.widenedBackfillCount).toBe(0)
+        // Only the backbone query ran — no widening backfill.
+        expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledTimes(1)
+        expect(page.items.map((i) => i.id)).toEqual(['b1', 'b2'])
+      })
+
+      it('reports a falling freshnessRatio on a short fresh page but does NOT widen a cold entry (empty seen)', async () => {
+        // Cold entry, thin fresh supply (2 of a requested 4) and no seen set to
+        // re-show from → the metric flags the supply problem but the feed stays
+        // byte-identical (no extra query, no re-show).
+        mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+          feedRow({ id: 'b1', rankScore: 9 }),
+          feedRow({ id: 'b2', rankScore: 7 }),
+        ])
+
+        const page = await buildPersonalizedFeedPage({
+          tenant: ROOT_TENANT,
+          userId: 'user_1',
+          clientId: 'client_1',
+          limit: 4,
+          cursor: null,
+          seenLookIds: new Set(),
+          now: NOW,
+        })
+
+        expect(page.meta.freshnessRatio).toBe(0.5)
+        expect(page.meta.widenedBackfillCount).toBe(0)
+        expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledTimes(1)
+        expect(page.items.map((i) => i.id)).toEqual(['b1', 'b2'])
+        expect(page.nextCursor).toBeNull()
+      })
+
+      it('widens retrieval on a short fresh page once a seen set exists, re-showing previously-seen looks after the fresh ones', async () => {
+        mocks.prisma.lookPost.findMany
+          // Fresh backbone: only 2 never-seen looks left for a requested 4.
+          .mockResolvedValueOnce([
+            feedRow({ id: 'b1', rankScore: 9 }),
+            feedRow({ id: 'b2', rankScore: 7 }),
+          ])
+          // Widening backfill: the globally-best previously-seen looks.
+          .mockResolvedValueOnce([
+            feedRow({ id: 's1', rankScore: 100 }),
+            feedRow({ id: 's2', rankScore: 80 }),
+          ])
+
+        const page = await buildPersonalizedFeedPage({
+          tenant: ROOT_TENANT,
+          userId: 'user_1',
+          clientId: 'client_1',
+          limit: 4,
+          cursor: { rankScore: 20, publishedAt: NOW, id: 'prev' },
+          seenLookIds: new Set(['s1', 's2']),
+          now: NOW,
+        })
+
+        // Fresh never-seen content always leads; the re-shown backfill trails.
+        expect(page.items.map((i) => i.id)).toEqual(['b1', 'b2', 's1', 's2'])
+        expect(page.meta.freshnessRatio).toBe(0.5)
+        expect(page.meta.widenedBackfillCount).toBe(2)
+
+        // The widening query (2nd call) fills exactly the short slots and excludes
+        // the fresh page's ids, but NOT the seen ids (re-showing them is the point).
+        const widenCall = mocks.prisma.lookPost.findMany.mock.calls[1]?.[0]
+        expect(widenCall?.take).toBe(2)
+        const widenIdClause = widenCall?.where?.AND?.find(
+          (clause: Record<string, unknown>) =>
+            clause && typeof clause === 'object' && 'id' in clause,
+        )
+        expect(widenIdClause?.id?.notIn).toEqual(
+          expect.arrayContaining(['b1', 'b2']),
+        )
+        expect(widenIdClause?.id?.notIn).not.toContain('s1')
+      })
+
+      it('keeps hidden looks hard-excluded from the widening backfill (§2.2 never re-shown)', async () => {
+        mocks.prisma.lookHide.findMany.mockResolvedValue([
+          { lookPostId: 'hidden_a', createdAt: NOW, ...catRow('bridal') },
+        ])
+        mocks.prisma.lookPost.findMany
+          .mockResolvedValueOnce([feedRow({ id: 'b1', rankScore: 9 })])
+          .mockResolvedValueOnce([feedRow({ id: 's1', rankScore: 100 })])
+
+        const page = await buildPersonalizedFeedPage({
+          tenant: ROOT_TENANT,
+          userId: 'user_1',
+          clientId: 'client_1',
+          limit: 3,
+          cursor: { rankScore: 20, publishedAt: NOW, id: 'prev' },
+          seenLookIds: new Set(['s1']),
+          now: NOW,
+        })
+
+        expect(page.meta.widenedBackfillCount).toBe(1)
+        const widenCall = mocks.prisma.lookPost.findMany.mock.calls[1]?.[0]
+        const widenIdClause = widenCall?.where?.AND?.find(
+          (clause: Record<string, unknown>) =>
+            clause && typeof clause === 'object' && 'id' in clause,
+        )
+        // Hidden looks stay excluded even under widening.
+        expect(widenIdClause?.id?.notIn).toContain('hidden_a')
+      })
+    })
   })
 })
 

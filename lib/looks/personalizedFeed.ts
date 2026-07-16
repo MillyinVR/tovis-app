@@ -763,6 +763,24 @@ export type PersonalizedFeedPage = {
     // closeness measure — ordering, not this count, buries a far pro. The §9 "is the
     // proximity signal reaching the feed" metric.
     proximityFitBoostedCount: number
+    // §4.6 impression freshness: the per-serve fraction of the requested `limit`
+    // this feed could fill with NEVER-SEEN looks (backbone + injection + exploration
+    // all hard-exclude the session seen + hidden sets, so those items are fresh by
+    // construction). 1.0 = the fresh supply filled the page; below 1.0 = the fresh
+    // supply within reach is running short — the spec §4.6 "% of cards the user has
+    // never seen" / §9 feed-freshness metric. A sustained fall predicts a stale feed
+    // (supply problem in that viewer's graph) before it happens.
+    freshnessRatio: number
+    // §4.6 retrieval widening: how many PREVIOUSLY-SEEN looks were re-shown to
+    // backfill a short fresh page (hidden looks stay hard-excluded). 0 in the healthy
+    // case (fresh supply filled the page) and on cold entries (no seen set to
+    // re-show from). >0 = the fresh supply ran out this serve and the feed widened
+    // rather than go short/empty (spec §4.6/§4.7 "an empty feed is worse than a
+    // loosely-matched one"). Only ever fires on the terminal page (a short fresh
+    // backbone means nextCursor is null), so it never becomes an infinite re-show —
+    // the per-user impression cap that would govern sustained re-show is a separate,
+    // deferred §4.6 build.
+    widenedBackfillCount: number
   }
 }
 
@@ -1015,11 +1033,58 @@ export async function buildPersonalizedFeedPage(args: {
   })
 
   // §4.3.1: interleave the reserved exploration slice into the re-ranked page.
-  const items = interleaveExploration(
+  // Everything here is NEVER-SEEN (the backbone, followed injection and exploration
+  // all hard-exclude the session seen + hidden sets), so this is the page's fresh
+  // supply.
+  const freshItems = interleaveExploration(
     rankedItems,
     explorationRows,
     plan.explorationSlots,
   )
+
+  // §4.6 impression freshness + retrieval widening. The fresh supply "runs out"
+  // exactly when `freshItems` is short of the requested `limit` — the per-serve
+  // freshness ratio falling below 1.0 is the supply-problem signal (spec §4.6:
+  // "% of cards the user has never seen … falling freshness = supply problem in
+  // that user's graph → widen retrieval before the feed goes stale"). Rather than
+  // serve a short/empty page (spec §4.7: "an empty feed is worse than a
+  // loosely-matched one"), widen retrieval: backfill the remaining slots with the
+  // globally-best PREVIOUSLY-SEEN looks (hidden looks stay hard-excluded; this
+  // page's ids too), appended AFTER the fresh items so never-seen content always
+  // leads. Gated on a non-empty session seen set — that is both where the
+  // re-showable back-catalog comes from and the only situation the fresh supply
+  // gets excluded down to short in the first place, so a cold entry stays
+  // byte-identical (no extra query). This can only fire on the TERMINAL page: a
+  // short fresh backbone means hasMore is false, so nextCursor is already null and
+  // the feed ends after this one widened page (no infinite re-show; the §4.6
+  // per-user impression cap that would govern sustained re-show is deferred).
+  const freshCount = freshItems.length
+  const freshnessRatio =
+    args.limit > 0
+      ? Math.round(Math.min(1, freshCount / args.limit) * 1000) / 1000
+      : 0
+  const remainingSlots = Math.max(0, args.limit - freshCount)
+  let widenedRows: LooksFeedRow[] = []
+  if (remainingSlots > 0 && seenIds.length > 0) {
+    const onPageIds = new Set(freshItems.map((row) => row.id))
+    const widenExcludeIds = [...new Set([...hiddenLookIds, ...onPageIds])]
+    widenedRows = await prisma.lookPost.findMany({
+      where: {
+        AND: [
+          baseWhere,
+          ...(widenExcludeIds.length > 0
+            ? [{ id: { notIn: widenExcludeIds } }]
+            : []),
+        ],
+      },
+      orderBy: buildLooksFeedOrderBy({ kind: 'ALL', sort: 'RANKED' }),
+      take: remainingSlots,
+      select: looksFeedSelect,
+    })
+  }
+
+  const items = [...freshItems, ...widenedRows]
+  const widenedBackfillCount = widenedRows.length
 
   // §4.3 composition metric: the displayed blend of bookable-now (pro has a real
   // near-term opening) vs inspiration (everything else). Dark until the cron runs.
@@ -1114,6 +1179,8 @@ export async function buildPersonalizedFeedPage(args: {
       reliabilityBoostedCount,
       priceFitBoostedCount,
       proximityFitBoostedCount,
+      freshnessRatio,
+      widenedBackfillCount,
     },
   }
 }
