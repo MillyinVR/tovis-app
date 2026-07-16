@@ -11,6 +11,7 @@ import {
   impressionWindowDate,
   MAX_APPLY_LOOK_VIEWS_BATCH,
   processApplyLookViews,
+  selectViewerCappedLookIds,
   type LookPostViewIngestDb,
 } from './applyLookViews'
 import type { LookViewImpression } from './contracts'
@@ -146,6 +147,47 @@ describe('impressionWindowDate', () => {
   })
 })
 
+describe('selectViewerCappedLookIds', () => {
+  const eligible = new Set(['look_1', 'look_2'])
+
+  it('keeps only eligible FEED impressions', () => {
+    const ids = selectViewerCappedLookIds(
+      [
+        { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+        // DETAIL is explicit nav — never counts toward the feed cap
+        { lookPostId: 'look_1', source: LookImpressionSource.DETAIL },
+        { lookPostId: 'look_2', source: LookImpressionSource.FEED },
+        // ineligible look — dropped
+        { lookPostId: 'look_gone', source: LookImpressionSource.FEED },
+      ],
+      eligible,
+    )
+    expect(ids).toEqual(['look_1', 'look_2'])
+  })
+
+  it('drops DETAIL-only and BOARD impressions', () => {
+    const ids = selectViewerCappedLookIds(
+      [
+        { lookPostId: 'look_1', source: LookImpressionSource.DETAIL },
+        { lookPostId: 'look_2', source: LookImpressionSource.BOARD },
+      ],
+      eligible,
+    )
+    expect(ids).toEqual([])
+  })
+
+  it('returns each eligible look once', () => {
+    const ids = selectViewerCappedLookIds(
+      [
+        { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+        { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+      ],
+      eligible,
+    )
+    expect(ids).toEqual(['look_1'])
+  })
+})
+
 describe('processApplyLookViews', () => {
   function makeDb(eligibleIds: string[]) {
     const updateManyAndReturn = vi
@@ -156,11 +198,17 @@ describe('processApplyLookViews', () => {
       .mockImplementation((args: { create: { lookPostId: string } }) =>
         Promise.resolve({ lookPostId: args.create.lookPostId }),
       )
+    const viewerUpsert = vi
+      .fn()
+      .mockImplementation((args: { create: { lookPostId: string } }) =>
+        Promise.resolve({ lookPostId: args.create.lookPostId }),
+      )
     const db: LookPostViewIngestDb = {
       lookPost: { updateManyAndReturn },
       lookPostImpressionStat: { upsert },
+      lookViewerImpressionStat: { upsert: viewerUpsert },
     }
-    return { db, updateManyAndReturn, upsert }
+    return { db, updateManyAndReturn, upsert, viewerUpsert }
   }
 
   const now = new Date('2026-07-08T12:00:00.000Z')
@@ -262,5 +310,78 @@ describe('processApplyLookViews', () => {
     expect(upsert).not.toHaveBeenCalled()
     expect(result.appliedCount).toBe(0)
     expect(result.lookPostIds).toEqual([])
+  })
+
+  it('bumps the per-viewer cap counter for eligible FEED looks when a viewer is present', async () => {
+    const { db, viewerUpsert } = makeDb(['look_1', 'look_2'])
+
+    await processApplyLookViews(
+      db,
+      {
+        viewerId: 'user_1',
+        impressions: [
+          { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+          // DETAIL open — never counts toward the feed cap
+          { lookPostId: 'look_1', source: LookImpressionSource.DETAIL },
+          { lookPostId: 'look_2', source: LookImpressionSource.FEED },
+          // ineligible — no cap row
+          { lookPostId: 'look_gone', source: LookImpressionSource.FEED },
+        ],
+      },
+      { now },
+    )
+
+    expect(viewerUpsert).toHaveBeenCalledTimes(2)
+    expect(viewerUpsert).toHaveBeenCalledWith({
+      where: { userId_lookPostId: { userId: 'user_1', lookPostId: 'look_1' } },
+      create: {
+        userId: 'user_1',
+        lookPostId: 'look_1',
+        count: 1,
+        lastSeenAt: now,
+      },
+      update: { count: { increment: 1 }, lastSeenAt: now },
+      select: { lookPostId: true },
+    })
+    expect(viewerUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId_lookPostId: { userId: 'user_1', lookPostId: 'look_2' },
+        },
+      }),
+    )
+  })
+
+  it('records no per-viewer cap rows for a guest (no viewerId)', async () => {
+    const { db, viewerUpsert } = makeDb(['look_1'])
+
+    await processApplyLookViews(
+      db,
+      {
+        impressions: [
+          { lookPostId: 'look_1', source: LookImpressionSource.FEED },
+        ],
+      },
+      { now },
+    )
+
+    expect(viewerUpsert).not.toHaveBeenCalled()
+  })
+
+  it('records no per-viewer cap row for a DETAIL-only exposure', async () => {
+    const { db, viewerUpsert } = makeDb(['look_1'])
+
+    await processApplyLookViews(
+      db,
+      {
+        viewerId: 'user_1',
+        impressions: [
+          { lookPostId: 'look_1', source: LookImpressionSource.DETAIL },
+        ],
+      },
+      { now },
+    )
+
+    expect(viewerUpsert).not.toHaveBeenCalled()
   })
 })

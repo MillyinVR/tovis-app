@@ -404,6 +404,39 @@ describe('lib/jobs/looksSocial/process', () => {
     )
   })
 
+  it('reads the §4.6 viewerId from an APPLY_LOOK_VIEWS payload into the view processor', async () => {
+    const now = new Date('2026-04-20T19:00:00.000Z')
+    const job = makeDueJob({
+      id: 'job_views_3',
+      type: LooksSocialJobType.APPLY_LOOK_VIEWS,
+      payload: {
+        viewerId: '  user_1  ',
+        impressions: [{ lookPostId: 'look_1', source: 'FEED' }],
+      },
+      dedupeKey: 'look-views:nonce-3',
+    })
+
+    mocks.prisma.looksSocialJob.findMany.mockResolvedValue([job])
+    mocks.prisma.looksSocialJob.updateMany.mockResolvedValue({ count: 1 })
+    mocks.processApplyLookViews.mockResolvedValue({
+      appliedCount: 1,
+      lookPostIds: ['look_1'],
+    })
+    mocks.recomputeLookPostRankScore.mockResolvedValue(0)
+    mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: job.id })
+
+    await processLooksSocialJobs({ now })
+
+    expect(mocks.processApplyLookViews).toHaveBeenCalledWith(
+      mocks.prisma,
+      {
+        viewerId: 'user_1',
+        impressions: [{ lookPostId: 'look_1', source: 'FEED' }],
+      },
+      { now },
+    )
+  })
+
   it('requeues force-enqueued MODERATION_SCAN_LOOK_POST jobs when attempts remain, proving the worker still treats them as deferred', async () => {
     const now = new Date('2026-04-20T17:00:00.000Z')
     const retryAt = makeRetryAt(now)

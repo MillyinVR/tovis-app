@@ -312,6 +312,52 @@ describe('lib/jobs/looksSocial/enqueue', () => {
       expect(db.looksSocialJob.upsert).not.toHaveBeenCalled()
     })
 
+    it('enqueueApplyLookViews persists a trimmed §4.6 viewerId when signed in', async () => {
+      const db = makeDb()
+      const prismaDb = asLooksSocialJobDb(db)
+      db.looksSocialJob.upsert.mockResolvedValue(
+        makeJobRow({
+          id: 'job_views_2',
+          type: LooksSocialJobType.APPLY_LOOK_VIEWS,
+          dedupeKey: 'look-views:nonce',
+        }),
+      )
+
+      await enqueueApplyLookViews(prismaDb, {
+        viewerId: '  user_1  ',
+        impressions: [{ lookPostId: 'look_1', source: 'FEED' }],
+      })
+
+      const call = db.looksSocialJob.upsert.mock.calls[0]?.[0]
+      expect(call.create.payload).toEqual({
+        impressions: [{ lookPostId: 'look_1', source: 'FEED' }],
+        viewerId: 'user_1',
+      })
+    })
+
+    it('enqueueApplyLookViews omits the viewerId for a guest / blank id', async () => {
+      const db = makeDb()
+      const prismaDb = asLooksSocialJobDb(db)
+      db.looksSocialJob.upsert.mockResolvedValue(
+        makeJobRow({
+          id: 'job_views_3',
+          type: LooksSocialJobType.APPLY_LOOK_VIEWS,
+          dedupeKey: 'look-views:nonce',
+        }),
+      )
+
+      await enqueueApplyLookViews(prismaDb, {
+        viewerId: '   ',
+        impressions: [{ lookPostId: 'look_1', source: 'FEED' }],
+      })
+
+      const call = db.looksSocialJob.upsert.mock.calls[0]?.[0]
+      expect(call.create.payload).toEqual({
+        impressions: [{ lookPostId: 'look_1', source: 'FEED' }],
+      })
+      expect('viewerId' in call.create.payload).toBe(false)
+    })
+
     it('enqueueRecomputeLookSpotlightScore builds the canonical dedupe key and payload', async () => {
       const db = makeDb()
       const prismaDb = asLooksSocialJobDb(db)

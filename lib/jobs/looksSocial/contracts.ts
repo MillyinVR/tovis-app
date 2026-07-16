@@ -62,6 +62,13 @@ export type ApplyLookViewsJobPayload = {
   // Legacy unsourced list (iOS + pre-§5.6 web, plus jobs already queued at
   // deploy time). Read as FEED-sourced impressions for back-compat.
   lookPostIds?: string[]
+  // §4.6 impression cap: the signed-in viewer this batch belongs to, resolved
+  // server-side from the session at flush time (never client-supplied). When
+  // present, each eligible FEED impression bumps a per-(viewer, look) exposure
+  // counter (LookViewerImpressionStat) that caps a look out of that viewer's
+  // personalized feed. Absent for guests — the aggregate viewCount /
+  // per-source path is unchanged.
+  viewerId?: string
 }
 
 export type EmbedLookPostImageJobPayload = {

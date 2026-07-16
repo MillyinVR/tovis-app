@@ -1349,6 +1349,7 @@ model User {
 
   lookLikes        LookLike[]
   lookHides        LookHide[]
+  lookViewerImpressionStats LookViewerImpressionStat[]
   lookComments     LookComment[]
   lookCommentLikes LookCommentLike[]
 
@@ -4308,6 +4309,9 @@ model LookPost {
   // §5.6 per-source, per-day impression aggregates (written by the
   // APPLY_LOOK_VIEWS job); the anti-gaming velocity-check denominator breakdown.
   impressionStats  LookPostImpressionStat[]
+  // §4.6 per-viewer feed-exposure counts (written by the APPLY_LOOK_VIEWS job);
+  // once a viewer has seen a look enough times it's capped out of their feed.
+  viewerImpressionStats LookViewerImpressionStat[]
   inspiredBookings Booking[]                @relation("LookInspiredBookings")
   // §4.2 per-look booking-conversion aggregate (written hourly by the
   // look-conversion-stats job; absent until the look has driven >=1 booking).
@@ -4708,6 +4712,39 @@ model LookPostImpressionStat {
   @@id([lookPostId, source, windowDate])
   @@index([windowDate])
   @@index([lookPostId, windowDate])
+}
+
+// Per-viewer, per-look feed-exposure counter (spec §4.6 impression capping).
+// Unlike the session `seen` list (client-supplied, resets every session) this
+// PERSISTS a viewer's feed exposures across sessions, so a look that a viewer
+// has scrolled past enough times stops re-appearing in their personalized feed
+// (it can still be opened directly — the cap only governs the feed).
+//
+// Written by the APPLY_LOOK_VIEWS job: only FEED-source impressions increment
+// the count (a DETAIL open is explicit nav, not an unwanted repeat), and only
+// when the flushing viewer is signed in (guests get no row — the aggregate
+// LookPostImpressionStat path is unaffected). Read by loadPersonalizedAffinity
+// (lib/looks/viewerImpressionCap.ts), which lists the looks at/above the cap for
+// the feed's hard exclusion.
+model LookViewerImpressionStat {
+  userId     String
+  lookPostId String
+  // How many FEED exposures this viewer has had of this look (≈ once per
+  // browsing session — the client dedupes per session).
+  count      Int      @default(0)
+  // The most recent exposure — drives which capped ids win the bounded read.
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
+
+  @@id([userId, lookPostId])
+  // The reader filters by (userId, count >= cap) and orders by recency; this
+  // composite covers the capped-id lookup.
+  @@index([userId, count])
+  @@index([lookPostId])
 }
 
 // Global taste vector per client (§6.0/§6.1 global_taste_embedding): the
