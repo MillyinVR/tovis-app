@@ -163,6 +163,15 @@ jobs:
       - name: Backfill contact lookup hashes
         run: pnpm run backfill:contact-hash-v2 -- --write
 
+      # Build here rather than inside Playwright's `webServer` command, which
+      # caps it at 120s: a full production build of ~111 routes routinely ran
+      # longer on a slow runner and killed the job before a single test ran,
+      # reported only as "Timed out waiting 120000ms from config.webServer". As
+      # its own step it gets the job's 30min budget and a readable log when the
+      # build genuinely breaks. playwright.config.ts then only runs `next start`.
+      - name: Build
+        run: pnpm run build
+
       # One project per job (see the `matrix` job above). `--project=<name>`
       # auto-runs its `setup` dependency, so each job seeds its own auth state.
       - name: Run browser E2E

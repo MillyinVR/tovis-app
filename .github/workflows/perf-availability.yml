@@ -115,6 +115,14 @@ jobs:
           test -n "$PERF_BACKGROUND_REFRESH_TRIGGER_SELECTOR" || (echo "Missing PERF_BACKGROUND_REFRESH_TRIGGER_SELECTOR" && exit 1)
           echo "Required perf config is set"
 
+      # Build once here rather than inside Playwright's `webServer` command,
+      # which caps it at 120s. This job invokes `playwright test` TWICE and
+      # `reuseExistingServer` is false on CI, so the build previously ran twice —
+      # both times racing that timeout. Now each invocation only boots the
+      # prebuilt server. See the note in playwright.config.ts.
+      - name: Build
+        run: pnpm run build
+
       - name: Run desktop perf collection
         run: pnpm exec playwright test tests/e2e/availability.perf.spec.ts --project=chromium
 
