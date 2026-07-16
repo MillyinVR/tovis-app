@@ -2,6 +2,9 @@ import React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
+
+const PASSWORD_PLACEHOLDER = `At least ${PASSWORD_MIN_LEN} characters`
 
 vi.mock('../AuthShell', () => ({
   default: ({
@@ -54,7 +57,7 @@ describe('app/(auth)/_components/reset/ResetPasswordClient', () => {
     render(<ResetPasswordClient token="reset_token_123" />)
 
     await user.type(
-      screen.getByPlaceholderText('At least 8 characters'),
+      screen.getByPlaceholderText(PASSWORD_PLACEHOLDER),
       'NewPassword123!',
     )
 
@@ -92,7 +95,7 @@ it('toggles password visibility', async () => {
   render(<ResetPasswordClient token="reset_token_123" />)
 
   const input = screen.getByPlaceholderText(
-    'At least 8 characters',
+    PASSWORD_PLACEHOLDER,
   ) as HTMLInputElement
 
   expect(input.type).toBe('password')
@@ -113,7 +116,7 @@ it('toggles password visibility', async () => {
     render(<ResetPasswordClient token="reset_token_123" />)
 
     await user.type(
-      screen.getByPlaceholderText('At least 8 characters'),
+      screen.getByPlaceholderText(PASSWORD_PLACEHOLDER),
       'NewPassword123!',
     )
 
@@ -148,7 +151,7 @@ it('toggles password visibility', async () => {
     render(<ResetPasswordClient token="reset_token_123" />)
 
     await user.type(
-      screen.getByPlaceholderText('At least 8 characters'),
+      screen.getByPlaceholderText(PASSWORD_PLACEHOLDER),
       'NewPassword123!',
     )
 

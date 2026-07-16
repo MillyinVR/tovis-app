@@ -3,6 +3,7 @@
 'use client'
 
 import { useState } from 'react'
+import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
 import AuthShell from '../AuthShell'
 import FieldLabel from '../FieldLabel'
 import PasswordInput from '../PasswordInput'
@@ -57,9 +58,9 @@ export default function ResetPasswordClient({ token }: { token: string }) {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="new-password"
-              placeholder="At least 8 characters"
+              placeholder={`At least ${PASSWORD_MIN_LEN} characters`}
             />
-            <span className="text-xs text-textSecondary/80">Use at least 8 characters.</span>
+            <span className="text-xs text-textSecondary/80">Use at least {PASSWORD_MIN_LEN} characters.</span>
           </label>
 
           {error ? (
