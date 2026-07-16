@@ -10955,6 +10955,149 @@
       ],
       "type": "object"
     },
+    "ProVisibilityActionDTO": {
+      "description": "Where the pro goes to pull this lever.",
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "href"
+      ],
+      "type": "object"
+    },
+    "ProVisibilityHealthDTO": {
+      "properties": {
+        "discoverable": {
+          "description": "False = the pro is filtered out of discovery entirely; levers are moot.",
+          "type": "boolean"
+        },
+        "levers": {
+          "description": "Biggest lever first (ACTION → ATTENTION → GOOD → UNKNOWN, stable).",
+          "items": {
+            "$ref": "#/definitions/ProVisibilityLeverDTO"
+          },
+          "type": "array"
+        },
+        "looks": {
+          "$ref": "#/definitions/ProVisibilityLookCountsDTO"
+        },
+        "notMeasured": {
+          "description": "Inputs a pro might expect to matter that discovery does NOT read today. Stated plainly so the dashboard never implies coverage it doesn't have.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/definitions/ProVisibilityStatus",
+          "description": "Worst lever status — drives the section header tone."
+        }
+      },
+      "required": [
+        "status",
+        "discoverable",
+        "levers",
+        "looks",
+        "notMeasured"
+      ],
+      "type": "object"
+    },
+    "ProVisibilityLeverDTO": {
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/definitions/ProVisibilityActionDTO"
+          },
+          "type": "array"
+        },
+        "detail": {
+          "description": "Plain-language \"here's how this affects discovery\" — no weights.",
+          "type": "string"
+        },
+        "headline": {
+          "description": "One-line verdict, written to be readable on its own.",
+          "type": "string"
+        },
+        "key": {
+          "$ref": "#/definitions/ProVisibilityLeverKey"
+        },
+        "status": {
+          "$ref": "#/definitions/ProVisibilityStatus"
+        }
+      },
+      "required": [
+        "key",
+        "status",
+        "headline",
+        "detail",
+        "actions"
+      ],
+      "type": "object"
+    },
+    "ProVisibilityLeverKey": {
+      "enum": [
+        "BOOKABLE",
+        "AVAILABILITY",
+        "LOOK_COVERAGE",
+        "BOOKING_CONVERSION",
+        "RELIABILITY"
+      ],
+      "type": "string"
+    },
+    "ProVisibilityLookCountsDTO": {
+      "description": "Counts behind the LOOK_COVERAGE lever, shown as a breakdown strip.",
+      "properties": {
+        "distinctServiceCount": {
+          "description": "Distinct services represented across feed-eligible looks. Services, not categories: groupBy can't traverse Service → ServiceCategory, and \"you have looks for 3 of your services\" is the more concrete read for a pro anyway. Display only — the coverage lever's status keys off looks + tags.",
+          "type": "number"
+        },
+        "distinctTagCount": {
+          "description": "Distinct non-banned tags across feed-eligible looks (match surface).",
+          "type": "number"
+        },
+        "draftCount": {
+          "description": "Never published.",
+          "type": "number"
+        },
+        "feedEligibleCount": {
+          "description": "Pro-authored looks that clear every gate the pro controls.",
+          "type": "number"
+        },
+        "pendingReviewCount": {
+          "description": "Published but still awaiting moderation — nothing for the pro to do.",
+          "type": "number"
+        },
+        "rejectedCount": {
+          "description": "Published but not approved — actionable.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "feedEligibleCount",
+        "pendingReviewCount",
+        "rejectedCount",
+        "draftCount",
+        "distinctTagCount",
+        "distinctServiceCount"
+      ],
+      "type": "object"
+    },
+    "ProVisibilityStatus": {
+      "description": "ACTION  — discovery is actively held back and the pro can fix it now. ATTENTION — a real lift is being left on the table. GOOD    — this input is healthy. UNKNOWN — not measured yet (cron hasn't populated, or too little data to           judge). Never the pro's fault; carries no blame copy.",
+      "enum": [
+        "GOOD",
+        "ATTENTION",
+        "ACTION",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
     "ProfessionType": {
       "$ref": "#/definitions/%24Enums.ProfessionType"
     },
