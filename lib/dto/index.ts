@@ -60,6 +60,16 @@ export type {
   ProOverviewPageData,
 } from '@/lib/analytics/proMonthlyAnalytics'
 
+// ── Pro visibility / transparency (GET /api/v1/pro/visibility) ────────────────
+export type {
+  ProVisibilityLeverKey,
+  ProVisibilityStatus,
+  ProVisibilityActionDTO,
+  ProVisibilityLeverDTO,
+  ProVisibilityLookCountsDTO,
+  ProVisibilityHealthDTO,
+} from '@/lib/pro/visibilityHealth'
+
 // ── Pro Finance & Tax tab (GET /api/v1/pro/finance) — superset of Overview ────
 export type {
   ProFinanceCardTone,

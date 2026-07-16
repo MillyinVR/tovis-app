@@ -3,18 +3,22 @@ import Link from 'next/link'
 
 import type { ProOverviewPageData } from '@/lib/analytics/proMonthlyAnalytics'
 import type { CreatorLooksAnalyticsDto } from '@/lib/looks/creatorAnalytics'
+import type { ProVisibilityHealthDTO } from '@/lib/pro/visibilityHealth'
 
 import ProLooksInsights from './ProLooksInsights'
 import ProPerformanceSections from './ProPerformanceSections'
+import ProVisibilitySection from './ProVisibilitySection'
 
 type ProOverviewDashboardProps = {
   overview: ProOverviewPageData
   looksAnalytics: CreatorLooksAnalyticsDto
+  visibility: ProVisibilityHealthDTO
 }
 
 export default function ProOverviewDashboard({
   overview,
   looksAnalytics,
+  visibility,
 }: ProOverviewDashboardProps) {
   return (
     <div className="brand-pro-overview-body no-scroll">
@@ -23,6 +27,10 @@ export default function ProOverviewDashboard({
       <ProPerformanceSections overview={overview} />
 
       <ProLooksInsights analytics={looksAnalytics} />
+
+      {/* §6.5 sits after the performance read: "what happened" first, then
+          "why, and what to pull about it". */}
+      <ProVisibilitySection visibility={visibility} />
     </div>
   )
 }
