@@ -82,7 +82,14 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: isCI ? 'npm run build && npm run start' : 'npm run dev',
+    // CI builds in its own workflow step (see e2e.yml / perf-availability.yml),
+    // so this only boots the prebuilt server — a few seconds. `next build` used
+    // to run here, which meant a ~2-4min production build of ~111 routes had to
+    // finish inside the timeout below: on a slow runner it didn't, and the job
+    // died with the opaque "Timed out waiting 120000ms from config.webServer"
+    // having run zero tests (it took down `main` twice on 2026-07-16, once on a
+    // docs-only commit). Any CI caller of `playwright test` MUST build first.
+    command: isCI ? 'npm run start' : 'npm run dev',
     url: baseURL,
     timeout: 120_000,
     reuseExistingServer: !isCI,
