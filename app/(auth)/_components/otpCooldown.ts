@@ -16,16 +16,30 @@ export function formatCooldown(seconds: number): string {
 }
 
 /**
- * Pull a `retryAfterSeconds` hint out of a JSON error body (the shape our
- * rate-limit responses use). Accepts a number or numeric string; returns a
- * non-negative whole number of seconds, or null when absent/unparseable.
+ * Pull the retry hint out of a rate-limit (429) JSON error body. Accepts a
+ * number or numeric string; returns a non-negative whole number of seconds, or
+ * null when absent/unparseable.
+ *
+ * The hint lives at `details.retryAfterSeconds`, NOT at the top level:
+ * `buildRateLimitResponse` (app/api/_utils/rateLimit.ts) nests the whole
+ * decision under `details`, and `jsonFail` spreads that as-is, so a real 429 is
+ *   { ok: false, error, code: 'RATE_LIMITED', details: { retryAfterSeconds, … } }
+ * That one site is the only emitter of the field anywhere in the API — reading
+ * the top level instead silently yielded null on every real response, which is
+ * exactly the bug this shape comment exists to prevent.
  */
 export function readRetryAfterSeconds(
   data: Record<string, unknown> | null,
 ): number | null {
   if (!data) return null
 
-  const value = data.retryAfterSeconds
+  const details = data.details
+  if (!details || typeof details !== 'object' || Array.isArray(details)) {
+    return null
+  }
+
+  const value = (details as Record<string, unknown>).retryAfterSeconds
+
   if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.max(0, Math.ceil(value))
   }

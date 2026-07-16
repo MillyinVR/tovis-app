@@ -760,7 +760,11 @@ describe('app/(auth)/verify-phone/page', () => {
             ok: false,
             error: 'Too many requests. Try again shortly.',
             code: 'RATE_LIMITED',
-            retryAfterSeconds: 60,
+            // `details` is where the real rate limiter puts this — see
+            // buildRateLimitResponse in app/api/_utils/rateLimit.ts. This mock
+            // previously hoisted it to the top level, so the assertions below
+            // passed against a body the API never sends.
+            details: { retryAfterSeconds: 60 },
           },
           429,
         ),
