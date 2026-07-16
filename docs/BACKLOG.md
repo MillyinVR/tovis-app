@@ -147,6 +147,11 @@ Foundation shipped (rate-based Bayesian rank scoring); remaining:
     and discovery fee-waiver logic (`lib/booking/resolveDiscoveryFinalize.ts:236`). Policy path —
     support-readiness before flipping.
 - [ ] Pro-migration go-live: confirm catalog min prices; Square/Acuity OAuth (Phase 2); flip `ENABLE_PRO_MIGRATION`.
+  - Export-instructions audit 2026-07-15 (PR #639 fixed the copy + `calendarFeed` flags; sources in that PR). Remaining wizard gaps, in impact order:
+  - [ ] Accept `.xlsx` uploads in the services/clients steps (SheetJS or server-side convert) — Vagaro (the biggest source) and Fresha export Excel by default; today the file picker only takes `.csv` and the copy tells pros to hand-convert.
+  - [ ] Optional full-name column splitting in the clients Map step — the mapper hard-requires separate first+last columns; a single-`Name` export (support-provided Booksy/StyleSeat CSVs) dead-ends the flow.
+  - [ ] Set expectations for attendee-less calendar feeds: most real feeds (Google-relay, Fresha times-only) carry no attendee name/email, so events import as held BLOCKS, not bookings — say so in the calendar step copy instead of implying full booking transfer.
+  - [ ] Consider a concierge fallback ("email us your exports") mirroring Vagaro's import model — their list of ~90 supported sources (screenshots, 2026-07-15) is the market map; self-serve-adjacent additions if we expand the picker: Booker, Boulevard, Goldie, Timely, Setmore, Mindbody.
 
 ## 3. Premortem remediation — Phase 3/4 + operator
 Source (now superseded): `audits/premortem-2026-06-24-remediation-plan.md`, `audits/HANDOFF-premortem-remediation-2026-06-25.md`.

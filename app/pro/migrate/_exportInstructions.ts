@@ -6,10 +6,14 @@
 // app. Data-only + brand-neutral (every step is about the SOURCE app, never
 // ours), so it lives beside _constants.ts rather than in lib/brand.
 //
-// Steps are kept intentionally version-agnostic — the goal is to point the pro at
-// the right screen and format, not to assert exact menu paths that shift between
-// app releases. The universal fallback (see MigrationCopy.entry.exportGuide) tells
-// them a plain CSV works when an app has no direct export.
+// Every guide below was fact-checked against the source app's official help
+// docs (or, where those are silent, the migration guides of vendors who run
+// concierge imports from that app) on 2026-07-15 — sources in the PR that
+// landed this revision; re-verify before editing a path here. Several
+// apps have NO self-serve export for a given stage; the guide then says so and
+// leads with the build-a-CSV fallback instead of pointing at a screen that
+// doesn't exist. The universal fallback (see MigrationCopy.entry.exportGuide)
+// reinforces that a plain CSV always works.
 
 import type { SourceApp } from './_types'
 
@@ -28,7 +32,7 @@ export type MigrationExportGuide = {
 const GENERIC: MigrationExportGuide = {
   menu: 'Open your service or price list and export/download it as a CSV. No export? A simple spreadsheet with a name and price column works too.',
   clients:
-    'Open your client or customer list and export/download it as a CSV. Look under Settings, Reports, or the list’s ••• / Export menu.',
+    'Open your client or customer list and export/download it as a CSV. Look under Settings, Reports, or the list’s ••• / Export menu. If the export is an Excel file, open it and save it as CSV first.',
   calendar:
     'Turn on calendar sync to get an iCal (.ics) link, or export your appointments as an .ics file.',
   calendarFeed: false,
@@ -36,49 +40,59 @@ const GENERIC: MigrationExportGuide = {
 
 export const EXPORT_GUIDES: Record<SourceApp, MigrationExportGuide> = {
   Vagaro: {
-    menu: 'In Vagaro, open your service menu (Business → Services) and export the list as a CSV.',
-    clients: 'In Vagaro, go to Customers and choose Export to download your client list as a CSV.',
+    menu: 'Vagaro’s service list downloads per stylist: Settings → Employees → Employee Profiles → pick the stylist → Services → the download icon (choose Excel, then save as CSV). Or just build a quick name-and-price CSV for the whole menu.',
+    clients:
+      'In Vagaro (owner login), go to Reports → Customers → Customers, run the report, then Export → Excel. Open the file and save it as CSV before uploading.',
     calendar:
-      'In Vagaro, turn on Calendar Sync to get an iCal feed link you can paste below, or export your appointments as .ics.',
-    calendarFeed: true,
+      'In Vagaro on the web, open Calendar and choose Export to iCal to download an .ics of the view on screen. Already had Apple/Outlook calendar sync connected? That subscribe link still works — paste it below.',
+    calendarFeed: false,
   },
   GlossGenius: {
     menu: 'GlossGenius has no service-list export — build a quick CSV with a service name and price column and upload that (we match each name to the catalog as you go).',
-    clients: 'In GlossGenius, open Clients and use Export clients to download a CSV.',
+    clients:
+      'Log in to GlossGenius in a web browser (the mobile app can’t export; owner account only) and open Clients → Export Clients to download a CSV.',
     calendar:
-      'In GlossGenius, connect your calendar (Google/Apple) to get an iCal link, or export upcoming appointments as .ics.',
-    calendarFeed: false,
+      'In GlossGenius, open calendar sync (Settings → Preferences → Two-Way Calendar Sync) and Copy Calendar Link — paste that link below. It’s the only GlossGenius export that includes upcoming appointments.',
+    calendarFeed: true,
   },
   Booksy: {
-    menu: 'In Booksy, open your services list and export it as a CSV, or build a simple name-and-price CSV to upload.',
-    clients: 'In Booksy, open Customers and export your client list as a CSV (via Settings or Booksy support if needed).',
-    calendar: 'In Booksy, enable calendar sync to get an iCal link, or export your appointments as .ics.',
+    menu: 'Booksy has no service-list export — build a quick CSV with a service name and price column and upload that.',
+    clients:
+      'In Booksy Biz on desktop, open Clients → More Options → Export to download a CSV. Don’t see it? Ask Booksy support (in-app chat or info.us@booksy.com) for your client list as a CSV.',
+    calendar:
+      'Booksy can’t export a calendar or iCal file (its calendar tools only import INTO Booksy). Ask Booksy support for a list of your upcoming appointments, or add them here by hand.',
     calendarFeed: false,
   },
   Square: {
-    menu: 'In Square Dashboard, open Items & Services → Actions → Export to download your services as a CSV.',
-    clients: 'In Square Dashboard, open Customer Directory → Export customers to download a CSV.',
+    menu: 'Square can’t export Appointments services (the Item library export covers retail items only) — build a quick CSV with a service name and price column and upload that.',
+    clients:
+      'In Square Dashboard, go to Customers → Customer directory → Import/Export → Export customers to download a CSV.',
     calendar:
-      'In Square Appointments, enable the calendar subscription to get an iCal feed link you can paste below.',
-    calendarFeed: true,
+      'Square has no iCal feed of its own. In Appointments → Settings → Calendar & booking, link Google Calendar (export only), then paste your Google Calendar’s private iCal address below to bring bookings in.',
+    calendarFeed: false,
   },
   StyleSeat: {
     menu: 'StyleSeat has no service export — build a quick CSV with a service name and price column and upload that.',
-    clients: 'In StyleSeat, open your Clients list and export it as a CSV (Settings → Clients, or via StyleSeat support).',
-    calendar: 'In StyleSeat, sync your calendar to get an iCal link, or export your appointments as .ics.',
+    clients:
+      'In StyleSeat, open your Clients tab and tap ••• → Export Client List. StyleSeat emails the CSV to your verified email address — check your inbox (and spam) rather than waiting for a download.',
+    calendar:
+      'StyleSeat can’t export appointments (its calendar sync only pulls your personal calendar in). Ask StyleSeat support for an appointments list, or add upcoming bookings here by hand.',
     calendarFeed: false,
   },
   Fresha: {
-    menu: 'In Fresha, open Catalog → Services and export your service list as a CSV.',
-    clients: 'In Fresha, open Clients and use Export to download your client list as a CSV.',
-    calendar: 'In Fresha, turn on calendar sync to get an iCal link, or export your appointments as .ics.',
-    calendarFeed: false,
+    menu: 'In Fresha, open Catalog → Service menu and use Options → Export to download your service list as a CSV.',
+    clients:
+      'In Fresha, open Clients → Options → Export to download your client list as a CSV (on team accounts this needs the “Can download clients” permission).',
+    calendar:
+      'In Fresha, open Calendar sync (profile picture → Manage workspace → Calendar sync), choose Other Calendars → Export your Fresha Calendar, and paste the link below. Fresha hides client and service details in that feed, so bookings arrive as held time slots.',
+    calendarFeed: true,
   },
   Acuity: {
-    menu: 'In Acuity, open your Appointment Types and export them, or build a quick name-and-price CSV.',
-    clients: 'In Acuity, open Client List → Import/Export and export your clients as a CSV.',
+    menu: 'Acuity has no appointment-type export — build a quick CSV with a service name and price column and upload that.',
+    clients:
+      'In Acuity, open Clients → Import/export → Export client list to download a CSV.',
     calendar:
-      'In Acuity, copy your calendar Subscribe (iCal) feed URL and paste it below to keep bookings in sync.',
+      'In Acuity, open Sync with Other Calendars → 1-way Calendar Sync and copy the link at the bottom of the page — paste it below to keep bookings in sync (clicking the link instead downloads a one-time .ics).',
     calendarFeed: true,
   },
   Other: GENERIC,

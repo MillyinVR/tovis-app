@@ -23,12 +23,25 @@ describe('migration export instructions', () => {
   })
 
   it('flags live-feed apps so the calendar step can offer "keep synced"', () => {
-    // Apps known to hand out an iCal/subscription feed URL.
+    // Verified against each app's help docs 2026-07-15 (sources in the PR that
+    // landed this revision):
+    // - Acuity hands out a 1-way-sync subscribe URL.
+    // - GlossGenius has a "Copy Calendar Link" iCal feed (its only export that
+    //   includes future appointments).
+    // - Fresha's "Export your Fresha Calendar" yields a subscribe URL (events
+    //   are times-only — client/service details are stripped).
     expect(EXPORT_GUIDES.Acuity.calendarFeed).toBe(true)
-    expect(EXPORT_GUIDES.Square.calendarFeed).toBe(true)
-    expect(EXPORT_GUIDES.Vagaro.calendarFeed).toBe(true)
-    // Export-only apps.
-    expect(EXPORT_GUIDES.GlossGenius.calendarFeed).toBe(false)
+    expect(EXPORT_GUIDES.GlossGenius.calendarFeed).toBe(true)
+    expect(EXPORT_GUIDES.Fresha.calendarFeed).toBe(true)
+    // No self-serve feed URL:
+    // - Square Appointments has no iCal support (Google-account sync only).
+    // - Vagaro stopped minting Apple/Outlook subscribe URLs for new
+    //   connections in 2026 (Google-account sync only; one-off .ics remains).
+    // - Booksy/StyleSeat have no outbound calendar export at all.
+    expect(EXPORT_GUIDES.Square.calendarFeed).toBe(false)
+    expect(EXPORT_GUIDES.Vagaro.calendarFeed).toBe(false)
+    expect(EXPORT_GUIDES.Booksy.calendarFeed).toBe(false)
+    expect(EXPORT_GUIDES.StyleSeat.calendarFeed).toBe(false)
     expect(EXPORT_GUIDES.Other.calendarFeed).toBe(false)
   })
 })
