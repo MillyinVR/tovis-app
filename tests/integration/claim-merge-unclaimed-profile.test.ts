@@ -25,6 +25,7 @@ import {
   ClientAddressKind,
   ClientClaimStatus,
   MessageThreadContextType,
+  NotificationEventKey,
   Prisma,
   PrismaClient,
   ProfessionalLocationType,
@@ -82,6 +83,12 @@ async function cleanup(): Promise<void> {
   // profile they hang off, or the delete is refused.
   await db.clientAllergy.deleteMany({ where: { client: { firstName: TAG } } })
   await db.clientAddress.deleteMany({ where: { client: { firstName: TAG } } })
+  await db.clientNotificationSettings.deleteMany({
+    where: { client: { firstName: TAG } },
+  })
+  await db.clientNotificationPreference.deleteMany({
+    where: { client: { firstName: TAG } },
+  })
   await db.clientProfile.deleteMany({ where: { firstName: TAG } })
   await db.user.deleteMany({ where: { email: { startsWith: TAG } } })
   await db.tenant.deleteMany({ where: { slug: { startsWith: TAG } } })
@@ -436,6 +443,81 @@ describe('mergeUnclaimedClientProfile', () => {
     })
 
     expect(result).toMatchObject({ kind: 'refused', reason: 'cross_tenant' })
+  })
+
+  it('collapses colliding notification rows instead of violating their uniques', async () => {
+    // The subtle half of the writer. Both profiles legitimately hold notification
+    // config, and `clientId @unique` / `@@unique([clientId, eventKey])` mean a
+    // straight rewrite would throw. The target's own settings win, because they
+    // are the ones its owner has actually seen and touched; the shell's are
+    // regenerable bookkeeping, which is why dropping them is safe here and
+    // refusing (as for threads) would be overkill.
+    const target = await makeTargetClient('notif_t')
+    const source = await makeSourceShell('notif_src')
+
+    await db.clientNotificationSettings.create({
+      data: { clientId: target.clientId, maxLastMinutePerDay: 9 },
+    })
+    await db.clientNotificationSettings.create({
+      data: { clientId: source, maxLastMinutePerDay: 1 },
+    })
+
+    // Same eventKey on both → collides. Plus one only the shell has → must move.
+    await db.clientNotificationPreference.create({
+      data: {
+        clientId: target.clientId,
+        eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+        smsEnabled: true,
+      },
+    })
+    await db.clientNotificationPreference.create({
+      data: {
+        clientId: source,
+        eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+        smsEnabled: false,
+      },
+    })
+    await db.clientNotificationPreference.create({
+      data: {
+        clientId: source,
+        eventKey: NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
+        smsEnabled: false,
+      },
+    })
+
+    const result = await runMerge({
+      sourceClientId: source,
+      targetClientId: target.clientId,
+      actingUserId: target.userId,
+    })
+
+    expect(result.kind).toBe('ok')
+
+    // The target's own settings survived untouched — not the shell's.
+    const settings = await db.clientNotificationSettings.findMany({
+      where: { clientId: target.clientId },
+      select: { maxLastMinutePerDay: true },
+    })
+    expect(settings).toHaveLength(1)
+    expect(settings[0]?.maxLastMinutePerDay).toBe(9)
+
+    const preferences = await db.clientNotificationPreference.findMany({
+      where: { clientId: target.clientId },
+      select: { eventKey: true, smsEnabled: true },
+      orderBy: { eventKey: 'asc' },
+    })
+    // The collision collapsed to the target's row (smsEnabled stays true)...
+    const confirmed = preferences.find(
+      (p) => p.eventKey === NotificationEventKey.BOOKING_CONFIRMED,
+    )
+    expect(preferences).toHaveLength(2)
+    expect(confirmed?.smsEnabled).toBe(true)
+    // ...and the non-colliding one came across.
+    expect(
+      preferences.some((p) => p.eventKey === NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT),
+    ).toBe(true)
+
+    expect(await db.clientProfile.findUnique({ where: { id: source } })).toBeNull()
   })
 
   it('ROLLS BACK the whole merge when the sweep finds leftovers', async () => {
