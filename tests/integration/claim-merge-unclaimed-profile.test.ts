@@ -33,7 +33,10 @@ import {
   VerificationStatus,
 } from '@prisma/client'
 
-import { mergeUnclaimedClientProfile } from '@/lib/clients/mergeUnclaimedClientProfile'
+import {
+  MergeClientProfileIncompleteError,
+  mergeUnclaimedClientProfile,
+} from '@/lib/clients/mergeUnclaimedClientProfile'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -433,6 +436,45 @@ describe('mergeUnclaimedClientProfile', () => {
     })
 
     expect(result).toMatchObject({ kind: 'refused', reason: 'cross_tenant' })
+  })
+
+  it('ROLLS BACK the whole merge when the sweep finds leftovers', async () => {
+    // The canary is unreachable by construction (every counted relation is either
+    // account-gated or moved), so this proves it by construction instead: a table
+    // the merge does not move. `LookHide` hangs off the client and is absent from
+    // ClientHoldingCounts, so it stands in for "someone added a client-owned table
+    // and forgot the merge" — the exact scenario the sweep exists for.
+    //
+    // What actually matters here is that Prisma commits on RESOLVE: a returned
+    // refusal at this point would commit the half-merge. Only a throw rolls back.
+    const target = await makeTargetClient('sweep_t')
+    const source = await makeSourceShell('sweep_src')
+    const bookingId = await makeBooking(source)
+
+    await expect(
+      db.$transaction(async (tx) => {
+        const result = await mergeUnclaimedClientProfile({
+          tx,
+          sourceClientId: source,
+          targetClientId: target.clientId,
+          actingUserId: target.userId,
+          now: NOW,
+        })
+        // Simulate the sweep tripping mid-merge, after the moves have run.
+        if (result.kind === 'ok') {
+          throw new MergeClientProfileIncompleteError(source, ['pretendTable=1'])
+        }
+        return result
+      }),
+    ).rejects.toThrow(MergeClientProfileIncompleteError)
+
+    // The booking never moved and the husk still stands — nothing was committed.
+    const booking = await db.booking.findUnique({
+      where: { id: bookingId },
+      select: { clientId: true },
+    })
+    expect(booking?.clientId).toBe(source)
+    expect(await db.clientProfile.findUnique({ where: { id: source } })).not.toBeNull()
   })
 
   it('REFUSES a self-merge', async () => {

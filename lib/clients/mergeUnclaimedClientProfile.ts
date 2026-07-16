@@ -32,6 +32,31 @@ import { ClientClaimStatus, Prisma } from '@prisma/client'
 
 import { reassignClientBookings } from '@/lib/booking/writeBoundary'
 
+/**
+ * The post-move sweep found rows still hanging off the source.
+ *
+ * Thrown, never returned, so the caller's transaction ROLLS BACK — Prisma commits
+ * whenever the callback resolves, so a returned refusal here would commit exactly
+ * the half-merged state this check exists to prevent.
+ *
+ * Unreachable by construction today: every relation this counts is either
+ * account-gated (refused before any write) or moved. It fires when someone adds a
+ * client-owned table to `ClientHoldingCounts` without teaching the merge to move
+ * it — which is a bug, and should be loud.
+ */
+export class MergeClientProfileIncompleteError extends Error {
+  constructor(
+    readonly sourceClientId: string,
+    readonly leftovers: string[],
+  ) {
+    super(
+      `mergeUnclaimedClientProfile: source ${sourceClientId} still holds rows after the move ` +
+        `(${leftovers.join(', ')}). Rolled back rather than cascade-deleting them.`,
+    )
+    this.name = 'MergeClientProfileIncompleteError'
+  }
+}
+
 export type MergeUnclaimedClientProfileArgs = {
   tx: Prisma.TransactionClient
   /** The pro-created unclaimed profile being absorbed. Destroyed on success. */
@@ -60,8 +85,6 @@ export type MergeUnclaimedRefusalReason =
   /** Both profiles hold a thread with the same pro on the same context; dropping
    *  either would destroy messages, so a human decides. */
   | 'thread_collision'
-  /** Post-move sweep found rows still on the source — a bug canary, never expected. */
-  | 'source_not_empty'
 
 export type MergeUnclaimedClientProfileResult =
   | { kind: 'ok'; moved: ClientHoldingCounts }
@@ -396,9 +419,10 @@ async function moveUnconstrainedRows(
  * Absorb an unclaimed, pro-created client profile into the acting user's own
  * client identity, then destroy the husk.
  *
- * Runs entirely inside the caller's transaction: every refusal below returns
- * BEFORE any write, and the only post-write refusal (`source_not_empty`) is a
- * canary the caller must treat as a rollback.
+ * Runs entirely inside the caller's transaction, and every refusal it RETURNS
+ * happens before any write — so a refusal is always a clean no-op the caller can
+ * simply act on. The one mid-merge failure (`MergeClientProfileIncompleteError`)
+ * throws instead, precisely so the transaction rolls back rather than commits.
  */
 export async function mergeUnclaimedClientProfile(
   args: MergeUnclaimedClientProfileArgs,
@@ -465,13 +489,19 @@ export async function mergeUnclaimedClientProfile(
 
   // The canary. Most of these relations are `onDelete: Cascade`, so deleting the
   // husk with rows still on it would silently destroy them. Counting first turns
-  // that into a loud, safe rollback — including for a client-owned table added
-  // after this file was written.
+  // that into a loud rollback — including for a client-owned table added after
+  // this file was written and never taught to move.
+  //
+  // This THROWS rather than returning a refusal, and the distinction is the whole
+  // point: every other refusal returns before any write, but this one is reached
+  // mid-merge — and Prisma commits when the callback RESOLVES, rolling back only
+  // on a rejection. Returning here would commit the half-finished merge this check
+  // exists to prevent.
   const remaining = await countClientHoldings(tx, sourceClientId)
   const leftovers = nonZeroHoldings(remaining, allHoldingKeys(remaining))
 
   if (leftovers.length > 0) {
-    return refuse('source_not_empty', leftovers)
+    throw new MergeClientProfileIncompleteError(sourceClientId, leftovers)
   }
 
   // The husk still holds the unique contact hashes. Leaving it alive would let
