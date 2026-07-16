@@ -32,7 +32,7 @@ export type MigrationExportGuide = {
 const GENERIC: MigrationExportGuide = {
   menu: 'Open your service or price list and export/download it as a CSV. No export? A simple spreadsheet with a name and price column works too.',
   clients:
-    'Open your client or customer list and export/download it as a CSV. Look under Settings, Reports, or the list’s ••• / Export menu. If the export is an Excel file, open it and save it as CSV first.',
+    'Open your client or customer list and export/download it as a CSV or Excel file — both upload fine. Look under Settings, Reports, or the list’s ••• / Export menu.',
   calendar:
     'Turn on calendar sync to get an iCal (.ics) link, or export your appointments as an .ics file.',
   calendarFeed: false,
@@ -40,9 +40,9 @@ const GENERIC: MigrationExportGuide = {
 
 export const EXPORT_GUIDES: Record<SourceApp, MigrationExportGuide> = {
   Vagaro: {
-    menu: 'Vagaro’s service list downloads per stylist: Settings → Employees → Employee Profiles → pick the stylist → Services → the download icon (choose Excel, then save as CSV). Or just build a quick name-and-price CSV for the whole menu.',
+    menu: 'Vagaro’s service list downloads per stylist: Settings → Employees → Employee Profiles → pick the stylist → Services → the download icon (choose Excel — it uploads as-is, and you can pick several files at once). Or just build a quick name-and-price CSV for the whole menu.',
     clients:
-      'In Vagaro (owner login), go to Reports → Customers → Customers, run the report, then Export → Excel. Open the file and save it as CSV before uploading.',
+      'In Vagaro (owner login), go to Reports → Customers → Customers, run the report, then Export → Excel. The Excel file uploads as-is.',
     calendar:
       'In Vagaro on the web, open Calendar and choose Export to iCal to download an .ics of the view on screen. Already had Apple/Outlook calendar sync connected? That subscribe link still works — paste it below.',
     calendarFeed: false,

@@ -20,7 +20,7 @@ import {
   type RawCsvRow,
 } from './clientImport'
 
-const CLIENT_IMPORT_FIELDS = ['firstName', 'lastName', 'email', 'phone'] as const
+const CLIENT_IMPORT_FIELDS = ['firstName', 'lastName', 'email', 'phone', 'fullName'] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -58,7 +58,10 @@ export function parseClientImportRequest(body: unknown): ClientImportRequest | n
   if (!Array.isArray(body.rows)) return null
   const rows = body.rows.map(toStringRecord)
   const mapping = toColumnMapping(body.mapping)
-  if (!mapping.firstName || !mapping.lastName) return null // pii-plaintext-read-ok: CSV column-header names, not contact values
+  // Names must be derivable: either explicit first+last columns, or one
+  // combined full-name column that evaluateClientRow splits.
+  const hasNameMapping = Boolean((mapping.firstName && mapping.lastName) || mapping.fullName) // pii-plaintext-read-ok: CSV column-header names, not contact values
+  if (!hasNameMapping) return null
   const excludeIndices = Array.isArray(body.excludeIndices)
     ? body.excludeIndices.filter((n): n is number => typeof n === 'number')
     : []

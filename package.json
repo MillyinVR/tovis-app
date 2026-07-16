@@ -130,7 +130,8 @@
     "react-leaflet": "^5.0.0",
     "stripe": "^22.1.0",
     "tailwind-merge": "^3.4.0",
-    "twilio": "^5.12.0"
+    "twilio": "^5.12.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@playwright/test": "^1.51.1",

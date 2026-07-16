@@ -7,7 +7,6 @@
 // which reuses upsertProClient. Type-only imports from the server module are
 // erased at build time, so no server code is bundled into the client.
 
-import Papa from 'papaparse'
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 
@@ -23,6 +22,10 @@ import { MigrationStepper } from '../_components/MigrationStepper'
 import { StatusChip } from '../_components/StatusChip'
 import { SummaryBar, type SummaryStat } from '../_components/SummaryBar'
 import { ToggleSwitch } from '../_components/ToggleSwitch'
+import {
+  parseSpreadsheetFiles,
+  tablesShareHeaders,
+} from '../_utils/parseSpreadsheetFile'
 
 type Phase = 'upload' | 'map' | 'preview' | 'done'
 
@@ -38,7 +41,13 @@ type CommitResponse = {
   error?: string
 }
 
-const FIELD_ORDER: ClientImportField[] = ['firstName', 'lastName', 'email', 'phone']
+const FIELD_ORDER: ClientImportField[] = [
+  'firstName',
+  'lastName',
+  'fullName',
+  'email',
+  'phone',
+]
 const REQUIRED_FIELDS: ClientImportField[] = ['firstName', 'lastName']
 
 function guessMapping(headers: string[]): ColumnMapping {
@@ -53,7 +62,18 @@ function guessMapping(headers: string[]): ColumnMapping {
   if (last) mapping.lastName = last // pii-plaintext-read-ok: CSV column-header names, not contact values
   if (email) mapping.email = email // pii-plaintext-read-ok: CSV column-header names, not contact values
   if (phone) mapping.phone = phone // pii-plaintext-read-ok: CSV column-header names, not contact values
+  // Combined-name exports (a bare "Name"/"Client" column) split at import time.
+  if (!first && !last) {
+    const full = find(['name', 'client', 'customer'])
+    if (full) mapping.fullName = full // pii-plaintext-read-ok: CSV column-header names, not contact values
+  }
   return mapping
+}
+
+// A usable mapping needs names to be derivable: explicit first+last columns,
+// or one combined full-name column.
+function isMappingValid(mapping: ColumnMapping): boolean {
+  return REQUIRED_FIELDS.every((f) => Boolean(mapping[f])) || Boolean(mapping.fullName) // pii-plaintext-read-ok: CSV column-header names, not contact values
 }
 
 export function MigrateClientsClient({ copy }: { copy: MigrationCopy['clients'] }) {
@@ -69,27 +89,36 @@ export function MigrateClientsClient({ copy }: { copy: MigrationCopy['clients'] 
     null,
   )
 
-  const mappingValid = REQUIRED_FIELDS.every((f) => Boolean(mapping[f]))
+  const mappingValid = isMappingValid(mapping)
 
-  function handleFile(file: File): void {
+  async function handleFiles(files: File[]): Promise<void> {
     setError(null)
-    Papa.parse<RawCsvRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (res) => {
-        const fields = res.meta.fields ?? []
-        const rows = res.data.filter((r): r is RawCsvRow => Boolean(r) && typeof r === 'object')
-        if (fields.length === 0 || rows.length === 0) {
-          setError(copy.parseError)
-          return
-        }
-        setHeaders(fields)
-        setRawRows(rows)
-        setMapping(guessMapping(fields))
-        setPhase('map')
-      },
-      error: () => setError(copy.parseError),
-    })
+    setBusy(true)
+    try {
+      const result = await parseSpreadsheetFiles(files)
+      if (!result.ok) {
+        setError(result.error ?? copy.parseError)
+        return
+      }
+      // Several files are fine when they're pages of the same export; different
+      // column sets can't share one mapping, so ask for one file at a time.
+      if (!tablesShareHeaders(result.tables)) {
+        setError(copy.mixedFilesError)
+        return
+      }
+      const headers = result.tables[0]?.headers ?? []
+      const rows: RawCsvRow[] = result.tables.flatMap((t) => t.rows)
+      if (headers.length === 0 || rows.length === 0) {
+        setError(copy.parseError)
+        return
+      }
+      setHeaders(headers)
+      setRawRows(rows)
+      setMapping(guessMapping(headers))
+      setPhase('map')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function runPreview(): Promise<void> {
@@ -189,7 +218,7 @@ export function MigrateClientsClient({ copy }: { copy: MigrationCopy['clients'] 
         ) : null}
 
         {phase === 'upload' ? (
-          <UploadStep copy={copy} onFile={handleFile} />
+          <UploadStep copy={copy} busy={busy} onFiles={(files) => void handleFiles(files)} />
         ) : null}
 
         {phase === 'map' ? (
@@ -243,10 +272,12 @@ export function MigrateClientsClient({ copy }: { copy: MigrationCopy['clients'] 
 
 function UploadStep({
   copy,
-  onFile,
+  busy,
+  onFiles,
 }: {
   copy: MigrationCopy['clients']
-  onFile: (file: File) => void
+  busy: boolean
+  onFiles: (files: File[]) => void
 }) {
   return (
     <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_1fr]">
@@ -271,14 +302,16 @@ function UploadStep({
         <p className="text-[15px] font-medium">{copy.upload}</p>
         <p className="text-[13px] text-textMuted">{copy.uploadHint}</p>
         <label className="mt-2 inline-flex h-11 cursor-pointer items-center justify-center rounded-full border border-white/15 px-6 text-[14px] font-medium hover:border-white/30">
-          {copy.chooseFile}
+          {busy ? copy.importing : copy.chooseFile}
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,.xlsm,.xls,text/csv"
+            multiple
+            disabled={busy}
             className="sr-only"
             onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) onFile(file)
+              const files = Array.from(e.target.files ?? [])
+              if (files.length > 0) onFiles(files)
               e.target.value = ''
             }}
           />
