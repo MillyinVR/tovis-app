@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   enqueueApplyLookViews: vi.fn(),
+  getOptionalUser: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -10,6 +11,10 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/jobs/looksSocial/enqueue', () => ({
   enqueueApplyLookViews: mocks.enqueueApplyLookViews,
+}))
+
+vi.mock('@/app/api/_utils/auth/getOptionalUser', () => ({
+  getOptionalUser: mocks.getOptionalUser,
 }))
 
 import { POST } from './route'
@@ -26,6 +31,8 @@ describe('POST /api/v1/looks/views', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.enqueueApplyLookViews.mockResolvedValue({ id: 'job_1' })
+    // Guest by default (no session) — the per-viewer §4.6 cap path stays off.
+    mocks.getOptionalUser.mockResolvedValue(null)
   })
 
   it('enqueues a legacy id batch as FEED-sourced impressions and reports the accepted count', async () => {
@@ -66,6 +73,27 @@ describe('POST /api/v1/looks/views', () => {
 
     const body = (await res.json()) as { accepted: number }
     expect(body.accepted).toBe(2)
+  })
+
+  it('threads the signed-in viewer id into the job (§4.6 impression cap)', async () => {
+    mocks.getOptionalUser.mockResolvedValue({ id: 'user_1' })
+
+    const res = await POST(makeRequest({ lookPostIds: ['look_1'] }))
+
+    expect(res.status).toBe(202)
+    expect(mocks.enqueueApplyLookViews).toHaveBeenCalledWith(expect.anything(), {
+      impressions: [{ lookPostId: 'look_1', source: 'FEED' }],
+      viewerId: 'user_1',
+    })
+  })
+
+  it('omits the viewer id for a guest flush', async () => {
+    const res = await POST(makeRequest({ lookPostIds: ['look_1'] }))
+
+    expect(res.status).toBe(202)
+    expect(mocks.enqueueApplyLookViews).toHaveBeenCalledWith(expect.anything(), {
+      impressions: [{ lookPostId: 'look_1', source: 'FEED' }],
+    })
   })
 
   it('accepts an empty flush without enqueuing anything', async () => {

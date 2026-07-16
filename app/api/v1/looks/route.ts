@@ -364,6 +364,8 @@ export async function GET(req: Request) {
       // §4.6 impression freshness + retrieval widening (personalized cohort only).
       freshnessRatio: personalizedMeta?.freshnessRatio ?? null,
       widenedBackfillCount: personalizedMeta?.widenedBackfillCount ?? null,
+      // §4.6 per-viewer impression cap (personalized cohort only).
+      cappedExcludedCount: personalizedMeta?.cappedExcludedCount ?? null,
       badgeEligibleCount: badgeResult.meta.eligibleCount,
       badgeShownCount: badgeResult.meta.shownCount,
       badgeHoldoutCount: badgeResult.meta.holdoutCount,

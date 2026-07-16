@@ -101,6 +101,11 @@ export type LooksFeedServeEvent = {
   // (hidden looks stay excluded). 0 in the healthy case; >0 = the fresh supply ran
   // out and the feed widened (terminal page only — never an infinite re-show).
   widenedBackfillCount?: number | null
+  // §4.6 impression cap (personalized cohort only): how many of this viewer's
+  // looks are currently capped out of the feed (seen in-feed past the exposure
+  // cap). A growing count paired with a falling freshnessRatio flags a viewer
+  // whose fresh supply is running dry before the feed goes stale.
+  cappedExcludedCount?: number | null
   // Board feed assembly detail (spec §4.4; null / omitted for other cohorts).
   answerTagCount?: number | null
   feasibilityTagCount?: number | null
@@ -158,6 +163,7 @@ export function logLooksFeedServe(input: LooksFeedServeEvent): void {
     proximityFitBoostedCount: input.proximityFitBoostedCount ?? null,
     freshnessRatio: input.freshnessRatio ?? null,
     widenedBackfillCount: input.widenedBackfillCount ?? null,
+    cappedExcludedCount: input.cappedExcludedCount ?? null,
     answerTagCount: input.answerTagCount ?? null,
     feasibilityTagCount: input.feasibilityTagCount ?? null,
     savedExcludedCount: input.savedExcludedCount ?? null,

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     proFollow: { findMany: vi.fn() },
     lookLike: { findMany: vi.fn() },
     lookHide: { findMany: vi.fn() },
+    lookViewerImpressionStat: { findMany: vi.fn() },
     boardItem: { findMany: vi.fn() },
     board: { findMany: vi.fn() },
     lookPost: { findMany: vi.fn() },
@@ -73,6 +74,7 @@ describe('lib/looks/personalizedFeed', () => {
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
     mocks.prisma.lookHide.findMany.mockResolvedValue([])
+    mocks.prisma.lookViewerImpressionStat.findMany.mockResolvedValue([])
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.board.findMany.mockResolvedValue([])
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
@@ -630,6 +632,30 @@ describe('lib/looks/personalizedFeed', () => {
       expect(affinity.categorySuppressionWeights?.get('bridal')).toBeCloseTo(
         1 + 0.5,
         5,
+      )
+    })
+
+    it('collects the viewer’s capped look ids (spec §4.6 impression cap)', async () => {
+      mocks.prisma.lookViewerImpressionStat.findMany.mockResolvedValue([
+        { lookPostId: 'capped_a' },
+        { lookPostId: 'capped_b' },
+      ])
+
+      const affinity = await loadPersonalizedAffinity({
+        userId: 'user_1',
+        clientId: 'client_1',
+        now: NOW,
+      })
+
+      expect(affinity.cappedLookIds).toEqual(['capped_a', 'capped_b'])
+      // Keyed by userId (like hides) — the cap is a signed-in signal, not
+      // client-gated.
+      expect(
+        mocks.prisma.lookViewerImpressionStat.findMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ userId: 'user_1' }),
+        }),
       )
     })
 
@@ -1291,6 +1317,38 @@ describe('lib/looks/personalizedFeed', () => {
       expect(page.meta.categorySuppressionCount).toBe(1)
     })
 
+    it('excludes the viewer’s capped looks from the backbone and reports the count (§4.6)', async () => {
+      mocks.prisma.lookViewerImpressionStat.findMany.mockResolvedValue([
+        { lookPostId: 'capped_a' },
+        { lookPostId: 'capped_b' },
+      ])
+      mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
+        feedRow({ id: 'b1', rankScore: 5 }),
+      ])
+
+      const page = await buildPersonalizedFeedPage({
+        tenant: ROOT_TENANT,
+        userId: 'user_1',
+        clientId: 'client_1',
+        limit: 2,
+        cursor: null,
+        seenLookIds: new Set(['seen_x']),
+        now: NOW,
+      })
+
+      const backboneWhere =
+        mocks.prisma.lookPost.findMany.mock.calls[0]?.[0]?.where
+      const idExclusion = backboneWhere?.AND?.find(
+        (clause: Record<string, unknown>) =>
+          clause && typeof clause === 'object' && 'id' in clause,
+      )
+      // Capped looks fold into the same hard-exclusion set as seen + hidden.
+      expect(idExclusion?.id?.notIn).toEqual(
+        expect.arrayContaining(['capped_a', 'capped_b', 'seen_x']),
+      )
+      expect(page.meta.cappedExcludedCount).toBe(2)
+    })
+
     it('skips the candidate-embedding query when the viewer has no taste vector', async () => {
       mocks.prisma.lookPost.findMany.mockResolvedValueOnce([
         feedRow({ id: 'b1', rankScore: 5 }),
@@ -1638,6 +1696,34 @@ describe('lib/looks/personalizedFeed', () => {
         )
         // Hidden looks stay excluded even under widening.
         expect(widenIdClause?.id?.notIn).toContain('hidden_a')
+      })
+
+      it('keeps capped looks hard-excluded from the widening backfill (§4.6 reappears only via state change / nav)', async () => {
+        mocks.prisma.lookViewerImpressionStat.findMany.mockResolvedValue([
+          { lookPostId: 'capped_a' },
+        ])
+        mocks.prisma.lookPost.findMany
+          .mockResolvedValueOnce([feedRow({ id: 'b1', rankScore: 9 })])
+          .mockResolvedValueOnce([feedRow({ id: 's1', rankScore: 100 })])
+
+        const page = await buildPersonalizedFeedPage({
+          tenant: ROOT_TENANT,
+          userId: 'user_1',
+          clientId: 'client_1',
+          limit: 3,
+          cursor: { rankScore: 20, publishedAt: NOW, id: 'prev' },
+          seenLookIds: new Set(['s1']),
+          now: NOW,
+        })
+
+        expect(page.meta.widenedBackfillCount).toBe(1)
+        const widenCall = mocks.prisma.lookPost.findMany.mock.calls[1]?.[0]
+        const widenIdClause = widenCall?.where?.AND?.find(
+          (clause: Record<string, unknown>) =>
+            clause && typeof clause === 'object' && 'id' in clause,
+        )
+        // A capped look is never re-shown, even by the terminal-page widening.
+        expect(widenIdClause?.id?.notIn).toContain('capped_a')
       })
     })
   })

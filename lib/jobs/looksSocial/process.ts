@@ -169,6 +169,14 @@ function readApplyLookViewsPayload(
     )
   }
 
+  // §4.6 impression cap: the signed-in viewer this batch belongs to (server-set
+  // at enqueue). A blank / non-string value is dropped so the per-viewer path
+  // simply doesn't run.
+  const rawViewerId = payload.viewerId
+  if (typeof rawViewerId === 'string' && rawViewerId.trim().length > 0) {
+    result.viewerId = rawViewerId.trim()
+  }
+
   return result
 }
 

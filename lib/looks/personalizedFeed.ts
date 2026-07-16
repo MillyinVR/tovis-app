@@ -33,6 +33,7 @@ import {
 } from '@/lib/looks/feed'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
 import { HIDDEN_LOOK_IDS_CAP, hideCategorySelect } from '@/lib/looks/hides'
+import { loadCappedLookIds } from '@/lib/looks/viewerImpressionCap'
 import {
   normalizeSelfProfile,
   selfProfileInterestCategorySlugs,
@@ -487,7 +488,12 @@ export async function loadPersonalizedAffinity(args: {
   userId: string
   clientId: string | null | undefined
   now: Date
-}): Promise<PersonalizedViewerAffinity & { hiddenLookIds: string[] }> {
+}): Promise<
+  PersonalizedViewerAffinity & {
+    hiddenLookIds: string[]
+    cappedLookIds: string[]
+  }
+> {
   const clientId = args.clientId ?? null
 
   const [
@@ -499,6 +505,7 @@ export async function loadPersonalizedAffinity(args: {
     tasteVectorRow,
     hides,
     bookingSignals,
+    cappedLookIds,
   ] = await Promise.all([
       clientId
         ? prisma.proFollow.findMany({
@@ -564,6 +571,11 @@ export async function loadPersonalizedAffinity(args: {
             relationshipSignals: new Map<string, ProRelationshipSignal>(),
             completedBookings: [] as CompletedBookingSignalRow[],
           }),
+      // §4.6 impression cap: the looks this viewer has seen in-feed enough times
+      // to drop out of their personalized feed. Keyed by userId (like hides), so
+      // loaded for any signed-in viewer; empty for a viewer with no exposure
+      // history → byte-identical to the pre-cap feed.
+      loadCappedLookIds(prisma, { userId: args.userId }),
     ])
 
   // Behavioral signals decay with age (spec §6.2) so stale taste fades.
@@ -679,6 +691,7 @@ export async function loadPersonalizedAffinity(args: {
     relationshipSignals: bookingSignals.relationshipSignals,
     priceBand,
     hiddenLookIds,
+    cappedLookIds,
   }
 }
 
@@ -711,6 +724,11 @@ export type PersonalizedFeedPage = {
     // §9 hide-rate early-warning signal.
     hiddenExcludedCount: number
     categorySuppressionCount: number
+    // §4.6 impression cap: how many of this viewer's looks are currently
+    // capped-excluded (seen in-feed past the cap). A growing count is the §9
+    // signal that a viewer's fresh supply is being exhausted — pair it with
+    // freshnessRatio to catch a narrowing graph before the feed goes stale.
+    cappedExcludedCount: number
     // §4.3/§4.3.2 session intent + §4.3.1 diversity injection.
     // `sessionIntent` is the resolved per-session mood; `availabilityWeightMultiplier`
     // the intent lean applied to the bookable term. `explorationInjectedCount` is
@@ -832,9 +850,16 @@ export async function buildPersonalizedFeedPage(args: {
 
   const seenIds = [...args.seenLookIds]
   // §2.2: hidden looks are hard-excluded (never re-served), alongside the
-  // session seen list. Both are folded into one bounded `notIn`.
+  // session seen list. §4.6: capped looks — ones this viewer has already seen
+  // in-feed past the impression cap — are hard-excluded too, but PERSISTENTLY
+  // (across sessions, unlike the client-supplied seen list). All three fold into
+  // one bounded `notIn` so the backbone, followed injection and exploration never
+  // surface a hidden or capped look.
   const hiddenLookIds = affinity.hiddenLookIds
-  const excludedIds = [...new Set([...seenIds, ...hiddenLookIds])]
+  const cappedLookIds = affinity.cappedLookIds
+  const excludedIds = [
+    ...new Set([...seenIds, ...hiddenLookIds, ...cappedLookIds]),
+  ]
   const idExclusion: Prisma.LookPostWhereInput | null =
     excludedIds.length > 0 ? { id: { notIn: excludedIds } } : null
 
@@ -1067,7 +1092,13 @@ export async function buildPersonalizedFeedPage(args: {
   let widenedRows: LooksFeedRow[] = []
   if (remainingSlots > 0 && seenIds.length > 0) {
     const onPageIds = new Set(freshItems.map((row) => row.id))
-    const widenExcludeIds = [...new Set([...hiddenLookIds, ...onPageIds])]
+    // Hidden AND capped looks stay hard-excluded even from the widening backfill:
+    // a capped look "reappears only via a state change or explicit nav" (spec
+    // §4.6), so re-showing it here would defeat the cap. The widening still draws
+    // from the many seen-but-not-capped looks, so it keeps filling a short page.
+    const widenExcludeIds = [
+      ...new Set([...hiddenLookIds, ...cappedLookIds, ...onPageIds]),
+    ]
     widenedRows = await prisma.lookPost.findMany({
       where: {
         AND: [
@@ -1167,6 +1198,7 @@ export async function buildPersonalizedFeedPage(args: {
       sessionVisualSignalCount: affinity.sessionVisualSignalCount ?? 0,
       hiddenExcludedCount: hiddenLookIds.length,
       categorySuppressionCount: affinity.categorySuppressionWeights?.size ?? 0,
+      cappedExcludedCount: cappedLookIds.length,
       sessionIntent: intent,
       availabilityWeightMultiplier: plan.availabilityWeightMultiplier,
       explorationInjectedCount: explorationRows.length,

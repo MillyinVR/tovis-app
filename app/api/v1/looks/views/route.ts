@@ -11,11 +11,16 @@
 // the batch and records the §5.6 per-source, per-day windowed aggregate (the
 // job is the visibility gate, so no per-look access check here).
 //
+// For a signed-in flush it also carries the viewer id (resolved server-side from
+// the session, never client-supplied) so the job can bump the §4.6 per-(viewer,
+// look) FEED-exposure counter that caps a look out of that viewer's feed.
+//
 // Two body shapes are accepted: the source-tagged `impressions: [{ lookPostId,
 // source }]` (current web) and the legacy `lookPostIds: [...]` (iOS + pre-§5.6
 // web), which the job reads as FEED-sourced.
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
 import { enqueueApplyLookViews } from '@/lib/jobs/looksSocial/enqueue'
 import {
   buildApplyLookViewsUpdate,
@@ -69,7 +74,17 @@ export async function POST(req: Request) {
       return jsonOk({ accepted: 0 }, 202)
     }
 
-    await enqueueApplyLookViews(prisma, { impressions })
+    // §4.6 impression cap: resolve the viewer from the session (server-side —
+    // never trust the client for identity). Guest-allowed, so this is optional:
+    // a signed-in flush carries the viewer through to the per-(viewer, look)
+    // exposure counter; a guest flush omits it and only the aggregate viewCount /
+    // per-source paths run. Best-effort, like the rest of view tracking.
+    const user = await getOptionalUser().catch(() => null)
+
+    await enqueueApplyLookViews(prisma, {
+      impressions,
+      ...(user ? { viewerId: user.id } : {}),
+    })
 
     return jsonOk({ accepted: lookPostIds.length }, 202)
   } catch (e) {

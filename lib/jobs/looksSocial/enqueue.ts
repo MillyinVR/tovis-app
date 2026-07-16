@@ -215,13 +215,21 @@ export function enqueueApplyLookViews(
   const { impressions, lookPostIds } = buildApplyLookViewsUpdate(payload)
   if (lookPostIds.length === 0) return null
 
+  // §4.6 impression cap: carry the signed-in viewer through to the job so it can
+  // bump the per-(viewer, look) FEED-exposure counter. Only a non-blank string
+  // is persisted; a guest flush omits it and the job runs the aggregate-only path.
+  const viewerId =
+    typeof payload.viewerId === 'string' && payload.viewerId.trim().length > 0
+      ? payload.viewerId.trim()
+      : undefined
+
   return enqueueLooksSocialJob(db, {
     type: LooksSocialJobType.APPLY_LOOK_VIEWS,
     dedupeKey: `look-views:${crypto.randomUUID()}`,
     // Persist the normalized, source-tagged form (spec §5.6). The job reader
     // still tolerates a legacy `lookPostIds` payload for anything queued before
     // this deploy.
-    payload: { impressions },
+    payload: { impressions, ...(viewerId ? { viewerId } : {}) },
   })
 }
 
