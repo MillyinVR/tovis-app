@@ -200,6 +200,19 @@ export type {
   ClientNotificationsReadResponseDTO,
 } from '@/lib/dto/clientNotifications'
 
+// ── Client activity feed (GET /api/v1/client/activity) ──────────────────────
+// The engagement surface behind the Me-header bell; `markReadEventKeys` is the
+// allowlist a client hands back to POST /api/v1/client/notifications/read.
+export type { ClientActivityFeedDTO } from '@/lib/dto/clientActivity'
+
+// The feed's presentation items are already JSON-safe (createdAt → an ISO
+// `timestamp` string), so the builder's own types are the wire contract.
+export type {
+  ActivityFollowBack,
+  ActivityIconKind,
+  ClientActivityItem,
+} from '@/lib/notifications/activityFeed'
+
 // Preferences payload + its parts are already JSON-safe (no Decimal/Date), so
 // the engine's own types serve as the wire contract directly.
 export type {

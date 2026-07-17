@@ -3,6 +3,8 @@ import 'server-only'
 
 import { redirect } from 'next/navigation'
 
+import { NotificationEventKey } from '@prisma/client'
+
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import {
@@ -34,7 +36,7 @@ export type ClientActivityPageData = {
   items: ClientActivityItem[]
   unreadCount: number
   /** The event keys "Mark all read" should clear (the activity allowlist). */
-  markReadEventKeys: string[]
+  markReadEventKeys: NotificationEventKey[]
 }
 
 export async function loadClientActivityPage(): Promise<ClientActivityPageData> {
