@@ -11,6 +11,9 @@
 // - `/claim/<token>` — the account-claim link the client-claim invite delivers
 //   (§27 claim flow) → native ClaimView with the token, so a pro's client who taps
 //   their claim link lands in the app's claim-acceptance screen (paired iOS #106).
+// - `/looks/<id>` — a shared look → the native single-look detail (LookDetailView,
+//   paired iOS #155). The app's OWN share sheet emits this URL, so without the
+//   association it produced links it could not open.
 //
 // Notes:
 // - Must be served with `Content-Type: application/json` and NO redirect. A
@@ -27,7 +30,24 @@ const APP_ID = 'SB3J675LNU.app.tovis.Tovis'
 
 // Universal Link path patterns that open in-app. Add a pattern here (and update
 // the AASA test) when a new emailed/SMS'd link should deep-link into the app.
-const ASSOCIATED_PATHS = ['/reset-password/*', '/claim/*'] as const
+//
+// ⚠️ ORDER IS LOAD-BEARING. iOS evaluates these top-to-bottom and stops at the
+// FIRST match, positive or negative — so an `exclude` must come BEFORE the
+// broader pattern it carves out of, not after.
+//
+// ⚠️ Only associate a path the app can actually HANDLE. An associated path the
+// app doesn't route is worse than no association: iOS opens the app, the app
+// recognizes nothing, and the tap becomes a silent no-op instead of loading the
+// web page. That's why `/looks/tags/…` is excluded — those are tag pages, and
+// native has no tag screen (it opens them in an in-app browser instead).
+const ASSOCIATED_PATHS = [
+  { path: '/reset-password/*' },
+  { path: '/claim/*' },
+  // Exclusions first — see the ordering note above.
+  { path: '/looks/tags', exclude: true },
+  { path: '/looks/tags/*', exclude: true },
+  { path: '/looks/*' },
+] as const
 
 const AASA = {
   applinks: {
@@ -36,8 +56,17 @@ const AASA = {
       {
         appID: APP_ID,
         appIDs: [APP_ID],
-        paths: [...ASSOCIATED_PATHS],
-        components: ASSOCIATED_PATHS.map((path) => ({ '/': path })),
+        // Legacy (pre-iOS 13) form: exclusions are a "NOT " prefix.
+        paths: ASSOCIATED_PATHS.map((entry) =>
+          'exclude' in entry ? `NOT ${entry.path}` : entry.path,
+        ),
+        // iOS 13+ form: exclusions are an `exclude: true` key. Derived from the
+        // same list so the two forms can never disagree.
+        components: ASSOCIATED_PATHS.map((entry) =>
+          'exclude' in entry
+            ? { '/': entry.path, exclude: true }
+            : { '/': entry.path },
+        ),
       },
     ],
   },
