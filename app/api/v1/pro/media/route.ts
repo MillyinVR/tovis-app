@@ -15,6 +15,7 @@ import {
   UploadSurface,
 } from '@prisma/client'
 import { BUCKETS } from '@/lib/storageBuckets'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import {
   consumeUploadSession,
@@ -301,6 +302,18 @@ export async function POST(req: Request) {
 
     const priceStartingAt = getStr(body, 'priceStartingAt')
 
+    // Optional normalized subject focal point: [0,1] from the top-left origin of
+    // the EXIF-corrected upright image, so the Looks feed's cover-crop can center
+    // on the subject instead of the geometric middle. The native authoring flow
+    // supplies it from the camera's face detection (camera C6); web's editor
+    // bakes its crop into the pixels instead and sends nothing, so this stays
+    // optional. Lenient like the booking-media route: a missing/malformed focal
+    // degrades to null (center), never a 400 — it's a crop hint, not load-bearing.
+    const focal = resolveFocalPoint(
+      typeof body.focalX === 'number' ? body.focalX : null,
+      typeof body.focalY === 'number' ? body.focalY : null,
+    )
+
     const result = await prisma.$transaction(async (tx) => {
       const proTenantId = await resolveProTenantId(tx, professionalId)
       const created = await tx.mediaAsset.create({
@@ -316,6 +329,9 @@ export async function POST(req: Request) {
             caption,
             mediaType,
             visibility,
+
+            focalX: focal?.x ?? null,
+            focalY: focal?.y ?? null,
 
             isFeaturedInPortfolio,
             // §19b: a featured upload is Looks-eligible too (unified public atom),

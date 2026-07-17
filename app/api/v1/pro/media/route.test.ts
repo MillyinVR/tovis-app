@@ -733,6 +733,58 @@ describe('app/api/v1/pro/media/route.ts', () => {
       mocks.createOrUpdateProLookFromMediaAsset,
     ).not.toHaveBeenCalled()
   })
+  it('persists a normalized focal point so the Looks crop centers on the subject', async () => {
+    mocks.serviceFindMany.mockResolvedValue([{ id: 'service_1' }])
+    mocks.mediaAssetCreate.mockResolvedValue(makeCreatedMedia())
+
+    const res = await POST(
+      makeJsonRequest({
+        uploadSessionId: 'us_1',
+        serviceIds: ['service_1'],
+        isFeaturedInPortfolio: true,
+        focalX: 0.42,
+        focalY: 0.18,
+      }),
+    )
+
+    expect(res.status).toBe(201)
+    expect(mocks.mediaAssetCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ focalX: 0.42, focalY: 0.18 }),
+      }),
+    )
+  })
+
+  it.each([
+    ['an out-of-range coordinate', { focalX: 1.4, focalY: 0.5 }],
+    ['a non-numeric coordinate', { focalX: '0.4', focalY: '0.5' }],
+    ['a half-supplied pair', { focalX: 0.4 }],
+  ])(
+    'degrades %s to a centered crop instead of rejecting the post',
+    async (_label, focal) => {
+      mocks.serviceFindMany.mockResolvedValue([{ id: 'service_1' }])
+      mocks.mediaAssetCreate.mockResolvedValue(makeCreatedMedia())
+
+      const res = await POST(
+        makeJsonRequest({
+          uploadSessionId: 'us_1',
+          serviceIds: ['service_1'],
+          isFeaturedInPortfolio: true,
+          ...focal,
+        }),
+      )
+
+      // A focal point is a crop hint, never load-bearing — a bad one must not
+      // cost the pro their upload (the bytes are already in the bucket).
+      expect(res.status).toBe(201)
+      expect(mocks.mediaAssetCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ focalX: null, focalY: null }),
+        }),
+      )
+    },
+  )
+
   it('returns 500 and logs a safe error when media creation throws', async () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
