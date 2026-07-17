@@ -6,7 +6,7 @@
 // is exercised through the REAL lib/messages/inboxContext (only Prisma is
 // mocked) so this proves the route + shared resolver stay wired together.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MessageThreadContextType, Role } from '@prisma/client'
+import { MessageThreadContextType, ProNameDisplay, Role } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn(
@@ -65,6 +65,7 @@ function makeThreadRow(
     offeringId: string | null
     waitlistEntryId: string | null
     professionalUserId: string
+    professionalNameDisplay: ProNameDisplay
   }> = {},
 ) {
   const {
@@ -76,6 +77,7 @@ function makeThreadRow(
     offeringId = null,
     waitlistEntryId = null,
     professionalUserId = 'pro_user_1',
+    professionalNameDisplay = ProNameDisplay.BUSINESS_NAME,
   } = overrides
 
   return {
@@ -99,6 +101,10 @@ function makeThreadRow(
       id: 'pro_1',
       userId: professionalUserId,
       businessName: 'Studio',
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      handle: 'studio',
+      nameDisplay: professionalNameDisplay,
       avatarUrl: null,
     },
     participants: [{ lastReadAt: null }],
@@ -200,8 +206,35 @@ describe('GET /api/v1/messages/threads', () => {
     expect(threads[0]?.isAccentContext).toBe(true)
     expect(threads[0]?.eyebrow).toContain('BOOKING CONFIRMED')
     expect(threads[0]?.eyebrow).toContain('Balayage')
-    // The professional payload never leaks the counterparty's user id.
+    // The professional payload never leaks the counterparty's user id nor the
+    // raw first/last names selected only to resolve the display name.
     expect(threads[0]?.professional).not.toHaveProperty('userId')
+    expect(threads[0]?.professional).not.toHaveProperty('firstName')
+    expect(threads[0]?.professional).not.toHaveProperty('lastName')
+    // Server-resolved display name (BUSINESS_NAME toggle → business name).
+    expect(threads[0]?.professional).toMatchObject({ displayName: 'Studio' })
+  })
+
+  it('resolves the professional displayName from the nameDisplay toggle (HANDLE → @handle)', async () => {
+    mocks.prisma.messageThread.findMany.mockResolvedValue([
+      makeThreadRow({ professionalNameDisplay: ProNameDisplay.HANDLE }),
+    ])
+    mocks.prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'booking_1',
+        scheduledFor: new Date('2026-07-10T21:00:00.000Z'),
+        locationTimeZone: 'America/Los_Angeles',
+        service: { name: 'Balayage' },
+      },
+    ])
+
+    const res = await GET(makeRequest('?filter=bookings'))
+    const body = await readJson(res)
+    const threads = body.threads as Array<Record<string, unknown>>
+
+    expect(threads[0]?.professional).toMatchObject({ displayName: '@studio' })
+    expect(threads[0]?.professional).not.toHaveProperty('firstName')
+    expect(threads[0]?.professional).not.toHaveProperty('lastName')
   })
 
   it('marks a non-accent pro-profile eyebrow and isViewerPro false for a client viewer', async () => {

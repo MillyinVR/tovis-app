@@ -73,6 +73,8 @@ const notifyThreadSelect = {
       businessName: true,
       firstName: true, // pii-plaintext-read-ok: counterparty name for notif title (same as inbox)
       lastName: true, // pii-plaintext-read-ok: counterparty name for notif title (same as inbox)
+      handle: true,
+      nameDisplay: true,
       avatarUrl: true,
     },
   },

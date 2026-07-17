@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { MessagesThreadsListResponseDTO } from '@/lib/dto/messaging'
 import {
   INBOX_THREADS_PAGE_SIZE,
@@ -38,7 +39,18 @@ export async function GET(req: Request) {
         lastMessagePreview: true,
         updatedAt: true,
         client: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
-        professional: { select: { id: true, userId: true, businessName: true, avatarUrl: true } },
+        professional: {
+          select: {
+            id: true,
+            userId: true,
+            businessName: true,
+            firstName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+            lastName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+            handle: true,
+            nameDisplay: true,
+            avatarUrl: true,
+          },
+        },
         participants: {
           where: { userId: user.id },
           select: { lastReadAt: true },
@@ -57,7 +69,7 @@ export async function GET(req: Request) {
         // Counterparty is derived from the viewer's user id, not their acting
         // role — the list payload deliberately omits participant user ids, so
         // this boolean is the client's only signal for whose name to show.
-        const { userId: proUserId, ...professional } = t.professional
+        const proUserId = t.professional.userId
         const isViewerPro = proUserId != null && proUserId === user.id
         const eyebrow = eyebrowById.get(t.id) ?? {
           eyebrow: 'Message',
@@ -75,7 +87,18 @@ export async function GET(req: Request) {
           lastMessagePreview: t.lastMessagePreview,
           updatedAt: t.updatedAt.toISOString(),
           client: t.client,
-          professional,
+          // Rebuild the professional preview explicitly so raw firstName/lastName
+          // (selected only to resolve the toggle-aware display name) never leak
+          // onto the wire — the DTO carries only the resolved displayName.
+          professional: {
+            id: t.professional.id,
+            businessName: t.professional.businessName,
+            avatarUrl: t.professional.avatarUrl,
+            displayName: formatProfessionalPublicDisplayName(
+              t.professional,
+              'Your pro',
+            ),
+          },
           participants: t.participants.map((p) => ({
             lastReadAt: p.lastReadAt?.toISOString() ?? null,
           })),

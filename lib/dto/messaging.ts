@@ -21,6 +21,12 @@ export type MessageThreadClientPreviewDTO = {
 export type MessageThreadProfessionalPreviewDTO = {
   id: string
   businessName: string | null
+  /**
+   * Server-resolved public display name honoring the pro's `nameDisplay` toggle
+   * (business name / real name / @handle). Emitted so iOS renders it verbatim;
+   * raw first/last names are never placed on the wire.
+   */
+  displayName: string
   avatarUrl: string | null
 }
 

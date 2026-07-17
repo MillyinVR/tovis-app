@@ -110,6 +110,8 @@ export default async function MessageThreadPage(props: PageProps) {
           businessName: true,
           firstName: true,
           lastName: true,
+          handle: true,
+          nameDisplay: true,
           avatarUrl: true,
         },
       },

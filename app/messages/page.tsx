@@ -1,7 +1,7 @@
 // app/messages/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { MessageThreadContextType, Role } from '@prisma/client'
+import { MessageThreadContextType, ProNameDisplay, Role } from '@prisma/client'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { LiveRefresh } from '@/app/_components/live/LiveRefresh'
@@ -53,6 +53,8 @@ type InboxThread = {
     businessName: string | null
     firstName: string
     lastName: string
+    handle: string | null
+    nameDisplay: ProNameDisplay
     avatarUrl: string | null
   } | null
   participants: {
@@ -233,6 +235,8 @@ async function findInboxThreads(params: {
           businessName: true,
           firstName: true,
           lastName: true,
+          handle: true,
+          nameDisplay: true,
           avatarUrl: true,
         },
       },

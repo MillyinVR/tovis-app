@@ -4074,6 +4074,9 @@
                     "null"
                   ]
                 },
+                "displayName": {
+                  "type": "string"
+                },
                 "handle": {
                   "type": [
                     "string",
@@ -4099,6 +4102,7 @@
               "required": [
                 "id",
                 "businessName",
+                "displayName",
                 "handle",
                 "avatarUrl",
                 "location",
@@ -4373,6 +4377,9 @@
                     "null"
                   ]
                 },
+                "displayName": {
+                  "type": "string"
+                },
                 "handle": {
                   "type": [
                     "string",
@@ -4398,6 +4405,7 @@
               "required": [
                 "id",
                 "businessName",
+                "displayName",
                 "handle",
                 "avatarUrl",
                 "professionType",
@@ -4636,6 +4644,9 @@
                     "null"
                   ]
                 },
+                "displayName": {
+                  "type": "string"
+                },
                 "handle": {
                   "type": [
                     "string",
@@ -4667,6 +4678,7 @@
               "required": [
                 "id",
                 "businessName",
+                "displayName",
                 "handle",
                 "avatarUrl",
                 "professionType",
@@ -5045,6 +5057,9 @@
                     "null"
                   ]
                 },
+                "displayName": {
+                  "type": "string"
+                },
                 "handle": {
                   "type": [
                     "string",
@@ -5070,6 +5085,7 @@
               "required": [
                 "id",
                 "businessName",
+                "displayName",
                 "handle",
                 "avatarUrl",
                 "location",
@@ -8463,6 +8479,10 @@
             "null"
           ]
         },
+        "displayName": {
+          "description": "Server-resolved public display name honoring the pro's `nameDisplay` toggle (business name / real name /",
+          "type": "string"
+        },
         "id": {
           "type": "string"
         }
@@ -8470,6 +8490,7 @@
       "required": [
         "id",
         "businessName",
+        "displayName",
         "avatarUrl"
       ],
       "type": "object"

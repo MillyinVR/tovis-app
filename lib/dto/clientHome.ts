@@ -7,6 +7,7 @@
 import type { Prisma } from '@prisma/client'
 
 import { moneyToString } from '@/lib/money'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { BookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 import type {
   ClientHomeAftercare,
@@ -85,6 +86,7 @@ export type ClientHomeBookingDTO = {
   professional: {
     id: string
     businessName: string | null
+    displayName: string
     handle: string | null
     avatarUrl: string | null
     location: string | null
@@ -174,6 +176,7 @@ export type ClientHomeLastMinuteInviteDTO = {
     professional: {
       id: string
       businessName: string | null
+      displayName: string
       handle: string | null
       avatarUrl: string | null
       professionType: string | null
@@ -241,6 +244,7 @@ export type ClientHomeWaitlistEntryDTO = {
   professional: {
     id: string
     businessName: string | null
+    displayName: string
     handle: string | null
     avatarUrl: string | null
     location: string | null
@@ -252,6 +256,7 @@ export type ClientHomeFavoriteProDTO = {
   professional: {
     id: string
     businessName: string | null
+    displayName: string
     handle: string | null
     avatarUrl: string | null
     professionType: string | null
@@ -335,6 +340,10 @@ function serializeBooking(b: ClientHomeBooking): ClientHomeBookingDTO {
       ? {
           id: b.professional.id,
           businessName: b.professional.businessName ?? null,
+          displayName: formatProfessionalPublicDisplayName(
+            b.professional,
+            'Your pro',
+          ),
           handle: b.professional.handle ?? null,
           avatarUrl: b.professional.avatarUrl ?? null,
           location: b.professional.location ?? null,
@@ -448,6 +457,10 @@ function serializeInvite(
       professional: {
         id: opening.professional.id,
         businessName: opening.professional.businessName ?? null,
+        displayName: formatProfessionalPublicDisplayName(
+          opening.professional,
+          'Your pro',
+        ),
         handle: opening.professional.handle ?? null,
         avatarUrl: opening.professional.avatarUrl ?? null,
         professionType: opening.professional.professionType ?? null,
@@ -529,6 +542,10 @@ function serializeWaitlist(
       ? {
           id: entry.professional.id,
           businessName: entry.professional.businessName ?? null,
+          displayName: formatProfessionalPublicDisplayName(
+            entry.professional,
+            'Your pro',
+          ),
           handle: entry.professional.handle ?? null,
           avatarUrl: entry.professional.avatarUrl ?? null,
           location: entry.professional.location ?? null,
@@ -546,6 +563,10 @@ function serializeFavoritePro(
       ? {
           id: fav.professional.id,
           businessName: fav.professional.businessName ?? null,
+          displayName: formatProfessionalPublicDisplayName(
+            fav.professional,
+            'Your pro',
+          ),
           handle: fav.professional.handle ?? null,
           avatarUrl: fav.professional.avatarUrl ?? null,
           professionType: fav.professional.professionType ?? null,
