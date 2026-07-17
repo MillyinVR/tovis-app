@@ -69,7 +69,8 @@ export type SearchProsParams = {
   lng: number | null
   categoryId: string | null
   // Exact service-offering filter (GIN on psi."serviceIds"). Used by the
-  // nearby surface; the search route leaves it null.
+  // nearby surface and by search's services tab (pick a service, see the pros
+  // who actually offer it) — finer-grained than categoryId.
   serviceId: string | null
   // Excludes one pro from results (e.g. "other pros near this one"). Nearby-only.
   excludeProfessionalId: string | null
@@ -122,9 +123,9 @@ export function parseSearchProsParams(
     lat: pickFiniteNumber(searchParams.get('lat')),
     lng: pickFiniteNumber(searchParams.get('lng')),
     categoryId: normalizeOptionalId(searchParams.get('categoryId')),
-    // serviceId / excludeProfessionalId are nearby-surface inputs; the search
-    // route does not expose them, so they stay null here.
-    serviceId: null,
+    serviceId: normalizeOptionalId(searchParams.get('serviceId')),
+    // excludeProfessionalId is a nearby-surface input ("other pros near this
+    // one"); the search route has no such anchor, so it stays null here.
     excludeProfessionalId: null,
     radiusMiles,
     mobileOnly: parseBooleanParam(searchParams.get('mobile')),
@@ -298,7 +299,8 @@ export async function fetchProSearchCandidates(
     )
   }
 
-  // Exact offering match via GIN(serviceIds). Nearby uses this; search omits it.
+  // Exact offering match via GIN(serviceIds). Used by nearby and by search's
+  // services tab.
   if (params.serviceId) {
     filters.push(
       Prisma.sql`${params.serviceId}::text = ANY(psi."serviceIds")`,

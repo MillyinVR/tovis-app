@@ -290,6 +290,18 @@ describe('lib/search/pros.ts', () => {
       })
     })
 
+    it('parses serviceId — the services tab filters pros by an exact offering', () => {
+      const params = parseSearchProsParams(
+        new URLSearchParams('serviceId=svc_balayage&categoryId=cat_hair'),
+      )
+
+      expect(params.serviceId).toBe('svc_balayage')
+      // categoryId still works alongside it; the two narrow independently.
+      expect(params.categoryId).toBe('cat_hair')
+      // Still withheld — the search route has no "near this pro" anchor.
+      expect(params.excludeProfessionalId).toBeNull()
+    })
+
     it('throws a 400 SearchRequestError for an invalid cursor', () => {
       expect(() =>
         parseSearchProsParams(
