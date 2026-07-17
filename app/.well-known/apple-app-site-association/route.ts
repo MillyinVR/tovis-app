@@ -26,6 +26,12 @@
 //   they complete signup there. A richer NATIVE signup-with-attribution flow (route
 //   /c/ into ClientSignupView, plumb the tap intent through register/login) is
 //   backlogged — see tovis-ios/BACKLOG.md.
+// - `/u/<handle>/boards/<slug>` — a shared public board → the native public-board
+//   viewer (PublicBoardView, routed by `PublicBoardLink` in `handleDeepLink`).
+//   `BoardShareSection` emits exactly this URL, so without the association the app
+//   produced share links it could not open. Scoped to `/u/*/boards/*` so it never
+//   catches the bare `/u/<handle>` profile the app does NOT route (which correctly
+//   keeps opening in the browser); there is no `/u/<handle>/boards` index route.
 //
 // Notes:
 // - Must be served with `Content-Type: application/json` and NO redirect. A
@@ -63,6 +69,14 @@ const ASSOCIATED_PATHS = [
   { path: '/looks/tags', exclude: true },
   { path: '/looks/tags/*', exclude: true },
   { path: '/looks/*' },
+  // A shared public board → the native public-board viewer (PublicBoardView,
+  // routed by `PublicBoardLink` in the app's `handleDeepLink`). `BoardShareSection`
+  // emits exactly `/u/<handle>/boards/<slug>`, so without this the app produced
+  // share links it could not open. Scoped to `/u/*/boards/*` on purpose: the app
+  // does NOT route the bare `/u/<handle>` profile, so that stays in the browser
+  // (associating it would be the silent no-op above). There is no `/u/<handle>/
+  // boards` index route, so nothing under this pattern goes unhandled.
+  { path: '/u/*/boards/*' },
 ] as const
 
 const AASA = {
