@@ -24,6 +24,7 @@ import {
   isSupportedAttachmentContentType,
 } from '@/lib/messages/attachments'
 import type { MessageUploadInitDTO } from '@/lib/dto/messaging'
+import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +38,13 @@ export async function POST(req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
+
+    // Refuse rather than silently PUT bytes into a remote bucket from a local
+    // database (see lib/media/storageEnvironment.ts). After the auth gate so an
+    // anonymous caller gets its 401 and never sees infra hostnames; fails open,
+    // so it returns null in production and CI.
+    const storageMismatch = getStorageEnvironmentMismatch()
+    if (storageMismatch) return jsonFail(500, storageMismatch)
     const userId = auth.user.id
 
     const { id } = await resolveRouteParams(ctx)

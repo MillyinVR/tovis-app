@@ -10,6 +10,7 @@ import {
   createUploadSession,
   uploadSurfaceForKind,
 } from '@/lib/media/uploadSession'
+import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,6 +58,13 @@ export async function POST(req: Request) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
+    // Refuse rather than silently PUT bytes into a remote bucket from a local
+    // database (see lib/media/storageEnvironment.ts). After the auth gate so an
+    // anonymous caller gets its 401 and never sees infra hostnames; fails open,
+    // so it returns null in production and CI.
+    const storageMismatch = getStorageEnvironmentMismatch()
+    if (storageMismatch) return jsonFail(500, storageMismatch)
     const { clientId } = auth
 
     const base = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()

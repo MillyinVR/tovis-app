@@ -4209,7 +4209,10 @@ model MediaServiceTag {
   mediaId   String
   serviceId String
 
-  media   MediaAsset @relation(fields: [mediaId], references: [id])
+  // Cascade: a tag is a pure join — it cannot outlive its media, and a Restrict
+  // here made EVERY MediaAsset undeletable (the create requires >=1 tag), which
+  // broke the pro's "Delete media" button and user-data deletion alike.
+  media   MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   service Service    @relation(fields: [serviceId], references: [id])
 
   @@unique([mediaId, serviceId])
@@ -4221,7 +4224,8 @@ model MediaLike {
   userId    String
   createdAt DateTime @default(now())
 
-  media MediaAsset @relation(fields: [mediaId], references: [id])
+  // Cascade: a like on a deleted photo has nothing to point at.
+  media MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   user  User       @relation(fields: [userId], references: [id])
 
   @@unique([mediaId, userId])
@@ -4234,7 +4238,8 @@ model MediaComment {
   body      String
   createdAt DateTime @default(now())
 
-  media MediaAsset @relation(fields: [mediaId], references: [id])
+  // Cascade: a comment on a deleted photo has nothing to point at.
+  media MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   user  User       @relation(fields: [userId], references: [id])
 }
 
@@ -4300,7 +4305,13 @@ model LookPost {
 
   professional      ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
   clientAuthor      ClientProfile?      @relation("ClientAuthoredLooks", fields: [clientAuthorId], references: [id], onDelete: Cascade)
-  primaryMediaAsset MediaAsset          @relation("PrimaryLookMediaAsset", fields: [primaryMediaAssetId], references: [id], onDelete: Restrict)
+  // Cascade: primaryMediaAssetId is required AND @unique, so a look is 1:1 with
+  // its primary photo and cannot render without it. Restrict was unworkable: §19b
+  // makes EVERY public asset a LookPost, so it meant no public media could ever be
+  // deleted — not by the pro, not by user-data deletion. Everything below LookPost
+  // (likes, comments, board items, stats) already cascades, so this is the same
+  // contract one level up. Deleting a photo deletes its post.
+  primaryMediaAsset MediaAsset          @relation("PrimaryLookMediaAsset", fields: [primaryMediaAssetId], references: [id], onDelete: Cascade)
   service           Service?            @relation(fields: [serviceId], references: [id], onDelete: SetNull)
   reviewedByUser    User?               @relation("LookPostReviewedByUser", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
 
@@ -4372,7 +4383,9 @@ model LookPostAsset {
   createdAt    DateTime @default(now())
 
   lookPost   LookPost   @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
-  mediaAsset MediaAsset @relation("LookPostAssetMedia", fields: [mediaAssetId], references: [id], onDelete: Restrict)
+  // Cascade: drops just this asset's row from the look (the look itself survives
+  // unless the deleted asset was its PRIMARY — see LookPost.primaryMediaAsset).
+  mediaAsset MediaAsset @relation("LookPostAssetMedia", fields: [mediaAssetId], references: [id], onDelete: Cascade)
 
   @@unique([lookPostId, mediaAssetId])
   @@index([lookPostId, sortOrder])
