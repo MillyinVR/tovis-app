@@ -1,7 +1,8 @@
 // tests/integration/claim-merge-unclaimed-profile.test.ts
 //
 // Real-Postgres coverage for mergeUnclaimedClientProfile — absorbing a pro-created
-// unclaimed ClientProfile into the signed-in client's own identity.
+// unclaimed ClientProfile into the signed-in client's own identity — AND for
+// acceptClientClaimFromLink, its one caller, driven end-to-end at the bottom.
 //   node scripts/with-test-db.mjs npx vitest run \
 //     tests/integration/claim-merge-unclaimed-profile.test.ts \
 //     --config vitest.integration.config.mts
@@ -17,27 +18,57 @@
 // Each test builds its own source/target pair under a unique TAG and merges inside
 // a real transaction, so the assertions are about rows that actually moved.
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   AllergySeverity,
   BookingSource,
   BookingStatus,
   ClientAddressKind,
   ClientClaimStatus,
+  ContactMethod,
   MessageThreadContextType,
   NotificationEventKey,
   Prisma,
   PrismaClient,
+  ProClientInviteStatus,
   ProfessionalLocationType,
   Role,
   ServiceLocationType,
   VerificationStatus,
 } from '@prisma/client'
 
+import { acceptClientClaimFromLink } from '@/lib/clients/clientClaim'
 import {
   MergeClientProfileIncompleteError,
   mergeUnclaimedClientProfile,
 } from '@/lib/clients/mergeUnclaimedClientProfile'
+import {
+  createProClientInviteToken,
+  hashProClientInviteToken,
+} from '@/lib/clients/proClientInviteTokens'
+
+/**
+ * The accept path's ONE unforceable failure: the invite being revoked between
+ * this transaction's read of it and its audit write. Every state that would make
+ * the real audit fail is also caught by the early revoked check, so the only way
+ * to stand in that window is to force the audit's verdict — everything else here
+ * (the merge, the transaction, the rollback) stays real, which is the whole point.
+ */
+const audit = vi.hoisted(() => ({
+  override: null as null | 'revoked' | 'not_found' | 'conflict',
+}))
+
+vi.mock('@/lib/clients/clientClaimLinks', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/clients/clientClaimLinks')>()
+
+  return {
+    ...actual,
+    markClientClaimLinkAcceptedAudit: async (
+      args: Parameters<typeof actual.markClientClaimLinkAcceptedAudit>[0],
+    ) => audit.override ?? actual.markClientClaimLinkAcceptedAudit(args),
+  }
+})
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -569,5 +600,229 @@ describe('mergeUnclaimedClientProfile', () => {
     })
 
     expect(result).toMatchObject({ kind: 'refused', reason: 'same_profile' })
+  })
+})
+
+/**
+ * The merge wired into the claim it exists for.
+ *
+ * `acceptClientClaimFromLink` is the only caller, and driving it against real
+ * Postgres is the only way to see what a viewer actually gets — the unit tests
+ * mock the merge away, so they prove which branch is picked and nothing about
+ * whether the rows move or unwind.
+ */
+describe('acceptClientClaimFromLink (the merge, wired in)', () => {
+  afterEach(() => {
+    audit.override = null
+  })
+
+  /** A `ready` claim link: PENDING, and pointed at a shell with no user. */
+  async function makeClaimLink(args: {
+    clientId: string
+    bookingId?: string | null
+  }): Promise<{ token: string; inviteId: string }> {
+    const token = createProClientInviteToken()
+    const invite = await db.proClientInvite.create({
+      data: {
+        professionalId: fx!.professionalId,
+        clientId: args.clientId,
+        bookingId: args.bookingId ?? null,
+        invitedName: `${TAG} Invited`,
+        invitedEmail: `${TAG}_invited@example.com`,
+        preferredContactMethod: ContactMethod.EMAIL,
+        status: ProClientInviteStatus.PENDING,
+        token: null,
+        tokenHash: hashProClientInviteToken(token),
+      },
+      select: { id: true },
+    })
+
+    return { token, inviteId: invite.id }
+  }
+
+  /**
+   * The headline. Before this wiring the exact same setup returned
+   * `client_mismatch` — 100% of the time, for every client who already had an
+   * account, because a `ready` link's client and a signed-in client can never
+   * share an id.
+   */
+  it('CLAIMS for a signed-in client — the case that was impossible before', async () => {
+    const target = await makeTargetClient('acc_ok')
+    const shell = await makeSourceShell('acc_ok_shell')
+    const bookingId = await makeBooking(shell)
+    const { token, inviteId } = await makeClaimLink({
+      clientId: shell,
+      bookingId,
+    })
+
+    const result = await acceptClientClaimFromLink({
+      token,
+      actingUserId: target.userId,
+      actingClientId: target.clientId,
+    })
+
+    expect(result).toEqual({ kind: 'ok', bookingId })
+
+    // The pro's booking now hangs off the signed-in identity.
+    const booking = await db.booking.findUnique({
+      where: { id: bookingId },
+      select: { clientId: true },
+    })
+    expect(booking?.clientId).toBe(target.clientId)
+
+    // The husk is destroyed, so upsertProClient can never re-split on its hashes.
+    expect(
+      await db.clientProfile.findUnique({ where: { id: shell } }),
+    ).toBeNull()
+
+    const claimed = await db.clientProfile.findUnique({
+      where: { id: target.clientId },
+      select: { claimStatus: true, claimedAt: true },
+    })
+    expect(claimed?.claimStatus).toBe(ClientClaimStatus.CLAIMED)
+    expect(claimed?.claimedAt).toBeInstanceOf(Date)
+
+    // The invite is audited onto the acting user AND now points at the survivor.
+    const invite = await db.proClientInvite.findUnique({
+      where: { id: inviteId },
+      select: { status: true, acceptedByUserId: true, clientId: true },
+    })
+    expect(invite).toMatchObject({
+      status: ProClientInviteStatus.ACCEPTED,
+      acceptedByUserId: target.userId,
+      clientId: target.clientId,
+    })
+  })
+
+  it('REFUSES a cross-tenant shell and writes nothing', async () => {
+    const target = await makeTargetClient('acc_xt')
+    const shell = await makeSourceShell('acc_xt_shell', {
+      tenantId: fx!.otherTenantId,
+    })
+    const bookingId = await makeBooking(shell)
+    const { token, inviteId } = await makeClaimLink({
+      clientId: shell,
+      bookingId,
+    })
+
+    const result = await acceptClientClaimFromLink({
+      token,
+      actingUserId: target.userId,
+      actingClientId: target.clientId,
+    })
+
+    expect(result).toEqual({ kind: 'merge_refused', reason: 'cross_tenant' })
+
+    expect(
+      await db.clientProfile.findUnique({ where: { id: shell } }),
+    ).not.toBeNull()
+    const booking = await db.booking.findUnique({
+      where: { id: bookingId },
+      select: { clientId: true },
+    })
+    expect(booking?.clientId).toBe(shell)
+    const untouched = await db.clientProfile.findUnique({
+      where: { id: target.clientId },
+      select: { claimStatus: true },
+    })
+    expect(untouched?.claimStatus).toBe(ClientClaimStatus.UNCLAIMED)
+    const invite = await db.proClientInvite.findUnique({
+      where: { id: inviteId },
+      select: { status: true },
+    })
+    expect(invite?.status).toBe(ProClientInviteStatus.PENDING)
+  })
+
+  /**
+   * THE invariant, and the reason this file exists. Past the merge, a failure
+   * must THROW: Prisma commits whenever the callback resolves, so returning
+   * `revoked` here would commit the absorption it is reporting as failed — the
+   * pro pulls consent and the client keeps the history anyway. No mocked `tx` can
+   * observe this; only a real transaction can be watched not to commit.
+   */
+  it('ROLLS BACK the whole merge when the link is revoked before the audit lands', async () => {
+    const target = await makeTargetClient('acc_rb')
+    const shell = await makeSourceShell('acc_rb_shell')
+    const bookingId = await makeBooking(shell)
+    const threadId = await makeThread(shell, 'ctx_rollback')
+    const { token, inviteId } = await makeClaimLink({
+      clientId: shell,
+      bookingId,
+    })
+
+    audit.override = 'revoked'
+
+    const result = await acceptClientClaimFromLink({
+      token,
+      actingUserId: target.userId,
+      actingClientId: target.clientId,
+    })
+
+    expect(result).toEqual({ kind: 'revoked' })
+
+    // Every row the merge touched is back where it started.
+    expect(
+      await db.clientProfile.findUnique({ where: { id: shell } }),
+    ).not.toBeNull()
+    const booking = await db.booking.findUnique({
+      where: { id: bookingId },
+      select: { clientId: true },
+    })
+    expect(booking?.clientId).toBe(shell)
+    const thread = await db.messageThread.findUnique({
+      where: { id: threadId },
+      select: { clientId: true },
+    })
+    expect(thread?.clientId).toBe(shell)
+    const invite = await db.proClientInvite.findUnique({
+      where: { id: inviteId },
+      select: { clientId: true },
+    })
+    expect(invite?.clientId).toBe(shell)
+    const untouched = await db.clientProfile.findUnique({
+      where: { id: target.clientId },
+      select: { claimStatus: true },
+    })
+    expect(untouched?.claimStatus).toBe(ClientClaimStatus.UNCLAIMED)
+  })
+
+  /**
+   * A second pro's link, claimed by an identity that already absorbed a first
+   * one. The old `updateMany({ where: { claimStatus: UNCLAIMED } })` guard would
+   * have reported `already_claimed` here — telling the client nothing happened
+   * while their history had in fact just moved.
+   */
+  it('CLAIMS onto an identity that already absorbed an earlier shell, without restamping claimedAt', async () => {
+    const target = await makeTargetClient('acc_2nd')
+    const firstClaimedAt = new Date('2026-01-01T00:00:00.000Z')
+    await db.clientProfile.update({
+      where: { id: target.clientId },
+      data: {
+        claimStatus: ClientClaimStatus.CLAIMED,
+        claimedAt: firstClaimedAt,
+      },
+    })
+
+    const shell = await makeSourceShell('acc_2nd_shell')
+    const bookingId = await makeBooking(shell)
+    const { token } = await makeClaimLink({ clientId: shell, bookingId })
+
+    const result = await acceptClientClaimFromLink({
+      token,
+      actingUserId: target.userId,
+      actingClientId: target.clientId,
+    })
+
+    expect(result).toEqual({ kind: 'ok', bookingId })
+    const booking = await db.booking.findUnique({
+      where: { id: bookingId },
+      select: { clientId: true },
+    })
+    expect(booking?.clientId).toBe(target.clientId)
+    const claimed = await db.clientProfile.findUnique({
+      where: { id: target.clientId },
+      select: { claimedAt: true },
+    })
+    expect(claimed?.claimedAt).toEqual(firstClaimedAt)
   })
 })
