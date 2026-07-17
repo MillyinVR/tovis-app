@@ -57,6 +57,9 @@ export const clientHomeBookingSelect = Prisma.validator<Prisma.BookingSelect>()(
     select: {
       id: true,
       businessName: true,
+      firstName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+      lastName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+      nameDisplay: true,
       handle: true,
       avatarUrl: true,
       location: true,
@@ -195,6 +198,9 @@ export const clientHomeLastMinuteInviteSelect =
           select: {
             id: true,
             businessName: true,
+            firstName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+            lastName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+            nameDisplay: true,
             handle: true,
             avatarUrl: true,
             professionType: true,
@@ -304,6 +310,9 @@ export const clientHomeWaitlistSelect =
       select: {
         id: true,
         businessName: true,
+        firstName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+        lastName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+        nameDisplay: true,
         handle: true,
         avatarUrl: true,
         location: true,
@@ -318,6 +327,9 @@ export const clientHomeFavoriteProSelect =
       select: {
         id: true,
         businessName: true,
+        firstName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+        lastName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
+        nameDisplay: true,
         handle: true,
         avatarUrl: true,
         professionType: true,

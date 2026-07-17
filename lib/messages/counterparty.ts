@@ -10,7 +10,9 @@
 // never their acting role — so a dual-role user (a pro who also books as a
 // client) and admins always see the other party, never their own name.
 
-import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import type { ProNameDisplay } from '@prisma/client'
+
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 function isPresentString(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -34,14 +36,17 @@ type CounterpartyProfessional = {
   businessName?: string | null
   firstName?: string | null
   lastName?: string | null
+  handle?: string | null
+  nameDisplay?: ProNameDisplay | null
   avatarUrl?: string | null
 }
 
 /**
  * Resolve the counterparty's display title + avatar for a thread. When the
  * viewer is the pro, that's the client (person name, fallback "Client"); when
- * the viewer is the client, that's the pro (business name → person name,
- * fallback "Professional").
+ * the viewer is the client, that's the pro — resolved through the toggle-aware
+ * public display-name rule (honors `nameDisplay`: business name / real name /
+ * @handle), fallback "Professional".
  */
 export function resolveThreadCounterparty(args: {
   viewerIsThreadPro: boolean
@@ -58,12 +63,16 @@ export function resolveThreadCounterparty(args: {
   }
 
   return {
-    title: formatPublicProfileDisplayName({
-      businessName: professional?.businessName,
-      firstName: professional?.firstName,
-      lastName: professional?.lastName,
-      fallback: 'Professional',
-    }),
+    title: formatProfessionalPublicDisplayName(
+      {
+        businessName: professional?.businessName,
+        firstName: professional?.firstName,
+        lastName: professional?.lastName,
+        handle: professional?.handle,
+        nameDisplay: professional?.nameDisplay,
+      },
+      'Professional',
+    ),
     avatarUrl: professional?.avatarUrl ?? null,
   }
 }

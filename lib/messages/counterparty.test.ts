@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ProNameDisplay } from '@prisma/client'
 
 import { formatPersonName, resolveThreadCounterparty } from './counterparty'
 
@@ -52,5 +53,79 @@ describe('resolveThreadCounterparty', () => {
         professional: { businessName: null, firstName: null, lastName: null, avatarUrl: null },
       }),
     ).toEqual({ title: 'Professional', avatarUrl: null })
+  })
+
+  describe('honors the pro nameDisplay toggle for a client viewer', () => {
+    const toggling = {
+      businessName: 'Glow Studio',
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      handle: 'grace',
+      avatarUrl: 'pro.png',
+    }
+
+    it('REAL_NAME → the real name', () => {
+      expect(
+        resolveThreadCounterparty({
+          viewerIsThreadPro: false,
+          client,
+          professional: { ...toggling, nameDisplay: ProNameDisplay.REAL_NAME },
+        }).title,
+      ).toBe('Grace Hopper')
+    })
+
+    it('HANDLE → the @handle', () => {
+      expect(
+        resolveThreadCounterparty({
+          viewerIsThreadPro: false,
+          client,
+          professional: { ...toggling, nameDisplay: ProNameDisplay.HANDLE },
+        }).title,
+      ).toBe('@grace')
+    })
+
+    it('BUSINESS_NAME → the business name', () => {
+      expect(
+        resolveThreadCounterparty({
+          viewerIsThreadPro: false,
+          client,
+          professional: { ...toggling, nameDisplay: ProNameDisplay.BUSINESS_NAME },
+        }).title,
+      ).toBe('Glow Studio')
+    })
+
+    it('BUSINESS_NAME with no business name degrades to the real name, NEVER the handle', () => {
+      expect(
+        resolveThreadCounterparty({
+          viewerIsThreadPro: false,
+          client,
+          professional: {
+            businessName: null,
+            firstName: 'Grace',
+            lastName: 'Hopper',
+            handle: 'grace',
+            nameDisplay: ProNameDisplay.BUSINESS_NAME,
+            avatarUrl: null,
+          },
+        }).title,
+      ).toBe('Grace Hopper')
+    })
+
+    it('BUSINESS_NAME with neither business nor real name returns the fallback, NEVER the handle', () => {
+      expect(
+        resolveThreadCounterparty({
+          viewerIsThreadPro: false,
+          client,
+          professional: {
+            businessName: null,
+            firstName: null,
+            lastName: null,
+            handle: 'grace',
+            nameDisplay: ProNameDisplay.BUSINESS_NAME,
+            avatarUrl: null,
+          },
+        }).title,
+      ).toBe('Professional')
+    })
   })
 })
