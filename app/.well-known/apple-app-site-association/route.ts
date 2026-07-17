@@ -14,6 +14,18 @@
 // - `/looks/<id>` — a shared look → the native single-look detail (LookDetailView,
 //   paired iOS #155). The app's OWN share sheet emits this URL, so without the
 //   association it produced links it could not open.
+// - `/c/<shortCode>` — a client's shareable referral link (the invite card + its
+//   QR emit this; `lib/referral/inviteCard.ts`). It redirects through the web NFC
+//   tap-funnel (`/c → /t`), which is web-only BY DESIGN, so there is no native
+//   funnel screen — instead the native handler opens this URL in the in-app
+//   browser (SFSafariViewController), the same way `/looks/tags` pages open. That
+//   still counts as "handling" the path (the tap does something deterministic, not
+//   a no-op), and it keeps the app-emitted invite/QR links inside the app rather
+//   than bouncing to system Safari. ⚠️ The in-app browser is cookieless, so the
+//   web funnel treats the tapper as anonymous → referral credit is only granted if
+//   they complete signup there. A richer NATIVE signup-with-attribution flow (route
+//   /c/ into ClientSignupView, plumb the tap intent through register/login) is
+//   backlogged — see tovis-ios/BACKLOG.md.
 //
 // Notes:
 // - Must be served with `Content-Type: application/json` and NO redirect. A
@@ -43,6 +55,10 @@ const APP_ID = 'SB3J675LNU.app.tovis.Tovis'
 const ASSOCIATED_PATHS = [
   { path: '/reset-password/*' },
   { path: '/claim/*' },
+  // A client's referral short-link → opened in the app's in-app browser (the
+  // web funnel is web-only by design). No exclusion needed — `/c/` has a single
+  // `{shortCode}` shape and no sub-paths.
+  { path: '/c/*' },
   // Exclusions first — see the ordering note above.
   { path: '/looks/tags', exclude: true },
   { path: '/looks/tags/*', exclude: true },

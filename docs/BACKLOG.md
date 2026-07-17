@@ -227,8 +227,14 @@ iOS wins to web; (8) add iOS's consolidated pro self-profile+settings surface to
 web; (9) fold minor drift in (inbox role-awareness FIX + filters, home invite
 card, notifications day-grouping).
 **Accepted divergences (no work):** camera/best-shots/scrubber + wrap-up AI
-critique (iOS-only); membership purchase (web-only, Apple IAP); NFC `/t` `/c`
-`/nfc/invalid` + claim-accept (web inbound); public SEO `/p` pro-vanity mirror
+critique (iOS-only); membership purchase (web-only, Apple IAP); NFC `/t`
+`/nfc/invalid` + claim-accept (web inbound — but `/c/<shortCode>` referral links
+now OPEN the web funnel in the iOS in-app browser as of parity-gaps step 17b: web
+`/c/*` AASA + iOS `PublicReferralLink`→SafariView. A richer NATIVE
+signup-with-attribution flow — new `shortCode→tapIntentId` resolve API (or a
+`referralShortCode` on native register) + `tapIntentId` on the native
+register/login request + native-signup routing — is backlogged in
+`tovis-ios/BACKLOG.md §4`); public SEO `/p` pro-vanity mirror
 (iOS renders the native pro profile instead). NOTE: the public *client* profile
 `/u/[handle]` and public boards are NOT accepted divergences — they're iOS build
 items (A2), since they're social surfaces (looks/stats/follow), not SEO mirrors.

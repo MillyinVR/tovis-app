@@ -13,7 +13,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(res.headers.get('content-type')).toBe('application/json')
   })
 
-  it('associates the reset-password + claim + look paths with the real app id', async () => {
+  it('associates the reset-password + claim + referral + look paths with the real app id', async () => {
     const res = GET()
     const body = await res.json()
 
@@ -25,12 +25,14 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(detail.appID).toBe('SB3J675LNU.app.tovis.Tovis')
     expect(detail.appIDs).toEqual(['SB3J675LNU.app.tovis.Tovis'])
 
-    // The emailed reset link, the §27 account-claim link, and a shared look open
+    // The emailed reset link, the §27 account-claim link, the client referral
+    // short-link (`/c/*`, opened in the in-app browser), and a shared look open
     // in-app; everything else stays in the browser. `components` mirrors `paths`
     // one-for-one (legacy "NOT " prefix ↔ modern `exclude: true`).
     expect(detail.paths).toEqual([
       '/reset-password/*',
       '/claim/*',
+      '/c/*',
       'NOT /looks/tags',
       'NOT /looks/tags/*',
       '/looks/*',
@@ -38,6 +40,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(detail.components).toEqual([
       { '/': '/reset-password/*' },
       { '/': '/claim/*' },
+      { '/': '/c/*' },
       { '/': '/looks/tags', exclude: true },
       { '/': '/looks/tags/*', exclude: true },
       { '/': '/looks/*' },
