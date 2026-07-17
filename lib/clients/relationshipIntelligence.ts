@@ -8,6 +8,7 @@
 // Nothing here adds data: it's pure aggregation over bookings/reviews/referrals
 // the page already loads (design doc PR2, "derived relationship intelligence").
 
+import { moneyToString } from '@/lib/money'
 import { getZonedParts, weekdayInTimeZone } from '@/lib/time'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -285,6 +286,88 @@ export function formatCadence(cadenceDays: number | null): string | null {
 /** Whole days remaining in the access window, given its close instant. */
 export function daysLeftInWindow(accessUntil: Date, now: Date): number {
   return Math.max(0, Math.ceil((accessUntil.getTime() - now.getTime()) / DAY_MS))
+}
+
+/** One stat tile's rendered strings — value plus an optional sub-hint. */
+export type IntelTile = { value: string; hint: string | null }
+
+/**
+ * Fully-formatted, presentation-ready view of the intelligence card. Built once
+ * here so the web card AND the native chart's `relationshipIntelligence` wire
+ * block render byte-identical copy from a single source — the same anti-drift
+ * reason the profile stats ship server-formatted `*Label`s. Native carries no
+ * derivations of its own; it decodes and renders these strings.
+ */
+export type RelationshipIntelligenceLabels = {
+  lifetimeValue: IntelTile
+  visits: IntelTile
+  cadence: IntelTile
+  leadTime: IntelTile
+  pattern: IntelTile
+  rebooking: IntelTile
+  preferredContactMethod: string | null
+  referralSource: string | null
+  flags: SmartFlag[]
+}
+
+function moneyLabel(amount: number): string {
+  return `$${moneyToString(amount) ?? '0.00'}`
+}
+
+export function formatRelationshipIntelligence(
+  intel: RelationshipIntelligence,
+  referralSource: string | null,
+): RelationshipIntelligenceLabels {
+  const cadence = formatCadence(intel.cadenceDays)
+  const roundedLead =
+    intel.avgLeadTimeDays === null ? null : Math.round(intel.avgLeadTimeDays)
+  const leadTime =
+    roundedLead === null
+      ? null
+      : `${Math.max(1, roundedLead)} day${roundedLead === 1 ? '' : 's'} ahead`
+  const pattern = [intel.preferredDay, intel.preferredTimeOfDay]
+    .filter(Boolean)
+    .join(' · ')
+  const rebooking = intel.hasUpcoming
+    ? 'Booked'
+    : intel.retentionRisk
+      ? 'At risk'
+      : intel.lastVisitAt
+        ? 'Lapsing'
+        : '—'
+
+  return {
+    lifetimeValue: {
+      value: moneyLabel(intel.lifetimeValue.withYou),
+      hint: `${moneyLabel(intel.lifetimeValue.platform)} platform-wide`,
+    },
+    visits: {
+      value: String(intel.completedVisitsWithYou),
+      hint: `${intel.completedVisits} platform-wide`,
+    },
+    cadence: {
+      value: cadence ?? '—',
+      hint:
+        intel.daysSinceLastVisit === null
+          ? null
+          : `${intel.daysSinceLastVisit} days since last visit`,
+    },
+    leadTime: { value: leadTime ?? '—', hint: null },
+    pattern: {
+      value: pattern || '—',
+      hint: intel.cancelCount ? `${intel.cancelCount} cancelled` : null,
+    },
+    rebooking: {
+      value: rebooking,
+      hint:
+        intel.daysUntilBirthday !== null && intel.daysUntilBirthday <= 30
+          ? `Birthday in ${intel.daysUntilBirthday}d`
+          : null,
+    },
+    preferredContactMethod: intel.preferredContactMethod,
+    referralSource,
+    flags: intel.flags,
+  }
 }
 
 export { DAY_MS, WEEK_MS }

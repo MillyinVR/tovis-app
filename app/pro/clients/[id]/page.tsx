@@ -15,7 +15,7 @@ import { assertProCanViewClient } from '@/lib/clientVisibility'
 import {
   computeRelationshipIntelligence,
   daysLeftInWindow,
-  formatCadence,
+  formatRelationshipIntelligence,
   type IntelBooking,
   type RelationshipIntelligence,
 } from '@/lib/clients/relationshipIntelligence'
@@ -332,10 +332,6 @@ function formatShortDate(value: Date, tz: string): string {
 
 function safeUpper(value: unknown): string {
   return typeof value === 'string' ? value.trim().toUpperCase() : ''
-}
-
-function moneyLabel(amount: number): string {
-  return `$${moneyToString(amount) ?? '0.00'}`
 }
 
 function buildProToClientMessageHref(args: {
@@ -1588,7 +1584,7 @@ function IntelStat({
 }: {
   label: string
   value: string
-  hint?: string
+  hint?: string | null
 }) {
   return (
     <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
@@ -1612,77 +1608,56 @@ function RelationshipIntelligenceCard({
   intel: RelationshipIntelligence
   referralSource: string | null
 }) {
-  const cadence = formatCadence(intel.cadenceDays)
-  const leadTime =
-    intel.avgLeadTimeDays === null
-      ? null
-      : `${Math.max(1, Math.round(intel.avgLeadTimeDays))} day${
-          Math.round(intel.avgLeadTimeDays) === 1 ? '' : 's'
-        } ahead`
-  const pattern = [intel.preferredDay, intel.preferredTimeOfDay]
-    .filter(Boolean)
-    .join(' · ')
+  // Shared formatter — the same bundle the native chart's wire block carries, so
+  // both platforms render identical copy from one source of truth.
+  const labels = formatRelationshipIntelligence(intel, referralSource)
 
   return (
     <Card variant="glass" padding="md">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <IntelStat
           label="Lifetime value (you)"
-          value={moneyLabel(intel.lifetimeValue.withYou)}
-          hint={`${moneyLabel(intel.lifetimeValue.platform)} platform-wide`}
+          value={labels.lifetimeValue.value}
+          hint={labels.lifetimeValue.hint}
         />
         <IntelStat
           label="Visits with you"
-          value={String(intel.completedVisitsWithYou)}
-          hint={`${intel.completedVisits} platform-wide`}
+          value={labels.visits.value}
+          hint={labels.visits.hint}
         />
         <IntelStat
           label="Cadence"
-          value={cadence ?? '—'}
-          hint={
-            intel.daysSinceLastVisit === null
-              ? undefined
-              : `${intel.daysSinceLastVisit} days since last visit`
-          }
+          value={labels.cadence.value}
+          hint={labels.cadence.hint}
         />
-        <IntelStat label="Lead time" value={leadTime ?? '—'} />
+        <IntelStat label="Lead time" value={labels.leadTime.value} />
         <IntelStat
           label="Pattern"
-          value={pattern || '—'}
-          hint={intel.cancelCount ? `${intel.cancelCount} cancelled` : undefined}
+          value={labels.pattern.value}
+          hint={labels.pattern.hint}
         />
         <IntelStat
           label="Rebooking"
-          value={
-            intel.hasUpcoming
-              ? 'Booked'
-              : intel.retentionRisk
-                ? 'At risk'
-                : intel.lastVisitAt
-                  ? 'Lapsing'
-                  : '—'
-          }
-          hint={
-            intel.daysUntilBirthday !== null && intel.daysUntilBirthday <= 30
-              ? `Birthday in ${intel.daysUntilBirthday}d`
-              : undefined
-          }
+          value={labels.rebooking.value}
+          hint={labels.rebooking.hint}
         />
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold text-textSecondary">
-        {intel.preferredContactMethod ? (
+        {labels.preferredContactMethod ? (
           <span>
             Prefers{' '}
             <span className="font-black text-textPrimary">
-              {intel.preferredContactMethod}
+              {labels.preferredContactMethod}
             </span>
           </span>
         ) : null}
-        {referralSource ? (
+        {labels.referralSource ? (
           <span>
             Source:{' '}
-            <span className="font-black text-textPrimary">{referralSource}</span>
+            <span className="font-black text-textPrimary">
+              {labels.referralSource}
+            </span>
           </span>
         ) : null}
       </div>

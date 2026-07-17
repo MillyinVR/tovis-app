@@ -16,6 +16,13 @@ import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { readEncryptedNoteOrFallback } from '@/lib/security/notesPrivacy'
 import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
+import {
+  computeRelationshipIntelligence,
+  formatRelationshipIntelligence,
+} from '@/lib/clients/relationshipIntelligence'
+import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
+import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { decimalToNullableNumber } from '@/lib/booking/snapshots'
 import { moneyToString } from '@/lib/money'
 import { pickString } from '@/lib/pick'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
@@ -54,6 +61,7 @@ const BOOKING_SELECT = {
   id: true,
   status: true,
   scheduledFor: true,
+  createdAt: true, // relationship-intelligence lead time = scheduledFor − createdAt
   locationTimeZone: true,
   finishedAt: true,
   totalDurationMinutes: true,
@@ -129,8 +137,18 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     const technicalEnabled = isClientTechnicalRecordEnabled(proId)
 
-    const [client, bookings, reviewCount, products, clientLeftReviews, proFeedback, photoRows] =
-      await Promise.all([
+    const [
+      client,
+      bookings,
+      reviewCount,
+      products,
+      clientLeftReviews,
+      proFeedback,
+      photoRows,
+      referredCount,
+      wasReferred,
+      scheduleTz,
+    ] = await Promise.all([
         prisma.clientProfile.findUnique({
           where: { id: clientId },
           select: {
@@ -158,9 +176,47 @@ export async function GET(_req: Request, ctx: RouteContext) {
           take: 200,
           select: PHOTO_SELECT,
         }),
+        // Relationship-intelligence inputs (mirror the web chart loader).
+        prisma.referral.count({
+          where: {
+            referrerClientId: clientId,
+            status: { in: ['CONFIRMED', 'CONVERTED', 'REWARDED'] },
+          },
+        }),
+        prisma.referral
+          .count({ where: { referredClientId: clientId } })
+          .then((count) => count > 0),
+        resolveProScheduleTimeZone(proId, auth.user.professionalProfile?.timeZone),
       ])
 
     if (!client) return jsonFail(404, 'Client not found.')
+
+    // Derived relationship intelligence — same module + inputs as the web page,
+    // formatted server-side so native renders identical copy (no native math).
+    const now = new Date()
+    const intel = computeRelationshipIntelligence({
+      bookings: bookings.map((b) => ({
+        status: b.status,
+        scheduledFor: b.scheduledFor,
+        createdAt: b.createdAt,
+        finishedAt: b.finishedAt,
+        professionalId: b.professionalId,
+        amount:
+          decimalToNullableNumber(b.totalAmount) ??
+          decimalToNullableNumber(b.subtotalSnapshot),
+        timeZone: resolveAppointmentDisplayTimeZone(b.locationTimeZone, scheduleTz),
+      })),
+      proId,
+      now,
+      reviewCount,
+      noteCount: client.notes.length,
+      referredCount,
+      wasReferred,
+      dateOfBirth: client.dateOfBirth ?? null, // pii-plaintext-read-ok: birthday math for the authorized pro chart; plaintext-by-schema.
+      preferredContactMethod: client.preferredContactMethod ?? null,
+    })
+    const referralSource = wasReferred ? 'Referred by a client' : null
+    const relationshipIntelligence = formatRelationshipIntelligence(intel, referralSource)
 
     const { groups, doNotRebook } = partitionNotesByKind(client.notes)
     const doNotRebookNote = doNotRebook[0] ?? null
@@ -209,6 +265,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
         bookingCount: bookings.length,
         reviewCount,
       },
+      relationshipIntelligence,
       alertBanner: pickString(client.alertBanner),
       doNotRebook: doNotRebookNote ? { reason: pickString(doNotRebookNote.body), createdAt: doNotRebookNote.createdAt.toISOString() } : null,
       allergies: client.allergies.map((a) => ({
