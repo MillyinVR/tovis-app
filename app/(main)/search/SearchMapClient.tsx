@@ -23,6 +23,7 @@ import DiscoverProRows from './_components/DiscoverProRows'
 import DiscoverActiveProCard from './_components/DiscoverActiveProCard'
 import { fetchDiscoverCategories } from './_lib/discoverCategoryApi'
 import { preferredProLocation, type ApiLocationPreview, type ApiPro } from './_lib/discoverProTypes'
+import { isSortMode, sortPros, type SortMode } from './_lib/discoverSort'
 import type { DiscoverMode, DiscoverViewMode } from './_lib/discoverViewTypes'
 import type { DiscoverCategoryOption } from '@/lib/discovery/categoryTypes'
 
@@ -48,8 +49,6 @@ type ResolvedPlace = {
   label: string
   viewport: Bounds | null
 }
-
-type SortMode = 'DISTANCE' | 'NAME' | 'RATING'
 
 const MapView = dynamic(() => import('./_components/MapView'), { ssr: false })
 
@@ -129,10 +128,6 @@ function isApiPro(value: unknown): value is ApiPro {
     isLocationPreview(value.closestLocation) &&
     isLocationPreview(value.primaryLocation)
   )
-}
-
-function isSortMode(value: string): value is SortMode {
-  return value === 'DISTANCE' || value === 'NAME' || value === 'RATING'
 }
 
 function nearlyEqual(a: number, b: number, eps = 1e-5) {
@@ -323,34 +318,6 @@ function parseResolvedPlace(raw: unknown): ResolvedPlace | null {
     label,
     viewport,
   }
-}
-
-function sortPros(list: ApiPro[], mode: SortMode): ApiPro[] {
-  const sorted = [...list]
-
-  if (mode === 'NAME') {
-    sorted.sort((a, b) => (a.businessName || '').localeCompare(b.businessName || ''))
-    return sorted
-  }
-
-  if (mode === 'RATING') {
-    sorted.sort((a, b) => {
-      const aRating = typeof a.ratingAvg === 'number' ? a.ratingAvg : -1
-      const bRating = typeof b.ratingAvg === 'number' ? b.ratingAvg : -1
-      if (bRating !== aRating) return bRating - aRating
-      return (b.ratingCount ?? 0) - (a.ratingCount ?? 0)
-    })
-    return sorted
-  }
-
-  sorted.sort((a, b) => {
-    const aDistance = typeof a.distanceMiles === 'number' ? a.distanceMiles : Number.POSITIVE_INFINITY
-    const bDistance = typeof b.distanceMiles === 'number' ? b.distanceMiles : Number.POSITIVE_INFINITY
-
-    return aDistance - bDistance
-  })
-
-  return sorted
 }
 
 export default function SearchMapClient() {
@@ -1384,6 +1351,7 @@ export default function SearchMapClient() {
                   >
                     <option value="DISTANCE">Sort: Distance</option>
                     <option value="RATING">Sort: Rating</option>
+                    <option value="PRICE">Sort: Price</option>
                     <option value="NAME">Sort: Name</option>
                   </select>
 
