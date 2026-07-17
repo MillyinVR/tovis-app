@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
     productRecommendation: { findMany: vi.fn() },
     clientProfessionalNote: { findMany: vi.fn() },
     mediaAsset: { findMany: vi.fn() },
+    referral: { count: vi.fn() },
   }
   return { jsonOk, jsonFail, requirePro, assertProCanViewClient, prisma }
 })
@@ -33,6 +34,7 @@ vi.mock('@/lib/clients/clientNoteKinds', () => ({ partitionNotesByKind: vi.fn(()
 vi.mock('@/lib/clients/technicalRecord', () => ({ isClientTechnicalRecordEnabled: vi.fn(() => false) }))
 vi.mock('@/lib/money', async () => await vi.importActual<typeof import('@/lib/money')>('@/lib/money'))
 vi.mock('@/lib/pick', async () => await vi.importActual<typeof import('@/lib/pick')>('@/lib/pick'))
+vi.mock('@/lib/proLocations/resolveProScheduleTimeZone', () => ({ resolveProScheduleTimeZone: vi.fn(async () => 'America/Los_Angeles') }))
 vi.mock('@/app/api/_utils/routeContext', () => ({ resolveRouteParams: vi.fn(async (ctx: { params: Promise<{ id: string }> }) => ctx.params) }))
 
 import { GET } from './route'
@@ -60,7 +62,7 @@ describe('GET /api/v1/pro/clients/[id]/chart', () => {
   })
 
   it('returns the aggregate chart for a viewable client', async () => {
-    mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
+    mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1', user: { professionalProfile: { timeZone: 'America/Los_Angeles' } } })
     mocks.assertProCanViewClient.mockResolvedValue({ ok: true, visibility: { accessUntil: new Date('2026-08-01T00:00:00Z') } })
     mocks.prisma.clientProfile.findUnique.mockResolvedValue({
       id: 'client_1', firstName: 'Jordan', lastName: 'Rivera', phone: '+15555550123',
@@ -71,13 +73,14 @@ describe('GET /api/v1/pro/clients/[id]/chart', () => {
       notes: [],
     })
     mocks.prisma.booking.findMany.mockResolvedValue([
-      { id: 'bk_1', status: 'COMPLETED', scheduledFor: new Date('2026-07-01T17:00:00Z'), locationTimeZone: 'America/Los_Angeles', finishedAt: null, totalDurationMinutes: 120, totalAmount: '180', subtotalSnapshot: '180', professionalId: 'pro_1', service: { name: 'Balayage', category: { name: 'Hair' } }, professional: { businessName: 'Studio', firstName: null, lastName: null }, aftercareSummary: { notes: 'Gloss in 6w' } },
+      { id: 'bk_1', status: 'COMPLETED', scheduledFor: new Date('2026-07-01T17:00:00Z'), createdAt: new Date('2026-06-21T17:00:00Z'), locationTimeZone: 'America/Los_Angeles', finishedAt: null, totalDurationMinutes: 120, totalAmount: '180', subtotalSnapshot: '180', professionalId: 'pro_1', service: { name: 'Balayage', category: { name: 'Hair' } }, professional: { businessName: 'Studio', firstName: null, lastName: null }, aftercareSummary: { notes: 'Gloss in 6w' } },
     ])
     mocks.prisma.review.count.mockResolvedValue(2)
     mocks.prisma.productRecommendation.findMany.mockResolvedValue([])
     mocks.prisma.review.findMany.mockResolvedValue([])
     mocks.prisma.clientProfessionalNote.findMany.mockResolvedValue([])
     mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
+    mocks.prisma.referral.count.mockResolvedValue(0)
 
     const res = await GET(new Request('http://x'), ctx())
     const body = await res.json()
@@ -91,5 +94,10 @@ describe('GET /api/v1/pro/clients/[id]/chart', () => {
     expect(body.history[0].serviceName).toBe('Balayage')
     expect(body.history[0].isMine).toBe(true)
     expect(body.technicalEnabled).toBe(false)
+    // Relationship intelligence: one $180 completed visit with this pro.
+    expect(body.relationshipIntelligence.lifetimeValue.value).toBe('$180')
+    expect(body.relationshipIntelligence.visits.value).toBe('1')
+    expect(body.relationshipIntelligence.rebooking.value).toBe('Lapsing')
+    expect(Array.isArray(body.relationshipIntelligence.flags)).toBe(true)
   })
 })

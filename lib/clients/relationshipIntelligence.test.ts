@@ -5,6 +5,7 @@ import {
   computeRelationshipIntelligence,
   daysLeftInWindow,
   formatCadence,
+  formatRelationshipIntelligence,
   type IntelBooking,
   type RelationshipIntelligenceInput,
 } from './relationshipIntelligence'
@@ -219,5 +220,79 @@ describe('daysLeftInWindow', () => {
   it('rounds up partial days and floors at zero', () => {
     expect(daysLeftInWindow(new Date(NOW.getTime() + 3.2 * DAY_MS), NOW)).toBe(4)
     expect(daysLeftInWindow(new Date(NOW.getTime() - DAY_MS), NOW)).toBe(0)
+  })
+})
+
+describe('formatRelationshipIntelligence', () => {
+  it('formats every tile from a populated relationship', () => {
+    const intel = computeRelationshipIntelligence(
+      input(
+        [
+          booking({
+            professionalId: 'pro1',
+            amount: 120,
+            createdAt: daysAgo(78),
+            scheduledFor: daysAgo(70),
+          }),
+          booking({
+            professionalId: 'pro2',
+            amount: 80,
+            createdAt: daysAgo(64),
+            scheduledFor: daysAgo(56),
+          }),
+          booking({
+            professionalId: 'pro1',
+            amount: 60,
+            createdAt: daysAgo(50),
+            scheduledFor: daysAgo(42),
+          }),
+          booking({ status: 'CANCELLED', amount: 999 }),
+        ],
+        { preferredContactMethod: 'text' },
+      ),
+    )
+    const labels = formatRelationshipIntelligence(intel, 'Referred by a client')
+
+    // Money is server-formatted so native never re-implements it.
+    expect(labels.lifetimeValue.value).toBe('$180')
+    expect(labels.lifetimeValue.hint).toBe('$260 platform-wide')
+    expect(labels.visits.value).toBe('2')
+    expect(labels.visits.hint).toBe('3 platform-wide')
+    // Consecutive visits 14 days apart → "~every 2 wks"; lead time 8 days.
+    expect(labels.cadence.value).toBe('~every 2 wks')
+    expect(labels.cadence.hint).toBe('42 days since last visit')
+    expect(labels.leadTime.value).toBe('8 days ahead')
+    expect(labels.pattern.hint).toBe('1 cancelled')
+    // Last visit 42d ago is past 1.5× the 14d cadence, nothing booked → at risk.
+    expect(labels.rebooking.value).toBe('At risk')
+    expect(labels.preferredContactMethod).toBe('text')
+    expect(labels.referralSource).toBe('Referred by a client')
+  })
+
+  it('renders em-dash placeholders and null hints when data is thin', () => {
+    const intel = computeRelationshipIntelligence(input([]))
+    const labels = formatRelationshipIntelligence(intel, null)
+
+    expect(labels.lifetimeValue.value).toBe('$0')
+    expect(labels.cadence.value).toBe('—')
+    expect(labels.cadence.hint).toBeNull()
+    expect(labels.leadTime.value).toBe('—')
+    expect(labels.leadTime.hint).toBeNull()
+    expect(labels.pattern.value).toBe('—')
+    expect(labels.pattern.hint).toBeNull()
+    // No prior visit → not "Lapsing", not "At risk".
+    expect(labels.rebooking.value).toBe('—')
+    expect(labels.referralSource).toBeNull()
+    expect(labels.flags).toEqual([])
+  })
+
+  it('shows a birthday hint on the rebooking tile within 30 days', () => {
+    const intel = computeRelationshipIntelligence(
+      input([booking({ scheduledFor: daysAgo(5) })], {
+        dateOfBirth: new Date(2000, NOW.getMonth(), NOW.getDate() + 10),
+      }),
+    )
+    const labels = formatRelationshipIntelligence(intel, null)
+    expect(labels.rebooking.hint).toBe('Birthday in 10d')
   })
 })
