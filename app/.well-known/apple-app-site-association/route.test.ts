@@ -26,9 +26,10 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(detail.appIDs).toEqual(['SB3J675LNU.app.tovis.Tovis'])
 
     // The emailed reset link, the §27 account-claim link, the client referral
-    // short-link (`/c/*`, opened in the in-app browser), and a shared look open
-    // in-app; everything else stays in the browser. `components` mirrors `paths`
-    // one-for-one (legacy "NOT " prefix ↔ modern `exclude: true`).
+    // short-link (`/c/*`, opened in the in-app browser), a shared look, and a
+    // shared public board (`/u/*/boards/*`) open in-app; everything else stays in
+    // the browser. `components` mirrors `paths` one-for-one (legacy "NOT " prefix
+    // ↔ modern `exclude: true`).
     expect(detail.paths).toEqual([
       '/reset-password/*',
       '/claim/*',
@@ -36,6 +37,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
       'NOT /looks/tags',
       'NOT /looks/tags/*',
       '/looks/*',
+      '/u/*/boards/*',
     ])
     expect(detail.components).toEqual([
       { '/': '/reset-password/*' },
@@ -44,6 +46,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
       { '/': '/looks/tags', exclude: true },
       { '/': '/looks/tags/*', exclude: true },
       { '/': '/looks/*' },
+      { '/': '/u/*/boards/*' },
     ])
   })
 
@@ -63,5 +66,20 @@ describe('GET /.well-known/apple-app-site-association', () => {
       expect(paths.indexOf(exclusion)).toBeGreaterThan(-1)
       expect(paths.indexOf(exclusion)).toBeLessThan(broadLooks)
     }
+  })
+
+  // The board association is deliberately SCOPED to the board detail the app
+  // routes (`PublicBoardLink` → PublicBoardView). The bare `/u/<handle>` profile
+  // is NOT routed natively, so it must stay in the browser — associating a broad
+  // `/u/*` would turn every profile tap into the silent no-op the header warns
+  // about.
+  it('associates the board detail but NOT the bare /u/<handle> profile', async () => {
+    const res = GET()
+    const body = await res.json()
+    const { paths } = body.applinks.details[0]
+
+    expect(paths).toContain('/u/*/boards/*')
+    expect(paths).not.toContain('/u/*')
+    expect(paths).not.toContain('/u/*/boards')
   })
 })
