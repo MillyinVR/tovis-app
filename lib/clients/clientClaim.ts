@@ -2,6 +2,7 @@ import { ClientClaimStatus, Prisma, ProClientInviteStatus } from '@prisma/client
 
 import { prisma } from '@/lib/prisma'
 
+import { claimMergeDisabled } from './claimMergeFlag'
 import {
   getClientClaimLinkByToken,
   markClientClaimLinkAcceptedAudit,
@@ -204,6 +205,15 @@ async function runAcceptClientClaim(args: {
     if (invite.client.id !== actingClient.id) {
       if (isClientAlreadyClaimed(invite.client)) {
         return { kind: 'already_claimed' }
+      }
+
+      // The kill switch. The merge is irreversible and any client holding a link
+      // can trigger it, so it stays stoppable without a revert + redeploy. Off by
+      // default; `DISABLE_CLAIM_MERGE=1` restores the pre-#652 refusal, which
+      // writes nothing. Checked BEFORE the merge so disabling is always a clean
+      // no-op, never a half-finished absorption.
+      if (claimMergeDisabled()) {
+        return { kind: 'client_mismatch' }
       }
 
       // A signed-in client lands here EVERY time on a `ready` link: the link only
