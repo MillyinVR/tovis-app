@@ -60,6 +60,23 @@ export async function POST(
       })
     }
 
+    // The history could not be absorbed safely, so nothing was written. The
+    // reason is deliberately not on the wire — every one of them means "our model
+    // of this data is wrong", which is a support question, not something the
+    // viewer can act on. It is logged for the people who can.
+    if (result.kind === 'merge_refused') {
+      console.warn(
+        'POST /api/v1/pro/invites/[token]/accept merge refused',
+        JSON.stringify({ reason: result.reason, clientId: auth.clientId }),
+      )
+
+      return jsonFail(
+        409,
+        'This history needs a quick review before it can be added to your account. Contact support and we will finish it for you.',
+        { code: 'MERGE_REFUSED' },
+      )
+    }
+
     if (result.kind === 'conflict') {
       return jsonFail(409, 'Invite could not be claimed.', {
         code: 'CONFLICT',

@@ -238,6 +238,34 @@ describe('POST /api/v1/pro/invites/[token]/accept', () => {
     })
   })
 
+  it('returns MERGE_REFUSED without leaking the reason when the merge declines', async () => {
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
+      kind: 'merge_refused',
+      reason: 'source_not_shell',
+    })
+
+    const result = await POST(makeRequest(), {
+      params: { token: 'token_1' },
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'This history needs a quick review before it can be added to your account. Contact support and we will finish it for you.',
+      { code: 'MERGE_REFUSED' },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error:
+        'This history needs a quick review before it can be added to your account. Contact support and we will finish it for you.',
+      code: 'MERGE_REFUSED',
+    })
+
+    // The reason is a support signal, not something the viewer can act on.
+    expect(JSON.stringify(result)).not.toContain('source_not_shell')
+  })
+
   it('returns CONFLICT when claim service returns conflict', async () => {
     mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'conflict',

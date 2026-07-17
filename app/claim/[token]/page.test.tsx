@@ -446,10 +446,20 @@ describe('app/claim/[token]/page.tsx', () => {
     expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
-  it('renders verify flow for the matching client when the account still needs verification', async () => {
+  /**
+   * ⚠️ Every signed-in-client case below deliberately uses a client id that does
+   * NOT match the invite's. That is not an edge case — it is the only shape that
+   * exists in production. A `ready` link's client has `userId == null` by
+   * definition and a signed-in client's profile always has `userId != null`, so
+   * the ids can never match. Tests that signed a "matching" client in were
+   * describing a world the database cannot produce, which is exactly how the
+   * claim form stayed broken while its tests stayed green.
+   */
+  it('renders verify flow for a signed-in client whose account still needs verification', async () => {
     mocks.getCurrentUser.mockResolvedValueOnce(
       makeClientUser({
-        clientId: 'client_1',
+        id: 'user_2',
+        clientId: 'client_own',
         sessionKind: 'LIMITED',
         isFullyVerified: false,
       }),
@@ -464,19 +474,41 @@ describe('app/claim/[token]/page.tsx', () => {
     expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
-  it('renders mismatch state for a different signed-in client account', async () => {
+  it('offers the claim to a signed-in client instead of sending them to make a second account', async () => {
     mocks.getCurrentUser.mockResolvedValueOnce(
       makeClientUser({
         id: 'user_2',
-        clientId: 'client_other',
+        clientId: 'client_own',
       }),
     )
 
     const html = await renderPage()
 
-    expect(html).toContain('You are signed into a different client account')
-    expect(html).toContain('/login?from=%2Fclaim%2Ftok_1')
-    expect(html).toContain('/signup?from=%2Fclaim%2Ftok_1')
+    expect(html).toContain('Claim this history')
+    expect(html).toContain(
+      'This will attach this history to your client identity.',
+    )
+    // The old page short-circuited this exact viewer to a dead end.
+    expect(html).not.toContain('You are signed into a different client account')
+    expect(html).not.toContain('Create a new client account')
+    expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
+  it('renders merge-unavailable state from query params, pointing at support', async () => {
+    mocks.getCurrentUser.mockResolvedValueOnce(
+      makeClientUser({
+        id: 'user_2',
+        clientId: 'client_own',
+      }),
+    )
+
+    const html = await renderPage({
+      searchParams: { state: 'merge-unavailable' },
+    })
+
+    expect(html).toContain('This history needs a quick review first')
+    expect(html).toContain('Nothing was changed, and nothing was lost.')
+    expect(html).toContain('/support')
     expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
@@ -501,10 +533,11 @@ describe('app/claim/[token]/page.tsx', () => {
     expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
-  it('renders ready claim action for a matching verified client', async () => {
+  it('renders ready claim action for a verified client', async () => {
     mocks.getCurrentUser.mockResolvedValueOnce(
       makeClientUser({
-        clientId: 'client_1',
+        id: 'user_2',
+        clientId: 'client_own',
       }),
     )
 

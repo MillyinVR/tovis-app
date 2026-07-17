@@ -35,6 +35,7 @@ type ClaimPageState =
   | 'revoked'
   | 'already-claimed'
   | 'client-mismatch'
+  | 'merge-unavailable'
   | 'conflict'
 
 type ClaimInviteRecord = ClientClaimLinkRow
@@ -104,6 +105,7 @@ function parsePageState(value: string | null): ClaimPageState | null {
     value === 'revoked' ||
     value === 'already-claimed' ||
     value === 'client-mismatch' ||
+    value === 'merge-unavailable' ||
     value === 'conflict'
   ) {
     return value
@@ -195,10 +197,13 @@ export default async function ClaimInvitePage(props: PageProps) {
   const isAuthedClient =
     user?.role === 'CLIENT' && Boolean(user.clientProfile?.id)
   const currentClientId = isAuthedClient ? user.clientProfile?.id ?? null : null
+  // Only ever true on an already-claimed link — a `ready` one is by construction
+  // a client with no user behind it, which the signed-in viewer can never be.
+  // It survives solely to offer the "Go to booking" jump after signup adoption.
   const isMatchingClient =
     currentClientId != null && currentClientId === invite.client.id
   const needsVerification =
-    Boolean(isMatchingClient) &&
+    isAuthedClient &&
     (user?.sessionKind !== 'ACTIVE' || !user?.isFullyVerified)
 
   const revoked = inviteState.kind === 'revoked' || isInviteRevoked(invite)
@@ -207,12 +212,16 @@ export default async function ClaimInvitePage(props: PageProps) {
 
   let pageState: ClaimPageState = 'ready'
 
+  // A signed-in client on a `ready` link is the ONE viewer this page exists for,
+  // and it used to short-circuit them all to `client-mismatch` here — before the
+  // ready branch could ever run, on the reasoning that a link whose ids don't
+  // match isn't yours. The ids never match; the link is theirs anyway, and the
+  // accept now merges the pro's shell into their identity rather than refusing.
+  // Mismatch is now only what the server reports back, never a guess made here.
   if (revoked) {
     pageState = 'revoked'
   } else if (alreadyClaimed) {
     pageState = 'already-claimed'
-  } else if (isAuthedClient && !isMatchingClient) {
-    pageState = 'client-mismatch'
   } else if (stateFromQuery) {
     pageState = stateFromQuery
   }
@@ -266,6 +275,9 @@ export default async function ClaimInvitePage(props: PageProps) {
 
       case 'client_mismatch':
         redirect(`${claimHref(token)}?state=client-mismatch`)
+
+      case 'merge_refused':
+        redirect(`${claimHref(token)}?state=merge-unavailable`)
 
       case 'conflict':
         redirect(`${claimHref(token)}?state=conflict`)
@@ -411,6 +423,21 @@ export default async function ClaimInvitePage(props: PageProps) {
           </StatusCard>
         ) : null}
 
+        {pageState === 'merge-unavailable' ? (
+          <StatusCard
+            title="This history needs a quick review first"
+            body="Something about this history has to be checked by a person before we can add it to your account. Nothing was changed, and nothing was lost. Contact support and we will finish it for you."
+            tone="warning"
+          >
+            <Link
+              href="/support"
+              className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
+            >
+              Contact support
+            </Link>
+          </StatusCard>
+        ) : null}
+
         {pageState === 'conflict' ? (
           <StatusCard
             title="We could not finish the claim"
@@ -485,7 +512,12 @@ export default async function ClaimInvitePage(props: PageProps) {
                   </Link>
                 </div>
               </>
-            ) : isMatchingClient ? (
+            ) : (
+              // Every signed-in client reaching a `ready` link gets the claim,
+              // matching ids or not. This used to be gated on `isMatchingClient`,
+              // which is unsatisfiable here — so the form below had never once
+              // rendered in production, and the branch that replaced it told the
+              // rightful owner to go make a second account.
               <>
                 <div className="mt-2 text-sm text-textSecondary">
                   This will attach this history to your client identity.
@@ -499,29 +531,6 @@ export default async function ClaimInvitePage(props: PageProps) {
                     Claim this history
                   </button>
                 </form>
-              </>
-            ) : (
-              <>
-                <div className="mt-2 text-sm text-textSecondary">
-                  This link is valid, but it does not match the client account
-                  currently signed in.
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <Link
-                    href={loginLink}
-                    className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
-                  >
-                    Use a different account
-                  </Link>
-
-                  <Link
-                    href={signupLink}
-                    className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
-                  >
-                    Create a new client account
-                  </Link>
-                </div>
               </>
             )}
           </section>

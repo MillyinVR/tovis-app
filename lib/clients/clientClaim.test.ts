@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
     clientProfile: {
       findUnique: vi.fn(),
       updateMany: vi.fn(),
+      update: vi.fn(),
     },
   }
 
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => {
     tx,
     getClientClaimLinkByToken: vi.fn(),
     markClientClaimLinkAcceptedAudit: vi.fn(),
+    mergeUnclaimedClientProfile: vi.fn(),
   }
 })
 
@@ -33,6 +35,18 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('./clientClaimLinks', () => ({
   getClientClaimLinkByToken: mocks.getClientClaimLinkByToken,
   markClientClaimLinkAcceptedAudit: mocks.markClientClaimLinkAcceptedAudit,
+}))
+
+/**
+ * The merge itself is covered against REAL Postgres in
+ * tests/integration/claim-merge-unclaimed-profile.test.ts, and the wiring here is
+ * covered end-to-end in tests/integration/claim-accept-merge.test.ts. These mocked
+ * tests are only about which branch this function picks — a mocked `tx` cannot see
+ * a constraint, a Cascade, or a rollback, so nothing here should be read as proof
+ * that the merge works.
+ */
+vi.mock('./mergeUnclaimedClientProfile', () => ({
+  mergeUnclaimedClientProfile: mocks.mergeUnclaimedClientProfile,
 }))
 
 import { acceptClientClaimFromLink } from './clientClaim'
@@ -122,7 +136,12 @@ describe('acceptClientClaimFromLink', () => {
     mocks.getClientClaimLinkByToken.mockResolvedValue(makeInvite())
     mocks.tx.clientProfile.findUnique.mockResolvedValue(makeActingClient())
     mocks.tx.clientProfile.updateMany.mockResolvedValue({ count: 1 })
+    mocks.tx.clientProfile.update.mockResolvedValue(makeActingClient())
     mocks.markClientClaimLinkAcceptedAudit.mockResolvedValue('ok')
+    mocks.mergeUnclaimedClientProfile.mockResolvedValue({
+      kind: 'ok',
+      moved: {},
+    })
   })
 
   afterEach(() => {
@@ -252,28 +271,254 @@ describe('acceptClientClaimFromLink', () => {
     expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
-  it('returns client_mismatch when link belongs to a different unclaimed client identity', async () => {
-    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
-      makeInvite({
-        client: {
-          id: 'client_other',
-          userId: null,
-          claimStatus: ClientClaimStatus.UNCLAIMED,
-          claimedAt: null,
-          preferredContactMethod: null,
-        },
-      }),
-    )
+  /**
+   * The heart of this file. A signed-in client on a `ready` link ALWAYS lands
+   * here — the link only reads `ready` while its client has `userId == null`, and
+   * the acting client's own profile always has `userId != null`, so the ids can
+   * never match. This used to return `client_mismatch`, which is why nobody with
+   * an account could ever claim.
+   */
+  describe('signed-in client on a ready link (the merge path)', () => {
+    function mockReadyLinkForSignedInClient() {
+      mocks.getClientClaimLinkByToken.mockResolvedValue(
+        makeInvite({
+          clientId: 'client_shell',
+          client: {
+            id: 'client_shell',
+            userId: null,
+            claimStatus: ClientClaimStatus.UNCLAIMED,
+            claimedAt: null,
+            preferredContactMethod: null,
+          },
+        }),
+      )
 
-    const result = await acceptClientClaimFromLink({
-      token: 'token_1',
-      actingUserId: 'user_1',
-      actingClientId: 'client_1',
+      // 1st read = the acting client; 2nd = the re-read after the merge.
+      mocks.tx.clientProfile.findUnique.mockResolvedValue(
+        makeActingClient({ id: 'client_1', userId: 'user_1' }),
+      )
+    }
+
+    it('absorbs the pro-created shell instead of refusing, and claims', async () => {
+      mockReadyLinkForSignedInClient()
+
+      const result = await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      expect(mocks.mergeUnclaimedClientProfile).toHaveBeenCalledWith({
+        tx: mocks.tx,
+        sourceClientId: 'client_shell',
+        targetClientId: 'client_1',
+        actingUserId: 'user_1',
+        now: TEST_NOW,
+      })
+
+      expect(result).toEqual({ kind: 'ok', bookingId: 'booking_1' })
+      expect(mocks.markClientClaimLinkAcceptedAudit).toHaveBeenCalledWith({
+        inviteId: 'invite_1',
+        actingUserId: 'user_1',
+        acceptedAt: TEST_NOW,
+        tx: mocks.tx,
+      })
     })
 
-    expect(result).toEqual({ kind: 'client_mismatch' })
-    expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
-    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
+    it('never merges into a profile the acting user does not own', async () => {
+      mockReadyLinkForSignedInClient()
+      mocks.mergeUnclaimedClientProfile.mockResolvedValueOnce({
+        kind: 'refused',
+        reason: 'target_not_owned',
+        details: [],
+      })
+
+      const result = await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      expect(result).toEqual({ kind: 'client_mismatch' })
+      expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['cross_tenant'],
+      ['source_not_shell'],
+      ['thread_collision'],
+    ] as const)(
+      'surfaces a %s refusal as merge_refused, claiming nothing',
+      async (reason) => {
+        mockReadyLinkForSignedInClient()
+        mocks.mergeUnclaimedClientProfile.mockResolvedValueOnce({
+          kind: 'refused',
+          reason,
+          details: [],
+        })
+
+        const result = await acceptClientClaimFromLink({
+          token: 'token_1',
+          actingUserId: 'user_1',
+          actingClientId: 'client_1',
+        })
+
+        expect(result).toEqual({ kind: 'merge_refused', reason })
+        expect(mocks.tx.clientProfile.update).not.toHaveBeenCalled()
+        expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
+      },
+    )
+
+    /**
+     * A refusal that means the world moved under us reports the kind describing
+     * the NEW world, not a merge error the viewer can do nothing with.
+     */
+    it.each([
+      ['source_not_unclaimed', 'already_claimed'],
+      ['source_not_found', 'not_found'],
+      ['target_not_found', 'client_not_found'],
+      ['same_profile', 'conflict'],
+    ] as const)('maps a %s refusal to %s', async (reason, kind) => {
+      mockReadyLinkForSignedInClient()
+      mocks.mergeUnclaimedClientProfile.mockResolvedValueOnce({
+        kind: 'refused',
+        reason,
+        details: [],
+      })
+
+      const result = await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      expect(result).toEqual({ kind })
+      expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
+    })
+
+    it('re-reads the target after the merge rather than trusting the pre-merge row', async () => {
+      mockReadyLinkForSignedInClient()
+      mocks.getClientClaimLinkByToken.mockResolvedValue(
+        makeInvite({
+          clientId: 'client_shell',
+          preferredContactMethod: ContactMethod.EMAIL,
+          client: {
+            id: 'client_shell',
+            userId: null,
+            claimStatus: ClientClaimStatus.UNCLAIMED,
+            claimedAt: null,
+            preferredContactMethod: ContactMethod.EMAIL,
+          },
+        }),
+      )
+
+      // The merge carries the shell's contact preference across, so the row read
+      // BEFORE it ran is stale. Trusting it would overwrite the just-merged value.
+      mocks.tx.clientProfile.findUnique
+        .mockResolvedValueOnce(
+          makeActingClient({ id: 'client_1', userId: 'user_1' }),
+        )
+        .mockResolvedValueOnce(
+          makeActingClient({
+            id: 'client_1',
+            userId: 'user_1',
+            preferredContactMethod: ContactMethod.EMAIL,
+          }),
+        )
+
+      await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      expect(mocks.tx.clientProfile.update).toHaveBeenCalledWith({
+        where: { id: 'client_1' },
+        data: {
+          claimStatus: ClientClaimStatus.CLAIMED,
+          claimedAt: TEST_NOW,
+        },
+      })
+    })
+
+    /**
+     * A target that adopted another pro's shell earlier is ALREADY CLAIMED. The
+     * merge is the substantive work and CLAIMED is already the state we wanted,
+     * so this is success — the old `updateMany`-with-UNCLAIMED-guard would have
+     * reported `already_claimed` while the history had in fact just moved.
+     */
+    it('claims a target that was already CLAIMED by an earlier merge, keeping its original claimedAt', async () => {
+      const firstClaimedAt = new Date('2026-01-01T00:00:00.000Z')
+
+      mockReadyLinkForSignedInClient()
+      mocks.tx.clientProfile.findUnique.mockResolvedValue(
+        makeActingClient({
+          id: 'client_1',
+          userId: 'user_1',
+          claimStatus: ClientClaimStatus.CLAIMED,
+          claimedAt: firstClaimedAt,
+          // Already has an opinion, so nothing is carried over — this test is
+          // about claimedAt alone.
+          preferredContactMethod: ContactMethod.SMS,
+        }),
+      )
+
+      const result = await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      expect(result).toEqual({ kind: 'ok', bookingId: 'booking_1' })
+      expect(mocks.tx.clientProfile.update).toHaveBeenCalledWith({
+        where: { id: 'client_1' },
+        data: {
+          claimStatus: ClientClaimStatus.CLAIMED,
+          claimedAt: firstClaimedAt,
+        },
+      })
+      expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+    })
+
+    /**
+     * Past the merge, a failure must THROW so the transaction rolls back — Prisma
+     * commits when the callback resolves, so returning would commit the very
+     * absorption being reported as failed. This asserts the caller still sees the
+     * right result; that the rows actually unwind is only provable against real
+     * Postgres (tests/integration/claim-accept-merge.test.ts).
+     */
+    it.each([
+      ['revoked', 'revoked'],
+      ['not_found', 'not_found'],
+      ['conflict', 'conflict'],
+    ] as const)(
+      'rolls the merge back when the audit comes back %s',
+      async (auditResult, kind) => {
+        mockReadyLinkForSignedInClient()
+        mocks.markClientClaimLinkAcceptedAudit.mockResolvedValueOnce(auditResult)
+
+        const transactionCallback = vi.fn()
+        mocks.prisma.$transaction.mockImplementationOnce(
+          async (callback: (tx: typeof mocks.tx) => Promise<unknown>) => {
+            transactionCallback.mockImplementation(callback)
+            return transactionCallback(mocks.tx)
+          },
+        )
+
+        const result = await acceptClientClaimFromLink({
+          token: 'token_1',
+          actingUserId: 'user_1',
+          actingClientId: 'client_1',
+        })
+
+        expect(result).toEqual({ kind })
+        // Rejecting the callback is what makes Prisma roll back; resolving it
+        // would commit the merge.
+        await expect(transactionCallback.mock.results[0]?.value).rejects.toThrow(
+          'rolled back after the merge had already moved rows',
+        )
+      },
+    )
   })
 
   it('returns already_claimed when link belongs to a different claimed client identity', async () => {
