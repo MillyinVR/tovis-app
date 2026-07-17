@@ -146,6 +146,7 @@ describe('acceptClientClaimFromLink', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllEnvs()
   })
 
   it('throws when token is blank after trimming', async () => {
@@ -323,6 +324,80 @@ describe('acceptClientClaimFromLink', () => {
         acceptedAt: TEST_NOW,
         tx: mocks.tx,
       })
+    })
+
+    /**
+     * The kill switch. Defaults OFF (the merge runs) — this asserts the escape
+     * hatch restores the exact pre-#652 behaviour and, critically, that it is
+     * checked BEFORE the merge so disabling can never leave a half-absorbed
+     * profile behind.
+     */
+    it('falls back to the pre-#652 refusal when DISABLE_CLAIM_MERGE is set, writing nothing', async () => {
+      mockReadyLinkForSignedInClient()
+      vi.stubEnv('DISABLE_CLAIM_MERGE', '1')
+
+      const result = await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      expect(result).toEqual({ kind: 'client_mismatch' })
+      expect(mocks.mergeUnclaimedClientProfile).not.toHaveBeenCalled()
+      expect(mocks.tx.clientProfile.update).not.toHaveBeenCalled()
+      expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+      expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
+    })
+
+    /**
+     * A kill switch must FAIL SAFE. The opt-in flags accept-list their truthy
+     * values, and copying that here would mean `DISABLE_CLAIM_MERGE=y` kept an
+     * irreversible write running during the emergency it was set to stop.
+     */
+    it.each([['1'], ['true'], ['yes'], ['y'], ['on'], ['TRUE'], ['  1  '], ['whatever']])(
+      'disables the merge for %j — anything set that is not explicitly off',
+      async (value) => {
+        mockReadyLinkForSignedInClient()
+        vi.stubEnv('DISABLE_CLAIM_MERGE', value)
+
+        const result = await acceptClientClaimFromLink({
+          token: 'token_1',
+          actingUserId: 'user_1',
+          actingClientId: 'client_1',
+        })
+
+        expect(result).toEqual({ kind: 'client_mismatch' })
+        expect(mocks.mergeUnclaimedClientProfile).not.toHaveBeenCalled()
+      },
+    )
+
+    it.each([['0'], ['false'], ['no'], ['off'], [''], ['  ']])(
+      'still merges when DISABLE_CLAIM_MERGE is %j (explicitly off)',
+      async (value) => {
+        mockReadyLinkForSignedInClient()
+        vi.stubEnv('DISABLE_CLAIM_MERGE', value)
+
+        const result = await acceptClientClaimFromLink({
+          token: 'token_1',
+          actingUserId: 'user_1',
+          actingClientId: 'client_1',
+        })
+
+        expect(result).toEqual({ kind: 'ok', bookingId: 'booking_1' })
+        expect(mocks.mergeUnclaimedClientProfile).toHaveBeenCalledTimes(1)
+      },
+    )
+
+    it('merges when DISABLE_CLAIM_MERGE is unset (the switch is opt-OUT)', async () => {
+      mockReadyLinkForSignedInClient()
+
+      const result = await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      expect(result).toEqual({ kind: 'ok', bookingId: 'booking_1' })
     })
 
     it('never merges into a profile the acting user does not own', async () => {

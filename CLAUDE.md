@@ -41,6 +41,40 @@ npm run typecheck && npm run lint && npm run check:static-guards
 
 plus the relevant `vitest` suites for the code you touched.
 
+## Final self-review (standing rule — Tori, 2026-07-16)
+
+**Never say "done" straight off the back of the work.** Before reporting a session
+complete — and before merging — do a deliberate second pass. The first round is
+where careless errors get made; this is the round that catches them. Green tooling
+is not this pass: typecheck, lint and guards all pass happily on code that does the
+wrong thing.
+
+Do these in order, as a **reviewer** who did not write the code:
+
+1. **Re-read the original prompt, literally.** Not your memory of it. Did you do
+   what was actually asked? Did you miss a sub-ask, quietly drop a constraint, or
+   drift into work nobody requested? If the ask contained a warning or a "⚠️", find
+   the line of code that answers it.
+2. **Re-read your own diff, top to bottom.** Every hunk, as if reviewing someone
+   else. Say out loud what each change does and why it is correct. Real bugs have
+   been caught here that no test caught — a refusal that should have thrown, an
+   unescaped quote, a swallowed closing delimiter.
+3. **Verify the thing you are SHIPPING, not the thing you were looking at.** The
+   recurring failure mode: the tests pass, the logic is sound, and the artifact is
+   broken — because it was never opened. Run the built output, load the page, drive
+   the endpoint, parse the file you just edited.
+4. **Name what you did NOT check.** Cost, latency, transaction size, failure paths,
+   reachability, blast radius. If you cannot say why an unchecked thing is safe,
+   check it or say so plainly in the report. "I didn't verify X" is a finding, not
+   an admission.
+5. **Ask what would make this unsafe.** Is it reversible? Can a user trigger it? Is
+   there a kill switch, and does the repo's convention expect one? Irreversible +
+   user-triggerable + no way to stop it is not shippable just because it is correct.
+
+Then report honestly: what you verified and HOW, what you changed, and what you are
+unsure about. A confident summary of unverified work is worse than no summary — it
+spends trust you have not earned yet.
+
 ## Ship cadence & deploys (standing rule — Tori, 2026-07-08)
 
 Default workflow for every session, no need to ask each time:
