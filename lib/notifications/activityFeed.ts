@@ -27,6 +27,13 @@ export const ACTIVITY_FEED_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_MILESTONE_REACHED,
 ]
 
+/**
+ * Which glyph a row renders. ⚠️ `remix` and `featured` are planned, not live:
+ * no NotificationEventKey produces them today (see ACTIVITY_FEED_EVENT_KEYS
+ * above), so no builder below emits them. They are part of the published wire
+ * contract, so a client should tolerate them rather than assume a closed set —
+ * but nothing will render them until the events ship.
+ */
 export type ActivityIconKind =
   | 'follow'
   | 'comment'

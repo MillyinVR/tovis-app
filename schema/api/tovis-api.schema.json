@@ -376,6 +376,37 @@
       ],
       "type": "string"
     },
+    "ActivityFollowBack": {
+      "properties": {
+        "alreadyFollowing": {
+          "description": "Whether the viewer already follows this follower back.",
+          "type": "boolean"
+        },
+        "handle": {
+          "description": "The follower's public handle — addresses /u/[handle] + the follow toggle.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "handle",
+        "alreadyFollowing"
+      ],
+      "type": "object"
+    },
+    "ActivityIconKind": {
+      "description": "Which glyph a row renders. ⚠️ `remix` and `featured` are planned, not live: no NotificationEventKey produces them today (see ACTIVITY_FEED_EVENT_KEYS above), so no builder below emits them. They are part of the published wire contract, so a client should tolerate them rather than assume a closed set — but nothing will render them until the events ship.",
+      "enum": [
+        "follow",
+        "comment",
+        "like",
+        "save",
+        "new-look",
+        "remix",
+        "featured",
+        "milestone"
+      ],
+      "type": "string"
+    },
     "AftercareRebookMode": {
       "$ref": "#/definitions/%24Enums.AftercareRebookMode"
     },
@@ -2151,6 +2182,92 @@
         "already_claimed"
       ],
       "type": "string"
+    },
+    "ClientActivityFeedDTO": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ClientActivityItem"
+          },
+          "type": "array"
+        },
+        "markReadEventKeys": {
+          "description": "The event keys \"Mark all read\" should clear (the activity allowlist).",
+          "items": {
+            "$ref": "#/definitions/NotificationEventKey"
+          },
+          "type": "array"
+        },
+        "unreadCount": {
+          "description": "Unread activity events — the same count that badges the Me header bell.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "items",
+        "unreadCount",
+        "markReadEventKeys"
+      ],
+      "type": "object"
+    },
+    "ClientActivityItem": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "followBack": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ActivityFollowBack"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present for a follow item whose follower is publicly addressable."
+        },
+        "highlight": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "href": {
+          "description": "Where the row (and any \"View\" CTA) links, when applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "iconKind": {
+          "$ref": "#/definitions/ActivityIconKind"
+        },
+        "id": {
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "ISO timestamp; the client formats it relative.",
+          "type": "string"
+        },
+        "unread": {
+          "type": "boolean"
+        },
+        "who": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "iconKind",
+        "who",
+        "action",
+        "highlight",
+        "timestamp",
+        "unread",
+        "href",
+        "followBack"
+      ],
+      "type": "object"
     },
     "ClientAddressDTO": {
       "properties": {
