@@ -114,6 +114,8 @@ describe('GET /api/v1/client/priority-offer', () => {
     expect(offer.professionalId).toBe('pro_1')
     expect(offer.serviceId).toBe('svc_1')
     expect(offer.offeringId).toBe('off_1')
+    // The LastMinuteOpening id a native claim finalizes with (same id claimHref embeds).
+    expect(offer.openingId).toBe('opening_1')
     // The web-facing hrefs still ship alongside the flat ids.
     expect(offer.proHref).toBe('/professionals/pro_1')
     expect(offer.claimHref).toContain('/offerings/off_1')

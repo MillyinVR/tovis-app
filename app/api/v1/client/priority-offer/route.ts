@@ -168,6 +168,10 @@ export async function GET() {
       serviceLabel: serviceSummary(opening.services),
       serviceId: primaryService?.serviceId ?? null,
       offeringId: primaryService?.offeringId ?? null,
+      // The LastMinuteOpening id, so a native claim can finalize with `openingId`
+      // (consume the opening + apply its incentive) — the same id `buildClaimHref`
+      // already embeds in the web `claimHref`. The web UI reads `claimHref`, not this.
+      openingId: opening.id,
       startAt: opening.startAt.toISOString(),
       endAt: opening.endAt ? opening.endAt.toISOString() : null,
       timeZone: opening.timeZone,
