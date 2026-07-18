@@ -8,6 +8,10 @@ import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { safeJson } from '@/lib/http'
 import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
+import {
   buildLifecycleActionViewModel,
   type LifecycleAction,
 } from '@/lib/booking/lifecycleActionViewModel'
@@ -154,11 +158,22 @@ export default function BookingActions({
     abortRef.current = controller
 
     try {
+      // These routes go through withRouteIdempotency, which 400s
+      // IDEMPOTENCY_KEY_REQUIRED without a key — this component used to send
+      // none at all, so client cancel was dead. Same deterministic key shape
+      // as the pro-side lifecycle actions: a double-click replays.
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'booking-lifecycle',
+        entityId: bookingId,
+        action: action.verb,
+      })
+
       const res = await fetch(action.href, {
         method: action.method === 'POST' ? 'POST' : 'PATCH',
-        headers: action.payload
-          ? { 'Content-Type': 'application/json' }
-          : undefined,
+        headers: {
+          ...(action.payload ? { 'Content-Type': 'application/json' } : {}),
+          ...idempotencyHeaders(idempotencyKey),
+        },
         body: action.payload ? JSON.stringify(action.payload) : undefined,
         signal: controller.signal,
       })

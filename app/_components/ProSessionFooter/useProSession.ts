@@ -12,6 +12,10 @@ import type {
 } from '@/lib/proSession/types'
 import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 type CenterState = {
   label: string
@@ -222,17 +226,19 @@ function nextHrefFromStartFinish(data: unknown): string | null {
   return isSafeInternalHref(href) ? href : null
 }
 
+/**
+ * Deterministic per (booking, transition): a double-tap of Start/Finish
+ * replays the first response instead of re-running the session transition.
+ */
 function buildProSessionIdempotencyKey(args: {
   bookingId: string
   action: 'START' | 'FINISH'
 }): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
-  }
-
-  return `pro-session-${args.action.toLowerCase()}-${args.bookingId}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}`
+  return buildClientIdempotencyKey({
+    scope: 'pro-session',
+    entityId: args.bookingId,
+    action: args.action.toLowerCase(),
+  })
 }
 
 export function useProSession() {
@@ -520,10 +526,7 @@ export function useProSession() {
           `/api/v1/pro/bookings/${encodeURIComponent(cleanId)}/session/start`,
           {
             method: 'POST',
-            headers: {
-              'Idempotency-Key': idempotencyKey,
-              'x-idempotency-key': idempotencyKey,
-            },
+            headers: idempotencyHeaders(idempotencyKey),
           },
         )
 
@@ -590,10 +593,7 @@ export function useProSession() {
           `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}/session/start`,
           {
             method: 'POST',
-            headers: {
-              'Idempotency-Key': idempotencyKey,
-              'x-idempotency-key': idempotencyKey,
-            },
+            headers: idempotencyHeaders(idempotencyKey),
           },
         )
 
@@ -639,10 +639,7 @@ export function useProSession() {
           `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}/session/finish`,
           {
             method: 'POST',
-            headers: {
-              'Idempotency-Key': idempotencyKey,
-              'x-idempotency-key': idempotencyKey,
-            },
+            headers: idempotencyHeaders(idempotencyKey),
           },
         )
 

@@ -18,6 +18,10 @@ import {
 } from '@prisma/client'
 
 import type { BookingMoneyTrail } from '@/lib/booking/moneyTrail'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 import { formatCents } from '@/lib/money'
 import { formatRelativeTimeAgo } from '@/lib/time'
 import { safeJson } from '@/lib/http'
@@ -45,14 +49,6 @@ type TrailEntry = {
 
 function readString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function buildIdempotencyKey(prefix: string, bookingId: string): string {
-  const suffix =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  return `${prefix}:${bookingId}:${suffix}`
 }
 
 function money(cents: number | null, currency: string): string | null {
@@ -307,17 +303,25 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
 
     setActionError(null)
     setActionPending(true)
-    const key = buildIdempotencyKey('inspector-refund', bookingId)
 
     try {
+      // Strict action-only key: a double-submit within the bucket replays the
+      // first refund instead of issuing a second one. The server hashes the
+      // refund details, so a different amount under the same key 409s. Built
+      // inside the try so a throw can't strand the pending flag.
+      const key = buildClientIdempotencyKey({
+        scope: 'money-trail',
+        entityId: bookingId,
+        action: 'refund',
+      })
+
       const res = await fetch(
         `/api/v1/bookings/${encodeURIComponent(bookingId)}/refund`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': key,
-            'x-idempotency-key': key,
+            ...idempotencyHeaders(key),
           },
           body: JSON.stringify({
             ...(cents !== null ? { amountCents: cents } : {}),
@@ -359,17 +363,21 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
 
     setActionError(null)
     setActionPending(true)
-    const key = buildIdempotencyKey('inspector-waive', bookingId)
 
     try {
+      const key = buildClientIdempotencyKey({
+        scope: 'money-trail',
+        entityId: bookingId,
+        action: 'waive',
+      })
+
       const res = await fetch(
         `/api/v1/bookings/${encodeURIComponent(bookingId)}/no-show-fee/waive`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': key,
-            'x-idempotency-key': key,
+            ...idempotencyHeaders(key),
           },
           body: '{}',
         },

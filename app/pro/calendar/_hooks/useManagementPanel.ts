@@ -13,6 +13,10 @@ import type {
 
 import { apiMessage } from '../_utils/parsers'
 import { safeJson, errorMessageFromUnknown } from '@/lib/http'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 import {
   BookingOverrideRequiredError,
@@ -121,19 +125,21 @@ async function patchBookingStatus(args: {
   payload: BookingPatchPayload
   fallbackErrorMessage: string
 }): Promise<void> {
-  const idempotencyKey =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `pro-booking-status-${args.bookingId}-${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}`
+  // Deterministic per (booking, status, exact payload): a double-click
+  // replays the first response; an override retry (added flags) changes the
+  // body and so mints a fresh key.
+  const idempotencyKey = buildClientIdempotencyKey({
+    scope: 'pro-calendar-management',
+    entityId: args.bookingId,
+    action: args.payload.status,
+    nonce: JSON.stringify(args.payload),
+  })
 
   const response = await fetch(bookingPatchEndpoint(args.bookingId), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
-      'Idempotency-Key': idempotencyKey,
-      'x-idempotency-key': idempotencyKey,
+      ...idempotencyHeaders(idempotencyKey),
     },
     body: JSON.stringify(args.payload),
   })

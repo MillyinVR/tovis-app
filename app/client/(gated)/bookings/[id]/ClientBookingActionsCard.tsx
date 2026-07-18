@@ -7,6 +7,10 @@ import { useRouter } from 'next/navigation'
 import BookingActions from './BookingActions'
 import AvailabilityDrawer from '@/app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer'
 import { safeJson } from '@/lib/http'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 import type {
   BookingSource,
@@ -85,6 +89,21 @@ export default function ClientBookingActionsCard({
       throw new Error('Missing booking location type for reschedule.')
     }
 
+    const bodyJson = JSON.stringify({
+      holdId: selectedHold.holdId,
+      locationType: selectedHold.locationType,
+    })
+
+    // The reschedule route runs through withRouteIdempotency and 400s without
+    // a key — this call sent none, so client reschedule was dead. Keyed to the
+    // chosen hold: a double-click replays, picking a different time re-keys.
+    const idempotencyKey = buildClientIdempotencyKey({
+      scope: 'booking-lifecycle',
+      entityId: bookingId,
+      action: 'CLIENT_RESCHEDULE',
+      nonce: bodyJson,
+    })
+
     const res = await fetch(
       `/api/v1/bookings/${encodeURIComponent(bookingId)}/reschedule`,
       {
@@ -92,11 +111,9 @@ export default function ClientBookingActionsCard({
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
+          ...idempotencyHeaders(idempotencyKey),
         },
-        body: JSON.stringify({
-          holdId: selectedHold.holdId,
-          locationType: selectedHold.locationType,
-        }),
+        body: bodyJson,
       },
     )
 

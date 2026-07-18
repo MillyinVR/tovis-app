@@ -2,7 +2,14 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { buildClientIdempotencyKey } from '@/lib/idempotency/client'
+
 import { useConfirmChange } from './useConfirmChange'
+
+// Frozen so deterministic idempotency keys recomputed in assertions land in
+// the same time bucket as the hook's.
+const FROZEN_NOW = 1_752_000_000_000
 
 import type { CalendarEvent, PendingChange } from '../_types'
 
@@ -136,6 +143,7 @@ describe('useConfirmChange', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW)
 
     mocks.locationTypeFromBookingValue.mockReturnValue('SALON')
     mocks.computeDurationMinutesFromIso.mockReturnValue(60)
@@ -233,15 +241,59 @@ describe('useConfirmChange', () => {
     expect(retryBody.allowShortNotice).toBe(true)
     expect(retryBody.overrideReason).toBe('Client asked to move it today')
 
-    // Each attempt must use a fresh idempotency key.
+    // The override retry adds flags + a reason, so the body changes and the
+    // deterministic key must change with it (same key ⇒ same body, else the
+    // ledger 409s on the changed request).
     const firstKey = patchCalls[0]?.[1]?.headers?.['Idempotency-Key']
     const retryKey = patchCalls[1]?.[1]?.headers?.['Idempotency-Key']
     expect(retryKey).toBeTruthy()
     expect(retryKey).not.toBe(firstKey)
+    // Both keys are the deterministic client key, not a random UUID.
+    expect(firstKey).toMatch(/^pro-calendar-change:booking_1:apply:/)
+    expect(retryKey).toMatch(/^pro-calendar-change:booking_1:apply:/)
 
     expect(result.current.changeOverridePrompt).toBeNull()
     expect(result.current.pendingChange).toBeNull()
     expect(reloadCalendar).toHaveBeenCalled()
+  })
+
+  it('replays with the SAME key when the identical change is re-applied', async () => {
+    // A double-submit of the exact same move must reuse one key so the server
+    // ledger replays the first response instead of re-patching the booking.
+    mocks.safeJson.mockResolvedValue({ ok: true })
+    fetchMock.mockResolvedValue({ ok: true, status: 200 })
+
+    const { result } = renderConfirmChange()
+
+    act(() => {
+      result.current.openConfirm(makeMoveChange())
+    })
+    await act(async () => {
+      await result.current.applyConfirm()
+    })
+
+    act(() => {
+      result.current.openConfirm(makeMoveChange())
+    })
+    await act(async () => {
+      await result.current.applyConfirm()
+    })
+
+    const patchCalls = bookingPatchCalls()
+    expect(patchCalls).toHaveLength(2)
+
+    const firstKey = patchCalls[0]?.[1]?.headers?.['Idempotency-Key']
+    const secondKey = patchCalls[1]?.[1]?.headers?.['Idempotency-Key']
+
+    // Identical body within the same time bucket ⇒ identical key.
+    const expectedKey = buildClientIdempotencyKey({
+      scope: 'pro-calendar-change',
+      entityId: 'booking_1',
+      action: 'apply',
+      nonce: String(patchCalls[0]?.[1]?.body),
+    })
+    expect(firstKey).toBe(expectedKey)
+    expect(secondKey).toBe(firstKey)
   })
 
   it('retries the override without an overrideReason when none is given', async () => {

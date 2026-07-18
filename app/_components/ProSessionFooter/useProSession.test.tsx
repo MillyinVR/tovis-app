@@ -2,7 +2,16 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
+
 import { FORCE_EVENT, useProSession } from './useProSession'
+
+// Frozen so the deterministic idempotency keys computed in assertions land in
+// the same time bucket as the hook's.
+const FROZEN_NOW = 1_752_000_000_000
 
 const navMocks = vi.hoisted(() => {
   const routerPush = vi.fn()
@@ -220,10 +229,7 @@ describe('useProSession', () => {
     navMocks.routerRefresh.mockClear()
 
     vi.spyOn(Math, 'random').mockReturnValue(0)
-
-    vi.stubGlobal('crypto', {
-      randomUUID: vi.fn(() => 'uuid_1'),
-    })
+    vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW)
 
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -365,14 +371,20 @@ describe('useProSession', () => {
       await result.current.startSelectedBooking(' booking_b ')
     })
 
+    // Deterministic key: a double-tap of Start builds the same key, so the
+    // server replays instead of re-running the transition.
+    const startKey = buildClientIdempotencyKey({
+      scope: 'pro-session',
+      entityId: 'booking_b',
+      action: 'start',
+    })
+    expect(startKey).toMatch(/^pro-session:booking_b:start:/)
+
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/pro/bookings/booking_b/session/start',
       {
         method: 'POST',
-        headers: {
-          'Idempotency-Key': 'uuid_1',
-          'x-idempotency-key': 'uuid_1',
-        },
+        headers: idempotencyHeaders(startKey),
       },
     )
 
@@ -421,10 +433,13 @@ describe('useProSession', () => {
       '/api/v1/pro/bookings/booking_1/session/start',
       {
         method: 'POST',
-        headers: {
-          'Idempotency-Key': 'uuid_1',
-          'x-idempotency-key': 'uuid_1',
-        },
+        headers: idempotencyHeaders(
+          buildClientIdempotencyKey({
+            scope: 'pro-session',
+            entityId: 'booking_1',
+            action: 'start',
+          }),
+        ),
       },
     )
 
@@ -469,14 +484,25 @@ describe('useProSession', () => {
       await result.current.handleCenterClick()
     })
 
+    // Distinct intent, distinct key: finish can never collide with start.
+    const finishKey = buildClientIdempotencyKey({
+      scope: 'pro-session',
+      entityId: 'booking_1',
+      action: 'finish',
+    })
+    expect(finishKey).not.toBe(
+      buildClientIdempotencyKey({
+        scope: 'pro-session',
+        entityId: 'booking_1',
+        action: 'start',
+      }),
+    )
+
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/pro/bookings/booking_1/session/finish',
       {
         method: 'POST',
-        headers: {
-          'Idempotency-Key': 'uuid_1',
-          'x-idempotency-key': 'uuid_1',
-        },
+        headers: idempotencyHeaders(finishKey),
       },
     )
 

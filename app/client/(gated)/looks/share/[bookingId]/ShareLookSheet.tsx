@@ -7,6 +7,10 @@ import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import type { ShareLookPageData, ShareLookPrefillPhoto } from './_data/loadShareLookPage'
@@ -141,21 +145,32 @@ export default function ShareLookSheet({ data }: { data: ShareLookPageData }) {
 
     setSubmitting(true)
     try {
+      const bodyJson = JSON.stringify({
+        name: name.trim(),
+        caption: caption.trim() || null,
+        isPublic,
+        after: after.source,
+        before: before.source ?? undefined,
+      })
+
+      // Deterministic per (booking, exact body): a double-tap of Share
+      // replays the first response; an edited resubmit mints a fresh key.
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'share-look',
+        entityId: data.bookingId,
+        action: 'submit',
+        nonce: bodyJson,
+      })
+
       const res = await fetch(
         `/api/v1/client/bookings/${encodeURIComponent(data.bookingId)}/share-look`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'idempotency-key': crypto.randomUUID(),
+            ...idempotencyHeaders(idempotencyKey),
           },
-          body: JSON.stringify({
-            name: name.trim(),
-            caption: caption.trim() || null,
-            isPublic,
-            after: after.source,
-            before: before.source ?? undefined,
-          }),
+          body: bodyJson,
         },
       )
 

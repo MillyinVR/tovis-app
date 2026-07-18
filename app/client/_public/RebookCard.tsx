@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { isRecord } from '@/lib/guards'
 import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
+import {
   DAY_PERIOD_ORDER,
   firstNonEmptyPeriod,
   groupSlotsByPeriod,
@@ -106,13 +110,6 @@ function formatSlotFull(iso: string, timeZone: string): string {
     hour: 'numeric',
     minute: '2-digit',
   })
-}
-
-function buildIdempotencyKey(token: string, slotIso: string): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
-  }
-  return `public-rebook-${token}-${slotIso}-${Date.now()}`
 }
 
 export function RebookCard({
@@ -296,26 +293,35 @@ export function RebookCard({
     setBooking({ kind: 'submitting', slotIso })
 
     try {
-      const idempotencyKey = buildIdempotencyKey(token, slotIso)
+      // clientAddressId is sent only for an explicit picker selection —
+      // omitting it keeps the server's behavior of reusing the original
+      // visit's address (FK or preserved snapshot).
+      const bodyJson = JSON.stringify({
+        scheduledFor: slotIso,
+        locationType: activeMode.type,
+        ...(activeMode.type === 'MOBILE' && selectedAddressId
+          ? { clientAddressId: selectedAddressId }
+          : {}),
+      })
+
+      // Deterministic per (token, exact body): a double-tap of a slot replays
+      // the first booking; picking a different slot mints a fresh key.
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'public-rebook',
+        entityId: token,
+        action: 'book',
+        nonce: bodyJson,
+      })
+
       const res = await fetch(
         `/api/v1/client/rebook/${encodeURIComponent(token)}`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': idempotencyKey,
-            'x-idempotency-key': idempotencyKey,
+            ...idempotencyHeaders(idempotencyKey),
           },
-          // clientAddressId is sent only for an explicit picker selection —
-          // omitting it keeps the server's behavior of reusing the original
-          // visit's address (FK or preserved snapshot).
-          body: JSON.stringify({
-            scheduledFor: slotIso,
-            locationType: activeMode.type,
-            ...(activeMode.type === 'MOBILE' && selectedAddressId
-              ? { clientAddressId: selectedAddressId }
-              : {}),
-          }),
+          body: bodyJson,
         },
       )
 

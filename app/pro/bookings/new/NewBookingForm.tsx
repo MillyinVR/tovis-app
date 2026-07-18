@@ -7,6 +7,10 @@ import { useRouter } from 'next/navigation'
 
 import { safeJson, readErrorMessage } from '@/lib/http'
 import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
+import {
   mergeBookingOverrideFlags,
   readBookingOverridePrompt,
   type BookingOverrideFlag,
@@ -128,17 +132,6 @@ function readBookingId(data: unknown): string | null {
   if (!isRecord(booking)) return null
   const id = booking.id
   return typeof id === 'string' && id.trim() ? id.trim() : null
-}
-
-function createClientIdempotencyKey(): string {
-  if (
-    typeof crypto !== 'undefined' &&
-    typeof crypto.randomUUID === 'function'
-  ) {
-    return crypto.randomUUID()
-  }
-
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 type BookingOverrideBody = {
@@ -750,7 +743,13 @@ export default function NewBookingForm({
   >([])
   const [overrideReason, setOverrideReason] = useState('')
 
-  const submitIdempotencyKeyRef = useRef<string | null>(null)
+  // Carries the submit key across a network-error retry so a request that
+  // actually landed can't double-book. Keyed to the exact body, so editing
+  // the form (or an override retry, which adds flags) mints a fresh key.
+  const submitIdempotencyKeyRef = useRef<{
+    key: string
+    bodyJson: string
+  } | null>(null)
 
   const offeringOptions = useMemo(() => offerings ?? [], [offerings])
 
@@ -1385,34 +1384,44 @@ export default function NewBookingForm({
     setLoading(true)
 
     try {
-      const idempotencyKey =
-        submitIdempotencyKeyRef.current ?? createClientIdempotencyKey()
+      const bodyJson = JSON.stringify({
+        clientId: clientMode === 'existing' ? clientId : null,
+        client: clientPayload,
+        offeringId: selectedOffering.id,
+        addOnIds: selectedAddOnIds,
+        locationType,
+        locationId,
+        clientAddressId:
+          locationType === 'MOBILE' && addressMode === 'existing'
+            ? clientAddressId
+            : null,
+        serviceAddress: serviceAddressPayload,
+        scheduledFor: scheduledForISO,
+        internalNotes: internalNotes.trim() || null,
+        overrideReason: trimmedOverrideReason || null,
+        ...overrideBody,
+      })
 
-      submitIdempotencyKeyRef.current = idempotencyKey
+      const cached = submitIdempotencyKeyRef.current
+      const idempotencyKey =
+        cached && cached.bodyJson === bodyJson
+          ? cached.key
+          : buildClientIdempotencyKey({
+              scope: 'pro-booking-create',
+              entityId: selectedOffering.id,
+              action: 'create',
+              nonce: bodyJson,
+            })
+
+      submitIdempotencyKeyRef.current = { key: idempotencyKey, bodyJson }
 
   const res = await fetch('/api/v1/pro/bookings', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'idempotency-key': idempotencyKey,
+      ...idempotencyHeaders(idempotencyKey),
     },
-    body: JSON.stringify({
-      clientId: clientMode === 'existing' ? clientId : null,
-      client: clientPayload,
-      offeringId: selectedOffering.id,
-      addOnIds: selectedAddOnIds,
-      locationType,
-      locationId,
-      clientAddressId:
-        locationType === 'MOBILE' && addressMode === 'existing'
-          ? clientAddressId
-          : null,
-      serviceAddress: serviceAddressPayload,
-      scheduledFor: scheduledForISO,
-      internalNotes: internalNotes.trim() || null,
-      overrideReason: trimmedOverrideReason || null,
-      ...overrideBody,
-    }),
+    body: bodyJson,
   })
 
   if (res.status === 401) {
