@@ -16,6 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # Private-repo runners are 2-core/7GB (public repos get 4-core/16GB), so
+    # Node's default heap cap lands near 2GB — below what tsc needs here.
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
