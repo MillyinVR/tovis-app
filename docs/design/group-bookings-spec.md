@@ -281,7 +281,9 @@ before every appointment.
 > untouched. The AI-consult counterpart doc is
 > [`ai-consult.md`](./ai-consult.md) — its group-event hook and §13.8 here
 > describe the same integration (Vision Board feeds the consult brief; one
-> pro-facing inbox per client).
+> pro-facing inbox per client). Session-by-session execution queue:
+> [`consult-groups-build-plan.md`](./consult-groups-build-plan.md) — G-steps
+> (blocked on §14.11/G0 ratification + a backlog §N from Tori).
 
 ### 14.1 §10 audit result — the `conversation_type` enum did NOT land
 
