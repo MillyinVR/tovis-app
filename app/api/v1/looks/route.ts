@@ -26,6 +26,7 @@ import { personalizedFeedEnabled } from '@/lib/looks/personalizedFlag'
 import { buildPersonalizedFeedPage, parseSeenLookIds } from '@/lib/looks/personalizedFeed'
 import { parseSessionIntent } from '@/lib/looks/feedComposition'
 import { loadHiddenLookIds } from '@/lib/looks/hides'
+import { slugifyLookTag } from '@/lib/looks/tags'
 import {
   logLooksFeedServe,
   type LooksFeedCohort,
@@ -41,11 +42,13 @@ function resolveDefaultCohort(args: {
   kind: LooksFeedKind
   q: string | null
   categorySlug: string | null
+  tagSlug: string | null
 }): LooksFeedCohort {
   if (args.q) return 'search'
   if (args.kind === 'SPOTLIGHT') return 'spotlight'
   if (args.kind === 'FOLLOWING') return 'following'
   if (args.categorySlug) return 'category'
+  if (args.tagSlug) return 'tag'
   return 'recent'
 }
 
@@ -107,6 +110,18 @@ export async function GET(req: Request) {
     const q = pickString(searchParams.get('q'))
     const following = parseBooleanParam(searchParams.get('following'))
 
+    // Restrict to looks carrying this hashtag/style tag — the native counterpart
+    // of /looks/tags/[slug]. Normalized through the same slugifier the RSC tag
+    // page applies, so '#Balayage' and 'balayage' filter the same tag; a token
+    // that normalizes below the 2-char slug minimum is rejected rather than
+    // silently ignored. Unknown/banned tags simply match nothing (empty feed).
+    const rawTag = pickString(searchParams.get('tag'))
+    const tagSlug = rawTag ? slugifyLookTag(rawTag) : null
+
+    if (rawTag && (tagSlug === null || tagSlug.length < 2)) {
+      return jsonFail(400, 'Invalid looks tag.')
+    }
+
     const rawFilter = pickString(searchParams.get('filter'))
     const kind = resolveLooksFeedKind({
       filter: rawFilter,
@@ -155,7 +170,7 @@ export async function GET(req: Request) {
         : null
 
     // The personalized feed gates the DEFAULT Look tab only: signed-in viewer, no explicit
-    // sort/search/category, flag on. An explicit `sort=recent` (or the flag off)
+    // sort/search/category/tag, flag on. An explicit `sort=recent` (or the flag off)
     // always falls through to the chronological feed — the capability is never
     // gated, only the default.
     const usePersonalized =
@@ -164,6 +179,7 @@ export async function GET(req: Request) {
       kind === 'ALL' &&
       !q &&
       !rawCategorySlug &&
+      !tagSlug &&
       !rawSort
 
     let items: LooksFeedRow[]
@@ -220,6 +236,7 @@ export async function GET(req: Request) {
         tenant,
         categorySlug: rawCategorySlug,
         q,
+        tagSlug,
         followingProfessionalIds,
         followingClientIds,
       })
@@ -270,7 +287,12 @@ export async function GET(req: Request) {
             })
           : null
 
-      cohort = resolveDefaultCohort({ kind, q, categorySlug: rawCategorySlug })
+      cohort = resolveDefaultCohort({
+        kind,
+        q,
+        categorySlug: rawCategorySlug,
+        tagSlug,
+      })
     }
 
     const resolveViewerFlags = await buildLooksViewerFlagResolver({

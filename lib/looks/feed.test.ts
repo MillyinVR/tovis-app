@@ -289,6 +289,36 @@ describe('lib/looks/feed.ts', () => {
       )
     })
 
+    it('builds the tag filter for the all feed, excluding banned tags', () => {
+      const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
+        kind: 'ALL',
+        tagSlug: 'balayage',
+      })
+
+      const andFilters = Array.isArray(where.AND) ? where.AND : []
+
+      expect(andFilters).toEqual(
+        expect.arrayContaining([
+          {
+            tags: { some: { slug: 'balayage', bannedAt: null } },
+          },
+        ]),
+      )
+    })
+
+    it('ignores a blank tag slug', () => {
+      const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
+        kind: 'ALL',
+        tagSlug: '   ',
+      })
+
+      const andFilters = Array.isArray(where.AND) ? where.AND : []
+
+      expect(andFilters.some((part) => 'tags' in part)).toBe(false)
+    })
+
     it('includes followers-only visibility for the following feed', () => {
       const where = buildLooksFeedWhere({
         tenant: ROOT_TENANT,
