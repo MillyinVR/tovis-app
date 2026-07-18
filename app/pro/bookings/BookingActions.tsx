@@ -8,6 +8,10 @@ import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { safeJson } from '@/lib/http'
 import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
+import {
   buildLifecycleActionViewModel,
   type LifecycleAction,
 } from '@/lib/booking/lifecycleActionViewModel'
@@ -67,13 +71,6 @@ function errorFromResponse(res: Response, data: unknown) {
   if (res.status === 404) return 'Not found.'
   if (res.status === 409) return 'That action is not allowed right now.'
   return `Request failed (${res.status}).`
-}
-
-function buildIdempotencyKey(hint: string): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${hint}:${crypto.randomUUID()}`
-  }
-  return `${hint}:${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 export default function BookingActions({
@@ -142,15 +139,22 @@ export default function BookingActions({
     const controller = new AbortController()
     abortRef.current = controller
 
-    const idempotencyKey = buildIdempotencyKey(action.idempotencyKeyHint)
-
     try {
+      // Deterministic per (booking, verb): a double-click replays the first
+      // response instead of re-running the lifecycle transition. Built inside
+      // the try — it throws on an empty bookingId, and the catch/finally must
+      // surface that rather than leave the buttons stuck disabled.
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'booking-lifecycle',
+        entityId: bookingId,
+        action: action.verb,
+      })
+
       const init: RequestInit = {
         method: action.method,
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
-          'x-idempotency-key': idempotencyKey,
+          ...idempotencyHeaders(idempotencyKey),
         },
         signal: controller.signal,
       }

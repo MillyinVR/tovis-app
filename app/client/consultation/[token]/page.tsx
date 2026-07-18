@@ -7,6 +7,10 @@ import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 
 import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
 import { isRecord } from '@/lib/guards'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/time'
@@ -27,15 +31,19 @@ type PageProps = {
 
 type DecisionAction = 'APPROVE' | 'REJECT'
 
+/**
+ * Strict per (token, decision): a double-tap of Approve replays the first
+ * response, while Approve and Reject can never share a key.
+ */
 function buildPublicConsultationDecisionIdempotencyKey(args: {
   token: string
   action: DecisionAction
 }): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `public-consultation-decision-${args.token}-${args.action}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}`
+  return buildClientIdempotencyKey({
+    scope: 'public-consultation',
+    entityId: args.token,
+    action: args.action,
+  })
 }
 
 type ActionState = {
@@ -709,8 +717,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': idempotencyKey,
-            'x-idempotency-key': idempotencyKey,
+            ...idempotencyHeaders(idempotencyKey),
           },
           body: JSON.stringify({ action }),
         },

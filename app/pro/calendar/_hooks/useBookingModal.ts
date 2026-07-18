@@ -42,6 +42,10 @@ import {
 import { anchorDayLocalNoon } from '../_utils/calendarRange'
 
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 import {
   combineDateAndTimeInput,
@@ -297,19 +301,21 @@ async function patchBooking(args: {
   payload: BookingPatchPayload
   fallbackError: string
 }) {
-  const idempotencyKey =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `pro-booking-patch-${args.bookingId}-${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}`
+  // Deterministic per (booking, exact payload): a double-click replays the
+  // first response; a body change (new time, status, or override flags on a
+  // retry) mints a fresh key so it can't 409 against the previous attempt.
+  const idempotencyKey = buildClientIdempotencyKey({
+    scope: 'pro-booking-modal',
+    entityId: args.bookingId,
+    action: args.payload.status ?? 'reschedule',
+    nonce: JSON.stringify(args.payload),
+  })
 
   const response = await fetch(bookingEndpoint(args.bookingId), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
-      'Idempotency-Key': idempotencyKey,
-      'x-idempotency-key': idempotencyKey,
+      ...idempotencyHeaders(idempotencyKey),
     },
     body: JSON.stringify(args.payload),
   })
@@ -883,12 +889,11 @@ export function useBookingModal(deps: BookingModalDeps) {
     setBookingError(null)
 
     try {
-      const idempotencyKey =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `pro-booking-start-${booking.id}-${Date.now()}-${Math.random()
-              .toString(36)
-              .slice(2)}`
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'pro-booking-modal',
+        entityId: booking.id,
+        action: 'session-start',
+      })
 
       const response = await fetch(
         `/api/v1/pro/bookings/${encodeURIComponent(booking.id)}/session/start`,
@@ -896,8 +901,7 @@ export function useBookingModal(deps: BookingModalDeps) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': idempotencyKey,
-            'x-idempotency-key': idempotencyKey,
+            ...idempotencyHeaders(idempotencyKey),
           },
           body: JSON.stringify({ explicitSelection: true }),
         },

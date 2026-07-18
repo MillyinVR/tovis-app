@@ -3,6 +3,10 @@
 import { useState } from 'react'
 
 import { isRecord } from '@/lib/guards'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 import { formatCents } from '@/lib/money'
 
 type Props = {
@@ -10,15 +14,6 @@ type Props = {
   token: string
   amountCents: number
   currency: string
-}
-
-function buildIdempotencyKey(token: string): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
-  }
-  return `public-checkout-${token}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}`
 }
 
 function formatAmount(amountCents: number, currency: string): string {
@@ -37,7 +32,13 @@ export function CompletePaymentCard({ token, amountCents, currency }: Props) {
     setError(null)
 
     try {
-      const idempotencyKey = buildIdempotencyKey(token)
+      // Strict per (token, checkout): a double-tap of Pay replays the first
+      // Stripe checkout session instead of opening a second one.
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'public-rebook',
+        entityId: token,
+        action: 'checkout',
+      })
 
       const response = await fetch(
         `/api/v1/client/rebook/${encodeURIComponent(token)}/checkout`,
@@ -45,8 +46,7 @@ export function CompletePaymentCard({ token, amountCents, currency }: Props) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': idempotencyKey,
-            'x-idempotency-key': idempotencyKey,
+            ...idempotencyHeaders(idempotencyKey),
           },
           body: JSON.stringify({}),
         },

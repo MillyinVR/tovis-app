@@ -40,6 +40,10 @@ import {
 
 import { errorMessageFromUnknown, safeJson } from '@/lib/http'
 import { hasOverlap } from '@/lib/calendar/overlap'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 import {
   BookingOverrideRequiredError,
@@ -274,12 +278,22 @@ function bookingEndpoint(bookingId: string) {
   return `/api/v1/pro/bookings/${encodeURIComponent(bookingId)}`
 }
 
-function buildProBookingPatchIdempotencyKey(bookingId: string): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `pro-booking-patch-${bookingId}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}`
+/**
+ * Deterministic per (booking, exact payload): a double-click of the confirm
+ * button replays the first response, while any body change — a different
+ * target time, or an override retry that adds flags — mints a fresh key
+ * (same key ⇒ same body, or the ledger 409s).
+ */
+function buildProBookingPatchIdempotencyKey(
+  bookingId: string,
+  payload: BookingPatchPayload,
+): string {
+  return buildClientIdempotencyKey({
+    scope: 'pro-calendar-change',
+    entityId: bookingId,
+    action: 'apply',
+    nonce: JSON.stringify(payload),
+  })
 }
 
 function blockEndpoint(blockId: string) {
@@ -298,8 +312,7 @@ async function patchJson(args: {
   }
 
   if (args.idempotencyKey) {
-    headers['Idempotency-Key'] = args.idempotencyKey
-    headers['x-idempotency-key'] = args.idempotencyKey
+    Object.assign(headers, idempotencyHeaders(args.idempotencyKey))
   }
 
   const response = await fetch(args.url, {
@@ -487,15 +500,20 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
 
         const reason = overrideReason.trim()
 
+        const payload = buildBookingPatchPayload({
+          change: pendingChange,
+          context: bookingContext,
+          outsideWorkingHours: pendingOutsideWorkingHours,
+          overrideReason: reason,
+        })
+
         await patchJson({
-          idempotencyKey: buildProBookingPatchIdempotencyKey(pendingChange.apiId),
+          idempotencyKey: buildProBookingPatchIdempotencyKey(
+            pendingChange.apiId,
+            payload,
+          ),
           url: bookingEndpoint(pendingChange.apiId),
-          payload: buildBookingPatchPayload({
-            change: pendingChange,
-            context: bookingContext,
-            outsideWorkingHours: pendingOutsideWorkingHours,
-            overrideReason: reason,
-          }),
+          payload,
           fallbackError: 'Failed to apply changes.',
           overrideGated: true,
         })
@@ -590,7 +608,10 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
       }
 
       await patchJson({
-        idempotencyKey: buildProBookingPatchIdempotencyKey(pendingChange.apiId),
+        idempotencyKey: buildProBookingPatchIdempotencyKey(
+          pendingChange.apiId,
+          payload,
+        ),
         url: bookingEndpoint(pendingChange.apiId),
         payload,
         fallbackError: 'Failed to apply changes.',

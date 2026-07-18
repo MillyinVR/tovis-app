@@ -141,14 +141,6 @@ describe('buildLifecycleActionViewModel — pro role', () => {
     expect(vm.displayLabel).toBe('Cancelled')
   })
 
-  it('every action carries an idempotency key hint stable per (bookingId, verb)', () => {
-    const vm = buildLifecycleActionViewModel(
-      input({ status: BookingStatus.PENDING, role: 'PRO' }),
-    )
-    expect(requireDefined(vm.actions[0]).idempotencyKeyHint).toBe(`${BOOKING_ID}:ACCEPT`)
-    expect(requireDefined(vm.actions[1]).idempotencyKeyHint).toBe(`${BOOKING_ID}:CANCEL`)
-  })
-
   it('blockers: BEFORE_MEDIA_REQUIRED when at BEFORE_PHOTOS with zero before media', () => {
     const vm = buildLifecycleActionViewModel(
       input({

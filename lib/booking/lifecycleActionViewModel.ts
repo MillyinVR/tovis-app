@@ -50,8 +50,6 @@ export type LifecycleAction = {
   href?: string
   /** JSON body for PATCH/POST verbs. */
   payload?: Record<string, unknown>
-  /** Stable identifier for forming an Idempotency-Key. */
-  idempotencyKeyHint: string
   primary?: boolean
   confirmCopy?: string
 }
@@ -111,10 +109,6 @@ const TERMINAL_STATUSES: ReadonlySet<BookingStatus> = new Set([
 
 function encodePathSegment(value: string): string {
   return encodeURIComponent(value)
-}
-
-function idempotencyKeyHint(bookingId: string, verb: LifecycleActionVerb): string {
-  return `${bookingId}:${verb}`
 }
 
 function displayLabelFor(
@@ -201,7 +195,6 @@ function proActions(input: LifecycleViewModelInput): LifecycleAction[] {
       method: 'PATCH',
       href: `/api/v1/pro/bookings/${safeId}`,
       payload: { status: 'ACCEPTED', notifyClient: true },
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'ACCEPT'),
       primary: true,
     })
     actions.push({
@@ -210,7 +203,6 @@ function proActions(input: LifecycleViewModelInput): LifecycleAction[] {
       method: 'PATCH',
       href: `/api/v1/pro/bookings/${safeId}`,
       payload: { status: 'CANCELLED', notifyClient: true },
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'CANCEL'),
       confirmCopy: 'Cancel this booking? This will notify the client.',
     })
     return actions
@@ -223,7 +215,6 @@ function proActions(input: LifecycleViewModelInput): LifecycleAction[] {
       method: 'POST',
       href: `/api/v1/pro/bookings/${safeId}/session/start`,
       payload: { explicitSelection: true },
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'START_SESSION'),
       primary: true,
     })
     actions.push({
@@ -232,7 +223,6 @@ function proActions(input: LifecycleViewModelInput): LifecycleAction[] {
       method: 'PATCH',
       href: `/api/v1/pro/bookings/${safeId}`,
       payload: { status: 'CANCELLED', notifyClient: true },
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'CANCEL'),
       confirmCopy: 'Cancel this booking? This will notify the client.',
     })
     if (input.noShowFeatureEnabled) {
@@ -241,7 +231,6 @@ function proActions(input: LifecycleViewModelInput): LifecycleAction[] {
         label: 'Mark no-show',
         method: 'POST',
         href: `/api/v1/pro/bookings/${safeId}/no-show`,
-        idempotencyKeyHint: idempotencyKeyHint(bookingId, 'NO_SHOW'),
         confirmCopy:
           'Mark this client as a no-show? This may charge their saved card a fee per your no-show policy.',
       })
@@ -255,7 +244,6 @@ function proActions(input: LifecycleViewModelInput): LifecycleAction[] {
       label: 'Continue session',
       method: 'NAVIGATE',
       href: `/pro/bookings/${safeId}/session`,
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'CONTINUE_SESSION'),
       primary: true,
     })
     return actions
@@ -280,7 +268,6 @@ function clientActions(input: LifecycleViewModelInput): LifecycleAction[] {
       verb: 'CLIENT_RESCHEDULE',
       label: 'Reschedule',
       method: 'CALLBACK',
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'CLIENT_RESCHEDULE'),
     })
 
     actions.push({
@@ -288,7 +275,6 @@ function clientActions(input: LifecycleViewModelInput): LifecycleAction[] {
       label: 'Cancel booking',
       method: 'POST',
       href: `/api/v1/bookings/${safeId}/cancel`,
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'CLIENT_CANCEL'),
       confirmCopy: 'Cancel this booking?',
     })
   }
@@ -302,10 +288,6 @@ function clientActions(input: LifecycleViewModelInput): LifecycleAction[] {
       label: 'Review consultation',
       method: 'NAVIGATE',
       href: `/client/bookings/${safeId}?step=consult`,
-      idempotencyKeyHint: idempotencyKeyHint(
-        bookingId,
-        'CLIENT_APPROVE_CONSULTATION',
-      ),
       primary: true,
     })
   }
@@ -316,7 +298,6 @@ function clientActions(input: LifecycleViewModelInput): LifecycleAction[] {
       label: 'View aftercare',
       method: 'NAVIGATE',
       href: `/client/bookings/${safeId}?step=aftercare`,
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'CLIENT_VIEW_AFTERCARE'),
       primary: true,
     })
   }
@@ -327,7 +308,6 @@ function clientActions(input: LifecycleViewModelInput): LifecycleAction[] {
       label: 'Rebook',
       method: 'NAVIGATE',
       href: `/client/bookings/${safeId}?action=rebook`,
-      idempotencyKeyHint: idempotencyKeyHint(bookingId, 'CLIENT_REBOOK'),
     })
   }
 
