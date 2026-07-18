@@ -341,6 +341,9 @@ billing.
 
 ## Phasing
 
+> Session-by-session execution queue (both repos, both epics):
+> [`consult-groups-build-plan.md`](./consult-groups-build-plan.md) — C-steps.
+
 1. **Phase 0 — free booking-attached consult (MVP).** No billing work. Universal
    core analysis + 1–2 vertical lenses — hair color (richest analysis, founder's
    domain) + brows (pure shape mapping, cheap, covers microblading interest).
