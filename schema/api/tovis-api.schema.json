@@ -5459,6 +5459,13 @@
     },
     "ClientMeUserDTO": {
       "properties": {
+        "availableWorkspaces": {
+          "description": "Every workspace this user is entitled to act in, from the same `listAvailableWorkspaces` the web switcher gates on. Native has no other way to know: the acting role above is always CLIENT, and the session JWT carries only that acting role — so a dual-role pro browsing as a client is otherwise indistinguishable on the wire from a client-only account. That is what stranded iOS clients with no way back to the pro shell.\n\nAlways present and always contains `CLIENT` (anyone may act as a client); a length of 1 means \"don't offer a switch\", matching web's `buildWorkspaceOptions` returning [] for a single workspace.",
+          "items": {
+            "$ref": "#/definitions/Role"
+          },
+          "type": "array"
+        },
         "clientProfile": {
           "anyOf": [
             {
@@ -5536,6 +5543,7 @@
           ]
         },
         "role": {
+          "description": "The workspace the user is ACTING in — always `CLIENT` here, since this payload is gated by requireClient. Never a capability signal: see `availableWorkspaces` for that.",
           "type": "string"
         }
       },
@@ -5544,6 +5552,7 @@
         "email",
         "phone",
         "role",
+        "availableWorkspaces",
         "createdAt",
         "phoneVerifiedAt",
         "emailVerifiedAt",
