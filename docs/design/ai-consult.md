@@ -229,9 +229,12 @@ consult** ties into that:
   where "the best version of yourself" framing lands hardest.
 
 **Group events (bridal parties, quinceañeras, proms) are a separate,
-not-yet-started epic** — Tori is planning it; nothing exists in the repo today
-(confirmed 2026-07-18: no group-booking models or backlog entries). Design hook
-for when it lands: one event, many members — each member runs their own consult,
+not-yet-started epic** — spec'd (nothing implemented) in
+[`group-bookings-spec.md`](./group-bookings-spec.md). Its §13.8 and this doc
+agree on the integration: the group Vision Board **feeds** the consult layer
+(one pro-facing brief per client, never two inspiration inboxes), and a member
+tapping "+ Add to Vision Board" is feeding the same intake pipeline a consult
+uses. Design hook: one event, many members — each member runs their own consult,
 the event holds a shared context (palette/theme), and the AI coordinates
 ("looks that suit each member *and* the shared palette"). Per-member analyses
 stay private to each member; only the shared goal is group-visible.
