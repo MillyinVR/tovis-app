@@ -9,6 +9,7 @@ import {
 } from '@prisma/client'
 
 import MediaUploader from '../MediaUploader'
+import { UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
 import SessionPhotoGrid from '../_components/SessionPhotoGrid'
 
 import { transitionSessionStep } from '@/lib/booking/writeBoundary'
@@ -457,7 +458,7 @@ export default async function ProBeforePhotosPage(props: PageProps) {
             </div>
 
             <div className="brand-cap brand-pro-session-capture-formats">
-              JPG · PNG · MP4 up to 30MB · auto-compressed
+              JPG · PNG · MP4 up to {UPLOAD_MAX_LABEL} · auto-compressed
             </div>
           </div>
         </section>

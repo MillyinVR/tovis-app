@@ -16,19 +16,19 @@ import {
   processImageForUpload,
   formatBytes,
 } from '@/lib/media/processImageForUpload'
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_MB } from '@/lib/media/uploadLimits'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
 type UploadState = 'IDLE' | 'COMPRESSING' | 'UPLOADING' | 'SAVING'
 
-// The signing route (app/api/v1/pro/uploads) hard-caps any single upload at 30MB.
-// Videos upload as-is, so their source ceiling must match the server. Images
-// are downscaled + compressed below COMPRESS_MAX_BYTES before upload, so we
-// accept a generous source file and let compression bring it under the cap.
-const SERVER_MAX_MB = 30
-const SERVER_MAX_BYTES = SERVER_MAX_MB * 1024 * 1024
-const MAX_VIDEO_MB = SERVER_MAX_MB
+// The signing route (app/api/v1/pro/uploads) hard-caps any single upload at
+// UPLOAD_MAX_BYTES. Videos upload as-is, so their source ceiling must match
+// the server. Images are downscaled + compressed below COMPRESS_MAX_BYTES
+// before upload, so we accept a generous source file and let compression bring
+// it under the cap.
+const MAX_VIDEO_MB = UPLOAD_MAX_MB
 const MAX_IMAGE_SOURCE_MB = 75
 const CAPTION_MAX = 300
 
@@ -288,13 +288,13 @@ export default function MediaUploader({
         }
       }
 
-      // The signing route rejects anything over SERVER_MAX_BYTES. Images are
+      // The signing route rejects anything over UPLOAD_MAX_BYTES. Images are
       // normally compressed well under it; this guards the rare case where
       // compression failed (we kept the original) or a video exceeds the cap,
       // surfacing a clear message instead of an opaque server 400.
-      if (uploadFile.size > SERVER_MAX_BYTES) {
+      if (uploadFile.size > UPLOAD_MAX_BYTES) {
         const mb = (uploadFile.size / (1024 * 1024)).toFixed(1)
-        setError(`That file is ${mb}MB — over the ${SERVER_MAX_MB}MB limit.`)
+        setError(`That file is ${mb}MB — over the ${UPLOAD_MAX_MB}MB limit.`)
         setStatus('IDLE')
         return
       }

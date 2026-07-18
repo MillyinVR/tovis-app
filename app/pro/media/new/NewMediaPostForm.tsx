@@ -16,11 +16,11 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import {
   DEFAULT_IMAGE_EDIT_STATE,
   IMAGE_UPLOAD_MAX_BYTES,
-  VIDEO_UPLOAD_MAX_BYTES,
   formatBytes,
   processImageForUpload,
   type ProcessedImageResult,
 } from '@/lib/media/processImageForUpload'
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
 
 type ProService = { id: string; name: string }
 
@@ -101,12 +101,14 @@ function isValidPriceString(value: string): boolean {
   return /^\d+(\.\d{1,2})?$/.test(value)
 }
 
-function getVideoFileError(file: File | null): string | null {
+// Exported for the test that pins this validation to the SAME cap the signing
+// route enforces (app/api/v1/pro/uploads) — the two must never disagree again.
+export function getVideoFileError(file: File | null): string | null {
   if (!file) return 'Select an image or video to post.'
   if (file.size <= 0) return 'That file looks empty.'
 
-  if (file.size > VIDEO_UPLOAD_MAX_BYTES) {
-    return `That file is ${formatBytes(file.size)}. The video limit is ${formatBytes(VIDEO_UPLOAD_MAX_BYTES)}.`
+  if (file.size > UPLOAD_MAX_BYTES) {
+    return `That file is ${formatBytes(file.size)}. The video limit is ${UPLOAD_MAX_LABEL}.`
   }
 
   return null
@@ -620,7 +622,7 @@ export default function NewMediaPostForm() {
 
             <div className="text-[11px] text-textSecondary">
               Images are optimized automatically before upload. You can also crop
-              them to fit the Looks UI.
+              them to fit the Looks UI. Videos up to {UPLOAD_MAX_LABEL}.
             </div>
 
             {file && mediaType === MediaType.IMAGE ? (

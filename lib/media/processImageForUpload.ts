@@ -1,7 +1,9 @@
 // lib/media/processImageForUpload.ts
 
+// Compression TARGET for images (distinct from the hard per-object upload cap,
+// UPLOAD_MAX_BYTES in lib/media/uploadLimits.ts — validate uploads against
+// that, not this).
 export const IMAGE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
-export const VIDEO_UPLOAD_MAX_BYTES = 200 * 1024 * 1024
 
 const DEFAULT_OUTPUT_MIME_TYPE = 'image/jpeg'
 const DEFAULT_OUTPUT_QUALITY = 0.9
@@ -293,7 +295,7 @@ export function formatBytes(bytes: number): string {
  *   them).
  * - If processing throws (e.g. a decode failure on an exotic format), the
  *   original file is returned so the upload still proceeds — the signing route
- *   and storage still enforce the hard 30MB cap server-side.
+ *   and storage still enforce the hard UPLOAD_MAX_BYTES cap server-side.
  *
  * Callers MUST use the returned File for the signing request (contentType +
  * size) and for the upload itself, since the processed file's type/extension
