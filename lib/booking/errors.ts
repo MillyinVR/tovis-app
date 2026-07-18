@@ -627,6 +627,16 @@ export function getBookingErrorMeta(code: BookingErrorCode): BookingErrorMeta {
   return BOOKING_ERROR_CATALOG[code];
 }
 
+/**
+ * Whether a caller-supplied code names a catalog entry. Lets helpers that
+ * accept an error code as a parameter (e.g. lib/booking/serviceItems guards)
+ * throw a proper BookingError for catalog codes instead of a plain Error the
+ * routes' isBookingError check can't recognize.
+ */
+export function isBookingErrorCode(code: string): code is BookingErrorCode {
+  return Object.prototype.hasOwnProperty.call(BOOKING_ERROR_CATALOG, code);
+}
+
 export function getBookingErrorDescriptor(
   code: BookingErrorCode,
   overrides?: Partial<Pick<BookingErrorMeta, "message" | "userMessage">>,

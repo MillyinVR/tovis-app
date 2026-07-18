@@ -1,6 +1,7 @@
 // lib/booking/serviceItems.ts
 import { Prisma, BookingServiceItemType, ServiceLocationType } from '@prisma/client'
 import { clampInt } from '@/lib/pick'
+import { bookingError, isBookingErrorCode } from '@/lib/booking/errors'
 import {
   DEFAULT_DURATION_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
@@ -63,7 +64,14 @@ export type EditRouteOfferingRow = {
   }
 }
 
+// Callers pass their route's error code into these guards. When that code is a
+// catalog BookingErrorCode (writeBoundary passes 'INVALID_SERVICE_ITEMS'), the
+// throw must be a BookingError so routes return its 4xx + userMessage — a plain
+// Error(code) fails isBookingError and surfaces as INTERNAL_ERROR instead.
 function throwCode(code: string): never {
+  if (isBookingErrorCode(code)) {
+    throw bookingError(code)
+  }
   throw new Error(code)
 }
 
