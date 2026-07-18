@@ -51,6 +51,7 @@ import {
   type JsonObjectPayload,
 } from '@/app/api/_utils/jsonPayload'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
@@ -335,6 +336,15 @@ export async function GET(_req: Request, ctx: RouteContext) {
         booking: {
           id: booking.id,
           status: booking.status,
+          // Phase 2 revenue protection master switch, echoed onto the payload the
+          // booking-detail action row consumes. Web resolves this server-side in
+          // the RSC page and passes it to BookingActions as a prop
+          // (`app/pro/bookings/[id]/page.tsx` → `noShowFeatureEnabled`), so no DTO
+          // ever carried it — a native client had no way to know whether to draw
+          // "Mark no-show". There is no safe probe either: the only endpoint is a
+          // POST that marks the booking and may charge a card. Same helper as web,
+          // never a re-derivation, so the two can't drift.
+          noShowFeatureEnabled: noShowProtectionEnabled(),
           scheduledFor: start.toISOString(),
           endsAt: addMinutes(
             start,

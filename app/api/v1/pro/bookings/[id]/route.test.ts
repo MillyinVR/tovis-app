@@ -1,9 +1,10 @@
 // app/api/v1/pro/bookings/[id]/route.test.ts
 
 import { NextRequest } from 'next/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BookingStatus, Role, ServiceLocationType } from '@prisma/client'
 import { bookingError } from '@/lib/booking/errors'
+import { isRecord } from '@/lib/guards'
 
 const IDEMPOTENCY_ROUTE = 'PATCH /api/v1/pro/bookings/[id]'
 const ROUTE_OPERATION = 'PATCH /api/v1/pro/bookings/[id]'
@@ -73,6 +74,11 @@ const mocks = vi.hoisted(() => ({
   isRouteIdempotencyHandled: vi.fn(),
 
   captureBookingException: vi.fn(),
+
+  // GET-side collaborators (hoisted so the GET tests can set return values
+  // without importing the mocked modules and fighting Prisma's generics).
+  bookingFindFirst: vi.fn(),
+  resolveAppointmentSchedulingContext: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -109,7 +115,7 @@ vi.mock('@/lib/observability/bookingEvents', () => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
-      findFirst: vi.fn(),
+      findFirst: mocks.bookingFindFirst,
     },
   },
 }))
@@ -120,7 +126,8 @@ vi.mock('@/lib/timeZone', () => ({
 }))
 
 vi.mock('@/lib/booking/timeZoneTruth', () => ({
-  resolveAppointmentSchedulingContext: vi.fn(),
+  resolveAppointmentSchedulingContext:
+    mocks.resolveAppointmentSchedulingContext,
 }))
 
 vi.mock('@/lib/money', () => ({
@@ -145,7 +152,7 @@ vi.mock('@/lib/booking/snapshots', () => ({
   pickFormattedAddressFromSnapshot: vi.fn(() => null),
 }))
 
-import { PATCH } from './route'
+import { GET, PATCH } from './route'
 
 function makeRequest(
   body: unknown,
@@ -1017,5 +1024,125 @@ describe('PATCH /api/v1/pro/bookings/[id]', () => {
         code: 'TIME_BLOCKED',
       }),
     )
+  })
+})
+// The pro booking detail GET had no coverage before the no-show gate landed on
+// it. These drive the REAL `noShowProtectionEnabled()` through its env var
+// rather than mocking it: the whole point of the field is that it tracks the
+// flag, and a mocked flag would prove only that the mock was returned.
+describe('GET /api/v1/pro/bookings/[id] — noShowFeatureEnabled gate', () => {
+  const ORIGINAL_FLAG = process.env.ENABLE_NO_SHOW_PROTECTION
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+
+    mocks.requirePro.mockResolvedValue({
+      ok: true,
+      professionalId: 'pro_123',
+      proId: 'pro_123',
+      user: { id: 'user_123' },
+    })
+
+    // A real Response here, unlike the PATCH block's plain object: it keeps
+    // GET's declared return type honest so the payload can be read back without
+    // a cast, and it is what the real jsonOk returns anyway.
+    mocks.jsonOk.mockImplementation((data: unknown, status = 200) =>
+      new Response(JSON.stringify(data), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+    mocks.pickString.mockImplementation((value: unknown) =>
+      typeof value === 'string' && value.trim() ? value.trim() : null,
+    )
+
+    mocks.resolveAppointmentSchedulingContext.mockResolvedValue({
+      ok: true,
+      context: {
+        appointmentTimeZone: 'America/Los_Angeles',
+        timeZoneSource: 'BOOKING_SNAPSHOT',
+      },
+    })
+
+    mocks.bookingFindFirst.mockResolvedValue({
+      id: 'booking_1',
+      status: BookingStatus.ACCEPTED,
+      scheduledFor: new Date('2026-03-17T13:00:00.000Z'),
+      locationType: ServiceLocationType.SALON,
+      bufferMinutes: 15,
+      totalDurationMinutes: 60,
+      subtotalSnapshot: '50.00',
+      clientId: 'client_1',
+      locationId: 'loc_1',
+      locationTimeZone: 'America/Los_Angeles',
+      locationAddressSnapshot: null,
+      locationLatSnapshot: null,
+      locationLngSnapshot: null,
+      clientAddressId: null,
+      sessionStep: null,
+      startedAt: null,
+      finishedAt: null,
+      totalAmount: null,
+      serviceSubtotalSnapshot: null,
+      taxAmount: null,
+      tipAmount: null,
+      discountAmount: null,
+      paymentCollectedAt: null,
+      selectedPaymentMethod: null,
+      checkoutStatus: 'NOT_READY',
+      rebookOfBookingId: null,
+      stripePaymentStatus: null,
+      stripeAmountTotal: null,
+      stripeCurrency: null,
+      aftercareSummary: null,
+      serviceItems: [],
+      client: { firstName: 'Ada', lastName: 'L', phone: null, user: { email: 'a@b.com' } },
+      professional: { timeZone: 'America/Los_Angeles' },
+    })
+  })
+
+  afterEach(() => {
+    if (ORIGINAL_FLAG === undefined) {
+      delete process.env.ENABLE_NO_SHOW_PROTECTION
+    } else {
+      process.env.ENABLE_NO_SHOW_PROTECTION = ORIGINAL_FLAG
+    }
+  })
+
+  async function getPayload(): Promise<Record<string, unknown>> {
+    const result = await GET(
+      new NextRequest('http://localhost/api/v1/pro/bookings/booking_1'),
+      makeCtx(),
+    )
+    const parsed: unknown = await result.json()
+    if (!isRecord(parsed) || !isRecord(parsed.booking)) {
+      throw new Error(`GET did not return a booking payload: ${JSON.stringify(parsed)}`)
+    }
+    return parsed.booking
+  }
+
+  it('reports the gate OFF when ENABLE_NO_SHOW_PROTECTION is unset (prod today)', async () => {
+    delete process.env.ENABLE_NO_SHOW_PROTECTION
+
+    expect(await getPayload()).toMatchObject({
+      id: 'booking_1',
+      noShowFeatureEnabled: false,
+    })
+  })
+
+  it('reports the gate ON when the flag is enabled', async () => {
+    process.env.ENABLE_NO_SHOW_PROTECTION = '1'
+
+    expect(await getPayload()).toMatchObject({
+      id: 'booking_1',
+      noShowFeatureEnabled: true,
+    })
+  })
+
+  it('does not treat an arbitrary flag value as enabled', async () => {
+    process.env.ENABLE_NO_SHOW_PROTECTION = 'maybe'
+
+    expect(await getPayload()).toMatchObject({ noShowFeatureEnabled: false })
   })
 })
