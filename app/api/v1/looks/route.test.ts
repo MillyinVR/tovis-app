@@ -1,5 +1,5 @@
 // app/api/v1/looks/route.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MediaType, ProfessionType } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => {
   const getCurrentUser = vi.fn()
   const resolveTenantContextForRequest = vi.fn()
   const attachLookBadges = vi.fn()
+  const buildPersonalizedFeedPage = vi.fn()
   const resolveLooksFeedKind = vi.fn()
   const buildLooksFeedWhere = vi.fn()
   const buildLooksFeedCursorWhere = vi.fn()
@@ -61,6 +62,7 @@ const mocks = vi.hoisted(() => {
     getCurrentUser,
     resolveTenantContextForRequest,
     attachLookBadges,
+    buildPersonalizedFeedPage,
     resolveLooksFeedKind,
     buildLooksFeedWhere,
     buildLooksFeedCursorWhere,
@@ -106,6 +108,11 @@ vi.mock('@/lib/brand/forTenant', () => ({
 
 vi.mock('@/lib/looks/badges/attach', () => ({
   attachLookBadges: mocks.attachLookBadges,
+}))
+
+vi.mock('@/lib/looks/personalizedFeed', () => ({
+  buildPersonalizedFeedPage: mocks.buildPersonalizedFeedPage,
+  parseSeenLookIds: () => [],
 }))
 
 vi.mock('@/lib/looks/feed', () => ({
@@ -244,6 +251,10 @@ describe('app/api/v1/looks/route.ts', () => {
     })
   })
 
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('queries the default feed through shared look-post helpers and returns the new envelope', async () => {
     const sharedWhere = { whereToken: 'all-feed' }
     const sharedOrderBy = [{ publishedAt: 'desc' }, { id: 'desc' }]
@@ -270,6 +281,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tenant: ROOT_TENANT,
       categorySlug: null,
       q: null,
+      tagSlug: null,
       followingProfessionalIds: [],
       followingClientIds: [],
     })
@@ -444,6 +456,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tenant: ROOT_TENANT,
       categorySlug: null,
       q: null,
+      tagSlug: null,
       followingProfessionalIds: ['pro_1', 'pro_2'],
       followingClientIds: ['client_2'],
     })
@@ -512,6 +525,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tenant: ROOT_TENANT,
       categorySlug: 'spotlight',
       q: 'fade',
+      tagSlug: null,
       followingProfessionalIds: [],
       followingClientIds: [],
     })
@@ -576,6 +590,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tenant: ROOT_TENANT,
       categorySlug: 'nails',
       q: 'fade',
+      tagSlug: null,
       followingProfessionalIds: [],
       followingClientIds: [],
     })
@@ -686,6 +701,78 @@ describe('app/api/v1/looks/route.ts', () => {
         viewer: expect.objectContaining({ lat: null, lng: null }),
       }),
     )
+  })
+
+  it('filters by tag through the shared feed where, slugified like the tag page', async () => {
+    const res = await GET(makeRequest('/api/v1/looks?tag=%23Money-Piece'))
+
+    expect(res.status).toBe(200)
+
+    // '#Money-Piece' → 'moneypiece': the same slugifyLookTag normalization the
+    // RSC /looks/tags/[slug] page applies, so both consumers of the filter
+    // agree on the key.
+    expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
+      kind: 'ALL',
+      tenant: ROOT_TENANT,
+      categorySlug: null,
+      q: null,
+      tagSlug: 'moneypiece',
+      followingProfessionalIds: [],
+      followingClientIds: [],
+    })
+    expect(mocks.prisma.lookPost.findMany).toHaveBeenCalled()
+  })
+
+  it('returns 400 for a tag that normalizes below the slug minimum', async () => {
+    for (const tag of ['%23%21', 'x'] as const) {
+      const res = await GET(makeRequest(`/api/v1/looks?tag=${tag}`))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Invalid looks tag.',
+      })
+    }
+
+    expect(mocks.buildLooksFeedWhere).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookPost.findMany).not.toHaveBeenCalled()
+  })
+
+  it('serves the personalized default for a signed-in viewer when the flag is on', async () => {
+    vi.stubEnv('ENABLE_PERSONALIZED_FEED', '1')
+    mocks.getCurrentUser.mockResolvedValue({
+      id: 'user_1',
+      clientProfile: { id: 'client_1' },
+    })
+    mocks.buildPersonalizedFeedPage.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      meta: {},
+    })
+
+    const res = await GET(makeRequest('/api/v1/looks'))
+
+    expect(res.status).toBe(200)
+    expect(mocks.buildPersonalizedFeedPage).toHaveBeenCalled()
+    expect(mocks.prisma.lookPost.findMany).not.toHaveBeenCalled()
+  })
+
+  it('routes a tag filter off the personalized default onto the chronological feed', async () => {
+    vi.stubEnv('ENABLE_PERSONALIZED_FEED', '1')
+    mocks.getCurrentUser.mockResolvedValue({
+      id: 'user_1',
+      clientProfile: { id: 'client_1' },
+    })
+
+    const res = await GET(makeRequest('/api/v1/looks?tag=balayage'))
+
+    expect(res.status).toBe(200)
+    expect(mocks.buildPersonalizedFeedPage).not.toHaveBeenCalled()
+    expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith(
+      expect.objectContaining({ tagSlug: 'balayage' }),
+    )
+    expect(mocks.prisma.lookPost.findMany).toHaveBeenCalled()
   })
 
   it('returns 400 for an invalid filter', async () => {

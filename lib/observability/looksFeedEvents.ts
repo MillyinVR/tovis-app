@@ -22,6 +22,7 @@ export type LooksFeedCohort =
   | 'spotlight'
   | 'following'
   | 'category'
+  | 'tag'
   | 'search'
 
 export type LooksFeedServeEvent = {
