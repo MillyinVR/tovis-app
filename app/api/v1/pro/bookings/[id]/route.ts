@@ -52,6 +52,7 @@ import {
 } from '@/app/api/_utils/jsonPayload'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { clientCanBeMessaged } from '@/lib/messages/clientThreadEligibility'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
@@ -278,6 +279,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
             firstName: true,
             lastName: true,
             phone: true,
+            // Presence-only: feeds `client.canMessage`. The id itself never
+            // leaves the server — an unclaimed profile has none, which is
+            // exactly what makes a thread impossible.
+            userId: true,
             user: { select: { email: true } },
           },
         },
@@ -423,6 +428,13 @@ export async function GET(_req: Request, ctx: RouteContext) {
             fullName,
             email: booking.client?.user?.email ?? null,
             phone: booking.client?.phone ?? null,
+            // Whether a message thread can be opened with this client. A
+            // pro-created / imported profile stays unclaimed until the client
+            // signs up, and `POST /messages/resolve` answers 409
+            // CLIENT_UNCLAIMED for it — so without this the native "Message
+            // client" button was offered and then failed silently. Same
+            // predicate the resolve route refuses on, never a re-derivation.
+            canMessage: clientCanBeMessaged(booking.client),
           },
           timeZone: schedulingContext.appointmentTimeZone,
           timeZoneSource: schedulingContext.timeZoneSource,
