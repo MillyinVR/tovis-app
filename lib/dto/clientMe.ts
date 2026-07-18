@@ -7,6 +7,12 @@
 // creator remixes are already serialized. This only converts the remaining raw
 // Prisma rows (the signed-in user + the client profile) whose Date columns are
 // not JSON-safe, and narrows the user object to the client-facing fields.
+import type { Role } from '@prisma/client'
+
+import {
+  listAvailableWorkspaces,
+  workspaceCapabilityOf,
+} from '@/lib/auth/workspaces'
 import type { ClientBookingDTO } from '@/lib/dto/clientBooking'
 import type { ClientMePageData } from '@/app/client/(gated)/me/_data/loadClientMePage'
 
@@ -14,7 +20,25 @@ export type ClientMeUserDTO = {
   id: string
   email: string | null
   phone: string | null
+  /**
+   * The workspace the user is ACTING in — always `CLIENT` here, since this
+   * payload is gated by requireClient. Never a capability signal: see
+   * `availableWorkspaces` for that.
+   */
   role: string
+  /**
+   * Every workspace this user is entitled to act in, from the same
+   * `listAvailableWorkspaces` the web switcher gates on. Native has no other
+   * way to know: the acting role above is always CLIENT, and the session JWT
+   * carries only that acting role — so a dual-role pro browsing as a client is
+   * otherwise indistinguishable on the wire from a client-only account. That is
+   * what stranded iOS clients with no way back to the pro shell.
+   *
+   * Always present and always contains `CLIENT` (anyone may act as a client);
+   * a length of 1 means "don't offer a switch", matching web's
+   * `buildWorkspaceOptions` returning [] for a single workspace.
+   */
+  availableWorkspaces: Role[]
   createdAt: string
   phoneVerifiedAt: string | null
   emailVerifiedAt: string | null
@@ -69,6 +93,7 @@ function serializeUser(user: ClientMePageData['user']): ClientMeUserDTO {
     email: user.email ?? null,
     phone: user.phone ?? null,
     role: user.role,
+    availableWorkspaces: listAvailableWorkspaces(workspaceCapabilityOf(user)),
     createdAt: user.createdAt.toISOString(),
     phoneVerifiedAt: iso(user.phoneVerifiedAt),
     emailVerifiedAt: iso(user.emailVerifiedAt),
