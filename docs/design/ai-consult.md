@@ -1,9 +1,11 @@
 # AI Consult & Client Membership — design
 
 > **Status: DESIGN — not started.** Drafted 2026-07-18 from a planning session with
-> Tori. No code exists yet. Open decisions for Tori are listed at the bottom;
-> everything else in this doc is settled direction. When work starts, follow the
-> session-chaining protocol (one step per session) and keep this doc updated.
+> Tori; updated same day with the home entry card, evidence-based pro matching,
+> event/group-event mode, and success metrics. No code exists yet. Open decisions
+> for Tori are listed at the bottom; everything else in this doc is settled
+> direction. When work starts, follow the session-chaining protocol (one step per
+> session) and keep this doc updated.
 
 ## Vision
 
@@ -47,11 +49,24 @@ feature.
 
 | | Free client | Member (paid) |
 |---|---|---|
-| Entry point | Booking flow only | Standalone "Me" surface + booking flow |
-| Scope | The vertical of the service being booked | Full analysis — all verticals |
-| Client sees | 2–3 recommendations framed around the upcoming appointment | Full Me card: undertone/season, face shape, best colors/cuts/shapes per vertical, suits-you looks, outcome history |
+| Entry points | Home "need a change?" card (**mini analysis**) + booking flow | Home card + standalone full analysis + booking flow |
+| Scope | Booking flow: the booked vertical. Home card: quick mini analysis (client picks a focus — face, hair, hands/nails) | Full analysis — all verticals, any time |
+| Client sees | 2–3 recommendations, each with matched services **and pros** to book | Full Me card: undertone/season, face shape, best colors/cuts/shapes per vertical, suits-you looks, outcome history |
 | Pro gets | **Full brief** | **Full brief** |
-| Persistence | Per-booking consult record only | Durable beauty profile powering the Me card |
+| Persistence | Per-consult record only | Durable beauty profile powering the Me card |
+
+**Home entry card** (Tori, 2026-07-18): every client's home page gets a card —
+"Need a change? Want something new? Run an analysis to see what suits you." A
+free tap runs a **mini analysis**: a few guided photos (hands explicitly
+offered, for nail shape), a light read, and 2–3 recommendations that each
+resolve to bookable services *and* matched pros. Nothing durable is saved. A
+member tap runs the full analysis / opens the Me card.
+
+> Note: this **revises the original "standalone is member-only" decision** —
+> the resolution is that *entry* is for everyone and *depth* is what's tiered.
+> The free mini analysis is a pure booking driver (Tovis earns on the booking);
+> membership sells depth + persistence. Flagged in open decisions for Tori to
+> confirm the mini-analysis depth/caps.
 
 Locked principles:
 
@@ -62,9 +77,10 @@ Locked principles:
   One engine, no tiered analysis code paths. Makes the locked-Me-card upsell
   nearly free: after a free booking consult the full analysis already exists —
   show the teaser ("Your full analysis is ready — unlock your Me card").
-- **Free-tier limits are self-scoping:** vertical comes from the booked
-  offering's service category; photo count per vertical needs; recommendations
-  capped; no durable profile write.
+- **Free-tier limits:** booking-flow consults are self-scoping (vertical from
+  the booked offering's category); home-card mini analyses are client-picked
+  focus with tight caps (photos, recommendation count, cooldown between runs);
+  neither writes the durable profile.
 
 ## Analysis engine: universal core + vertical lenses
 
@@ -162,6 +178,64 @@ June — how it held"), and achievability framing gets grounded in what pros
 actually delivered for similar clients. Unique to Tovis; also the strongest
 renewal story.
 
+## Evidence-based pro matching (the pro skill graph)
+
+Recommendations resolve to **pros with demonstrated results**, not just pros who
+list the service (Tori, 2026-07-18). "Highlights would suit you" should surface
+the colorists whose *portfolios show work in the client's color range* and whose
+*outcomes prove it* — not everyone with a highlights offering.
+
+Evidence sources, all existing or near-existing:
+
+- **Portfolio analysis**: run analysis over pro media (`MediaAsset` has
+  `primaryServiceId`; look embeddings already exist via Voyage) to tag what each
+  pro demonstrably does — color ranges/levels, hair textures, skin tones served,
+  styles. This builds a per-pro **skill graph**.
+- **Outcome evidence**: reviews, rebook rates (`ProfessionalBadgeStat`,
+  REBOOK_RATE badge), and bookings by clients with **similar analysis profiles**
+  — "clients with your color profile rebook this pro."
+- The ranking engine already has the fairness machinery to blend this:
+  `underbooked_pro_boost` exists precisely so evidence-rich busy pros don't
+  bury newer pros. Skill-graph match becomes another soft term, never a hard
+  filter.
+
+Guardrails:
+
+- **Similar-client matching is aggregate and anonymous** — never expose any
+  individual client's analysis to anyone; only "pros with strong results for
+  profiles like yours."
+- **Cold start / fairness**: thin-portfolio pros must not vanish — blend
+  evidence score with the existing underbooked/availability terms.
+- **Pro-side flywheel**: the skill graph doubles as pro value — "your portfolio
+  shows strong warm-blonde work; clients searching for X can't see evidence of
+  it yet — post more X" is a coaching surface (and pairs with the TOVISCamera
+  portfolio critique).
+
+This is meaty enough to be its own future epic ("pro skill graph") that the
+consult *consumes*; design it so the consult works with plain
+service+availability matching first and upgrades transparently.
+
+## Event & group-event mode
+
+Boards already carry the event machinery: `BoardType` (BRIDAL, PROM,
+PERMANENT_MAKEUP, COLOR_TRANSFORMATION, NAILS, SKINCARE), `Board.eventDate`, and
+the 30/14/7/3-day event countdown notifications (§8, PR #621). An **event
+consult** ties into that:
+
+- Anchored to a dated board: the analysis + goal feed a **run-up timeline**
+  ("book your trial 8 weeks out, color 2 weeks out, brows 1 week out") with each
+  step bookable. Countdown notifications can reference consult recommendations.
+- Event clients are the highest-intent, highest-ticket users; bridal/prom is
+  where "the best version of yourself" framing lands hardest.
+
+**Group events (bridal parties, quinceañeras, proms) are a separate,
+not-yet-started epic** — Tori is planning it; nothing exists in the repo today
+(confirmed 2026-07-18: no group-booking models or backlog entries). Design hook
+for when it lands: one event, many members — each member runs their own consult,
+the event holds a shared context (palette/theme), and the AI coordinates
+("looks that suit each member *and* the shared palette"). Per-member analyses
+stay private to each member; only the shared goal is group-visible.
+
 ## Data model sketch
 
 - **`ConsultSession`** — clientId, optional serviceCategoryId (vertical),
@@ -221,21 +295,71 @@ Privacy/consent (decide before build, not after):
 - Pro adoption risk → brief framing rules + one-tap feedback (above).
 - Cyber/med safety: skin analysis stays cosmetic; no diagnosis language.
 
+## Success metrics (instrument from day one)
+
+Each phase has a small set of numbers that decide whether the next phase
+deserves investment. Emit serve-log events (the `looks_feed_serve` pattern) from
+the start.
+
+**Phase 0 — "does the AI help bookings?"** (decides whether membership is worth
+building)
+
+- **Consult completion rate**: of clients who start a consult, % who finish.
+  Low completion = intake too long or capture too frustrating; fix before
+  anything else.
+- **Consult → booking conversion**: do consulted bookings happen (and complete)
+  at a higher rate than non-consulted ones?
+- **Pro brief rating**: % of briefs the pro one-taps as accurate/useful. This is
+  the quality bar — pros are the adoption risk.
+- **Photo retake rate**: how many quality-gate rejections per accepted photo
+  (capture-UX health).
+
+**Teaser — "is membership viable?"** (measurable before billing exists)
+
+- **Teaser tap rate**: % of free consulters who tap the locked Me card.
+- Optionally a "notify me when membership launches" list — signup rate is the
+  cheapest demand signal there is.
+
+**Phase 1 — "is membership a business?"**
+
+- Teaser → paid conversion; month-2 retention/churn; Me-card return rate
+  (weekly actives among members); share-card usage (growth loop).
+
+**Always-on guardrails**
+
+- Analysis accuracy on the diverse eval set (per prompt revision, before ship).
+- Pro negative-brief-rating rate trending down, not up.
+- Complaint/report rate on analyses.
+
+Rough go/no-go: if consulted bookings convert meaningfully better AND pros rate
+briefs positively, Phase 1 is justified. If teaser taps are high but bookings
+don't lift, the product is entertainment, not a booking driver — rethink before
+billing.
+
 ## Phasing
 
 1. **Phase 0 — free booking-attached consult (MVP).** No billing work. Universal
    core analysis + 1–2 vertical lenses — hair color (richest analysis, founder's
    domain) + brows (pure shape mapping, cheap, covers microblading interest).
    Question packs → guided capture with quality gate → analysis → brief →
-   `consultId` on finalize → brief in pro booking detail. Founder-gated first
-   (allowlist precedent: technical record). Validates AI quality with real pros
-   before any money changes hands; builds the corpus and the teaser audience.
-2. **Phase 1 — membership + Me card.** `ClientSubscription` + entitlements, the
-   durable profile, full Me card, standalone entry, teaser upsell from free
-   consults, share render. Requires the IAP decision.
-3. **Phase 2 — breadth + loops.** Remaining vertical lenses (men's cut/beard,
+   `consultId` on finalize → brief in pro booking detail. Pro-driven
+   distribution from day one: the booking confirmation invites the client to
+   consult before their appointment. Founder-gated first (allowlist precedent:
+   technical record). Validates AI quality with real pros before any money
+   changes hands; builds the corpus and the teaser audience.
+2. **Phase 0.5 — home entry card (free mini analysis).** Still no billing. The
+   "need a change?" card with the capped mini analysis (face / hair / hands
+   focus), recommendations resolving to services + pros (plain
+   service+availability matching at first). Ships once Phase 0 proves the
+   engine; this is the booking-driver + teaser-audience surface.
+3. **Phase 1 — membership + Me card.** `ClientSubscription` + entitlements, the
+   durable profile, full Me card, standalone full analysis, teaser upsell from
+   free consults, share render. Requires the IAP decision.
+4. **Phase 2 — breadth + loops.** Remaining vertical lenses (men's cut/beard,
    lashes, makeup/bridal, skin, nails), outcome loop, suits-you feed filtering,
-   pro feedback → prompt iteration, seasonal refresh.
+   evidence-based pro matching (skill graph), event-mode consults on dated
+   boards, pro feedback → prompt iteration, seasonal refresh. Group-event
+   consults land whenever the group-events epic exists.
 
 Web ↔ iOS: client-facing → parity rule applies. Capture is dramatically better
 native (reuse TOVISCamera geometry + coaching); scope web to upload + AI quality
@@ -253,6 +377,11 @@ feedback, iOS to full guided capture.
 5. **Consult photo retention window** specifics (auto-expiry duration).
 6. **Free-tier caps** — exact recommendation count / photo counts / refresh
    limits.
+7. **Mini-analysis depth** — confirm the home-card free tier (what a mini
+   analysis includes, run cooldown) since it revises the original
+   standalone-is-member-only decision.
+8. **Group-events epic** — scope and timing (Tori has her own planning started;
+   nothing in the repo yet). The consult's event mode doesn't wait for it.
 
 ## Grounding map (for the implementing session)
 
