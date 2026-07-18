@@ -35,6 +35,10 @@ jobs:
       CI: true
       NODE_ENV: test
 
+      # Private-repo runners are 2-core/7GB (public repos get 4-core/16GB);
+      # Node's default heap cap there (~2GB) OOMs the `next build` step.
+      NODE_OPTIONS: --max-old-space-size=4096
+
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5433/tovis_perf?schema=public
       DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5433/tovis_perf?schema=public
 

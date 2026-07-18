@@ -71,6 +71,10 @@ jobs:
       PORT: 3000
       NEXT_TELEMETRY_DISABLED: 1
 
+      # Private-repo runners are 2-core/7GB (public repos get 4-core/16GB);
+      # Node's default heap cap there (~2GB) OOMs the `next build` step.
+      NODE_OPTIONS: --max-old-space-size=4096
+
       # Keep the availability perf sampler out of the functional e2e gate: it
       # saturates the single shared `next start` server for ~3min and times out
       # the specs that run right after it. It runs in perf-availability.yml.
