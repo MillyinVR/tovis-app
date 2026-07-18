@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { buildViralRequestUploadTargetPath } from '@/lib/viralRequests'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { isRecord, type UnknownRecord } from '@/lib/guards'
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
 import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
 
 export const dynamic = 'force-dynamic'
@@ -74,8 +75,8 @@ export async function POST(req: NextRequest) {
       return jsonFail(400, 'Only image/video uploads allowed')
     }
 
-    if (size != null && size > 30 * 1024 * 1024) {
-      return jsonFail(400, 'File too large (max 30MB)')
+    if (size != null && size > UPLOAD_MAX_BYTES) {
+      return jsonFail(400, `File too large (max ${UPLOAD_MAX_LABEL})`)
     }
 
     const requestRow = await prisma.viralServiceRequest.findUnique({

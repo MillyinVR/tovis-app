@@ -23,12 +23,11 @@ import {
   buildMessageAttachmentPath,
   isSupportedAttachmentContentType,
 } from '@/lib/messages/attachments'
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
 import type { MessageUploadInitDTO } from '@/lib/dto/messaging'
 import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
 
 export const dynamic = 'force-dynamic'
-
-const MAX_ATTACHMENT_BYTES = 30 * 1024 * 1024
 
 function trimOrEmpty(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
@@ -77,8 +76,8 @@ export async function POST(req: Request, ctx: RouteContext) {
       typeof body.size === 'number' && Number.isFinite(body.size)
         ? body.size
         : null
-    if (size != null && size > MAX_ATTACHMENT_BYTES) {
-      return jsonFail(400, 'File too large (max 30MB).')
+    if (size != null && size > UPLOAD_MAX_BYTES) {
+      return jsonFail(400, `File too large (max ${UPLOAD_MAX_LABEL}).`)
     }
 
     const bucket = MESSAGE_ATTACHMENT_BUCKET

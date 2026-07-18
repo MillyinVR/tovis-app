@@ -9,6 +9,7 @@ import {
 } from '@prisma/client'
 
 import MediaUploader from '../MediaUploader'
+import { UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
 import FeaturedPairPicker from './FeaturedPairPicker'
 
 import {
@@ -369,7 +370,7 @@ export default async function ProAfterPhotosPage(props: PageProps) {
             </div>
 
             <div className="brand-cap brand-pro-session-capture-formats">
-              JPG · PNG · MP4 up to 30MB · auto-compressed
+              JPG · PNG · MP4 up to {UPLOAD_MAX_LABEL} · auto-compressed
             </div>
           </div>
         </section>

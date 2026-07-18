@@ -40,6 +40,8 @@ vi.mock('@/lib/media/uploadSession', () => ({
   uploadSurfaceForKind: mocks.uploadSurfaceForKind,
 }))
 
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
+
 import { POST } from './route'
 
 function makeJsonResponse(status: number, payload: unknown): Response {
@@ -264,6 +266,45 @@ describe('POST /api/v1/pro/uploads', () => {
       ok: true,
       uploadSessionId: 'session_1',
     })
+  })
+
+  // These two pin the route to the SAME constant the upload forms validate
+  // against (getVideoFileError in NewMediaPostForm, MediaUploader, ThreadClient)
+  // — the 200MB-form / 30MB-route contradiction must not come back.
+  it('rejects a declared size one byte over UPLOAD_MAX_BYTES without minting a signed URL', async () => {
+    const res = await POST(
+      makeRequest({
+        kind: 'LOOKS_PUBLIC',
+        contentType: 'video/mp4',
+        size: UPLOAD_MAX_BYTES + 1,
+      }),
+    )
+
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({
+      ok: false,
+      error: `File too large (max ${UPLOAD_MAX_LABEL})`,
+    })
+    expect(mocks.createSignedUploadUrl).not.toHaveBeenCalled()
+  })
+
+  it('accepts a video exactly at UPLOAD_MAX_BYTES and binds the upload session to the same cap', async () => {
+    mocks.uploadSurfaceForKind.mockReturnValueOnce('PRO_LOOKS')
+
+    const res = await POST(
+      makeRequest({
+        kind: 'LOOKS_PUBLIC',
+        contentType: 'video/mp4',
+        size: UPLOAD_MAX_BYTES,
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(mocks.createSignedUploadUrl).toHaveBeenCalledTimes(1)
+    expect(mocks.createUploadSession).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ maxBytes: UPLOAD_MAX_BYTES }),
+    )
   })
 
   it('returns 500 when Supabase fails to create the signed URL', async () => {

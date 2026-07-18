@@ -10,6 +10,7 @@ import {
   createUploadSession,
   uploadSurfaceForKind,
 } from '@/lib/media/uploadSession'
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
 import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
 
 export const dynamic = 'force-dynamic'
@@ -92,8 +93,9 @@ export async function POST(req: Request) {
     const isVideo = contentType.startsWith('video/')
     if (!isImage && !isVideo) return jsonFail(400, 'Only image/video uploads allowed')
 
-    // Keep consistent with your pro route limit
-    if (size != null && size > 30 * 1024 * 1024) return jsonFail(400, 'File too large (max 30MB)')
+    if (size != null && size > UPLOAD_MAX_BYTES) {
+      return jsonFail(400, `File too large (max ${UPLOAD_MAX_LABEL})`)
+    }
 
     const bucket = 'media-public'
     const path = buildPath({ clientId, kind, contentType })
@@ -121,7 +123,7 @@ export async function POST(req: Request) {
         storageBucket: bucket,
         storagePath: path,
         contentType,
-        maxBytes: 30 * 1024 * 1024,
+        maxBytes: UPLOAD_MAX_BYTES,
         clientId,
         bookingId,
         phase,

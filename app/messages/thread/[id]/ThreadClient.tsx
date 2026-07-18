@@ -8,6 +8,7 @@ import { useLiveChannels } from '@/app/_components/live/useLiveChannels'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
 import { THREAD_MESSAGE_PAGE_SIZE } from '@/lib/messages/paging'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
 import { isRecord } from '@/lib/guards'
 
 type Attachment = {
@@ -37,8 +38,6 @@ type Msg = {
    */
   retryAttachmentPaths?: string[]
 }
-
-const MAX_ATTACHMENT_BYTES = 30 * 1024 * 1024
 
 type ThreadClientProps = {
   threadId: string
@@ -666,8 +665,8 @@ export default function ThreadClient(props: ThreadClientProps) {
         setErr('Only images can be attached.')
         return
       }
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        setErr('Image too large (max 30MB).')
+      if (file.size > UPLOAD_MAX_BYTES) {
+        setErr(`Image too large (max ${UPLOAD_MAX_LABEL}).`)
         return
       }
       setErr(null)
