@@ -36,6 +36,7 @@ type ClaimPageState =
   | 'already-claimed'
   | 'client-mismatch'
   | 'merge-unavailable'
+  | 'claim-paused'
   | 'conflict'
 
 type ClaimInviteRecord = ClientClaimLinkRow
@@ -106,6 +107,7 @@ function parsePageState(value: string | null): ClaimPageState | null {
     value === 'already-claimed' ||
     value === 'client-mismatch' ||
     value === 'merge-unavailable' ||
+    value === 'claim-paused' ||
     value === 'conflict'
   ) {
     return value
@@ -279,6 +281,9 @@ export default async function ClaimInvitePage(props: PageProps) {
       case 'merge_refused':
         redirect(`${claimHref(token)}?state=merge-unavailable`)
 
+      case 'merge_paused':
+        redirect(`${claimHref(token)}?state=claim-paused`)
+
       case 'conflict':
         redirect(`${claimHref(token)}?state=conflict`)
     }
@@ -435,6 +440,36 @@ export default async function ClaimInvitePage(props: PageProps) {
             >
               Contact support
             </Link>
+          </StatusCard>
+        ) : null}
+
+        {/*
+          The merge kill switch is pulled. Deliberately NOT the mismatch card:
+          nothing here is the viewer's doing, there is no other account to go
+          find, and the condition ends the moment an operator flips the switch
+          back — so the card says "wait", owns the problem, and keeps a live
+          retry instead of sending anyone off to make a second account.
+
+          The retry renders for every viewer rather than being gated on a
+          signed-in client. `claimAction` re-checks the session itself and routes
+          a signed-out or unverified viewer to signup/verification, so the button
+          is correct for all of them — and gating it would turn a hand-typed
+          `?state=claim-paused` into a card with no way forward at all.
+        */}
+        {pageState === 'claim-paused' ? (
+          <StatusCard
+            title="Claiming is paused right now"
+            body="We have paused claiming for a moment while we sort something out on our end. Nothing changed on your account and nothing was lost — this history is still here, and your professional still has it. Try again shortly."
+            tone="warning"
+          >
+            <form action={claimAction}>
+              <button
+                type="submit"
+                className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
+              >
+                Try again
+              </button>
+            </form>
           </StatusCard>
         ) : null}
 

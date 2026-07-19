@@ -60,6 +60,24 @@ export async function POST(
       })
     }
 
+    // An operator pulled the merge kill switch, so the claim never ran and
+    // nothing was written. 503, not 409: this is our service being temporarily
+    // unavailable, not a conflict with the request — the same distinction
+    // `lib/booking/errors.ts` draws, and it keeps the condition legible to
+    // monitoring (a spike here means someone left the switch pulled).
+    //
+    // ⚠️ The message has to stand on its own. A client that predates this code
+    // does not recognise `CLAIM_PAUSED` and falls back to rendering this string
+    // verbatim, so it must read correctly as a bare sentence with no card around
+    // it — and must not imply the viewer has to do anything but wait.
+    if (result.kind === 'merge_paused') {
+      return jsonFail(
+        503,
+        'Claiming is paused right now. Nothing changed on your account — please try again shortly.',
+        { code: 'CLAIM_PAUSED' },
+      )
+    }
+
     // The history could not be absorbed safely, so nothing was written. The
     // reason is deliberately not on the wire — every one of them means "our model
     // of this data is wrong", which is a support question, not something the

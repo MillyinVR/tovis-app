@@ -266,6 +266,66 @@ describe('POST /api/v1/pro/invites/[token]/accept', () => {
     expect(JSON.stringify(result)).not.toContain('source_not_shell')
   })
 
+  /**
+   * The kill switch gets a 503 and its own code, not the 409 CLIENT_MISMATCH it
+   * used to share. Both halves matter: the code is what the surfaces branch on,
+   * and the 503 is what keeps "we turned it off" legible to monitoring instead of
+   * hiding inside the ordinary conflict bucket.
+   */
+  it('returns 503 CLAIM_PAUSED when the merge kill switch is pulled', async () => {
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
+      kind: 'merge_paused',
+    })
+
+    const result = await POST(makeRequest(), {
+      params: { token: 'token_1' },
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      503,
+      'Claiming is paused right now. Nothing changed on your account — please try again shortly.',
+      { code: 'CLAIM_PAUSED' },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 503,
+      error:
+        'Claiming is paused right now. Nothing changed on your account — please try again shortly.',
+      code: 'CLAIM_PAUSED',
+    })
+  })
+
+  /**
+   * A client too old to know `CLAIM_PAUSED` renders this message verbatim, with
+   * no card around it — so it has to read as a complete, correct sentence on its
+   * own, and must never tell a blameless viewer to go fix their account. That is
+   * the exact failure this whole change exists to kill, so pin it rather than
+   * trusting the next person editing the copy to remember.
+   */
+  it('phrases the paused message so a client that does not know the code degrades honestly', async () => {
+    mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
+      kind: 'merge_paused',
+    })
+
+    await POST(makeRequest(), { params: { token: 'token_1' } })
+
+    // A complete sentence that tells the viewer to wait…
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      503,
+      expect.stringMatching(/try again.*\.$/i),
+      { code: 'CLAIM_PAUSED' },
+    )
+
+    // …and never the old card's advice, which is the bug this replaces: there is
+    // no other account to sign into and no reason to make one.
+    expect(mocks.jsonFail).not.toHaveBeenCalledWith(
+      503,
+      expect.stringMatching(/sign in|different client|correct client account/i),
+      expect.anything(),
+    )
+  })
+
   it('returns CONFLICT when claim service returns conflict', async () => {
     mocks.acceptClientClaimFromLink.mockResolvedValueOnce({
       kind: 'conflict',

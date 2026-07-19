@@ -27,6 +27,13 @@ export type AcceptClientClaimFromLinkResult =
   | { kind: 'client_mismatch' }
   /** The shell could not be absorbed safely; nothing was written. Needs a human. */
   | { kind: 'merge_refused'; reason: MergeUnclaimedRefusalReason }
+  /**
+   * An operator has the merge kill switch pulled, so the claim did not run.
+   * Nothing was written and the viewer did nothing wrong — it is temporary and
+   * retryable, which is why it is NOT `client_mismatch` (see the kill-switch
+   * branch below for the full reasoning).
+   */
+  | { kind: 'merge_paused' }
   | { kind: 'conflict' }
   | { kind: 'ok'; bookingId: string | null }
 
@@ -209,11 +216,24 @@ async function runAcceptClientClaim(args: {
 
       // The kill switch. The merge is irreversible and any client holding a link
       // can trigger it, so it stays stoppable without a revert + redeploy. Off by
-      // default; `DISABLE_CLAIM_MERGE=1` restores the pre-#652 refusal, which
-      // writes nothing. Checked BEFORE the merge so disabling is always a clean
-      // no-op, never a half-finished absorption.
+      // default; `DISABLE_CLAIM_MERGE=1` skips the merge entirely, writing
+      // nothing. Checked BEFORE the merge so disabling is always a clean no-op,
+      // never a half-finished absorption.
+      //
+      // ⚠️ This used to return `client_mismatch` — the literal pre-#652 refusal —
+      // and that was wrong on the wire, not just in the copy. Because EVERY
+      // signed-in claim reaches this branch while the switch is pulled (the ids
+      // never match; see the comment below), every one of them was told it was
+      // signed into the wrong client account and sent to go find the right one.
+      // No such account exists: the link's client is a pro-made shell with no
+      // user behind it, so the "correct account" the card names is unreachable by
+      // construction and the only thing following that advice can produce is a
+      // second, emptier account. The two situations are opposites — one is the
+      // viewer's mistake and permanent, the other is ours and temporary — so they
+      // get separate kinds, and the surfaces branch on server-supplied evidence
+      // rather than guessing which 409 they are holding.
       if (claimMergeDisabled()) {
-        return { kind: 'client_mismatch' }
+        return { kind: 'merge_paused' }
       }
 
       // A signed-in client lands here EVERY time on a `ready` link: the link only
