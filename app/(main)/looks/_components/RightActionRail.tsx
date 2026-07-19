@@ -14,6 +14,7 @@ import {
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import SaveToBoardModal from './SaveToBoardModal'
+import { formatCompactCount } from '@/lib/format/compactCount'
 import type { LooksSaveStateResponseDto } from '@/lib/looks/types'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
@@ -22,17 +23,6 @@ const TEXT_SHADOW =
 const PAPER = 'rgb(var(--text-primary) / 1)'
 const EMBER = 'rgb(var(--color-ember))'
 const ACID = 'rgb(var(--color-acid))'
-
-function clamp(n: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, n))
-}
-
-function formatCount(n: number) {
-  const v = clamp(n, 0, 999_999)
-  if (v >= 100_000) return `${Math.round(v / 1000)}K`
-  if (v >= 10_000) return `${(v / 1000).toFixed(1)}K`
-  return String(v)
-}
 
 function initialLetter(name: string | null) {
   const s = (name || '').trim()
@@ -90,7 +80,7 @@ function RailButton({
 }) {
   const footerText =
     label ??
-    (typeof count === 'number' && count > 0 ? formatCount(count) : null)
+    (typeof count === 'number' && count > 0 ? formatCompactCount(count) : null)
 
   return (
     <button

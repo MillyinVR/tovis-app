@@ -102,9 +102,13 @@ export type LifecycleViewModelInput = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// A no-show is as final as a cancellation: neither role has an action left on
+// it (proActions/clientActions both fall through to an empty list), so the card
+// must render the read-only "Status: …" branch rather than an action row.
 const TERMINAL_STATUSES: ReadonlySet<BookingStatus> = new Set([
   BookingStatus.COMPLETED,
   BookingStatus.CANCELLED,
+  BookingStatus.NO_SHOW,
 ])
 
 function encodePathSegment(value: string): string {
@@ -119,6 +123,9 @@ function displayLabelFor(
   if (status === BookingStatus.ACCEPTED) return 'Confirmed'
   if (status === BookingStatus.COMPLETED) return 'Completed'
   if (status === BookingStatus.CANCELLED) return 'Cancelled'
+  // Without this arm NO_SHOW fell through to the IN_PROGRESS switch below and
+  // a no-showed booking read "In progress" on both booking cards.
+  if (status === BookingStatus.NO_SHOW) return 'No-show'
 
   // IN_PROGRESS — surface the session step so the user knows where they are.
   switch (sessionStep) {

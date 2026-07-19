@@ -2,8 +2,13 @@
 // lib/profiles/publicProfileFormatting.ts
 import type { ProfessionType, ProNameDisplay } from '@prisma/client'
 
+import { formatCompactCount } from '@/lib/format/compactCount'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+
+// Re-exported so the many existing profile-side importers keep working; the
+// rule itself lives in lib/format/compactCount.
+export { formatCompactCount }
 
 export type PublicProfileTab = 'portfolio' | 'services' | 'reviews'
 
@@ -23,12 +28,6 @@ export const PUBLIC_PROFILE_TABS: PublicProfileTabItem[] = [
 ]
 
 const PUBLIC_PROFILE_DEFAULT_TAB: PublicProfileTab = 'portfolio'
-
-const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
-  compactDisplay: 'short',
-  maximumFractionDigits: 1,
-  notation: 'compact',
-})
 
 const PROFESSION_LABEL_BY_TYPE = {
   COSMETOLOGIST: 'Cosmetologist',
@@ -212,13 +211,6 @@ export function formatRatingCount(value: number | null | undefined): string {
   if (!Number.isFinite(value)) return '0'
 
   return String(Math.max(0, Math.trunc(value)))
-}
-
-export function formatCompactCount(value: number | null | undefined): string {
-  if (typeof value !== 'number') return '0'
-  if (!Number.isFinite(value)) return '0'
-
-  return COMPACT_NUMBER_FORMATTER.format(Math.max(0, Math.trunc(value)))
 }
 
 export function formatReviewLabel(count: number | null | undefined): string {

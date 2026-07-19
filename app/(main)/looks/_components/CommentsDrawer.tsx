@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Heart, User as UserIcon, X } from 'lucide-react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatCompactCount } from '@/lib/format/compactCount'
 import { initialsForName } from '@/lib/initials'
 import { formatRelativeTimeCompact } from '@/lib/time/relativeTime'
 import { zClass } from '@/lib/zIndex'
@@ -13,12 +14,6 @@ import { useLookComments } from './useLookComments'
 import type { UiComment } from './lookTypes'
 
 const LIKED_COLOR = 'rgb(var(--color-ember))'
-
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
-}
 
 function CommentAvatar({
   displayName,
@@ -192,7 +187,7 @@ function CommentRow({
           className={comment.viewerLiked ? '' : 'text-textSecondary'}
         />
         <span className="text-[10px] font-bold text-textSecondary">
-          {comment.likeCount > 0 ? formatCount(comment.likeCount) : ''}
+          {comment.likeCount > 0 ? formatCompactCount(comment.likeCount) : ''}
         </span>
       </button>
     </div>
@@ -282,7 +277,7 @@ export default function CommentsDrawer({
         <div className="flex items-center justify-between border-b border-surfaceGlass/10 px-3 pb-2">
           <div className="text-[14px] font-black">
             {commentsCount > 0
-              ? `${formatCount(commentsCount)} comment${commentsCount === 1 ? '' : 's'}`
+              ? `${formatCompactCount(commentsCount)} comment${commentsCount === 1 ? '' : 's'}`
               : 'Comments'}
           </div>
           <button
@@ -326,7 +321,7 @@ export default function CommentsDrawer({
                           <span className="h-px w-5 bg-textSecondary/40" />
                           {thread.open
                             ? 'Hide replies'
-                            : `View ${formatCount(c.replyCount)} ${c.replyCount === 1 ? 'reply' : 'replies'}`}
+                            : `View ${formatCompactCount(c.replyCount)} ${c.replyCount === 1 ? 'reply' : 'replies'}`}
                         </button>
 
                         {thread.open ? (

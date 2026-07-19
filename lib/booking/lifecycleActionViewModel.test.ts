@@ -141,6 +141,20 @@ describe('buildLifecycleActionViewModel — pro role', () => {
     expect(vm.displayLabel).toBe('Cancelled')
   })
 
+  // Regression: NO_SHOW had no arm in displayLabelFor, so it fell through to
+  // the IN_PROGRESS switch and a no-showed booking read "In progress" — and it
+  // was missing from TERMINAL_STATUSES, so isTerminal lied about it too.
+  it('NO_SHOW → terminal, no actions, labelled "No-show" (not "In progress")', () => {
+    const vm = buildLifecycleActionViewModel(
+      input({ status: BookingStatus.NO_SHOW, role: 'PRO' }),
+    )
+    expect(vm.displayLabel).toBe('No-show')
+    expect(vm.displayLabel).not.toBe('In progress')
+    expect(verbs(vm)).toEqual([])
+    expect(vm.isTerminal).toBe(true)
+    expect(vm.isInProgress).toBe(false)
+  })
+
   it('blockers: BEFORE_MEDIA_REQUIRED when at BEFORE_PHOTOS with zero before media', () => {
     const vm = buildLifecycleActionViewModel(
       input({
@@ -232,6 +246,18 @@ describe('buildLifecycleActionViewModel — client role', () => {
     const vm = buildLifecycleActionViewModel(
       input({ status: BookingStatus.CANCELLED, role: 'CLIENT' }),
     )
+    expect(verbs(vm)).toEqual([])
+    expect(vm.isTerminal).toBe(true)
+  })
+
+  // The client's booking card renders the same displayLabel, so it showed
+  // "In progress" for a booking the pro had marked as a no-show.
+  it('NO_SHOW → no actions, terminal, labelled "No-show"', () => {
+    const vm = buildLifecycleActionViewModel(
+      input({ status: BookingStatus.NO_SHOW, role: 'CLIENT' }),
+    )
+    expect(vm.displayLabel).toBe('No-show')
+    expect(vm.displayLabel).not.toBe('In progress')
     expect(verbs(vm)).toEqual([])
     expect(vm.isTerminal).toBe(true)
   })

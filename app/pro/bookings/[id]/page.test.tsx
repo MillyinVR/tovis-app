@@ -87,6 +87,15 @@ vi.mock('@/app/_components/ClientNameLink', () => ({
 
 vi.mock('@/app/_components/ui', () => ({
   Avatar: () => null,
+  // Rendered (not stubbed to null) so the status chip's label and tone stay
+  // assertable — this page's chip is the canonical Badge as of queue item 12.
+  Badge: ({
+    children,
+    tone,
+  }: {
+    children?: React.ReactNode
+    tone?: string
+  }) => <span data-tone={tone}>{children}</span>,
 }))
 
 import ProBookingDetailPage from './page'
@@ -202,6 +211,35 @@ function hasText(node: PageNode, text: string): boolean {
 }
 
 type AnchorProps = { href?: string; children?: React.ReactNode }
+
+type ChipProps = { 'data-tone'?: string; children?: React.ReactNode }
+
+/**
+ * The status chip is the canonical <Badge>, stubbed above as a span carrying
+ * data-tone — so this finds the rendered chip and lets a test read the tone the
+ * page asked for without depending on Badge's own class strings.
+ */
+function findChip(node: PageNode): React.ReactElement<ChipProps> | null {
+  if (node == null || typeof node === 'boolean') return null
+  if (typeof node === 'string' || typeof node === 'number') return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findChip(child)
+      if (hit) return hit
+    }
+    return null
+  }
+
+  if (React.isValidElement<ChipProps>(node)) {
+    const element = node
+    if (typeof element.type === 'function' && isFunctionComponent(element.type)) {
+      return findChip(element.type(element.props))
+    }
+    if (typeof element.props['data-tone'] === 'string') return element
+    return findChip(element.props.children)
+  }
+  return null
+}
 
 function findAnchors(node: PageNode): Array<React.ReactElement<AnchorProps>> {
   if (node == null || typeof node === 'boolean') return []
@@ -323,5 +361,37 @@ describe('app/pro/bookings/[id]/page.tsx', () => {
       }),
     )
     expect(hasText(page, 'Money trail')).toBe(true)
+  })
+
+  // Queue item 12: this page used to re-map status → chip style locally, so
+  // NO_SHOW rendered neutral (canonical: danger), IN_PROGRESS was unhandled and
+  // PENDING used a raw border-white/10. It now renders the canonical Badge with
+  // badgeToneForBookingStatus/labelForBookingStatus, the same pair the pro
+  // bookings list and the client Appointments list already use.
+  describe('status chip uses the canonical tone + label map', () => {
+    const CASES: ReadonlyArray<[BookingStatus, string, string]> = [
+      [BookingStatus.PENDING, 'Pending', 'pending'],
+      [BookingStatus.ACCEPTED, 'Accepted', 'accent'],
+      [BookingStatus.IN_PROGRESS, 'In progress', 'accent'],
+      [BookingStatus.COMPLETED, 'Completed', 'success'],
+      [BookingStatus.CANCELLED, 'Cancelled', 'danger'],
+      [BookingStatus.NO_SHOW, 'No-show', 'danger'],
+    ]
+
+    for (const [status, label, tone] of CASES) {
+      it(`${status} → "${label}" in the ${tone} tone`, async () => {
+        const page = await renderPage(makeBooking({ status }))
+        const chip = findChip(page)
+
+        expect(chip).not.toBeNull()
+        expect(chip?.props['data-tone']).toBe(tone)
+        // Asserted on the CHIP, not the whole page: the stubbed BookingActions
+        // renders the raw status itself, so a page-wide check would be testing
+        // the mock. The chip previously rendered this raw enum ("NO_SHOW").
+        const chipText = extractText(chip)
+        expect(chipText).toContain(label)
+        expect(chipText).not.toContain(status)
+      })
+    }
   })
 })
