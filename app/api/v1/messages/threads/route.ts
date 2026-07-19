@@ -2,7 +2,6 @@
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { MessagesThreadsListResponseDTO } from '@/lib/dto/messaging'
 import {
   INBOX_THREADS_PAGE_SIZE,
@@ -10,6 +9,7 @@ import {
   resolveInboxEyebrows,
   whereForInboxFilter,
 } from '@/lib/messages/inboxContext'
+import { inboxThreadRowSelect, serializeInboxThreadRow } from '@/lib/messages/threadRow'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,37 +27,7 @@ export async function GET(req: Request) {
       where: whereForInboxFilter({ userId: user.id, filter }),
       orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
       take: INBOX_THREADS_PAGE_SIZE,
-      select: {
-        id: true,
-        contextType: true,
-        contextId: true,
-        bookingId: true,
-        serviceId: true,
-        offeringId: true,
-        waitlistEntryId: true,
-        lastMessageAt: true,
-        lastMessagePreview: true,
-        updatedAt: true,
-        client: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
-        professional: {
-          select: {
-            id: true,
-            userId: true,
-            businessName: true,
-            firstName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
-            lastName: true, // pii-plaintext-read-ok: pro public display name (formatProfessionalPublicDisplayName)
-            handle: true,
-            nameDisplay: true,
-            avatarUrl: true,
-          },
-        },
-        participants: {
-          where: { userId: user.id },
-          select: { lastReadAt: true },
-          take: 1,
-        },
-        _count: { select: { messages: true } },
-      },
+      select: inboxThreadRowSelect(user.id),
     })
 
     // Resolve each row's context eyebrow once, server-side (booking time /
@@ -65,49 +35,16 @@ export async function GET(req: Request) {
     const eyebrowById = await resolveInboxEyebrows(threads)
 
     return jsonOk({
-      threads: threads.map((t) => {
-        // Counterparty is derived from the viewer's user id, not their acting
-        // role — the list payload deliberately omits participant user ids, so
-        // this boolean is the client's only signal for whose name to show.
-        const proUserId = t.professional.userId
-        const isViewerPro = proUserId != null && proUserId === user.id
-        const eyebrow = eyebrowById.get(t.id) ?? {
-          eyebrow: 'Message',
-          isAccentContext: false,
-        }
-        return {
-          id: t.id,
-          contextType: t.contextType,
-          contextId: t.contextId,
-          bookingId: t.bookingId,
-          serviceId: t.serviceId,
-          offeringId: t.offeringId,
-          waitlistEntryId: t.waitlistEntryId,
-          lastMessageAt: t.lastMessageAt?.toISOString() ?? null,
-          lastMessagePreview: t.lastMessagePreview,
-          updatedAt: t.updatedAt.toISOString(),
-          client: t.client,
-          // Rebuild the professional preview explicitly so raw firstName/lastName
-          // (selected only to resolve the toggle-aware display name) never leak
-          // onto the wire — the DTO carries only the resolved displayName.
-          professional: {
-            id: t.professional.id,
-            businessName: t.professional.businessName,
-            avatarUrl: t.professional.avatarUrl,
-            displayName: formatProfessionalPublicDisplayName(
-              t.professional,
-              'Your pro',
-            ),
+      threads: threads.map((row) =>
+        serializeInboxThreadRow({
+          row,
+          viewerUserId: user.id,
+          eyebrow: eyebrowById.get(row.id) ?? {
+            eyebrow: 'Message',
+            isAccentContext: false,
           },
-          participants: t.participants.map((p) => ({
-            lastReadAt: p.lastReadAt?.toISOString() ?? null,
-          })),
-          isViewerPro,
-          eyebrow: eyebrow.eyebrow,
-          isAccentContext: eyebrow.isAccentContext,
-          _count: t._count,
-        }
-      }),
+        }),
+      ),
     } satisfies MessagesThreadsListResponseDTO)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Internal error'
