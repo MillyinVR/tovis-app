@@ -75,6 +75,17 @@
      would override this. */
   --on-cta: 10 20 19;
 
+  /* Footer "app-coin" disc stops. Deliberately CONSTANT across light/dark
+     (like --on-cta above, and for the same reason the app icon is): the
+     iridescent feather mark is drawn to read on a dark disc, so flipping
+     these with [data-mode] would wash the mark out in light mode. They are
+     tokens rather than inline hex purely so a white-label tenant has an
+     override point — see app/styles/footers.css. */
+  --coin-1: 44 79 73;
+  --coin-2: 22 48 43;
+  --coin-3: 13 26 23;
+  --coin-4: 5 13 11;
+
   /* Status tones */
   --tone-danger: var(--color-ember);
   --tone-warn: var(--color-amber);

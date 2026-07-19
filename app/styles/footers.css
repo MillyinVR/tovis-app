@@ -10,8 +10,11 @@
 
 :root {
   /* The center "app-coin" is intentionally dark in BOTH themes (like the app
-     icon) so the iridescent mark keeps its gradient. Constant. */
-  --tovis-coin: radial-gradient(125% 125% at 32% 24%, #2c4f49 0%, #16302b 27%, #0d1a17 58%, #050d0b 100%);
+     icon) so the iridescent mark keeps its gradient. The --coin-* stops are
+     defined once in lib/brand/brand.css and deliberately do NOT flip with
+     [data-mode] — they are tokens so a white-label tenant can override the
+     disc without editing this file. */
+  --tovis-coin: radial-gradient(125% 125% at 32% 24%, rgb(var(--coin-1)) 0%, rgb(var(--coin-2)) 27%, rgb(var(--coin-3)) 58%, rgb(var(--coin-4)) 100%);
   /* Cast-glow under the center coin — derived from the brand accent token so it
      rebrands per white-label tenant (and flips light/dark automatically). For
      the default brand this resolves to the plume teal, matching the original
@@ -91,7 +94,7 @@
     padding: 10px 18px;
     border: 1px solid var(--line-strong);
     border-radius: 999px;
-    box-shadow: 0 22px 48px rgba(0, 0, 0, 0.30);
+    box-shadow: 0 22px 48px rgb(var(--shadow-color) / 0.30);
   }
   .tovis-center-lift,
   .tovis-center-lift-lg { margin-top: 0; }

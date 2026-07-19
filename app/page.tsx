@@ -24,10 +24,10 @@ export default function Home() {
 
         {/* Atmospheric glows — no card borders, just depth */}
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-          {/* Terra warmth — bottom left */}
-          <div className="absolute bottom-[15%] left-[-8%] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgb(196_103_58/0.13),transparent_60%)] blur-3xl" />
-          {/* Driftwood warmth — top right */}
-          <div className="absolute right-[-5%] top-[5%] h-[380px] w-[380px] rounded-full bg-[radial-gradient(circle,rgb(154_123_92/0.09),transparent_65%)] blur-3xl" />
+          {/* Accent warmth — bottom left */}
+          <div className="absolute bottom-[15%] left-[-8%] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgb(var(--accent-primary)/0.13),transparent_60%)] blur-3xl" />
+          {/* Micro-accent warmth — top right */}
+          <div className="absolute right-[-5%] top-[5%] h-[380px] w-[380px] rounded-full bg-[radial-gradient(circle,rgb(var(--micro-accent)/0.09),transparent_65%)] blur-3xl" />
           {/* Subtle grain overlay */}
           <div
             className="absolute inset-0 opacity-[0.025]"
@@ -70,7 +70,7 @@ export default function Home() {
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <Link
               href="/signup/client"
-              className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-7 py-3 text-[13px] font-bold text-textPrimary shadow-[0_0_32px_rgb(196_103_58/0.30)] transition hover:bg-accentPrimaryHover hover:shadow-[0_0_44px_rgb(196_103_58/0.42)] active:scale-[0.98]"
+              className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-7 py-3 text-[13px] font-bold text-textPrimary shadow-[0_0_32px_rgb(var(--accent-primary)/0.30)] transition hover:bg-accentPrimaryHover hover:shadow-[0_0_44px_rgb(var(--accent-primary-hover)/0.42)] active:scale-[0.98]"
             >
               Create Client Account
             </Link>

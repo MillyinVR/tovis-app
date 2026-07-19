@@ -11,6 +11,8 @@
 
 import type { NextRequest } from 'next/server'
 
+import { getBrandConfig } from '@/lib/brand'
+
 export const dynamic = 'force-dynamic'
 
 const APP_SCHEME = 'tovis'
@@ -55,6 +57,15 @@ export function GET(req: NextRequest): Response {
       ? 'No charge was made. Returning you to the app…'
       : 'Thanks! Returning you to the app…'
 
+  // This bounce page is a standalone document — it never loads globals.css, so
+  // the brand tokens have to be emitted inline rather than inherited. The dark
+  // palette is taken deliberately (the page pins `color-scheme: dark`): it is
+  // on screen for a few hundred milliseconds before the deep link fires, so a
+  // light/dark negotiation would only buy a flash. Sourcing them from the brand
+  // config is what keeps this page white-label instead of the previous
+  // off-brand purple.
+  const { colors } = getBrandConfig().tokensByMode.dark
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -63,21 +74,28 @@ export function GET(req: NextRequest): Response {
 <meta name="robots" content="noindex" />
 <title>${escapeHtml(heading)}</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --bg-primary: ${colors.bgPrimary};
+    --text-primary: ${colors.textPrimary};
+    --text-muted: ${colors.textMuted};
+    --accent-primary: ${colors.accentPrimary};
+    --on-accent: ${colors.onAccent};
+  }
   html, body { height: 100%; margin: 0; }
   body {
     display: flex; align-items: center; justify-content: center;
-    background: #0b0b10; color: #f4f3f7;
+    background: rgb(var(--bg-primary)); color: rgb(var(--text-primary));
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     text-align: center; padding: 24px;
   }
   .card { max-width: 22rem; }
   h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.5rem; }
-  p { font-size: 0.95rem; line-height: 1.4; color: #b9b7c4; margin: 0 0 1.5rem; }
+  p { font-size: 0.95rem; line-height: 1.4; color: rgb(var(--text-muted)); margin: 0 0 1.5rem; }
   a.btn {
     display: inline-block; text-decoration: none; font-weight: 600;
     padding: 0.85rem 1.4rem; border-radius: 0.85rem;
-    background: #6c5ce7; color: #fff;
+    background: rgb(var(--accent-primary)); color: rgb(var(--on-accent));
   }
 </style>
 </head>

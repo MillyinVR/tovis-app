@@ -21,8 +21,11 @@ export default function HashJumpHighlight() {
     const prevBackground = el.style.background
 
     el.style.transition = 'box-shadow 250ms ease, background 250ms ease'
-    el.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.55)'
-    el.style.background = 'rgba(34,197,94,0.06)'
+    // Tone tokens (not a raw green) so the flash follows [data-mode] and any
+    // white-label palette — these are inline styles, but `rgb(var(--…))`
+    // resolves against the element just like a class would.
+    el.style.boxShadow = '0 0 0 3px rgb(var(--tone-success) / 0.55)'
+    el.style.background = 'rgb(var(--tone-success) / 0.06)'
 
     const t1 = window.setTimeout(() => {
       el.style.boxShadow = prevBoxShadow
