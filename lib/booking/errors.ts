@@ -693,6 +693,46 @@ export function bookingError(
   return new BookingError(code, overrides);
 }
 
+/**
+ * Codes that mean "this opening (or this exact time) is no longer yours to take"
+ * on a last-minute claim.
+ *
+ * The claim path CANNOT branch on the 409 status alone. Twenty-seven distinct
+ * codes answer 409, and several are reachable on a claim without anybody having
+ * raced you — `PRO_NOT_READY` when the pro's readiness lapsed after the opening
+ * was published, and the location-config family (`WORKING_HOURS_REQUIRED`,
+ * `TIMEZONE_REQUIRED`, `SALON_LOCATION_ADDRESS_REQUIRED`,
+ * `NO_SCHEDULING_READY_LOCATION`, …) when their setup drifted. Telling that
+ * client "Someone just grabbed it" is simply false, and it sends them away from
+ * a slot that is still sitting there with no way to find out otherwise.
+ *
+ * Policy refusals (off-step start, outside working hours, too soon) are 400s and
+ * carry their own readable copy — never dress those up as a race either.
+ *
+ * `OPENING_NOT_AVAILABLE` is raised from five distinct places in the write
+ * boundary — wrong pro, wrong service, time mismatch, already consumed, and the
+ * update race — with no discriminator. On the claim path every one of them means
+ * the same thing to the client, because the claim surface never lets them pick a
+ * time: it always sends the opening's own instant, so a mismatch can only mean
+ * the opening changed underneath them.
+ *
+ * Kept here rather than in a component so web and the iOS `OpeningClaimFailure`
+ * classifier stay the same rule rather than two lists that drift.
+ */
+export const OPENING_GONE_CODES: ReadonlySet<BookingErrorCode> = new Set([
+  "OPENING_NOT_AVAILABLE",
+  "TIME_BOOKED",
+  "TIME_HELD",
+  "TIME_BLOCKED",
+]);
+
+/** Whether a `code` off an error body means the opening is gone. */
+export function isOpeningGoneCode(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const code = value.trim().toUpperCase();
+  return isBookingErrorCode(code) && OPENING_GONE_CODES.has(code);
+}
+
 export function isBookingError(value: unknown): value is BookingError {
   return value instanceof BookingError;
 }

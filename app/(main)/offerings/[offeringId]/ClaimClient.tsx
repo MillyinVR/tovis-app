@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 
 import { buildClientIdempotencyKey, idempotencyHeaders } from '@/lib/idempotency/client'
 import { isRecord } from '@/lib/guards'
+import { isOpeningGoneCode } from '@/lib/booking/errors'
 
 type Props = {
   offeringId: string
@@ -27,10 +28,42 @@ function readBookingId(raw: unknown): string | null {
 
 function readError(raw: unknown, fallback: string): string {
   if (isRecord(raw)) {
-    if (typeof raw.message === 'string' && raw.message.trim()) return raw.message
+    // `error` is the USER-facing copy every booking error carries; `message` is
+    // the internal one ("Requested opening is no longer available."). Prefer the
+    // one written for a human.
     if (typeof raw.error === 'string' && raw.error.trim()) return raw.error
+    if (typeof raw.message === 'string' && raw.message.trim()) return raw.message
   }
   return fallback
+}
+
+/**
+ * How a failed hold/finalize should be reported.
+ *
+ * A 409 is NOT automatically a lost race: `PRO_NOT_READY` and the
+ * location-config family answer 409 too, and both are reachable here when a pro's
+ * setup drifts after the opening was published. Branching on the status alone
+ * told those clients "Someone just grabbed it" about a slot that was still
+ * available. Branch on the CODE, and fall back to the server's own user-facing
+ * copy — the same rule the iOS claim sheet applies (`OpeningClaimFailure`).
+ */
+function classifyClaimFailure(
+  status: number,
+  raw: unknown,
+): { taken: true } | { taken: false; message: string } {
+  const code = isRecord(raw) ? raw.code : null
+
+  if (isOpeningGoneCode(code)) return { taken: true }
+
+  return {
+    taken: false,
+    message: readError(
+      raw,
+      status === 409
+        ? 'That time is no longer available. Please try another opening.'
+        : 'Could not complete the booking. Please try again.',
+    ),
+  }
 }
 
 export default function ClaimClient(props: Props) {
@@ -76,14 +109,12 @@ export default function ClaimClient(props: Props) {
         window.location.href = props.loginHref
         return
       }
-      if (holdRes.status === 409) {
-        setTaken(true)
-        return
-      }
       const hold = isRecord(holdRaw) ? holdRaw.hold : null
       const holdId = isRecord(hold) && typeof hold.id === 'string' ? hold.id : null
       if (!holdRes.ok || !holdId) {
-        setError(readError(holdRaw, 'Could not hold this slot. Please try again.'))
+        const outcome = classifyClaimFailure(holdRes.status, holdRaw)
+        if (outcome.taken) setTaken(true)
+        else setError(outcome.message)
         return
       }
 
@@ -111,13 +142,11 @@ export default function ClaimClient(props: Props) {
         window.location.href = props.loginHref
         return
       }
-      if (finRes.status === 409) {
-        setTaken(true)
-        return
-      }
       const bookingId = readBookingId(finRaw)
       if (!finRes.ok || !bookingId) {
-        setError(readError(finRaw, 'Could not complete the booking. Please try again.'))
+        const outcome = classifyClaimFailure(finRes.status, finRaw)
+        if (outcome.taken) setTaken(true)
+        else setError(outcome.message)
         return
       }
 
