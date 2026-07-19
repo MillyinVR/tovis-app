@@ -4,10 +4,19 @@
 // (the write boundary stays DB-only; external Stripe effects orchestrate here,
 // mirroring how notification sends happen outside the cancel transaction).
 //
-// Policy:
-//   - pro / admin cancels        -> auto FULL refund, always (not the client's fault)
+// Policy (service payment), updated 2026-07-19 — a pro cancel no longer
+// auto-refunds. The previous rule ("pro/admin -> auto FULL refund, always") is
+// retired; only admin keeps the unconditional refund.
+//   - admin cancels              -> auto FULL refund, always
+//   - pro cancels                -> NO auto refund (pro discretion)
 //   - client cancels >= 24h out  -> auto FULL refund
 //   - client cancels  < 24h out  -> NO auto refund (pro/admin discretion, PR 3)
+//
+// ⚠️ This governs the SERVICE PAYMENT only. The new-client discovery deposit is
+// a separate Stripe PaymentIntent with its own policy in
+// lib/booking/discoveryDepositPlan.ts, and a pro cancel STILL refunds it in full
+// (deposit + fee) — a client should not be out of pocket on a cancellation they
+// did not cause. Do not "align" the two; the split is deliberate.
 //
 // Best-effort: never throws. The cancellation is already committed, so a refund
 // failure must not fail the request — the FAILED BookingRefund row + Sentry
@@ -38,17 +47,31 @@ export type AutoCancelRefundResult =
   | { outcome: 'NOT_ATTEMPTED' }
 
 /**
- * Whether an automatic full refund applies for this cancellation. Pro/admin
- * cancellations always qualify; a client cancellation qualifies only when it
- * lands at least CLIENT_FULL_REFUND_WINDOW_MS before the appointment.
+ * Whether an automatic full refund of the SERVICE PAYMENT applies for this
+ * cancellation. An admin cancellation always qualifies; a pro cancellation never
+ * does (pro discretion — the discovery deposit refunds on its own policy); a
+ * client cancellation qualifies only when it lands at least
+ * CLIENT_FULL_REFUND_WINDOW_MS before the appointment.
+ *
+ * This function is the single home of the actor policy — callers must not
+ * re-derive it. `scheduledFor` is read only for a client cancel; pass null when
+ * the actor kind cannot depend on it.
  */
 export function isAutoCancelRefundEligible(args: {
   actorKind: CancelRefundActorKind
-  scheduledFor: Date
+  scheduledFor: Date | null
   now: Date
 }): boolean {
-  if (args.actorKind === 'pro' || args.actorKind === 'admin') {
+  if (args.actorKind === 'admin') {
     return true
+  }
+
+  if (args.actorKind === 'pro') {
+    return false
+  }
+
+  if (!args.scheduledFor) {
+    return false
   }
 
   return (
@@ -79,8 +102,9 @@ export async function applyAutoCancelRefund(args: {
   try {
     const now = args.now ?? new Date()
 
-    // Pro/admin always qualify; only a client cancel needs the 24h-window check,
-    // so the scheduledFor read is skipped otherwise.
+    // Only a client cancel depends on the 24h window, so the scheduledFor read
+    // stays conditional; every other actor kind is decided by actor alone. The
+    // policy itself lives in isAutoCancelRefundEligible — do not inline it here.
     if (args.actorKind === 'client') {
       const booking = await prisma.booking.findUnique({
         where: { id: args.bookingId },
@@ -97,6 +121,14 @@ export async function applyAutoCancelRefund(args: {
       ) {
         return { outcome: 'NOT_ATTEMPTED' }
       }
+    } else if (
+      !isAutoCancelRefundEligible({
+        actorKind: args.actorKind,
+        scheduledFor: null,
+        now,
+      })
+    ) {
+      return { outcome: 'NOT_ATTEMPTED' }
     }
 
     const result = await refundBookingPayment({
