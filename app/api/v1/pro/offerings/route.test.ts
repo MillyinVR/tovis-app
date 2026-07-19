@@ -52,6 +52,11 @@ const mocks = vi.hoisted(() => {
   const professionalServiceOffering = {
     findMany: vi.fn(),
     create: vi.fn(),
+    // writeOffering looks the pro's existing row up first, so it can REVIVE a
+    // soft-deleted offering rather than collide with its unique
+    // [professionalId, serviceId] slot. Default: no row → the create path.
+    findUnique: vi.fn(),
+    update: vi.fn(),
   }
 
   const prisma = {
@@ -262,6 +267,8 @@ describe('app/api/v1/pro/offerings/route.ts', () => {
       makeOffering(),
     ])
     mocks.professionalServiceOffering.create.mockResolvedValue(makeOffering())
+    mocks.professionalServiceOffering.findUnique.mockResolvedValue(null)
+    mocks.professionalServiceOffering.update.mockResolvedValue(makeOffering())
 
     const tx = {
       professionalLocation: mocks.professionalLocation,
@@ -990,6 +997,65 @@ describe('app/api/v1/pro/offerings/route.ts', () => {
       expect(mocks.professionalLocation.create).not.toHaveBeenCalled()
       expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
       expect(mocks.professionalServiceOffering.create).toHaveBeenCalled()
+    })
+
+    // Removing an offering only sets `isActive: false`, and the row keeps the
+    // unique [professionalId, serviceId] slot. Adding the service back used to
+    // hit P2002 and tell the pro "you already added this service" about a row
+    // that is invisible to them everywhere in the app.
+    it('REVIVES a previously removed offering instead of 409ing', async () => {
+      mocks.professionalServiceOffering.findUnique.mockResolvedValueOnce({
+        id: 'dead_1',
+        isActive: false,
+      })
+
+      const result = await POST(
+        makeRequest({
+          serviceId: 'service_1',
+          offersInSalon: true,
+          salonPriceStartingAt: '75',
+          salonDurationMinutes: 60,
+        }),
+      )
+
+      expect(result.status).toBe(201)
+      expect(mocks.professionalServiceOffering.create).not.toHaveBeenCalled()
+      expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'dead_1' },
+          // Comes back ON, carrying the pricing from this add.
+          data: expect.objectContaining({
+            isActive: true,
+            salonDurationMinutes: 60,
+          }),
+        }),
+      )
+    })
+
+    it('still returns 409 when the service is already LIVE on the menu', async () => {
+      mocks.professionalServiceOffering.findUnique.mockResolvedValueOnce({
+        id: 'live_1',
+        isActive: true,
+      })
+
+      const result = await POST(
+        makeRequest({
+          serviceId: 'service_1',
+          offersInSalon: true,
+          salonPriceStartingAt: '75',
+          salonDurationMinutes: 60,
+        }),
+      )
+
+      const body = await readJson<{ ok: false; error: string }>(result)
+
+      expect(result.status).toBe(409)
+      expect(body).toEqual({
+        ok: false,
+        error: 'You already added this service to your menu.',
+      })
+      expect(mocks.professionalServiceOffering.create).not.toHaveBeenCalled()
+      expect(mocks.professionalServiceOffering.update).not.toHaveBeenCalled()
     })
 
     it('returns 409 when creating a duplicate offering', async () => {

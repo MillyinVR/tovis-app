@@ -9,7 +9,10 @@
 import { Prisma, ServiceLocationType } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { writeOffering } from '@/lib/offerings/writeOffering'
+import {
+  OfferingAlreadyActiveError,
+  writeOffering,
+} from '@/lib/offerings/writeOffering'
 import { loadAllowedServices } from '@/lib/services/allowedServices'
 
 import {
@@ -218,20 +221,28 @@ export async function commitServiceImport(args: {
         ]
         for (const { mode, ramp } of modeRamps) {
           if (!ramp) continue
-          await tx.offeringPriceRamp.create({
-            data: {
-              offeringId: offering.id,
-              mode,
-              grandfatheredPrice: dec(ramp.currentPrice),
-              targetPrice: dec(ramp.targetPrice),
-              currentPrice: dec(ramp.currentPrice),
-              stepMode: ramp.stepMode,
-              stepValue: dec(ramp.stepValue),
-              cadenceWeeks: ramp.cadenceWeeks,
-              startedAt: ramp.startedAt,
-              nextStepAt: ramp.nextStepAt,
-              completedAt: ramp.completedAt,
-            },
+          const rampFields = {
+            grandfatheredPrice: dec(ramp.currentPrice),
+            targetPrice: dec(ramp.targetPrice),
+            currentPrice: dec(ramp.currentPrice),
+            stepMode: ramp.stepMode,
+            stepValue: dec(ramp.stepValue),
+            cadenceWeeks: ramp.cadenceWeeks,
+            startedAt: ramp.startedAt,
+            nextStepAt: ramp.nextStepAt,
+            completedAt: ramp.completedAt,
+          }
+          // Upsert, not create: writeOffering can now REVIVE a previously
+          // removed offering, and that offering may still carry a ramp from an
+          // earlier import. `@@unique([offeringId, mode])` would make a plain
+          // create throw P2002 — inside this transaction, that would roll the
+          // revive back and report the row as "Already on your menu" while
+          // nothing actually changed. This import's decision is the newer one,
+          // so it wins.
+          await tx.offeringPriceRamp.upsert({
+            where: { offeringId_mode: { offeringId: offering.id, mode } },
+            create: { offeringId: offering.id, mode, ...rampFields },
+            update: rampFields,
           })
           ramps += 1
         }
@@ -247,10 +258,14 @@ export async function commitServiceImport(args: {
         ramps: outcome.ramps,
       })
     } catch (error: unknown) {
-      // Already on the pro's menu → unique [professionalId, serviceId].
+      // Already on the pro's menu AND live. A service the pro previously
+      // REMOVED no longer lands here — writeOffering revives that row and the
+      // import counts it as created, which is what "import my menu" means. Only
+      // a genuine live duplicate is skipped. P2002 stays as the race fallback.
       if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
+        error instanceof OfferingAlreadyActiveError ||
+        (error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002')
       ) {
         skipped += 1
         results.push({

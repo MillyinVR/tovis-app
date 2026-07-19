@@ -14,7 +14,11 @@ import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { isRecord } from '@/lib/guards'
 import { parseMoney, moneyToString } from '@/lib/money'
-import { offeringToDto, writeOffering } from '@/lib/offerings/writeOffering'
+import {
+  OfferingAlreadyActiveError,
+  offeringToDto,
+  writeOffering,
+} from '@/lib/offerings/writeOffering'
 
 export const dynamic = 'force-dynamic'
 
@@ -314,9 +318,14 @@ export async function POST(request: Request) {
 
     return jsonOk({ offering: offeringToDto(offering) }, 201)
   } catch (error: unknown) {
+    // Only a LIVE duplicate is a conflict now. A previously-removed offering is
+    // revived by writeOffering instead of reaching here, so this no longer fires
+    // for a service the pro cannot see. P2002 is kept as the race fallback —
+    // two concurrent adds can still collide after the findUnique.
     if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
+      error instanceof OfferingAlreadyActiveError ||
+      (error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002')
     ) {
       return jsonFail(409, 'You already added this service to your menu.')
     }
