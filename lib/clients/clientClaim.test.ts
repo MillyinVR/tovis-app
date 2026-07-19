@@ -328,11 +328,10 @@ describe('acceptClientClaimFromLink', () => {
 
     /**
      * The kill switch. Defaults OFF (the merge runs) — this asserts the escape
-     * hatch restores the exact pre-#652 behaviour and, critically, that it is
-     * checked BEFORE the merge so disabling can never leave a half-absorbed
-     * profile behind.
+     * hatch skips the merge and, critically, that it is checked BEFORE the merge
+     * so disabling can never leave a half-absorbed profile behind.
      */
-    it('falls back to the pre-#652 refusal when DISABLE_CLAIM_MERGE is set, writing nothing', async () => {
+    it('returns merge_paused when DISABLE_CLAIM_MERGE is set, writing nothing', async () => {
       mockReadyLinkForSignedInClient()
       vi.stubEnv('DISABLE_CLAIM_MERGE', '1')
 
@@ -342,11 +341,50 @@ describe('acceptClientClaimFromLink', () => {
         actingClientId: 'client_1',
       })
 
-      expect(result).toEqual({ kind: 'client_mismatch' })
+      expect(result).toEqual({ kind: 'merge_paused' })
       expect(mocks.mergeUnclaimedClientProfile).not.toHaveBeenCalled()
       expect(mocks.tx.clientProfile.update).not.toHaveBeenCalled()
       expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
       expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
+    })
+
+    /**
+     * The whole point of the split, stated as one assertion.
+     *
+     * Both of these refuse the same claim, in the same branch of the same
+     * function, and used to be the SAME kind — which is why the surfaces told a
+     * blameless viewer to go sign in with an account that cannot exist. They are
+     * opposites: the switch is ours and temporary, `target_not_owned` is the
+     * caller's and permanent. If a future refactor collapses them back together,
+     * this is the test that says no.
+     */
+    it('distinguishes the kill switch from a genuine mismatch — same branch, different kinds', async () => {
+      mockReadyLinkForSignedInClient()
+      vi.stubEnv('DISABLE_CLAIM_MERGE', '1')
+
+      const paused = await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      vi.stubEnv('DISABLE_CLAIM_MERGE', '')
+      mockReadyLinkForSignedInClient()
+      mocks.mergeUnclaimedClientProfile.mockResolvedValueOnce({
+        kind: 'refused',
+        reason: 'target_not_owned',
+        details: [],
+      })
+
+      const mismatch = await acceptClientClaimFromLink({
+        token: 'token_1',
+        actingUserId: 'user_1',
+        actingClientId: 'client_1',
+      })
+
+      expect(paused).toEqual({ kind: 'merge_paused' })
+      expect(mismatch).toEqual({ kind: 'client_mismatch' })
+      expect(paused).not.toEqual(mismatch)
     })
 
     /**
@@ -366,7 +404,7 @@ describe('acceptClientClaimFromLink', () => {
           actingClientId: 'client_1',
         })
 
-        expect(result).toEqual({ kind: 'client_mismatch' })
+        expect(result).toEqual({ kind: 'merge_paused' })
         expect(mocks.mergeUnclaimedClientProfile).not.toHaveBeenCalled()
       },
     )

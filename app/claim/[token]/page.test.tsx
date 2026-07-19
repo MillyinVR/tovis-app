@@ -512,6 +512,42 @@ describe('app/claim/[token]/page.tsx', () => {
     expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
+  /**
+   * The card this whole step exists for. While the kill switch is pulled every
+   * signed-in claim lands here, so what it says is what every claiming client
+   * sees — and it used to be the mismatch card, which named an account that
+   * cannot exist and offered to make them a second one.
+   */
+  it('renders claim-paused state as a blameless, retryable card', async () => {
+    mocks.getCurrentUser.mockResolvedValueOnce(
+      makeClientUser({
+        id: 'user_2',
+        clientId: 'client_own',
+      }),
+    )
+
+    const html = await renderPage({
+      searchParams: { state: 'claim-paused' },
+    })
+
+    expect(html).toContain('Claiming is paused right now')
+    expect(html).toContain('Nothing changed on your account and nothing was lost')
+    expect(html).toContain('Try again')
+
+    // Not a dead end: the retry is a live submit of the claim action, not a link
+    // somewhere else.
+    expect(html).toContain('type="submit"')
+
+    // The bug, stated as an assertion. None of the mismatch card's advice may
+    // appear here — there is no other account to sign into and no reason to make
+    // one, and following either instruction is strictly worse than waiting.
+    expect(html).not.toContain('You are signed into a different client account')
+    expect(html).not.toContain('Use the correct client account')
+    expect(html).not.toContain('Create a new client account')
+    expect(html).not.toContain('Continue with a different account')
+    expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
   it('renders already-claimed state and shows booking link for the matching client', async () => {
     mocks.getCurrentUser.mockResolvedValueOnce(
       makeClientUser({

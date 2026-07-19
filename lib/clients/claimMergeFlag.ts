@@ -14,8 +14,16 @@
 // What it buys instead is an escape hatch. The merge is IRREVERSIBLE (it moves
 // rows and destroys the husk) and any client holding a claim link can trigger it,
 // so it should be stoppable without a revert-and-redeploy. Set
-// `DISABLE_CLAIM_MERGE=1` and `acceptClientClaimFromLink` falls straight back to
-// the pre-#652 `client_mismatch` refusal, which writes nothing.
+// `DISABLE_CLAIM_MERGE=1` and `acceptClientClaimFromLink` skips the merge and
+// returns `merge_paused`, which writes nothing.
+//
+// ⚠️ It used to return `client_mismatch` — the literal pre-#652 refusal — and
+// that quietly made pulling this switch user-hostile: every signed-in claim
+// landed on a card telling the viewer to sign in with the right client account,
+// which on a `ready` link does not exist. Pulling a kill switch must not blame
+// the people it stops, so the refusal now has its own kind, its own wire code
+// (`CLAIM_PAUSED`, a 503) and its own blameless, retryable card on both
+// platforms. Do not collapse it back into the mismatch case.
 //
 // ⚠️ Disabling this does NOT roll anything back — merges already committed stay
 // committed. It only stops new ones.
