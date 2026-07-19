@@ -18,7 +18,11 @@ import {
 import { COPY } from '@/lib/copy'
 import ConfirmPaymentReceivedButton from './ConfirmPaymentReceivedButton'
 import ClientNameLink from '@/app/_components/ClientNameLink'
-import { Avatar } from '@/app/_components/ui'
+import { Avatar, Badge } from '@/app/_components/ui'
+import {
+  badgeToneForBookingStatus,
+  labelForBookingStatus,
+} from '@/lib/booking/statusLabel'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
@@ -29,34 +33,6 @@ import { mapsHrefFromLocation } from '@/lib/maps'
 import { paymentMethodLabel } from '@/lib/payments/acceptedMethods'
 
 export const dynamic = 'force-dynamic'
-
-function safeUpper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
-}
-
-function statusTone(status: unknown) {
-  const s = safeUpper(status)
-  if (s === 'COMPLETED') return 'border-toneSuccess/30 text-toneSuccess'
-  if (s === 'CANCELLED') return 'border-toneDanger/30 text-toneDanger'
-  if (s === 'ACCEPTED') return 'border-accentPrimary/30 text-textPrimary'
-  if (s === 'PENDING') return 'border-white/10 text-textPrimary'
-  return 'border-white/10 text-textSecondary'
-}
-
-function StatusPill({ status }: { status: unknown }) {
-  const s = safeUpper(status) || 'UNKNOWN'
-  return (
-    <span
-      className={[
-        'inline-flex items-center gap-1.5 rounded-full border bg-bgPrimary px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-[0.12em]',
-        statusTone(s),
-      ].join(' ')}
-    >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {s}
-    </span>
-  )
-}
 
 function ChevronLeftIcon() {
   return (
@@ -363,7 +339,9 @@ export default async function ProBookingDetailPage(props: {
           </span>
         </Link>
 
-        <StatusPill status={booking.status} />
+        <Badge tone={badgeToneForBookingStatus(booking.status)} size="sm">
+          {labelForBookingStatus(booking.status)}
+        </Badge>
       </div>
 
       {/* header card */}

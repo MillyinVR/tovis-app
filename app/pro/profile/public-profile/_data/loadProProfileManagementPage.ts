@@ -12,6 +12,7 @@ import {
 import { getBrandConfig } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/currentUser'
 import { countFollowers } from '@/lib/follows'
+import { formatCompactCount } from '@/lib/format/compactCount'
 import { isRecord } from '@/lib/guards'
 import { vanityLinkFor } from '@/lib/handles'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
@@ -582,24 +583,6 @@ function formatAverageRating(value: number | null): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
 
   return value.toFixed(1)
-}
-
-function formatCompactCount(value: number): string {
-  const count = normalizeCount(value)
-
-  if (count >= 1_000_000) {
-    return `${trimTrailingZero((count / 1_000_000).toFixed(1))}M`
-  }
-
-  if (count >= 1_000) {
-    return `${trimTrailingZero((count / 1_000).toFixed(1))}K`
-  }
-
-  return String(count)
-}
-
-function trimTrailingZero(value: string): string {
-  return value.endsWith('.0') ? value.slice(0, -2) : value
 }
 
 function normalizeCount(value: number): number {

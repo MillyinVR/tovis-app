@@ -14,8 +14,8 @@ export const dynamic = 'force-dynamic'
 type Params = { id: string }
 type Props = { params: Params | Promise<Params> }
 
-type ChipTone = 'neutral' | 'gold' | 'danger' | 'success'
-type BadgeTone = 'neutral' | 'gold'
+type AdminChipTone = 'neutral' | 'gold' | 'danger' | 'success'
+type AdminBadgeTone = 'neutral' | 'gold'
 
 function formatUsd(value: Parameters<typeof moneyToString>[0]): string {
   const money = moneyToString(value)
@@ -36,12 +36,12 @@ function Chip({
   tone = 'neutral',
 }: {
   children: ReactNode
-  tone?: ChipTone
+  tone?: AdminChipTone
 }) {
   const base =
     'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-extrabold'
 
-  const tones: Record<ChipTone, string> = {
+  const tones: Record<AdminChipTone, string> = {
     neutral: 'border-surfaceGlass/10 bg-bgPrimary/25 text-textPrimary',
     gold: 'border-accentPrimary/25 bg-accentPrimary/10 text-textPrimary',
     success:
@@ -58,12 +58,12 @@ function Badge({
   tone = 'neutral',
 }: {
   children: ReactNode
-  tone?: BadgeTone
+  tone?: AdminBadgeTone
 }) {
   const base =
     'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold'
 
-  const tones: Record<BadgeTone, string> = {
+  const tones: Record<AdminBadgeTone, string> = {
     neutral: 'border-surfaceGlass/10 bg-bgSecondary text-textPrimary',
     gold: 'border-accentPrimary/25 bg-accentPrimary/10 text-textPrimary',
   }

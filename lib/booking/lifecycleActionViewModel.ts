@@ -18,6 +18,8 @@
 
 import { BookingStatus, SessionStep } from '@prisma/client'
 
+import { isTerminalBookingStatus } from '@/lib/booking/lifecycleContract'
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type LifecycleViewerRole = 'PRO' | 'CLIENT' | 'ADMIN'
@@ -102,10 +104,9 @@ export type LifecycleViewModelInput = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const TERMINAL_STATUSES: ReadonlySet<BookingStatus> = new Set([
-  BookingStatus.COMPLETED,
-  BookingStatus.CANCELLED,
-])
+// Terminality comes from the lifecycle contract (isTerminalBookingStatus), so
+// this card can't disagree with the session pages or the write boundary about
+// what "over" means. It used to be a hand-listed set that omitted NO_SHOW.
 
 function encodePathSegment(value: string): string {
   return encodeURIComponent(value)
@@ -119,6 +120,9 @@ function displayLabelFor(
   if (status === BookingStatus.ACCEPTED) return 'Confirmed'
   if (status === BookingStatus.COMPLETED) return 'Completed'
   if (status === BookingStatus.CANCELLED) return 'Cancelled'
+  // Without this arm NO_SHOW fell through to the IN_PROGRESS switch below and
+  // a no-showed booking read "In progress" on both booking cards.
+  if (status === BookingStatus.NO_SHOW) return 'No-show'
 
   // IN_PROGRESS — surface the session step so the user knows where they are.
   switch (sessionStep) {
@@ -377,7 +381,7 @@ export function buildLifecycleActionViewModel(
 ): LifecycleViewModel {
   const status = input.status
   const sessionStep = input.sessionStep ?? SessionStep.NONE
-  const isTerminal = TERMINAL_STATUSES.has(status)
+  const isTerminal = isTerminalBookingStatus(status)
   const isInProgress = status === BookingStatus.IN_PROGRESS
 
   let actions: LifecycleAction[] = []

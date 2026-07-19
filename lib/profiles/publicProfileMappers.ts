@@ -17,12 +17,12 @@ import {
   resolveClientProfileHref,
   type ClientLinkViewer,
 } from '@/lib/profiles/profileHrefs'
+import { formatCompactCount } from '@/lib/format/compactCount'
 import {
   formatAvatarUrl,
   formatAverageRating,
   formatBio,
   formatBusinessName,
-  formatCompactCount,
   formatDateIso,
   formatDisplayHandle,
   formatDisplayTimeZone,

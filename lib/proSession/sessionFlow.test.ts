@@ -1,8 +1,8 @@
 // lib/proSession/sessionFlow.test.ts
 import { describe, expect, it } from 'vitest'
-import { SessionStep } from '@prisma/client'
+import { BookingStatus, SessionStep } from '@prisma/client'
 
-import { getSessionCenterState } from './sessionFlow'
+import { getSessionCenterState, isTerminalBooking } from './sessionFlow'
 
 const BOOKING_ID = 'booking_1'
 
@@ -213,5 +213,27 @@ describe('getSessionCenterState', () => {
       action: 'NAVIGATE',
       href: '/pro/bookings/booking_1/aftercare',
     })
+  })
+})
+describe('isTerminalBooking', () => {
+  // Regression: this used to hard-code CANCELLED|COMPLETED, so a no-showed
+  // booking was NOT terminal and its session page stayed live and workable —
+  // the pro could still run a consultation for a client who never showed up.
+  // Terminality is now derived from the lifecycle contract, which has always
+  // called NO_SHOW "Terminal, like CANCELLED".
+  it('treats every contract-terminal status as terminal, including NO_SHOW', () => {
+    expect(isTerminalBooking(BookingStatus.NO_SHOW, null)).toBe(true)
+    expect(isTerminalBooking(BookingStatus.COMPLETED, null)).toBe(true)
+    expect(isTerminalBooking(BookingStatus.CANCELLED, null)).toBe(true)
+  })
+
+  it('leaves workable statuses non-terminal', () => {
+    expect(isTerminalBooking(BookingStatus.PENDING, null)).toBe(false)
+    expect(isTerminalBooking(BookingStatus.ACCEPTED, null)).toBe(false)
+    expect(isTerminalBooking(BookingStatus.IN_PROGRESS, null)).toBe(false)
+  })
+
+  it('still treats a finishedAt stamp as terminal whatever the status', () => {
+    expect(isTerminalBooking(BookingStatus.IN_PROGRESS, new Date())).toBe(true)
   })
 })

@@ -8,7 +8,7 @@ import Link from 'next/link'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import type { CreatorLooksAnalyticsDto } from '@/lib/looks/creatorAnalytics'
-import { formatCompactCount } from '@/lib/profiles/publicProfileFormatting'
+import { formatCompactCount } from '@/lib/format/compactCount'
 
 type ProLooksInsightsProps = {
   analytics: CreatorLooksAnalyticsDto

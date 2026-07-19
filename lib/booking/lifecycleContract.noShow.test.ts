@@ -6,7 +6,53 @@
 import { describe, expect, it } from 'vitest'
 import { BookingStatus } from '@prisma/client'
 
-import { isLegalStatusTransition } from './lifecycleContract'
+import {
+  isLegalStatusTransition,
+  isTerminalBookingStatus,
+} from './lifecycleContract'
+
+describe('isTerminalBookingStatus — derived from the transition contract', () => {
+  // Pinned for EVERY status, so adding a status or an outgoing transition to
+  // the contract shows up here instead of silently changing what "terminal"
+  // means at the four call sites that consume it.
+  const CASES: ReadonlyArray<[BookingStatus, boolean]> = [
+    [BookingStatus.PENDING, false],
+    [BookingStatus.ACCEPTED, false],
+    [BookingStatus.IN_PROGRESS, false],
+    [BookingStatus.COMPLETED, true],
+    [BookingStatus.CANCELLED, true],
+    [BookingStatus.NO_SHOW, true],
+  ]
+
+  for (const [status, terminal] of CASES) {
+    it(`${status} is ${terminal ? '' : 'not '}terminal`, () => {
+      expect(isTerminalBookingStatus(status)).toBe(terminal)
+    })
+  }
+
+  it('covers every BookingStatus the schema defines', () => {
+    // Guards the list above against a new enum member being added to Prisma
+    // without anyone deciding whether it ends the lifecycle.
+    expect(new Set(CASES.map(([s]) => s))).toEqual(
+      new Set(Object.values(BookingStatus)),
+    )
+  })
+
+  it('agrees with NO_SHOW having no legal transition to another status', () => {
+    for (const to of Object.values(BookingStatus)) {
+      // NO_SHOW → NO_SHOW is deliberately legal: assertLegalStatusTransition
+      // returns early when from === to, which is what makes re-marking an
+      // already-no-showed booking an idempotent no-op rather than an error.
+      if (to === BookingStatus.NO_SHOW) continue
+
+      for (const actor of ['PRO', 'CLIENT', 'ADMIN', 'SYSTEM'] as const) {
+        expect(
+          isLegalStatusTransition(BookingStatus.NO_SHOW, to, actor),
+        ).toBe(false)
+      }
+    }
+  })
+})
 
 describe('NO_SHOW status transitions', () => {
   it('lets a pro or admin mark a confirmed booking NO_SHOW', () => {
