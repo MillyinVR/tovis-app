@@ -8,6 +8,7 @@
 import { MessageThreadContextType, Role } from '@prisma/client'
 
 import { prisma } from './prisma'
+import { clientCanBeMessaged } from './messages/clientThreadEligibility'
 
 type JsonRecord = Record<string, unknown>
 
@@ -432,13 +433,16 @@ export async function resolveMessageThread(
     return resolveFailure(404, 'Client profile missing.')
   }
 
-  const clientUserId = clientProfile.userId
-
-  if (!clientUserId) {
+  // Same predicate the pro booking detail uses to decide whether to offer a
+  // "Message client" affordance, so the button and this refusal cannot drift.
+  // It is a type predicate, so `userId` is a real string from here on.
+  if (!clientCanBeMessaged(clientProfile)) {
     return resolveFailure(409, 'Client account has not been claimed yet.', {
       code: 'CLIENT_UNCLAIMED',
     })
   }
+
+  const clientUserId = clientProfile.userId
 
   if (!professionalProfile) {
     return resolveFailure(404, 'Professional profile missing.')

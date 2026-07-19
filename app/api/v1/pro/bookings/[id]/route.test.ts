@@ -1033,6 +1033,51 @@ describe('PATCH /api/v1/pro/bookings/[id]', () => {
 describe('GET /api/v1/pro/bookings/[id] — noShowFeatureEnabled gate', () => {
   const ORIGINAL_FLAG = process.env.ENABLE_NO_SHOW_PROTECTION
 
+  function bookingRow(clientOverrides: Record<string, unknown> = {}) {
+    return {
+      id: 'booking_1',
+      status: BookingStatus.ACCEPTED,
+      scheduledFor: new Date('2026-03-17T13:00:00.000Z'),
+      locationType: ServiceLocationType.SALON,
+      bufferMinutes: 15,
+      totalDurationMinutes: 60,
+      subtotalSnapshot: '50.00',
+      clientId: 'client_1',
+      locationId: 'loc_1',
+      locationTimeZone: 'America/Los_Angeles',
+      locationAddressSnapshot: null,
+      locationLatSnapshot: null,
+      locationLngSnapshot: null,
+      clientAddressId: null,
+      sessionStep: null,
+      startedAt: null,
+      finishedAt: null,
+      totalAmount: null,
+      serviceSubtotalSnapshot: null,
+      taxAmount: null,
+      tipAmount: null,
+      discountAmount: null,
+      paymentCollectedAt: null,
+      selectedPaymentMethod: null,
+      checkoutStatus: 'NOT_READY',
+      rebookOfBookingId: null,
+      stripePaymentStatus: null,
+      stripeAmountTotal: null,
+      stripeCurrency: null,
+      aftercareSummary: null,
+      serviceItems: [],
+      client: {
+        firstName: 'Ada',
+        lastName: 'L',
+        phone: null,
+        userId: 'user_client_1',
+        user: { email: 'a@b.com' },
+        ...clientOverrides,
+      },
+      professional: { timeZone: 'America/Los_Angeles' },
+    }
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
 
@@ -1065,41 +1110,7 @@ describe('GET /api/v1/pro/bookings/[id] — noShowFeatureEnabled gate', () => {
       },
     })
 
-    mocks.bookingFindFirst.mockResolvedValue({
-      id: 'booking_1',
-      status: BookingStatus.ACCEPTED,
-      scheduledFor: new Date('2026-03-17T13:00:00.000Z'),
-      locationType: ServiceLocationType.SALON,
-      bufferMinutes: 15,
-      totalDurationMinutes: 60,
-      subtotalSnapshot: '50.00',
-      clientId: 'client_1',
-      locationId: 'loc_1',
-      locationTimeZone: 'America/Los_Angeles',
-      locationAddressSnapshot: null,
-      locationLatSnapshot: null,
-      locationLngSnapshot: null,
-      clientAddressId: null,
-      sessionStep: null,
-      startedAt: null,
-      finishedAt: null,
-      totalAmount: null,
-      serviceSubtotalSnapshot: null,
-      taxAmount: null,
-      tipAmount: null,
-      discountAmount: null,
-      paymentCollectedAt: null,
-      selectedPaymentMethod: null,
-      checkoutStatus: 'NOT_READY',
-      rebookOfBookingId: null,
-      stripePaymentStatus: null,
-      stripeAmountTotal: null,
-      stripeCurrency: null,
-      aftercareSummary: null,
-      serviceItems: [],
-      client: { firstName: 'Ada', lastName: 'L', phone: null, user: { email: 'a@b.com' } },
-      professional: { timeZone: 'America/Los_Angeles' },
-    })
+    mocks.bookingFindFirst.mockResolvedValue(bookingRow())
   })
 
   afterEach(() => {
@@ -1144,5 +1155,26 @@ describe('GET /api/v1/pro/bookings/[id] — noShowFeatureEnabled gate', () => {
     process.env.ENABLE_NO_SHOW_PROTECTION = 'maybe'
 
     expect(await getPayload()).toMatchObject({ noShowFeatureEnabled: false })
+  })
+  it('reports canMessage true for a claimed client', async () => {
+    const payload = await getPayload()
+    const client = payload.client
+    if (!isRecord(client)) throw new Error('missing client')
+    expect(client.canMessage).toBe(true)
+  })
+
+  it('reports canMessage false for an UNCLAIMED client', async () => {
+    // A pro-created / CSV-imported profile has no user account until the client
+    // claims it, and POST /messages/resolve answers 409 CLIENT_UNCLAIMED for it.
+    // Without this field iOS offered a "Message client" button that failed
+    // silently, because the thrown error was swallowed.
+    mocks.bookingFindFirst.mockResolvedValue(bookingRow({ userId: null }))
+
+    const payload = await getPayload()
+    const client = payload.client
+    if (!isRecord(client)) throw new Error('missing client')
+    expect(client.canMessage).toBe(false)
+    // The raw id must never reach the wire — presence is all the client needs.
+    expect(client.userId).toBeUndefined()
   })
 })
