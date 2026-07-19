@@ -24,9 +24,14 @@ export function pickRecipientTierPlan<P extends { tier: LastMinuteTier }>(args: 
 }
 
 /**
- * The plan a public/discovery viewer (no recipient row) would see. Mirrors app/api/v1/openings:
+ * The plan a public/discovery viewer (no recipient row) would see:
  * DISCOVERY tier for PUBLIC_AT_DISCOVERY; for PUBLIC_IMMEDIATE the latest plan already started
  * by `now` (else the first). Returns null for TARGETED_ONLY (no public incentive).
+ *
+ * This rule used to be described as "mirrors app/api/v1/openings", which no longer exists — the
+ * public openings route was a duplicate of `/api/v1/client/openings` and was removed. This
+ * function is now the single source of the rule; `loadOfferingDetail` and `writeBoundary` are its
+ * callers.
  */
 export function pickPublicTierPlan<P extends { tier: LastMinuteTier; scheduledFor: Date }>(
   args: {

@@ -177,6 +177,7 @@ Source (now superseded): `audits/premortem-2026-06-24-remediation-plan.md`, `aud
 - [ ] Fold `nearbyPros` onto the search-index GIST path (`performance/ticket-consolidate-nearby-onto-search-index.md`) — still on the `take:800` bounding-box impl; closes the duplicate geo impl + the missing `(isPrimary,isBookable,lat,lng)` index.
 - [ ] Gate 2 real baseline: the CI gate (`perf-availability.yml`) exists but `performance/baselines/availability-gate2-baseline.json` is still a template — run an approved clean-`main` perf run and record it.
 - [ ] Enable `exactOptionalPropertyTypes` and burn down the ~283 errors module-by-module (`architecture/canonical-modules.md`).
+- [ ] **Wire the "other pros" rail to its own endpoint — Tori 2026-07-19: "something that got lost along the way, but I do want to implement it."** `GET /api/v1/availability/other-pros` exists, is tested, has a DTO (`AvailabilityOtherProsOk`) and shares the live `loadOtherProsNearbyCached` loader — but **nothing fetches it**, so a consumer scan reads it as an orphan. It is not dead weight: it is the **unwired server half** of a feature whose client half already exists. `useAvailability.ts`'s `loadOtherProsOnly()` (`refreshKind: 'other-pros-only'`) refreshes that one rail by **refetching the entire bootstrap window** with `includeOtherPros: true`. Point it at the dedicated route instead — same cached loader, 120s cache keyed on `scheduleConfigVersion`, and it stops paying for a full-window availability recompute to update a side rail. ⚠️ **Do NOT delete this route in an orphan sweep** (explicitly kept out of the round-3 step-16 cleanup for this reason).
 
 ## 6. Duplicate-logic consolidation (Tier D high-value)
 Source (superseded, was stale at #138): `refactors/duplicate-logic-consolidation-handoff.md`. Reconcile against what actually landed through ~#156 before acting.
@@ -199,6 +200,52 @@ Source (superseded, was stale at #138): `refactors/duplicate-logic-consolidation
 - [ ] Passive double-book warning — new-booking form follow-up (conflict-detection audit finding #1, "passive warning only"; calendar tiles + reschedule-confirm note shipped web #584 / iOS #104). Surface the same "overlaps {client}" heads-up when a pro places a **brand-new** booking (`/pro/bookings/new` web · `ProNewBookingView` iOS) on a time that collides — deferred because that form doesn't load the pro's existing bookings for the day, so it needs an availability/bookings fetch first. Reuse `lib/calendar/overlap.overlappingEventIds` (web) / `ProCalendarGrid.overlappingIntervalIds` (iOS). Non-blocking; the server still allows the overlap.
 - [ ] Client media capture/upload OUTSIDE before/after flows — scope the product first (audit 2026-07-07): today clients can only upload review media (`ReviewSection.tsx`) and the share-look BEFORE/AFTER sheet (`ShareLookSheet.tsx`); pros already have the standalone `/pro/media/new` portfolio/Looks uploader. Related gaps found: no surface uses `capture=` (no dedicated in-app camera anywhere, pro or client); `app/api/v1/viral-service-requests/upload` is client-callable but has NO UI wiring; upload kinds `DM_PRIVATE`/`AFTERCARE_PRIVATE` are declared in the pro signing route but unwired (messages UI has no composer/file input, aftercare form has no upload).
 - [ ] Orphan-media cleanup job + a media scan/moderation decision.
+
+### Orphan-route review follow-ups (round-3 step 16, 2026-07-19)
+The "~12 orphan routes" audit finding was re-verified route by route against `app/` + `lib/` +
+`scripts/` **and** every blob in `tovis-ios` history (4,733 objects / 495 commits — exhaustive for
+reachable history). Only **three** were true duplicates and were deleted (`/me/following`,
+`/search/looks`, public `/openings`). The rest are **not dead weight** — they are unwired features
+or carry deployed-caller risk. Tori's calls, 2026-07-19:
+- [ ] **Look-level report UI, both platforms — Tori: BUILD.** `POST /api/v1/looks/{id}/report`
+  exists and works but has UI on neither platform (open since round-3 step 4). ⚠️ Read step 4's
+  contract note first: the handler's param is literally `_req`, so it **reads no body** — an
+  invalid reason returns 200 and stores `OTHER`. The indexed `ModerationReportReason` enum is
+  unreachable until the route accepts one, so a reason picker needs a paired web change *first*.
+  Comment-level reporting (iOS #170) is the working precedent to mirror.
+- [ ] **In-board remove/reorder UI, both platforms — Tori: BUILD.** `POST /boards/{id}/items` +
+  `DELETE …/items/{lookId}` exist with no UI anywhere; both platforms add/remove via
+  `/looks/{id}/save` instead. Needs a board manage/edit mode. Decide whether reorder needs a
+  position column before building (the routes cover add/remove only).
+- [ ] **Wire `GET /api/v1/offerings/{id}` into the iOS priority-offer claim.** Built in #389 as a
+  native twin of the offering detail page (shares `loadOfferingDetail`, so the displayed price
+  cannot drift from what is charged) and **never called**. iOS's own comment at
+  `PriorityOffersView.swift:311` describes web's flow as "accept → route to
+  `/offerings/{id}?scheduledFor=…`" and falls back to the pro's profile when it can't resolve the
+  offering — this route returns exactly the price/place/duration/claimable payload that fallback
+  exists for. Pairs with round-3 step 11's note that `PriorityOffersView` needs those fields.
+- [ ] **A pro's followers LIST has no screen on either platform.** `GET /pros/{id}/followers`
+  (pro-auth, own id only) is complete and unused; pros currently see a follower **count** only.
+  Either build "your followers" or delete the route.
+- [ ] **`GET /client/saved-services/providers` has no UI.** Given service ids the client cares
+  about, it returns nearby pros with last-minute openings for those services, grouped by service,
+  soonest-then-nearest, 30s cached. `/client/openings` is the general feed; this is the
+  service-targeted one. Note there is **no `SavedService` model** — the caller passes ids, so a UI
+  needs to decide where "saved services" is stored first. Drive-by finding while verifying it:
+  that route declares its **own local `pickPublicTierPlan`** (`route.ts:202`) duplicating the
+  shared `lib/lastMinute/pickTierPlan.ts`. Diffed at review time — **behaviourally identical**, no
+  divergence, so it is a consolidation target rather than a bug; fold it in whenever this route
+  next gets touched.
+- [ ] **Delete `GET /api/v1/search` once TestFlight build 1 is retired.** Deliberately KEPT in the
+  step-16 cleanup: iOS called it from 2026-06-27 (`9a1a0e2`) until 2026-07-16 (`611cd7c`, iOS
+  #153), and build 1 was cut before the 2026-07-17 build bump, so it may still be in circulation.
+  It is a thin `tab=PROS|SERVICES` multiplexer over `searchPros`/`searchServices`; both halves are
+  live via `/search/pros` and `/search/services`, so nothing is lost by deleting it later.
+- [ ] **Still-unreviewed orphan candidates** (out of step 16's scope, evidence gathered): the
+  `/auth/resend-phone-code` + `/auth/verify-phone-code` pair (duplicates the live
+  `/auth/phone/send|verify` that both platforms use; zero callers anywhere, ever) and
+  `POST /viral-service-requests/upload` (zero consumers — web's viral form posts `{name, sourceUrl}`
+  and uploads nothing).
 - [ ] **The Activity feed is hard-capped at 30 events with NO pagination — on BOTH platforms** (found while shipping parity step 13, web #658 / iOS #157). `listClientActivity` (`lib/notifications/activityFeed.ts`) has **no cursor at all**: `take` defaults to 30, `MAX_TAKE` is 50, and `loadClientActivityPage` passes no `take`. So once a creator has 31+ engagement events, **the 31st is permanently unreachable** — there is no "load more" on web and none native. Pre-existing on web; iOS matched it deliberately for parity (adding `?take=` to the twin would have meant widening or bypassing the shared loader, which is the drift the twin exists to prevent). Fix is a proper slice, not a drive-by: add a cursor to `listClientActivity` → thread it through `loadClientActivityPage` (keeping the RSC page's arg-free call working) → expose it on `GET /api/v1/client/activity` (`ClientActivityFeedDTO` gains `nextCursor`; the repo's `FeedPage {items, nextCursor}` shape is the precedent) → then infinite scroll on web's `ClientActivityFrame` **and** iOS's `ClientActivityView` (which can copy `NotificationsView`'s existing last-item `.onAppear` loadMore). ⚠️ Note the unread badge/`markReadEventKeys` must stay whole-feed, not page-scoped.
 - [ ] `/support` has no success or error state (found while shipping the native support route, #646). `app/support/page.tsx` takes no `searchParams`, so the server action's `redirect('/support?sent=1')` and `?error=…` render **nothing** — a web user submits and sees the unchanged form, with no confirmation and no error. Has always been true; the native form (iOS #146) shows a proper banner, so web is now the weaker half. Small fix: accept `searchParams` and render a banner off `sent`/`error` (the action already emits stable codes: `missing_fields` / `subject_too_long` / `message_too_long`). Drive-by while there: the disclaimer copy in `supportForm.tsx` ends in a stray `)`.
 - [ ] Token hardening: drop legacy `AftercareSummary.publicToken`; migrate `ProClientInvite.token` to hashed storage; confirm NFC card IDs non-enumerable + short-code entropy/rate-limit + duplicate-tap idempotency.
