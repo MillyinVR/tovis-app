@@ -137,7 +137,17 @@ export type CreateMessageResponseDTO = {
 
 // POST /api/v1/messages/resolve
 export type ResolveThreadResponseDTO = {
-  thread: { id: string } | null
+  /**
+   * The resolved (or just-created) thread, as the same row the inbox list
+   * returns — null when nothing resolved and `createIfMissing` was false.
+   *
+   * The full row is carried, not just the id, so a caller can open the thread
+   * from one round trip. A brand-new thread has no messages and the inbox
+   * deliberately hides message-less threads, so "resolve, then find it in the
+   * list" could never work for the FIRST message to a client. Additive: earlier
+   * clients that read only `thread.id` are unaffected.
+   */
+  thread: MessageThreadListItemDTO | null
 }
 
 // GET /api/v1/messages/unread-count — `badge` omitted when count <= 0.

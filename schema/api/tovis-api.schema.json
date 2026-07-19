@@ -12075,20 +12075,13 @@
         "thread": {
           "anyOf": [
             {
-              "properties": {
-                "id": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id"
-              ],
-              "type": "object"
+              "$ref": "#/definitions/MessageThreadListItemDTO"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "The resolved (or just-created) thread, as the same row the inbox list returns — null when nothing resolved and `createIfMissing` was false.\n\nThe full row is carried, not just the id, so a caller can open the thread from one round trip. A brand-new thread has no messages and the inbox deliberately hides message-less threads, so \"resolve, then find it in the list\" could never work for the FIRST message to a client. Additive: earlier clients that read only `thread.id` are unaffected."
         }
       },
       "required": [

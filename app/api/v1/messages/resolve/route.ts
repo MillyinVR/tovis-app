@@ -3,6 +3,7 @@ import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, upper } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { resolveMessageThread } from '@/lib/messagesResolve'
+import { loadInboxThreadRow } from '@/lib/messages/threadRow'
 import { MessageThreadContextType } from '@prisma/client'
 import type { ResolveThreadResponseDTO } from '@/lib/dto/messaging'
 
@@ -95,9 +96,27 @@ export async function POST(req: Request) {
       return jsonOk({ thread: null } satisfies ResolveThreadResponseDTO)
     }
 
-    return jsonOk({
-      thread: { id: outcome.thread.id },
-    } satisfies ResolveThreadResponseDTO)
+    // Return the whole row, not just the id, so the caller can open the thread
+    // without a second lookup. That second lookup used to be "find it in the
+    // inbox list", which silently failed for every NEW thread: the inbox hides
+    // message-less threads, so the first message to a client never opened.
+    const thread = await loadInboxThreadRow({
+      threadId: outcome.thread.id,
+      viewerUserId: user.id,
+    })
+
+    if (!thread) {
+      // The row was upserted moments ago and nothing in the app deletes
+      // threads, so this is an invariant violation rather than a race worth
+      // papering over — reporting "no thread resolved" would hide it.
+      console.error('POST /api/v1/messages/resolve: resolved thread vanished', {
+        debugId,
+        threadId: outcome.thread.id,
+      })
+      return jsonFail(500, 'Thread could not be loaded.')
+    }
+
+    return jsonOk({ thread } satisfies ResolveThreadResponseDTO)
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal error'
 
