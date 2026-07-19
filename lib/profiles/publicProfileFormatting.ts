@@ -2,13 +2,12 @@
 // lib/profiles/publicProfileFormatting.ts
 import type { ProfessionType, ProNameDisplay } from '@prisma/client'
 
+// Compact counts live in lib/format/compactCount — the single source of truth
+// shared with the looks rail, the comments drawer and the pro-profile manager.
+// Imported (not re-exported) so there is exactly one path to it.
 import { formatCompactCount } from '@/lib/format/compactCount'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
-
-// Re-exported so the many existing profile-side importers keep working; the
-// rule itself lives in lib/format/compactCount.
-export { formatCompactCount }
 
 export type PublicProfileTab = 'portfolio' | 'services' | 'reviews'
 
