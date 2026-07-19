@@ -4690,6 +4690,70 @@
             "professionalId": {
               "type": "string"
             },
+            "publicIncentive": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "amountOff": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "freeAddOnService": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "offerType": {
+                      "type": "string"
+                    },
+                    "percentOff": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "tier",
+                    "offerType",
+                    "label",
+                    "percentOff",
+                    "amountOff",
+                    "freeAddOnService"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The incentive THIS client was matched on, already reduced to display copy (\"20% off\", \"$40 off\", \"Free service\") — the same block the openings feed sends, built by the same `pickRecipientTierPlan` + `mapPublicIncentiveDto` helpers so the two surfaces cannot word the same offer differently.\n\nThe raw `tierPlans` above are every tier's plan and say nothing about which one applies to this recipient; picking one client-side would mean re-implementing the tier resolution AND the label. Null when the matched plan carries no incentive."
+            },
             "publicVisibleFrom": {
               "type": [
                 "string",
@@ -4913,7 +4977,8 @@
             "professional",
             "location",
             "services",
-            "tierPlans"
+            "tierPlans",
+            "publicIncentive"
           ],
           "type": "object"
         },
