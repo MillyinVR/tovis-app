@@ -15,6 +15,12 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import {
+  checkSlotReadiness,
+  mapSlotReadinessToBookingError,
+} from '@/lib/booking/slotReadiness'
+import { resolveBookingLocationContext } from '@/lib/booking/locationContext'
+import { getBookingErrorDescriptor } from '@/lib/booking/errors'
+import {
   isValidIanaTimeZone,
   utcFromDayAndMinutesInTimeZone,
   weekdayInTimeZone,
@@ -924,6 +930,60 @@ async function createInsideTransaction(args: {
     const duration = resolveModeDurationMinutes(offering, locationType)
     return Math.max(max, duration)
   }, 15)
+
+  // An opening is a PROMISE that a client can claim this exact instant, and the
+  // claim runs `checkSlotReadiness` inside the hold (via `evaluateHoldCreationDecision`).
+  // Until this check existed the route accepted ANY valid ISO instant, so a pro could
+  // publish an opening at, say, 8:07pm on a day the salon closes at 5 — it showed up in
+  // the feed and every claim failed 400 OUTSIDE_WORKING_HOURS with nothing the client
+  // could do about it. Refuse it here instead, against the SAME helper the hold uses so
+  // the two can't drift.
+  //
+  // The longest offering's duration is the conservative choice: an opening carries
+  // several offerings and the client picks one, so the window has to fit the worst case.
+  const policyContext = await resolveBookingLocationContext({
+    tx: database,
+    professionalId,
+    locationType,
+    preloadedLocation: location,
+    professionalTimeZone: openingTimeZone,
+  })
+
+  assert(
+    policyContext.ok,
+    409,
+    'BOOKABLE_LOCATION_REQUIRED',
+    'No bookable location found for this opening.',
+  )
+
+  const readiness = checkSlotReadiness({
+    startUtc: startAt,
+    nowUtc: now,
+    durationMinutes: longestDurationMinutes,
+    bufferMinutes: policyContext.context.bufferMinutes,
+    workingHours: policyContext.context.workingHours,
+    timeZone: policyContext.context.timeZone,
+    stepMinutes: policyContext.context.stepMinutes,
+    advanceNoticeMinutes: policyContext.context.advanceNoticeMinutes,
+    maxDaysAhead: policyContext.context.maxDaysAhead,
+    fallbackTimeZone: 'UTC',
+  })
+
+  if (!readiness.ok) {
+    const mapped = mapSlotReadinessToBookingError({
+      code: readiness.code,
+      stepMinutes: readiness.stepMinutes,
+      workingHoursError: readiness.meta?.workingHoursError,
+    })
+    const descriptor = getBookingErrorDescriptor(mapped.code, {
+      message: mapped.message,
+      userMessage: mapped.userMessage,
+    })
+
+    // Always a 400 here even where the hold answers 409: at CREATE time nobody is
+    // racing us, the instant the pro typed is simply not one this location can serve.
+    assert(false, 400, `OPENING_${descriptor.code}`, descriptor.userMessage)
+  }
 
   const minimumEndAt = addMinutes(startAt, longestDurationMinutes)
   const finalEndAt = endAt ?? minimumEndAt

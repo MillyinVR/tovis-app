@@ -3,6 +3,7 @@ import { addMinutes } from '@/lib/booking/conflicts'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import {
   checkSlotReadiness,
+  mapSlotReadinessToBookingError,
   type SlotReadinessCode,
 } from '@/lib/booking/slotReadiness'
 import { type BookingErrorCode } from '@/lib/booking/errors'
@@ -86,18 +87,6 @@ function decisionOk(value: HoldCreationDecision): HoldCreationDecisionResult {
   }
 }
 
-function getReadableWorkingHoursMessage(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    return 'That time is outside working hours.'
-  }
-
-  if (value.startsWith(WORKING_HOURS_ERROR_PREFIX)) {
-    return 'That time is outside working hours.'
-  }
-
-  return value
-}
-
 function getSlotReadinessConflictType(
   code: SlotReadinessCode,
 ): HoldPolicyConflictType {
@@ -132,87 +121,43 @@ function mapSlotReadinessFailure(args: {
     },
   }
 
-  switch (args.code) {
-    case 'STEP_MISMATCH':
-      return decisionFail('STEP_MISMATCH', {
-        message: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
-        userMessage: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
-        logHint,
-      })
+  // The code + copy come from the SHARED mapping, so the refusal a client sees
+  // when holding an off-policy time is the same one the pro sees when creating an
+  // opening at that time. Only the log hint's working-hours breadcrumb is
+  // hold-specific.
+  const mapped = mapSlotReadinessToBookingError({
+    code: args.code,
+    stepMinutes: args.stepMinutes,
+    workingHoursError: args.workingHoursError,
+  })
 
-    case 'ADVANCE_NOTICE_REQUIRED':
-      return decisionFail('ADVANCE_NOTICE_REQUIRED', {
-        logHint,
-      })
+  const workingHoursBreadcrumb = WORKING_HOURS_LOG_CODES.has(args.code)
+    ? {
+        workingHoursError:
+          args.code === 'OUTSIDE_WORKING_HOURS'
+            ? args.workingHoursError ??
+              `${WORKING_HOURS_ERROR_PREFIX}OUTSIDE_WORKING_HOURS`
+            : `${WORKING_HOURS_ERROR_PREFIX}${args.code}`,
+      }
+    : null
 
-    case 'MAX_DAYS_AHEAD_EXCEEDED':
-      return decisionFail('MAX_DAYS_AHEAD_EXCEEDED', {
-        logHint,
-      })
-
-    case 'WORKING_HOURS_REQUIRED':
-      return decisionFail('WORKING_HOURS_REQUIRED', {
-        logHint: {
+  return decisionFail(mapped.code, {
+    message: mapped.message,
+    userMessage: mapped.userMessage,
+    logHint: workingHoursBreadcrumb
+      ? {
           ...logHint,
-          meta: {
-            ...(logHint.meta ?? {}),
-            workingHoursError: `${WORKING_HOURS_ERROR_PREFIX}WORKING_HOURS_REQUIRED`,
-          },
-        },
-      })
-
-    case 'WORKING_HOURS_INVALID':
-      return decisionFail('WORKING_HOURS_INVALID', {
-        logHint: {
-          ...logHint,
-          meta: {
-            ...(logHint.meta ?? {}),
-            workingHoursError: `${WORKING_HOURS_ERROR_PREFIX}WORKING_HOURS_INVALID`,
-          },
-        },
-      })
-
-    case 'OUTSIDE_WORKING_HOURS': {
-      const message = getReadableWorkingHoursMessage(args.workingHoursError)
-
-      return decisionFail('OUTSIDE_WORKING_HOURS', {
-        message,
-        userMessage: message,
-        logHint: {
-          ...logHint,
-          meta: {
-            ...(logHint.meta ?? {}),
-            workingHoursError:
-              args.workingHoursError ??
-              `${WORKING_HOURS_ERROR_PREFIX}OUTSIDE_WORKING_HOURS`,
-          },
-        },
-      })
-    }
-
-    case 'INVALID_START':
-      return decisionFail('INVALID_SCHEDULED_FOR', {
-        logHint,
-      })
-
-    case 'INVALID_DURATION':
-      return decisionFail('DURATION_REQUIRED', {
-        logHint,
-      })
-
-    case 'INVALID_BUFFER':
-      return decisionFail('INTERNAL_ERROR', {
-        message: 'Invalid buffer minutes.',
-        userMessage: 'That time is not available.',
-        logHint,
-      })
-
-    case 'INVALID_RANGE':
-      return decisionFail('INVALID_SCHEDULED_FOR', {
-        logHint,
-      })
-  }
+          meta: { ...(logHint.meta ?? {}), ...workingHoursBreadcrumb },
+        }
+      : logHint,
+  })
 }
+
+const WORKING_HOURS_LOG_CODES = new Set<SlotReadinessCode>([
+  'WORKING_HOURS_REQUIRED',
+  'WORKING_HOURS_INVALID',
+  'OUTSIDE_WORKING_HOURS',
+])
 
 export async function evaluateHoldCreationDecision(
   args: EvaluateHoldCreationDecisionArgs,

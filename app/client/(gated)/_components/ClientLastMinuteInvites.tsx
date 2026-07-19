@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { initialsForName } from '@/lib/initials'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { formatInTimeZone } from '@/lib/time'
+import { incentiveLabel } from '@/lib/lastMinute/openingDto'
+import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
 
 import type { ClientHomeLastMinuteInvite } from '../_data/getClientHomeData'
 import { firstWord, gradientAvatar, money, professionalName } from './homeVisuals'
@@ -18,14 +20,18 @@ function inviteTitle(invite: ClientHomeLastMinuteInvite): string {
   return `${firstServiceName} + ${serviceNames.length - 1} more`
 }
 
+/**
+ * A STARTING price — the fields say so themselves and the pro re-quotes at the
+ * consultation — so it reads "From $180", never a bare figure.
+ */
 function invitePrice(invite: ClientHomeLastMinuteInvite): string | null {
   const firstService = invite.opening.services[0]
   if (!firstService) return null
-  return (
+  const amount =
     money(firstService.offering.salonPriceStartingAt) ??
     money(firstService.offering.mobilePriceStartingAt) ??
     money(firstService.service.minPrice)
-  )
+  return amount ? `From ${amount}` : null
 }
 
 function inviteHref(invite: ClientHomeLastMinuteInvite): string | null {
@@ -87,6 +93,16 @@ function InviteRow({
   const title = inviteTitle(invite)
   const price = invitePrice(invite)
   const place = invite.opening.professional.location?.trim() || null
+  // This RSC gets the DOMAIN row, not the serialized DTO, so it resolves the
+  // matched tier the same way the serializer does — through the SAME two shared
+  // helpers, never a re-derivation, so home / feed / claim page cannot word one
+  // offer three ways.
+  const matchedPlan = pickRecipientTierPlan({
+    notifiedTier: invite.notifiedTier,
+    firstMatchedTier: invite.firstMatchedTier,
+    tierPlans: invite.opening.tierPlans,
+  })
+  const incentive = matchedPlan ? incentiveLabel(matchedPlan) : null
 
   const meta = [place, price].filter(Boolean).join(' · ')
 
@@ -119,8 +135,21 @@ function InviteRow({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-display text-[13.5px] font-semibold text-textPrimary">
-          {proFirst} · {title}
+        <div className="flex items-center gap-2">
+          <span className="truncate font-display text-[13.5px] font-semibold text-textPrimary">
+            {proFirst} · {title}
+          </span>
+          {/*
+            The offer sits right beside the service, bigger and bolder than the
+            line it's on — this card is the FIRST place a client sees a
+            last-minute opening, and the incentive (not the not-yet-final
+            starting price) is what makes it worth acting on.
+          */}
+          {incentive ? (
+            <span className="shrink-0 rounded-[8px] bg-accentPrimary px-2 py-0.5 font-display text-[14px] font-bold uppercase leading-tight text-onAccent">
+              {incentive}
+            </span>
+          ) : null}
         </div>
         <div className="mt-0.5 truncate text-[11.5px] text-textMuted">
           {time} {day}

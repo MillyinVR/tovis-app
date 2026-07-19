@@ -7,6 +7,8 @@
 import type { Prisma } from '@prisma/client'
 
 import { moneyToString } from '@/lib/money'
+import { mapPublicIncentiveDto } from '@/lib/lastMinute/openingDto'
+import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { BookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 import type {
@@ -226,6 +228,25 @@ export type ClientHomeLastMinuteInviteDTO = {
       freeAddOnServiceId: string | null
       freeAddOnService: { id: string; name: string } | null
     }[]
+    /**
+     * The incentive THIS client was matched on, already reduced to display copy
+     * ("20% off", "$40 off", "Free service") — the same block the openings feed
+     * sends, built by the same `pickRecipientTierPlan` + `mapPublicIncentiveDto`
+     * helpers so the two surfaces cannot word the same offer differently.
+     *
+     * The raw `tierPlans` above are every tier's plan and say nothing about which
+     * one applies to this recipient; picking one client-side would mean
+     * re-implementing the tier resolution AND the label. Null when the matched
+     * plan carries no incentive.
+     */
+    publicIncentive: {
+      tier: string
+      offerType: string
+      label: string
+      percentOff: number | null
+      amountOff: string | null
+      freeAddOnService: { id: string; name: string } | null
+    } | null
   }
 }
 
@@ -517,6 +538,15 @@ function serializeInvite(
             }
           : null,
       })),
+      // Resolved with the SAME helpers the openings feed uses, so an offer reads
+      // identically on the home card and on the claim page.
+      publicIncentive: mapPublicIncentiveDto(
+        pickRecipientTierPlan({
+          notifiedTier: invite.notifiedTier,
+          firstMatchedTier: invite.firstMatchedTier,
+          tierPlans: opening.tierPlans,
+        }),
+      ),
     },
   }
 }
