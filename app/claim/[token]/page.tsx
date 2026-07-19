@@ -459,7 +459,7 @@ export default async function ClaimInvitePage(props: PageProps) {
         {pageState === 'claim-paused' ? (
           <StatusCard
             title="Claiming is paused right now"
-            body="We have paused claiming for a moment while we sort something out on our end. Nothing changed on your account and nothing was lost — this history is still here, and your professional still has it. Try again shortly."
+            body="We’ve paused claiming for a moment while we sort something out on our end. Nothing changed on your account and nothing was lost — this history is still here, and your professional still has it. Try again shortly."
             tone="warning"
           >
             <form action={claimAction}>
