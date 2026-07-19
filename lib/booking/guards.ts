@@ -6,17 +6,12 @@ export function upper(v: unknown): string {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
-export function isTerminalStatus(status: unknown): boolean {
-  const s = upper(status)
-  return s === 'CANCELLED' || s === 'COMPLETED'
-}
-
-export function ensureNotTerminal(booking: { status: unknown; finishedAt?: Date | null }) {
-  if (isTerminalStatus(booking.status) || booking.finishedAt) {
-    return { ok: false as const, error: 'Booking is completed/cancelled.' }
-  }
-  return { ok: true as const }
-}
+// `isTerminalStatus` / `ensureNotTerminal` used to live here. Both had ZERO
+// callers and both hard-coded CANCELLED|COMPLETED, so they silently disagreed
+// with the lifecycle contract about NO_SHOW. Deleted rather than fixed: a dead
+// helper encoding a wrong rule is a trap for whoever wires it up next. Use
+// `isTerminalBookingStatus` from '@/lib/booking/lifecycleContract', which
+// derives the answer from the transition map.
 
 export function ensurePendingToAccepted(status: unknown) {
   const s = upper(status)

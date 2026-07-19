@@ -9,6 +9,7 @@ import {
   SessionStep,
 } from '@prisma/client'
 
+import { isTerminalBookingStatus } from '@/lib/booking/lifecycleContract'
 import type {
   StepKey,
   UiSessionCenterAction,
@@ -158,11 +159,11 @@ export function isTerminalBooking(
   status: BookingStatus,
   finishedAt: Date | null | undefined,
 ): boolean {
-  return (
-    status === BookingStatus.CANCELLED ||
-    status === BookingStatus.COMPLETED ||
-    Boolean(finishedAt)
-  )
+  // Terminality is DERIVED from the lifecycle contract, not re-listed here —
+  // this copy omitted NO_SHOW, so a no-showed booking still opened a live,
+  // workable session (consultation actions and all) while COMPLETED correctly
+  // collapsed to read-only.
+  return isTerminalBookingStatus(status) || Boolean(finishedAt)
 }
 
 export function isConsultationApproved(

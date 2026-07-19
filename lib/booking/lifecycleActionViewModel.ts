@@ -18,6 +18,8 @@
 
 import { BookingStatus, SessionStep } from '@prisma/client'
 
+import { isTerminalBookingStatus } from '@/lib/booking/lifecycleContract'
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type LifecycleViewerRole = 'PRO' | 'CLIENT' | 'ADMIN'
@@ -102,14 +104,9 @@ export type LifecycleViewModelInput = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// A no-show is as final as a cancellation: neither role has an action left on
-// it (proActions/clientActions both fall through to an empty list), so the card
-// must render the read-only "Status: …" branch rather than an action row.
-const TERMINAL_STATUSES: ReadonlySet<BookingStatus> = new Set([
-  BookingStatus.COMPLETED,
-  BookingStatus.CANCELLED,
-  BookingStatus.NO_SHOW,
-])
+// Terminality comes from the lifecycle contract (isTerminalBookingStatus), so
+// this card can't disagree with the session pages or the write boundary about
+// what "over" means. It used to be a hand-listed set that omitted NO_SHOW.
 
 function encodePathSegment(value: string): string {
   return encodeURIComponent(value)
@@ -384,7 +381,7 @@ export function buildLifecycleActionViewModel(
 ): LifecycleViewModel {
   const status = input.status
   const sessionStep = input.sessionStep ?? SessionStep.NONE
-  const isTerminal = TERMINAL_STATUSES.has(status)
+  const isTerminal = isTerminalBookingStatus(status)
   const isInProgress = status === BookingStatus.IN_PROGRESS
 
   let actions: LifecycleAction[] = []

@@ -182,6 +182,7 @@ import {
   createConsultationApprovalProof,
 } from '@/lib/consultation/consultationConfirmationProof'
 import {
+  isTerminalBookingStatus,
   recordStatusTransition,
   recordStepTransition,
 } from '@/lib/booking/lifecycleContract'
@@ -2825,11 +2826,10 @@ function isTerminalSessionBooking(
   status: BookingStatus,
   finishedAt: Date | null,
 ): boolean {
-  return (
-    status === BookingStatus.CANCELLED ||
-    status === BookingStatus.COMPLETED ||
-    Boolean(finishedAt)
-  )
+  // Derived from the lifecycle contract — see isTerminalBookingStatus. This
+  // copy omitted NO_SHOW, so session steps could still be advanced on a booking
+  // the pro had already marked as a no-show.
+  return isTerminalBookingStatus(status) || Boolean(finishedAt)
 }
 
 function requiresApprovedConsultForStep(step: SessionStep): boolean {
@@ -6635,7 +6635,9 @@ async function performLockedTransitionSessionStep(args: {
     return {
       ok: false,
       status: 409,
-      error: 'Booking is completed/cancelled.',
+      // NO_SHOW is terminal too, so the old "completed/cancelled" copy named the
+      // wrong reason for it.
+      error: 'This booking is closed and can no longer be worked on.',
       meta: buildMeta(false),
     }
   }

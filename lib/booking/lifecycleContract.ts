@@ -264,6 +264,23 @@ export function isLegalStatusTransition(
   }
 }
 
+/**
+ * True when a booking status has no legal transition out of it — i.e. the
+ * lifecycle is over. DERIVED from BOOKING_STATUS_TRANSITIONS rather than
+ * re-listed, because hand-maintained terminal lists drift: COMPLETED and
+ * CANCELLED were listed in four separate places and NO_SHOW was missing from
+ * three of them, which let a no-showed booking open a live, workable session
+ * and made the pro booking card read "Status: In progress".
+ *
+ * Today that resolves to COMPLETED, CANCELLED and NO_SHOW — the contract's own
+ * comment already calls NO_SHOW "Terminal, like CANCELLED".
+ */
+export function isTerminalBookingStatus(status: BookingStatus): boolean {
+  const outgoing = BOOKING_STATUS_TRANSITIONS.get(status)
+
+  return outgoing === undefined || outgoing.size === 0
+}
+
 // ─── Drift telemetry ──────────────────────────────────────────────────────────
 
 /**
