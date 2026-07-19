@@ -91,10 +91,6 @@ function buildParticipants(
   clientUserId: string,
   professionalUserId: string,
 ): ParticipantSeed[] {
-  if (clientUserId === professionalUserId) {
-    return [{ userId: clientUserId, role: Role.CLIENT }]
-  }
-
   return [
     { userId: clientUserId, role: Role.CLIENT },
     { userId: professionalUserId, role: Role.PRO },
@@ -269,7 +265,24 @@ async function resolveProProfileThreadSeed(
     return resolveFailure(403, 'Unauthorized.')
   }
 
-  if (viewerIds.clientId) {
+  // A single user account can hold BOTH profiles — "Switch to client" is a
+  // first-class feature — so the branch cannot be chosen by asking which
+  // profiles the viewer HAS. It has to ask which profile OWNS this context.
+  // Testing `viewerIds.clientId` first seeded the thread with the viewer's own
+  // client profile and left the pro branch below unreachable, so a pro tapping
+  // "Message" on a client opened a thread with themselves and the client never
+  // saw it.
+  const viewerProfessionalId = viewerIds.professionalId
+  const viewerOwnsContext =
+    viewerProfessionalId !== null && viewerProfessionalId === contextId
+
+  if (!viewerOwnsContext) {
+    // Not the viewer's own profile, so they are acting as a client here —
+    // including a pro messaging a DIFFERENT pro.
+    if (!viewerIds.clientId) {
+      return resolveFailure(403, 'Forbidden.')
+    }
+
     const professional = await prisma.professionalProfile.findUnique({
       where: { id: contextId },
       select: { id: true },
@@ -290,17 +303,12 @@ async function resolveProProfileThreadSeed(
     }
   }
 
-  if (viewerIds.professionalId !== contextId) {
-    return resolveFailure(403, 'Forbidden.')
-  }
-
   const clientId = presentString(input.clientId)
 
   if (!clientId) {
-    return resolveFailure(
-      400,
-      'Missing clientId for PRO_PROFILE when opened by pro.',
-    )
+    // Reachable from the pro's own public profile, where the Message CTA
+    // renders for any signed-in viewer — so this copy is user-facing.
+    return resolveFailure(400, 'Choose a client to message.')
   }
 
   const client = await prisma.clientProfile.findUnique({
@@ -316,7 +324,7 @@ async function resolveProProfileThreadSeed(
     ok: true,
     seed: makeSeed({
       clientId: client.id,
-      professionalId: viewerIds.professionalId,
+      professionalId: viewerProfessionalId,
       contextType,
       contextId,
     }),
@@ -452,6 +460,19 @@ export async function resolveMessageThread(
 
   if (!professionalUserId) {
     return resolveFailure(404, 'Professional profile missing.')
+  }
+
+  // A thread with two sides on the same user account is never legitimate, and
+  // it is the shape every branch-selection bug on this path collapses into.
+  // Refuse it here — once — so no context type can produce one, and so the
+  // failure is loud instead of a thread with a blank counterparty. This is the
+  // single home of that rule; `buildParticipants` used to quietly accommodate
+  // the case by emitting one participant, which is what made A5 look like it
+  // worked.
+  if (clientUserId === professionalUserId) {
+    return resolveFailure(409, 'You cannot start a message thread with yourself.', {
+      code: 'SELF_THREAD',
+    })
   }
 
   const existingThread = await prisma.messageThread.findUnique({
