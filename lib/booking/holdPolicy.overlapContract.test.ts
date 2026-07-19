@@ -193,3 +193,90 @@ describe('evaluateHoldCreationDecision overlap contract', () => {
     })
   })
 })
+
+// The slot-readiness refusals below used to be spelled out inside holdPolicy.
+// They now come from the SHARED mapSlotReadinessToBookingError, which last-minute
+// opening creation also calls so a pro cannot publish an opening no client can
+// hold. These are characterization tests: they pin the code, the user-facing copy
+// AND the working-hours log breadcrumb exactly as the hold reported them before
+// the extraction, so a change to the shared mapping can't silently reword or
+// re-code a refusal a client already sees.
+describe('evaluateHoldCreationDecision slot-readiness refusals', () => {
+  it('refuses an off-step start and names the boundary', async () => {
+    await expect(
+      evaluateHoldCreationDecision(
+        makeArgs({ requestedStart: new Date('2030-05-01T18:07:00.000Z') }),
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: 'STEP_MISMATCH',
+      message: 'Start time must be on a 15-minute boundary.',
+      userMessage: 'Start time must be on a 15-minute boundary.',
+      logHint: { conflictType: 'STEP_BOUNDARY' },
+    })
+  })
+
+  it('refuses a start outside working hours with human copy, not the guard sentinel', async () => {
+    // 20:00 PT, on the 15-minute grid — the salon closed at 17:00.
+    const decision = await evaluateHoldCreationDecision(
+      makeArgs({ requestedStart: new Date('2030-05-02T03:00:00.000Z') }),
+    )
+
+    expect(decision).toMatchObject({
+      ok: false,
+      code: 'OUTSIDE_WORKING_HOURS',
+      userMessage: 'That time is outside working hours.',
+      logHint: { conflictType: 'WORKING_HOURS' },
+    })
+    expect(decision.ok).toBe(false)
+    if (!decision.ok) {
+      // The sentinel stays in the LOG breadcrumb and never reaches the user.
+      expect(decision.logHint?.meta?.workingHoursError).toBe(
+        'BOOKING_WORKING_HOURS:OUTSIDE_WORKING_HOURS',
+      )
+      expect(decision.userMessage).not.toContain('BOOKING_WORKING_HOURS:')
+    }
+  })
+
+  it('refuses a start with no working hours configured for the location', async () => {
+    const decision = await evaluateHoldCreationDecision(
+      makeArgs({ workingHours: null }),
+    )
+
+    expect(decision).toMatchObject({
+      ok: false,
+      code: 'WORKING_HOURS_REQUIRED',
+      logHint: { conflictType: 'WORKING_HOURS' },
+    })
+    if (!decision.ok) {
+      expect(decision.logHint?.meta?.workingHoursError).toBe(
+        'BOOKING_WORKING_HOURS:WORKING_HOURS_REQUIRED',
+      )
+    }
+  })
+
+  it('refuses a start inside the advance-notice window', async () => {
+    await expect(
+      evaluateHoldCreationDecision(makeArgs({ advanceNoticeMinutes: 24 * 60 })),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: 'ADVANCE_NOTICE_REQUIRED',
+    })
+  })
+
+  it('refuses a start beyond the max-days-ahead horizon', async () => {
+    await expect(
+      // 10:00 PT four days out — on-step and inside working hours, so the ONLY
+      // thing that can refuse it is the horizon.
+      evaluateHoldCreationDecision(
+        makeArgs({
+          maxDaysAhead: 1,
+          requestedStart: new Date('2030-05-05T17:00:00.000Z'),
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: 'MAX_DAYS_AHEAD_EXCEEDED',
+    })
+  })
+})

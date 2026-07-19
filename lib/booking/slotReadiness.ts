@@ -13,6 +13,7 @@ import { getZonedParts, minutesSinceMidnightInTimeZone } from '@/lib/time'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
+import { type BookingErrorCode } from '@/lib/booking/errors'
 
 export type SlotReadinessCode =
   | 'STEP_MISMATCH'
@@ -89,6 +90,7 @@ export type CheckSlotReadinessArgs = {
 
 const DEFAULT_FALLBACK_TIME_ZONE = 'UTC'
 const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
+const WORKING_HOURS_FALLBACK_MESSAGE = 'That time is outside working hours.'
 
 type WorkingHoursGuardCode =
   | 'WORKING_HOURS_REQUIRED'
@@ -720,4 +722,82 @@ export function checkSlotReadiness(
     durationMinutes,
     bufferMinutes,
   }
+}
+
+/**
+ * The single translation from a slot-readiness refusal to the booking error the
+ * caller reports.
+ *
+ * Both writers that gate on `checkSlotReadiness` go through here — the hold
+ * (`evaluateHoldCreationDecision`, which refuses at CLAIM time) and last-minute
+ * opening creation (which refuses at CREATE time). They must agree: an opening a
+ * pro is allowed to create has to be one a client is allowed to hold, or the
+ * opening lands in the feed and every claim fails. Keeping the mapping in one
+ * place is what makes "same policy" true rather than merely intended.
+ */
+export function mapSlotReadinessToBookingError(args: {
+  code: SlotReadinessCode
+  stepMinutes: number
+  /** `meta.workingHoursError` off the failed result, when the code carries one. */
+  workingHoursError?: unknown
+}): {
+  code: BookingErrorCode
+  message?: string
+  userMessage?: string
+} {
+  switch (args.code) {
+    case 'STEP_MISMATCH': {
+      const message = `Start time must be on a ${args.stepMinutes}-minute boundary.`
+      return { code: 'STEP_MISMATCH', message, userMessage: message }
+    }
+
+    case 'OUTSIDE_WORKING_HOURS': {
+      const message = readWorkingHoursMessage(args.workingHoursError)
+      return { code: 'OUTSIDE_WORKING_HOURS', message, userMessage: message }
+    }
+
+    case 'ADVANCE_NOTICE_REQUIRED':
+      return { code: 'ADVANCE_NOTICE_REQUIRED' }
+
+    case 'MAX_DAYS_AHEAD_EXCEEDED':
+      return { code: 'MAX_DAYS_AHEAD_EXCEEDED' }
+
+    case 'WORKING_HOURS_REQUIRED':
+      return { code: 'WORKING_HOURS_REQUIRED' }
+
+    case 'WORKING_HOURS_INVALID':
+      return { code: 'WORKING_HOURS_INVALID' }
+
+    case 'INVALID_START':
+      return { code: 'INVALID_SCHEDULED_FOR' }
+
+    case 'INVALID_RANGE':
+      return { code: 'INVALID_SCHEDULED_FOR' }
+
+    case 'INVALID_DURATION':
+      return { code: 'DURATION_REQUIRED' }
+
+    case 'INVALID_BUFFER':
+      return {
+        code: 'INTERNAL_ERROR',
+        message: 'Invalid buffer minutes.',
+        userMessage: 'That time is not available.',
+      }
+  }
+}
+
+/**
+ * The working-hours guard encodes its own codes into the error string; anything
+ * else is already human copy and passes through unchanged.
+ */
+function readWorkingHoursMessage(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return WORKING_HOURS_FALLBACK_MESSAGE
+  }
+
+  if (value.startsWith(WORKING_HOURS_ERROR_PREFIX)) {
+    return WORKING_HOURS_FALLBACK_MESSAGE
+  }
+
+  return value
 }

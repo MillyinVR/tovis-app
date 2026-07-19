@@ -115,6 +115,25 @@ export default async function ClaimOpeningPage(props: PageProps) {
         {proName} · {profession}
       </div>
 
+      {/*
+        The deal, as the loudest thing on the page. A pro creating a last-minute
+        opening picks ONE incentive — percent off, dollar amount off, a free
+        service, or a free add-on — and that is what makes the slot worth dropping
+        everything for. The starting price isn't even final (the pro re-quotes at
+        the appointment), so it has no business outshouting the offer. It used to
+        be a small chip UNDER the price block.
+      */}
+      {incentiveLabel ? (
+        <div className="mt-6 rounded-card bg-accentPrimary px-5 py-4 text-onAccent">
+          <div className="font-display text-[30px] font-bold uppercase leading-[1.05] tracking-[-0.02em]">
+            ✦ {incentiveLabel}
+          </div>
+          <div className="mt-0.5 text-[12.5px] font-medium text-onAccent/85">
+            On this last-minute opening
+          </div>
+        </div>
+      ) : null}
+
       <div className="mt-6 rounded-card border border-textPrimary/10 bg-bgSurface p-5">
         <dl className="grid grid-cols-2 gap-4">
           <div>
@@ -132,27 +151,34 @@ export default async function ClaimOpeningPage(props: PageProps) {
             </div>
           ) : null}
           <div>
-            <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.1em] text-textMuted">Price</dt>
+            {/*
+              A STARTING price, never a set one. The underlying fields say so —
+              salonPriceStartingAt / mobilePriceStartingAt / service.minPrice — and
+              the pro sets the real price at the consultation, once they've seen the
+              hair. A bare "$144" on the screen where someone commits to a booking
+              reads as a quote, so the label, the "From" and the footnote below all
+              say otherwise. The discount is real and applies to the final price.
+            */}
+            <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.1em] text-textMuted">Starting at</dt>
             <dd className="mt-1 flex items-baseline gap-2">
               {discountedStr ? (
                 <>
-                  <span className="font-display text-[15px] font-bold text-accentPrimary">${discountedStr}</span>
+                  <span className="font-display text-[15px] font-bold text-accentPrimary">From ${discountedStr}</span>
                   {baseStr ? (
                     <span className="font-display text-[12px] font-semibold text-textMuted line-through">${baseStr}</span>
                   ) : null}
                 </>
               ) : (
-                <span className="font-display text-[15px] font-bold">{baseStr ? `$${baseStr}` : '—'}</span>
+                <span className="font-display text-[15px] font-bold">{baseStr ? `From $${baseStr}` : '—'}</span>
               )}
             </dd>
           </div>
         </dl>
 
-        {incentiveLabel ? (
-          <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-accentPrimary/12 px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-accentPrimary">
-            ✦ {incentiveLabel}
-          </div>
-        ) : null}
+        <p className="mt-3 text-[12px] text-textMuted">
+          Starting price — your pro confirms the final price at your appointment.
+          {discountedStr ? ' Your discount applies to it.' : ''}
+        </p>
 
         <PresenceSignals
           resourceType="opening"

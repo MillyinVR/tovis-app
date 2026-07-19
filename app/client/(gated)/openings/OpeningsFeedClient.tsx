@@ -299,6 +299,17 @@ export default function OpeningsFeedClient() {
                     </div>
                   ) : null}
 
+                  {/*
+                    The incentive leads the card. It used to sit under the price at
+                    8.5px in gold — the single most persuasive thing on a
+                    last-minute opening, rendered smaller than everything around it.
+                  */}
+                  {card.incentiveLabel ? (
+                    <div className="mb-3 inline-flex items-center gap-1.5 rounded-[10px] bg-accentPrimary px-3 py-1.5 font-display text-[17px] font-bold uppercase leading-none text-onAccent">
+                      ✦ {card.incentiveLabel}
+                    </div>
+                  ) : null}
+
                   <div className="flex items-start gap-[13px]">
                     <div
                       className="h-[50px] w-[50px] shrink-0 rounded-[14px]"
@@ -321,14 +332,15 @@ export default function OpeningsFeedClient() {
                           {card.wasLabel}
                         </div>
                       ) : null}
+                      {/*
+                        "From", because these are STARTING prices — the pro sets
+                        the final one at the consultation. The source fields say so
+                        (salonPriceStartingAt / service.minPrice); the card must not
+                        quote them as if they were settled.
+                      */}
                       {card.priceLabel ? (
                         <div className="font-display text-[18px] font-bold tracking-[-0.02em] text-accentPrimary">
-                          {card.priceLabel}
-                        </div>
-                      ) : null}
-                      {card.incentiveLabel && card.wasLabel ? (
-                        <div className="font-mono text-[8.5px] font-bold uppercase tracking-[0.06em] text-gold">
-                          {card.incentiveLabel}
+                          From {card.priceLabel}
                         </div>
                       ) : null}
                     </div>
