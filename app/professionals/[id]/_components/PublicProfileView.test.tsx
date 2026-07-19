@@ -325,7 +325,7 @@ function makePortfolioMedia() {
     thumbPath: null,
     url: '/portfolio/fresh-fade.jpg',
     thumbUrl: null,
-    services: [{ serviceId: 'service_1' }],
+    services: [{ serviceId: 'service_1', service: { name: 'Balayage' } }],
   }
 }
 

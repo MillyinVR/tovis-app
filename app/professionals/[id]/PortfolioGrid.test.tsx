@@ -21,6 +21,7 @@ function makeTile(
     isEligibleForLooks: false,
     isFeaturedInPortfolio: true,
     serviceIds: [],
+    serviceNames: [],
     before: null,
     ...(overrides ?? {}),
   }

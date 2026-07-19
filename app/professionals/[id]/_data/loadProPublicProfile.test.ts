@@ -41,7 +41,7 @@ function makeLookRow(mediaOverrides: Record<string, unknown> = {}) {
       url: 'https://cdn.example/1.jpg',
       thumbUrl: 'https://cdn.example/1-thumb.jpg',
       beforeAsset: null,
-      services: [{ serviceId: 'svc_1' }],
+      services: [{ serviceId: 'svc_1', service: { name: 'Balayage' } }],
       ...mediaOverrides,
     },
   }
