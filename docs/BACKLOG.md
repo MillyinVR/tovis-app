@@ -231,7 +231,11 @@ or carry deployed-caller risk. Tori's calls, 2026-07-19:
   about, it returns nearby pros with last-minute openings for those services, grouped by service,
   soonest-then-nearest, 30s cached. `/client/openings` is the general feed; this is the
   service-targeted one. Note there is **no `SavedService` model** — the caller passes ids, so a UI
-  needs to decide where "saved services" is stored first.
+  needs to decide where "saved services" is stored first. Drive-by finding while verifying it:
+  that route declares its **own local `pickPublicTierPlan`** (`route.ts:202`) duplicating the
+  shared `lib/lastMinute/pickTierPlan.ts`. Diffed at review time — **behaviourally identical**, no
+  divergence, so it is a consolidation target rather than a bug; fold it in whenever this route
+  next gets touched.
 - [ ] **Delete `GET /api/v1/search` once TestFlight build 1 is retired.** Deliberately KEPT in the
   step-16 cleanup: iOS called it from 2026-06-27 (`9a1a0e2`) until 2026-07-16 (`611cd7c`, iOS
   #153), and build 1 was cut before the 2026-07-17 build bump, so it may still be in circulation.

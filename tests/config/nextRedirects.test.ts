@@ -28,11 +28,17 @@ async function getRedirects(): Promise<RedirectEntry[]> {
 }
 
 /**
- * Next compiles a `:param(<regex>)` segment by using `<regex>` verbatim as that
- * segment's matcher. Extract it and exercise it directly — this is the exact
- * expression that decides whether a path segment is redirected, so testing it
- * tests the real discriminator without pulling in path-to-regexp (which is not
- * a direct dependency of this repo).
+ * Next compiles a `:param(<regex>)` segment by embedding `<regex>` verbatim into
+ * the full-path matcher. Extract it and exercise it in isolation — that pins the
+ * lookahead without pulling in path-to-regexp, which is not a direct dependency
+ * of this repo.
+ *
+ * ⚠️ This is an APPROXIMATION of the compiled matcher, not a re-implementation:
+ * anchored here with `^…$` the `$` means end-of-segment, while in the real
+ * compiled pattern it means end-of-path. The two agree for the cases below, and
+ * the end-to-end behaviour (`/pro/media/new`, `/pro/media/new/`,
+ * `/pro/media/new?x=1`, `/pro/media`, and a real cuid) was verified by driving a
+ * dev server. What this test exists to catch is someone deleting the lookahead.
  */
 function segmentMatcher(source: string): RegExp {
   const inline = source.match(/:id\((.+)\)$/)
