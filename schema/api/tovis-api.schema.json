@@ -11712,6 +11712,13 @@
           },
           "type": "array"
         },
+        "serviceNames": {
+          "description": "Display names for `serviceIds`, in the same tag order. Native clients render these as the tile's service chips (web's `/media/[id]` resolves the same names server-side); empty when the media carries no service tags.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "src": {
           "type": "string"
         },
@@ -11737,6 +11744,7 @@
         "isEligibleForLooks",
         "isFeaturedInPortfolio",
         "serviceIds",
+        "serviceNames",
         "before"
       ],
       "type": "object"

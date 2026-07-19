@@ -137,6 +137,12 @@ export type PublicPortfolioTileDto = {
   isEligibleForLooks: boolean
   isFeaturedInPortfolio: boolean
   serviceIds: string[]
+  /**
+   * Display names for `serviceIds`, in the same tag order. Native clients render
+   * these as the tile's service chips (web's `/media/[id]` resolves the same
+   * names server-side); empty when the media carries no service tags.
+   */
+  serviceNames: string[]
   before: PairedBeforeDto | null
 }
 
@@ -298,6 +304,25 @@ function pickServiceIds(
   }
 
   return [...ids]
+}
+
+/**
+ * Display names for a media asset's service tags — trimmed, blank-dropped and
+ * de-duplicated, in tag order. Shared by the portfolio tile DTO and the
+ * `/media/[id]` page so the two surfaces can never disagree about which chips
+ * a piece of media shows.
+ */
+export function pickServiceTagNames(
+  services: ReadonlyArray<{ service: { name: string } }>,
+): string[] {
+  const names = new Set<string>()
+
+  for (const serviceTag of services) {
+    const name = pickString(serviceTag.service.name)
+    if (name) names.add(name)
+  }
+
+  return [...names]
 }
 
 async function renderAssetUrls(
@@ -481,6 +506,7 @@ export async function mapPublicPortfolioTileToDto(
     isEligibleForLooks: asset.isEligibleForLooks,
     isFeaturedInPortfolio: asset.isFeaturedInPortfolio,
     serviceIds: pickServiceIds(asset.services),
+    serviceNames: pickServiceTagNames(asset.services),
     before,
   }
 }

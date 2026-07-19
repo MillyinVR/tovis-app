@@ -14,6 +14,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
+import { pickServiceTagNames } from '@/lib/profiles/publicProfileMappers'
 import { canViewerSeePublicMediaSurface } from '@/lib/proTrustState'
 import { cn } from '@/lib/utils'
 
@@ -114,9 +115,7 @@ export default async function MediaDetailPage({ params }: PageProps) {
 
   const backHref = `/professionals/${media.professionalId}`
   const isVideo = media.mediaType === MediaType.VIDEO
-  const tagNames = media.services
-    .map((tag) => tag.service.name.trim())
-    .filter((name) => name.length > 0)
+  const tagNames = pickServiceTagNames(media.services)
 
   const [serviceOptions, ownerProfile] = isOwner
     ? await Promise.all([

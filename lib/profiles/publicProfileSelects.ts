@@ -90,6 +90,12 @@ export const publicOfferingSelect =
 export const publicPortfolioServiceTagSelect =
   Prisma.validator<Prisma.MediaServiceTagSelect>()({
     serviceId: true,
+    // The tag's display name, so a tile can render service chips without a
+    // second round trip to resolve ids. Web's `/media/[id]` already renders
+    // these names; the DTO carries them so native clients can too.
+    service: {
+      select: { name: true },
+    },
   })
 
 /**

@@ -30,10 +30,13 @@ const beforeImage = {
   thumbUrl: 'https://cdn.example.com/before_1_thumb.jpg',
 }
 
+type ServiceTagRow = { serviceId: string; service: { name: string } }
+
 function makePortfolioRow(
   overrides?: Partial<{
     mediaType: MediaType
     beforeAsset: typeof beforeImage | null
+    services: ServiceTagRow[]
   }>,
 ) {
   return {
@@ -51,7 +54,7 @@ function makePortfolioRow(
     url: 'https://cdn.example.com/after_1.jpg',
     thumbUrl: 'https://cdn.example.com/after_1_thumb.jpg',
     beforeAsset: null as typeof beforeImage | null,
-    services: [],
+    services: [] as ServiceTagRow[],
     ...(overrides ?? {}),
   }
 }
@@ -105,6 +108,41 @@ describe('mapPublicPortfolioTileToDto before/after pairing', () => {
     expect(
       (await mapPublicPortfolioTileToDto(makePortfolioRow(), 'look_9'))?.lookId,
     ).toBe('look_9')
+  })
+})
+
+describe('mapPublicPortfolioTileToDto service tags', () => {
+  it('carries display names alongside the ids, in tag order', async () => {
+    const tile = await mapPublicPortfolioTileToDto(
+      makePortfolioRow({
+        services: [
+          { serviceId: 'svc_1', service: { name: 'Balayage' } },
+          { serviceId: 'svc_2', service: { name: 'Gloss' } },
+        ],
+      }),
+    )
+
+    expect(tile?.serviceIds).toEqual(['svc_1', 'svc_2'])
+    expect(tile?.serviceNames).toEqual(['Balayage', 'Gloss'])
+  })
+
+  it('is an empty list when the media carries no tags', async () => {
+    const tile = await mapPublicPortfolioTileToDto(makePortfolioRow())
+    expect(tile?.serviceNames).toEqual([])
+  })
+
+  it('trims, drops blank names and de-duplicates', async () => {
+    const tile = await mapPublicPortfolioTileToDto(
+      makePortfolioRow({
+        services: [
+          { serviceId: 'svc_1', service: { name: '  Balayage  ' } },
+          { serviceId: 'svc_2', service: { name: '   ' } },
+          { serviceId: 'svc_3', service: { name: 'Balayage' } },
+        ],
+      }),
+    )
+
+    expect(tile?.serviceNames).toEqual(['Balayage'])
   })
 })
 
