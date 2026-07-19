@@ -248,6 +248,25 @@ or carry deployed-caller risk. Tori's calls, 2026-07-19:
   and uploads nothing).
 - [ ] **The Activity feed is hard-capped at 30 events with NO pagination — on BOTH platforms** (found while shipping parity step 13, web #658 / iOS #157). `listClientActivity` (`lib/notifications/activityFeed.ts`) has **no cursor at all**: `take` defaults to 30, `MAX_TAKE` is 50, and `loadClientActivityPage` passes no `take`. So once a creator has 31+ engagement events, **the 31st is permanently unreachable** — there is no "load more" on web and none native. Pre-existing on web; iOS matched it deliberately for parity (adding `?take=` to the twin would have meant widening or bypassing the shared loader, which is the drift the twin exists to prevent). Fix is a proper slice, not a drive-by: add a cursor to `listClientActivity` → thread it through `loadClientActivityPage` (keeping the RSC page's arg-free call working) → expose it on `GET /api/v1/client/activity` (`ClientActivityFeedDTO` gains `nextCursor`; the repo's `FeedPage {items, nextCursor}` shape is the precedent) → then infinite scroll on web's `ClientActivityFrame` **and** iOS's `ClientActivityView` (which can copy `NotificationsView`'s existing last-item `.onAppear` loadMore). ⚠️ Note the unread badge/`markReadEventKeys` must stay whole-feed, not page-scoped.
 - [ ] `/support` has no success or error state (found while shipping the native support route, #646). `app/support/page.tsx` takes no `searchParams`, so the server action's `redirect('/support?sent=1')` and `?error=…` render **nothing** — a web user submits and sees the unchanged form, with no confirmation and no error. Has always been true; the native form (iOS #146) shows a proper banner, so web is now the weaker half. Small fix: accept `searchParams` and render a banner off `sent`/`error` (the action already emits stable codes: `missing_fields` / `subject_too_long` / `message_too_long`). Drive-by while there: the disclaimer copy in `supportForm.tsx` ends in a stray `)`.
+### Round-3 close-out — surviving threads (2026-07-19, queue COMPLETE at 19/19)
+The round-3 fix queue is finished; these are the threads it deliberately did **not** close.
+- [ ] **AASA association for `/looks/tags` — gated on web #673 DEPLOYING, not merging.** Step 6
+  shipped the native tag feed on both sides but left the Apple App Site Association entry out on
+  purpose: a universal-link association pointing at a path prod still ignores would open the app on
+  a URL the server can't yet filter. Whoever runs the next prod deploy should queue this edit right
+  after. Tracked nowhere else.
+- [ ] **`lib/messages/counterparty.ts:60` — a live plaintext PII read the guard cannot see**
+  (found in step 18, re-confirmed step 19). `formatPersonName(client?.firstName, …)` is invisible to
+  `check:pii-plaintext-reads` because `isLikelyObjectLiteralWrite` skips anything shaped `key: value`
+  — so it is watched by neither the baseline nor an annotation. Fixing it means loosening that
+  heuristic, which would flag every legitimate object construction, so it needs **its own PR** with a
+  re-baseline, not a drive-by.
+- [ ] **6 blank-line artifact entries in the PII baseline** (step 18). The select regex's leading
+  `\s*` swallows the preceding newline. Harmless — but do **not** hand-edit one, the key regenerates.
+- [ ] **Web-side portfolio/media surfaces were not swept for the id-without-name shape** (step 19).
+  `PublicPortfolioTileDto` shipped `serviceIds` with no names for as long as it existed, which is why
+  no native client could render service chips. Other DTOs were not audited for the same pattern.
+
 - [ ] Token hardening: drop legacy `AftercareSummary.publicToken`; migrate `ProClientInvite.token` to hashed storage; confirm NFC card IDs non-enumerable + short-code entropy/rate-limit + duplicate-tap idempotency.
 - [ ] Observability: build the live Sentry dashboard sections (`launch-readiness/sentry-dashboard.md` still all TODO) + link provider dashboards; add runbook-link-in-alert-message.
 - [ ] Deployed load gate: record per-route p99 (availability/day/hold/finalize/checkout/session-state/media/webhook) into the `traffic-model` "Measured" columns (staging + a deployed run exist per #361; the table is unfilled).
