@@ -56,6 +56,7 @@ function renderForm(props?: Partial<React.ComponentProps<typeof AftercareForm>>)
       rebookLocationType="SALON"
       rebookLocationId="location_1"
       rebookClientAddressId={null}
+      rebookClientProfileId="client_1"
       existingNotes="Use gentle cleanser tonight."
       existingRebookedFor={null}
       existingRebookMode="NONE"
@@ -225,6 +226,98 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
       screen.queryByText(/free to start your next booking/i),
     ).not.toBeInTheDocument()
     expect(screen.queryByText(/Aftercare not sent:/i)).not.toBeInTheDocument()
+  })
+
+  it('lets the pro pick which client service address a mobile next appointment is at', async () => {
+    // Mount (MOBILE): the form loads the client's saved service addresses.
+    mocks.fetch.mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        ok: true,
+        clientId: 'client_1',
+        addresses: [
+          {
+            id: 'addr_1',
+            label: 'Home',
+            formattedAddress: '1 Main St, Los Angeles, CA',
+            isDefault: true,
+          },
+          {
+            id: 'addr_2',
+            label: 'Work',
+            formattedAddress: '2 Office Way, Los Angeles, CA',
+            isDefault: false,
+          },
+        ],
+      }),
+    })
+
+    renderForm({
+      rebookLocationType: 'MOBILE',
+      rebookClientAddressId: 'addr_1',
+    })
+
+    expect(String(mocks.fetch.mock.calls[0]?.[0])).toBe(
+      '/api/v1/pro/clients/client_1/service-addresses',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next booking date' }))
+
+    // The pro can choose among the client's saved addresses; the source
+    // booking's address (their default here) starts selected.
+    const select = await screen.findByRole('combobox', {
+      name: /service address/i,
+    })
+    await waitFor(() => {
+      expect(
+        (screen.getByRole('option', { name: /Home/ }) as HTMLOptionElement)
+          .selected,
+      ).toBe(true)
+    })
+
+    fireEvent.change(select, { target: { value: 'addr_2' } })
+
+    // Picking a day queries availability FOR THE CHOSEN ADDRESS…
+    mocks.fetch.mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        ok: true,
+        slots: ['2026-09-01T17:00:00.000Z'],
+        durationMinutes: 90,
+      }),
+    })
+
+    const dayInput = document.querySelector(
+      'input[type="date"]',
+    ) as HTMLInputElement
+    fireEvent.change(dayInput, { target: { value: '2026-09-01' } })
+
+    await waitFor(() => {
+      expect(String(mocks.fetch.mock.calls[1]?.[0])).toContain(
+        'clientAddressId=addr_2',
+      )
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: '10:00 AM' }))
+
+    // …and the saved proposal carries that same address.
+    mockAftercareResponse()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save draft/i }))
+    })
+
+    const saveCall = mocks.fetch.mock.calls[2]
+    expect(String(saveCall?.[0])).toContain(
+      '/api/v1/pro/bookings/booking_1/aftercare',
+    )
+    const body = JSON.parse(String((saveCall?.[1] as RequestInit).body))
+    expect(body.rebookSlot).toMatchObject({
+      locationType: 'MOBILE',
+      clientAddressId: 'addr_2',
+      startsAt: '2026-09-01T17:00:00.000Z',
+    })
   })
 
   it('uses date-only window inputs and auto-advances the end past the start', () => {

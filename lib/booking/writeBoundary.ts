@@ -811,6 +811,13 @@ type UpsertBookingAftercareArgs = {
     offeringId: string | null
     locationId: string
     locationType: ServiceLocationType
+    /**
+     * MOBILE slots: the client service address the pro picked for the next
+     * appointment. Ownership (booking's client + SERVICE_ADDRESS kind) is
+     * asserted in the boundary; confirm falls back to the source booking's
+     * address when null, so older clients that never send it keep working.
+     */
+    clientAddressId: string | null
     startsAt: Date
     endsAt: Date
   } | null
@@ -1507,6 +1514,7 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
           offeringId: true,
           locationId: true,
           locationType: true,
+          clientAddressId: true,
           startsAt: true,
           endsAt: true,
         },
@@ -9777,14 +9785,25 @@ assertCanCreateRebookFromSourceBooking({
     throw bookingError('OFFERING_NOT_FOUND')
   }
 
-  // Client-chosen saved address for a MOBILE rebook (e.g. a SALON original
-  // rebooked as mobile from the public aftercare link, where the source
-  // booking has no client address to clone). The clientId + SERVICE_ADDRESS
-  // scoped load enforces ownership; coordinates and radius are validated in
+  // The pro-picked address stored on the aftercare proposal slot. Only trusted
+  // when this create is confirming that exact aftercare (same guard as the
+  // preselected-slot overlap permission below) — the direct pro-rebook path
+  // carries no aftercareId and keeps cloning the source booking's address.
+  const proposalClientAddressId =
+    args.aftercareId && source.aftercareSummary?.id === args.aftercareId
+      ? (source.aftercareSummary.rebookSlot?.clientAddressId ?? null)
+      : null
+
+  // Address for a MOBILE rebook, by precedence: the client's explicit choice
+  // (public aftercare link — e.g. a SALON original rebooked as mobile), then
+  // the address the pro picked when proposing the slot, then (downstream) the
+  // source booking's address clone. The clientId + SERVICE_ADDRESS scoped load
+  // enforces ownership; coordinates and radius are validated in
   // assertMobileBookingWithinRadius below.
   const requestedClientAddressId =
     effectiveLocationType === ServiceLocationType.MOBILE
-      ? normalizeReason(args.requestedClientAddressId)
+      ? (normalizeReason(args.requestedClientAddressId) ??
+        proposalClientAddressId)
       : null
 
   const requestedClientAddress = requestedClientAddressId
@@ -10970,6 +10989,13 @@ async function performLockedUpsertBookingAftercare(args: {
     offeringId: string | null
     locationId: string
     locationType: ServiceLocationType
+    /**
+     * MOBILE slots: the client service address the pro picked for the next
+     * appointment. Ownership (booking's client + SERVICE_ADDRESS kind) is
+     * asserted in the boundary; confirm falls back to the source booking's
+     * address when null, so older clients that never send it keep working.
+     */
+    clientAddressId: string | null
     startsAt: Date
     endsAt: Date
   } | null
@@ -11153,6 +11179,32 @@ if (args.rebookSlot) {
       message: `Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`,
       userMessage: `Aftercare isn’t available yet. Current step: ${booking.sessionStep ?? 'NONE'}.`,
     })
+  }
+
+  // A pro-picked mobile address must be one of THIS booking's client's saved
+  // service addresses — the pro chooses among the client's addresses, never
+  // supplies an arbitrary one. (Salon slots never carry an address; the route
+  // strips it, and the upsert below writes null defensively.)
+  if (
+    args.rebookSlot?.clientAddressId &&
+    args.rebookSlot.locationType === ServiceLocationType.MOBILE
+  ) {
+    const slotClientAddress = await args.tx.clientAddress.findFirst({
+      where: {
+        id: args.rebookSlot.clientAddressId,
+        clientId: booking.clientId,
+        kind: ClientAddressKind.SERVICE_ADDRESS,
+      },
+      select: { id: true },
+    })
+
+    if (!slotClientAddress) {
+      throw bookingError('CLIENT_SERVICE_ADDRESS_INVALID', {
+        message:
+          'Aftercare rebook slot clientAddressId is not a service address owned by this booking’s client.',
+        userMessage: 'Please choose one of the client’s saved service addresses.',
+      })
+    }
   }
 
   const timeZoneUsed = resolveAftercareTimeZone({
@@ -11366,6 +11418,11 @@ if (validRebookSlot) {
     })
   }
 
+  const rebookSlotClientAddressId =
+    validRebookSlot.locationType === ServiceLocationType.MOBILE
+      ? validRebookSlot.clientAddressId
+      : null
+
   await args.tx.aftercareRebookSlot.upsert({
     where: {
       aftercareSummaryId: aftercare.id,
@@ -11376,6 +11433,7 @@ if (validRebookSlot) {
       offeringId: rebookSlotOfferingId,
       locationId: validRebookSlot.locationId,
       locationType: validRebookSlot.locationType,
+      clientAddressId: rebookSlotClientAddressId,
       startsAt: validRebookSlot.startsAt,
       endsAt: validRebookSlot.endsAt,
     },
@@ -11384,6 +11442,7 @@ if (validRebookSlot) {
       offeringId: rebookSlotOfferingId,
       locationId: validRebookSlot.locationId,
       locationType: validRebookSlot.locationType,
+      clientAddressId: rebookSlotClientAddressId,
       startsAt: validRebookSlot.startsAt,
       endsAt: validRebookSlot.endsAt,
     },

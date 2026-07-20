@@ -425,6 +425,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
               }
             : null,
           client: {
+            // The ClientProfile id — lets native callers reach client-scoped
+            // reads (e.g. GET /pro/clients/{id}/service-addresses for the
+            // aftercare rebook address picker).
+            id: booking.clientId,
             fullName,
             email: booking.client?.user?.email ?? null,
             phone: booking.client?.phone ?? null,

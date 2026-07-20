@@ -71,6 +71,13 @@ type NormalizedRebookSlot = {
   offeringId: string | null
   locationId: string
   locationType: ServiceLocationType
+  /**
+   * MOBILE slots: the client service address the pro picked for the next
+   * appointment. Optional for wire compat (older clients omit it and the
+   * confirm falls back to the source booking's address); always null for
+   * SALON. Ownership is validated in the write boundary.
+   */
+  clientAddressId: string | null
   startsAt: Date
   endsAt: Date
 }
@@ -163,6 +170,7 @@ const GET_BOOKING_SELECT = {
           offeringId: true,
           locationId: true,
           locationType: true,
+          clientAddressId: true,
           startsAt: true,
           endsAt: true,
         },
@@ -262,6 +270,7 @@ function normalizeRebookSlot(
   const offeringId = trimmedString(input.offeringId)
   const locationId = trimmedString(input.locationId)
   const locationType = parseServiceLocationType(input.locationType)
+  const clientAddressId = trimmedString(input.clientAddressId)
   const startsAt = parseRequiredISODate(input.startsAt)
   const endsAt = parseRequiredISODate(input.endsAt)
 
@@ -306,6 +315,10 @@ function normalizeRebookSlot(
       offeringId,
       locationId,
       locationType,
+      // An address only means something for a mobile visit; drop it for salon
+      // slots so a client that sends both never persists a misleading pair.
+      clientAddressId:
+        locationType === ServiceLocationType.MOBILE ? clientAddressId : null,
       startsAt,
       endsAt,
     },
@@ -656,6 +669,7 @@ function mapAftercareSummaryForGet(
           offeringId: aftercare.rebookSlot.offeringId,
           locationId: aftercare.rebookSlot.locationId,
           locationType: aftercare.rebookSlot.locationType,
+          clientAddressId: aftercare.rebookSlot.clientAddressId,
           startsAt: aftercare.rebookSlot.startsAt.toISOString(),
           endsAt: aftercare.rebookSlot.endsAt.toISOString(),
         }

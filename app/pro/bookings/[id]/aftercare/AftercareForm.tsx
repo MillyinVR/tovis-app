@@ -67,6 +67,9 @@ type Props = {
   rebookLocationType: 'SALON' | 'MOBILE'
   rebookLocationId: string
   rebookClientAddressId: string | null
+  // The booking's ClientProfile id — used to list the client's saved service
+  // addresses so the pro can pick which one the mobile next appointment is at.
+  rebookClientProfileId: string
   existingNotes: string
   existingRebookedFor: string | null
   existingRebookMode?: RebookMode | null
@@ -85,6 +88,7 @@ type Props = {
     offeringId: string | null
     locationId: string
     locationType: 'SALON' | 'MOBILE'
+    clientAddressId?: string | null
     startsAt: string
     endsAt: string
   } | null
@@ -290,6 +294,7 @@ export default function AftercareForm({
   rebookLocationType,
   rebookLocationId,
   rebookClientAddressId,
+  rebookClientProfileId,
   existingNotes,
   existingRebookedFor,
   existingRebookMode,
@@ -333,6 +338,20 @@ export default function AftercareForm({
   const [rebookSlot, setRebookSlot] = useState<SelectedRebookSlot | null>(null)
   const [windowStart, setWindowStart] = useState<string>('')
   const [windowEnd, setWindowEnd] = useState<string>('')
+
+  // MOBILE bookings: which of the client's saved service addresses the next
+  // appointment is at. Defaults to the address saved on the proposal, else the
+  // source booking's. `mobileAddresses === null` means "not loaded yet".
+  const [mobileAddresses, setMobileAddresses] = useState<
+    | { id: string; label: string; formattedAddress: string; isDefault: boolean }[]
+    | null
+  >(null)
+  const [mobileAddressesError, setMobileAddressesError] = useState<
+    string | null
+  >(null)
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
+    existingRebookSlot?.clientAddressId ?? rebookClientAddressId,
+  )
 
   // Which window date field, if any, has the "open my calendar" popup showing.
   const [pickerTarget, setPickerTarget] = useState<
@@ -410,6 +429,7 @@ export default function AftercareForm({
             offeringId: existingRebookSlot.offeringId,
             locationId: existingRebookSlot.locationId,
             locationType: existingRebookSlot.locationType,
+            clientAddressId: existingRebookSlot.clientAddressId ?? null,
             startsAt: existingRebookSlot.startsAt,
             endsAt: existingRebookSlot.endsAt,
           }
@@ -467,6 +487,72 @@ export default function AftercareForm({
       abortRef.current = null
     }
   }, [])
+
+  // MOBILE bookings: load the client's saved service addresses so the pro can
+  // pick where the next appointment happens (the availability query and the
+  // saved proposal both carry the pick). Salon bookings never need this.
+  useEffect(() => {
+    if (rebookLocationType !== 'MOBILE' || readOnly) return
+
+    const controller = new AbortController()
+
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/v1/pro/clients/${encodeURIComponent(rebookClientProfileId)}/service-addresses`,
+          { signal: controller.signal },
+        )
+        const data = await safeJson(res)
+        if (!res.ok || !isRecord(data) || !Array.isArray(data.addresses)) {
+          setMobileAddressesError('Could not load the client’s saved addresses.')
+          setMobileAddresses([])
+          return
+        }
+
+        const addresses = data.addresses.flatMap((raw) => {
+          if (!isRecord(raw) || typeof raw.id !== 'string') return []
+          return [
+            {
+              id: raw.id,
+              label: typeof raw.label === 'string' ? raw.label : 'Service address',
+              formattedAddress:
+                typeof raw.formattedAddress === 'string'
+                  ? raw.formattedAddress
+                  : '',
+              isDefault: raw.isDefault === true,
+            },
+          ]
+        })
+
+        setMobileAddresses(addresses)
+        setMobileAddressesError(null)
+        // Keep a valid selection: prefer what's already picked when it still
+        // exists, else the client's default, else their first address.
+        setSelectedAddressId((current) => {
+          if (current && addresses.some((a) => a.id === current)) return current
+          return (
+            addresses.find((a) => a.isDefault)?.id ?? addresses[0]?.id ?? null
+          )
+        })
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setMobileAddressesError('Could not load the client’s saved addresses.')
+        setMobileAddresses([])
+      }
+    })()
+
+    return () => controller.abort()
+  }, [rebookLocationType, rebookClientProfileId, readOnly])
+
+  function onPickMobileAddress(nextId: string) {
+    markDirty()
+    setSelectedAddressId(nextId || null)
+    // The picked slot came from the previous address's availability — a
+    // different destination means different travel windows, so re-pick.
+    setRebookSlot((current) =>
+      current && current.clientAddressId !== (nextId || null) ? null : current,
+    )
+  }
 
   function markDirty() {
     setError(null)
@@ -718,6 +804,7 @@ export default function AftercareForm({
               offeringId: rebookSlot.offeringId,
               locationId: rebookSlot.locationId,
               locationType: rebookSlot.locationType,
+              clientAddressId: rebookSlot.clientAddressId,
               startsAt: rebookSlot.startsAt,
               endsAt: rebookSlot.endsAt,
             }
@@ -749,6 +836,14 @@ export default function AftercareForm({
     if (rebookMode === 'BOOKED_NEXT_APPOINTMENT') {
       if (!rebookOfferingId) {
         return 'This booking has no service offering set, so an exact next appointment can’t be proposed. Use “Booking window” instead.'
+      }
+
+      if (
+        rebookLocationType === 'MOBILE' &&
+        !selectedAddressId &&
+        !rebookClientAddressId
+      ) {
+        return 'This client has no saved service address, so a mobile next appointment can’t be proposed. Use “Booking window” instead.'
       }
 
       if (!rebookSlot) {
@@ -1157,20 +1252,75 @@ export default function AftercareForm({
                   </div>
                 ) : null}
 
-                <label className={labelClass()}>Next appointment time</label>
-                <RebookSlotPicker
-                  professionalId={rebookProfessionalId}
-                  serviceId={rebookServiceId}
-                  offeringId={rebookOfferingId}
-                  locationType={rebookLocationType}
-                  locationId={rebookLocationId}
-                  clientAddressId={rebookClientAddressId}
-                  timeZone={tz}
-                  minYmd={tomorrowYmd}
-                  value={rebookSlot}
-                  disabled={disabled}
-                  onChange={onPickRebookSlot}
-                />
+                {rebookLocationType === 'MOBILE' ? (
+                  <div className="mb-3">
+                    <label className={labelClass()}>Service address</label>
+                    {mobileAddresses && mobileAddresses.length === 0 ? (
+                      rebookClientAddressId ? (
+                        <div className="mt-1 text-xs font-semibold text-textSecondary">
+                          Using the address from this appointment — the client
+                          has no other saved service addresses.
+                        </div>
+                      ) : (
+                        <div className="mt-2 rounded-card border border-toneWarn/30 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
+                          This client has no saved service address, so a mobile
+                          next appointment can’t be proposed. Use “Booking
+                          window” instead.
+                        </div>
+                      )
+                    ) : (
+                      <select
+                        value={selectedAddressId ?? ''}
+                        disabled={disabled || mobileAddresses === null}
+                        onChange={(e) => onPickMobileAddress(e.target.value)}
+                        className={inputClass(Boolean(disabled))}
+                        aria-label="Service address for the next appointment"
+                      >
+                        {mobileAddresses === null ? (
+                          <option value="">Loading addresses…</option>
+                        ) : (
+                          mobileAddresses.map((address) => (
+                            <option key={address.id} value={address.id}>
+                              {address.label}
+                              {address.formattedAddress
+                                ? ` — ${address.formattedAddress}`
+                                : ''}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    )}
+                    {mobileAddressesError ? (
+                      <div className="mt-1 text-xs font-semibold text-textSecondary">
+                        {mobileAddressesError} Open times use the appointment’s
+                        original address.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {rebookLocationType === 'MOBILE' &&
+                mobileAddresses?.length === 0 &&
+                !rebookClientAddressId ? null : (
+                  <>
+                    <label className={labelClass()}>Next appointment time</label>
+                    <RebookSlotPicker
+                      professionalId={rebookProfessionalId}
+                      serviceId={rebookServiceId}
+                      offeringId={rebookOfferingId}
+                      locationType={rebookLocationType}
+                      locationId={rebookLocationId}
+                      clientAddressId={
+                        selectedAddressId ?? rebookClientAddressId
+                      }
+                      timeZone={tz}
+                      minYmd={tomorrowYmd}
+                      value={rebookSlot}
+                      disabled={disabled}
+                      onChange={onPickRebookSlot}
+                    />
+                  </>
+                )}
                 <div className="mt-2 text-xs font-semibold text-textSecondary">
                   Pick a real open time from your schedule. It shows on the
                   client’s summary and can power a reminder.

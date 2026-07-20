@@ -84,6 +84,9 @@ type MockTx = {
     upsert: Mock
     deleteMany: Mock
   }
+  clientAddress: {
+    findFirst: Mock
+  }
   product: {
     findMany: Mock
   }
@@ -190,6 +193,9 @@ function makeTx(overrides: Partial<MockTx> = {}): MockTx {
         count: 1,
       }),
     },
+    clientAddress: {
+      findFirst: vi.fn().mockResolvedValue({ id: 'address_1' }),
+    },
     product: {
       findMany: vi.fn().mockResolvedValue([]),
     },
@@ -242,6 +248,7 @@ function makeValidArgs(
       offeringId,
       locationId,
       locationType: ServiceLocationType.SALON,
+      clientAddressId: null,
       startsAt: rebookedFor,
       endsAt: rebookEndsAt,
     },
@@ -312,6 +319,7 @@ describe('upsertBookingAftercare rebook slot handling', () => {
             offeringId: null,
             locationId,
             locationType: ServiceLocationType.SALON,
+            clientAddressId: null,
             startsAt: rebookedFor,
             endsAt: rebookEndsAt,
           },
@@ -337,6 +345,7 @@ describe('upsertBookingAftercare rebook slot handling', () => {
             offeringId,
             locationId,
             locationType: ServiceLocationType.SALON,
+            clientAddressId: null,
             startsAt: rebookedFor,
             endsAt: rebookEndsAt,
           },
@@ -361,6 +370,7 @@ describe('upsertBookingAftercare rebook slot handling', () => {
             offeringId,
             locationId,
             locationType: ServiceLocationType.SALON,
+            clientAddressId: null,
             startsAt: new Date('2026-06-01T17:15:00.000Z'),
             endsAt: rebookEndsAt,
           },
@@ -383,6 +393,7 @@ describe('upsertBookingAftercare rebook slot handling', () => {
             offeringId,
             locationId,
             locationType: ServiceLocationType.SALON,
+            clientAddressId: null,
             startsAt: rebookedFor,
             endsAt: rebookedFor,
           },
@@ -420,6 +431,7 @@ describe('upsertBookingAftercare rebook slot handling', () => {
         offeringId,
         locationId,
         locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
         startsAt: rebookedFor,
         endsAt: rebookEndsAt,
       },
@@ -428,12 +440,100 @@ describe('upsertBookingAftercare rebook slot handling', () => {
         offeringId,
         locationId,
         locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
         startsAt: rebookedFor,
         endsAt: rebookEndsAt,
       },
     })
 
     expect(tx.aftercareRebookSlot.deleteMany).not.toHaveBeenCalled()
+  })
+
+  it('persists the pro-picked client address on a MOBILE rebook slot', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await upsertBookingAftercare(
+      makeValidArgs({
+        rebookSlot: {
+          offeringId,
+          locationId,
+          locationType: ServiceLocationType.MOBILE,
+          clientAddressId: 'address_1',
+          startsAt: rebookedFor,
+          endsAt: rebookEndsAt,
+        },
+      }),
+    )
+
+    // Ownership: the address must be the booking client's SERVICE_ADDRESS.
+    expect(tx.clientAddress.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'address_1',
+        clientId,
+        kind: 'SERVICE_ADDRESS',
+      },
+      select: { id: true },
+    })
+
+    expect(tx.aftercareRebookSlot.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ clientAddressId: 'address_1' }),
+        update: expect.objectContaining({ clientAddressId: 'address_1' }),
+      }),
+    )
+  })
+
+  it('rejects a MOBILE rebook slot address the client does not own', async () => {
+    const tx = makeTx()
+    tx.clientAddress.findFirst.mockResolvedValue(null)
+    mockTransaction(tx)
+
+    await expectBookingErrorCode(
+      upsertBookingAftercare(
+        makeValidArgs({
+          rebookSlot: {
+            offeringId,
+            locationId,
+            locationType: ServiceLocationType.MOBILE,
+            clientAddressId: 'address_not_owned',
+            startsAt: rebookedFor,
+            endsAt: rebookEndsAt,
+          },
+        }),
+      ),
+      'CLIENT_SERVICE_ADDRESS_INVALID',
+    )
+
+    expect(tx.aftercareRebookSlot.upsert).not.toHaveBeenCalled()
+  })
+
+  it('never persists an address on a SALON rebook slot', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await upsertBookingAftercare(
+      makeValidArgs({
+        rebookSlot: {
+          offeringId,
+          locationId,
+          locationType: ServiceLocationType.SALON,
+          clientAddressId: 'address_1',
+          startsAt: rebookedFor,
+          endsAt: rebookEndsAt,
+        },
+      }),
+    )
+
+    // Salon visits happen at the pro's location: no ownership lookup, and the
+    // stored slot's address is forced null.
+    expect(tx.clientAddress.findFirst).not.toHaveBeenCalled()
+    expect(tx.aftercareRebookSlot.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ clientAddressId: null }),
+        update: expect.objectContaining({ clientAddressId: null }),
+      }),
+    )
   })
 
   it('maps slot ownership validation failures to booking errors', async () => {

@@ -248,6 +248,12 @@ describe('decideBookingOverlapPermission', () => {
 
     if (!decision.ok) {
       expect(decision.code).toBe('AFTERCARE_PRESELECTED_SLOT_MISMATCH')
+      // Surface-neutral copy: this branch serves BOTH the in-app confirm card
+      // and the public aftercare link, and it only fires when the requested
+      // time genuinely conflicts — never mention "link" here.
+      expect(decision.userMessage).toBe(
+        'That time is no longer available. Please pick a different time.',
+      )
     }
   })
 

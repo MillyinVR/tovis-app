@@ -200,11 +200,17 @@ export function decideBookingOverlapPermission(args: {
       }
     }
 
+    // This branch only runs when the requested time CONFLICTS with something
+    // on the pro's schedule (no-conflict requests already returned ok above),
+    // so the honest message on every surface — in-app confirm card and public
+    // aftercare link alike — is "taken, pick another", not a lecture about
+    // link validity. See the in-app confirm: the client is often requesting
+    // exactly what the pro proposed and the slot has since been taken.
     return {
       ok: false,
       code: 'AFTERCARE_PRESELECTED_SLOT_MISMATCH',
       userMessage:
-        'That aftercare link is only valid for the time your pro recommended.',
+        'That time is no longer available. Please pick a different time.',
       conflicts,
     }
   }

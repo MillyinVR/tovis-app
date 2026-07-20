@@ -624,6 +624,7 @@ export default async function ProAftercarePage({
               offeringId: true,
               locationId: true,
               locationType: true,
+              clientAddressId: true,
               startsAt: true,
               endsAt: true,
             },
@@ -924,6 +925,7 @@ export default async function ProAftercarePage({
             rebookLocationType={booking.locationType}
             rebookLocationId={booking.locationId}
             rebookClientAddressId={booking.clientAddressId}
+            rebookClientProfileId={booking.clientId}
             existingNotes={aftercare?.notes ?? ''}
             existingRebookMode={aftercare?.rebookMode ?? AftercareRebookMode.NONE}
             existingRebookedFor={dateToIso(aftercare?.rebookedFor)}
@@ -940,6 +942,7 @@ export default async function ProAftercarePage({
                     offeringId: aftercare.rebookSlot.offeringId,
                     locationId: aftercare.rebookSlot.locationId,
                     locationType: aftercare.rebookSlot.locationType,
+                    clientAddressId: aftercare.rebookSlot.clientAddressId,
                     startsAt: aftercare.rebookSlot.startsAt.toISOString(),
                     endsAt: aftercare.rebookSlot.endsAt.toISOString(),
                   }

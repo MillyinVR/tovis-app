@@ -81,6 +81,15 @@ export const clientMeBookingSelect =
     totalDurationMinutes: true,
     bufferMinutes: true,
 
+    // Rebook-proposal fields: without these the DTO's
+    // hasPendingRebookConfirmation is silently false, and BookingDetailView
+    // opened from ME (history / upcoming card) hides the confirm card the
+    // same booking shows when opened from the Appointments list.
+    aftercareSummary: {
+      select: { rebookMode: true, rebookedFor: true, rebookDeclinedAt: true },
+    },
+    rebooks: { select: { id: true, status: true } },
+
     locationType: true,
     locationId: true,
     locationTimeZone: true,

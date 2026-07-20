@@ -176,7 +176,7 @@ export type ClientBookingDTO = {
    * drives the rebook-confirm CTA. Confirm/decline via
    * POST /api/v1/client/bookings/[id]/aftercare-rebook { action }.
    * Populated only where the source query selects the aftercare/rebook columns
-   * (the client bookings list route); false elsewhere.
+   * (the client bookings list route and the /me page loader); false elsewhere.
    */
   hasPendingRebookConfirmation: boolean
   /** The pro-proposed next-appointment instant (ISO) when one is pending; else null. */
