@@ -75,7 +75,6 @@ export type BookingOverlapAllowedMode =
   | 'NO_OVERLAP'
   | 'PRO_AUTHORIZED_OVERLAP'
   | 'ADMIN_AUTHORIZED_OVERLAP'
-  | 'AFTERCARE_PRESELECTED_SLOT'
 
 export type BookingOverlapBlockedCode =
   | 'CLIENT_OVERLAP_NOT_ALLOWED'
@@ -111,25 +110,6 @@ export function isValidBookingWindow(window: BookingWindow): boolean {
     Number.isFinite(startsAtMs) &&
     Number.isFinite(endsAtMs) &&
     startsAtMs < endsAtMs
-  )
-}
-
-export function bookingStartsMatch(left: Date, right: Date): boolean {
-  return left.getTime() === right.getTime()
-}
-
-export function bookingEndsMatch(left: Date, right: Date): boolean {
-  return left.getTime() === right.getTime()
-}
-
-export function aftercareSlotMatchesRequestedWindow(args: {
-  requestedWindow: BookingWindow
-  slot: ProPreselectedAftercareSlot
-}): boolean {
-  return (
-    args.requestedWindow.professionalId === args.slot.professionalId &&
-    bookingStartsMatch(args.requestedWindow.startsAt, args.slot.startsAt) &&
-    bookingEndsMatch(args.requestedWindow.endsAt, args.slot.endsAt)
   )
 }
 
@@ -187,25 +167,13 @@ export function decideBookingOverlapPermission(args: {
       }
     }
 
-    if (
-      aftercareSlotMatchesRequestedWindow({
-        requestedWindow: args.requestedWindow,
-        slot,
-      })
-    ) {
-      return {
-        ok: true,
-        mode: 'AFTERCARE_PRESELECTED_SLOT',
-        conflicts,
-      }
-    }
-
-    // This branch only runs when the requested time CONFLICTS with something
-    // on the pro's schedule (no-conflict requests already returned ok above),
-    // so the honest message on every surface — in-app confirm card and public
-    // aftercare link alike — is "taken, pick another", not a lecture about
-    // link validity. See the in-app confirm: the client is often requesting
-    // exactly what the pro proposed and the slot has since been taken.
+    // The pro's pre-selected slot no longer authorizes booking over a
+    // conflict: BOOKED-mode aftercare creates the real next appointment at
+    // save time, so a live proposal's slot cannot be taken out from under the
+    // client. A conflict here — legacy proposals included — therefore always
+    // means the time has since been taken; the honest answer on every surface
+    // (in-app confirm card and public aftercare link alike) is "taken, pick
+    // another", never a silent double-book.
     return {
       ok: false,
       code: 'AFTERCARE_PRESELECTED_SLOT_MISMATCH',

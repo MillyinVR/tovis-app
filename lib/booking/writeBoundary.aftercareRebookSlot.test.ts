@@ -74,6 +74,7 @@ const mockedUpsertClientNotification = upsertClientNotification as Mock
 type MockTx = {
   booking: {
     findUnique: Mock
+    findFirst: Mock
     update: Mock
   }
   aftercareSummary: {
@@ -156,6 +157,8 @@ function makeBooking(overrides: Record<string, unknown> = {}) {
       lastEditedAt: now,
       version: 1,
       rebookSlot: null,
+      rebookedBookingId: null,
+      rebookedBooking: null,
       recommendedProducts: [],
     },
     professional: {
@@ -165,10 +168,37 @@ function makeBooking(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// A booking whose summary already links a live next appointment that exactly
+// mirrors the incoming slot — the booked-at-save sync then has nothing to do,
+// which keeps slot-focused tests isolated from the create/cancel machinery.
+function makeBookingWithMirroredRebook(args: {
+  locationType: ServiceLocationType
+  clientAddressId: string | null
+}) {
+  const base = makeBooking()
+  return {
+    ...base,
+    aftercareSummary: {
+      ...base.aftercareSummary,
+      rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+      rebookedFor,
+      rebookedBookingId: 'rebooked_1',
+      rebookedBooking: {
+        id: 'rebooked_1',
+        status: BookingStatus.ACCEPTED,
+        scheduledFor: rebookedFor,
+        locationType: args.locationType,
+        clientAddressId: args.clientAddressId,
+      },
+    },
+  }
+}
+
 function makeTx(overrides: Partial<MockTx> = {}): MockTx {
   const tx: MockTx = {
     booking: {
       findUnique: vi.fn().mockResolvedValue(makeBooking()),
+      findFirst: vi.fn().mockResolvedValue(null),
       update: vi.fn(),
     },
     aftercareSummary: {
@@ -407,6 +437,12 @@ describe('upsertBookingAftercare rebook slot handling', () => {
 
   it('validates slot ownership and upserts the aftercare rebook slot', async () => {
     const tx = makeTx()
+    tx.booking.findUnique.mockResolvedValue(
+      makeBookingWithMirroredRebook({
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+      }),
+    )
     mockTransaction(tx)
 
     await upsertBookingAftercare(makeValidArgs())
@@ -451,6 +487,12 @@ describe('upsertBookingAftercare rebook slot handling', () => {
 
   it('persists the pro-picked client address on a MOBILE rebook slot', async () => {
     const tx = makeTx()
+    tx.booking.findUnique.mockResolvedValue(
+      makeBookingWithMirroredRebook({
+        locationType: ServiceLocationType.MOBILE,
+        clientAddressId: 'address_1',
+      }),
+    )
     mockTransaction(tx)
 
     await upsertBookingAftercare(
@@ -510,6 +552,12 @@ describe('upsertBookingAftercare rebook slot handling', () => {
 
   it('never persists an address on a SALON rebook slot', async () => {
     const tx = makeTx()
+    tx.booking.findUnique.mockResolvedValue(
+      makeBookingWithMirroredRebook({
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+      }),
+    )
     mockTransaction(tx)
 
     await upsertBookingAftercare(
@@ -534,6 +582,74 @@ describe('upsertBookingAftercare rebook slot handling', () => {
         update: expect.objectContaining({ clientAddressId: null }),
       }),
     )
+  })
+
+  it('books the slot immediately when no next appointment is linked yet', async () => {
+    // Wiring-level proof: with a BOOKED slot and no linked booking, the save
+    // enters the rebook-create path (whose first read is the rebook source
+    // select). The source read is stubbed to null so the attempt fails fast —
+    // asserting on the rejection pins that the path fired at save time.
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await expectBookingErrorCode(
+      upsertBookingAftercare(makeValidArgs()),
+      'BOOKING_NOT_FOUND',
+    )
+
+    expect(tx.booking.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: bookingId, professionalId },
+      }),
+    )
+    // The slot itself was persisted before the booking sync ran.
+    expect(tx.aftercareRebookSlot.upsert).toHaveBeenCalled()
+  })
+
+  it('withdrawing the booked plan routes through the pro cancel path', async () => {
+    // Wiring-level proof: switching the mode away from BOOKED with a live
+    // linked booking must cancel that booking. The cancel path's booking load
+    // is stubbed to null so it fails fast; the rejection + the read for the
+    // linked id pin the wiring.
+    const tx = makeTx()
+    const mirrored = makeBookingWithMirroredRebook({
+      locationType: ServiceLocationType.SALON,
+      clientAddressId: null,
+    })
+    // The withdraw branch only releases an appointment that is still in the
+    // future — pin the linked booking far ahead of the real clock.
+    const linked = {
+      ...mirrored,
+      aftercareSummary: {
+        ...mirrored.aftercareSummary,
+        rebookedBooking: {
+          ...mirrored.aftercareSummary.rebookedBooking,
+          scheduledFor: new Date('2100-01-01T17:00:00.000Z'),
+        },
+      },
+    }
+    tx.booking.findUnique.mockImplementation(
+      (query: { where?: { id?: string } }) =>
+        Promise.resolve(query?.where?.id === bookingId ? linked : null),
+    )
+    mockTransaction(tx)
+
+    await expectBookingErrorCode(
+      upsertBookingAftercare(
+        makeValidArgs({
+          rebookMode: AftercareRebookMode.NONE,
+          rebookedFor: null,
+          rebookSlot: null,
+          notes: 'Changed my mind',
+        }),
+      ),
+      'BOOKING_NOT_FOUND',
+    )
+
+    const findUniqueIds = tx.booking.findUnique.mock.calls.map(
+      (call) => (call[0] as { where?: { id?: string } })?.where?.id,
+    )
+    expect(findUniqueIds).toContain('rebooked_1')
   })
 
   it('maps slot ownership validation failures to booking errors', async () => {
@@ -574,10 +690,13 @@ describe('upsertBookingAftercare rebook slot handling', () => {
                 startsAt: rebookedFor,
                 endsAt: rebookEndsAt,
               },
+              rebookedBookingId: null,
+              rebookedBooking: null,
               recommendedProducts: [],
             },
           }),
         ),
+        findFirst: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
       aftercareSummary: {

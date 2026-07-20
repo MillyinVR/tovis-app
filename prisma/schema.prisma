@@ -3305,6 +3305,9 @@ model Booking {
   clientActionTokens         ClientActionToken[]
 
   aftercareSummary             AftercareSummary?
+  // Inverse of AftercareSummary.rebookedBooking: the summary whose BOOKED slot
+  // created this appointment.
+  aftercareRebookedFromSummary AftercareSummary? @relation("AftercareRebookedBooking")
   waitlistOffer                WaitlistOffer?
   clientNotifications          ClientNotification[]
   scheduledClientNotifications ScheduledClientNotification[]
@@ -3662,6 +3665,12 @@ model AftercareSummary {
   // when the pro saves a new proposal. Lets the pro see the decline and re-offer.
   rebookDeclinedAt  DateTime?
   rebookSlot        AftercareRebookSlot?
+
+  // BOOKED_NEXT_APPOINTMENT books immediately at save: the real Booking the
+  // pro's slot created. SetNull so deleting that booking never strands the
+  // summary; a cancelled next appointment clears this link explicitly.
+  rebookedBookingId String?  @unique
+  rebookedBooking   Booking? @relation("AftercareRebookedBooking", fields: [rebookedBookingId], references: [id], onDelete: SetNull)
 
   // Pro-chosen "featured pair" shown as the primary before/after comparison on
   // the client's aftercare summary; every other before/after photo renders as a

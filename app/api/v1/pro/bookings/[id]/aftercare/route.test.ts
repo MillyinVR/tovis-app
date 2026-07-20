@@ -366,6 +366,7 @@ function makeUpsertResult(overrides?: {
           : new Date('2026-04-12T20:10:00.000Z'),
       lastEditedAt: new Date('2026-04-12T20:08:00.000Z'),
       version: 4,
+      rebookedBookingId: null,
     },
     remindersTouched: 1,
     clientNotified: overrides?.clientNotified ?? true,
@@ -578,6 +579,7 @@ function makeExpectedPostResponse(overrides?: {
       sentToClientAt,
       lastEditedAt: '2026-04-12T20:08:00.000Z',
       version: 4,
+      rebookedBookingId: null,
       isFinalized: Boolean(sentToClientAt),
       publicAccess: sentToClientAt
         ? {

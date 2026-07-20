@@ -38,6 +38,10 @@ const mocks = vi.hoisted(() => ({
 
   txBookingFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
+  // The materialization's duration-growth conflict probe (findSchedulingConflicts)
+  // scans bookings + live holds; default both to "no conflicts".
+  txBookingFindMany: vi.fn().mockResolvedValue([]),
+  txBookingHoldFindMany: vi.fn().mockResolvedValue([]),
 
   txProfessionalServiceOfferingFindMany: vi.fn(),
 
@@ -121,6 +125,10 @@ const tx = {
   booking: {
     findUnique: mocks.txBookingFindUnique,
     update: mocks.txBookingUpdate,
+    findMany: mocks.txBookingFindMany,
+  },
+  bookingHold: {
+    findMany: mocks.txBookingHoldFindMany,
   },
   professionalServiceOffering: {
     findMany: mocks.txProfessionalServiceOfferingFindMany,
@@ -426,6 +434,10 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
     vi.clearAllMocks()
     vi.useFakeTimers()
     vi.setSystemTime(TEST_NOW)
+
+    // Duration-growth conflict probe defaults: clear schedule.
+    mocks.txBookingFindMany.mockResolvedValue([])
+    mocks.txBookingHoldFindMany.mockResolvedValue([])
 
     mocks.withLockedProfessionalTransaction.mockImplementation(
       async (

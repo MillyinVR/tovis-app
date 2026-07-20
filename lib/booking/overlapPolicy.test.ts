@@ -4,8 +4,6 @@ import { ServiceLocationType } from '@prisma/client'
 import { describe, expect, it } from 'vitest'
 
 import {
-  aftercareSlotMatchesRequestedWindow,
-  bookingStartsMatch,
   decideBookingOverlapPermission,
   type BookingOverlapActor,
   type BookingOverlapSource,
@@ -67,65 +65,6 @@ function makeAftercareSlot(
     ...overrides,
   }
 }
-
-describe('bookingStartsMatch', () => {
-  it('returns true when exact times match', () => {
-    expect(bookingStartsMatch(startsAt, new Date(startsAt))).toBe(true)
-  })
-
-  it('returns false when times differ', () => {
-    expect(
-      bookingStartsMatch(
-        startsAt,
-        new Date('2026-06-01T17:15:00.000Z'),
-      ),
-    ).toBe(false)
-  })
-})
-
-describe('aftercareSlotMatchesRequestedWindow', () => {
-  it('returns true when the requested window matches the pro-preselected aftercare slot', () => {
-    expect(
-      aftercareSlotMatchesRequestedWindow({
-        requestedWindow,
-        slot: makeAftercareSlot(),
-      }),
-    ).toBe(true)
-  })
-
-  it('returns false when the requested start differs from the aftercare slot', () => {
-    expect(
-      aftercareSlotMatchesRequestedWindow({
-        requestedWindow,
-        slot: makeAftercareSlot({
-          startsAt: new Date('2026-06-01T19:00:00.000Z'),
-        }),
-      }),
-    ).toBe(false)
-  })
-
-  it('returns false when the requested end differs from the aftercare slot', () => {
-    expect(
-      aftercareSlotMatchesRequestedWindow({
-        requestedWindow,
-        slot: makeAftercareSlot({
-          endsAt: new Date('2026-06-01T18:30:00.000Z'),
-        }),
-      }),
-    ).toBe(false)
-  })
-
-  it('returns false when the requested professional differs from the aftercare slot', () => {
-    expect(
-      aftercareSlotMatchesRequestedWindow({
-        requestedWindow,
-        slot: makeAftercareSlot({
-          professionalId: 'pro_2',
-        }),
-      }),
-    ).toBe(false)
-  })
-})
 
 describe('decideBookingOverlapPermission', () => {
   it('allows a normal client booking when there is no conflict', () => {
@@ -189,7 +128,10 @@ describe('decideBookingOverlapPermission', () => {
     })
   })
 
-  it('allows an aftercare rebook overlap when the pro-preselected window exactly matches', () => {
+  it('blocks an aftercare rebook overlap even when the pro-preselected window exactly matches', () => {
+    // BOOKED-mode aftercare books the real appointment at save time, so a
+    // conflict at confirm always means the time has since been taken — the
+    // pro's pre-selected slot never authorizes a silent double-book.
     const decision = decideBookingOverlapPermission({
       actor: clientActor,
       source: {
@@ -202,11 +144,15 @@ describe('decideBookingOverlapPermission', () => {
       conflicts: [conflict],
     })
 
-    expect(decision).toEqual({
-      ok: true,
-      mode: 'AFTERCARE_PRESELECTED_SLOT',
-      conflicts: [conflict],
-    })
+    expect(decision.ok).toBe(false)
+
+    if (!decision.ok) {
+      expect(decision.code).toBe('AFTERCARE_PRESELECTED_SLOT_MISMATCH')
+      expect(decision.userMessage).toBe(
+        'That time is no longer available. Please pick a different time.',
+      )
+      expect(decision.conflicts).toEqual([conflict])
+    }
   })
 
   it('blocks an aftercare rebook overlap when no preselected slot exists', () => {

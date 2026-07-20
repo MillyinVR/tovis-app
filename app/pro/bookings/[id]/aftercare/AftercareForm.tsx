@@ -76,6 +76,8 @@ type Props = {
   existingRebookWindowStart?: string | null
   existingRebookWindowEnd?: string | null
   existingRebookDeclinedAt?: string | null
+  /** The real next-appointment Booking a saved BOOKED slot created, if any. */
+  existingRebookedBookingId?: string | null
   // Auto-suggested recommended-window dates for a fresh wrap-up (service date +
   // the offering's typical rebook interval). The server sends these only when no
   // aftercare has been saved yet; when present, they pre-select
@@ -301,6 +303,7 @@ export default function AftercareForm({
   existingRebookWindowStart,
   existingRebookWindowEnd,
   existingRebookDeclinedAt,
+  existingRebookedBookingId,
   suggestedRebookWindowStart,
   suggestedRebookWindowEnd,
   existingRebookSlot,
@@ -835,7 +838,7 @@ export default function AftercareForm({
 
     if (rebookMode === 'BOOKED_NEXT_APPOINTMENT') {
       if (!rebookOfferingId) {
-        return 'This booking has no service offering set, so an exact next appointment can’t be proposed. Use “Booking window” instead.'
+        return 'This booking has no service offering set, so an exact next appointment can’t be booked. Use “Booking window” instead.'
       }
 
       if (
@@ -843,7 +846,7 @@ export default function AftercareForm({
         !selectedAddressId &&
         !rebookClientAddressId
       ) {
-        return 'This client has no saved service address, so a mobile next appointment can’t be proposed. Use “Booking window” instead.'
+        return 'This client has no saved service address, so a mobile next appointment can’t be booked. Use “Booking window” instead.'
       }
 
       if (!rebookSlot) {
@@ -1198,8 +1201,9 @@ export default function AftercareForm({
           <div className={cardClass()}>
             <div className={sectionTitleClass()}>Rebook</div>
             <div className={subtleTextClass()}>
-              The single biggest driver of repeat visits — propose the exact
-              next appointment, or a booking window, before the client leaves.
+              The single biggest driver of repeat visits — book the exact next
+              appointment on the spot, or recommend a booking window, before
+              the client leaves.
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -1219,7 +1223,7 @@ export default function AftercareForm({
                 className={pillClass(
                   rebookMode === 'BOOKED_NEXT_APPOINTMENT',
                 )}
-                title="Recommend a single ideal next booking date"
+                title="Book the exact next appointment on your calendar now"
               >
                 Next booking date
               </button>
@@ -1237,6 +1241,23 @@ export default function AftercareForm({
 
             {showBooked ? (
               <div className="mt-4">
+                {existingRebookedBookingId && !existingRebookDeclinedAt ? (
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <span
+                      className="brand-pro-session-pill"
+                      data-tone="success"
+                    >
+                      Next appointment booked
+                    </span>
+                    <a
+                      href={`/pro/bookings/${existingRebookedBookingId}`}
+                      className="text-xs font-semibold text-textSecondary underline"
+                    >
+                      View booking
+                    </a>
+                  </div>
+                ) : null}
+
                 {existingRebookDeclinedAt ? (
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <span
@@ -1264,7 +1285,7 @@ export default function AftercareForm({
                       ) : (
                         <div className="mt-2 rounded-card border border-toneWarn/30 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
                           This client has no saved service address, so a mobile
-                          next appointment can’t be proposed. Use “Booking
+                          next appointment can’t be booked. Use “Booking
                           window” instead.
                         </div>
                       )
@@ -1322,8 +1343,10 @@ export default function AftercareForm({
                   </>
                 )}
                 <div className="mt-2 text-xs font-semibold text-textSecondary">
-                  Pick a real open time from your schedule. It shows on the
-                  client’s summary and can power a reminder.
+                  Pick a real open time from your schedule. Saving books it on
+                  your calendar right away and notifies the client — nothing
+                  for them to confirm. Changing the time reschedules the
+                  appointment; switching to another option cancels it.
                 </div>
               </div>
             ) : null}
