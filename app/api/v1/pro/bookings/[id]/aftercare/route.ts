@@ -158,6 +158,7 @@ const GET_BOOKING_SELECT = {
       rebookWindowStart: true,
       rebookWindowEnd: true,
       rebookDeclinedAt: true,
+      rebookedBookingId: true,
       featuredBeforeAssetId: true,
       featuredAfterAssetId: true,
       draftSavedAt: true,
@@ -661,6 +662,8 @@ function mapAftercareSummaryForGet(
     rebookWindowStart: toIsoOrNull(aftercare.rebookWindowStart),
     rebookWindowEnd: toIsoOrNull(aftercare.rebookWindowEnd),
     rebookDeclinedAt: toIsoOrNull(aftercare.rebookDeclinedAt),
+    // BOOKED mode books immediately at save; this is the created appointment.
+    rebookedBookingId: aftercare.rebookedBookingId,
     featuredBeforeAssetId: aftercare.featuredBeforeAssetId,
     featuredAfterAssetId: aftercare.featuredAfterAssetId,
     rebookSlot: aftercare.rebookSlot
@@ -828,6 +831,8 @@ function buildAftercareResponseBody(args: {
       rebookWindowEnd: toIsoOrNull(args.result.aftercare.rebookWindowEnd),
       featuredBeforeAssetId: args.result.aftercare.featuredBeforeAssetId,
       featuredAfterAssetId: args.result.aftercare.featuredAfterAssetId,
+      // BOOKED mode books immediately at save; this is the created appointment.
+      rebookedBookingId: args.result.aftercare.rebookedBookingId,
       rebookSlot: args.parsedBody.normalizedRebook.rebookSlot,
       draftSavedAt: toIsoOrNull(args.result.aftercare.draftSavedAt),
       sentToClientAt: toIsoOrNull(args.result.aftercare.sentToClientAt),

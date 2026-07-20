@@ -617,6 +617,7 @@ export default async function ProAftercarePage({
           rebookWindowStart: true,
           rebookWindowEnd: true,
           rebookDeclinedAt: true,
+          rebookedBookingId: true,
           featuredBeforeAssetId: true,
           featuredAfterAssetId: true,
           rebookSlot: {
@@ -934,6 +935,7 @@ export default async function ProAftercarePage({
             )}
             existingRebookWindowEnd={dateToIso(aftercare?.rebookWindowEnd)}
             existingRebookDeclinedAt={dateToIso(aftercare?.rebookDeclinedAt)}
+            existingRebookedBookingId={aftercare?.rebookedBookingId ?? null}
             suggestedRebookWindowStart={rebookSuggestion?.windowStartIso ?? null}
             suggestedRebookWindowEnd={rebookSuggestion?.windowEndIso ?? null}
             existingRebookSlot={

@@ -197,6 +197,7 @@ import {
   type BookingWindow,
 } from '@/lib/booking/overlapPolicy'
 import { findSchedulingConflicts } from '@/lib/booking/schedulingConflicts'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { resolveAftercarePreselectedSlot } from '@/lib/booking/aftercarePreselectedSlot'
 import { validateAftercareRebookSlotOwnership } from '@/lib/booking/aftercareRebookSlotOwnership'
 import {
@@ -794,6 +795,11 @@ type PerformLockedCreateRebookedBookingArgs = {
   requestedLocationType?: ServiceLocationType | null
   /** See {@link CreateClientRebookedBookingFromAftercareArgs.requestedClientAddressId}. */
   requestedClientAddressId?: string | null
+  /**
+   * PRO_AFTERCARE_SAVE: the pro books the next appointment at aftercare save,
+   * before the source session completes — relaxes the completed-source gate.
+   */
+  gate?: 'PRO_AFTERCARE_SAVE'
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -1084,6 +1090,8 @@ type UpsertBookingAftercareResult = {
     sentToClientAt: Date | null
     lastEditedAt: Date | null
     version: number
+    /** The real next-appointment Booking a BOOKED slot created (null otherwise). */
+    rebookedBookingId: string | null
   }
   remindersTouched: number
   clientNotified: boolean
@@ -1249,6 +1257,7 @@ const APPROVE_CONSULTATION_BOOKING_SELECT = {
   scheduledFor: true,
   subtotalSnapshot: true,
   totalDurationMinutes: true,
+  bufferMinutes: true,
   consultationConfirmedAt: true,
   sessionStep: true,
   consultationApproval: {
@@ -1507,6 +1516,14 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
     select: {
       id: true,
       sentToClientAt: true,
+      rebookedBookingId: true,
+      rebookedBooking: {
+        select: {
+          id: true,
+          status: true,
+          scheduledFor: true,
+        },
+      },
       rebookSlot: {
         select: {
           id: true,
@@ -1676,6 +1693,16 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
       sentToClientAt: true,
       lastEditedAt: true,
       version: true,
+      rebookedBookingId: true,
+      rebookedBooking: {
+        select: {
+          id: true,
+          status: true,
+          scheduledFor: true,
+          locationType: true,
+          clientAddressId: true,
+        },
+      },
       rebookSlot: {
         select: {
           id: true,
@@ -5026,11 +5053,11 @@ async function enforceBookingOverlapPolicy(args: {
   })
 
   if (decision.ok) {
-    // An authorized overlap (PRO/ADMIN double-book, or an aftercare pre-selected
-    // slot landing on a conflict) must be exempted from the DB overlap EXCLUDE
-    // constraint, or the booking write hits a raw 23P01. A no-conflict booking
-    // stays bound by the constraint (allowsOverlap = false), preserving the
-    // durable no-double-book guarantee against races and direct writes.
+    // An authorized overlap (a PRO/ADMIN double-book) must be exempted from
+    // the DB overlap EXCLUDE constraint, or the booking write hits a raw
+    // 23P01. A no-conflict booking stays bound by the constraint
+    // (allowsOverlap = false), preserving the durable no-double-book
+    // guarantee against races and direct writes.
     return { allowsOverlap: decision.conflicts.length > 0 }
   }
 
@@ -8024,32 +8051,63 @@ const offeringIds = Array.from(
     nextServiceSubtotal: computedSubtotal,
   })
 
-  const updatedBooking = await args.tx.booking.update({
-    where: { id: booking.id },
-    data: {
-      serviceId: primaryServiceId,
-      offeringId: primaryOfferingId,
-      subtotalSnapshot: checkoutRollup.subtotalSnapshot,
-      serviceSubtotalSnapshot: checkoutRollup.serviceSubtotalSnapshot,
-      productSubtotalSnapshot: checkoutRollup.productSubtotalSnapshot,
-      tipAmount: checkoutRollup.tipAmount,
-      taxAmount: checkoutRollup.taxAmount,
-      discountAmount: checkoutRollup.discountAmount,
-      totalAmount: checkoutRollup.totalAmount,
-      totalDurationMinutes: computedDurationMinutes,
-      consultationConfirmedAt: args.now,
-      sessionStep: SessionStep.BEFORE_PHOTOS,
-    },
-    select: {
-      id: true,
-      serviceId: true,
-      offeringId: true,
-      subtotalSnapshot: true,
-      totalDurationMinutes: true,
-      consultationConfirmedAt: true,
-      sessionStep: true,
-    },
+  // The agreed services can extend the booking past its original window. The
+  // pro authored the proposal knowing the appointment is underway, so a
+  // collision with a later booking is a pro-authorized overlap: mark
+  // allowsOverlap so the duration update clears the DB EXCLUDE constraint
+  // instead of failing the approval, and leave the pro to manage the collision
+  // on their calendar. allowsOverlap is only ever raised here, never reset.
+  const materializedEnd = new Date(
+    booking.scheduledFor.getTime() +
+      (computedDurationMinutes + booking.bufferMinutes) * 60_000,
+  )
+  const extensionConflicts = await findSchedulingConflicts({
+    tx: args.tx,
+    professionalId: booking.professionalId,
+    startsAt: booking.scheduledFor,
+    endsAt: materializedEnd,
+    excludeHoldId: null,
+    excludeBookingId: booking.id,
+    now: args.now,
   })
+
+  const updatedBooking = await args.tx.booking
+    .update({
+      where: { id: booking.id },
+      data: {
+        serviceId: primaryServiceId,
+        offeringId: primaryOfferingId,
+        subtotalSnapshot: checkoutRollup.subtotalSnapshot,
+        serviceSubtotalSnapshot: checkoutRollup.serviceSubtotalSnapshot,
+        productSubtotalSnapshot: checkoutRollup.productSubtotalSnapshot,
+        tipAmount: checkoutRollup.tipAmount,
+        taxAmount: checkoutRollup.taxAmount,
+        discountAmount: checkoutRollup.discountAmount,
+        totalAmount: checkoutRollup.totalAmount,
+        totalDurationMinutes: computedDurationMinutes,
+        consultationConfirmedAt: args.now,
+        sessionStep: SessionStep.BEFORE_PHOTOS,
+        ...(extensionConflicts.all.length > 0 ? { allowsOverlap: true } : {}),
+      },
+      select: {
+        id: true,
+        serviceId: true,
+        offeringId: true,
+        subtotalSnapshot: true,
+        totalDurationMinutes: true,
+        consultationConfirmedAt: true,
+        sessionStep: true,
+      },
+    })
+    .catch((error: unknown) => {
+      // 23P01: the DB overlap EXCLUDE rejected the duration growth (a write
+      // path that skipped the schedule lock). Surface a clean conflict, not a
+      // 500.
+      if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
+        throw bookingError('TIME_BOOKED')
+      }
+      throw error
+    })
 
   const updatedApproval = await args.tx.consultationApproval.update({
     where: { bookingId: booking.id },
@@ -9049,6 +9107,9 @@ async function performLockedCreateProBooking(args: {
   requestId?: string | null
   idempotencyKey?: string | null
   importMode?: boolean
+  // A client confirming a pro-authored time (waitlist offer) is still a CLIENT
+  // for overlap purposes: a conflict must refuse, never silently double-book.
+  overlapActor?: BookingOverlapActor
 }): Promise<CreateProBookingResult> {
   const importMode = args.importMode ?? false
 
@@ -9335,7 +9396,7 @@ async function performLockedCreateProBooking(args: {
 
   const overlapDecision = await enforceBookingOverlapPolicy({
     tx: args.tx,
-    actor: {
+    actor: args.overlapActor ?? {
       kind: 'PRO',
       userId: args.actorUserId,
       professionalId: args.professionalId,
@@ -9641,6 +9702,7 @@ assertCanCreateRebookFromSourceBooking({
   source,
   clientId: args.clientId ?? null,
   aftercareId: args.aftercareId ?? null,
+  gate: args.gate,
 })
 
   const requestedStart = normalizeToMinute(new Date(args.scheduledFor))
@@ -9659,12 +9721,34 @@ assertCanCreateRebookFromSourceBooking({
     throw bookingError('BAD_LOCATION')
   }
 
+  // Booked-at-save model: the summary's slot already IS a live appointment. A
+  // client confirm at that exact instant replays it below; any other time must
+  // not mint a second booking — the client reschedules the real one instead.
+  if (args.clientId && args.aftercareId) {
+    const liveRebooked = source.aftercareSummary?.rebookedBooking
+    if (
+      liveRebooked &&
+      liveRebooked.status !== BookingStatus.CANCELLED &&
+      liveRebooked.status !== BookingStatus.NO_SHOW &&
+      liveRebooked.scheduledFor.getTime() !== requestedStart.getTime()
+    ) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Next appointment already booked from this aftercare.',
+        userMessage:
+          'Your next appointment is already booked. Manage it from your appointments.',
+      })
+    }
+  }
+
     const existingRebook = await args.tx.booking.findFirst({
     where: {
       rebookOfBookingId: source.id,
       clientId: source.clientId,
       professionalId: source.professionalId,
       scheduledFor: requestedStart,
+      // A cancelled/no-show rebook never satisfies "already rebooked" — a
+      // fresh booking at the same time must be creatable after a cancel.
+      status: { notIn: [BookingStatus.CANCELLED, BookingStatus.NO_SHOW] },
     },
     select: {
       id: true,
@@ -10225,12 +10309,14 @@ assertCanCreateRebookFromSourceBooking({
       rebookedFor: requestedStart,
       rebookWindowStart: null,
       rebookWindowEnd: null,
+      rebookedBookingId: createdBooking.id,
     },
     update: {
       rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
       rebookedFor: requestedStart,
       rebookWindowStart: null,
       rebookWindowEnd: null,
+      rebookedBookingId: createdBooking.id,
     },
     select: {
       id: true,
@@ -11315,6 +11401,7 @@ if (
       sentToClientAt: existingAftercare.sentToClientAt,
       lastEditedAt: existingAftercare.lastEditedAt,
       version: existingAftercare.version,
+      rebookedBookingId: existingAftercare.rebookedBookingId ?? null,
     },
     remindersTouched: 0,
     clientNotified: false,
@@ -11452,6 +11539,143 @@ if (validRebookSlot) {
     where: {
       aftercareSummaryId: aftercare.id,
     },
+  })
+}
+
+// BOOKED_NEXT_APPOINTMENT books immediately: mirror the saved slot into a real
+// Booking on the pro's calendar so no other client can take the time (Tori,
+// 2026-07-20 — the slot is a pro-confirmed appointment, not a proposal, and
+// the client has nothing to confirm). Create when missing, reschedule when
+// only the time changed, recreate when the placement (location type / mobile
+// address) changed, cancel when the pro withdraws the booked plan.
+const priorRebookedBooking =
+  booking.aftercareSummary?.rebookedBooking &&
+  booking.aftercareSummary.rebookedBooking.status !== BookingStatus.CANCELLED &&
+  booking.aftercareSummary.rebookedBooking.status !== BookingStatus.NO_SHOW
+    ? booking.aftercareSummary.rebookedBooking
+    : null
+
+let syncedRebookedBookingId: string | null = priorRebookedBooking?.id ?? null
+
+if (validRebookSlot) {
+  const slotClientAddressId =
+    validRebookSlot.locationType === ServiceLocationType.MOBILE
+      ? validRebookSlot.clientAddressId
+      : null
+  const startUnchanged =
+    priorRebookedBooking !== null &&
+    priorRebookedBooking.scheduledFor.getTime() ===
+      validRebookSlot.startsAt.getTime()
+  const placementUnchanged =
+    priorRebookedBooking !== null &&
+    priorRebookedBooking.locationType === validRebookSlot.locationType &&
+    (priorRebookedBooking.clientAddressId ?? null) === slotClientAddressId
+
+  if (priorRebookedBooking && startUnchanged && placementUnchanged) {
+    // The booking already mirrors the slot — nothing to do.
+  } else if (priorRebookedBooking && placementUnchanged) {
+    // Time-only change: a normal reschedule (client gets BOOKING_RESCHEDULED).
+    await performLockedUpdateProBooking({
+      tx: args.tx,
+      now,
+      professionalId: args.professionalId,
+      bookingId: priorRebookedBooking.id,
+      nextStatus: null,
+      notifyClient: true,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      nextStart: validRebookSlot.startsAt,
+      nextBuffer: null,
+      nextDuration: null,
+      parsedRequestedItems: null,
+      hasBuffer: false,
+      hasDuration: false,
+      hasServiceItems: false,
+      actorUserId: args.actorUserId,
+      overrideReason: null,
+      requestId: args.requestId ?? null,
+    })
+  } else {
+    // No active booking yet, or the placement changed (which a reschedule
+    // can't express): release the old booking quietly and create afresh. The
+    // create notification below covers the client-facing story.
+    if (
+      priorRebookedBooking &&
+      (priorRebookedBooking.status === BookingStatus.PENDING ||
+        priorRebookedBooking.status === BookingStatus.ACCEPTED)
+    ) {
+      await performLockedCancel({
+        tx: args.tx,
+        bookingId: priorRebookedBooking.id,
+        actor: { kind: 'pro', professionalId: args.professionalId },
+        notifyClient: false,
+        reason: 'Next appointment updated from the aftercare plan.',
+        allowedStatuses: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
+      })
+    }
+
+    const createdRebook = await performLockedCreateRebookedBooking({
+      tx: args.tx,
+      now,
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+      scheduledFor: validRebookSlot.startsAt,
+      initialStatus: BookingStatus.ACCEPTED,
+      aftercareId: aftercare.id,
+      requestedLocationType: validRebookSlot.locationType,
+      requestedClientAddressId: slotClientAddressId,
+      gate: 'PRO_AFTERCARE_SAVE',
+      requestId: args.requestId ?? null,
+      idempotencyKey: args.idempotencyKey ?? null,
+    })
+    syncedRebookedBookingId = createdRebook.booking.id
+
+    await upsertClientNotification({
+      tx: args.tx,
+      clientId: booking.clientId,
+      bookingId: createdRebook.booking.id,
+      eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+      title: 'Your next appointment is booked',
+      body: `${booking.service.name}${formatBookingWhenClause(
+        validRebookSlot.startsAt,
+        timeZoneUsed,
+      )} — booked for you by your pro. Reschedule anytime.`,
+      dedupeKey: `AFTERCARE_REBOOKED:${createdRebook.booking.id}`,
+      href: `/client/bookings/${createdRebook.booking.id}`,
+      data: {
+        bookingId: createdRebook.booking.id,
+        aftercareId: aftercare.id,
+        notificationReason: 'AFTERCARE_REBOOKED',
+      },
+    })
+  }
+} else if (
+  priorRebookedBooking &&
+  (priorRebookedBooking.status === BookingStatus.PENDING ||
+    priorRebookedBooking.status === BookingStatus.ACCEPTED) &&
+  priorRebookedBooking.scheduledFor.getTime() > now.getTime()
+) {
+  // The pro withdrew the booked plan (mode change / slot removed): release the
+  // held time and tell the client their appointment was cancelled.
+  await performLockedCancel({
+    tx: args.tx,
+    bookingId: priorRebookedBooking.id,
+    actor: { kind: 'pro', professionalId: args.professionalId },
+    notifyClient: true,
+    reason: 'Next appointment removed from the aftercare plan.',
+    allowedStatuses: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
+  })
+  syncedRebookedBookingId = null
+}
+
+if (
+  (booking.aftercareSummary?.rebookedBookingId ?? null) !==
+  syncedRebookedBookingId
+) {
+  await args.tx.aftercareSummary.update({
+    where: { id: aftercare.id },
+    data: { rebookedBookingId: syncedRebookedBookingId },
   })
 }
 
@@ -11790,6 +12014,7 @@ return {
     sentToClientAt: finalizedAftercare.sentToClientAt,
     lastEditedAt: finalizedAftercare.lastEditedAt,
     version: finalizedAftercare.version,
+    rebookedBookingId: syncedRebookedBookingId,
   },
   remindersTouched,
   clientNotified,
@@ -12341,9 +12566,47 @@ function assertCanCreateRebookFromSourceBooking(args: {
   source: RebookSourceBookingRecord
   clientId?: string | null
   aftercareId?: string | null
+  gate?: 'PRO_AFTERCARE_SAVE'
 }): void {
   if (args.clientId && args.source.clientId !== args.clientId) {
     throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (args.gate === 'PRO_AFTERCARE_SAVE') {
+    // The pro books the next appointment while authoring aftercare, before the
+    // source session completes or checkout closes — so the COMPLETED /
+    // finishedAt / sentToClientAt / checkout gates below don't apply. Only a
+    // terminal non-occupancy source is unbookable, and the summary (upserted
+    // in this same transaction) must belong to the source booking.
+    if (
+      args.source.status === BookingStatus.CANCELLED ||
+      args.source.status === BookingStatus.NO_SHOW
+    ) {
+      throw bookingError('AFTERCARE_NOT_COMPLETED', {
+        message:
+          'A cancelled or no-show booking cannot seed a next appointment.',
+        userMessage: 'This appointment can no longer be rebooked.',
+      })
+    }
+
+    if (!args.source.aftercareSummary?.id) {
+      throw bookingError('AFTERCARE_NOT_COMPLETED', {
+        message: 'Rebooking requires an aftercare summary.',
+        userMessage: 'This appointment is not ready to rebook yet.',
+      })
+    }
+
+    if (
+      args.aftercareId &&
+      args.source.aftercareSummary.id !== args.aftercareId
+    ) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Aftercare does not belong to the requested source booking.',
+        userMessage: 'That aftercare link is invalid or expired.',
+      })
+    }
+
+    return
   }
 
   if (args.source.status !== BookingStatus.COMPLETED) {
@@ -14206,7 +14469,7 @@ export async function createWaitlistOffer(
 
       const location = await tx.professionalLocation.findFirst({
         where: { id: args.locationId, professionalId: args.professionalId },
-        select: { id: true, type: true, timeZone: true },
+        select: { id: true, type: true, timeZone: true, bufferMinutes: true },
       })
       if (!location) {
         throw bookingError('LOCATION_NOT_FOUND')
@@ -14219,6 +14482,28 @@ export async function createWaitlistOffer(
           message: 'Waitlist offers require a salon location.',
           userMessage: 'Offer from an in-salon location.',
         })
+      }
+
+      // An offer promises the client a bookable time, so refuse creation when
+      // the window already collides with a booking, hold, or calendar block —
+      // otherwise the client receives an offer whose confirm can only fail.
+      const offerConflict = await getTimeRangeConflict({
+        tx,
+        professionalId: args.professionalId,
+        locationId: location.id,
+        requestedStart: startsAt,
+        requestedEnd: endsAt,
+        defaultBufferMinutes: location.bufferMinutes,
+        nowUtc: now,
+      })
+      if (offerConflict) {
+        throw bookingError(
+          offerConflict === 'BLOCKED'
+            ? 'TIME_BLOCKED'
+            : offerConflict === 'HOLD'
+              ? 'TIME_HELD'
+              : 'TIME_BOOKED',
+        )
       }
 
       // Supersede any still-pending offer for this entry (partial unique index).
@@ -14403,6 +14688,14 @@ export async function confirmClientWaitlistOffer(
         overrideReason: null,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
+        // The confirm is the CLIENT accepting a time the pro offered earlier.
+        // If the slot was taken between offer and confirm, refuse with a clean
+        // TIME_BOOKED instead of inheriting the pro path's authorized overlap.
+        overlapActor: {
+          kind: 'CLIENT',
+          userId: args.clientId,
+          clientId: args.clientId,
+        },
       })
 
       await tx.waitlistOffer.update({

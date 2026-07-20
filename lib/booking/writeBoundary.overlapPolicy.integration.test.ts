@@ -6,7 +6,9 @@ import {
   BookingStatus,
   LastMinuteOfferType,
   LastMinuteTier,
+  ProfessionalLocationType,
   ServiceLocationType,
+  WaitlistOfferStatus,
 } from '@prisma/client'
 
 const TEST_AEAD_KEYRING = JSON.stringify({
@@ -27,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 
   findSchedulingConflicts: vi.fn(),
   decideBookingOverlapPermission: vi.fn(),
+  getTimeRangeConflict: vi.fn(),
 
   computeLastMinuteDiscount: vi.fn(),
 
@@ -98,6 +101,22 @@ const mocks = vi.hoisted(() => ({
     clientAddress: {
       findFirst: vi.fn(),
     },
+
+    waitlistOffer: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+      create: vi.fn(),
+    },
+
+    waitlistEntry: {
+      findFirst: vi.fn(),
+      update: vi.fn(),
+    },
+
+    professionalLocation: {
+      findFirst: vi.fn(),
+    },
   },
 }))
 
@@ -149,6 +168,16 @@ vi.mock('@/lib/booking/overlapPolicy', () => ({
   decideBookingOverlapPermission: mocks.decideBookingOverlapPermission,
 }))
 
+vi.mock('@/lib/booking/conflictQueries', async () => {
+  const actual = await vi.importActual<object>(
+    '@/lib/booking/conflictQueries',
+  )
+  return {
+    ...actual,
+    getTimeRangeConflict: mocks.getTimeRangeConflict,
+  }
+})
+
 vi.mock('@/lib/lastMinutePricing', () => ({
   computeLastMinuteDiscount: mocks.computeLastMinuteDiscount,
 }))
@@ -179,8 +208,10 @@ vi.mock('@/lib/booking/holdCleanup', () => ({
 vi.mock('@/lib/observability/bookingEvents', () => ({}))
 
 import {
+  confirmClientWaitlistOffer,
   createHold,
   createProBooking,
+  createWaitlistOffer,
   finalizeBookingFromHold,
 } from './writeBoundary'
 
@@ -709,5 +740,119 @@ describe('writeBoundary overlap policy integration', () => {
     }
     expect(createArgs.data.discountAmount.toString()).toBe('0')
     expect(createArgs.data.totalAmount.toString()).toBe('100')
+  })
+
+  function setupConfirmableWaitlistOffer() {
+    mocks.prisma.waitlistOffer.findUnique.mockResolvedValue({
+      id: 'offer_1',
+      status: WaitlistOfferStatus.PENDING,
+      clientId: 'client_1',
+      professionalId: 'pro_1',
+      waitlistEntryId: 'entry_1',
+      offeringId: 'offering_1',
+      locationId: 'location_1',
+      locationType: ServiceLocationType.SALON,
+      startsAt: new Date('2030-05-01T18:00:00.000Z'),
+      durationMinutes: 60,
+      expiresAt: new Date('2030-05-02T17:00:00.000Z'),
+      bookingId: null,
+      professional: { userId: 'pro_user_1' },
+    })
+    mocks.prisma.waitlistOffer.update.mockResolvedValue({ id: 'offer_1' })
+    mocks.prisma.waitlistEntry.update.mockResolvedValue({ id: 'entry_1' })
+  }
+
+  it('waitlist confirm runs the overlap policy as the CLIENT, not the pro', async () => {
+    setupValidProCreateInputs()
+    setupConfirmableWaitlistOffer()
+
+    await confirmClientWaitlistOffer({
+      offerId: 'offer_1',
+      clientId: 'client_1',
+    })
+
+    expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: expect.objectContaining({
+          kind: 'CLIENT',
+          clientId: 'client_1',
+        }),
+        source: expect.objectContaining({
+          kind: 'PRO_CREATED',
+        }),
+      }),
+    )
+  })
+
+  it('waitlist confirm refuses with TIME_BOOKED when the offered slot is no longer free', async () => {
+    setupValidProCreateInputs()
+    setupConfirmableWaitlistOffer()
+
+    mocks.decideBookingOverlapPermission.mockReturnValue({
+      ok: false,
+      code: 'CLIENT_OVERLAP_NOT_ALLOWED',
+      userMessage: 'That time is no longer available. Please choose another time.',
+      conflicts: [
+        {
+          kind: 'BOOKING',
+          id: 'booking_other',
+          professionalId: 'pro_1',
+          startsAt: new Date('2030-05-01T18:00:00.000Z'),
+          endsAt: new Date('2030-05-01T19:00:00.000Z'),
+        },
+      ],
+    })
+
+    await expect(
+      confirmClientWaitlistOffer({ offerId: 'offer_1', clientId: 'client_1' }),
+    ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+
+    expect(mocks.prisma.booking.create).not.toHaveBeenCalled()
+    expect(mocks.prisma.waitlistOffer.update).not.toHaveBeenCalled()
+    expect(mocks.prisma.waitlistEntry.update).not.toHaveBeenCalled()
+  })
+
+  it('waitlist offer creation refuses when the window already conflicts', async () => {
+    mocks.prisma.waitlistEntry.findFirst.mockResolvedValue({
+      id: 'entry_1',
+      clientId: 'client_1',
+      serviceId: 'service_1',
+    })
+    mocks.prisma.professionalServiceOffering.findFirst.mockResolvedValue({
+      id: 'offering_1',
+      offersInSalon: true,
+      service: { name: 'Haircut' },
+      professional: { businessName: 'Salon', displayName: 'Pro' },
+    })
+    mocks.prisma.professionalLocation.findFirst.mockResolvedValue({
+      id: 'location_1',
+      type: ProfessionalLocationType.SALON,
+      timeZone: 'America/Los_Angeles',
+    })
+    mocks.getTimeRangeConflict.mockResolvedValue('BOOKING')
+
+    await expect(
+      createWaitlistOffer({
+        professionalId: 'pro_1',
+        actorUserId: 'user_1',
+        waitlistEntryId: 'entry_1',
+        scheduledFor: new Date('2030-05-01T18:00:00.000Z'),
+        endsAt: new Date('2030-05-01T19:00:00.000Z'),
+        locationId: 'location_1',
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      }),
+    ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+
+    expect(mocks.getTimeRangeConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        professionalId: 'pro_1',
+        locationId: 'location_1',
+        requestedStart: new Date('2030-05-01T18:00:00.000Z'),
+        requestedEnd: new Date('2030-05-01T19:00:00.000Z'),
+      }),
+    )
+    expect(mocks.prisma.waitlistOffer.updateMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.waitlistOffer.create).not.toHaveBeenCalled()
   })
 })
