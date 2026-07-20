@@ -12,6 +12,12 @@ export type SelectedRebookSlot = {
   offeringId: string
   locationId: string
   locationType: 'SALON' | 'MOBILE'
+  /**
+   * MOBILE: the client service address the availability (and therefore this
+   * slot) was computed for. Emitted with the slot so the pair stays atomic —
+   * changing the address invalidates the pick. Always null for SALON.
+   */
+  clientAddressId: string | null
   startsAt: string
   endsAt: string
 }
@@ -185,6 +191,7 @@ export default function RebookSlotPicker({
       offeringId,
       locationId,
       locationType,
+      clientAddressId: locationType === 'MOBILE' ? clientAddressId : null,
       startsAt: slotIso,
       endsAt: addMinutesIso(slotIso, minutes),
     })

@@ -90,8 +90,56 @@ describe('RebookSlotPicker', () => {
       offeringId: 'off_1',
       locationId: 'loc_1',
       locationType: 'SALON',
+      // Salon slots never carry a client address, even if one was passed in.
+      clientAddressId: null,
       startsAt: '2026-07-01T17:00:00.000Z',
       endsAt: '2026-07-01T18:00:00.000Z',
+    } satisfies SelectedRebookSlot)
+  })
+
+  it('emits the mobile client address the availability was computed for', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        ok: true,
+        slots: ['2026-07-01T17:00:00.000Z'],
+        durationMinutes: 90,
+      }),
+    )
+
+    const onChange = vi.fn()
+    const { container } = render(
+      <RebookSlotPicker
+        {...BASE_PROPS}
+        locationType="MOBILE"
+        clientAddressId="addr_1"
+        onChange={onChange}
+      />,
+    )
+
+    const dayInput = container.querySelector(
+      'input[type="date"]',
+    ) as HTMLInputElement
+    fireEvent.change(dayInput, { target: { value: '2026-07-01' } })
+
+    // Mobile availability is travel-aware: the address rides the query…
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      'clientAddressId=addr_1',
+    )
+
+    // …and the emitted slot carries the same address, so the saved proposal
+    // can never disagree with the availability it came from.
+    const slotButton = await screen.findByRole('button')
+    fireEvent.click(slotButton)
+
+    expect(onChange).toHaveBeenCalledWith({
+      offeringId: 'off_1',
+      locationId: 'loc_1',
+      locationType: 'MOBILE',
+      clientAddressId: 'addr_1',
+      startsAt: '2026-07-01T17:00:00.000Z',
+      endsAt: '2026-07-01T18:30:00.000Z',
     } satisfies SelectedRebookSlot)
   })
 

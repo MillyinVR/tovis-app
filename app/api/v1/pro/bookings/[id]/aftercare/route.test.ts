@@ -1378,6 +1378,82 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
     })
   })
 
+  it('POST passes the pro-picked mobile client address through on the rebook slot', async () => {
+    expectIdempotencyStarted('idem_1')
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_1',
+        body: {
+          ...makeValidPostBody(),
+          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+          rebookedFor: '2026-05-02T18:00:00.000Z',
+          rebookWindowStart: null,
+          rebookWindowEnd: null,
+          rebookSlot: {
+            offeringId: 'offering_1',
+            locationId: 'location_1',
+            locationType: 'MOBILE',
+            clientAddressId: '  addr_1  ',
+            startsAt: '2026-05-02T18:00:00.000Z',
+            endsAt: '2026-05-02T19:30:00.000Z',
+          },
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(200)
+    expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rebookSlot: {
+          offeringId: 'offering_1',
+          locationId: 'location_1',
+          locationType: 'MOBILE',
+          clientAddressId: 'addr_1',
+          startsAt: new Date('2026-05-02T18:00:00.000Z'),
+          endsAt: new Date('2026-05-02T19:30:00.000Z'),
+        },
+      }),
+    )
+  })
+
+  it('POST strips a client address sent on a SALON rebook slot', async () => {
+    expectIdempotencyStarted('idem_1')
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_1',
+        body: {
+          ...makeValidPostBody(),
+          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+          rebookedFor: '2026-05-02T18:00:00.000Z',
+          rebookWindowStart: null,
+          rebookWindowEnd: null,
+          rebookSlot: {
+            offeringId: 'offering_1',
+            locationId: 'location_1',
+            locationType: 'SALON',
+            clientAddressId: 'addr_1',
+            startsAt: '2026-05-02T18:00:00.000Z',
+            endsAt: '2026-05-02T19:00:00.000Z',
+          },
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(200)
+    expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rebookSlot: expect.objectContaining({
+          locationType: 'SALON',
+          clientAddressId: null,
+        }),
+      }),
+    )
+  })
+
   it('POST threads the featured before/after pair through to upsertBookingAftercare', async () => {
     expectIdempotencyStarted('idem_featured_1')
 

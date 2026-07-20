@@ -1163,6 +1163,13 @@ describe('GET /api/v1/pro/bookings/[id] — noShowFeatureEnabled gate', () => {
     expect(client.canMessage).toBe(true)
   })
 
+  it('includes the ClientProfile id for client-scoped reads (e.g. saved addresses)', async () => {
+    const payload = await getPayload()
+    const client = payload.client
+    if (!isRecord(client)) throw new Error('missing client')
+    expect(client.id).toBe('client_1')
+  })
+
   it('reports canMessage false for an UNCLAIMED client', async () => {
     // A pro-created / CSV-imported profile has no user account until the client
     // claims it, and POST /messages/resolve answers 409 CLIENT_UNCLAIMED for it.

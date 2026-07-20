@@ -1715,9 +1715,10 @@ model ClientAddress {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client       ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  bookings     Booking[]
-  bookingHolds BookingHold[]
+  client               ClientProfile         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  bookings             Booking[]
+  bookingHolds         BookingHold[]
+  aftercareRebookSlots AftercareRebookSlot[]
 
   @@index([clientId, kind])
   @@index([clientId, isDefault])
@@ -3706,6 +3707,13 @@ model AftercareRebookSlot {
 
   locationType ServiceLocationType
 
+  // MOBILE proposals: the client service address the pro picked for the next
+  // appointment. Confirm clones this (falling back to the source booking's
+  // address when null). SetNull mirrors Booking.clientAddressId — deleting the
+  // saved address must not strand the proposal.
+  clientAddressId String?
+  clientAddress   ClientAddress? @relation(fields: [clientAddressId], references: [id], onDelete: SetNull)
+
   startsAt DateTime
   endsAt   DateTime
 
@@ -3715,6 +3723,7 @@ model AftercareRebookSlot {
   @@index([professionalId, startsAt])
   @@index([locationId, startsAt])
   @@index([offeringId])
+  @@index([clientAddressId])
 }
 
 model Product {
