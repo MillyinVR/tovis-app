@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   evaluateProSchedulingDecision: vi.fn(),
   evaluateHoldCreationDecision: vi.fn(),
 
-  findSchedulingConflicts: vi.fn(),
+  findBookingAndHoldConflicts: vi.fn(),
   decideBookingOverlapPermission: vi.fn(),
   getTimeRangeConflict: vi.fn(),
 
@@ -160,10 +160,6 @@ vi.mock('@/lib/booking/policies/holdPolicy', () => ({
   evaluateHoldCreationDecision: mocks.evaluateHoldCreationDecision,
 }))
 
-vi.mock('@/lib/booking/schedulingConflicts', () => ({
-  findSchedulingConflicts: mocks.findSchedulingConflicts,
-}))
-
 vi.mock('@/lib/booking/overlapPolicy', () => ({
   decideBookingOverlapPermission: mocks.decideBookingOverlapPermission,
 }))
@@ -174,6 +170,7 @@ vi.mock('@/lib/booking/conflictQueries', async () => {
   )
   return {
     ...actual,
+    findBookingAndHoldConflicts: mocks.findBookingAndHoldConflicts,
     getTimeRangeConflict: mocks.getTimeRangeConflict,
   }
 })
@@ -364,7 +361,7 @@ describe('writeBoundary overlap policy integration', () => {
       blockers: [],
     })
 
-    mocks.findSchedulingConflicts.mockResolvedValue({
+    mocks.findBookingAndHoldConflicts.mockResolvedValue({
       all: [],
     })
 
@@ -453,7 +450,7 @@ describe('writeBoundary overlap policy integration', () => {
     })
 
     expect(mocks.evaluateHoldCreationDecision).toHaveBeenCalledOnce()
-    expect(mocks.findSchedulingConflicts).not.toHaveBeenCalled()
+    expect(mocks.findBookingAndHoldConflicts).not.toHaveBeenCalled()
     expect(mocks.decideBookingOverlapPermission).not.toHaveBeenCalled()
   })
 
@@ -486,7 +483,7 @@ describe('writeBoundary overlap policy integration', () => {
       },
     })
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledOnce()
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledOnce()
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledOnce()
 
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith(
@@ -530,7 +527,7 @@ describe('writeBoundary overlap policy integration', () => {
       idempotencyKey: null,
     })
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledOnce()
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledOnce()
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledOnce()
 
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith(

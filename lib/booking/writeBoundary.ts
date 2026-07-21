@@ -198,8 +198,8 @@ import {
   type BookingOverlapSource,
   type BookingWindow,
 } from '@/lib/booking/overlapPolicy'
-import { findSchedulingConflicts } from '@/lib/booking/schedulingConflicts'
 import {
+  findBookingAndHoldConflicts,
   getTimeRangeConflict,
   hasCalendarBlockConflict,
 } from '@/lib/booking/conflictQueries'
@@ -5040,7 +5040,7 @@ async function enforceBookingOverlapPolicy(args: {
   excludeBookingId?: string | null
   now: Date
 }): Promise<{ allowsOverlap: boolean }> {
-  const conflicts = await findSchedulingConflicts({
+  const conflicts = await findBookingAndHoldConflicts({
     tx: args.tx,
     professionalId: args.requestedWindow.professionalId,
     startsAt: args.requestedWindow.startsAt,
@@ -8033,54 +8033,15 @@ const offeringIds = Array.from(
     'INVALID_SERVICE_ITEMS',
   )
 
-  await replaceBookingServiceItems(
-    args.tx,
-    booking.id,
-    normalizedItems.map((item, index) => ({
-      serviceId: item.serviceId,
-      offeringId: item.offeringId,
-      itemType: item.itemType,
-      priceSnapshot: item.priceSnapshot,
-      durationMinutesSnapshot: item.durationMinutesSnapshot,
-      notes:
-        item.itemType === BookingServiceItemType.ADD_ON
-          ? 'CONSULTATION_APPROVED'
-          : null,
-      sortOrder: index,
-    })),
-  )
-
-  const checkoutRollup = await buildBookingCheckoutRollupUpdate({
-    tx: args.tx,
-    bookingId: booking.id,
-    nextServiceSubtotal: computedSubtotal,
-  })
-
-  // The agreed services can extend the booking past its original window. The
-  // pro authored the proposal knowing the appointment is underway, so a
-  // collision with a later booking is a pro-authorized overlap: mark
-  // allowsOverlap so the duration update clears the DB EXCLUDE constraint
-  // instead of failing the approval, and leave the pro to manage the collision
-  // on their calendar. allowsOverlap is only ever raised here, never reset.
   const materializedEnd = new Date(
     booking.scheduledFor.getTime() +
       (computedDurationMinutes + booking.bufferMinutes) * 60_000,
   )
-  const extensionConflicts = await findSchedulingConflicts({
-    tx: args.tx,
-    professionalId: booking.professionalId,
-    startsAt: booking.scheduledFor,
-    endsAt: materializedEnd,
-    excludeHoldId: null,
-    excludeBookingId: booking.id,
-    now: args.now,
-  })
 
-  // ...but a CALENDAR BLOCK is not a collision the pro can absorb by working
-  // through it — it is time they explicitly declared unavailable, and blocks
-  // are fatal on every other write path in the repo (never override-gated,
-  // unlike working hours). findSchedulingConflicts above is block-blind, so
-  // this is a separate probe against the block-aware engine.
+  // A CALENDAR BLOCK is not a collision the pro can absorb by working through
+  // it — it is time they explicitly declared unavailable, and blocks are fatal
+  // on every other write path in the repo (never override-gated, unlike working
+  // hours).
   //
   // Only the EXTENSION window [previousEnd, materializedEnd) is probed, never
   // the original window. A block may legitimately already overlap the booked
@@ -8088,6 +8049,9 @@ const offeringIds = Array.from(
   // booking-conflict check, so a migrated pro can have a block laid straight
   // over a live appointment. Probing the full window would refuse those
   // approvals for a pre-existing condition the client cannot act on.
+  //
+  // This runs BEFORE the service-item rewrite: the refusal rolls back either
+  // way, but there is no reason to spend the writes only to undo them.
   const previousEnd = new Date(
     booking.scheduledFor.getTime() +
       ((booking.totalDurationMinutes ?? 0) + booking.bufferMinutes) * 60_000,
@@ -8117,6 +8081,45 @@ const offeringIds = Array.from(
       })
     }
   }
+
+  await replaceBookingServiceItems(
+    args.tx,
+    booking.id,
+    normalizedItems.map((item, index) => ({
+      serviceId: item.serviceId,
+      offeringId: item.offeringId,
+      itemType: item.itemType,
+      priceSnapshot: item.priceSnapshot,
+      durationMinutesSnapshot: item.durationMinutesSnapshot,
+      notes:
+        item.itemType === BookingServiceItemType.ADD_ON
+          ? 'CONSULTATION_APPROVED'
+          : null,
+      sortOrder: index,
+    })),
+  )
+
+  const checkoutRollup = await buildBookingCheckoutRollupUpdate({
+    tx: args.tx,
+    bookingId: booking.id,
+    nextServiceSubtotal: computedSubtotal,
+  })
+
+  // The agreed services can extend the booking past its original window. The
+  // pro authored the proposal knowing the appointment is underway, so a
+  // collision with a later BOOKING OR HOLD is a pro-authorized overlap: mark
+  // allowsOverlap so the duration update clears the DB EXCLUDE constraint
+  // instead of failing the approval, and leave the pro to manage the collision
+  // on their calendar. allowsOverlap is only ever raised here, never reset.
+  const extensionConflicts = await findBookingAndHoldConflicts({
+    tx: args.tx,
+    professionalId: booking.professionalId,
+    startsAt: booking.scheduledFor,
+    endsAt: materializedEnd,
+    excludeHoldId: null,
+    excludeBookingId: booking.id,
+    now: args.now,
+  })
 
   // Working hours are deliberately NOT re-checked here. The actor on all three
   // decision routes is the CLIENT, mid-appointment, and OUTSIDE_WORKING_HOURS

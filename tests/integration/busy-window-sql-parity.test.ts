@@ -18,7 +18,7 @@
 //   pnpm test:integration   (or the scratch-DB recipe in the premortem handoff)
 
 import { afterAll, describe, expect, it } from 'vitest'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, ServiceLocationType } from '@prisma/client'
 
 import {
   bookingToBusyInterval,
@@ -26,8 +26,9 @@ import {
   normalizeToMinute,
   sqlBusyWindowMinutes,
 } from '@/lib/booking/conflicts'
-import { calculateWindowEnd } from '@/lib/booking/schedulingConflicts'
+import { holdRecordToBusyInterval } from '@/lib/booking/conflictQueries'
 import {
+  DEFAULT_DURATION_MINUTES,
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
@@ -137,14 +138,23 @@ describe('busy-window parity vs the SQL overlap-range constraint', () => {
         }),
       )
 
-      const runtimeMinutes =
-        (calculateWindowEnd({
-          startsAt: normalizeToMinute(START),
-          durationMinutes: scenario.duration,
-          bufferMinutes: scenario.buffer,
-        }).getTime() -
-          normalizeToMinute(START).getTime()) /
-        60_000
+      // The write-boundary gate's own hold window. Since F3 this is the SAME
+      // builder availability uses (holdRecordToBusyInterval), driven here on the
+      // snapshot columns the SQL constraint reads, with no endsAtSnapshot so the
+      // duration/buffer branches are the ones under test.
+      const runtimeMinutes = intervalMinutes(
+        holdRecordToBusyInterval({
+          hold: {
+            scheduledFor: normalizeToMinute(START),
+            locationType: ServiceLocationType.SALON,
+            endsAtSnapshot: null,
+            durationMinutesSnapshot: scenario.duration,
+            bufferMinutesSnapshot: scenario.buffer,
+          },
+          defaultBufferMinutes: 0,
+          fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
+        }),
+      )
 
       expect(bookingMinutes).toBeGreaterThanOrEqual(sqlMinutes)
       expect(holdMinutes).toBeGreaterThanOrEqual(sqlMinutes)

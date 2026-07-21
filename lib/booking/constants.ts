@@ -30,8 +30,14 @@ export const ALLOWED_STEP_MINUTES = [5, 10, 15, 20, 30, 60] as const
 /**
  * Booking statuses that occupy a professional's calendar and therefore block
  * other bookings, holds, and last-minute openings from overlapping them.
- * Single source of truth — used by conflictQueries, schedulingConflicts, and
- * the last-minute opening command so the set can never drift between paths.
+ * Single source of truth — used by conflictQueries (both the availability reads
+ * and the write-boundary overlap gate) and the last-minute opening command, so
+ * the set can never drift between paths.
+ *
+ * NOTE this set is stricter than the durable DB EXCLUDE predicate, which covers
+ * PENDING/ACCEPTED/IN_PROGRESS only — COMPLETED is deliberately excluded there
+ * (pinned by booking-overlap-concurrency.test.ts). See F8 in
+ * docs/design/scheduling-conflict-audit-fix-plan.md.
  */
 export const BOOKING_BLOCKING_STATUSES: readonly BookingStatus[] = [
   BookingStatus.PENDING,

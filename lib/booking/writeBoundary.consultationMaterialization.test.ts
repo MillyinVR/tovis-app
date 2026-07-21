@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   withLockedClientOwnedBookingTransaction: vi.fn(),
   withLockedProfessionalTransaction: vi.fn(),
 
-  findSchedulingConflicts: vi.fn(),
+  findBookingAndHoldConflicts: vi.fn(),
   hasCalendarBlockConflict: vi.fn(),
 
   createConsultationApprovalProof: vi.fn(),
@@ -68,14 +68,11 @@ vi.mock('@/lib/booking/scheduleLock', () => ({
   lockProfessionalSchedule: vi.fn(),
 }))
 
-vi.mock('@/lib/booking/schedulingConflicts', () => ({
-  findSchedulingConflicts: mocks.findSchedulingConflicts,
-}))
-
 vi.mock('@/lib/booking/conflictQueries', async () => {
   const actual = await vi.importActual<object>('@/lib/booking/conflictQueries')
   return {
     ...actual,
+    findBookingAndHoldConflicts: mocks.findBookingAndHoldConflicts,
     hasCalendarBlockConflict: mocks.hasCalendarBlockConflict,
   }
 })
@@ -251,7 +248,7 @@ describe('consultation materialization overlap contract', () => {
         }),
     )
 
-    mocks.findSchedulingConflicts.mockResolvedValue({ all: [] })
+    mocks.findBookingAndHoldConflicts.mockResolvedValue({ all: [] })
     mocks.hasCalendarBlockConflict.mockResolvedValue(false)
 
     setupMaterializationBooking()
@@ -264,7 +261,7 @@ describe('consultation materialization overlap contract', () => {
       professionalId: 'pro_1',
     })
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledWith(
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledWith(
       expect.objectContaining({
         professionalId: 'pro_1',
         startsAt: SCHEDULED_FOR,
@@ -275,7 +272,7 @@ describe('consultation materialization overlap contract', () => {
   })
 
   it('marks the booking allowsOverlap when the duration growth collides', async () => {
-    mocks.findSchedulingConflicts.mockResolvedValue({
+    mocks.findBookingAndHoldConflicts.mockResolvedValue({
       all: [
         {
           kind: 'BOOKING',
@@ -314,7 +311,7 @@ describe('consultation materialization overlap contract', () => {
     expect(updateArgs.data.totalDurationMinutes).toBe(120)
   })
 
-  // F2: findSchedulingConflicts is block-blind, so before this the approval
+  // F2: findBookingAndHoldConflicts is block-blind, so before this the approval
   // could push an appointment straight through a calendar block. Blocks are
   // fatal on every other write path and are never override-gated.
   it('probes calendar blocks for the EXTENSION window only, not the original window', async () => {
@@ -346,6 +343,12 @@ describe('consultation materialization overlap contract', () => {
     ).rejects.toMatchObject({ code: 'TIME_BLOCKED' })
 
     expect(mocks.prisma.booking.update).not.toHaveBeenCalled()
+
+    // The probe runs BEFORE the service-item rewrite. The transaction rolls the
+    // refusal back either way, so this is about not spending writes we are
+    // about to undo — but it only stays true if something asserts it.
+    expect(mocks.prisma.bookingServiceItem.deleteMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.bookingServiceItem.createMany).not.toHaveBeenCalled()
   })
 
   // A block laid over the ALREADY-BOOKED time is a pre-existing condition the
@@ -363,7 +366,7 @@ describe('consultation materialization overlap contract', () => {
         }) => unknown
       }) => args.run({ tx, now: NOW, professionalId: 'pro_1' }),
     )
-    mocks.findSchedulingConflicts.mockResolvedValue({ all: [] })
+    mocks.findBookingAndHoldConflicts.mockResolvedValue({ all: [] })
     mocks.hasCalendarBlockConflict.mockResolvedValue(true)
 
     // Already 120min booked; the proposal materializes the same 120min, so the

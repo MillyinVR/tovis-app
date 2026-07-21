@@ -339,6 +339,68 @@ describe('waitlist offer → client confirm (real DB)', () => {
     ).rejects.toMatchObject({ code: 'WAITLIST_OFFER_NOT_PENDING' })
   })
 
+  // F5 notes that no hold is placed between offer and confirm, so the slot can
+  // evaporate; this pins that it "fails cleanly with TIME_BOOKED" rather than
+  // double-booking or 500ing.
+  //
+  // NOTE it does NOT isolate the app-level gate: with the conflict finder
+  // deliberately blinded this test still passes, because the database EXCLUDE
+  // constraint rejects the insert and the catch maps 23P01 to the same
+  // TIME_BOOKED. The app gate is covered separately, by the pro-overlap test in
+  // booking-overlap-concurrency.test.ts — that one CAN tell the layers apart.
+  it('confirm refuses with TIME_BOOKED when a booking already occupies the slot', async () => {
+    const entryId = await createEntry()
+    const start = futureUtc(13, 19)
+
+    const { offer } = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: start,
+      endsAt: new Date(start.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    // The slot evaporates between offer and confirm (no hold is placed — see F5).
+    await db.booking.create({
+      data: {
+        client: { connect: { id: fx.clientId } },
+        professional: { connect: { id: fx.professionalId } },
+        proTenant: { connect: { id: fx.tenantId } },
+        clientHomeTenant: { connect: { id: fx.tenantId } },
+        service: { connect: { id: fx.serviceId } },
+        offering: { connect: { id: fx.offeringId } },
+        location: { connect: { id: fx.salonLocationId } },
+        status: BookingStatus.ACCEPTED,
+        scheduledFor: new Date(start.getTime() + 30 * 60_000),
+        totalDurationMinutes: 60,
+        bufferMinutes: 0,
+        locationType: ServiceLocationType.SALON,
+        locationTimeZone: 'America/Los_Angeles',
+        subtotalSnapshot: new Prisma.Decimal('100.00'),
+        totalAmount: new Prisma.Decimal('100.00'),
+      },
+      select: { id: true },
+    })
+
+    await expect(
+      confirmClientWaitlistOffer({
+        offerId: offer.id,
+        clientId: fx.clientId,
+        idempotencyKey: `${TAG}-confirm-conflict`,
+      }),
+    ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+
+    // The refusal left the offer claimable, not consumed.
+    const offerRow = await db.waitlistOffer.findUnique({
+      where: { id: offer.id },
+    })
+    expect(offerRow?.status).toBe(WaitlistOfferStatus.PENDING)
+    expect(offerRow?.bookingId).toBeNull()
+  })
+
   it('decline marks the offer DECLINED and returns the entry to ACTIVE', async () => {
     const entryId = await createEntry()
     const start = futureUtc(12, 19)

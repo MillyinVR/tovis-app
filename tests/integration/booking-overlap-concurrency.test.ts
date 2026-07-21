@@ -19,11 +19,16 @@ import {
 } from '@prisma/client'
 
 import { addMinutes } from '@/lib/booking/conflicts'
-import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import {
+  findBookingAndHoldConflicts,
+  getTimeRangeConflict,
+} from '@/lib/booking/conflictQueries'
+import {
+  BOOKING_BLOCKING_STATUSES,
   BOOKING_OVERLAP_CONSTRAINT_NAME,
   HOLD_OVERLAP_CONSTRAINT_NAME,
 } from '@/lib/booking/constants'
+import { createProBooking } from '@/lib/booking/writeBoundary'
 import { deleteExpiredHoldsForProfessional } from '@/lib/booking/holdCleanup'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 
@@ -1386,5 +1391,244 @@ describe('booking overlap concurrency integration', () => {
         where: { professionalId: fx.professionalId },
       }),
     ).resolves.toBe(1)
+  })
+})
+
+// F3: `enforceBookingOverlapPolicy` — the gate EVERY booking write passes
+// through — used to run on its own conflict engine (lib/booking/schedulingConflicts.ts,
+// now deleted). It now shares `findBookingAndHoldConflicts` with the rest of
+// conflictQueries.ts. These drive that finder against real Postgres, because the
+// unit tests for it all mock the database away.
+describe('findBookingAndHoldConflicts against real Postgres', () => {
+  it('returns the conflicting booking and hold, and agrees with getTimeRangeConflict', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const bookingStart = futureUtc(3, 10)
+    const holdStart = futureUtc(3, 14)
+
+    const bookingId = await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: bookingStart,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+    const holdId = await createDirectHold({
+      clientId: fx.clients[1].clientId,
+      start: holdStart,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    // A window spanning both.
+    const conflicts = await findBookingAndHoldConflicts({
+      tx: db,
+      professionalId: fx.professionalId,
+      startsAt: bookingStart,
+      endsAt: addMinutes(holdStart, 75),
+    })
+
+    expect(conflicts.bookings.map((c) => c.id)).toEqual([bookingId])
+    expect(conflicts.holds.map((c) => c.id)).toEqual([holdId])
+    expect(conflicts.all.map((c) => c.kind)).toEqual(['BOOKING', 'HOLD'])
+
+    // The booking's window is start + 60 + 15.
+    const bookingConflict = conflicts.bookings[0]
+    expect(bookingConflict?.startsAt.getTime()).toBe(bookingStart.getTime())
+    expect(bookingConflict?.endsAt.getTime()).toBe(
+      addMinutes(bookingStart, 75).getTime(),
+    )
+
+    // ...and the availability-side engine reaches the same verdict on each.
+    await expect(
+      getTimeRangeConflict({
+        tx: db,
+        professionalId: fx.professionalId,
+        locationId: fx.salonLocationId,
+        requestedStart: bookingStart,
+        requestedEnd: addMinutes(bookingStart, 30),
+        defaultBufferMinutes: 15,
+      }),
+    ).resolves.toBe('BOOKING')
+
+    await expect(
+      getTimeRangeConflict({
+        tx: db,
+        professionalId: fx.professionalId,
+        locationId: fx.salonLocationId,
+        requestedStart: holdStart,
+        requestedEnd: addMinutes(holdStart, 30),
+        defaultBufferMinutes: 15,
+      }),
+    ).resolves.toBe('HOLD')
+  })
+
+  it('honours the exclude ids and skips expired holds and non-blocking statuses', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const start = futureUtc(4, 11)
+    const window = { startsAt: start, endsAt: addMinutes(start, 75) }
+
+    const bookingId = await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    // An expired hold on the same slot must not register as a conflict.
+    await createExpiredHold({
+      clientId: fx.clients[1].clientId,
+      start,
+      locationId: fx.suiteLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    // A CANCELLED booking is not occupancy.
+    await createDirectBooking({
+      clientId: fx.clients[1].clientId,
+      start: addMinutes(start, 5),
+      locationId: fx.suiteLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.CANCELLED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    const found = await findBookingAndHoldConflicts({
+      tx: db,
+      professionalId: fx.professionalId,
+      ...window,
+    })
+    expect(found.all.map((c) => c.id)).toEqual([bookingId])
+
+    const excluded = await findBookingAndHoldConflicts({
+      tx: db,
+      professionalId: fx.professionalId,
+      ...window,
+      excludeBookingId: bookingId,
+    })
+    expect(excluded.all).toEqual([])
+  })
+
+  // THE test that can tell the app gate apart from the database backstop.
+  //
+  // On a CLIENT path both layers refuse with TIME_BOOKED, so blinding the finder
+  // changes nothing observable — the EXCLUDE constraint catches it. A PRO
+  // double-book is the opposite: it must SUCCEED, and it can only succeed if the
+  // gate FINDS the conflict and stamps allowsOverlap so the row leaves the GIST
+  // index. A finder that under-detects turns an intended pro double-book into a
+  // raw 23P01.
+  it('a pro double-book through the real write boundary succeeds and stamps allowsOverlap', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    // Every other test in this file inserts rows directly, so it never meets the
+    // pro-readiness gate. This one goes through the real write boundary, which
+    // does: the fixture has a bookable MOBILE_BASE location, so the profile also
+    // needs its base config or readiness fails MOBILE_MISSING_BASE_CONFIG.
+    // Scoped to this test — beforeEach re-seeds.
+    await db.professionalProfile.update({
+      where: { id: fx.professionalId },
+      data: { mobileBasePostalCode: '92101', mobileRadiusMiles: 25 },
+    })
+
+    // 18:00Z = 11:00 America/Los_Angeles, inside the fixture working hours.
+    const existingStart = futureUtc(6, 18)
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: existingStart,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    const result = await createProBooking({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      clientId: fx.clients[1].clientId,
+      offeringId: fx.offeringId,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      // 30 minutes in: squarely overlapping, and step-aligned to the fixture's
+      // 15-minute grid.
+      scheduledFor: addMinutes(existingStart, 30),
+      clientAddressId: null,
+      internalNotes: null,
+      overrideReason: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      // No overrides: the slot is inside working hours and the point of the
+      // test is the OVERLAP decision, nothing else.
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    })
+
+    const created = await db.booking.findUnique({
+      where: { id: result.booking.id },
+      select: { allowsOverlap: true, status: true },
+    })
+
+    expect(created?.allowsOverlap).toBe(true)
+
+    // ...and both bookings really are on the calendar.
+    await expect(
+      db.booking.count({
+        where: {
+          professionalId: fx.professionalId,
+          status: { in: [...BOOKING_BLOCKING_STATUSES] },
+        },
+      }),
+    ).resolves.toBe(2)
+  })
+
+  it('reserves at least the DB EXCLUDE range for a hold whose snapshots are null', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const start = futureUtc(5, 9)
+
+    // The live create path always writes all three snapshots, so this row shape
+    // is only reachable for holds predating migration 20260405070348 (which
+    // added the columns with no backfill). Those are all long expired — but the
+    // write boundary must not be able to book over one if it ever sees it, and
+    // it used to reserve as little as ONE MINUTE here.
+    const hold = await db.bookingHold.create({
+      data: {
+        offeringId: fx.offeringId,
+        professionalId: fx.professionalId,
+        clientId: fx.clients[0].clientId,
+        scheduledFor: start,
+        expiresAt: addMinutes(new Date(), 15),
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.salonLocationId,
+        locationTimeZone: 'America/Los_Angeles',
+        durationMinutesSnapshot: null,
+        bufferMinutesSnapshot: null,
+        endsAtSnapshot: null,
+      },
+      select: { id: true },
+    })
+
+    // 30 minutes in: inside the offering's real duration, far past the 1-minute
+    // window the retired engine would have reserved.
+    const conflicts = await findBookingAndHoldConflicts({
+      tx: db,
+      professionalId: fx.professionalId,
+      startsAt: addMinutes(start, 30),
+      endsAt: addMinutes(start, 45),
+    })
+
+    expect(conflicts.holds.map((c) => c.id)).toEqual([hold.id])
   })
 })

@@ -13,7 +13,6 @@ lib/booking/applyStripePaymentSucceeded.dedup.test.ts|as unknown as|return { tx:
 lib/booking/depositRefundPartial.test.ts|as unknown as|const tx = mocks.txMock as unknown as Prisma.TransactionClient
 lib/booking/holdPolicy.overlapContract.test.ts|as unknown as|} as unknown as Prisma.TransactionClient
 lib/booking/refunds.test.ts|as unknown as|return txRef.current as unknown as Prisma.TransactionClient
-lib/booking/schedulingConflicts.test.ts|as unknown as|return tx as unknown as PrismaTransactionClient
 lib/booking/writeBoundary.aftercareRebookSlot.test.ts|as unknown as|const mockedPrisma = prisma as unknown as {
 lib/creator/creatorProfileStats.test.ts|as unknown as|return db as unknown as PrismaClient
 lib/follows/clientFollows.test.ts|as unknown as|return db as unknown as Prisma.TransactionClient
