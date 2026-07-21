@@ -442,10 +442,31 @@ Named honestly rather than assumed safe:
 - `typecheck` clean, `lint` 0 errors, guards pass, 703 files / **6849** unit
   tests, 31 files / **148** integration tests.
 
-**Not verified:** no alerting is wired — this makes the signal *emittable*, not
-*watched*. `logBookingConflict` writes a `console.warn` JSON line; whether
-anything in Vercel/Sentry alerts on `layer: 'db_backstop'` is outside this change
-and unchecked.
+**Alerting is wired.** `captureOverlapBackstopFired`
+(`lib/observability/bookingEvents.ts`) raises an **error**-level Sentry event
+tagged `booking.event = overlap_backstop_fired`, following the same shape as
+`captureLifecycleDrift` / `captureStripeAmountMismatch`. Error, not warning,
+even though no bad data is written — Postgres refused, the appointment is safe —
+because the severity is about **detectability**: a gate that silently stopped
+working is invisible on every client-facing surface, and nothing else pages
+anyone. `captureMessage` is not affected by `tracesSampleRate`, and Sentry is
+`enabled: Boolean(dsn)` (`sentry.server.config.ts`), so this is live wherever a
+DSN is configured.
+
+The structured log line stays where it was, emitted once by `logBookingConflict`
+at the call site — the alert is added on top, not duplicated.
+
+**Checked, not assumed:** `SENTRY_DSN` **and** `NEXT_PUBLIC_SENTRY_DSN` are both
+present in the production Vercel environment (`vercel env ls production`), so
+`enabled: Boolean(dsn)` resolves true and these events do reach Sentry in prod.
+The project also drains Vercel logs to Sentry (`SENTRY_VERCEL_LOG_DRAIN_URL`),
+so the structured `console.warn` line lands there as a second path.
+
+**Not verified:** no alert *rule* — threshold, routing, who actually gets paged —
+was configured. That is Sentry-side dashboard config, outside the repo, and it is
+what turns this from "queryable" into "someone finds out". Suggested rule: any
+event tagged `booking.event = overlap_backstop_fired`, alert on the first
+occurrence rather than a rate, since the expected count is zero.
 
 ### F3 — what shipped
 

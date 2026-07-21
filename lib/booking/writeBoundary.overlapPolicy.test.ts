@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   decideBookingOverlapPermission: vi.fn(),
   findBookingAndHoldConflicts: vi.fn(),
   logBookingConflict: vi.fn(),
+  captureOverlapBackstopFired: vi.fn(),
 
   syncBookingAppointmentReminders: vi.fn(),
   bumpScheduleVersion: vi.fn(),
@@ -133,6 +134,16 @@ vi.mock('@/lib/booking/conflictQueries', async () => {
   return {
     ...actual,
     findBookingAndHoldConflicts: mocks.findBookingAndHoldConflicts,
+  }
+})
+
+vi.mock('@/lib/observability/bookingEvents', async () => {
+  const actual = await vi.importActual<object>(
+    '@/lib/observability/bookingEvents',
+  )
+  return {
+    ...actual,
+    captureOverlapBackstopFired: mocks.captureOverlapBackstopFired,
   }
 })
 
@@ -1502,6 +1513,16 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
           layer: 'db_backstop',
           prismaCode: '23P01',
         }),
+      }),
+    )
+
+    // A log line nobody reads is not a signal. This raises the operational
+    // alert too, so the gate regression reaches a human instead of sitting in
+    // Vercel logs looking like a routine refusal.
+    expect(mocks.captureOverlapBackstopFired).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_CREATE',
+        professionalId: 'pro_1',
       }),
     )
   })

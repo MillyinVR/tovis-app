@@ -213,7 +213,10 @@ import {
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
-import { captureStripeAmountMismatch } from '@/lib/observability/bookingEvents'
+import {
+  captureOverlapBackstopFired,
+  captureStripeAmountMismatch,
+} from '@/lib/observability/bookingEvents'
 import {
   ADDRESS_KEY_VERSION,
   buildAddressPrivacyWriteData,
@@ -5086,6 +5089,18 @@ function logOverlapBackstopFired(args: {
       clientId: args.clientId ?? null,
       sourceBookingId: args.sourceBookingId ?? null,
     },
+  })
+
+  // ...and page a human. The log line above is the audit trail; on its own it
+  // would sit in Vercel logs looking like one more routine refusal.
+  captureOverlapBackstopFired({
+    action: args.action,
+    professionalId: args.professionalId,
+    bookingId: args.bookingId ?? args.sourceBookingId ?? null,
+    holdId: args.holdId ?? null,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    constraint: BOOKING_OVERLAP_CONSTRAINT_NAME,
   })
 }
 
