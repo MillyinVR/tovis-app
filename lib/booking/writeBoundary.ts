@@ -807,6 +807,14 @@ type PerformLockedCreateRebookedBookingArgs = {
   /** See {@link CreateClientRebookedBookingFromAftercareArgs.requestedClientAddressId}. */
   requestedClientAddressId?: string | null
   /**
+   * Who picked `scheduledFor`. CLIENT only when the client chose the minute
+   * themselves (the public aftercare rebook link) — that start is held to the
+   * pro's slot grid. A pro-chosen start (direct rebook, aftercare save, and the
+   * client's confirm of a pro-proposed `rebookedFor`) stays off-grid-legal:
+   * refusing it would dead-end a client on a time they cannot change.
+   */
+  startChosenBy: 'PRO' | 'CLIENT'
+  /**
    * PRO_AFTERCARE_SAVE: the pro books the next appointment at aftercare save,
    * before the source session completes — relaxes the completed-source gate.
    */
@@ -4371,6 +4379,8 @@ async function enforceUpdateBookingScheduling(args: {
   allowShortNotice: boolean
   allowFarFuture: boolean
   allowOutsideWorkingHours: boolean
+  /** See {@link EvaluateProSchedulingDecisionArgs.enforceStepGrid}. */
+  enforceStepGrid: boolean
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
@@ -4398,6 +4408,7 @@ async function enforceUpdateBookingScheduling(args: {
     allowFarFuture: args.allowFarFuture,
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
     excludeBookingId: args.bookingId,
+    enforceStepGrid: args.enforceStepGrid,
     // Booking/hold overlaps are decided by enforceBookingOverlapPolicy in the
     // update path (a pro may intentionally double-book their own calendar).
     deferBusyConflictsToOverlapPolicy: true,
@@ -5371,6 +5382,8 @@ async function enforceProCreateScheduling(args: {
   allowShortNotice: boolean
   allowFarFuture: boolean
   allowOutsideWorkingHours: boolean
+  /** See {@link EvaluateProSchedulingDecisionArgs.enforceStepGrid}. */
+  enforceStepGrid: boolean
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
@@ -5397,6 +5410,7 @@ async function enforceProCreateScheduling(args: {
     allowShortNotice: args.allowShortNotice,
     allowFarFuture: args.allowFarFuture,
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    enforceStepGrid: args.enforceStepGrid,
     // Booking/hold overlaps are decided by enforceBookingOverlapPolicy right
     // after this gate (a pro may intentionally double-book their own calendar;
     // an aftercare pre-selected slot may land on a conflict).
@@ -9540,6 +9554,8 @@ async function performLockedCreateProBooking(args: {
     allowShortNotice: args.allowShortNotice,
     allowFarFuture: args.allowFarFuture,
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    // Pro-created appointments (incl. the ICS import) own the minute.
+    enforceStepGrid: false,
     professionalId: args.professionalId,
     locationId: locationContext.locationId,
     locationType: args.locationType,
@@ -10202,6 +10218,7 @@ assertCanCreateRebookFromSourceBooking({
     allowShortNotice: false,
     allowFarFuture: false,
     allowOutsideWorkingHours: false,
+    enforceStepGrid: args.startChosenBy === 'CLIENT',
     professionalId: source.professionalId,
     locationId: locationContext.locationId,
     locationType: effectiveLocationType,
@@ -10568,6 +10585,8 @@ async function performLockedCreateRebookedBookingFromCompletedBooking(args: {
     professionalId: args.professionalId,
     scheduledFor: args.scheduledFor,
     initialStatus: BookingStatus.ACCEPTED,
+    // The pro rebooks off their own calendar.
+    startChosenBy: 'PRO',
     requestId: args.requestId,
     idempotencyKey: args.idempotencyKey,
   })
@@ -10986,6 +11005,8 @@ if (args.notifyClient) {
     allowShortNotice: args.allowShortNotice,
     allowFarFuture: args.allowFarFuture,
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    // Pro-driven reschedule / drag / resize — the pro owns the minute.
+    enforceStepGrid: false,
     professionalId: existing.professionalId,
     locationId: location.id,
     locationType: existing.locationType,
@@ -11820,6 +11841,8 @@ if (validRebookSlot) {
       professionalId: args.professionalId,
       scheduledFor: validRebookSlot.startsAt,
       initialStatus: BookingStatus.ACCEPTED,
+      // The pro picked this slot while authoring aftercare.
+      startChosenBy: 'PRO',
       aftercareId: aftercare.id,
       requestedLocationType: validRebookSlot.locationType,
       requestedClientAddressId: slotClientAddressId,
@@ -14414,6 +14437,13 @@ export async function createClientRebookedBookingFromAftercare(
       professionalId: lockedAftercareRef.booking.professionalId,
       scheduledFor: args.scheduledFor,
       initialStatus: BookingStatus.PENDING,
+      // The client picked this minute on the public aftercare link, so it is
+      // held to the pro's slot grid — the same rule the client's own hold /
+      // finalize flow enforces via checkSlotReadiness. Every slot the
+      // RebookCard offers comes from /availability/day, which generates its
+      // candidates from that same working-window step grid, so this refuses
+      // only a start no client UI could have produced.
+      startChosenBy: 'CLIENT',
       clientId: args.clientId,
       aftercareId: args.aftercareId,
       aftercareClientActionTokenId: args.aftercareClientActionTokenId,
@@ -14510,6 +14540,10 @@ export async function confirmClientAftercareNextAppointment(
       professionalId: locked.professionalId,
       scheduledFor: locked.scheduledFor,
       initialStatus: BookingStatus.ACCEPTED,
+      // The client is confirming the pro's proposed `rebookedFor`, not choosing
+      // a time — holding it to the grid would dead-end them on a minute only
+      // the pro can change.
+      startChosenBy: 'PRO',
       clientId: args.clientId,
       aftercareId: locked.aftercareId,
       aftercareClientActionTokenId: null,

@@ -63,6 +63,8 @@ function makeArgs() {
     allowShortNotice: false,
     allowFarFuture: false,
     allowOutsideWorkingHours: false,
+    // The pro-owned default for every path except the public rebook link.
+    enforceStepGrid: false,
   } as const
 }
 
@@ -182,6 +184,62 @@ describe('evaluateProSchedulingDecision', () => {
         requestedEnd,
         appliedOverrides: [],
       },
+    })
+  })
+
+  it('refuses an off-step start with STEP_MISMATCH when the CLIENT picked the minute', async () => {
+    mocks.isStartAlignedToWorkingWindowStep.mockReturnValueOnce({
+      ok: false,
+      code: 'STEP_MISMATCH',
+      meta: {
+        reason: 'not-on-working-window-step',
+        stepRemainder: 7,
+      },
+    })
+
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      enforceStepGrid: true,
+    })
+
+    // Fatal, and fatal EARLY — no conflict query is spent on a start that can
+    // never be booked.
+    expect(mocks.checkAdvanceNotice).not.toHaveBeenCalled()
+    expect(mocks.ensureWithinWorkingHours).not.toHaveBeenCalled()
+    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'STEP_MISMATCH',
+      logHint: {
+        requestedStart,
+        requestedEnd,
+        conflictType: 'STEP_BOUNDARY',
+        meta: {
+          stepMinutes: 15,
+          reason: 'not-on-working-window-step',
+          stepRemainder: 7,
+        },
+      },
+    })
+  })
+
+  it('still surfaces WORKING_HOURS_REQUIRED (not STEP_MISMATCH) when the grid is enforced', async () => {
+    // enforceStepGrid must not swallow the working-hours codes the alignment
+    // helper returns instead of STEP_MISMATCH.
+    mocks.isStartAlignedToWorkingWindowStep.mockReturnValueOnce({
+      ok: false,
+      code: 'WORKING_HOURS_REQUIRED',
+    })
+
+    const result = await evaluateProSchedulingDecision({
+      ...makeArgs(),
+      enforceStepGrid: true,
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'WORKING_HOURS_REQUIRED',
     })
   })
 
