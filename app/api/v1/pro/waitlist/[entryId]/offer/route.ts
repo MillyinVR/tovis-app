@@ -4,7 +4,7 @@ import { Role, ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, pickString, requirePro } from '@/app/api/_utils'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -142,10 +142,7 @@ export async function POST(
     return response
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('POST /api/v1/pro/waitlist/[entryId]/offer error', {

@@ -15,6 +15,14 @@ const mocks = vi.hoisted(() => ({
     ...extra,
   })),
   pickString: vi.fn(),
+  bookingErrorJsonFail: vi.fn(
+    (error: { code: string; message: string; userMessage: string }) => ({
+      ok: false,
+      bookingErrorCode: error.code,
+      message: error.message,
+      userMessage: error.userMessage,
+    }),
+  ),
   bookingJsonFail: vi.fn((code: string, extra?: Record<string, unknown>) => ({
     ok: false,
     bookingErrorCode: code,
@@ -47,6 +55,7 @@ vi.mock('@/app/api/_utils', () => ({
 
 vi.mock('@/app/api/_utils/bookingResponses', () => ({
   bookingJsonFail: mocks.bookingJsonFail,
+  bookingErrorJsonFail: mocks.bookingErrorJsonFail,
 }))
 
 vi.mock('@/app/api/_utils/idempotency', () => ({

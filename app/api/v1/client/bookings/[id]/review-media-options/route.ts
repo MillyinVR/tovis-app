@@ -16,7 +16,7 @@ import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundar
 import {
   isBookingError,
 } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 export const dynamic = 'force-dynamic'
@@ -98,10 +98,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
     return jsonOk({ items })
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error(

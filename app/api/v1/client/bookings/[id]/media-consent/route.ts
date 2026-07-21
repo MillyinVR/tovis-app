@@ -9,7 +9,7 @@
 import { jsonFail, jsonOk, pickBool, pickString, requireClient } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { requireClientBookingOwnership } from '@/app/api/_utils/auth/requireClientBookingOwnership'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import { isBookingError } from '@/lib/booking/errors'
 import { setClientBookingMediaUseConsent } from '@/lib/booking/writeBoundary'
 import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
@@ -48,10 +48,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     return jsonOk({ mediaUseConsent: result.mediaUseConsent } satisfies Omit<MediaConsentResponseDTO, 'ok'>)
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
     console.error('POST /api/v1/client/bookings/[id]/media-consent error', {
       error: safeError(error),

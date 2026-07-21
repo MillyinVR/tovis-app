@@ -30,7 +30,7 @@ import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import { createRebookedBookingFromCompletedBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -336,10 +336,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     })
 
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('POST /api/v1/pro/bookings/[id]/rebook error', {

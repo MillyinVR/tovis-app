@@ -8109,6 +8109,11 @@ const offeringIds = Array.from(
         message: `Consultation extension runs into blocked time. bookingId=${booking.id}`,
         userMessage:
           'These services run into time your pro has blocked off. Ask them to update the proposal.',
+        // The catalog default is PICK_NEW_SLOT, which is right in the booking
+        // flow and meaningless here: the client is approving services on an
+        // appointment already underway and has no slot to pick. The pro amends
+        // the proposal (or clears the block); the client just retries.
+        uiAction: 'NONE',
       })
     }
   }

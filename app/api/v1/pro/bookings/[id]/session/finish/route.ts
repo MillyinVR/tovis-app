@@ -15,7 +15,10 @@ import { MediaPhase, Role, SessionStep } from '@prisma/client'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import {
   normalizeJsonObjectPayload,
   type JsonObjectPayload,
@@ -176,10 +179,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     })
 
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('POST /api/v1/pro/bookings/[id]/session/finish error', {

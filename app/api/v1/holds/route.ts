@@ -14,7 +14,10 @@ import { normalizeLocationType } from '@/lib/booking/locationContext'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import { createHold } from '@/lib/booking/writeBoundary'
 import type { BookingHoldCreateResponseDTO } from '@/lib/dto/holds'
 import {
@@ -344,10 +347,7 @@ export async function POST(req: NextRequest) {
 
     if (isBookingError(error)) {
       return withServerTiming(
-        bookingJsonFail(error.code, {
-          message: error.message,
-          userMessage: error.userMessage,
-        }),
+        bookingErrorJsonFail(error),
         buildServerTimingMetrics(),
       )
     }

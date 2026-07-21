@@ -101,6 +101,20 @@ export type BookingErrorDescriptor = BookingErrorMeta & {
   code: BookingErrorCode;
 };
 
+/**
+ * Per-call-site overrides for a catalog entry.
+ *
+ * `uiAction` is overridable because one code can be reached from surfaces with
+ * different remedies. TIME_BLOCKED is the live example: in the client booking
+ * flow the answer really is PICK_NEW_SLOT, but on a consultation approval the
+ * client has no slot to pick — the pro has to amend the proposal — so that
+ * call site downgrades it to NONE. The CODE stays the same because its meaning
+ * ("that time is blocked") is the same; only the suggested remedy differs.
+ */
+export type BookingErrorOverrides = Partial<
+  Pick<BookingErrorMeta, "message" | "userMessage" | "uiAction">
+>;
+
 export type BookingErrorResponse = {
   ok: false;
   error: BookingErrorDescriptor;
@@ -639,7 +653,7 @@ export function isBookingErrorCode(code: string): code is BookingErrorCode {
 
 export function getBookingErrorDescriptor(
   code: BookingErrorCode,
-  overrides?: Partial<Pick<BookingErrorMeta, "message" | "userMessage">>,
+  overrides?: BookingErrorOverrides,
 ): BookingErrorDescriptor {
   const meta = getBookingErrorMeta(code);
 
@@ -647,7 +661,7 @@ export function getBookingErrorDescriptor(
     code,
     httpStatus: meta.httpStatus,
     retryable: meta.retryable,
-    uiAction: meta.uiAction,
+    uiAction: overrides?.uiAction ?? meta.uiAction,
     message: overrides?.message ?? meta.message,
     userMessage: overrides?.userMessage ?? meta.userMessage,
   };
@@ -655,7 +669,7 @@ export function getBookingErrorDescriptor(
 
 export function toBookingErrorResponse(
   code: BookingErrorCode,
-  overrides?: Partial<Pick<BookingErrorMeta, "message" | "userMessage">>,
+  overrides?: BookingErrorOverrides,
 ): BookingErrorResponse {
   return {
     ok: false,
@@ -672,7 +686,7 @@ export class BookingError extends Error {
 
   constructor(
     code: BookingErrorCode,
-    overrides?: Partial<Pick<BookingErrorMeta, "message" | "userMessage">>,
+    overrides?: BookingErrorOverrides,
   ) {
     const descriptor = getBookingErrorDescriptor(code, overrides);
     super(descriptor.message);
@@ -688,7 +702,7 @@ export class BookingError extends Error {
 
 export function bookingError(
   code: BookingErrorCode,
-  overrides?: Partial<Pick<BookingErrorMeta, "message" | "userMessage">>,
+  overrides?: BookingErrorOverrides,
 ): BookingError {
   return new BookingError(code, overrides);
 }
@@ -751,7 +765,7 @@ export function isBookingError(value: unknown): value is BookingError {
  */
 export function getBookingFailPayload(
   code: BookingErrorCode,
-  overrides?: Partial<Pick<BookingErrorMeta, "message" | "userMessage">>,
+  overrides?: BookingErrorOverrides,
 ): {
   httpStatus: number;
   userMessage: string;
