@@ -207,6 +207,9 @@ a refactor.
 > Extend the parity test to cover holds either way — that is the guard the
 > booking path already has and the hold path never did.
 
+> ✅ **Shipped.** The hold divergence was settled first and is **latent, not
+> live** — it did not outrank the refactor. See "F3 — what shipped" in §4.
+
 ### F4 — Public rebook token accepts off-grid times 🟠
 
 `app/api/v1/client/rebook/[token]/route.ts:395` →
@@ -374,7 +377,7 @@ Named honestly rather than assumed safe:
 | --- | --- |
 | F1 ICS import double-book | ✅ done — branch `fix/scheduling-conflict-audit` |
 | F2 consultation extension | ✅ done — #699, + #700 (page) + #701 (uiAction), iOS #203 |
-| F3 retire second engine | not started |
+| F3 retire second engine | ✅ done — branch `fix/f3-retire-second-conflict-engine` |
 | F4 rebook token step grid | not started |
 | F5 waitlist offer working hours | not started |
 | F6 last-minute opening lock | not started |
@@ -384,6 +387,104 @@ Named honestly rather than assumed safe:
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — branch `fix/integration-suite-ci` |
 | F12 proposal-time validation | not started (opened by F2) |
+
+### F3 — what shipped
+
+**The hold divergence was settled first, and it is LATENT, not live.** It does
+not outrank the refactor. Three independent reasons, each checked rather than
+reasoned about:
+
+1. **One production hold-create site exists** (`writeBoundary.ts:7405`, the only
+   `bookingHold.create` outside tests/backfills), and it always writes
+   `endsAtSnapshot: requestedEnd` and `durationMinutesSnapshot: durationMinutes`.
+   Both are non-nullable upstream: `holdPolicy` types `requestedEnd` as `Date`,
+   and `locationContext.ts:429` refuses when the mode duration is null.
+2. **No update path can null them out.** The only `bookingHold.updateMany` moves
+   `clientId` on a claim-merge; the address-encryption backfill touches address
+   columns only.
+3. **A both-null row could only predate migration `20260405070348`**, which added
+   the three columns with **no backfill**. `HOLD_MINUTES = 10`, and both engines
+   filter `expiresAt > now`, so every such row expired months ago. Confirmed
+   against prod (`tovis-dev`): `BookingHold` holds **0 rows**, null or otherwise.
+
+**A wider version of the same bug was found while pinning it, and IS fixed.** The
+DB `EXCLUDE` for holds keys off `tovis_booking_overlap_range(scheduledFor,
+durationMinutesSnapshot, bufferMinutesSnapshot)` — **not** `endsAtSnapshot`.
+Engine B had no floor at all, so a hold with `durationMinutesSnapshot = 0` and
+`bufferMinutesSnapshot = 0` produced a **zero-length** busy window where Postgres
+reserves one minute — availability clearing a slot the database rejects with
+23P01. Engine A's `max(1, …)` covered that and Engine B is the engine that
+survived. `holdRecordToBusyInterval` now floors **every** branch to the SQL range.
+
+Shipped:
+
+- `lib/booking/conflictQueries.ts` — new `findBookingAndHoldConflicts`: the
+  list-returning booking/hold finder the overlap policy needs, built on the same
+  `bookingToBusyInterval` / `holdRecordToBusyInterval` primitives as every other
+  conflict read. Blocks stay out of it by design (gated a layer up). No `take`
+  default — a silently truncated conflict list at a write gate is a double-book.
+  `holdRecordToBusyInterval` exported and floored to the DB range.
+- `lib/booking/writeBoundary.ts` — `enforceBookingOverlapPolicy` and the
+  consultation extension probe both moved onto it; the import of the retired
+  engine is gone.
+- `lib/booking/schedulingConflicts.ts` + its test — **deleted** (211 + 483 lines).
+  `tools/baselines/no-type-escape.txt` shrinks by one entry with them.
+- The consultation block probe now runs **before** `replaceBookingServiceItems`
+  (the cheap follow-up F2 left open).
+
+**Verified. Every new guard was proven to fail first:**
+
+- `conflictEngineParity.test.ts` — rewritten around the invariant that outlives
+  the deletion (runtime window >= DB floor, bookings **and** holds). Two cases go
+  red without the floor: `expected 0 to be >= 1` (zero duration+buffer) and
+  `expected 5 to be >= 75` (a short `endsAtSnapshot`).
+- `busy-window-sql-parity.test.ts` now drives `holdRecordToBusyInterval` — the
+  builder that actually ships — against the real SQL function, instead of the
+  deleted `calculateWindowEnd`.
+- The probe reorder is pinned by a new assertion in
+  `writeBoundary.consultationMaterialization.test.ts`; swapping the two blocks
+  back reports `expected "spy" to not be called at all, but actually been called
+  1 times`.
+- **3 new real-Postgres tests** in `booking-overlap-concurrency.test.ts` drive the
+  finder itself. The null-snapshot one goes red when the builder is reverted to
+  Engine A's math: `expected [] to deeply equal [ 'cmrv…' ]` — the 1-minute
+  window misses the hold entirely.
+
+⚠️ **A test that looked like proof and was not.** A waitlist-confirm test
+asserting `TIME_BOOKED` on a taken slot passes *even with the conflict finder
+blinded to return nothing* — the DB `EXCLUDE` catches the insert and the catch
+maps 23P01 to the same code. On client paths the app gate and the durable
+backstop are indistinguishable from outside. The test that **can** tell them
+apart is the **pro double-book**: it must SUCCEED, and only succeeds if the gate
+finds the conflict and stamps `allowsOverlap`. Blinded, it fails with "Requested
+time already has a booking". That is the one in the suite now; the waitlist test
+was kept with its limitation written into the comment.
+
+`typecheck` clean, `lint` 0 errors, all static guards pass, **703 files / 6848
+unit tests**, **31 files / 148 integration tests** against real Postgres.
+
+**Not verified / not checked:**
+
+- **No browser or simulator driving.** This change has no UI surface — it is a
+  gate swap behind identical error codes — so nothing client-facing was expected
+  to move. That is an argument, not an observation.
+- **Lock-hold cost unmeasured.** The finder issues the same two queries the
+  retired engine did (`Promise.all` rather than sequential, so if anything
+  slightly shorter), but the hold query now joins `offering` and `location`.
+  Inside the advisory lock, unmeasured — same gap as §3's lock-contention entry.
+- **Removing the `take` cap is unbounded by construction.** The window is narrow
+  (`[start − MAX_OTHER_OVERLAP, end)`) so the row count is small in practice, but
+  no limit is enforced.
+- The floor can extend a hold window by **up to 59 seconds** when `scheduledFor`
+  carries seconds (`endsAtSnapshot` is built from a minute-floored start). The
+  live route normalizes first (`app/api/v1/holds/route.ts:188`), so this is
+  unreachable there; where it did fire it moves toward the DB, never away.
+- **Local-harness correction:** `waitlist-offer.test.ts` needs `PII_AEAD_KEYS_JSON`
+  keyed by **`address-aead-v1` / `email-aead-v1` / `phone-aead-v1` /
+  `notes-aead-v1`** (plus `PII_LOOKUP_HMAC_KEYS_JSON` and `JWT_SECRET`) — not a
+  single generic key. A wrongly-keyed ring fails with `Missing AEAD key for key
+  version: address-aead-v1`, and takes `offering-revive-price-ramp.test.ts` down
+  with it. Copy `.github/workflows/integration.yml:88`.
 
 ### F2 — the follow-ups that only turned up by LOOKING
 
@@ -594,63 +695,61 @@ update to the table in §4.)
 
 > Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
-> it first, especially §4's status table, the **"F2 — the follow-ups that only
-> turned up by LOOKING"** block, and the "Not checked" list in §3.
+> it first, especially §4's status table, the **"F3 — what shipped"** block (in
+> particular its ⚠️ note on the test that looked like proof and was not), and the
+> "Not checked" list in §3.
 >
-> **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203). NEXT = F3.**
+> **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703.
+> NEXT = F4.**
 >
-> ⚠️ **Read F3's ⚠️ block in §2 before you plan anything.** The card's original
-> "have `enforceBookingOverlapPolicy` call `getTimeRangeConflict`" shape was
-> checked and **does not work** — that function returns a single priority code
-> while the policy needs the conflict *list* (it drives both `allowsOverlap` and
-> the logged `conflictKinds`), and the overlap policy excludes calendar blocks
-> **by design** because `evaluateProSchedulingDecision` already gates them one
-> layer up. The real consolidation is at the **query** layer: give
-> `conflictQueries.ts` a list-returning booking/hold finder built on the same
-> primitives, point `enforceBookingOverlapPolicy` at it, then delete
-> `lib/booking/schedulingConflicts.ts`.
+> F3 retired the second conflict engine: `lib/booking/schedulingConflicts.ts` is
+> gone and `enforceBookingOverlapPolicy` now shares `findBookingAndHoldConflicts`
+> in `conflictQueries.ts` with every other conflict read. The hold divergence the
+> last session flagged turned out to be **latent, not live** (one create path,
+> both columns always written, prod `BookingHold` empty) — but a wider version of
+> it was real and is fixed: the hold busy-window builder had no floor against the
+> DB `EXCLUDE` range at all.
 >
-> 🔴 **Start by settling the hold divergence, not the refactor.** The parity test
-> reconciled only the BOOKING path. For a hold with `endsAtSnapshot` AND
-> `durationMinutesSnapshot` both null, the write-boundary engine reserves
-> `max(1, 0 + buffer)` — as little as **one minute** — where the availability
-> engine falls back to the offering's real duration. If such rows are reachable,
-> the write boundary can book over a hold availability shows as busy: that is a
-> bug that outranks the refactor and should ship on its own. **Unchecked:**
-> whether any hold-create path leaves both null, and whether such rows exist in
-> prod. Settle that first, then extend `conflictEngineParity.test.ts` to cover
-> holds — the guard the booking path has and the hold path never did.
+> ⚠️ **F4's card carries a question, not just a fix.** It proposes adding
+> `deferStepToPro` so the public rebook token stops accepting off-grid starts
+> (`STEP_MISMATCH` is deliberately non-fatal for pros, and that route is a CLIENT
+> path). Before writing it, confirm the premise the way the last four sessions
+> learned to: read `app/api/v1/client/rebook/[token]/route.ts:395` and
+> `proSchedulingPolicy` and check the refusal is actually reachable and actually
+> skipped. **Five card premises have now died on contact** — F2 had three, F3 had
+> its central one. The card also asks a question that is **Tori's, not yours**:
+> the recommended-window constraint is skipped unless
+> `rebookMode === RECOMMENDED_WINDOW` (`route.ts:198`) — is that intended?
+> Surface it with evidence when you get there.
 >
-> Also cheap while you are in there: the block probe in
-> `performLockedApproveConsultationMaterialization` runs *after*
-> `replaceBookingServiceItems`, so a refusal wastes those writes before rolling
-> them back. Moving it ahead of the item rewrite is small and safe.
+> **Tori wants the ENTIRE queue closed before she will deploy** (her call, stated
+> 2026-07-21). After F4 the remaining cards are F5, F6, F7 (iOS), F8, F9, F10
+> (iOS), F12. Two more carry decisions that are hers — F5 (working hours at offer
+> time vs allow at confirm; should an offer *reserve*?) and F8 (should COMPLETED
+> occupy future time? — note F11 found DB-side evidence that the constraint
+> excluding it is deliberate, so F8 probably resolves by dropping COMPLETED from
+> `BOOKING_BLOCKING_STATUSES`) — and F12 needs UI on web **and** iOS before its
+> server half can ship. Do not batch-ask them up front.
 >
-> **Tori wants the ENTIRE queue closed before she will deploy** (her call,
-> stated 2026-07-21). After F3 the remaining cards are F4, F5, F6, F7 (iOS),
-> F8, F9, F10 (iOS), F12. Three carry decisions that are hers, not yours — F4
-> (is the recommended-window skip intended?), F5 (check working hours at offer
-> time vs allow at confirm; should an offer *reserve*?), F8 (should COMPLETED
-> occupy future time?) — and F12 needs UI on web **and** iOS before its server
-> half can ship. Surface each decision with evidence when you reach it; do not
-> batch-ask them up front, because card premises here have a poor survival rate
-> (four have now died on contact) and you may be asking about a problem that
-> does not exist.
->
-> House rules that have bitten across four sessions, all in `CLAUDE.md`:
+> House rules that have bitten across five sessions, all in `CLAUDE.md`:
 > **don't guess — read the tool's own output, or ask.** **Prove a guard fails
-> before trusting that it passes** (a `uiAction` override type was widened,
-> compiled clean, and did nothing — only test-first caught it). And **verify the
-> thing you are SHIPPING** — #700 and #701 were both green on every test while
-> being wrong in the browser and on the wire.
+> before trusting that it passes.** And **verify the thing you are SHIPPING** —
+> #700 and #701 were green on every test while being wrong in the browser and on
+> the wire, and in F3 a green real-Postgres refusal test turned out to be proving
+> the database backstop rather than the code under change. When a test passes,
+> ask which layer made it pass.
 >
 > Verification tools now proven and worth reusing:
 > - `pnpm test:integration` (needs the test-postgres container on :5433).
->   ⚠️ also needs `PII_AEAD_KEYS_JSON` in your env or `waitlist-offer.test.ts`
->   fails with `Missing required env` — CI generates it,
->   `scripts/with-test-db.mjs` does not.
->   `tests/integration/consultation-extension-blocked.test.ts` is the pattern for
->   driving a real write-boundary path against real Postgres.
+>   ⚠️ it also needs a keyring **in CI's exact shape** or two suites fail:
+>   `PII_AEAD_KEYS_JSON` keyed by `address-aead-v1`/`email-aead-v1`/
+>   `phone-aead-v1`/`notes-aead-v1`, plus `PII_LOOKUP_HMAC_KEYS_JSON` and
+>   `JWT_SECRET`. Copy `.github/workflows/integration.yml:88`;
+>   `scripts/with-test-db.mjs` does not generate them.
+>   `tests/integration/booking-overlap-concurrency.test.ts` is now the pattern for
+>   driving a real write-boundary path (incl. `createProBooking`) against real
+>   Postgres — note a pro-readiness gate needs `mobileBasePostalCode` +
+>   `mobileRadiusMiles` on the profile when a bookable MOBILE_BASE exists.
 > - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
 >   HTTP without touching dev data.
 > - `tests/e2e/consultation-token-retryable-refusal.spec.ts` is the pattern for
@@ -662,6 +761,6 @@ update to the table in §4.)
 >   `xcrun simctl list devices booted` before screenshotting. Taps need
 >   `cliclick`, mapped through `group 1 of window 1` of Simulator.
 >
-> 🚫 Do not deploy. Runtime payload #686–#693 + #699 + #700 + #701 is merged and
-> NOT live. Tori has said she wants the whole queue done first — it is still her
-> call and her explicit go-ahead, never yours.
+> 🚫 Do not deploy. Runtime payload #686–#693 + #699 + #700 + #701 + #703 is
+> merged and NOT live. Tori has said she wants the whole queue done first — it is
+> still her call and her explicit go-ahead, never yours.

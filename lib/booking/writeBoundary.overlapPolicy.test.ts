@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   evaluateFinalizeDecision: vi.fn(),
   evaluateRescheduleDecision: vi.fn(),
   decideBookingOverlapPermission: vi.fn(),
-  findSchedulingConflicts: vi.fn(),
+  findBookingAndHoldConflicts: vi.fn(),
   logBookingConflict: vi.fn(),
 
   syncBookingAppointmentReminders: vi.fn(),
@@ -128,9 +128,13 @@ vi.mock('@/lib/booking/overlapPolicy', () => ({
   decideBookingOverlapPermission: mocks.decideBookingOverlapPermission,
 }))
 
-vi.mock('@/lib/booking/schedulingConflicts', () => ({
-  findSchedulingConflicts: mocks.findSchedulingConflicts,
-}))
+vi.mock('@/lib/booking/conflictQueries', async () => {
+  const actual = await vi.importActual<object>('@/lib/booking/conflictQueries')
+  return {
+    ...actual,
+    findBookingAndHoldConflicts: mocks.findBookingAndHoldConflicts,
+  }
+})
 
 vi.mock('@/lib/booking/conflictLogging', () => ({
   logBookingConflict: mocks.logBookingConflict,
@@ -549,7 +553,7 @@ function mockReschedulePolicyOk() {
 }
 
 function mockNoConflictsAllowed() {
-  mocks.findSchedulingConflicts.mockResolvedValue({
+  mocks.findBookingAndHoldConflicts.mockResolvedValue({
     all: [],
   })
 
@@ -778,7 +782,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       }),
     )
 
-    expect(mocks.findSchedulingConflicts).not.toHaveBeenCalled()
+    expect(mocks.findBookingAndHoldConflicts).not.toHaveBeenCalled()
     expect(mocks.decideBookingOverlapPermission).not.toHaveBeenCalled()
   })
 
@@ -808,7 +812,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       },
     })
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledWith({
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledWith({
       tx,
       professionalId: 'pro_1',
       startsAt: REQUESTED_START,
@@ -842,7 +846,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
   })
 
   it('blocks direct-profile finalize when overlap policy rejects the requested booking window', async () => {
-    mocks.findSchedulingConflicts.mockResolvedValueOnce({
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({
       all: [
         {
           kind: 'BOOKING',
@@ -1079,7 +1083,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
 
     mocks.txBookingFindFirst.mockResolvedValueOnce(makeExistingBookingForUpdate())
 
-    mocks.findSchedulingConflicts.mockResolvedValueOnce({
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({
       all: [existingConflict],
     })
 
@@ -1130,7 +1134,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       },
     })
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledWith({
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledWith({
       tx,
       professionalId: 'pro_1',
       startsAt: REQUESTED_START,
@@ -1181,7 +1185,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       makeExistingBookingForClientReschedule(),
     )
 
-    mocks.findSchedulingConflicts.mockResolvedValueOnce({
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({
       all: [existingConflict],
     })
 
@@ -1224,7 +1228,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       }),
     )
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledWith({
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledWith({
       tx,
       professionalId: 'pro_1',
       startsAt: REQUESTED_START,
@@ -1290,7 +1294,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       status: BookingStatus.ACCEPTED,
     })
 
-    mocks.findSchedulingConflicts.mockResolvedValueOnce({
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({
       all: [existingConflict],
     })
 
@@ -1346,7 +1350,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       },
     })
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledWith({
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledWith({
       tx,
       professionalId: 'pro_1',
       startsAt: REQUESTED_START,
@@ -1401,7 +1405,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       status: BookingStatus.ACCEPTED,
     })
 
-    mocks.findSchedulingConflicts.mockResolvedValueOnce({ all: [] })
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({ all: [] })
 
     mocks.decideBookingOverlapPermission.mockReturnValueOnce({
       ok: true,
@@ -1453,7 +1457,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       status: BookingStatus.ACCEPTED,
     })
 
-    mocks.findSchedulingConflicts.mockResolvedValueOnce({ all: [] })
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({ all: [] })
 
     mocks.decideBookingOverlapPermission.mockReturnValueOnce({
       ok: true,
@@ -1498,7 +1502,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       .mockResolvedValueOnce(makeCompletedSourceBookingForAftercareRebook())
       .mockResolvedValueOnce(null)
 
-    mocks.findSchedulingConflicts.mockResolvedValueOnce({
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({
       all: [existingConflict],
     })
 
@@ -1549,7 +1553,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       },
     })
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledWith({
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledWith({
       tx,
       professionalId: 'pro_1',
       startsAt: REQUESTED_START,
@@ -1610,7 +1614,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       .mockResolvedValueOnce(makeCompletedSourceBookingForAftercareRebook())
       .mockResolvedValueOnce(null)
 
-    mocks.findSchedulingConflicts.mockResolvedValueOnce({
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({
       all: [existingConflict],
     })
 
@@ -1659,7 +1663,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       },
     })
 
-    expect(mocks.findSchedulingConflicts).toHaveBeenCalledWith({
+    expect(mocks.findBookingAndHoldConflicts).toHaveBeenCalledWith({
       tx,
       professionalId: 'pro_1',
       startsAt: REQUESTED_START,

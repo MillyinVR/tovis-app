@@ -32,11 +32,13 @@ import {
   holdToBusyInterval,
   mergeBusyIntervals,
   overlaps,
+  sqlBusyWindowMinutes,
 } from '@/lib/booking/conflicts'
 import {
   BOOKING_BLOCKING_STATUSES,
   DEFAULT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
+import type { SchedulingConflict } from '@/lib/booking/overlapPolicy'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -122,31 +124,67 @@ function normalizeSnapshotMinutes(value: unknown): number | null {
   return whole >= 0 ? whole : null
 }
 
-function holdRecordToBusyInterval(args: {
-  hold: {
-    scheduledFor: Date
-    locationType: ServiceLocationType
-    endsAtSnapshot?: Date | null
-    durationMinutesSnapshot?: number | null
-    bufferMinutesSnapshot?: number | null
-    offering?: {
-      salonDurationMinutes: number | null
-      mobileDurationMinutes: number | null
-    } | null
-    location?: {
-      bufferMinutes: number | null
-    } | null
-  }
+export type HoldBusyIntervalRecord = {
+  scheduledFor: Date
+  locationType: ServiceLocationType
+  endsAtSnapshot?: Date | null
+  durationMinutesSnapshot?: number | null
+  bufferMinutesSnapshot?: number | null
+  offering?: {
+    salonDurationMinutes: number | null
+    mobileDurationMinutes: number | null
+  } | null
+  location?: {
+    bufferMinutes: number | null
+  } | null
+}
+
+/**
+ * THE hold busy-window builder. Both the availability reads and the
+ * write-boundary overlap gate go through this one function, so they can never
+ * disagree on how much time a hold occupies (they used to: see
+ * conflictEngineParity.test.ts).
+ *
+ * Whatever branch it takes, the returned window is floored to the durable
+ * database EXCLUDE range for that row —
+ * `tovis_booking_overlap_range(scheduledFor, durationMinutesSnapshot,
+ * bufferMinutesSnapshot)` = GREATEST(1, dur + buf). Note the constraint keys off
+ * the SNAPSHOT COLUMNS, not `endsAtSnapshot`, so a row whose `endsAtSnapshot` is
+ * shorter than its own duration+buffer (or a legacy row predating those columns)
+ * would otherwise let this builder clear a slot Postgres then rejects with a
+ * 23P01. Pinned against the real SQL function by
+ * tests/integration/busy-window-sql-parity.test.ts.
+ */
+export function holdRecordToBusyInterval(args: {
+  hold: HoldBusyIntervalRecord
   defaultBufferMinutes: number
   fallbackDurationMinutes: number
 }): BusyInterval {
   const start = new Date(args.hold.scheduledFor)
 
-  if (isValidDate(args.hold.endsAtSnapshot)) {
+  // The database floor for THIS row, computed from the same two columns the
+  // EXCLUDE constraint reads. Every branch below is clamped up to it, measured
+  // from that branch's own start so the legacy fallback keeps its floored start.
+  const atLeastSqlFloor = (interval: BusyInterval): BusyInterval => {
+    const floorEnd = addMinutes(
+      interval.start,
+      sqlBusyWindowMinutes(
+        args.hold.durationMinutesSnapshot,
+        args.hold.bufferMinutesSnapshot,
+      ),
+    )
+
     return {
+      start: interval.start,
+      end: interval.end.getTime() < floorEnd.getTime() ? floorEnd : interval.end,
+    }
+  }
+
+  if (isValidDate(args.hold.endsAtSnapshot)) {
+    return atLeastSqlFloor({
       start,
       end: new Date(args.hold.endsAtSnapshot),
-    }
+    })
   }
 
   const durationMinutes = normalizeSnapshotMinutes(
@@ -157,10 +195,10 @@ function holdRecordToBusyInterval(args: {
   )
 
   if (durationMinutes != null) {
-    return {
+    return atLeastSqlFloor({
       start,
       end: addMinutes(start, durationMinutes + (bufferMinutesSnapshot ?? 0)),
-    }
+    })
   }
 
   const legacyBufferMinutes =
@@ -168,13 +206,15 @@ function holdRecordToBusyInterval(args: {
       ? bufferOrZero(args.hold.location.bufferMinutes)
       : undefined) ?? bufferOrZero(args.defaultBufferMinutes)
 
-  return holdToBusyInterval({
-    hold: args.hold,
-    salonDurationMinutes: args.hold.offering?.salonDurationMinutes,
-    mobileDurationMinutes: args.hold.offering?.mobileDurationMinutes,
-    fallbackDurationMinutes: args.fallbackDurationMinutes,
-    bufferMinutes: legacyBufferMinutes,
-  })
+  return atLeastSqlFloor(
+    holdToBusyInterval({
+      hold: args.hold,
+      salonDurationMinutes: args.hold.offering?.salonDurationMinutes,
+      mobileDurationMinutes: args.hold.offering?.mobileDurationMinutes,
+      fallbackDurationMinutes: args.fallbackDurationMinutes,
+      bufferMinutes: legacyBufferMinutes,
+    }),
+  )
 }
 
 function assertValidRange(start: Date, end: Date): void {
@@ -412,6 +452,154 @@ export async function hasHoldConflict(
 
     return overlaps(interval.start, interval.end, requestedStart, requestedEnd)
   })
+}
+
+/**
+ * The write-boundary overlap gate's view of a requested window: the LIST of
+ * conflicting bookings and holds, not just a verdict.
+ *
+ * `getTimeRangeConflict` answers "is this window free?" with a single
+ * highest-priority code, which is all a client-facing refusal needs. The overlap
+ * policy needs more: `decideBookingOverlapPermission` takes the conflicts
+ * themselves, because the decision drives `allowsOverlap` (does this row leave
+ * the GIST index?) and the `conflictKinds` on the blocked-decision audit log.
+ * This is that shape, built on the SAME primitives as every other conflict read
+ * so the two can never drift apart again.
+ *
+ * CALENDAR BLOCKS ARE DELIBERATELY ABSENT. `SchedulingConflictKind` is
+ * BOOKING | HOLD only: blocks are gated one layer up, in
+ * `evaluateProSchedulingDecision`, which treats BLOCKED as fatal and then defers
+ * booking/hold to the overlap policy. Re-deriving that gate here would duplicate
+ * it, not consolidate it.
+ */
+export async function findBookingAndHoldConflicts(args: {
+  tx?: DbClient
+  professionalId: string
+  startsAt: Date
+  endsAt: Date
+  excludeBookingId?: string | null
+  excludeHoldId?: string | null
+  defaultBufferMinutes?: number
+  fallbackDurationMinutes?: number
+  now?: Date
+  take?: number
+}): Promise<{
+  bookings: SchedulingConflict[]
+  holds: SchedulingConflict[]
+  all: SchedulingConflict[]
+}> {
+  const {
+    tx,
+    professionalId,
+    startsAt,
+    endsAt,
+    excludeBookingId = null,
+    excludeHoldId = null,
+    defaultBufferMinutes = 0,
+    fallbackDurationMinutes = DEFAULT_DURATION_MINUTES,
+    now = new Date(),
+    // No default cap. Sibling readers take 2000 because they answer a boolean;
+    // this one is the gate a booking write passes through, and a silently
+    // truncated conflict list there is a double-book.
+    take,
+  } = args
+
+  // A non-positive window can never overlap anything, and the callers treat
+  // "no conflicts" as the answer. Returning empty (rather than throwing
+  // INVALID_RANGE like the assert-style readers) keeps that contract.
+  if (!(endsAt.getTime() > startsAt.getTime())) {
+    return { bookings: [], holds: [], all: [] }
+  }
+
+  const database = db(tx)
+  const queryStart = getConflictWindowStart(startsAt)
+
+  const [bookingRows, holdRows] = await Promise.all([
+    database.booking.findMany({
+      where: {
+        professionalId,
+        ...(excludeBookingId ? { id: { not: excludeBookingId } } : {}),
+        scheduledFor: { gte: queryStart, lt: endsAt },
+        ...buildBlockingBookingStatusWhere(),
+      },
+      select: {
+        id: true,
+        professionalId: true,
+        scheduledFor: true,
+        totalDurationMinutes: true,
+        bufferMinutes: true,
+      },
+      ...(take === undefined ? {} : { take: normalizeTake(take, 2000) }),
+    }),
+    database.bookingHold.findMany({
+      where: {
+        professionalId,
+        ...(excludeHoldId ? { id: { not: excludeHoldId } } : {}),
+        expiresAt: { gt: now },
+        scheduledFor: { gte: queryStart, lt: endsAt },
+      },
+      select: {
+        id: true,
+        professionalId: true,
+        scheduledFor: true,
+        endsAtSnapshot: true,
+        durationMinutesSnapshot: true,
+        bufferMinutesSnapshot: true,
+        locationType: true,
+        offering: {
+          select: {
+            salonDurationMinutes: true,
+            mobileDurationMinutes: true,
+          },
+        },
+        location: {
+          select: {
+            bufferMinutes: true,
+          },
+        },
+      },
+      ...(take === undefined ? {} : { take: normalizeTake(take, 2000) }),
+    }),
+  ])
+
+  const overlapsRequested = (conflict: SchedulingConflict): boolean =>
+    overlaps(conflict.startsAt, conflict.endsAt, startsAt, endsAt)
+
+  const bookings = bookingRows
+    .map((row): SchedulingConflict => {
+      const interval = bookingToBusyInterval(row, fallbackDurationMinutes)
+      return {
+        kind: 'BOOKING',
+        id: row.id,
+        professionalId: row.professionalId,
+        startsAt: interval.start,
+        endsAt: interval.end,
+      }
+    })
+    .filter(overlapsRequested)
+
+  const holds = holdRows
+    .map((row): SchedulingConflict => {
+      const interval = holdRecordToBusyInterval({
+        hold: row,
+        defaultBufferMinutes,
+        fallbackDurationMinutes,
+      })
+      return {
+        kind: 'HOLD',
+        id: row.id,
+        professionalId: row.professionalId,
+        startsAt: interval.start,
+        endsAt: interval.end,
+      }
+    })
+    .filter(overlapsRequested)
+
+  const all = [...bookings, ...holds].sort(
+    (left, right) => left.startsAt.getTime() - right.startsAt.getTime(),
+  )
+
+  return { bookings, holds, all }
 }
 
 export async function assertNoCalendarBlockConflict(
