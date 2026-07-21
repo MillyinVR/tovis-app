@@ -172,10 +172,12 @@
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
   "pnpm": {
     "overrides": {
-      "axios@>=1.0.0 <1.16.0": "^1.16.0",
-      "brace-expansion@<1.1.13": "^1.1.13",
-      "brace-expansion@>=2.0.0 <2.0.3": "^2.0.3",
-      "brace-expansion@>=4.0.0 <5.0.6": "^5.0.6",
+      "axios@>=1.0.0 <1.18.0": "^1.18.0",
+      "brace-expansion@<1.1.16": "^1.1.16",
+      "brace-expansion@>=2.0.0 <2.1.2": "^2.1.2",
+      "brace-expansion@>=3.0.0 <5.0.7": "^5.0.7",
+      "js-yaml@>=3.0.0 <3.15.0": "^3.15.0",
+      "js-yaml@>=4.0.0 <4.3.0": "^4.3.0",
       "defu@<=6.1.4": "^6.1.5",
       "esbuild@>=0.17.0 <0.28.1": "^0.28.1",
       "flatted@<3.4.2": "^3.4.2",
