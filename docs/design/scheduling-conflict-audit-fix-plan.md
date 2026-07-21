@@ -462,11 +462,29 @@ present in the production Vercel environment (`vercel env ls production`), so
 The project also drains Vercel logs to Sentry (`SENTRY_VERCEL_LOG_DRAIN_URL`),
 so the structured `console.warn` line lands there as a second path.
 
-**Not verified:** no alert *rule* — threshold, routing, who actually gets paged —
-was configured. That is Sentry-side dashboard config, outside the repo, and it is
-what turns this from "queryable" into "someone finds out". Suggested rule: any
-event tagged `booking.event = overlap_backstop_fired`, alert on the first
-occurrence rather than a rate, since the expected count is zero.
+**Routing: already covered — checked, and my own "no rule configured" note above
+was wrong.** Sentry issue rule `10003547001` ("Notify #tovis-ops-alerts via
+Slack") is **active**, scoped to project `tovis-app`, with `environment: null`
+(all), **zero filters**, `actionMatch: any`, and
+`FirstSeenEventCondition` among its conditions. Any *new issue* in this project
+posts to Slack `#tovis-ops-alerts`. An error-level `captureMessage` opens a new
+issue, so the first backstop firing routes to Slack with no new rule at all.
+
+Grouping nuance: the message embeds `action` and `professionalId`, so Sentry
+fingerprints one issue per distinct pair — each affected professional alerts
+separately on first occurrence. With an expected rate of zero that is a feature,
+not noise. Set an explicit fingerprint if that ever changes.
+
+**A dedicated rule is scriptable if one is ever wanted** (verified, not assumed):
+`POST https://sentry.io/api/0/projects/tovis/tovis-app/rules/` still accepts
+writes — an empty-body probe returns `400 {"actionMatch":…,"frequency":…,
+"name":["This field is required."]}`, while the **GET** on the same path is now
+`410 This API no longer exists` (listing moved to
+`/organizations/{org}/combined-rules/`). `SENTRY_AUTH_TOKEN` in
+`.env.production.local` carries `alerts:write` + `project:admin`. The building
+blocks are `sentry.rules.conditions.first_seen_event.FirstSeenEventCondition`
+and `sentry.rules.filters.tagged_event.TaggedEventFilter` on key
+`booking.event`, value `overlap_backstop_fired`.
 
 ### F3 — what shipped
 
