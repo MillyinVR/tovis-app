@@ -240,6 +240,12 @@ function makeProBody(overrides?: Record<string, unknown>) {
     turnstileToken: 'ts_integration_ok',
     professionType: 'MAKEUP_ARTIST',
     businessName: 'TOVIS Integration Studio',
+    // Mandatory for every pro — it drives the per-state service gate, not just
+    // license checks (app/api/v1/auth/register/route.ts STATE_REQUIRED). This
+    // factory predated that rule and was never updated, so every pro signup
+    // here 400'd; nothing caught it because test:integration ran in no CI
+    // workflow. Note this is distinct from signupLocation.state.
+    licenseState: 'CA',
     signupLocation: proSalonLocation(),
     ...(overrides ?? {}),
   }
@@ -553,7 +559,10 @@ describe('POST /api/v1/auth/register (integration)', () => {
   })
 
   it('rejects a pro handle that another pro already owns', async () => {
-    const handle = `dup_${tag.slice(-8)}`
+    // isValidHandle() allows only [a-z0-9-]; `tag` contains underscores, so the
+    // old `dup_${tag.slice(-8)}` made the FIRST signup 400 on an invalid handle
+    // and the duplicate-handle path under test was never reached.
+    const handle = `dup-${tag.replace(/[^a-z0-9]/g, '').slice(-8)}`
 
     const first = makeProBody({ handle })
     expect((await POST(makeRequest(first))).status).toBe(201)

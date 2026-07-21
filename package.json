@@ -51,6 +51,7 @@
     "db:dev:setup": "pnpm db:dev:wait && pnpm db:dev:push && pnpm db:dev:seed && pnpm backfill:contact-hash-v2:dev && pnpm db:dev:permissions",
     "db:dev:studio": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev prisma studio",
     "test:integration": "node scripts/with-test-db.mjs npx vitest run --config vitest.integration.config.mts",
+    "test:integration:ci": "vitest run --config vitest.integration.config.mts",
     "test:integration:booking-overlap": "node scripts/with-test-db.mjs npx vitest run tests/integration/booking-overlap-concurrency.test.ts --config vitest.integration.config.mts --maxWorkers=1 --minWorkers=1",
     "test:load:signup": "dotenv -e .env.local -- tsx tests/load/signup-load-test.ts",
     "check:booking-boundary": "node tools/check-booking-write-boundary.mjs",

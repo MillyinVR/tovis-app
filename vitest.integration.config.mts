@@ -25,6 +25,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
+      // Mirrors vitest.config.mts. `server-only` is a Next.js build-time marker
+      // with no runtime implementation installed, so any integration test that
+      // reaches a module importing it (e.g. lib/auth/verification.ts via the
+      // signup suite) fails to resolve without this alias.
+      'server-only': path.resolve(__dirname, 'test/mocks/server-only.ts'),
     },
   },
 })

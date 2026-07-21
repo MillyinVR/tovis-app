@@ -238,6 +238,26 @@ CI. The EXCLUDE constraints *are* present in the local test DB
 (`Booking_no_active_professional_overlap`, `BookingHold_no_active_professional_overlap`
 verified via psql), so the suite is meaningful once it runs.
 
+**Once it ran, two more rot findings fell out** — both invisible for as long as
+the suite has been dead:
+
+- `tests/integration/register-signup.test.ts` `makeProBody()` never sent
+  `licenseState`, which `app/api/v1/auth/register/route.ts:964` has since made
+  mandatory for **every** pro (it drives the per-state service gate, not just
+  license checks). All three pro-signup tests 400'd on `STATE_REQUIRED`. The
+  route is right; the test was stale.
+- The same file's duplicate-handle test built `dup_${tag.slice(-8)}`, but
+  `isValidHandle()` allows only `[a-z0-9-]`. The underscore made the *first*
+  signup fail, so the duplicate-handle path it exists to cover was never
+  actually exercised.
+
+**Useful side-evidence for F8:** the suite contains a test named *"database
+allows active booking to overlap completed and cancelled bookings"* — so the DB
+predicate excluding `COMPLETED` is deliberate and pinned. That makes
+`BOOKING_BLOCKING_STATUSES` (which includes `COMPLETED`) the odd one out, and
+F8 should probably resolve by dropping `COMPLETED` from the app constant rather
+than adding it to the constraint.
+
 ### F10 — iOS follow-ups 🟢
 
 - `Tovis/ProNewBookingView.swift:175` — calendar tap-to-create forces
@@ -286,7 +306,51 @@ Named honestly rather than assumed safe:
 | F8 occupied-status parity test | not started |
 | F9 duplicate-logic cleanup | not started |
 | F10 iOS follow-ups | not started |
-| F11 integration suite dead | not started (found during F1) |
+| F11 integration suite dead | ✅ done — branch `fix/integration-suite-ci` |
+
+### F11 — what shipped
+
+- `tests/integration/booking-overlap-concurrency.test.ts` — `cleanupAll` replaced
+  with a generated `TRUNCATE … RESTART IDENTITY CASCADE` over `pg_tables`, so it
+  cannot drift behind the schema again.
+- `tests/integration/register-signup.test.ts` — `licenseState: 'CA'` added to
+  `makeProBody()`; duplicate-handle fixture made charset-valid.
+- `vitest.integration.config.mts` — `server-only` alias, mirroring
+  `vitest.config.mts` (without it the signup suite cannot even resolve).
+- `package.json` — `test:integration:ci` (no `.env.test.local`, which is
+  gitignored and absent in CI).
+- `.github/workflows/integration.yml` — new job: Postgres 16 + PostGIS/pgvector,
+  `prisma migrate deploy` (**never** `db push` — the EXCLUDE constraints live
+  only in raw migration SQL), a guard step asserting both constraints exist,
+  then the suite. No seed step: every suite builds its own fixtures and
+  booking-overlap truncates between tests.
+  The job holds **no credentials at all**:
+  - PII keyrings + `JWT_SECRET` are generated per-run with `openssl rand` into
+    `$GITHUB_ENV` (the first revision hardcoded throwaway keys, copying
+    `perf-availability.yml`).
+  - Postgres uses `POSTGRES_HOST_AUTH_METHOD: trust` with a passwordless
+    connection URL. **This was the actual GitGuardian finding** — "Generic
+    Password" on `POSTGRES_PASSWORD: postgres`, not the keyrings. A service
+    container cannot take a value generated in a later step, so removing the
+    credential entirely is the only fix that doesn't need a repo secret. The
+    container is reachable only from the job's network and dies with the runner.
+
+  Note for whoever picks up the grandfathered files: `e2e.yml` and
+  `perf-availability.yml` both still hardcode the same throwaway keys **and**
+  `POSTGRES_PASSWORD`. They pass only because GitGuardian scans diffs. The two
+  techniques above apply to them verbatim.
+
+**Verified:** 29/29 files, **134/134 tests** green — three ways: via the local
+`.env.test.local` harness, against a freshly `migrate reset` + seeded DB, and
+against an **empty migrated DB using the exact env and script the workflow runs**
+(`test:integration:ci`). Constraint-guard SQL returns `2` as the step expects.
+Workflow YAML parses. `typecheck` clean, `lint` 0 errors, guards pass.
+
+**Not verified:** the workflow has not executed on a runner yet. The `psql`
+invocation copies the proven pattern in `e2e.yml:157` (same `${DIRECT_URL%%\?*}`
+strip), but `psql` is not on the local PATH so that one step is unrun locally.
+Suite runtime locally is ~20s; CI wall time including install/migrate is
+unmeasured.
 
 ### F1 — what shipped
 
