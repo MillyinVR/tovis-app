@@ -155,10 +155,57 @@ block-blind) vs `lib/booking/conflictQueries.ts` (`getTimeRangeConflict`,
 blocks+bookings+holds). `conflictEngineParity.test.ts` reconciled their *interval
 math* but not their *scope* — and that unreconciled scope gap is exactly F2.
 
-**Fix.** Have `enforceBookingOverlapPolicy` call `getTimeRangeConflict`, ignoring
-the `BLOCKED` verdict where the caller already gated it, then delete
-`findSchedulingConflicts`. Do this **after** F2 so F2 ships without waiting on a
-refactor.
+**Fix.** ~~Have `enforceBookingOverlapPolicy` call `getTimeRangeConflict`,
+ignoring the `BLOCKED` verdict where the caller already gated it, then delete
+`findSchedulingConflicts`.~~ Do this **after** F2 so F2 ships without waiting on
+a refactor.
+
+> ⚠️ **That shape does not work — established by reading, 2026-07-21, before any
+> code was written. Read this before starting.**
+>
+> **1. `getTimeRangeConflict` is not a drop-in.** It returns a single
+> highest-priority code (`'BLOCKED' | 'BOOKING' | 'HOLD' | null`).
+> `enforceBookingOverlapPolicy` (`writeBoundary.ts:5029`) needs the conflict
+> **list**: `decideBookingOverlapPermission` takes
+> `conflicts: readonly SchedulingConflict[]`, and the result drives both
+> `allowsOverlap = decision.conflicts.length > 0` and the
+> `conflictKinds` on `logOverlapDecisionBlocked`. A code loses both.
+>
+> **2. The overlap policy excludes blocks BY DESIGN, not by omission.**
+> `SchedulingConflictKind` is `'BOOKING' | 'HOLD'` only. Blocks are gated
+> earlier and separately, in `evaluateProSchedulingDecision`, which treats
+> `BLOCKED` as fatal and then defers booking/hold to the overlap policy via
+> `deferBusyConflictsToOverlapPolicy`. That separation is deliberate — see the
+> comment on that flag. "Ignoring the BLOCKED verdict" would be re-deriving a
+> gate that already exists one layer up.
+>
+> ⇒ The real consolidation is at the **query** layer, not the policy layer: give
+> `conflictQueries.ts` a list-returning booking/hold conflict finder built on
+> the same primitives `getTimeRangeConflict` uses, point
+> `enforceBookingOverlapPolicy` at it, then delete `schedulingConflicts.ts`.
+>
+> **3. 🔴 A SECOND divergence this card never mentioned — possibly a live bug.**
+> `conflictEngineParity.test.ts` reconciled only the **booking** path (Engine A's
+> `toBookingSchedulingConflict` now delegates to `bookingToBusyInterval`). The
+> **hold** path was never reconciled:
+>
+> | | hold with `endsAtSnapshot` = null AND `durationMinutesSnapshot` = null |
+> | --- | --- |
+> | Engine A (`calculateWindowEnd` → `sqlBusyWindowMinutes`) | `max(1, 0 + buffer)` — as little as **1 minute** |
+> | Engine B (`holdRecordToBusyInterval`) | falls back to the offering's salon/mobile duration + location buffer — a real window |
+>
+> Engine A is the **write-boundary gate**. If such rows exist, the write
+> boundary can book straight over a hold that availability correctly shows as
+> busy. All three snapshot columns are nullable (`BookingHold.durationMinutesSnapshot`,
+> `bufferMinutesSnapshot`, `endsAtSnapshot` are `Int?`/`DateTime?`).
+>
+> **NOT CHECKED — do this first:** whether any hold-create path can actually
+> leave both null (several `durationMinutesSnapshot:` writes exist in
+> `writeBoundary.ts`; they were not all traced), and whether any such rows exist
+> in prod. If unreachable this is a latent trap to close during the refactor; if
+> reachable it is a bug that outranks the refactor and should ship on its own.
+> Extend the parity test to cover holds either way — that is the guard the
+> booking path already has and the hold path never did.
 
 ### F4 — Public rebook token accepts off-grid times 🟠
 
@@ -547,54 +594,65 @@ update to the table in §4.)
 
 > Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
-> it first, especially §4's status table, the "F2 — the follow-ups that only
-> turned up by LOOKING" block, and the "Not checked" list in §3.
+> it first, especially §4's status table, the **"F2 — the follow-ups that only
+> turned up by LOOKING"** block, and the "Not checked" list in §3.
 >
 > **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203). NEXT = F3.**
 >
-> F3: retire the second conflict engine. `lib/booking/schedulingConflicts.ts`
-> (`findSchedulingConflicts` — bookings + holds, **block-blind**) still exists
-> alongside `lib/booking/conflictQueries.ts` (`getTimeRangeConflict` — blocks +
-> bookings + holds). That unreconciled scope gap is exactly what caused F2, and
-> F2's fix deliberately left `findSchedulingConflicts` in place, so
-> `performLockedApproveConsultationMaterialization` now calls **both** engines
-> side by side. Consolidating is the point of this card.
+> ⚠️ **Read F3's ⚠️ block in §2 before you plan anything.** The card's original
+> "have `enforceBookingOverlapPolicy` call `getTimeRangeConflict`" shape was
+> checked and **does not work** — that function returns a single priority code
+> while the policy needs the conflict *list* (it drives both `allowsOverlap` and
+> the logged `conflictKinds`), and the overlap policy excludes calendar blocks
+> **by design** because `evaluateProSchedulingDecision` already gates them one
+> layer up. The real consolidation is at the **query** layer: give
+> `conflictQueries.ts` a list-returning booking/hold finder built on the same
+> primitives, point `enforceBookingOverlapPolicy` at it, then delete
+> `lib/booking/schedulingConflicts.ts`.
 >
-> Suggested shape — **verify before trusting it; this plan has a poor premise
-> survival rate (three of F2's died on contact)**: have
-> `enforceBookingOverlapPolicy` call `getTimeRangeConflict`, ignoring the
-> `BLOCKED` verdict where the caller already gated it, then delete
-> `findSchedulingConflicts`. Two things to check before assuming a drop-in:
-> `getTimeRangeConflict` returns only the **highest-priority** code
-> (BLOCKED > BOOKING > HOLD), not a list — confirm no caller needs to
-> distinguish "blocked AND booked"; and it takes a `locationId` for
-> location-scoped blocks, which `findSchedulingConflicts` never had.
-> `conflictEngineParity.test.ts` reconciled the two engines' interval math but
-> not their scope — that test is where to pin the merge.
+> 🔴 **Start by settling the hold divergence, not the refactor.** The parity test
+> reconciled only the BOOKING path. For a hold with `endsAtSnapshot` AND
+> `durationMinutesSnapshot` both null, the write-boundary engine reserves
+> `max(1, 0 + buffer)` — as little as **one minute** — where the availability
+> engine falls back to the offering's real duration. If such rows are reachable,
+> the write boundary can book over a hold availability shows as busy: that is a
+> bug that outranks the refactor and should ship on its own. **Unchecked:**
+> whether any hold-create path leaves both null, and whether such rows exist in
+> prod. Settle that first, then extend `conflictEngineParity.test.ts` to cover
+> holds — the guard the booking path has and the hold path never did.
 >
-> While you are in there, F2 left one cheap follow-up: the block probe in
+> Also cheap while you are in there: the block probe in
 > `performLockedApproveConsultationMaterialization` runs *after*
 > `replaceBookingServiceItems`, so a refusal wastes those writes before rolling
 > them back. Moving it ahead of the item rewrite is small and safe.
 >
-> House rules that have now bitten across four sessions, all in `CLAUDE.md`:
-> **don't guess — read the tool's own output, or ask** (F2 found a single-use
-> token burn, a route that turned every booking error into a 500, and a
-> `uiAction` that never reached the wire — none of them visible from the card).
-> **Prove a guard fails before trusting that it passes** (a `uiAction` override
-> type was widened, compiled clean, and did nothing — only a test-first caught
-> it). And **verify the thing you are SHIPPING**: #700 and #701 were both green
-> on every test while being wrong in the browser and on the wire.
+> **Tori wants the ENTIRE queue closed before she will deploy** (her call,
+> stated 2026-07-21). After F3 the remaining cards are F4, F5, F6, F7 (iOS),
+> F8, F9, F10 (iOS), F12. Three carry decisions that are hers, not yours — F4
+> (is the recommended-window skip intended?), F5 (check working hours at offer
+> time vs allow at confirm; should an offer *reserve*?), F8 (should COMPLETED
+> occupy future time?) — and F12 needs UI on web **and** iOS before its server
+> half can ship. Surface each decision with evidence when you reach it; do not
+> batch-ask them up front, because card premises here have a poor survival rate
+> (four have now died on contact) and you may be asking about a problem that
+> does not exist.
 >
-> Tools that are now proven and worth reusing:
+> House rules that have bitten across four sessions, all in `CLAUDE.md`:
+> **don't guess — read the tool's own output, or ask.** **Prove a guard fails
+> before trusting that it passes** (a `uiAction` override type was widened,
+> compiled clean, and did nothing — only test-first caught it). And **verify the
+> thing you are SHIPPING** — #700 and #701 were both green on every test while
+> being wrong in the browser and on the wire.
+>
+> Verification tools now proven and worth reusing:
 > - `pnpm test:integration` (needs the test-postgres container on :5433).
 >   ⚠️ also needs `PII_AEAD_KEYS_JSON` in your env or `waitlist-offer.test.ts`
 >   fails with `Missing required env` — CI generates it,
 >   `scripts/with-test-db.mjs` does not.
 >   `tests/integration/consultation-extension-blocked.test.ts` is the pattern for
 >   driving a real write-boundary path against real Postgres.
-> - `pnpm dev:test-db` runs a real server against the test DB — good for driving
->   routes over HTTP without touching dev data.
+> - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
+>   HTTP without touching dev data.
 > - `tests/e2e/consultation-token-retryable-refusal.spec.ts` is the pattern for
 >   driving a real page (seed → act → assert DB state → act again).
 > - `~/Dev/tovis-ios/scripts/sim-login.sh --email <seeded user>` for the
@@ -605,4 +663,5 @@ update to the table in §4.)
 >   `cliclick`, mapped through `group 1 of window 1` of Simulator.
 >
 > 🚫 Do not deploy. Runtime payload #686–#693 + #699 + #700 + #701 is merged and
-> NOT live; that stays Tori's call.
+> NOT live. Tori has said she wants the whole queue done first — it is still her
+> call and her explicit go-ahead, never yours.
