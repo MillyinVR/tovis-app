@@ -73,3 +73,8 @@ tsconfig.tsbuildinfo
 docs/design/brand-handoff/
 # Design handoff zip bundles dropped in the repo root (reference-only, not source)
 *handoff*.zip
+
+# Perf-run output written by tests/e2e/availability.perf.spec.ts (and by the
+# perf-availability workflow, which mkdir -p's it and uploads it via
+# actions/upload-artifact — unaffected by this ignore).
+artifacts/
