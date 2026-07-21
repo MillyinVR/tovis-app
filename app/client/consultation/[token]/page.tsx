@@ -602,6 +602,12 @@ export default function PublicConsultationPage({ params }: PageProps) {
     token ? { kind: 'loading' } : { kind: 'error', message: 'Missing consultation link.' },
   )
   const [submittingAction, setSubmittingAction] = useState<DecisionAction | null>(null)
+  // A RETRYABLE refusal (the pro's blocked time, a slot that just went) is not
+  // a dead link — the token is only consumed inside the decision transaction,
+  // so it rolls back with the failed write and this same link still works.
+  // Those render inline here with the buttons left live; only terminal
+  // failures fall through to the "link unavailable" card.
+  const [decisionError, setDecisionError] = useState<string | null>(null)
 
     useEffect(() => {
     let cancelled = false
@@ -704,6 +710,9 @@ export default function PublicConsultationPage({ params }: PageProps) {
     if (!state.data.actionState.canApproveOrReject) return
 
     setSubmittingAction(action)
+    setDecisionError(null)
+
+    let retryable = false
 
     try {
       const idempotencyKey = buildPublicConsultationDecisionIdempotencyKey({
@@ -726,6 +735,11 @@ export default function PublicConsultationPage({ params }: PageProps) {
       const payload: unknown = await response.json().catch(() => null)
 
       if (!response.ok) {
+        // `retryable` comes from the booking-error envelope (getBookingFailPayload).
+        // TIME_BLOCKED / TIME_BOOKED / TIME_HELD are all retryable: the pro can
+        // clear the block or amend the proposal and this link still works.
+        retryable = isRecord(payload) && payload.retryable === true
+
         const message =
           isRecord(payload) && typeof payload.error === 'string'
             ? payload.error
@@ -775,7 +789,16 @@ export default function PublicConsultationPage({ params }: PageProps) {
         error instanceof Error && error.message.trim()
           ? error.message
           : `Unable to ${action.toLowerCase()} consultation.`
-      setState({ kind: 'error', message })
+
+      // Keep the proposal and both buttons on screen for a retryable refusal.
+      // Replacing the view with "Consultation link unavailable / ask your
+      // professional to resend the link" would be actively false — the link is
+      // untouched, and the client only has to try again once the pro clears it.
+      if (retryable) {
+        setDecisionError(message)
+      } else {
+        setState({ kind: 'error', message })
+      }
     } finally {
       setSubmittingAction(null)
     }
@@ -962,6 +985,18 @@ export default function PublicConsultationPage({ params }: PageProps) {
               <div className="text-sm text-textSecondary">
                 Approving confirms the proposed consultation plan. Declining keeps the consultation from moving forward until your professional updates it.
               </div>
+
+              {decisionError ? (
+                <div
+                  role="alert"
+                  className="mt-4 rounded-card border border-toneDanger/20 bg-toneDanger/5 px-4 py-3 text-sm text-textPrimary"
+                >
+                  {decisionError}
+                  <div className="mt-1 text-xs text-textSecondary">
+                    This link is still valid — you can try again once it&rsquo;s sorted.
+                  </div>
+                </div>
+              ) : null}
 
               <div className="mt-4 flex flex-wrap gap-3">
                 <button
