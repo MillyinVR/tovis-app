@@ -43,5 +43,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # CLAUDE.md has always mandated lint before pushing, but no workflow ran
+      # it — so an introduced ESLint *error* shipped green. Warnings stay
+      # non-blocking (there is a large pre-existing backlog); this fails only on
+      # errors, which is what the house rule actually asks for.
+      - name: Lint
+        run: pnpm lint
+
       - name: Run unit tests
         run: pnpm test
