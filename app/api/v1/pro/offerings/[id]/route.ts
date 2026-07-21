@@ -769,6 +769,18 @@ export async function PATCH(request: Request, ctx: RouteContext) {
         return { kind: 'OK', offering: existing }
       }
 
+      // Reviving drops the offering's price ramps, exactly as the add flow in
+      // writeOffering does. A ramp OUTRANKS the offering's own price at quote
+      // time — `effectiveUnitPrice` returns the ramp's currentPrice/targetPrice
+      // and never reads listPrice — so a ramp that outlived a removal would go
+      // on charging the price from the import that created it. Whatever the
+      // offering says when it comes back on is the price.
+      if (data.isActive === true && !existing.isActive) {
+        await tx.offeringPriceRamp.deleteMany({
+          where: { offeringId: existing.id },
+        })
+      }
+
       const saved = await tx.professionalServiceOffering.update({
         where: { id: existing.id },
         data,

@@ -232,13 +232,14 @@ export async function commitServiceImport(args: {
             nextStepAt: ramp.nextStepAt,
             completedAt: ramp.completedAt,
           }
-          // Upsert, not create: writeOffering can now REVIVE a previously
-          // removed offering, and that offering may still carry a ramp from an
-          // earlier import. `@@unique([offeringId, mode])` would make a plain
-          // create throw P2002 — inside this transaction, that would roll the
-          // revive back and report the row as "Already on your menu" while
-          // nothing actually changed. This import's decision is the newer one,
-          // so it wins.
+          // Upsert, not create, as a belt-and-braces guard on
+          // `@@unique([offeringId, mode])`. writeOffering can REVIVE a
+          // previously removed offering, and it clears that row's old ramps as
+          // it does so — so in practice nothing is here to collide with. If
+          // that ever stops being true, a plain create would throw P2002 inside
+          // this transaction, rolling the revive back and reporting the row as
+          // "Already on your menu" while nothing actually changed. Upserting
+          // fails safe instead: this import's decision is the newer one.
           await tx.offeringPriceRamp.upsert({
             where: { offeringId_mode: { offeringId: offering.id, mode } },
             create: { offeringId: offering.id, mode, ...rampFields },

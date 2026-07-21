@@ -227,6 +227,16 @@ export async function writeOffering(input: {
   }
 
   if (existing) {
+    // Removing an offering leaves its OfferingPriceRamp rows attached, and a
+    // ramp OUTRANKS the offering's own price: `effectiveUnitPrice` returns the
+    // ramp's currentPrice/targetPrice and never looks at listPrice. Reviving
+    // with a stale ramp would therefore charge the price from the import that
+    // created it and silently discard the price the pro just typed. Re-adding a
+    // service means this price is the price, so the ramp does not survive.
+    await input.tx.offeringPriceRamp.deleteMany({
+      where: { offeringId: existing.id },
+    })
+
     return input.tx.professionalServiceOffering.update({
       where: { id: existing.id },
       data: { ...fields, isActive: true },

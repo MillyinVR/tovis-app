@@ -50,9 +50,17 @@ const mocks = vi.hoisted(() => {
     update: vi.fn(),
   }
 
+  // Reviving an offering (isActive false -> true) drops its price ramps: a ramp
+  // outranks the offering's own price at quote time, so one that outlived a
+  // removal would keep charging the old import's price.
+  const offeringPriceRamp = {
+    deleteMany: vi.fn(),
+  }
+
   const prisma = {
     professionalLocation,
     professionalServiceOffering,
+    offeringPriceRamp,
     $transaction: vi.fn(),
   }
 
@@ -66,6 +74,7 @@ const mocks = vi.hoisted(() => {
     buildAddressPrivacyWriteData,
     professionalLocation,
     professionalServiceOffering,
+    offeringPriceRamp,
     prisma,
   }
 })
@@ -260,6 +269,7 @@ describe('app/api/v1/pro/offerings/[id]/route.ts', () => {
     mocks.professionalLocation.findMany.mockResolvedValue([])
     mocks.professionalLocation.count.mockResolvedValue(0)
     mocks.professionalLocation.create.mockResolvedValue({ id: 'loc_1' })
+    mocks.offeringPriceRamp.deleteMany.mockResolvedValue({ count: 0 })
 
     mocks.professionalServiceOffering.findFirst.mockResolvedValue(makeOffering())
     mocks.professionalServiceOffering.update.mockResolvedValue(makeOffering())
@@ -267,6 +277,7 @@ describe('app/api/v1/pro/offerings/[id]/route.ts', () => {
     const tx = {
       professionalLocation: mocks.professionalLocation,
       professionalServiceOffering: mocks.professionalServiceOffering,
+      offeringPriceRamp: mocks.offeringPriceRamp,
     }
 
     mocks.prisma.$transaction.mockImplementation(
@@ -541,6 +552,57 @@ describe('app/api/v1/pro/offerings/[id]/route.ts', () => {
       })
 
       expect(mocks.professionalServiceOffering.update).not.toHaveBeenCalled()
+    })
+
+    // PATCH is a second way back on, and it never goes through writeOffering.
+    // A ramp OUTRANKS the offering's own price at quote time, so one that
+    // outlived the removal would keep charging the price from the import that
+    // created it. Any revive clears them, matching the add flow.
+    it('clears price ramps when PATCH revives a removed offering', async () => {
+      mocks.professionalServiceOffering.findFirst.mockResolvedValueOnce(
+        makeOffering({ isActive: false }),
+      )
+      mocks.professionalServiceOffering.update.mockResolvedValueOnce(
+        makeOffering({ isActive: true }),
+      )
+
+      const result = await PATCH(makeRequest({ isActive: true }), makeCtx())
+
+      expect(result.status).toBe(200)
+      expect(mocks.offeringPriceRamp.deleteMany).toHaveBeenCalledWith({
+        where: { offeringId: 'offering_1' },
+      })
+    })
+
+    it('leaves price ramps alone when PATCH edits an already-live offering', async () => {
+      mocks.professionalServiceOffering.findFirst.mockResolvedValueOnce(
+        makeOffering({ isActive: true }),
+      )
+      mocks.professionalServiceOffering.update.mockResolvedValueOnce(
+        makeOffering({ isActive: true }),
+      )
+
+      const result = await PATCH(
+        makeRequest({ isActive: true, description: 'Updated' }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(200)
+      expect(mocks.offeringPriceRamp.deleteMany).not.toHaveBeenCalled()
+    })
+
+    it('leaves price ramps alone when PATCH disables an offering', async () => {
+      mocks.professionalServiceOffering.findFirst.mockResolvedValueOnce(
+        makeOffering({ isActive: true }),
+      )
+      mocks.professionalServiceOffering.update.mockResolvedValueOnce(
+        makeOffering({ isActive: false }),
+      )
+
+      const result = await PATCH(makeRequest({ isActive: false }), makeCtx())
+
+      expect(result.status).toBe(200)
+      expect(mocks.offeringPriceRamp.deleteMany).not.toHaveBeenCalled()
     })
 
     it('allows disabling an offering even when the service is inactive', async () => {
