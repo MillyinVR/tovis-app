@@ -1,8 +1,14 @@
 #!/bin/sh
 #
-# Pre-push guard: run the same checks CI does (typecheck + the full unit suite)
-# before anything leaves your machine, so a red build is caught locally instead
-# of on the PR. The full vitest run is ~15s; typecheck adds ~10s.
+# Pre-push guard: run the fast checks CI does (typecheck + the full unit suite +
+# the static guards) before anything leaves your machine, so a red build is
+# caught locally instead of on the PR. Roughly: vitest ~15s, typecheck ~10s,
+# static guards ~9s.
+#
+# `pnpm lint` is deliberately NOT here. CLAUDE.md asks for it before pushing and
+# it now runs in CI (unit-tests.yml), but it takes ~84s locally — more than the
+# rest of this hook combined — so gating every push on it trades a lot of
+# friction for a check the PR makes anyway.
 #
 # Bypass for a genuine emergency with:  git push --no-verify
 #
@@ -10,7 +16,8 @@
 # .githooks). If it isn't running, run:  git config core.hooksPath .githooks
 set -e
 
-echo "▶ pre-push: typecheck + unit tests (bypass with --no-verify)…"
+echo "▶ pre-push: typecheck + unit tests + static guards (bypass with --no-verify)…"
 npm run typecheck
 npx vitest run
+npm run check:static-guards
 echo "✓ pre-push checks passed"
