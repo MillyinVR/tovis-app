@@ -1,0 +1,120 @@
+name: integration
+
+# Runs tests/integration/** against a real Postgres.
+#
+# These suites were previously wired to no workflow at all: `test:integration`
+# existed in package.json but nothing ever invoked it in CI. It rotted quietly —
+# the booking-overlap cleanup drifted behind the schema and the signup suite
+# fell behind a route contract change (see
+# docs/design/scheduling-conflict-audit-fix-plan.md, F11). This job exists so
+# that can't happen again, and specifically so the GIST EXCLUDE constraints that
+# make double-booking impossible keep an end-to-end guard.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        # Same image as perf-availability: PostGIS 3.x AND pgvector on Postgres
+        # 16, so `prisma migrate deploy` can apply both the postgis migration
+        # and the pgvector one (which runs its own CREATE EXTENSION vector).
+        image: imresamu/postgis:16-3.4-bundle0
+        env:
+          POSTGRES_USER: postgres
+          # No POSTGRES_PASSWORD on purpose. A hardcoded one is what secret
+          # scanning flags (GitGuardian "Generic Password"), and a service
+          # container cannot take a value generated in a later step. `trust`
+          # removes the credential entirely: the container is reachable only
+          # from this job's network and dies with the runner.
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: tovis_integration
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tovis_integration"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CI: true
+      NODE_ENV: test
+
+      DATABASE_URL: postgresql://postgres@127.0.0.1:5433/tovis_integration?schema=public
+      DIRECT_URL: postgresql://postgres@127.0.0.1:5433/tovis_integration?schema=public
+
+      # JWT_SECRET and the PII keyrings are NOT set here — they are generated
+      # per-run in the "Generate throwaway keyrings" step below. Committing even
+      # a throwaway base64 key trips secret scanning (GitGuardian flagged
+      # exactly that on the first push of this file), and there is no reason to
+      # persist key material that only has to survive one job.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Random per-run key material, never committed and never reused. The
+      # blind-index keyring must be {keyVersion: base64 32-byte key} including
+      # version "1"; the AEAD keyring needs every version the suites touch —
+      # address (booking holds), email/phone (signup), notes (chart records).
+      # `>> $GITHUB_ENV` keeps them out of the log; the values are worthless
+      # outside this job anyway since the database is destroyed with the runner.
+      - name: Generate throwaway keyrings
+        run: |
+          aead=$(openssl rand -base64 32)
+          hmac=$(openssl rand -base64 32)
+          jwt=$(openssl rand -base64 32)
+          {
+            echo "PII_AEAD_KEYS_JSON={\"address-aead-v1\":\"$aead\",\"email-aead-v1\":\"$aead\",\"phone-aead-v1\":\"$aead\",\"notes-aead-v1\":\"$aead\"}"
+            echo "PII_LOOKUP_HMAC_KEYS_JSON={\"1\":\"$hmac\"}"
+            echo "JWT_SECRET=$jwt"
+          } >> "$GITHUB_ENV"
+
+      - name: Validate Prisma schema
+        run: pnpm exec prisma validate
+
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+
+      # `migrate deploy`, never `db push`: the Booking/BookingHold overlap
+      # EXCLUDE constraints live only in raw migration SQL, so a pushed schema
+      # would silently drop the very invariant these suites exist to prove.
+      - name: Apply database migrations
+        run: pnpm exec prisma migrate deploy
+
+      - name: Verify overlap EXCLUDE constraints exist
+        run: |
+          # psql rejects Prisma's `?schema=` query param, so strip it.
+          found=$(psql "${DIRECT_URL%%\?*}" -tAc "SELECT count(*) FROM pg_constraint WHERE conname IN ('Booking_no_active_professional_overlap','BookingHold_no_active_professional_overlap');")
+          echo "overlap constraints found: $found"
+          test "$found" = "2" || (echo "::error::Expected both overlap EXCLUDE constraints; migrations did not apply them." && exit 1)
+
+      # No seed step on purpose: every integration suite builds its own
+      # fixtures, and booking-overlap truncates the database between tests, so
+      # seeded rows would not survive to be depended on anyway.
+      - name: Run integration tests
+        run: pnpm run test:integration:ci

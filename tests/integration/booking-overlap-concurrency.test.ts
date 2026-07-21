@@ -88,40 +88,42 @@ function workingHoursJson(): Prisma.InputJsonValue {
   }
 }
 
+/**
+ * Wipe the test database between tests.
+ *
+ * This used to be a hand-ordered chain of ~30 unfiltered `deleteMany({})` calls
+ * walking the FK graph leaf-first. That chain rotted silently as the schema
+ * grew: it deleted `Service` before `ServicePermission` and `ClientProfile`
+ * before `ClientAllergy`, so against any database that had been through
+ * `pnpm db:test:seed` every test in this file died in `beforeEach` on a foreign
+ * key violation — and because `test:integration` runs in no CI workflow, nothing
+ * caught it. (See docs/design/scheduling-conflict-audit-fix-plan.md, F11.)
+ *
+ * A generated `TRUNCATE ... CASCADE` cannot drift: new tables are picked up
+ * automatically and CASCADE resolves the ordering. This is no more destructive
+ * than what it replaces — the old chain already wiped `User`/`Service`/
+ * `ClientProfile` unfiltered, so this suite has always assumed it owns the
+ * database. Only ever point DATABASE_URL at a throwaway test DB.
+ */
 async function cleanupAll(): Promise<void> {
-  await db.notificationDeliveryEvent.deleteMany({})
-  await db.notificationDelivery.deleteMany({})
-  await db.notificationDispatch.deleteMany({})
-  await db.scheduledClientNotification.deleteMany({})
-  await db.clientNotification.deleteMany({})
-  await db.notification.deleteMany({})
-  await db.reminder.deleteMany({})
+  // Table names come from pg_tables, never from test input, so interpolating
+  // them into the TRUNCATE is safe — identifiers cannot be parameterized.
+  const tables = await db.$queryRaw<{ tablename: string }[]>`
+    SELECT tablename
+    FROM pg_tables
+    WHERE schemaname = 'public'
+      AND tablename <> '_prisma_migrations'
+  `
 
-  await db.bookingOverrideAuditLog.deleteMany({})
-  await db.bookingCloseoutAuditLog.deleteMany({})
-  await db.idempotencyKey.deleteMany({})
+  if (tables.length === 0) return
 
-  await db.bookingCheckoutProductItem.deleteMany({})
-  await db.productRecommendation.deleteMany({})
-  await db.aftercareRebookSlot.deleteMany({})
-  await db.aftercareSummary.deleteMany({})
+  const quoted = tables
+    .map((row) => `"public"."${row.tablename}"`)
+    .join(', ')
 
-  await db.productSale.deleteMany({})
-  await db.bookingHold.deleteMany({})
-  await db.bookingServiceItem.deleteMany({})
-  await db.booking.deleteMany({})
-
-  await db.professionalServiceOffering.deleteMany({})
-  await db.clientAddress.deleteMany({})
-  await db.mediaServiceTag.deleteMany({})
-  await db.mediaAsset.deleteMany({})
-  await db.service.deleteMany({})
-  await db.serviceCategory.deleteMany({})
-  await db.professionalLocation.deleteMany({})
-  await db.professionalPaymentSettings.deleteMany({})
-  await db.clientProfile.deleteMany({})
-  await db.professionalProfile.deleteMany({})
-  await db.user.deleteMany({})
+  await db.$executeRawUnsafe(
+    `TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE`,
+  )
 }
 
 async function seedClient(
