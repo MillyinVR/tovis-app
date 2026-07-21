@@ -302,6 +302,51 @@ function assertConsultationTokenUsable(
   }
 }
 
+export type ConsultationActionTokenTarget = {
+  bookingId: string
+  clientId: string
+  professionalId: string
+}
+
+/**
+ * Read-only resolve of which booking a consultation link points at, WITHOUT
+ * burning it.
+ *
+ * These tokens are `singleUse`, so consuming them before the approval
+ * transaction means any refusal inside that transaction (TIME_BLOCKED, a
+ * stale proposal, a DB overlap rejection) permanently kills the client's
+ * magic link — the public page then dead-ends on a full-screen error with no
+ * way back. Callers use this to learn the booking/client ids they need in
+ * order to open the locked transaction, then call
+ * `consumeConsultationActionToken({ tx })` INSIDE it so a refusal rolls the
+ * consumption back and the link survives for a retry.
+ *
+ * The usability assertions here are an early, cheap rejection of a dead link;
+ * the authoritative once-only guarantee is still the conditional updateMany in
+ * `consumeConsultationActionToken`.
+ */
+export async function resolveConsultationActionTokenTarget(args: {
+  rawToken: string
+  tx?: Prisma.TransactionClient
+}): Promise<ConsultationActionTokenTarget> {
+  const db = getDb(args.tx)
+  const now = new Date()
+  const tokenHash = hashClientActionToken(args.rawToken)
+
+  const existing = await db.clientActionToken.findUnique({
+    where: { tokenHash },
+    select: CONSUME_CONSULTATION_ACTION_TOKEN_SELECT,
+  })
+
+  assertConsultationTokenUsable(existing, now)
+
+  return {
+    bookingId: existing.bookingId,
+    clientId: existing.clientId,
+    professionalId: existing.professionalId,
+  }
+}
+
 export async function consumeConsultationActionToken(
   args: ConsumeConsultationActionTokenArgs,
 ): Promise<ConsumedConsultationActionToken> {

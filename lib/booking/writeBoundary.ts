@@ -175,6 +175,7 @@ import {
 } from '@/lib/notifications/paymentNotifications'
 import {
   consumeConsultationActionToken,
+  resolveConsultationActionTokenTarget,
   revokeConsultationActionTokensForBooking,
 } from '@/lib/consultation/clientActionTokens'
 import {
@@ -198,7 +199,10 @@ import {
   type BookingWindow,
 } from '@/lib/booking/overlapPolicy'
 import { findSchedulingConflicts } from '@/lib/booking/schedulingConflicts'
-import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import {
+  getTimeRangeConflict,
+  hasCalendarBlockConflict,
+} from '@/lib/booking/conflictQueries'
 import { resolveAftercarePreselectedSlot } from '@/lib/booking/aftercarePreselectedSlot'
 import { validateAftercareRebookSlotOwnership } from '@/lib/booking/aftercareRebookSlotOwnership'
 import {
@@ -1256,6 +1260,9 @@ const APPROVE_CONSULTATION_BOOKING_SELECT = {
   clientId: true,
   professionalId: true,
   locationType: true,
+  // Calendar blocks are location-aware (global blocks conflict everywhere, a
+  // location block only for that location) — the extension probe needs this.
+  locationId: true,
   serviceId: true,
   offeringId: true,
   scheduledFor: true,
@@ -8069,6 +8076,53 @@ const offeringIds = Array.from(
     now: args.now,
   })
 
+  // ...but a CALENDAR BLOCK is not a collision the pro can absorb by working
+  // through it — it is time they explicitly declared unavailable, and blocks
+  // are fatal on every other write path in the repo (never override-gated,
+  // unlike working hours). findSchedulingConflicts above is block-blind, so
+  // this is a separate probe against the block-aware engine.
+  //
+  // Only the EXTENSION window [previousEnd, materializedEnd) is probed, never
+  // the original window. A block may legitimately already overlap the booked
+  // time: the ICS importer's createBlockIfAbsent writes blocks with no
+  // booking-conflict check, so a migrated pro can have a block laid straight
+  // over a live appointment. Probing the full window would refuse those
+  // approvals for a pre-existing condition the client cannot act on.
+  const previousEnd = new Date(
+    booking.scheduledFor.getTime() +
+      ((booking.totalDurationMinutes ?? 0) + booking.bufferMinutes) * 60_000,
+  )
+  const extensionStart =
+    previousEnd > booking.scheduledFor ? previousEnd : booking.scheduledFor
+
+  if (materializedEnd > extensionStart) {
+    const blocked = await hasCalendarBlockConflict({
+      tx: args.tx,
+      professionalId: booking.professionalId,
+      locationId: booking.locationId,
+      requestedStart: extensionStart,
+      requestedEnd: materializedEnd,
+    })
+
+    if (blocked) {
+      throw bookingError('TIME_BLOCKED', {
+        message: `Consultation extension runs into blocked time. bookingId=${booking.id}`,
+        userMessage:
+          'These services run into time your pro has blocked off. Ask them to update the proposal.',
+      })
+    }
+  }
+
+  // Working hours are deliberately NOT re-checked here. The actor on all three
+  // decision routes is the CLIENT, mid-appointment, and OUTSIDE_WORKING_HOURS
+  // is override-gated for the PRO everywhere else in the repo
+  // (lib/booking/overridePrompts.ts) — there is nobody on this path who can
+  // grant that override, so enforcing it would dead-end a live in-person
+  // approval with no way forward. Running past your own closing time is the
+  // pro's call and the pro authored the proposal. The check belongs at
+  // proposal time, where the pro is authenticated and present; see F12 in
+  // docs/design/scheduling-conflict-audit-fix-plan.md.
+
   const updatedBooking = await args.tx.booking
     .update({
       where: { id: booking.id },
@@ -8098,9 +8152,11 @@ const offeringIds = Array.from(
       },
     })
     .catch((error: unknown) => {
-      // 23P01: the DB overlap EXCLUDE rejected the duration growth (a write
-      // path that skipped the schedule lock). Surface a clean conflict, not a
-      // 500.
+      // 23P01: the DB overlap EXCLUDE rejected the duration growth. All three
+      // decision routes DO hold the per-professional advisory lock, so this is
+      // the durable backstop firing on a case the runtime probe above missed
+      // (e.g. a conflicting row this booking must not overlap), not an
+      // unlocked write. Surface a clean conflict, not a 500.
       if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
         throw bookingError('TIME_BOOKED')
       }
@@ -13392,15 +13448,27 @@ export async function approveConsultationAndMaterializeBooking(args: {
 export async function approveConsultationByClientActionToken(
   args: ApproveConsultationByClientActionTokenArgs,
 ): Promise<ApproveConsultationMaterializationResult> {
-  const consumed = await consumeConsultationActionToken({
+  // Resolve WITHOUT burning the link, then consume inside the transaction.
+  // These tokens are single-use, so consuming before the write meant any
+  // refusal below (TIME_BLOCKED on an extension, a stale proposal, the DB
+  // overlap backstop) left the client holding a dead magic link and a
+  // full-screen error with no retry. Rolling the consumption back with the
+  // failed write keeps a refusal recoverable — the client can re-open the same
+  // link once the pro clears whatever blocked it.
+  const target = await resolveConsultationActionTokenTarget({
     rawToken: args.rawToken,
   })
 
   return withLockedClientOwnedBookingTransaction({
-    bookingId: consumed.bookingId,
-    clientId: consumed.clientId,
-    run: async ({ tx, now }) =>
-      performLockedApproveConsultationMaterialization({
+    bookingId: target.bookingId,
+    clientId: target.clientId,
+    run: async ({ tx, now }) => {
+      const consumed = await consumeConsultationActionToken({
+        rawToken: args.rawToken,
+        tx,
+      })
+
+      return performLockedApproveConsultationMaterialization({
         tx,
         bookingId: consumed.bookingId,
         clientId: consumed.clientId,
@@ -13417,22 +13485,30 @@ export async function approveConsultationByClientActionToken(
         },
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
-      }),
+      })
+    },
   })
 }
 
 export async function rejectConsultationByClientActionToken(
   args: RejectConsultationByClientActionTokenArgs,
 ): Promise<RejectConsultationResult> {
-  const consumed = await consumeConsultationActionToken({
+  // Same single-use contract as the approve path above: resolve first, consume
+  // inside the transaction so a refused decline doesn't burn the link.
+  const target = await resolveConsultationActionTokenTarget({
     rawToken: args.rawToken,
   })
 
   return withLockedClientOwnedBookingTransaction({
-    bookingId: consumed.bookingId,
-    clientId: consumed.clientId,
-    run: async ({ tx, now }) =>
-      performLockedRejectConsultationDecision({
+    bookingId: target.bookingId,
+    clientId: target.clientId,
+    run: async ({ tx, now }) => {
+      const consumed = await consumeConsultationActionToken({
+        rawToken: args.rawToken,
+        tx,
+      })
+
+      return performLockedRejectConsultationDecision({
         tx,
         bookingId: consumed.bookingId,
         clientId: consumed.clientId,
@@ -13449,7 +13525,8 @@ export async function rejectConsultationByClientActionToken(
         },
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
-      }),
+      })
+    },
   })
 }
 

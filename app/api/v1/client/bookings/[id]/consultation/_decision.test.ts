@@ -939,6 +939,42 @@ describe('handleConsultationDecision', () => {
     }
   })
 
+  // The approval write is a real scheduling write: after F2 it refuses with
+  // TIME_BLOCKED when the agreed services run into the pro's blocked time.
+  // This route used to funnel every bookingError into an opaque 500, unlike
+  // the sibling public-token and pro in-person routes.
+  it('surfaces a booking error as its own code and status, not a 500', async () => {
+    expectIdempotencyStarted('idem_blocked_approve_1')
+
+    const { bookingError } = await import('@/lib/booking/errors')
+
+    mocks.approveConsultationAndMaterializeBooking.mockRejectedValueOnce(
+      bookingError('TIME_BLOCKED', {
+        message: 'Consultation extension runs into blocked time.',
+        userMessage: 'These services run into time your pro has blocked off.',
+      }),
+    )
+
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_blocked_approve_1',
+    })
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: OPERATION,
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 409,
+      code: 'TIME_BLOCKED',
+      error: 'These services run into time your pro has blocked off.',
+    })
+
+    // A refusal the client can act on is not an exception to report.
+    expect(mocks.captureBookingException).not.toHaveBeenCalled()
+  })
+
   it('marks idempotency failed and returns 500 when approval write throws', async () => {
     expectIdempotencyStarted('idem_boom_approve_1')
 

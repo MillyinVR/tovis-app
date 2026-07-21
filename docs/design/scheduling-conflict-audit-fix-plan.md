@@ -55,7 +55,7 @@ endpoints; every finding is a server finding.
 | 9 | `POST /client/rebook/[token]` | token, no session | ✅ | ✅ | ✅ (step grid ❌) |
 | 10 | `POST /pro/waitlist/[entryId]/offer` | pro | ✅ | ✅ | ❌ |
 | 11 | `POST /client/waitlist-offers/[id]` (CONFIRM) | client | ✅ | ✅ | ✅ |
-| 12 | Consultation approve ×3 routes (extends duration) | client / token / pro | ⚠️ | ❌ | ❌ |
+| 12 | Consultation approve ×3 routes (extends duration) | client / token / pro | ⚠️ | ✅ extension only (F2) | ❌ by decision → F12 |
 | 13 | `POST /pro/migrate/calendar/commit` (ICS import) | pro | ⚠️ silent double-book | ✅ | bypassed by design |
 | 14 | Hourly cron `migration/calendar-resync` | cron, unattended | ⚠️ silent double-book | ✅ | bypassed by design |
 | 15 | `POST /pro/openings` (last-minute opening) | pro | ✅ no lock | ✅ no lock | ✅ |
@@ -113,11 +113,40 @@ and never re-checks working hours. A pro proposing extra services can push a 2pm
 appointment through a 4pm calendar block or past closing. Reachable
 unauthenticated via `POST /api/v1/public/consultation/[token]/decision`.
 
-**Fix.** Swap to `getTimeRangeConflict` for the extended window; treat `BLOCKED`
+**Fix.** Probe the block-aware engine for the extended window; treat `BLOCKED`
 as fatal (`TIME_BLOCKED`) and keep booking/hold conflicts as the existing
-pro-authorized `allowsOverlap` path. Re-run `ensureWithinWorkingHours` on the
-extended end; if extending past close is intended, make it an explicit override
-rather than an absence.
+pro-authorized `allowsOverlap` path. Working hours are a separate decision —
+see F12.
+
+> ✅ **Shipped.** Two of this card's premises were wrong and one extra hazard
+> surfaced during implementation — see "F2 — what shipped" in §4 before reusing
+> anything above.
+
+### F12 — Consultation proposal is authored with zero schedule validation 🟠
+
+Fell out of F2. `POST /api/v1/pro/bookings/[id]/consultation-proposal` performs
+**no** scheduling check of any kind — it validates offerings, prices and session
+step, then stores the proposal. The pro picks services without ever being told
+what the resulting end time is or what it runs into.
+
+That is also the only place the working-hours question can be answered. F2
+deliberately does **not** enforce working hours at approval time (see its
+decision note): the actor there is the client, mid-appointment, and
+`OUTSIDE_WORKING_HOURS` is override-gated for the **pro** everywhere else in the
+repo (`lib/booking/overridePrompts.ts`) — nobody on that path can grant the
+override, so enforcing it would dead-end a live in-person approval.
+
+**Fix.** At proposal time, compute the materialized end from the proposed items
+and run the extension through the same two checks a pro create/reschedule gets:
+
+- calendar block → fatal `TIME_BLOCKED` (blocks are never override-gated);
+- past closing → 409 `OUTSIDE_WORKING_HOURS` carrying the existing
+  `allowOutsideWorkingHours` override flag, so the pro confirms explicitly and
+  the override lands in `BookingOverrideAuditLog` like every other one.
+
+Needs the confirm-dialog wiring on **web + iOS** before the server side can ship
+with the flag defaulting to false — otherwise pros hit a refusal with no UI to
+clear it. Ship the two halves together.
 
 ### F3 — Retire the second conflict engine 🟠
 
@@ -297,7 +326,7 @@ Named honestly rather than assumed safe:
 | Item | State |
 | --- | --- |
 | F1 ICS import double-book | ✅ done — branch `fix/scheduling-conflict-audit` |
-| F2 consultation extension | not started |
+| F2 consultation extension | ✅ done — branch `fix/consultation-extension-blocks` |
 | F3 retire second engine | not started |
 | F4 rebook token step grid | not started |
 | F5 waitlist offer working hours | not started |
@@ -307,6 +336,101 @@ Named honestly rather than assumed safe:
 | F9 duplicate-logic cleanup | not started |
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — branch `fix/integration-suite-ci` |
+| F12 proposal-time validation | not started (opened by F2) |
+
+### F2 — what shipped
+
+**Two of the card's premises did not survive.** Both are corrected in place
+above; noting them here because each changed the fix.
+
+1. *"a write path that skipped the schedule lock"* (the comment at
+   `writeBoundary.ts:8102`) — **false**. All three decision routes hold the
+   per-professional advisory lock: the two client paths via
+   `withLockedClientOwnedBookingTransaction`, the pro path via
+   `withLockedProfessionalTransaction`. Comment corrected.
+2. *"treat BLOCKED as fatal"* over the **whole** materialized window would have
+   been wrong. `createBlockIfAbsent` (`lib/migration/calendarImportServer.ts:237`)
+   writes calendar blocks with **no** booking-conflict check — and after F1 an
+   import collision *guarantees* a block laid over an existing booking. Probing
+   the full window would refuse approvals for migrated pros over a pre-existing
+   condition the client cannot act on. Only the **extension window**
+   `[previousEnd, materializedEnd)` is probed; a proposal that doesn't grow the
+   window is not probed at all.
+
+**A third finding was discovered while implementing, and had to be fixed for
+the refusal to be shippable:** consultation action tokens are `singleUse` and
+were consumed *before* the transaction (`writeBoundary.ts:13395`). Any refusal
+inside the write therefore burned the client's magic link permanently while
+leaving the booking untouched — and `app/client/consultation/[token]/page.tsx`
+swaps the whole view for an error, so the client dead-ends with no retry. This
+already applied to the pre-existing `TIME_BOOKED` and `INVALID_SERVICE_ITEMS`
+refusals; F2 would have added a third.
+
+Shipped:
+
+- `lib/booking/writeBoundary.ts` — `hasCalendarBlockConflict` probe over the
+  extension window, fatal `TIME_BLOCKED` with consultation-specific copy;
+  booking/hold conflicts left on the existing pro-authorized `allowsOverlap`
+  path untouched (`findSchedulingConflicts` stays until F3 retires it);
+  `locationId` added to `APPROVE_CONSULTATION_BOOKING_SELECT` because blocks are
+  location-aware; stale lock comment corrected.
+- `lib/consultation/clientActionTokens.ts` — new
+  `resolveConsultationActionTokenTarget`, a read-only resolve that does not burn
+  the link.
+- `lib/booking/writeBoundary.ts` — both token wrappers (approve **and** reject)
+  resolve first, then consume **inside** the locked transaction, so a refusal
+  rolls the consumption back and the link survives.
+- `app/api/v1/client/bookings/[id]/consultation/_decision.ts` — added the
+  missing `isBookingError` branch. This route funnelled **every** booking error
+  into an opaque 500, unlike its public-token and pro in-person siblings, so the
+  new `TIME_BLOCKED` (and the pre-existing `TIME_BOOKED`) would have been
+  unreadable to the client.
+
+**Working hours: decided, not inherited.** Deliberately *not* enforced at
+approval — reasoning in the code comment and in F12, which owns the real fix.
+
+**Verified.** Every new test was proven to fail before it was trusted:
+
+- `writeBoundary.consultationMaterialization.test.ts` +3 — the two
+  behaviour tests go red with the probe removed; the narrowing test goes red
+  when the window is widened to the full booking.
+- `writeBoundary.approveConsultation.test.ts` +1 — the ordering test reports
+  `expected [ 'token:consume' ] to deeply equal [ 'transaction:open', … ]`
+  against the old code.
+- `_decision.test.ts` +1 — reports `status: 500` vs the expected `409` without
+  the mapping branch.
+- **`tests/integration/consultation-extension-blocked.test.ts` (new, 3 tests)
+  drives the real approval write against real Postgres** — no mocked conflict
+  engine. With the fix removed the refusal test fails outright: the approval
+  commits straight through the block. This is the runtime proof F1 could not
+  claim. It also asserts the refusal leaves *nothing* half-written (duration,
+  `allowsOverlap`, approval status and service items all roll back), which
+  covers the `$transaction` return-vs-throw trap.
+- Full local integration suite **31/31 files, 143/143 tests**; `vitest lib/booking
+  lib/consultation app/api/v1/client/bookings app/api/v1/public` → 883 passing /
+  87 files. `typecheck` clean, `lint` 0 errors, `check:static-guards` all pass.
+
+**Not verified / not checked:**
+
+- No browser or simulator driving — the client-facing copy for the new
+  `TIME_BLOCKED` was not seen rendered on either platform.
+- iOS was not touched and not read this session. Whether the iOS consultation
+  screens render a 409 `TIME_BLOCKED` usefully (vs a generic failure) is
+  unchecked.
+- Moving the token consume inside the locked transaction adds ~3 queries to the
+  advisory-lock hold. Consultation decisions are low-frequency so this was
+  judged fine, but lock-hold time was not measured (same gap as §3's
+  lock-contention entry).
+- The block probe runs *after* `replaceBookingServiceItems`, so a refusal wastes
+  those writes before rolling them back. Correct, but not free; moving it
+  earlier is a cheap follow-up.
+- **Local-harness gap, pre-existing, not from this change:**
+  `tests/integration/waitlist-offer.test.ts` fails locally with
+  `Missing required env PII_AEAD_KEYS_JSON`. Confirmed pre-existing by stashing
+  all changes, and confirmed environmental by re-running with the key supplied
+  (5/5 pass). `.github/workflows/integration.yml:88` generates the keyring per
+  run, so CI is unaffected; only `scripts/with-test-db.mjs` (which reads just
+  `.env.test.local`) lacks it.
 
 ### F11 — what shipped
 
@@ -388,37 +512,45 @@ update to the table in §4.)
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
 > it first, especially §4's status table and the "Not checked" list in §3.
 >
-> **F1 and F11 are done and merged** (#693, #694). **NEXT = F2.**
+> **F1, F11 and F2 are done** (#693, #694, and F2 on branch
+> `fix/consultation-extension-blocks`). **NEXT = F3.**
 >
-> F2: consultation approval extends an appointment's `totalDurationMinutes`
-> using `findSchedulingConflicts` (`lib/booking/writeBoundary.ts:8064`), which is
-> **block-blind**, and never re-checks working hours. So a pro proposing extra
-> services can push a 2pm appointment straight through a 4pm calendar block or
-> past closing time. It is reachable **unauthenticated** via
-> `POST /api/v1/public/consultation/[token]/decision`, and also from the in-app
-> client route and the pro's in-person decision route — three entry points, one
-> shared code path.
+> F3: retire the second conflict engine. `lib/booking/schedulingConflicts.ts`
+> (`findSchedulingConflicts`, bookings+holds, **block-blind**) still exists
+> alongside `lib/booking/conflictQueries.ts` (`getTimeRangeConflict`,
+> blocks+bookings+holds). That unreconciled scope gap is exactly what caused F2
+> — and F2's fix deliberately left `findSchedulingConflicts` in place, so the
+> consultation approval now calls **both** engines side by side. Consolidating
+> is the point of this card.
 >
-> Suggested shape (verify before trusting it — the plan's own premises have not
-> all survived contact): swap to `getTimeRangeConflict` for the extended window,
-> treat `BLOCKED` as fatal (`TIME_BLOCKED`), keep booking/hold conflicts on the
-> existing pro-authorized `allowsOverlap` path, and re-run
-> `ensureWithinWorkingHours` on the extended end. If extending past close is
-> intended, make it an explicit override rather than an absence — decide, don't
-> inherit.
+> Suggested shape (verify before trusting it — this plan's premises have a poor
+> survival rate; **three** of F2's did not hold): have
+> `enforceBookingOverlapPolicy` call `getTimeRangeConflict`, ignoring the
+> `BLOCKED` verdict where the caller already gated it, then delete
+> `findSchedulingConflicts`. Note `getTimeRangeConflict` returns only the
+> **highest-priority** code (BLOCKED > BOOKING > HOLD), not a list — check
+> whether any caller needs to distinguish "blocked AND booked" before assuming
+> it is a drop-in. `conflictEngineParity.test.ts` reconciled the two engines'
+> interval math but not their scope; that test is the place to pin the merge.
 >
-> Then consider **F3** (retire `findSchedulingConflicts` entirely, so the
-> block-blind engine that caused F2 cannot cause it again). F2 first so it ships
-> without waiting on the refactor.
+> While you are in there, F2 left one cheap follow-up: the block probe in
+> `performLockedApproveConsultationMaterialization` runs *after*
+> `replaceBookingServiceItems`, so a refusal wastes those writes before rolling
+> them back. Moving it ahead of the item rewrite is a small, safe win.
 >
-> House rules that bit hard this session and are now in `CLAUDE.md`:
-> **don't guess — read the tool's own output, or ask.** And when you add a guard,
-> **prove it fails before trusting that it passes.**
+> House rules that have now bitten across three sessions and are in `CLAUDE.md`:
+> **don't guess — read the tool's own output, or ask** (F2 found a
+> single-use-token burn and a route that turned every booking error into a 500,
+> both only by reading the actual code rather than the card). And when you add a
+> guard, **prove it fails before trusting that it passes** — every test F2 added
+> was reverted-and-re-run to confirm it goes red.
 >
-> The integration suite is alive again and runs in CI, so you can now verify
-> booking-overlap behaviour end to end: `pnpm test:integration` locally (needs
-> the test-postgres container on :5433), or let `.github/workflows/integration.yml`
-> run it on the PR.
+> The integration suite runs in CI and is the strongest tool here:
+> `pnpm test:integration` locally (needs the test-postgres container on :5433).
+> ⚠️ it also needs `PII_AEAD_KEYS_JSON` in your environment or
+> `waitlist-offer.test.ts` fails with `Missing required env` — CI generates it,
+> `scripts/with-test-db.mjs` does not. `tests/integration/consultation-extension-blocked.test.ts`
+> is the pattern for driving a real write-boundary path against real Postgres.
 >
 > 🚫 Do not deploy. Runtime payload #686–#693 is merged and NOT live; that stays
 > Tori's call.
