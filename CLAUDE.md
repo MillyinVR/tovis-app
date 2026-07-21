@@ -12,6 +12,17 @@ will catch them.
 - **No duplicate logic.** Search for an existing helper before writing one;
   reuse or extract rather than copy. If you catch yourself repeating logic,
   consolidate it. *Judgment-only — not guarded.*
+- **Don't guess — read the source of truth, or ask.** When something fails or a
+  fact isn't certain, go get the actual evidence before changing anything: the
+  failing tool's own output or annotation (`gh api …/check-runs`, the job log,
+  the stack trace), the code, the schema, the migration SQL. A plausible theory
+  that fits the symptoms is **not** a finding, and the most dangerous theory is
+  one that matches a remembered gotcha — it feels confirmed without ever having
+  been checked. Symptoms are usually consistent with several causes; the tool
+  almost always names the real one. If the answer can't be established from the
+  repo, ask instead of assuming. One lookup is cheaper than two speculative
+  fixes, and a wrong guess that happens to go green is worse than a red build.
+  *Judgment-only — not guarded.*
 - **Prisma schema is the single source of truth for data shapes.** Derive types
   from the generated Prisma client; don't hand-redeclare model shapes or write
   around the schema. Backed by `npm run typecheck` plus the write-boundary
