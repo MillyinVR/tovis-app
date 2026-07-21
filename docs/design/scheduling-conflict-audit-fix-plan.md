@@ -52,7 +52,7 @@ endpoints; every finding is a server finding.
 | 6 | `POST /pro/bookings/[id]/rebook` (BOOK) | pro | ⚠️ | ✅ | ✅ |
 | 7 | `POST /pro/bookings/[id]/aftercare` (BOOKED mode) | pro | ⚠️ | ✅ | ✅ |
 | 8 | `POST /client/bookings/[id]/aftercare-rebook` (CONFIRM) | client | ✅ | ✅ | ✅ |
-| 9 | `POST /client/rebook/[token]` | token, no session | ✅ | ✅ | ✅ (step grid ❌) |
+| 9 | `POST /client/rebook/[token]` | token, no session | ✅ | ✅ | ✅ (step grid ✅ F4) |
 | 10 | `POST /pro/waitlist/[entryId]/offer` | pro | ✅ | ✅ | ❌ |
 | 11 | `POST /client/waitlist-offers/[id]` (CONFIRM) | client | ✅ | ✅ | ✅ |
 | 12 | Consultation approve ×3 routes (extends duration) | client / token / pro | ⚠️ | ✅ extension only (F2) | ❌ by decision → F12 |
@@ -898,70 +898,79 @@ update to the table in §4.)
 
 > Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
-> it first, especially §4's status table, **"F3 — what shipped"** and
-> **"F13 — what shipped"** (both contain traps that cost real time), and the
-> "Not checked" list in §3.
+> it first, especially §4's status table, **"F4 — what shipped"**,
+> **"F3 — what shipped"** and **"F13 — what shipped"** (each contains a trap that
+> cost real time), and the "Not checked" list in §3.
 >
 > **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
-> F13 ✅ #704. NEXT = F4.**
+> F13 ✅ #704, F4 ✅ #705. NEXT = F5.**
 >
-> ✅ **Everything through #704 is DEPLOYED** (2026-07-21, `tovis-npx5cy47p`, on
-> Tori's explicit go-ahead). Migration `20260804000000` applied. Prod now runs the
-> retired-engine refactor and the backstop logging, so from here a regression is a
-> LIVE regression, not a staged one. **Deploy is still Tori's call every time** —
-> do not infer standing permission from the last one.
+> ✅ Everything through **#704** is DEPLOYED (2026-07-21, `tovis-npx5cy47p`).
+> **#705 is merged but NOT deployed** — a prod deploy is pending Tori's
+> go-ahead, and **deploy is Tori's call every time**; never infer standing
+> permission from the last one. Until it ships, prod still accepts an off-grid
+> start on the public rebook link.
 >
-> F3 retired the second conflict engine (`lib/booking/schedulingConflicts.ts` is
-> gone; `enforceBookingOverlapPolicy` now shares `findBookingAndHoldConflicts`
-> with every other conflict read). F13 fell out of it: the DB overlap backstop was
-> refusing silently, so a gate regression would have been invisible. **If
-> `booking.event = overlap_backstop_fired` ever appears in Slack
-> `#tovis-ops-alerts`, drop everything — that is the F3 refactor breaking in
-> production.** It has never fired; the path is proven by configuration, not by
+> **If `booking.event = overlap_backstop_fired` ever appears in Slack
+> `#tovis-ops-alerts`, drop everything** — that is the F3 refactor breaking in
+> production. It has never fired; the path is proven by configuration, not by
 > observation.
 >
-> ⚠️ **F4's card carries a premise AND a question.** It proposes adding
-> `deferStepToPro` so the public rebook token stops accepting off-grid starts
-> (`STEP_MISMATCH` is deliberately non-fatal for pros, and that route is a CLIENT
-> path). **Confirm the premise before writing anything** — read
-> `app/api/v1/client/rebook/[token]/route.ts:395` and `proSchedulingPolicy`, and
-> check the refusal is genuinely reachable and genuinely skipped. **Five card
-> premises have now died on contact** (F2 had three; F3's central one; and in F13
-> I was wrong twice about my own work — see below). The card also asks something
-> that is **Tori's call, not yours**: the recommended-window constraint is skipped
-> unless `rebookMode === RECOMMENDED_WINDOW` (`route.ts:198`) — is that intended?
-> Surface it with evidence when you reach it.
+> ⚠️ **F5 carries a decision that is Tori's, not yours** — and F4 is the reason
+> to be careful how you ask. F4's card also "carried a Tori decision" (was the
+> recommended-window skip intended?) and it turned out the code already answered
+> it: the pro-side writer refuses to store a rebook window in any mode but
+> `RECOMMENDED_WINDOW`, so the guard was exactly scoped and there was nothing to
+> decide. **Establish the facts first, and only escalate what the repo genuinely
+> cannot answer.** For F5 that means reading `createWaitlistOffer`
+> (`writeBoundary.ts:14490`), the client confirm path, and what the pro's offer
+> UI actually lets them pick, before asking whether an offer should check working
+> hours at offer time (recommended — the offer is the promise) or pass
+> `allowOutsideWorkingHours: true` at confirm. The second half — should an offer
+> *reserve* the slot with a hold? — is a real product decision with no code
+> answer; surface it with evidence about what happens today (it fails cleanly
+> with `TIME_BOOKED`, but the offer was a promise).
 >
-> **Tori wants the ENTIRE queue closed.** After F4 the remaining cards are F5, F6,
-> F7 (iOS), F8, F9, F10 (iOS), F12. Two more carry decisions that are hers — F5
-> (working hours at offer time vs allow at confirm; should an offer *reserve*?)
-> and F8 (should COMPLETED occupy future time? — F11 found DB-side evidence the
-> constraint excluding it is deliberate, so F8 probably resolves by dropping
-> COMPLETED from `BOOKING_BLOCKING_STATUSES`) — and F12 needs UI on web **and**
-> iOS before its server half can ship. Do not batch-ask them up front.
+> **Tori wants the ENTIRE queue closed.** After F5: F6, F7 (iOS), F8, F9, F10
+> (iOS), F12. F8 carries a decision too (should COMPLETED occupy future time? —
+> F11 found DB-side evidence the constraint excluding it is deliberate, so F8
+> probably resolves by dropping COMPLETED from `BOOKING_BLOCKING_STATUSES`), and
+> F12 needs UI on web **and** iOS before its server half can ship. Do not
+> batch-ask them up front.
 >
-> **House rules that have bitten across six sessions**, all in `CLAUDE.md`:
+> ⚠️ **`security-scan` / "Dependency audit" is RED on `main` and on every PR** —
+> `sharp <0.35.0` via `next`, high-severity libvips CVEs (GHSA-f88m-g3jw-g9cj).
+> Verified identical on `main` before #705 existed, so **do not own it as your
+> failure**; it is a real advisory needing a dependency bump, which is its own
+> change. Every other check on #705 was green.
 >
-> - **Don't guess — read the tool's own output, or ask.** In F13 the Sentry
->   endpoint I "remembered" was half-retired: `GET .../rules/` is now `410`, the
->   `POST` still works. A probe took one minute; the assumption would have been
->   wrong in both directions.
-> - **Prove a guard fails before trusting that it passes.** Every guard in #703
->   and #704 was proven red first, four different ways (reverting the builder,
->   swapping the probe order, blinding the finder, removing the alert call).
-> - **Verify the thing you are SHIPPING**, and **ask which LAYER made a test
->   pass.** This is the big one from F3. A real-Postgres test asserting a client
->   path refuses with `TIME_BOOKED` passed *with the conflict finder blinded* —
->   the database was doing the refusing. Overlap is enforced twice and both layers
->   surface the same code, so a green refusal test proves nothing about the gate.
->   The discriminating test is the **pro double-book**, which must SUCCEED and only
->   can if the gate finds the conflict. To isolate a permissive layer, test what it
->   should ALLOW — refusals are over-determined.
+> **House rules that have bitten across seven sessions**, all in `CLAUDE.md`:
+>
+> - **Don't guess — read the tool's own output, or ask.** The "Dependency audit"
+>   red above looks like a PR failure until you diff it against `main`; the F13
+>   Sentry endpoint I "remembered" was half-retired (`GET .../rules/` is `410`,
+>   the `POST` still works).
+> - **Prove a guard fails before trusting that it passes.** Every guard in #703,
+>   #704 and #705 was proven red first — by reverting the builder, swapping the
+>   probe order, blinding the finder, removing the alert call, and (F4) flipping
+>   each permissive literal one at a time.
+> - **Ask which LAYER made a test pass, and to isolate a permissive layer, test
+>   what it should ALLOW.** Refusals are over-determined: a real-Postgres test
+>   asserting a client path refuses with `TIME_BOOKED` passed *with the conflict
+>   finder blinded*, because the database was doing the refusing. F4's corollary:
+>   when a rule becomes conditional, write one ALLOW test per call site that opts
+>   out, and prove each red by flipping only its own literal — over-enforcement
+>   is invisible from the refusal side.
+> - **Branch on WHO CHOSE the value, not who is acting.** F4's near-miss: three
+>   of four callers of `performLockedCreateRebookedBooking` are pro-driven, and
+>   the fourth has a `clientId` but books the *pro's* chosen minute. Keying the
+>   new refusal on the actor would have dead-ended clients on a time only the pro
+>   can change. Make such a flag **required, not defaulted** — TypeScript then
+>   finds every call site and forces each to state its intent.
 > - **Check your own "not verified" list before publishing it.** Twice in F13 I
->   wrote something off as unverifiable and it took one command: `SENTRY_DSN` is
->   set in prod (`vercel env ls production`), and the alert *already* routes to
->   Slack via an active catch-all issue rule. Both claims in my first draft were
->   wrong.
+>   wrote something off as unverifiable and it took one command.
+> - **Ask "who can fix this?" of every new refusal.** A refusal the user cannot
+>   act on is worse than the looseness it closes.
 >
 > Verification tools now proven and worth reusing:
 > - `pnpm test:integration` (needs the test-postgres container on :5433).
@@ -970,13 +979,26 @@ update to the table in §4.)
 >   `phone-aead-v1` / `notes-aead-v1`, plus `PII_LOOKUP_HMAC_KEYS_JSON` and
 >   `JWT_SECRET`. A single generic key fails with `Missing AEAD key for key
 >   version: address-aead-v1`. Copy `.github/workflows/integration.yml:88`.
-> - `tests/integration/booking-overlap-concurrency.test.ts` is the pattern for
->   driving a real write-boundary path (incl. `createProBooking`) against real
->   Postgres. Gotcha: the pro-readiness gate needs `mobileBasePostalCode` +
->   `mobileRadiusMiles` on the profile whenever a bookable MOBILE_BASE exists,
->   which the shared fixture does not set.
+> - `tests/integration/rebook-token-step-grid.test.ts` (F4) is the compact
+>   pattern for driving a rebook / aftercare write path against real Postgres —
+>   a self-contained fixture, no shared seed. Two gotchas it already encodes: the
+>   pro-readiness gate needs **`lat`/`lng` on the location** or `createProBooking`
+>   dies with `LOCATION_MISSING_GEO, NO_BOOKABLE_LOCATION`, and a `beforeEach`
+>   must clear prior rebooks or the `existingRebook` short-circuit makes the next
+>   case pass for the wrong reason. `tests/integration/booking-overlap-concurrency.test.ts`
+>   is the heavier equivalent (its fixture needs `mobileBasePostalCode` +
+>   `mobileRadiusMiles` whenever a bookable MOBILE_BASE exists).
+> - `computeDaySlotsFast` (`lib/availability/core/dayComputation.ts`) is callable
+>   straight from a test — use it to book a slot the availability engine *actually
+>   emitted* instead of hand-picking one you believe is valid.
 > - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
->   HTTP without touching dev data.
+>   HTTP without touching dev data. For a tokened public route, seed a
+>   `ClientActionToken` with `tokenHash = sha256hex(rawToken)` (see
+>   `hashClientActionToken`, `lib/consultation/clientActionTokens.ts:113`) and
+>   POST to it directly; that is how F4's 400/201 wire behaviour was confirmed.
+>   ⚠️ the dev server also loads `.env.local` (PROD Supabase) — `dev:test-db`
+>   overrides `DATABASE_URL` **and** `DIRECT_URL` on the command line, but do not
+>   exercise storage/upload paths under it.
 > - `tests/e2e/consultation-token-retryable-refusal.spec.ts` is the pattern for
 >   driving a real page (seed → act → assert DB state → act again).
 > - `~/Dev/tovis-ios/scripts/sim-login.sh --email <seeded user>` for the
