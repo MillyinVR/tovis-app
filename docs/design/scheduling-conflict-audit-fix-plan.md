@@ -502,18 +502,36 @@ the actual route — not the function it calls):
 `typecheck` clean, `lint` 0 errors, all static guards pass, **704 files / 6853
 unit tests**, **32 files / 154 integration tests** against real Postgres.
 
+**Driven in a real browser** — `tests/e2e/rebook-token-stale-slot.spec.ts`
+(new). The refusal is unreachable through normal web UI use (the RebookCard only
+offers `/availability/day` slots) and iOS has no rebook-token flow at all
+(`grep -rn "client/rebook" ~/Dev/tovis-ios` returns nothing). The one path that
+*can* reach it is a **stale page**, and that is what the spec drives: card
+renders real slots → the pro shifts their window start 09:00 → 09:07 → the
+client taps a slot that was valid when it rendered → **inline refusal, slot list
+still rendered and enabled, no row written** → reload → the re-anchored grid is
+offered and a slot books at :07 past the quarter hour. The last step is the
+point: a refusal the client cannot escape would be worse than the looseness this
+card closed. Proven red first — with the policy branch disabled the stale slot
+books silently. The server log confirms the app gate fired and not some other
+guard: `conflictType: STEP_BOUNDARY`, `windowStartMinutes: 547`,
+`stepRemainder: 8`. Full chromium suite 28 passed.
+
+**Retroactivity: measured, and there is nothing to migrate.** Every future
+booking in prod was run through the real `isStartAlignedToWorkingWindowStep`
+(9 rows). Exactly one is off-grid by `STEP_MISMATCH` — a **CANCELLED**
+`AFTERCARE` rebook at 10:30 against an 11:00 window opening
+(`before-window-start`), i.e. a pro-chosen time on a dead row. **Zero live rows
+originate from the client rebook-token path.** Four `ACCEPTED` rows sit on a
+Saturday the pro has disabled, which looked alarming and is not: each carries a
+`BookingOverrideAuditLog` row with `rule: WORKING_HOURS`,
+`route: writeBoundary.ts:createProBooking` — the pro overrode their own closed
+day deliberately and the audit trail recorded it. (The tempting explanation —
+"the hours were edited after the fact" — is **false**: the location was last
+updated 2026-07-13, all four bookings were created 2026-07-18…20.)
+
 **Not verified / not checked:**
 
-- **No browser and no simulator.** The refusal is unreachable through the web UI
-  (the RebookCard only offers `/availability/day` slots) and iOS has no rebook-
-  token flow at all — `grep -rn "client/rebook" ~/Dev/tovis-ios` returns nothing.
-  The one UI path that *can* now hit it is a **stale page**: if the pro changes
-  `stepMinutes` or their window start while the client's card is open, a slot
-  that was valid at render becomes off-grid. That fails safe — 400 `retryable`,
-  rendered inline by the card's existing error branch with the slot list still
-  live — but it was reasoned about, not watched.
-- **Not retroactive.** Bookings already sitting off-grid from this path stay
-  where they are; nothing sweeps or snaps them.
 - **The `enforceUpdateBookingScheduling` STEP_MISMATCH handler stays dead** —
   reachable only if someone flips that literal. Its test proves the literal, not
   the handler.
@@ -938,11 +956,11 @@ update to the table in §4.)
 > F12 needs UI on web **and** iOS before its server half can ship. Do not
 > batch-ask them up front.
 >
-> ⚠️ **`security-scan` / "Dependency audit" is RED on `main` and on every PR** —
-> `sharp <0.35.0` via `next`, high-severity libvips CVEs (GHSA-f88m-g3jw-g9cj).
-> Verified identical on `main` before #705 existed, so **do not own it as your
-> failure**; it is a real advisory needing a dependency bump, which is its own
-> change. Every other check on #705 was green.
+> ✅ **`security-scan` / "Dependency audit" is GREEN again** (#706): `sharp` and
+> `@babel/core` are pinned forward with `pnpm.overrides`. Those two entries are a
+> ceiling, not a cure — when `next` ships its own `sharp@>=0.35`, the
+> `sharp@<0.35.0` key silently stops matching and should be pruned, like the rest
+> of that list.
 >
 > **House rules that have bitten across seven sessions**, all in `CLAUDE.md`:
 >
