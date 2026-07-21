@@ -156,6 +156,24 @@ export function offeringToDto(off: OfferingRow) {
   }
 }
 
+/**
+ * Thrown when the pro already has this service on their menu AND it is live.
+ *
+ * Distinguishes a genuine duplicate from a *soft-deleted* row. Removing an
+ * offering only sets `isActive: false` — the row keeps the
+ * `@@unique([professionalId, serviceId])` slot — so before this existed, adding
+ * a previously-removed service hit P2002 and the pro was told "you already
+ * added this service" about something they could not see anywhere. Callers map
+ * this error to whatever "already added" response they already had; the
+ * soft-deleted case no longer reaches them.
+ */
+export class OfferingAlreadyActiveError extends Error {
+  constructor() {
+    super('This service is already active on the professional’s menu.')
+    this.name = 'OfferingAlreadyActiveError'
+  }
+}
+
 // Persist one offering. Validation (floor/durations) is the caller's job.
 export async function writeOffering(input: {
   tx: Prisma.TransactionClient
@@ -177,19 +195,60 @@ export async function writeOffering(input: {
     offersMobile: input.offersMobile,
   })
 
+  const fields = {
+    title: null,
+    description: input.description ?? null,
+    customImageUrl: input.customImageUrl ?? null,
+    offersInSalon: input.offersInSalon,
+    offersMobile: input.offersMobile,
+    salonPriceStartingAt: input.offersInSalon ? input.salonPrice : null,
+    salonDurationMinutes: input.offersInSalon ? input.salonDurationMinutes : null,
+    mobilePriceStartingAt: input.offersMobile ? input.mobilePrice : null,
+    mobileDurationMinutes: input.offersMobile ? input.mobileDurationMinutes : null,
+  }
+
+  // `isActive: false` is the ONLY delete marker on this model (there is no
+  // deletedAt), and removing an offering leaves everything else attached. So a
+  // soft-deleted row is invisible to the pro but still owns the unique
+  // [professionalId, serviceId] slot — adding the service back has to revive
+  // that row, not fail on it.
+  const existing = await input.tx.professionalServiceOffering.findUnique({
+    where: {
+      professionalId_serviceId: {
+        professionalId: input.professionalId,
+        serviceId: input.serviceId,
+      },
+    },
+    select: { id: true, isActive: true },
+  })
+
+  if (existing?.isActive) {
+    throw new OfferingAlreadyActiveError()
+  }
+
+  if (existing) {
+    // Removing an offering leaves its OfferingPriceRamp rows attached, and a
+    // ramp OUTRANKS the offering's own price: `effectiveUnitPrice` returns the
+    // ramp's currentPrice/targetPrice and never looks at listPrice. Reviving
+    // with a stale ramp would therefore charge the price from the import that
+    // created it and silently discard the price the pro just typed. Re-adding a
+    // service means this price is the price, so the ramp does not survive.
+    await input.tx.offeringPriceRamp.deleteMany({
+      where: { offeringId: existing.id },
+    })
+
+    return input.tx.professionalServiceOffering.update({
+      where: { id: existing.id },
+      data: { ...fields, isActive: true },
+      include: { service: { include: { category: true } } },
+    })
+  }
+
   return input.tx.professionalServiceOffering.create({
     data: {
       professionalId: input.professionalId,
       serviceId: input.serviceId,
-      title: null,
-      description: input.description ?? null,
-      customImageUrl: input.customImageUrl ?? null,
-      offersInSalon: input.offersInSalon,
-      offersMobile: input.offersMobile,
-      salonPriceStartingAt: input.offersInSalon ? input.salonPrice : null,
-      salonDurationMinutes: input.offersInSalon ? input.salonDurationMinutes : null,
-      mobilePriceStartingAt: input.offersMobile ? input.mobilePrice : null,
-      mobileDurationMinutes: input.offersMobile ? input.mobileDurationMinutes : null,
+      ...fields,
     },
     include: { service: { include: { category: true } } },
   })
