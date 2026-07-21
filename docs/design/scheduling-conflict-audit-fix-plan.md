@@ -210,6 +210,35 @@ a refactor.
 > ✅ **Shipped.** The hold divergence was settled first and is **latent, not
 > live** — it did not outrank the refactor. See "F3 — what shipped" in §4.
 
+### F13 — the DB backstop refused silently, hiding gate regressions 🟠
+
+Fell out of F3, where it cost a test. Overlap is enforced twice: the app gate
+(`enforceBookingOverlapPolicy`) and the durable GIST `EXCLUDE`. **Both refuse
+with `TIME_BOOKED`** — the catch maps 23P01 onto the same code — so from outside
+they are indistinguishable.
+
+The hold-create path has always logged its own backstop firing
+(`prismaCode: '23P01'`, `conflictKind: 'overlap_range'`). The five **booking**
+side catches did not log at all: consultation materialization, client finalize,
+pro create, rebook, and pro update each just threw.
+
+Consequence: if the gate ever stopped finding conflicts, **every client path
+would keep refusing correctly — by Postgres — and nothing would say so.** The
+`booking_conflict` trail would go quiet rather than wrong, and the only visible
+symptom would be *pro double-books starting to fail*, a path nobody watches.
+This is not hypothetical: an F3 integration test asserting a client-path
+`TIME_BOOKED` refusal **passed with the conflict finder deliberately blinded**.
+
+The advisory schedule lock serialises these writes, so a 23P01 on `Booking`
+should be effectively unreachable. A nonzero rate is a bug, not background noise.
+
+**Fix.** `logOverlapBackstopFired` next to `logOverlapDecisionBlocked`; all five
+catches call it. Discriminator is `meta.layer = 'db_backstop'` plus
+`note: 'db_overlap_backstop_fired'`. No behaviour change — same refusal, same
+code, same client experience.
+
+> ✅ **Shipped** — see "F13 — what shipped" in §4.
+
 ### F4 — Public rebook token accepts off-grid times 🟠
 
 `app/api/v1/client/rebook/[token]/route.ts:395` →
@@ -387,6 +416,36 @@ Named honestly rather than assumed safe:
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — branch `fix/integration-suite-ci` |
 | F12 proposal-time validation | not started (opened by F2) |
+| F13 backstop refused silently | ✅ done — branch `fix/f13-log-overlap-backstop` (opened by F3) |
+
+### F13 — what shipped
+
+- `lib/booking/writeBoundary.ts` — `logOverlapBackstopFired`, called from all
+  five booking-side 23P01 catches. Marks the refusal `layer: 'db_backstop'` so
+  it is separable from an app-gate refusal, which logs an
+  `overlapDecisionCode`. On the rebook path the source booking id goes to
+  `meta.sourceBookingId`, not `bookingId` — that create has no row yet, and a
+  reader would take `bookingId` for the conflicting row.
+- **The client-path integration test is now discriminating.** `waitlist-offer`'s
+  conflict test asserts the app gate refused (an `overlapDecisionCode` was
+  logged) **and** that the backstop did not fire. That is the assertion that was
+  missing: the previous version passed with the gate blinded.
+
+**Verified, both directions:**
+
+- The unit guard (`writeBoundary.overlapPolicy.test.ts`) fails before the fix
+  with `expected "spy" to be called with arguments: [ ObjectContaining{…} ]` —
+  note the `TIME_BOOKED` half of that test passes either way, which is precisely
+  the point.
+- The integration guard fails when the conflict finder is blinded
+  (`expected false to be true`), where before it passed.
+- `typecheck` clean, `lint` 0 errors, guards pass, 703 files / **6849** unit
+  tests, 31 files / **148** integration tests.
+
+**Not verified:** no alerting is wired — this makes the signal *emittable*, not
+*watched*. `logBookingConflict` writes a `console.warn` JSON line; whether
+anything in Vercel/Sentry alerts on `layer: 'db_backstop'` is outside this change
+and unchecked.
 
 ### F3 — what shipped
 

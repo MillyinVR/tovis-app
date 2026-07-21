@@ -2,7 +2,7 @@
 //
 // Real-DB drive of the waitlist "Offer a time" client-confirm gate. Runs against
 // the test database — `pnpm test:integration` (or the whole integration config).
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,
   Prisma,
@@ -343,12 +343,14 @@ describe('waitlist offer → client confirm (real DB)', () => {
   // evaporate; this pins that it "fails cleanly with TIME_BOOKED" rather than
   // double-booking or 500ing.
   //
-  // NOTE it does NOT isolate the app-level gate: with the conflict finder
-  // deliberately blinded this test still passes, because the database EXCLUDE
-  // constraint rejects the insert and the catch maps 23P01 to the same
-  // TIME_BOOKED. The app gate is covered separately, by the pro-overlap test in
-  // booking-overlap-concurrency.test.ts — that one CAN tell the layers apart.
-  it('confirm refuses with TIME_BOOKED when a booking already occupies the slot', async () => {
+  // It also pins WHICH LAYER refused. The app gate and the database EXCLUDE
+  // constraint both surface `TIME_BOOKED`, so asserting the error code alone
+  // cannot tell them apart — this test passed with the conflict finder
+  // deliberately blinded, because Postgres was quietly doing the refusing. The
+  // `booking_conflict` log line is the only discriminator, so it is asserted
+  // here: the app gate must be what refused, and the durable backstop must NOT
+  // have fired.
+  it('confirm refuses with TIME_BOOKED, and it is the APP GATE that refuses', async () => {
     const entryId = await createEntry()
     const start = futureUtc(13, 19)
 
@@ -385,13 +387,52 @@ describe('waitlist offer → client confirm (real DB)', () => {
       select: { id: true },
     })
 
-    await expect(
-      confirmClientWaitlistOffer({
-        offerId: offer.id,
-        clientId: fx.clientId,
-        idempotencyKey: `${TAG}-confirm-conflict`,
-      }),
-    ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+    // logBookingConflict writes a JSON line to console.warn; that is the only
+    // place the two enforcement layers are distinguishable.
+    const conflictLines: string[] = []
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation((...parts: unknown[]) => {
+        conflictLines.push(parts.map((part) => String(part)).join(' '))
+      })
+
+    try {
+      await expect(
+        confirmClientWaitlistOffer({
+          offerId: offer.id,
+          clientId: fx.clientId,
+          idempotencyKey: `${TAG}-confirm-conflict`,
+        }),
+      ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+    } finally {
+      warnSpy.mockRestore()
+    }
+
+    const conflictEvents = conflictLines
+      .map((line) => {
+        try {
+          return JSON.parse(line) as {
+            event?: string
+            meta?: Record<string, unknown> | null
+          }
+        } catch {
+          return null
+        }
+      })
+      .filter((parsed) => parsed?.event === 'booking_conflict')
+
+    expect(conflictEvents.length).toBeGreaterThan(0)
+
+    // The app-level overlap gate refused: it logged a decision code.
+    expect(
+      conflictEvents.some((e) => e?.meta?.overlapDecisionCode != null),
+    ).toBe(true)
+
+    // ...and the durable DB backstop never had to fire. If this flips, the gate
+    // stopped finding conflicts and Postgres is silently covering for it.
+    expect(conflictEvents.some((e) => e?.meta?.layer === 'db_backstop')).toBe(
+      false,
+    )
 
     // The refusal left the offer claimable, not consumed.
     const offerRow = await db.waitlistOffer.findUnique({
