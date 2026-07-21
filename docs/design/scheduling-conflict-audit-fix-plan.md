@@ -793,61 +793,74 @@ update to the table in §4.)
 
 > Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
-> it first, especially §4's status table, the **"F3 — what shipped"** block (in
-> particular its ⚠️ note on the test that looked like proof and was not), and the
+> it first, especially §4's status table, **"F3 — what shipped"** and
+> **"F13 — what shipped"** (both contain traps that cost real time), and the
 > "Not checked" list in §3.
 >
-> **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703.
-> NEXT = F4.**
+> **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
+> F13 ✅ #704. NEXT = F4.**
 >
-> F3 retired the second conflict engine: `lib/booking/schedulingConflicts.ts` is
-> gone and `enforceBookingOverlapPolicy` now shares `findBookingAndHoldConflicts`
-> in `conflictQueries.ts` with every other conflict read. The hold divergence the
-> last session flagged turned out to be **latent, not live** (one create path,
-> both columns always written, prod `BookingHold` empty) — but a wider version of
-> it was real and is fixed: the hold busy-window builder had no floor against the
-> DB `EXCLUDE` range at all.
+> F3 retired the second conflict engine (`lib/booking/schedulingConflicts.ts` is
+> gone; `enforceBookingOverlapPolicy` now shares `findBookingAndHoldConflicts`
+> with every other conflict read). F13 fell out of it: the DB overlap backstop
+> was refusing silently, so a gate regression would have been invisible.
 >
-> ⚠️ **F4's card carries a question, not just a fix.** It proposes adding
+> ⚠️ **F4's card carries a premise AND a question.** It proposes adding
 > `deferStepToPro` so the public rebook token stops accepting off-grid starts
 > (`STEP_MISMATCH` is deliberately non-fatal for pros, and that route is a CLIENT
-> path). Before writing it, confirm the premise the way the last four sessions
-> learned to: read `app/api/v1/client/rebook/[token]/route.ts:395` and
-> `proSchedulingPolicy` and check the refusal is actually reachable and actually
-> skipped. **Five card premises have now died on contact** — F2 had three, F3 had
-> its central one. The card also asks a question that is **Tori's, not yours**:
-> the recommended-window constraint is skipped unless
-> `rebookMode === RECOMMENDED_WINDOW` (`route.ts:198`) — is that intended?
-> Surface it with evidence when you get there.
+> path). **Confirm the premise before writing anything** — read
+> `app/api/v1/client/rebook/[token]/route.ts:395` and `proSchedulingPolicy`, and
+> check the refusal is genuinely reachable and genuinely skipped. **Five card
+> premises have now died on contact** (F2 had three; F3's central one; and in F13
+> I was wrong twice about my own work — see below). The card also asks something
+> that is **Tori's call, not yours**: the recommended-window constraint is
+> skipped unless `rebookMode === RECOMMENDED_WINDOW` (`route.ts:198`) — is that
+> intended? Surface it with evidence when you reach it.
 >
 > **Tori wants the ENTIRE queue closed before she will deploy** (her call, stated
 > 2026-07-21). After F4 the remaining cards are F5, F6, F7 (iOS), F8, F9, F10
 > (iOS), F12. Two more carry decisions that are hers — F5 (working hours at offer
 > time vs allow at confirm; should an offer *reserve*?) and F8 (should COMPLETED
-> occupy future time? — note F11 found DB-side evidence that the constraint
-> excluding it is deliberate, so F8 probably resolves by dropping COMPLETED from
+> occupy future time? — F11 found DB-side evidence the constraint excluding it is
+> deliberate, so F8 probably resolves by dropping COMPLETED from
 > `BOOKING_BLOCKING_STATUSES`) — and F12 needs UI on web **and** iOS before its
 > server half can ship. Do not batch-ask them up front.
 >
-> House rules that have bitten across five sessions, all in `CLAUDE.md`:
-> **don't guess — read the tool's own output, or ask.** **Prove a guard fails
-> before trusting that it passes.** And **verify the thing you are SHIPPING** —
-> #700 and #701 were green on every test while being wrong in the browser and on
-> the wire, and in F3 a green real-Postgres refusal test turned out to be proving
-> the database backstop rather than the code under change. When a test passes,
-> ask which layer made it pass.
+> **House rules that have bitten across six sessions**, all in `CLAUDE.md`:
+>
+> - **Don't guess — read the tool's own output, or ask.** In F13 the Sentry
+>   endpoint I "remembered" was half-retired: `GET .../rules/` is now `410`, the
+>   `POST` still works. A probe took one minute; the assumption would have been
+>   wrong in both directions.
+> - **Prove a guard fails before trusting that it passes.** Every guard in #703
+>   and #704 was proven red first, four different ways (reverting the builder,
+>   swapping the probe order, blinding the finder, removing the alert call).
+> - **Verify the thing you are SHIPPING**, and **ask which LAYER made a test
+>   pass.** This is the big one from F3. A real-Postgres test asserting a client
+>   path refuses with `TIME_BOOKED` passed *with the conflict finder blinded* —
+>   the database was doing the refusing. Overlap is enforced twice and both
+>   layers surface the same code, so a green refusal test proves nothing about
+>   the gate. The discriminating test is the **pro double-book**, which must
+>   SUCCEED and only can if the gate finds the conflict. To isolate a permissive
+>   layer, test what it should ALLOW — refusals are over-determined.
+> - **Check your own "not verified" list before publishing it.** Twice in F13 I
+>   wrote something off as unverifiable and it took one command: `SENTRY_DSN` is
+>   set in prod (`vercel env ls production`), and the alert *already* routes to
+>   Slack (`#tovis-ops-alerts` via an active catch-all issue rule). Both claims
+>   in my first draft were wrong.
 >
 > Verification tools now proven and worth reusing:
 > - `pnpm test:integration` (needs the test-postgres container on :5433).
->   ⚠️ it also needs a keyring **in CI's exact shape** or two suites fail:
->   `PII_AEAD_KEYS_JSON` keyed by `address-aead-v1`/`email-aead-v1`/
->   `phone-aead-v1`/`notes-aead-v1`, plus `PII_LOOKUP_HMAC_KEYS_JSON` and
->   `JWT_SECRET`. Copy `.github/workflows/integration.yml:88`;
->   `scripts/with-test-db.mjs` does not generate them.
->   `tests/integration/booking-overlap-concurrency.test.ts` is now the pattern for
+>   ⚠️ it needs a keyring **in CI's exact shape** or two suites fail:
+>   `PII_AEAD_KEYS_JSON` keyed by `address-aead-v1` / `email-aead-v1` /
+>   `phone-aead-v1` / `notes-aead-v1`, plus `PII_LOOKUP_HMAC_KEYS_JSON` and
+>   `JWT_SECRET`. A single generic key fails with `Missing AEAD key for key
+>   version: address-aead-v1`. Copy `.github/workflows/integration.yml:88`.
+> - `tests/integration/booking-overlap-concurrency.test.ts` is the pattern for
 >   driving a real write-boundary path (incl. `createProBooking`) against real
->   Postgres — note a pro-readiness gate needs `mobileBasePostalCode` +
->   `mobileRadiusMiles` on the profile when a bookable MOBILE_BASE exists.
+>   Postgres. Gotcha: the pro-readiness gate needs `mobileBasePostalCode` +
+>   `mobileRadiusMiles` on the profile whenever a bookable MOBILE_BASE exists,
+>   which the shared fixture does not set.
 > - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
 >   HTTP without touching dev data.
 > - `tests/e2e/consultation-token-retryable-refusal.spec.ts` is the pattern for
@@ -858,7 +871,15 @@ update to the table in §4.)
 >   the script picks the newest-runtime device — check
 >   `xcrun simctl list devices booted` before screenshotting. Taps need
 >   `cliclick`, mapped through `group 1 of window 1` of Simulator.
+> - Observability: booking-domain alerts go through
+>   `lib/observability/bookingEvents.ts` (Sentry + a structured log line). Sentry
+>   is live in prod and an active catch-all rule routes every NEW issue in
+>   `tovis-app` to Slack `#tovis-ops-alerts`, so a fresh `captureMessage` reaches
+>   a human without any rule work. A dedicated rule is scriptable if ever needed:
+>   `POST /api/0/projects/tovis/tovis-app/rules/` (the GET is `410`; listing
+>   moved to `/organizations/{org}/combined-rules/`), token in
+>   `.env.production.local` has `alerts:write`.
 >
-> 🚫 Do not deploy. Runtime payload #686–#693 + #699 + #700 + #701 + #703 is
-> merged and NOT live. Tori has said she wants the whole queue done first — it is
-> still her call and her explicit go-ahead, never yours.
+> 🚫 Do not deploy. Runtime payload #686–#693 + #699 + #700 + #701 + #703 + #704
+> is merged and NOT live. Tori has said she wants the whole queue done first — it
+> is still her call and her explicit go-ahead, never yours.
