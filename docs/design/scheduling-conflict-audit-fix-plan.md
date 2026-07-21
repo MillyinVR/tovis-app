@@ -375,3 +375,50 @@ route was unavailable). Pre-existing overlapping rows created by earlier imports
 keep `allowsOverlap = true` — this change is not retroactive. Whether the
 migration feature flag (`isProMigrationEnabled`) is on in production is
 unchecked.
+
+---
+
+## 5. Next-session prompt
+
+Copy-paste this to continue the queue. (Session-chaining protocol: one queue
+step per session; end with a completion report + the next prompt + a status
+update to the table in §4.)
+
+> Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
+> and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
+> it first, especially §4's status table and the "Not checked" list in §3.
+>
+> **F1 and F11 are done and merged** (#693, #694). **NEXT = F2.**
+>
+> F2: consultation approval extends an appointment's `totalDurationMinutes`
+> using `findSchedulingConflicts` (`lib/booking/writeBoundary.ts:8064`), which is
+> **block-blind**, and never re-checks working hours. So a pro proposing extra
+> services can push a 2pm appointment straight through a 4pm calendar block or
+> past closing time. It is reachable **unauthenticated** via
+> `POST /api/v1/public/consultation/[token]/decision`, and also from the in-app
+> client route and the pro's in-person decision route — three entry points, one
+> shared code path.
+>
+> Suggested shape (verify before trusting it — the plan's own premises have not
+> all survived contact): swap to `getTimeRangeConflict` for the extended window,
+> treat `BLOCKED` as fatal (`TIME_BLOCKED`), keep booking/hold conflicts on the
+> existing pro-authorized `allowsOverlap` path, and re-run
+> `ensureWithinWorkingHours` on the extended end. If extending past close is
+> intended, make it an explicit override rather than an absence — decide, don't
+> inherit.
+>
+> Then consider **F3** (retire `findSchedulingConflicts` entirely, so the
+> block-blind engine that caused F2 cannot cause it again). F2 first so it ships
+> without waiting on the refactor.
+>
+> House rules that bit hard this session and are now in `CLAUDE.md`:
+> **don't guess — read the tool's own output, or ask.** And when you add a guard,
+> **prove it fails before trusting that it passes.**
+>
+> The integration suite is alive again and runs in CI, so you can now verify
+> booking-overlap behaviour end to end: `pnpm test:integration` locally (needs
+> the test-postgres container on :5433), or let `.github/workflows/integration.yml`
+> run it on the PR.
+>
+> 🚫 Do not deploy. Runtime payload #686–#693 is merged and NOT live; that stays
+> Tori's call.
