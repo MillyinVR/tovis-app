@@ -59,6 +59,7 @@ const mocks = vi.hoisted(() => ({
   cancelBookingAppointmentReminders: vi.fn(),
 
   consumeConsultationActionToken: vi.fn(),
+  resolveConsultationActionTokenTarget: vi.fn(),
   revokeConsultationActionTokensForBooking: vi.fn(),
 
   createConsultationApprovalProof: vi.fn(),
@@ -104,6 +105,8 @@ vi.mock('@/lib/notifications/appointmentReminders', () => ({
 vi.mock('@/lib/consultation/clientActionTokens', () => ({
   CONSULTATION_ACTION_TOKEN_EXPIRY_MS: 24 * 60 * 60 * 1000,
   consumeConsultationActionToken: mocks.consumeConsultationActionToken,
+  resolveConsultationActionTokenTarget:
+    mocks.resolveConsultationActionTokenTarget,
   revokeConsultationActionTokensForBooking:
     mocks.revokeConsultationActionTokensForBooking,
 }))
@@ -472,6 +475,12 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
 
     mocks.revokeConsultationActionTokensForBooking.mockResolvedValue({
       count: 0,
+    })
+
+    mocks.resolveConsultationActionTokenTarget.mockResolvedValue({
+      bookingId: BOOKING_ID,
+      clientId: CLIENT_ID,
+      professionalId: PROFESSIONAL_ID,
     })
 
     mocks.buildConsultationApprovalProofSnapshot.mockImplementation((proof) => {
@@ -1015,6 +1024,7 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
 
     expect(mocks.consumeConsultationActionToken).toHaveBeenCalledWith({
       rawToken: RAW_TOKEN,
+      tx,
     })
 
     expect(mocks.createConsultationApprovalProof).toHaveBeenCalledWith(
@@ -1040,6 +1050,64 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
     expect(result.proof.contactMethod).toBe(ContactMethod.EMAIL)
     expect(result.proof.destinationSnapshot).toBe(DESTINATION_EMAIL)
     expect(result.booking.subtotalSnapshot).toEqual(computedSubtotal)
+  })
+
+  // Consultation links are single-use. Consuming one BEFORE the write meant a
+  // refusal inside the transaction (TIME_BLOCKED on an extension, a stale
+  // proposal, the DB overlap backstop) permanently killed the client's link
+  // while leaving the booking untouched — the public page then dead-ends on a
+  // full-screen error with no retry. The consume must ride the same
+  // transaction so it rolls back with the failed write.
+  it('consumes the action token INSIDE the locked transaction, so a refusal cannot burn the link', async () => {
+    installBookingFindUniqueMocks()
+
+    const order: string[] = []
+
+    mocks.withLockedClientOwnedBookingTransaction.mockImplementationOnce(
+      async ({
+        run,
+      }: {
+        run: (ctx: {
+          tx: typeof tx
+          now: Date
+          professionalId: string
+        }) => Promise<unknown>
+      }) => {
+        order.push('transaction:open')
+        try {
+          return await run({ tx, now: TEST_NOW, professionalId: PROFESSIONAL_ID })
+        } finally {
+          order.push('transaction:close')
+        }
+      },
+    )
+
+    mocks.consumeConsultationActionToken.mockImplementationOnce(async () => {
+      order.push('token:consume')
+      throw new Error('boom')
+    })
+
+    await expect(
+      approveConsultationByClientActionToken({
+        rawToken: RAW_TOKEN,
+        requestId: 'req_approve_token_burn',
+        idempotencyKey: 'idem_approve_token_burn',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+      }),
+    ).rejects.toThrow('boom')
+
+    expect(order).toEqual([
+      'transaction:open',
+      'token:consume',
+      'transaction:close',
+    ])
+
+    // The link is resolved read-only before the lock is taken; only the
+    // transaction-scoped call may mutate it.
+    expect(mocks.resolveConsultationActionTokenTarget).toHaveBeenCalledWith({
+      rawToken: RAW_TOKEN,
+    })
   })
 
   it('rejects consultation through a client action token', async () => {
@@ -1088,6 +1156,7 @@ describe('lib/booking/writeBoundary consultation decisions', () => {
 
     expect(mocks.consumeConsultationActionToken).toHaveBeenCalledWith({
       rawToken: RAW_TOKEN,
+      tx,
     })
 
     expect(mocks.txConsultationApprovalUpdate).toHaveBeenCalledWith({

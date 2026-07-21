@@ -16,6 +16,8 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import { approveConsultationAndMaterializeBooking } from '@/lib/booking/writeBoundary'
+import { isBookingError } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
@@ -515,6 +517,19 @@ const idempotencyRequest = new Request(
   } catch (e: unknown) {
     if (idempotencyRecordId) {
       await failStartedIdempotency(idempotencyRecordId)
+    }
+
+    // Approval is a real scheduling write and can refuse for reasons the
+    // client can act on: the agreed services run into the pro's blocked time
+    // (TIME_BLOCKED), the grown window lost a race (TIME_BOOKED), the proposal
+    // references a stale offering (INVALID_SERVICE_ITEMS). Without this branch
+    // every one of those rendered as an opaque 500 — the sibling public-token
+    // and pro in-person routes have always mapped them.
+    if (isBookingError(e)) {
+      return bookingJsonFail(e.code, {
+        message: e.message,
+        userMessage: e.userMessage,
+      })
     }
 
     console.error('handleConsultationDecision error', e)
