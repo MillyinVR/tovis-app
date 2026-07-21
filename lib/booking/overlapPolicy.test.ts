@@ -113,6 +113,74 @@ describe('decideBookingOverlapPermission', () => {
     })
   })
 
+  // A calendar import runs unattended (interactive commit walks a whole ICS
+  // feed; the resync cron re-walks it hourly), so it must NOT inherit the pro's
+  // authority to double-book even though the actor is the pro. The importer
+  // holds the time as a calendar block instead.
+  it('refuses a calendar import that overlaps, despite the PRO actor', () => {
+    const decision = decideBookingOverlapPermission({
+      actor: proActor,
+      source: { kind: 'CALENDAR_IMPORT' },
+      requestedWindow,
+      conflicts: [conflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('IMPORT_OVERLAP_NOT_ALLOWED')
+    expect(decision.conflicts).toEqual([conflict])
+  })
+
+  it('refuses a calendar import that overlaps a HOLD, not just a booking', () => {
+    const holdConflict: SchedulingConflict = {
+      ...conflict,
+      kind: 'HOLD',
+      id: 'hold_conflict_1',
+    }
+
+    const decision = decideBookingOverlapPermission({
+      actor: proActor,
+      source: { kind: 'CALENDAR_IMPORT' },
+      requestedWindow,
+      conflicts: [holdConflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('IMPORT_OVERLAP_NOT_ALLOWED')
+  })
+
+  // The refusal is scoped to conflicts only — a clean import still books.
+  it('allows a calendar import when there is no conflict', () => {
+    const decision = decideBookingOverlapPermission({
+      actor: proActor,
+      source: { kind: 'CALENDAR_IMPORT' },
+      requestedWindow,
+      conflicts: [],
+    })
+
+    expect(decision).toEqual({
+      ok: true,
+      mode: 'NO_OVERLAP',
+      conflicts: [],
+    })
+  })
+
+  // The CALENDAR_IMPORT branch sits before the ADMIN branch on purpose: it is a
+  // property of the source, not of who holds the pen.
+  it('refuses a calendar import even for an ADMIN actor', () => {
+    const decision = decideBookingOverlapPermission({
+      actor: adminActor,
+      source: { kind: 'CALENDAR_IMPORT' },
+      requestedWindow,
+      conflicts: [conflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('IMPORT_OVERLAP_NOT_ALLOWED')
+  })
+
   it('allows an admin override overlapping booking', () => {
     const decision = decideBookingOverlapPermission({
       actor: adminActor,

@@ -65,6 +65,9 @@ export type BookingOverlapSource =
       kind: 'ADMIN_OVERRIDE'
     }
   | {
+      kind: 'CALENDAR_IMPORT'
+    }
+  | {
       kind: 'AFTERCARE_REBOOK'
       aftercareSummaryId: string
       clientActionTokenId: string
@@ -78,6 +81,7 @@ export type BookingOverlapAllowedMode =
 
 export type BookingOverlapBlockedCode =
   | 'CLIENT_OVERLAP_NOT_ALLOWED'
+  | 'IMPORT_OVERLAP_NOT_ALLOWED'
   | 'AFTERCARE_PRESELECTED_SLOT_REQUIRED'
   | 'AFTERCARE_PRESELECTED_SLOT_MISMATCH'
   | 'INVALID_BOOKING_WINDOW'
@@ -134,6 +138,24 @@ export function decideBookingOverlapPermission(args: {
     return {
       ok: true,
       mode: 'NO_OVERLAP',
+      conflicts,
+    }
+  }
+
+  // A calendar import runs unattended — the interactive commit walks a whole ICS
+  // feed, and the resync cron re-walks it hourly from a remote URL. No human is
+  // looking at this slot and choosing to double-book, so a conflict here is
+  // never an authorized overlap even though the actor is the pro. Refusing
+  // before the PRO/ADMIN branches is deliberate: this is a property of the
+  // SOURCE, not of who is holding the pen. The importer catches this and holds
+  // the time as a calendar block for the pro to review instead — never dropping
+  // the event, and never silently stacking it on a real appointment.
+  if (args.source.kind === 'CALENDAR_IMPORT') {
+    return {
+      ok: false,
+      code: 'IMPORT_OVERLAP_NOT_ALLOWED',
+      userMessage:
+        'That time is already booked. The imported appointment was held as blocked time for you to review.',
       conflicts,
     }
   }

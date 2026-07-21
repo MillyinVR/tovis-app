@@ -193,6 +193,7 @@ import {
 import {
   decideBookingOverlapPermission,
   type BookingOverlapActor,
+  type BookingOverlapBlockedCode,
   type BookingOverlapSource,
   type BookingWindow,
 } from '@/lib/booking/overlapPolicy'
@@ -509,8 +510,11 @@ type CreateProBookingArgs = {
   idempotencyKey?: string | null
   // Calendar-migration import: source = IMPORTED, price snapshotted at 0
   // (excluded from revenue until edited), and client notifications/reminders
-  // suppressed (the migrated client has no account yet). Overlap is already
-  // permitted for PRO actors. Defaults to a normal pro booking.
+  // suppressed (the migrated client has no account yet). Also refuses to
+  // overlap an existing booking/hold despite the PRO actor — an unattended
+  // import has no human authorizing a double-book (see
+  // decideBookingOverlapPermission's CALENDAR_IMPORT branch); the caller holds
+  // the time as a calendar block instead. Defaults to a normal pro booking.
   importMode?: boolean
 }
 
@@ -4963,14 +4967,12 @@ async function assertAftercareRebookSlotOwnership(args: {
 }
 
 function mapBookingOverlapBlockedCodeToBookingError(
-  code:
-    | 'CLIENT_OVERLAP_NOT_ALLOWED'
-    | 'AFTERCARE_PRESELECTED_SLOT_REQUIRED'
-    | 'AFTERCARE_PRESELECTED_SLOT_MISMATCH'
-    | 'INVALID_BOOKING_WINDOW',
+  code: BookingOverlapBlockedCode,
 ): BookingErrorCode {
   switch (code) {
     case 'CLIENT_OVERLAP_NOT_ALLOWED':
+      return 'TIME_BOOKED'
+    case 'IMPORT_OVERLAP_NOT_ALLOWED':
       return 'TIME_BOOKED'
     case 'AFTERCARE_PRESELECTED_SLOT_REQUIRED':
       return 'TIME_BOOKED'
@@ -4991,11 +4993,7 @@ function logOverlapDecisionBlocked(args: {
   offeringId: string | null
   clientId: string
   holdId?: string | null
-  code:
-    | 'CLIENT_OVERLAP_NOT_ALLOWED'
-    | 'AFTERCARE_PRESELECTED_SLOT_REQUIRED'
-    | 'AFTERCARE_PRESELECTED_SLOT_MISMATCH'
-    | 'INVALID_BOOKING_WINDOW'
+  code: BookingOverlapBlockedCode
   conflictKinds: string[]
   sourceKind: string
   actorKind: string
@@ -9401,9 +9399,11 @@ async function performLockedCreateProBooking(args: {
       userId: args.actorUserId,
       professionalId: args.professionalId,
     },
-    source: {
-      kind: 'PRO_CREATED',
-    },
+    // An import is machine-driven with no human at the slot, so it must not
+    // inherit the pro's authority to double-book (see
+    // decideBookingOverlapPermission). importMode is already threaded here, so
+    // the source is derived rather than plumbed through another parameter.
+    source: importMode ? { kind: 'CALENDAR_IMPORT' } : { kind: 'PRO_CREATED' },
     requestedWindow: {
       professionalId: args.professionalId,
       startsAt: requestedStart,

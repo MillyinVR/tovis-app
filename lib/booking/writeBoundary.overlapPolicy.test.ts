@@ -1388,6 +1388,104 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_1')
   })
 
+  // A calendar import must NOT reach the overlap policy as PRO_CREATED, or it
+  // inherits the pro's authority to double-book and the ICS resync cron can
+  // silently stack imported events on real appointments. importMode is the only
+  // signal available at the write boundary, so this pins the derivation.
+  it('sends CALENDAR_IMPORT as the overlap source when importMode is set', async () => {
+    mocks.txBookingCreate.mockResolvedValueOnce({
+      id: 'booking_import_1',
+      scheduledFor: REQUESTED_START,
+      totalDurationMinutes: 60,
+      bufferMinutes: 15,
+      status: BookingStatus.ACCEPTED,
+    })
+
+    mocks.findSchedulingConflicts.mockResolvedValueOnce({ all: [] })
+
+    mocks.decideBookingOverlapPermission.mockReturnValueOnce({
+      ok: true,
+      mode: 'NO_OVERLAP',
+      conflicts: [],
+    })
+
+    await createProBooking({
+      professionalId: 'pro_1',
+      actorUserId: 'user_pro_1',
+      overrideReason: null,
+      clientId: 'client_1',
+      offeringId: 'offering_1',
+      locationId: 'location_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: REQUESTED_START,
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: true,
+      allowShortNotice: true,
+      allowFarFuture: false,
+      importMode: true,
+      requestId: 'req_import_source_1',
+      idempotencyKey: 'idem_import_source_1',
+    })
+
+    expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: { kind: 'CALENDAR_IMPORT' },
+        actor: {
+          kind: 'PRO',
+          userId: 'user_pro_1',
+          professionalId: 'pro_1',
+        },
+      }),
+    )
+  })
+
+  // The inverse: a normal pro booking must keep PRO_CREATED (and its authorized
+  // overlap), so the import refusal can't leak onto the pro's own calendar.
+  it('keeps PRO_CREATED as the overlap source when importMode is absent', async () => {
+    mocks.txBookingCreate.mockResolvedValueOnce({
+      id: 'booking_normal_1',
+      scheduledFor: REQUESTED_START,
+      totalDurationMinutes: 60,
+      bufferMinutes: 15,
+      status: BookingStatus.ACCEPTED,
+    })
+
+    mocks.findSchedulingConflicts.mockResolvedValueOnce({ all: [] })
+
+    mocks.decideBookingOverlapPermission.mockReturnValueOnce({
+      ok: true,
+      mode: 'NO_OVERLAP',
+      conflicts: [],
+    })
+
+    await createProBooking({
+      professionalId: 'pro_1',
+      actorUserId: 'user_pro_1',
+      overrideReason: null,
+      clientId: 'client_1',
+      offeringId: 'offering_1',
+      locationId: 'location_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: REQUESTED_START,
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      requestId: 'req_normal_source_1',
+      idempotencyKey: 'idem_normal_source_1',
+    })
+
+    expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith(
+      expect.objectContaining({ source: { kind: 'PRO_CREATED' } }),
+    )
+  })
+
   it('passes aftercare client action token into overlap policy for client aftercare rebook creation', async () => {
     const existingConflict = {
       kind: 'BOOKING',
