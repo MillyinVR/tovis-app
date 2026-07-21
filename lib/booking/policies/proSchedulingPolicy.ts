@@ -70,6 +70,14 @@ export type EvaluateProSchedulingDecisionArgs = {
   allowOutsideWorkingHours: boolean
   excludeBookingId?: string | null
   excludeHoldId?: string | null
+  // Whether the requested start must sit on the pro's slot grid. Required, not
+  // defaulted: the answer is "who picked this minute", and getting it wrong is
+  // silent in both directions — false on a client path fragments the pro's day,
+  // true on a pro path refuses a time the pro deliberately chose. Pro-owned
+  // starts (#4-#7 in the scheduling-conflict audit) pass false; a start the
+  // CLIENT picked (the public rebook token, #9) passes true, matching the step
+  // rule every other client entry point already enforces via checkSlotReadiness.
+  enforceStepGrid: boolean
   // Booking/hold overlaps are owned by decideBookingOverlapPermission, which
   // can authorize a PRO/ADMIN double-book (or an aftercare pre-selected slot).
   // Callers that run the overlap policy right after this gate set this so the
@@ -111,9 +119,22 @@ export async function evaluateProSchedulingDecision(
     // A pro setting an appointment on their own calendar may pick ANY start
     // minute. The step grid (e.g. 30-min slots, anchored to the working-window
     // start) is a client self-booking nicety, not a constraint on the pro — so
-    // STEP_MISMATCH is intentionally NOT fatal here. Only the working-hours
-    // codes from the alignment helper are surfaced; working hours, advance
-    // notice, max-days-ahead, and conflicts are all still enforced below.
+    // STEP_MISMATCH is NOT fatal unless the caller says the CLIENT picked this
+    // minute. Only the working-hours codes from the alignment helper are
+    // surfaced otherwise; working hours, advance notice, max-days-ahead, and
+    // conflicts are all still enforced below.
+    if (stepCheck.code === 'STEP_MISMATCH' && args.enforceStepGrid) {
+      return policyFail('STEP_MISMATCH', {
+        requestedStart: args.requestedStart,
+        requestedEnd,
+        conflictType: 'STEP_BOUNDARY',
+        meta: {
+          stepMinutes: args.stepMinutes,
+          ...(stepCheck.meta ?? {}),
+        },
+      })
+    }
+
     if (stepCheck.code === 'WORKING_HOURS_REQUIRED') {
       return policyFail('WORKING_HOURS_REQUIRED', {
         requestedStart: args.requestedStart,

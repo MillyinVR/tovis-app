@@ -253,6 +253,10 @@ paths (#4–#7) keep the freedom; client-facing rebook (#9) gets grid alignment
 back. Note the recommended-window constraint is also skipped unless
 `rebookMode === RECOMMENDED_WINDOW` (`route.ts:198`) — confirm that is intended.
 
+> ✅ **Shipped.** The premise held — this one was real, and driving it proved the
+> off-grid booking actually commits without the fix. The card's *question*
+> resolved in the code, so it never became Tori's: see "F4 — what shipped" in §4.
+
 ### F5 — Waitlist offer / confirm disagree on working hours 🟠
 
 `createWaitlistOffer` (`writeBoundary.ts:14490`) checks blocks/bookings/holds but
@@ -407,7 +411,7 @@ Named honestly rather than assumed safe:
 | F1 ICS import double-book | ✅ done — branch `fix/scheduling-conflict-audit` |
 | F2 consultation extension | ✅ done — #699, + #700 (page) + #701 (uiAction), iOS #203 |
 | F3 retire second engine | ✅ done — branch `fix/f3-retire-second-conflict-engine` |
-| F4 rebook token step grid | not started |
+| F4 rebook token step grid | ✅ done — branch `fix/f4-rebook-token-step-grid` |
 | F5 waitlist offer working hours | not started |
 | F6 last-minute opening lock | not started |
 | F7 iOS mobile slot address | not started |
@@ -417,6 +421,107 @@ Named honestly rather than assumed safe:
 | F11 integration suite dead | ✅ done — branch `fix/integration-suite-ci` |
 | F12 proposal-time validation | not started (opened by F2) |
 | F13 backstop refused silently | ✅ done — branch `fix/f13-log-overlap-backstop` (opened by F3) |
+
+### F4 — what shipped
+
+**The premise survived — the first card in five that did.** Confirmed by reading
+before writing, then by driving: with the fix reverted, an off-grid client
+rebook does not merely pass the gate, it **commits a booking**
+(`promise resolved "{ id: 'cmrv…' }" instead of rejecting`).
+
+**But the card's question was not Tori's to answer — the code already answers
+it.** `validateRecommendedWindow` (`route.ts:201`) returning early unless
+`rebookMode === RECOMMENDED_WINDOW` is not a skipped check: the pro-side writer
+(`app/api/v1/pro/bookings/[id]/aftercare/route.ts:519-610`) *refuses* to store
+`rebookWindowStart`/`End` in any other mode — `NONE` rejects rebook dates
+outright and `BOOKED_NEXT_APPOINTMENT` rejects the window pair by name. The
+columns are non-null **iff** the mode is `RECOMMENDED_WINDOW`, so the guard is
+exactly scoped and there is no window to enforce in the other modes. Nothing to
+decide; no question raised.
+
+**The real design question was elsewhere: WHO picked the minute.** Four call
+sites reach the same gate through `performLockedCreateRebookedBooking`, and one
+of them is a trap — `confirmClientAftercareNextAppointment` (#8) has
+`clientId` set but books the **pro's** `rebookedFor`. Keying the new rule on
+"is there a client" would refuse a minute only the pro can change, dead-ending
+the client with a `PICK_NEW_SLOT` they cannot act on.
+
+Shipped:
+
+- `lib/booking/policies/proSchedulingPolicy.ts` — `enforceStepGrid: boolean`,
+  **required, not defaulted**. It is wrong in both directions silently, so every
+  call site has to state its intent; TypeScript found all of them.
+  `STEP_MISMATCH` becomes fatal only when set, and fatally **early** — before
+  the conflict query is spent.
+- `lib/booking/writeBoundary.ts` — `startChosenBy: 'PRO' | 'CLIENT'` on
+  `PerformLockedCreateRebookedBookingArgs` (the domain fact) mapping to
+  `enforceStepGrid` (the policy consequence). `CLIENT` at exactly one call site:
+  `createClientRebookedBookingFromAftercare`. The two previously-**dead**
+  `case 'STEP_MISMATCH'` handlers in `enforceProCreateScheduling` /
+  `enforceUpdateBookingScheduling` are now reachable — the create one is live.
+
+**Safe against the UI by construction, not by luck.** Availability and the write
+boundary both resolve `stepMinutes` / `workingHours` / `timeZone` through the
+**same** `resolveValidatedBookingContext` (`lib/availability/core/placement.ts:476`
+→ `lib/booking/locationContext.ts:293`), and `computeDaySlotsFast` steps its
+candidates from `window.startMinutes` and then filters each through
+`checkSlotReadiness` — the same `validateWorkingWindowStep` the new gate calls.
+The client's own hold path has enforced this identical rule all along
+(`holdPolicy.ts:187`), so the parity was already load-bearing in production.
+
+**Verified. Every guard proven red first, five different ways:**
+
+- `proSchedulingPolicy.test.ts` +2 — the refusal test reports
+  `expected "spy" to not be called at all, but actually been called 1 times`
+  when the branch is disabled; a second test pins that `enforceStepGrid` does
+  not swallow `WORKING_HOURS_REQUIRED`.
+- **`tests/integration/rebook-token-step-grid.test.ts` (new, 6 tests) drives the
+  real write boundary against real Postgres.** Four of the six are the
+  discriminating half — one per `enforceStepGrid: false` in the tree — because a
+  refusal test proves nothing here and **over**-enforcement only ever shows up as
+  a path that should succeed and doesn't. Each was proven red by flipping its
+  own literal to `true`: pro rebook, pro create (#4), pro reschedule (#5), and
+  the client's confirm of a pro-proposed off-grid time (#8) all fail with
+  `Start time must be on a 15-minute boundary.`
+- The "still books" case does **not** hand-pick a valid minute: it calls
+  `computeDaySlotsFast` and books a slot the availability engine actually
+  emitted, letting the write boundary re-resolve its own context from the
+  database. That is the assertion that would catch a context divergence.
+
+**Driven over real HTTP** (`pnpm dev:test-db`, seeded `AFTERCARE_ACCESS` token,
+the actual route — not the function it calls):
+
+- off-grid `14:07Z` → **400** `{"code":"STEP_MISMATCH","retryable":true,
+  "uiAction":"PICK_NEW_SLOT","error":"Start time must be on a 15-minute
+  boundary."}` — the #701 serializer carries it correctly;
+- on-grid `14:00Z` → **201**, booking created, `rebookMode` flips to
+  `BOOKED_NEXT_APPOINTMENT`;
+- a second off-grid POST → **403**, the booked-at-save guard firing *before* the
+  scheduling gate, as designed.
+
+`typecheck` clean, `lint` 0 errors, all static guards pass, **704 files / 6853
+unit tests**, **32 files / 154 integration tests** against real Postgres.
+
+**Not verified / not checked:**
+
+- **No browser and no simulator.** The refusal is unreachable through the web UI
+  (the RebookCard only offers `/availability/day` slots) and iOS has no rebook-
+  token flow at all — `grep -rn "client/rebook" ~/Dev/tovis-ios` returns nothing.
+  The one UI path that *can* now hit it is a **stale page**: if the pro changes
+  `stepMinutes` or their window start while the client's card is open, a slot
+  that was valid at render becomes off-grid. That fails safe — 400 `retryable`,
+  rendered inline by the card's existing error branch with the slot list still
+  live — but it was reasoned about, not watched.
+- **Not retroactive.** Bookings already sitting off-grid from this path stay
+  where they are; nothing sweeps or snaps them.
+- **The `enforceUpdateBookingScheduling` STEP_MISMATCH handler stays dead** —
+  reachable only if someone flips that literal. Its test proves the literal, not
+  the handler.
+- **No measurement of the refusal rate in production.** Expected to be zero
+  (only a crafted request or a stale page reaches it) but there is no counter,
+  and the `booking_conflict` line with `conflictType: 'STEP_BOUNDARY'` is the
+  only trace. Unlike F13's backstop this raises no Sentry alert — deliberately:
+  a client-facing 400 that the client can retry is not a gate regression.
 
 ### F13 — what shipped
 
