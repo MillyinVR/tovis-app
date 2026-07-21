@@ -2033,7 +2033,6 @@
 .brand-pro-calendar-block-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1300;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -2043,16 +2042,19 @@
   -webkit-backdrop-filter: blur(12px);
 }
 
-.brand-pro-calendar-management-overlay {
-  z-index: 1100;
+/* Calendar overlay ladder. Values must live between Z.overlay (1000000) and
+   Z.modal (1000100) from lib/zIndex.ts: above the global footer nav (999999),
+   below the confirm/override modals that stack on top (zClass.modal). */
+.brand-pro-calendar-booking-overlay {
+  z-index: 1000000;
 }
 
-.brand-pro-calendar-booking-overlay {
-  z-index: 999;
+.brand-pro-calendar-management-overlay {
+  z-index: 1000010;
 }
 
 .brand-pro-calendar-block-overlay {
-  z-index: 1400;
+  z-index: 1000040;
 }
 
 @media (min-width: 640px) {
@@ -4021,10 +4023,11 @@
 
 /* Edit schedule overlay */
 
+/* Overlay ladder: see the z-index comment above .brand-pro-calendar-booking-overlay. */
 .brand-pro-calendar-desktop-edit-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: 1000020;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4482,10 +4485,11 @@
    Shared edit schedule overlay — desktop / tablet / mobile
 ────────────────────────────────────────────────────────────────── */
 
+/* Overlay ladder: see the z-index comment above .brand-pro-calendar-booking-overlay. */
 .brand-pro-calendar-edit-schedule-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1600;
+  z-index: 1000060;
   display: flex;
   background: rgb(var(--shadow-color) / 0.72);
   backdrop-filter: blur(12px);
