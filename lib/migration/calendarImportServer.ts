@@ -348,15 +348,23 @@ export async function commitCalendarImport(args: {
             allowOutsideWorkingHours: true,
             allowShortNotice: true,
             allowFarFuture: false,
+            // Also refuses to overlap an existing booking/hold: an unattended
+            // import must not inherit the pro's authority to double-book, so a
+            // collision throws TIME_BOOKED and lands in the block fallback
+            // below (see decideBookingOverlapPermission's CALENDAR_IMPORT
+            // branch). Replays are unaffected — the idempotency short-circuit
+            // in performLockedCreateProBooking runs before any schedule check,
+            // so re-importing an already-imported UID never re-evaluates it.
             importMode: true,
             idempotencyKey: importKey(event.uid),
           })
           created.bookings += 1
           continue
         } catch (bookingError: unknown) {
-          // The appointment couldn't become a clean booking — most often its
-          // start time doesn't sit on the pro's slot grid (STEP_MISMATCH) or it
-          // collides with an existing booking. Never drop it: hold the time as a
+          // The appointment couldn't become a clean booking — its start time
+          // doesn't sit on the pro's slot grid (STEP_MISMATCH), it collides with
+          // an existing booking/hold (TIME_BOOKED), or the pro has already
+          // blocked that time (TIME_BLOCKED). Never drop it: hold the time as a
           // block so the pro sees + can fix it, rather than losing the slot.
           const code =
             bookingError && typeof bookingError === 'object' && 'code' in bookingError
