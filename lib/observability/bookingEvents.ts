@@ -120,6 +120,65 @@ export function captureLifecycleDrift(event: LifecycleDriftEvent): void {
 }
 
 /**
+ * The durable `Booking` overlap EXCLUDE constraint refused a write that the
+ * app-level gate had already allowed.
+ *
+ * Every booking write is serialised per professional by the advisory schedule
+ * lock and pre-checked by `enforceBookingOverlapPolicy`, so this should be
+ * effectively unreachable. It fires only when the gate stopped finding conflicts
+ * or a write reached the table without the lock.
+ *
+ * **Error level, not warning**, even though no bad data was written — Postgres
+ * refused, so the appointment is safe. The severity is about detectability: both
+ * layers refuse with the same `TIME_BOOKED`, so a gate that has silently stopped
+ * working is invisible from every client-facing surface. Bookings keep getting
+ * refused (by the database), the `booking_conflict` audit trail goes quiet
+ * rather than wrong, and the only symptom is pro double-books — which are
+ * *supposed* to succeed — starting to fail. Nothing else will page anyone.
+ *
+ * A nonzero rate is a bug, not background noise.
+ *
+ * The structured log line is emitted by `logBookingConflict` at the call site
+ * (`note: 'db_overlap_backstop_fired'`, `meta.layer: 'db_backstop'`); this adds
+ * the alert on top rather than duplicating it.
+ */
+export function captureOverlapBackstopFired(input: {
+  action: string
+  professionalId: string
+  bookingId?: string | null
+  holdId?: string | null
+  requestedStart: Date
+  requestedEnd: Date
+  constraint: string
+}): void {
+  Sentry.withScope((scope) => {
+    scope.setLevel('error')
+    scope.setTag('area', 'booking')
+    scope.setTag('booking.event', 'overlap_backstop_fired')
+    scope.setTag('booking.action', input.action)
+    scope.setTag('booking.professionalId', input.professionalId)
+
+    if (input.bookingId) scope.setTag('booking.id', input.bookingId)
+    if (input.holdId) scope.setTag('booking.holdId', input.holdId)
+
+    scope.setContext('overlap_backstop', {
+      action: input.action,
+      professionalId: input.professionalId,
+      bookingId: input.bookingId ?? null,
+      holdId: input.holdId ?? null,
+      requestedStart: input.requestedStart.toISOString(),
+      requestedEnd: input.requestedEnd.toISOString(),
+      constraint: input.constraint,
+    })
+
+    Sentry.captureMessage(
+      `Booking overlap backstop fired (${input.action}) for professional ${input.professionalId} — the app-level overlap gate allowed a write the database refused`,
+      'error',
+    )
+  })
+}
+
+/**
  * Surfaces a Stripe payment dispute on a booking as a high-severity operational
  * alert (Sentry + a structured log line). Disputes are rare and money-critical —
  * a destination-charge dispute reverses the transfer off the pro and debits the

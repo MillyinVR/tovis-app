@@ -213,7 +213,10 @@ import {
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
-import { captureStripeAmountMismatch } from '@/lib/observability/bookingEvents'
+import {
+  captureOverlapBackstopFired,
+  captureStripeAmountMismatch,
+} from '@/lib/observability/bookingEvents'
 import {
   ADDRESS_KEY_VERSION,
   buildAddressPrivacyWriteData,
@@ -5026,6 +5029,81 @@ function logOverlapDecisionBlocked(args: {
   })
 }
 
+/**
+ * The durable database EXCLUDE constraint refused a write the app-level gate let
+ * through. **This should be effectively unreachable.**
+ *
+ * Every booking write is serialised per professional by the advisory schedule
+ * lock and pre-checked by `enforceBookingOverlapPolicy`, so a 23P01 on `Booking`
+ * is not "a race we tolerate" — it is evidence that something upstream is wrong:
+ * a gate that stopped finding conflicts, or a write that reached the table
+ * without the lock.
+ *
+ * It has to be logged explicitly because **the two layers are otherwise
+ * indistinguishable from outside.** Both refuse with `TIME_BOOKED`, so the
+ * client sees the same thing either way and no existing signal separates them.
+ * Without this line a gate that silently stopped working looks exactly like
+ * normal operation: client bookings keep getting refused (by Postgres), the
+ * `booking_conflict` audit trail goes quiet rather than wrong, and the only
+ * visible symptom is pro double-books starting to fail — a path nobody watches.
+ *
+ * The hold-create path has always logged its own backstop
+ * (`prismaCode: '23P01'`); this is the booking-side equivalent.
+ *
+ * Alert on it: a nonzero rate is a bug, not background noise.
+ */
+function logOverlapBackstopFired(args: {
+  action: 'BOOKING_CREATE' | 'BOOKING_FINALIZE' | 'BOOKING_UPDATE'
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  /** The booking being CHANGED. Omit on create paths — there is no row yet. */
+  bookingId?: string | null
+  holdId?: string | null
+  offeringId?: string | null
+  clientId?: string | null
+  /** Rebook only: the completed booking this create was derived from. */
+  sourceBookingId?: string | null
+}): void {
+  logBookingConflict({
+    action: args.action,
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: 'BOOKING',
+    bookingId: args.bookingId ?? undefined,
+    holdId: args.holdId ?? undefined,
+    note: 'db_overlap_backstop_fired',
+    meta: {
+      route: 'lib/booking/writeBoundary.ts',
+      // The discriminator: this refusal came from Postgres, NOT from
+      // enforceBookingOverlapPolicy.
+      layer: 'db_backstop',
+      prismaCode: '23P01',
+      constraint: BOOKING_OVERLAP_CONSTRAINT_NAME,
+      offeringId: args.offeringId ?? null,
+      clientId: args.clientId ?? null,
+      sourceBookingId: args.sourceBookingId ?? null,
+    },
+  })
+
+  // ...and page a human. The log line above is the audit trail; on its own it
+  // would sit in Vercel logs looking like one more routine refusal.
+  captureOverlapBackstopFired({
+    action: args.action,
+    professionalId: args.professionalId,
+    bookingId: args.bookingId ?? args.sourceBookingId ?? null,
+    holdId: args.holdId ?? null,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    constraint: BOOKING_OVERLAP_CONSTRAINT_NAME,
+  })
+}
+
 async function enforceBookingOverlapPolicy(args: {
   tx: Prisma.TransactionClient
   actor: BookingOverlapActor
@@ -8166,6 +8244,16 @@ const offeringIds = Array.from(
       // (e.g. a conflicting row this booking must not overlap), not an
       // unlocked write. Surface a clean conflict, not a 500.
       if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
+        logOverlapBackstopFired({
+          action: 'BOOKING_UPDATE',
+          professionalId: booking.professionalId,
+          locationId: booking.locationId,
+          locationType: booking.locationType,
+          requestedStart: booking.scheduledFor,
+          requestedEnd: materializedEnd,
+          bookingId: booking.id,
+          clientId: booking.clientId,
+        })
         throw bookingError('TIME_BOOKED')
       }
       throw error
@@ -9053,6 +9141,17 @@ async function performLockedFinalizeBookingFromHold(args: {
     // conflict the app check missed (a race against a concurrent booking). Map
     // to a clean domain error instead of leaking a raw Prisma 500.
     if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
+      logOverlapBackstopFired({
+        action: 'BOOKING_FINALIZE',
+        professionalId: hold.professionalId,
+        locationId: hold.locationId,
+        locationType: hold.locationType,
+        requestedStart: hold.scheduledFor,
+        requestedEnd,
+        holdId: hold.id,
+        offeringId: hold.offeringId,
+        clientId: args.clientId,
+      })
       throw bookingError('TIME_NOT_AVAILABLE')
     }
 
@@ -9617,6 +9716,16 @@ async function performLockedCreateProBooking(args: {
 
     // 23P01: DB overlap EXCLUDE rejected the insert (race the app check missed).
     if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
+      logOverlapBackstopFired({
+        action: 'BOOKING_CREATE',
+        professionalId: args.professionalId,
+        locationId: args.locationId,
+        locationType: args.locationType,
+        requestedStart: args.scheduledFor,
+        requestedEnd: schedulingDecision.requestedEnd,
+        offeringId: args.offeringId,
+        clientId: args.clientId,
+      })
       throw bookingError('TIME_BOOKED')
     }
 
@@ -10325,6 +10434,21 @@ assertCanCreateRebookFromSourceBooking({
 
     // 23P01: DB overlap EXCLUDE rejected the insert (race the app check missed).
     if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
+      logOverlapBackstopFired({
+        action: 'BOOKING_CREATE',
+        professionalId: args.professionalId,
+        locationId: locationContext.locationId,
+        // The mode the rebook is actually being written with, which may differ
+        // from the source booking's when the caller overrode it.
+        locationType: effectiveLocationType,
+        requestedStart,
+        requestedEnd: schedulingDecision.requestedEnd,
+        // A create: the new row does not exist. args.bookingId is the COMPLETED
+        // booking this rebook came from, which belongs in meta, not in the
+        // bookingId field a reader will take for the conflicting row.
+        sourceBookingId: args.bookingId,
+        clientId: args.clientId ?? null,
+      })
       throw bookingError('TIME_BOOKED')
     }
 
@@ -10979,6 +11103,16 @@ if (args.notifyClient) {
   } catch (error) {
     // 23P01: DB overlap EXCLUDE rejected the move (race the app check missed).
     if (isExclusionConstraintError(error, BOOKING_OVERLAP_CONSTRAINT_NAME)) {
+      logOverlapBackstopFired({
+        action: 'BOOKING_UPDATE',
+        professionalId: existing.professionalId,
+        locationId: existing.locationId,
+        locationType: existing.locationType,
+        requestedStart: finalStart,
+        requestedEnd: schedulingDecision.requestedEnd,
+        bookingId: existing.id,
+        clientId: existing.clientId,
+      })
       throw bookingError('TIME_BOOKED')
     }
 

@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   decideBookingOverlapPermission: vi.fn(),
   findBookingAndHoldConflicts: vi.fn(),
   logBookingConflict: vi.fn(),
+  captureOverlapBackstopFired: vi.fn(),
 
   syncBookingAppointmentReminders: vi.fn(),
   bumpScheduleVersion: vi.fn(),
@@ -133,6 +134,16 @@ vi.mock('@/lib/booking/conflictQueries', async () => {
   return {
     ...actual,
     findBookingAndHoldConflicts: mocks.findBookingAndHoldConflicts,
+  }
+})
+
+vi.mock('@/lib/observability/bookingEvents', async () => {
+  const actual = await vi.importActual<object>(
+    '@/lib/observability/bookingEvents',
+  )
+  return {
+    ...actual,
+    captureOverlapBackstopFired: mocks.captureOverlapBackstopFired,
   }
 })
 
@@ -1442,6 +1453,76 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
           userId: 'user_pro_1',
           professionalId: 'pro_1',
         },
+      }),
+    )
+  })
+
+  // The app gate and the durable DB EXCLUDE constraint BOTH refuse with
+  // TIME_BOOKED, so from outside they are indistinguishable — a gate that
+  // silently stopped finding conflicts still looks like normal operation,
+  // because Postgres keeps refusing on its behalf. The backstop firing is
+  // therefore the only evidence that something upstream broke, and it has to be
+  // logged distinctly or that evidence is thrown away.
+  //
+  // The advisory schedule lock serialises these writes, so this should be
+  // effectively unreachable in practice. A nonzero rate is a bug.
+  it('logs distinctly when the DB overlap backstop refuses a write the gate allowed', async () => {
+    mocks.findBookingAndHoldConflicts.mockResolvedValueOnce({ all: [] })
+    mocks.decideBookingOverlapPermission.mockReturnValueOnce({
+      ok: true,
+      mode: 'NO_OVERLAP',
+      conflicts: [],
+    })
+
+    // The gate found nothing; Postgres disagrees.
+    mocks.txBookingCreate.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError(
+        'conflicting key value violates exclusion constraint "Booking_no_active_professional_overlap"',
+        { code: 'P2010', clientVersion: 'test' },
+      ),
+    )
+
+    await expect(
+      createProBooking({
+        professionalId: 'pro_1',
+        actorUserId: 'user_pro_1',
+        overrideReason: null,
+        clientId: 'client_1',
+        offeringId: 'offering_1',
+        locationId: 'location_1',
+        locationType: ServiceLocationType.SALON,
+        scheduledFor: REQUESTED_START,
+        clientAddressId: null,
+        internalNotes: null,
+        requestedBufferMinutes: null,
+        requestedTotalDurationMinutes: null,
+        allowOutsideWorkingHours: true,
+        allowShortNotice: true,
+        allowFarFuture: false,
+        requestId: 'req_backstop_1',
+        idempotencyKey: 'idem_backstop_1',
+      }),
+    ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+
+    expect(mocks.logBookingConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_CREATE',
+        professionalId: 'pro_1',
+        note: 'db_overlap_backstop_fired',
+        meta: expect.objectContaining({
+          layer: 'db_backstop',
+          prismaCode: '23P01',
+        }),
+      }),
+    )
+
+    // A log line nobody reads is not a signal. This raises the operational
+    // alert too, so the gate regression reaches a human instead of sitting in
+    // Vercel logs looking like a routine refusal.
+    expect(mocks.captureOverlapBackstopFired).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_CREATE',
+        professionalId: 'pro_1',
       }),
     )
   })

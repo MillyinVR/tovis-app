@@ -210,6 +210,35 @@ a refactor.
 > ✅ **Shipped.** The hold divergence was settled first and is **latent, not
 > live** — it did not outrank the refactor. See "F3 — what shipped" in §4.
 
+### F13 — the DB backstop refused silently, hiding gate regressions 🟠
+
+Fell out of F3, where it cost a test. Overlap is enforced twice: the app gate
+(`enforceBookingOverlapPolicy`) and the durable GIST `EXCLUDE`. **Both refuse
+with `TIME_BOOKED`** — the catch maps 23P01 onto the same code — so from outside
+they are indistinguishable.
+
+The hold-create path has always logged its own backstop firing
+(`prismaCode: '23P01'`, `conflictKind: 'overlap_range'`). The five **booking**
+side catches did not log at all: consultation materialization, client finalize,
+pro create, rebook, and pro update each just threw.
+
+Consequence: if the gate ever stopped finding conflicts, **every client path
+would keep refusing correctly — by Postgres — and nothing would say so.** The
+`booking_conflict` trail would go quiet rather than wrong, and the only visible
+symptom would be *pro double-books starting to fail*, a path nobody watches.
+This is not hypothetical: an F3 integration test asserting a client-path
+`TIME_BOOKED` refusal **passed with the conflict finder deliberately blinded**.
+
+The advisory schedule lock serialises these writes, so a 23P01 on `Booking`
+should be effectively unreachable. A nonzero rate is a bug, not background noise.
+
+**Fix.** `logOverlapBackstopFired` next to `logOverlapDecisionBlocked`; all five
+catches call it. Discriminator is `meta.layer = 'db_backstop'` plus
+`note: 'db_overlap_backstop_fired'`. No behaviour change — same refusal, same
+code, same client experience.
+
+> ✅ **Shipped** — see "F13 — what shipped" in §4.
+
 ### F4 — Public rebook token accepts off-grid times 🟠
 
 `app/api/v1/client/rebook/[token]/route.ts:395` →
@@ -387,6 +416,75 @@ Named honestly rather than assumed safe:
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — branch `fix/integration-suite-ci` |
 | F12 proposal-time validation | not started (opened by F2) |
+| F13 backstop refused silently | ✅ done — branch `fix/f13-log-overlap-backstop` (opened by F3) |
+
+### F13 — what shipped
+
+- `lib/booking/writeBoundary.ts` — `logOverlapBackstopFired`, called from all
+  five booking-side 23P01 catches. Marks the refusal `layer: 'db_backstop'` so
+  it is separable from an app-gate refusal, which logs an
+  `overlapDecisionCode`. On the rebook path the source booking id goes to
+  `meta.sourceBookingId`, not `bookingId` — that create has no row yet, and a
+  reader would take `bookingId` for the conflicting row.
+- **The client-path integration test is now discriminating.** `waitlist-offer`'s
+  conflict test asserts the app gate refused (an `overlapDecisionCode` was
+  logged) **and** that the backstop did not fire. That is the assertion that was
+  missing: the previous version passed with the gate blinded.
+
+**Verified, both directions:**
+
+- The unit guard (`writeBoundary.overlapPolicy.test.ts`) fails before the fix
+  with `expected "spy" to be called with arguments: [ ObjectContaining{…} ]` —
+  note the `TIME_BOOKED` half of that test passes either way, which is precisely
+  the point.
+- The integration guard fails when the conflict finder is blinded
+  (`expected false to be true`), where before it passed.
+- `typecheck` clean, `lint` 0 errors, guards pass, 703 files / **6849** unit
+  tests, 31 files / **148** integration tests.
+
+**Alerting is wired.** `captureOverlapBackstopFired`
+(`lib/observability/bookingEvents.ts`) raises an **error**-level Sentry event
+tagged `booking.event = overlap_backstop_fired`, following the same shape as
+`captureLifecycleDrift` / `captureStripeAmountMismatch`. Error, not warning,
+even though no bad data is written — Postgres refused, the appointment is safe —
+because the severity is about **detectability**: a gate that silently stopped
+working is invisible on every client-facing surface, and nothing else pages
+anyone. `captureMessage` is not affected by `tracesSampleRate`, and Sentry is
+`enabled: Boolean(dsn)` (`sentry.server.config.ts`), so this is live wherever a
+DSN is configured.
+
+The structured log line stays where it was, emitted once by `logBookingConflict`
+at the call site — the alert is added on top, not duplicated.
+
+**Checked, not assumed:** `SENTRY_DSN` **and** `NEXT_PUBLIC_SENTRY_DSN` are both
+present in the production Vercel environment (`vercel env ls production`), so
+`enabled: Boolean(dsn)` resolves true and these events do reach Sentry in prod.
+The project also drains Vercel logs to Sentry (`SENTRY_VERCEL_LOG_DRAIN_URL`),
+so the structured `console.warn` line lands there as a second path.
+
+**Routing: already covered — checked, and my own "no rule configured" note above
+was wrong.** Sentry issue rule `10003547001` ("Notify #tovis-ops-alerts via
+Slack") is **active**, scoped to project `tovis-app`, with `environment: null`
+(all), **zero filters**, `actionMatch: any`, and
+`FirstSeenEventCondition` among its conditions. Any *new issue* in this project
+posts to Slack `#tovis-ops-alerts`. An error-level `captureMessage` opens a new
+issue, so the first backstop firing routes to Slack with no new rule at all.
+
+Grouping nuance: the message embeds `action` and `professionalId`, so Sentry
+fingerprints one issue per distinct pair — each affected professional alerts
+separately on first occurrence. With an expected rate of zero that is a feature,
+not noise. Set an explicit fingerprint if that ever changes.
+
+**A dedicated rule is scriptable if one is ever wanted** (verified, not assumed):
+`POST https://sentry.io/api/0/projects/tovis/tovis-app/rules/` still accepts
+writes — an empty-body probe returns `400 {"actionMatch":…,"frequency":…,
+"name":["This field is required."]}`, while the **GET** on the same path is now
+`410 This API no longer exists` (listing moved to
+`/organizations/{org}/combined-rules/`). `SENTRY_AUTH_TOKEN` in
+`.env.production.local` carries `alerts:write` + `project:admin`. The building
+blocks are `sentry.rules.conditions.first_seen_event.FirstSeenEventCondition`
+and `sentry.rules.filters.tagged_event.TaggedEventFilter` on key
+`booking.event`, value `overlap_backstop_fired`.
 
 ### F3 — what shipped
 
@@ -695,61 +793,74 @@ update to the table in §4.)
 
 > Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
-> it first, especially §4's status table, the **"F3 — what shipped"** block (in
-> particular its ⚠️ note on the test that looked like proof and was not), and the
+> it first, especially §4's status table, **"F3 — what shipped"** and
+> **"F13 — what shipped"** (both contain traps that cost real time), and the
 > "Not checked" list in §3.
 >
-> **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703.
-> NEXT = F4.**
+> **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
+> F13 ✅ #704. NEXT = F4.**
 >
-> F3 retired the second conflict engine: `lib/booking/schedulingConflicts.ts` is
-> gone and `enforceBookingOverlapPolicy` now shares `findBookingAndHoldConflicts`
-> in `conflictQueries.ts` with every other conflict read. The hold divergence the
-> last session flagged turned out to be **latent, not live** (one create path,
-> both columns always written, prod `BookingHold` empty) — but a wider version of
-> it was real and is fixed: the hold busy-window builder had no floor against the
-> DB `EXCLUDE` range at all.
+> F3 retired the second conflict engine (`lib/booking/schedulingConflicts.ts` is
+> gone; `enforceBookingOverlapPolicy` now shares `findBookingAndHoldConflicts`
+> with every other conflict read). F13 fell out of it: the DB overlap backstop
+> was refusing silently, so a gate regression would have been invisible.
 >
-> ⚠️ **F4's card carries a question, not just a fix.** It proposes adding
+> ⚠️ **F4's card carries a premise AND a question.** It proposes adding
 > `deferStepToPro` so the public rebook token stops accepting off-grid starts
 > (`STEP_MISMATCH` is deliberately non-fatal for pros, and that route is a CLIENT
-> path). Before writing it, confirm the premise the way the last four sessions
-> learned to: read `app/api/v1/client/rebook/[token]/route.ts:395` and
-> `proSchedulingPolicy` and check the refusal is actually reachable and actually
-> skipped. **Five card premises have now died on contact** — F2 had three, F3 had
-> its central one. The card also asks a question that is **Tori's, not yours**:
-> the recommended-window constraint is skipped unless
-> `rebookMode === RECOMMENDED_WINDOW` (`route.ts:198`) — is that intended?
-> Surface it with evidence when you get there.
+> path). **Confirm the premise before writing anything** — read
+> `app/api/v1/client/rebook/[token]/route.ts:395` and `proSchedulingPolicy`, and
+> check the refusal is genuinely reachable and genuinely skipped. **Five card
+> premises have now died on contact** (F2 had three; F3's central one; and in F13
+> I was wrong twice about my own work — see below). The card also asks something
+> that is **Tori's call, not yours**: the recommended-window constraint is
+> skipped unless `rebookMode === RECOMMENDED_WINDOW` (`route.ts:198`) — is that
+> intended? Surface it with evidence when you reach it.
 >
 > **Tori wants the ENTIRE queue closed before she will deploy** (her call, stated
 > 2026-07-21). After F4 the remaining cards are F5, F6, F7 (iOS), F8, F9, F10
 > (iOS), F12. Two more carry decisions that are hers — F5 (working hours at offer
 > time vs allow at confirm; should an offer *reserve*?) and F8 (should COMPLETED
-> occupy future time? — note F11 found DB-side evidence that the constraint
-> excluding it is deliberate, so F8 probably resolves by dropping COMPLETED from
+> occupy future time? — F11 found DB-side evidence the constraint excluding it is
+> deliberate, so F8 probably resolves by dropping COMPLETED from
 > `BOOKING_BLOCKING_STATUSES`) — and F12 needs UI on web **and** iOS before its
 > server half can ship. Do not batch-ask them up front.
 >
-> House rules that have bitten across five sessions, all in `CLAUDE.md`:
-> **don't guess — read the tool's own output, or ask.** **Prove a guard fails
-> before trusting that it passes.** And **verify the thing you are SHIPPING** —
-> #700 and #701 were green on every test while being wrong in the browser and on
-> the wire, and in F3 a green real-Postgres refusal test turned out to be proving
-> the database backstop rather than the code under change. When a test passes,
-> ask which layer made it pass.
+> **House rules that have bitten across six sessions**, all in `CLAUDE.md`:
+>
+> - **Don't guess — read the tool's own output, or ask.** In F13 the Sentry
+>   endpoint I "remembered" was half-retired: `GET .../rules/` is now `410`, the
+>   `POST` still works. A probe took one minute; the assumption would have been
+>   wrong in both directions.
+> - **Prove a guard fails before trusting that it passes.** Every guard in #703
+>   and #704 was proven red first, four different ways (reverting the builder,
+>   swapping the probe order, blinding the finder, removing the alert call).
+> - **Verify the thing you are SHIPPING**, and **ask which LAYER made a test
+>   pass.** This is the big one from F3. A real-Postgres test asserting a client
+>   path refuses with `TIME_BOOKED` passed *with the conflict finder blinded* —
+>   the database was doing the refusing. Overlap is enforced twice and both
+>   layers surface the same code, so a green refusal test proves nothing about
+>   the gate. The discriminating test is the **pro double-book**, which must
+>   SUCCEED and only can if the gate finds the conflict. To isolate a permissive
+>   layer, test what it should ALLOW — refusals are over-determined.
+> - **Check your own "not verified" list before publishing it.** Twice in F13 I
+>   wrote something off as unverifiable and it took one command: `SENTRY_DSN` is
+>   set in prod (`vercel env ls production`), and the alert *already* routes to
+>   Slack (`#tovis-ops-alerts` via an active catch-all issue rule). Both claims
+>   in my first draft were wrong.
 >
 > Verification tools now proven and worth reusing:
 > - `pnpm test:integration` (needs the test-postgres container on :5433).
->   ⚠️ it also needs a keyring **in CI's exact shape** or two suites fail:
->   `PII_AEAD_KEYS_JSON` keyed by `address-aead-v1`/`email-aead-v1`/
->   `phone-aead-v1`/`notes-aead-v1`, plus `PII_LOOKUP_HMAC_KEYS_JSON` and
->   `JWT_SECRET`. Copy `.github/workflows/integration.yml:88`;
->   `scripts/with-test-db.mjs` does not generate them.
->   `tests/integration/booking-overlap-concurrency.test.ts` is now the pattern for
+>   ⚠️ it needs a keyring **in CI's exact shape** or two suites fail:
+>   `PII_AEAD_KEYS_JSON` keyed by `address-aead-v1` / `email-aead-v1` /
+>   `phone-aead-v1` / `notes-aead-v1`, plus `PII_LOOKUP_HMAC_KEYS_JSON` and
+>   `JWT_SECRET`. A single generic key fails with `Missing AEAD key for key
+>   version: address-aead-v1`. Copy `.github/workflows/integration.yml:88`.
+> - `tests/integration/booking-overlap-concurrency.test.ts` is the pattern for
 >   driving a real write-boundary path (incl. `createProBooking`) against real
->   Postgres — note a pro-readiness gate needs `mobileBasePostalCode` +
->   `mobileRadiusMiles` on the profile when a bookable MOBILE_BASE exists.
+>   Postgres. Gotcha: the pro-readiness gate needs `mobileBasePostalCode` +
+>   `mobileRadiusMiles` on the profile whenever a bookable MOBILE_BASE exists,
+>   which the shared fixture does not set.
 > - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
 >   HTTP without touching dev data.
 > - `tests/e2e/consultation-token-retryable-refusal.spec.ts` is the pattern for
@@ -760,7 +871,15 @@ update to the table in §4.)
 >   the script picks the newest-runtime device — check
 >   `xcrun simctl list devices booted` before screenshotting. Taps need
 >   `cliclick`, mapped through `group 1 of window 1` of Simulator.
+> - Observability: booking-domain alerts go through
+>   `lib/observability/bookingEvents.ts` (Sentry + a structured log line). Sentry
+>   is live in prod and an active catch-all rule routes every NEW issue in
+>   `tovis-app` to Slack `#tovis-ops-alerts`, so a fresh `captureMessage` reaches
+>   a human without any rule work. A dedicated rule is scriptable if ever needed:
+>   `POST /api/0/projects/tovis/tovis-app/rules/` (the GET is `410`; listing
+>   moved to `/organizations/{org}/combined-rules/`), token in
+>   `.env.production.local` has `alerts:write`.
 >
-> 🚫 Do not deploy. Runtime payload #686–#693 + #699 + #700 + #701 + #703 is
-> merged and NOT live. Tori has said she wants the whole queue done first — it is
-> still her call and her explicit go-ahead, never yours.
+> 🚫 Do not deploy. Runtime payload #686–#693 + #699 + #700 + #701 + #703 + #704
+> is merged and NOT live. Tori has said she wants the whole queue done first — it
+> is still her call and her explicit go-ahead, never yours.

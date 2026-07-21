@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 
   findBookingAndHoldConflicts: vi.fn(),
   hasCalendarBlockConflict: vi.fn(),
+  captureOverlapBackstopFired: vi.fn(),
 
   createConsultationApprovalProof: vi.fn(),
   revokeConsultationActionTokensForBooking: vi.fn(),
@@ -117,7 +118,9 @@ vi.mock('@/lib/booking/cacheVersion', () => ({
   bumpScheduleConfigVersion: vi.fn(),
 }))
 
-vi.mock('@/lib/observability/bookingEvents', () => ({}))
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureOverlapBackstopFired: mocks.captureOverlapBackstopFired,
+}))
 
 import { approveConsultationAndMaterializeBooking } from './writeBoundary'
 
@@ -398,5 +401,16 @@ describe('consultation materialization overlap contract', () => {
         professionalId: 'pro_1',
       }),
     ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+
+    // The backstop firing here means the app-level gate let the duration growth
+    // through. Identical TIME_BOOKED to the client either way, so the alert is
+    // the only thing that surfaces it.
+    expect(mocks.captureOverlapBackstopFired).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'BOOKING_UPDATE',
+        professionalId: 'pro_1',
+        bookingId: 'booking_1',
+      }),
+    )
   })
 })
