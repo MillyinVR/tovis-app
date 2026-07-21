@@ -45,7 +45,10 @@ import {
   bookingError,
   isBookingError,
 } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import {
   normalizeJsonObjectPayload,
   type JsonObjectPayload,
@@ -458,10 +461,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
     )
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('GET /api/v1/pro/bookings/[id] error', {
@@ -619,10 +619,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       parsedRequestedItems = parseRequestedServiceItems(rec.serviceItems)
     } catch (error: unknown) {
       if (isBookingError(error)) {
-        return bookingJsonFail(error.code, {
-          message: error.message,
-          userMessage: error.userMessage,
-        })
+        return bookingErrorJsonFail(error)
       }
 
       throw error
@@ -719,10 +716,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     )
 
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('PATCH /api/v1/pro/bookings/[id] error', {

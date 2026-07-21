@@ -24,7 +24,10 @@ import {
 import {
   isBookingError,
 } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import {
@@ -833,10 +836,7 @@ export async function POST(request: Request) {
     return response
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('POST /api/v1/bookings/finalize error', {

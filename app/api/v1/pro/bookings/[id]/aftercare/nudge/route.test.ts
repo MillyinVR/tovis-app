@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   pickString: vi.fn(),
 
   bookingJsonFail: vi.fn(),
+
+  bookingErrorJsonFail: vi.fn(),
   isBookingError: vi.fn(),
 
   nudgeAftercareRebook: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock('@/app/api/_utils', () => ({
 
 vi.mock('@/app/api/_utils/bookingResponses', () => ({
   bookingJsonFail: mocks.bookingJsonFail,
+  bookingErrorJsonFail: mocks.bookingErrorJsonFail,
 }))
 
 vi.mock('@/lib/booking/errors', () => ({
@@ -115,6 +118,22 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/nudge/route.ts', () => {
       const trimmed = value.trim()
       return trimmed.length > 0 ? trimmed : null
     })
+
+    // The routes serialize the ERROR now; delegate so the code->status map
+    // above still drives the response and a dropped field still shows up.
+    mocks.bookingErrorJsonFail.mockImplementation(
+      (error: {
+        code: string
+        message: string
+        userMessage: string
+        uiAction: string
+      }) =>
+        mocks.bookingJsonFail(error.code, {
+          message: error.message,
+          userMessage: error.userMessage,
+          uiAction: error.uiAction,
+        }),
+    )
 
     mocks.bookingJsonFail.mockImplementation(
       (code: string, overrides?: { message?: string; userMessage?: string }) => {
@@ -243,10 +262,13 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/nudge/route.ts', () => {
     const result = await POST(makeRequest(), makeCtx())
 
     expect(mocks.kickNotificationDrain).not.toHaveBeenCalled()
-    expect(mocks.bookingJsonFail).toHaveBeenCalledWith('AFTERCARE_NOT_COMPLETED', {
-      message: 'Aftercare must be sent before it can be nudged.',
-      userMessage: 'Send the aftercare before nudging the client.',
-    })
+    expect(mocks.bookingJsonFail).toHaveBeenCalledWith(
+      'AFTERCARE_NOT_COMPLETED',
+      expect.objectContaining({
+        message: 'Aftercare must be sent before it can be nudged.',
+        userMessage: 'Send the aftercare before nudging the client.',
+      }),
+    )
 
     expect(result.status).toBe(409)
     await expect(result.json()).resolves.toEqual({

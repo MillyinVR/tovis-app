@@ -19,7 +19,10 @@ import {
 import {
   isBookingError,
 } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -293,10 +296,7 @@ export async function GET(_req: Request, ctx: RouteContext<{ token: string }>) {
     )
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('GET /api/v1/client/rebook/[token] error:', error)
@@ -415,10 +415,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
     )
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('POST /api/v1/client/rebook/[token] error:', error)

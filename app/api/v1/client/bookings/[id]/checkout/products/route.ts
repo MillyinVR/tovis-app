@@ -9,7 +9,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { safeError } from '@/lib/security/logging'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import {
   normalizeJsonObjectPayload,
   type JsonObjectPayload,
@@ -267,10 +270,7 @@ export async function POST(req: NextRequest, props: RouteContext) {
     )
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error(`${ROUTE_OPERATION} error`, { error: safeError(error) })

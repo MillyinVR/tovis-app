@@ -21,7 +21,10 @@ import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import { normalizeJsonValue } from '@/app/api/_utils/jsonPayload'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
@@ -483,10 +486,7 @@ export async function POST(req: Request) {
     }
 
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('POST /api/v1/pro/bookings error', {

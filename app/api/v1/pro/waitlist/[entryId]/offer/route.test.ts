@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
   withRouteIdempotency: vi.fn(),
   bookingJsonFail: vi.fn(),
+  bookingErrorJsonFail: vi.fn(),
   isBookingError: vi.fn(() => false),
   createWaitlistOffer: vi.fn(),
   kickNotificationDrain: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
 
 vi.mock('@/app/api/_utils/bookingResponses', () => ({
   bookingJsonFail: mocks.bookingJsonFail,
+  bookingErrorJsonFail: mocks.bookingErrorJsonFail,
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
@@ -222,14 +224,13 @@ describe('app/api/v1/pro/waitlist/[entryId]/offer/route.ts', () => {
     }
     mocks.createWaitlistOffer.mockRejectedValueOnce(bookingErr)
     mocks.isBookingError.mockReturnValue(true)
-    mocks.bookingJsonFail.mockReturnValue({ ok: false, status: 404 })
+    mocks.bookingErrorJsonFail.mockReturnValue({ ok: false, status: 404 })
 
     const result = await POST(makeRequest({ body: VALID_BODY }), makeCtx())
 
-    expect(mocks.bookingJsonFail).toHaveBeenCalledWith(
-      'WAITLIST_ENTRY_NOT_FOUND',
-      { message: bookingErr.message, userMessage: bookingErr.userMessage },
-    )
+    // The route forwards the ERROR itself now, so a call-site uiAction
+    // override can't be dropped on the way to the wire.
+    expect(mocks.bookingErrorJsonFail).toHaveBeenCalledWith(bookingErr)
     expect(result).toEqual({ ok: false, status: 404 })
   })
 

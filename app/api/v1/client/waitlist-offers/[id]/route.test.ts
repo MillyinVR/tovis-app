@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 
   withRouteIdempotency: vi.fn(),
   bookingJsonFail: vi.fn(),
+  bookingErrorJsonFail: vi.fn(),
   isBookingError: vi.fn(() => false),
   confirmClientWaitlistOffer: vi.fn(),
   declineClientWaitlistOffer: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
 
 vi.mock('@/app/api/_utils/bookingResponses', () => ({
   bookingJsonFail: mocks.bookingJsonFail,
+  bookingErrorJsonFail: mocks.bookingErrorJsonFail,
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
@@ -228,17 +230,15 @@ describe('app/api/v1/client/waitlist-offers/[id]/route.ts', () => {
     }
     mocks.declineClientWaitlistOffer.mockRejectedValueOnce(bookingErr)
     mocks.isBookingError.mockReturnValue(true)
-    mocks.bookingJsonFail.mockReturnValue({ ok: false, status: 409 })
+    mocks.bookingErrorJsonFail.mockReturnValue({ ok: false, status: 409 })
 
     const result = await POST(
       makeRequest({ body: { action: 'DECLINE' } }),
       makeCtx(),
     )
 
-    expect(mocks.bookingJsonFail).toHaveBeenCalledWith(
-      'WAITLIST_OFFER_NOT_PENDING',
-      { message: bookingErr.message, userMessage: bookingErr.userMessage },
-    )
+    // Forwards the ERROR itself, so a call-site uiAction override survives.
+    expect(mocks.bookingErrorJsonFail).toHaveBeenCalledWith(bookingErr)
     expect(result).toEqual({ ok: false, status: 409 })
   })
 

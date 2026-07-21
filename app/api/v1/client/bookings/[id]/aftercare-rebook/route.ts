@@ -4,7 +4,7 @@ import { Role } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requireClient, upper } from '@/app/api/_utils'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { requireClientBookingOwnership } from '@/app/api/_utils/auth/requireClientBookingOwnership'
 import {
@@ -115,10 +115,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     return response
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error('POST /api/v1/client/bookings/[id]/aftercare-rebook error', {

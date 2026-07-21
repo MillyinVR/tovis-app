@@ -1,6 +1,9 @@
 // app/api/v1/pro/bookings/[id]/aftercare/send/route.ts
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -71,10 +74,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     return jsonOk({ ok: true }, 200)
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error(`${OPERATION} error`, { error: safeError(error) })

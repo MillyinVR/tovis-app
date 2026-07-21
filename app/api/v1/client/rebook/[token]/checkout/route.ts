@@ -10,7 +10,10 @@
 import { PaymentMethod, PaymentProvider, Role } from '@prisma/client'
 
 import { jsonFail, pickString } from '@/app/api/_utils'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import {
   resolveRouteParams,
@@ -272,10 +275,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
     )
   } catch (error: unknown) {
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error(`${ROUTE_OPERATION} error`, { error: safeError(error) })

@@ -17,7 +17,7 @@ import {
 } from '@/app/api/_utils/idempotency'
 import { approveConsultationAndMaterializeBooking } from '@/lib/booking/writeBoundary'
 import { isBookingError } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
@@ -526,10 +526,7 @@ const idempotencyRequest = new Request(
     // every one of those rendered as an opaque 500 — the sibling public-token
     // and pro in-person routes have always mapped them.
     if (isBookingError(e)) {
-      return bookingJsonFail(e.code, {
-        message: e.message,
-        userMessage: e.userMessage,
-      })
+      return bookingErrorJsonFail(e)
     }
 
     console.error('handleConsultationDecision error', e)

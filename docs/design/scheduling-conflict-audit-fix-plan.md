@@ -326,7 +326,7 @@ Named honestly rather than assumed safe:
 | Item | State |
 | --- | --- |
 | F1 ICS import double-book | ✅ done — branch `fix/scheduling-conflict-audit` |
-| F2 consultation extension | ✅ done — branch `fix/consultation-extension-blocks` |
+| F2 consultation extension | ✅ done — #699, + #700 (page) + #701 (uiAction), iOS #203 |
 | F3 retire second engine | not started |
 | F4 rebook token step grid | not started |
 | F5 waitlist offer working hours | not started |
@@ -337,6 +337,43 @@ Named honestly rather than assumed safe:
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — branch `fix/integration-suite-ci` |
 | F12 proposal-time validation | not started (opened by F2) |
+
+### F2 — the follow-ups that only turned up by LOOKING
+
+The server fix (#699) was green on every test and still wrong in two places that
+no test was watching. Both were found by driving the real thing.
+
+- **#700 — the page called the refusal terminal.** #699 made the single-use link
+  survive a refusal; `app/client/consultation/[token]/page.tsx` still replaced
+  the whole view with *"Consultation link unavailable / ask your professional to
+  resend the consultation link"* on ANY failed decision, and threw away both
+  buttons. Recoverable server-side, presented as a dead end. Now branches on the
+  envelope's `retryable` flag: retryable refusals render inline with the actions
+  still live. Pinned by `tests/e2e/consultation-token-retryable-refusal.spec.ts`,
+  which drives refuse → pro clears the block → retry-in-place → APPROVED.
+- **#701 — `uiAction` never reached the wire.** TIME_BLOCKED advertises
+  `PICK_NEW_SLOT`, which is right in the booking flow and meaningless on an
+  approval. Two bugs: `getBookingErrorDescriptor` ignored the override entirely
+  (widening the type compiled clean and did nothing), and all **37** route catch
+  blocks hand-forwarded only `{ message, userMessage }`, re-deriving the rest
+  from the catalog. New `bookingErrorJsonFail(error)` serializes the error
+  itself; the 37 hand-forwards collapse into it.
+- **iOS #203** — no app change was needed (both call sites already render
+  `APIError.userMessage` inline), but the error path had **zero** test coverage:
+  every existing case served 200. That gap had been hiding the fact that the
+  in-app route returned a bare 500, so clients saw "Internal server error".
+
+**Verified by driving, not by reading:** the public token route over real HTTP
+(409 → link unused → clear block → same link → 200), the page in a real browser,
+and **the iOS simulator** — the copy renders in ember inline with both buttons
+live, and after the pro clears the block the retry lands and NEXT BOOKING shows
+the materialized 3h / $180 appointment.
+
+⚠️ Two traps worth carrying forward: `isFullyVerified` needs **both**
+`emailVerifiedAt` and `phoneVerifiedAt` or every authed screen 403s
+`VERIFICATION_REQUIRED`; and `scripts/sim-login.sh` picks the newest-runtime
+simulator, which is not necessarily the one you booted — check
+`xcrun simctl list devices booted` before screenshotting.
 
 ### F2 — what shipped
 
@@ -510,47 +547,62 @@ update to the table in §4.)
 
 > Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
-> it first, especially §4's status table and the "Not checked" list in §3.
+> it first, especially §4's status table, the "F2 — the follow-ups that only
+> turned up by LOOKING" block, and the "Not checked" list in §3.
 >
-> **F1, F11 and F2 are done** (#693, #694, and F2 on branch
-> `fix/consultation-extension-blocks`). **NEXT = F3.**
+> **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203). NEXT = F3.**
 >
 > F3: retire the second conflict engine. `lib/booking/schedulingConflicts.ts`
-> (`findSchedulingConflicts`, bookings+holds, **block-blind**) still exists
-> alongside `lib/booking/conflictQueries.ts` (`getTimeRangeConflict`,
-> blocks+bookings+holds). That unreconciled scope gap is exactly what caused F2
-> — and F2's fix deliberately left `findSchedulingConflicts` in place, so the
-> consultation approval now calls **both** engines side by side. Consolidating
-> is the point of this card.
+> (`findSchedulingConflicts` — bookings + holds, **block-blind**) still exists
+> alongside `lib/booking/conflictQueries.ts` (`getTimeRangeConflict` — blocks +
+> bookings + holds). That unreconciled scope gap is exactly what caused F2, and
+> F2's fix deliberately left `findSchedulingConflicts` in place, so
+> `performLockedApproveConsultationMaterialization` now calls **both** engines
+> side by side. Consolidating is the point of this card.
 >
-> Suggested shape (verify before trusting it — this plan's premises have a poor
-> survival rate; **three** of F2's did not hold): have
+> Suggested shape — **verify before trusting it; this plan has a poor premise
+> survival rate (three of F2's died on contact)**: have
 > `enforceBookingOverlapPolicy` call `getTimeRangeConflict`, ignoring the
 > `BLOCKED` verdict where the caller already gated it, then delete
-> `findSchedulingConflicts`. Note `getTimeRangeConflict` returns only the
-> **highest-priority** code (BLOCKED > BOOKING > HOLD), not a list — check
-> whether any caller needs to distinguish "blocked AND booked" before assuming
-> it is a drop-in. `conflictEngineParity.test.ts` reconciled the two engines'
-> interval math but not their scope; that test is the place to pin the merge.
+> `findSchedulingConflicts`. Two things to check before assuming a drop-in:
+> `getTimeRangeConflict` returns only the **highest-priority** code
+> (BLOCKED > BOOKING > HOLD), not a list — confirm no caller needs to
+> distinguish "blocked AND booked"; and it takes a `locationId` for
+> location-scoped blocks, which `findSchedulingConflicts` never had.
+> `conflictEngineParity.test.ts` reconciled the two engines' interval math but
+> not their scope — that test is where to pin the merge.
 >
 > While you are in there, F2 left one cheap follow-up: the block probe in
 > `performLockedApproveConsultationMaterialization` runs *after*
 > `replaceBookingServiceItems`, so a refusal wastes those writes before rolling
-> them back. Moving it ahead of the item rewrite is a small, safe win.
+> them back. Moving it ahead of the item rewrite is small and safe.
 >
-> House rules that have now bitten across three sessions and are in `CLAUDE.md`:
-> **don't guess — read the tool's own output, or ask** (F2 found a
-> single-use-token burn and a route that turned every booking error into a 500,
-> both only by reading the actual code rather than the card). And when you add a
-> guard, **prove it fails before trusting that it passes** — every test F2 added
-> was reverted-and-re-run to confirm it goes red.
+> House rules that have now bitten across four sessions, all in `CLAUDE.md`:
+> **don't guess — read the tool's own output, or ask** (F2 found a single-use
+> token burn, a route that turned every booking error into a 500, and a
+> `uiAction` that never reached the wire — none of them visible from the card).
+> **Prove a guard fails before trusting that it passes** (a `uiAction` override
+> type was widened, compiled clean, and did nothing — only a test-first caught
+> it). And **verify the thing you are SHIPPING**: #700 and #701 were both green
+> on every test while being wrong in the browser and on the wire.
 >
-> The integration suite runs in CI and is the strongest tool here:
-> `pnpm test:integration` locally (needs the test-postgres container on :5433).
-> ⚠️ it also needs `PII_AEAD_KEYS_JSON` in your environment or
-> `waitlist-offer.test.ts` fails with `Missing required env` — CI generates it,
-> `scripts/with-test-db.mjs` does not. `tests/integration/consultation-extension-blocked.test.ts`
-> is the pattern for driving a real write-boundary path against real Postgres.
+> Tools that are now proven and worth reusing:
+> - `pnpm test:integration` (needs the test-postgres container on :5433).
+>   ⚠️ also needs `PII_AEAD_KEYS_JSON` in your env or `waitlist-offer.test.ts`
+>   fails with `Missing required env` — CI generates it,
+>   `scripts/with-test-db.mjs` does not.
+>   `tests/integration/consultation-extension-blocked.test.ts` is the pattern for
+>   driving a real write-boundary path against real Postgres.
+> - `pnpm dev:test-db` runs a real server against the test DB — good for driving
+>   routes over HTTP without touching dev data.
+> - `tests/e2e/consultation-token-retryable-refusal.spec.ts` is the pattern for
+>   driving a real page (seed → act → assert DB state → act again).
+> - `~/Dev/tovis-ios/scripts/sim-login.sh --email <seeded user>` for the
+>   simulator. Two traps: a seeded user needs BOTH `emailVerifiedAt` and
+>   `phoneVerifiedAt` or every authed screen 403s `VERIFICATION_REQUIRED`, and
+>   the script picks the newest-runtime device — check
+>   `xcrun simctl list devices booted` before screenshotting. Taps need
+>   `cliclick`, mapped through `group 1 of window 1` of Simulator.
 >
-> 🚫 Do not deploy. Runtime payload #686–#693 is merged and NOT live; that stays
-> Tori's call.
+> 🚫 Do not deploy. Runtime payload #686–#693 + #699 + #700 + #701 is merged and
+> NOT live; that stays Tori's call.

@@ -16,7 +16,10 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { isBookingError } from '@/lib/booking/errors'
-import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  bookingErrorJsonFail,
+  bookingJsonFail,
+} from '@/app/api/_utils/bookingResponses'
 import { markProBookingCheckoutPaid } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
@@ -209,10 +212,7 @@ export async function POST(request: Request, context: RouteContext) {
     })
 
     if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
-      })
+      return bookingErrorJsonFail(error)
     }
 
     console.error(`${ROUTE_OPERATION} error`, {
