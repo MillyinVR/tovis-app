@@ -295,6 +295,11 @@ export function useCalendarData(args: UseCalendarDataArgs) {
 
   const [showHoursForm, setShowHoursForm] = useState(false)
 
+  // Click-to-create: the clicked slot's start instant while the pro is choosing
+  // between adding an appointment and blocking personal time. Non-null = the
+  // choice sheet is open.
+  const [createChoiceStart, setCreateChoiceStart] = useState<Date | null>(null)
+
   const isOverlayOpen = useMemo(
     () =>
       Boolean(
@@ -303,7 +308,8 @@ export function useCalendarData(args: UseCalendarDataArgs) {
           bookingModal.openBookingId ||
           mgmt.managementOpen ||
           blocks.blockCreateOpen ||
-          blocks.editBlockOpen,
+          blocks.editBlockOpen ||
+          createChoiceStart,
       ),
     [
       blocks.blockCreateOpen,
@@ -311,6 +317,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       bookingModal.openBookingId,
       confirm.confirmOpen,
       confirm.pendingChange,
+      createChoiceStart,
       mgmt.managementOpen,
     ],
   )
@@ -360,15 +367,8 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       const minutes = snapMinutes(y / PX_PER_MINUTE, loc.activeStepMinutes)
       const timeZone = resolveActiveCalendarTimeZone()
       const startUtc = utcFromDayAndMinutesInTimeZone(day, minutes, timeZone)
-      const scheduledAt = toDatetimeLocalValueInTimeZone(startUtc, timeZone)
 
-      const query = new URLSearchParams({
-        locationId: loc.activeLocationId,
-        locationType: loc.activeLocationType,
-        scheduledAt,
-      })
-
-      router.push(`/pro/bookings/new?${query.toString()}`)
+      setCreateChoiceStart(startUtc)
     },
     [
       blocks.blockCreateOpen,
@@ -377,14 +377,57 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       confirm.confirmOpen,
       confirm.pendingChange,
       loc.activeLocationId,
-      loc.activeLocationType,
       loc.activeStepMinutes,
       mgmt.managementOpen,
       resolveActiveCalendarTimeZone,
-      router,
       showTemporaryError,
     ],
   )
+
+  const closeCreateChoice = useCallback((): void => {
+    setCreateChoiceStart(null)
+  }, [])
+
+  const chooseCreateAppointment = useCallback((): void => {
+    if (!createChoiceStart) return
+
+    setCreateChoiceStart(null)
+
+    if (!loc.activeLocationId) {
+      showTemporaryError(NO_LOCATION_SELECTED_MESSAGE)
+      return
+    }
+
+    const timeZone = resolveActiveCalendarTimeZone()
+    const scheduledAt = toDatetimeLocalValueInTimeZone(
+      createChoiceStart,
+      timeZone,
+    )
+
+    const query = new URLSearchParams({
+      locationId: loc.activeLocationId,
+      locationType: loc.activeLocationType,
+      scheduledAt,
+    })
+
+    router.push(`/pro/bookings/new?${query.toString()}`)
+  }, [
+    createChoiceStart,
+    loc.activeLocationId,
+    loc.activeLocationType,
+    resolveActiveCalendarTimeZone,
+    router,
+    showTemporaryError,
+  ])
+
+  const chooseCreateBlock = useCallback((): void => {
+    if (!createChoiceStart) return
+
+    setCreateChoiceStart(null)
+
+    blocks.setBlockCreateInitialStart(createChoiceStart)
+    blocks.setBlockCreateOpen(true)
+  }, [blocks, createChoiceStart])
 
   const openCreateAppointment = useCallback((): void => {
     if (
@@ -594,6 +637,11 @@ export function useCalendarData(args: UseCalendarDataArgs) {
 
     openCreateForClick,
     openCreateAppointment,
+
+    createChoiceStart,
+    closeCreateChoice,
+    chooseCreateAppointment,
+    chooseCreateBlock,
 
     utils,
 

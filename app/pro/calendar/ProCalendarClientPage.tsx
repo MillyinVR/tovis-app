@@ -8,6 +8,7 @@ import EditBlockModal from './_components/EditBlockModal'
 
 import { BookingModal } from './_components/BookingModal'
 import { BookingOverrideConfirmModal } from './_components/BookingOverrideConfirmModal'
+import { CalendarCreateSheet } from './_components/CalendarCreateSheet'
 import { CalendarDesktopShell } from './_components/CalendarDesktopShell'
 import { CalendarMobileShell } from './_components/CalendarMobileShell'
 import { CalendarTabletShell } from './_components/CalendarTabletShell'
@@ -37,6 +38,8 @@ import {
 
 import type { CalendarEvent, ManagementLists, ViewMode } from './_types'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
+
+import { formatInTimeZone } from '@/lib/time'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -204,6 +207,26 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
     [cal.management, cal.events],
   )
 
+  // Heading for the click-to-create choice sheet, stamped with the clicked
+  // slot so the pro can confirm the click landed on the intended time.
+  const createChoiceHeading = useMemo(() => {
+    if (!cal.createChoiceStart) return copy.actions.createMenu
+
+    const timeLabel = formatInTimeZone(
+      cal.createChoiceStart,
+      activeLocationTimeZone,
+      {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      },
+    )
+
+    return `${copy.actions.createMenu} · ${timeLabel}`
+  }, [activeLocationTimeZone, cal.createChoiceStart, copy.actions.createMenu])
+
   const managementCopyOverride = useMemo(() => {
     const scopeWord = rangeScopeWordForView(view)
 
@@ -301,6 +324,18 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         pendingBarDismissed={pendingBarDismissed}
         onDismissPendingBar={dismissPendingBar}
         cal={cal}
+      />
+
+      <CalendarCreateSheet
+        open={cal.createChoiceStart !== null}
+        onClose={cal.closeCreateChoice}
+        heading={createChoiceHeading}
+        appointmentLabel={copy.actions.addAppointment}
+        appointmentHint={copy.actions.addAppointmentHint}
+        blockLabel={copy.actions.blockPersonalTime}
+        blockHint={copy.actions.blockPersonalTimeHint}
+        onAddAppointment={cal.chooseCreateAppointment}
+        onBlockTime={cal.chooseCreateBlock}
       />
 
       <BlockTimeModal
