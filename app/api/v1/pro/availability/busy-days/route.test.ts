@@ -1,4 +1,7 @@
+import { BookingStatus } from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
@@ -52,7 +55,21 @@ describe('GET /api/v1/pro/availability/busy-days', () => {
     expect(res.status).toBe(400)
   })
 
-  it('buckets non-cancelled bookings by local day in the pro timezone', async () => {
+  // F8: this popup used to keep its own status list, omitting COMPLETED on the
+  // theory that "completed is past" — false for an early-finished or same-day
+  // session, and it made the pro's own busy-day view disagree with what
+  // availability would actually let them book.
+  it('asks for exactly the shared occupancy statuses, not a local copy', async () => {
+    await GET(req('from=2026-09-01&to=2026-09-30&tz=America/Los_Angeles'))
+
+    const where = mocks.bookingFindMany.mock.calls[0]?.[0]?.where
+    expect(where?.status).toEqual({ in: [...BOOKING_BLOCKING_STATUSES] })
+    expect(BOOKING_BLOCKING_STATUSES).toContain(BookingStatus.COMPLETED)
+    expect(BOOKING_BLOCKING_STATUSES).not.toContain(BookingStatus.CANCELLED)
+    expect(BOOKING_BLOCKING_STATUSES).not.toContain(BookingStatus.NO_SHOW)
+  })
+
+  it('buckets occupying bookings by local day in the pro timezone', async () => {
     mocks.bookingFindMany.mockResolvedValue([
       { scheduledFor: new Date('2026-09-10T20:00:00.000Z') }, // 13:00 PDT -> Sep 10
       { scheduledFor: new Date('2026-09-11T02:00:00.000Z') }, // 19:00 PDT -> Sep 10

@@ -43,14 +43,28 @@ export const ALLOWED_STEP_MINUTES = [5, 10, 15, 20, 30, 60] as const
 /**
  * Booking statuses that occupy a professional's calendar and therefore block
  * other bookings, holds, and last-minute openings from overlapping them.
- * Single source of truth — used by conflictQueries (both the availability reads
- * and the write-boundary overlap gate) and the last-minute opening command, so
- * the set can never drift between paths.
  *
- * NOTE this set is stricter than the durable DB EXCLUDE predicate, which covers
- * PENDING/ACCEPTED/IN_PROGRESS only — COMPLETED is deliberately excluded there
- * (pinned by booking-overlap-concurrency.test.ts). See F8 in
+ * THE single source of truth. Every surface that asks "is the pro busy?" reads
+ * this list — conflictQueries (the availability reads AND the write-boundary
+ * overlap gate), the last-minute opening command, the pro busy-days route, and
+ * the look-ranking availability aggregates — so the set can never drift between
+ * paths.
+ *
+ * It matches the durable DB EXCLUDE predicate exactly (migration
+ * 20260806000000); `booking-overlap-concurrency.test.ts` walks every
+ * BookingStatus against real Postgres and fails if the two ever diverge, so a
+ * status added to this array without a migration (or vice versa) is caught.
+ *
+ * COMPLETED is in the set by ruling (Tori, 2026-07-21): a finished appointment
+ * still owns its time, because its buffer is the pro's cleanup/travel window
+ * and `advanceNoticeMinutes` defaults to 15 — dropping it would let a client
+ * book into that tail the moment the pro closed out. CANCELLED and NO_SHOW are
+ * out: that time is genuinely free again. See F8 in
  * docs/design/scheduling-conflict-audit-fix-plan.md.
+ *
+ * A status array with this SHAPE but a different question behind it is not this
+ * constant — e.g. `ESTABLISHED_BOOKING_STATUSES` (has this client booked here
+ * before?) is also P/A/IP/COMPLETED and must NOT be folded in here.
  */
 export const BOOKING_BLOCKING_STATUSES: readonly BookingStatus[] = [
   BookingStatus.PENDING,

@@ -274,6 +274,52 @@ describe('refreshProfessionalAvailabilityStats (real DB)', () => {
     )
   })
 
+  // F8: this aggregate used to keep its own status list, omitting COMPLETED as
+  // "in the past". A session finished early still owns the rest of its window,
+  // so leaving it out understated how booked the pro is — and made the ranking
+  // signal disagree with what availability will actually offer. Measured as a
+  // DELTA because earlier tests in this file have already put a booking on the
+  // calendar; an absolute fullness assertion would pass for the wrong reason.
+  it('counts a COMPLETED booking toward fullness and ignores a CANCELLED one', async () => {
+    if (!fx) throw new Error('Fixtures not initialized')
+
+    const professionalId = fx.professionalId
+    const fullnessNow = async (): Promise<number> => {
+      await refreshProfessionalAvailabilityStats(db, new Date())
+      const row = await db.professionalAvailabilityStat.findUnique({
+        where: { professionalId },
+      })
+      if (!row) throw new Error('Expected an availability stat row')
+      return row.fullness14d
+    }
+
+    const before = await fullnessNow()
+
+    // A different day from the ACCEPTED booking above, so the two cannot
+    // overlap and mask each other.
+    const twoDaysOut = new Date(Date.now() + 2 * DAY_MS)
+    twoDaysOut.setUTCHours(20, 0, 0, 0)
+    await createBooking({
+      scheduledFor: twoDaysOut,
+      durationMinutes: 60,
+      status: BookingStatus.COMPLETED,
+    })
+
+    const afterCompleted = await fullnessNow()
+    expect(afterCompleted).toBeGreaterThan(before)
+
+    const threeDaysOut = new Date(Date.now() + 3 * DAY_MS)
+    threeDaysOut.setUTCHours(20, 0, 0, 0)
+    await createBooking({
+      scheduledFor: threeDaysOut,
+      durationMinutes: 60,
+      status: BookingStatus.CANCELLED,
+    })
+
+    // Cancelled time is genuinely free again — it must move nothing.
+    expect(await fullnessNow()).toBe(afterCompleted)
+  })
+
   it('a pro with no bookable schedule is dropped on the next refresh', async () => {
     if (!fx) throw new Error('Fixtures not initialized')
 

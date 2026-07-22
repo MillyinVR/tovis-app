@@ -3,12 +3,12 @@
 // Lightweight, service-agnostic view of a PRO's OWN commitments per calendar
 // day, for the aftercare date-picker popup ("which days am I already booked /
 // blocked?"). Unlike /api/v1/availability/* (client-facing, per-service slot
-// computation) this just buckets the pro's non-cancelled bookings + calendar
-// blocks by local day across all locations.
-
-import { BookingStatus } from '@prisma/client'
+// computation) this just buckets the pro's OCCUPYING bookings
+// (BOOKING_BLOCKING_STATUSES) + calendar blocks by local day across all
+// locations.
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import { prisma } from '@/lib/prisma'
 import {
@@ -21,13 +21,6 @@ export const dynamic = 'force-dynamic'
 
 const MAX_RANGE_DAYS = 62
 const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/
-
-// Bookings that occupy the pro's day (exclude cancelled; completed is past).
-const BUSY_STATUSES = [
-  BookingStatus.PENDING,
-  BookingStatus.ACCEPTED,
-  BookingStatus.IN_PROGRESS,
-]
 
 type DayBusy = { bookings: number; blocked: boolean }
 
@@ -138,7 +131,11 @@ export async function GET(req: Request) {
       prisma.booking.findMany({
         where: {
           professionalId,
-          status: { in: BUSY_STATUSES },
+          // The shared occupancy set (F8), not a local copy: this popup must
+          // call a day busy for exactly the bookings that block a slot. It used
+          // to omit COMPLETED on the theory that "completed is past" — an
+          // early-finished or same-day session makes that false.
+          status: { in: [...BOOKING_BLOCKING_STATUSES] },
           scheduledFor: { gte: fromUtc, lt: toUtcExclusive },
         },
         select: { scheduledFor: true },

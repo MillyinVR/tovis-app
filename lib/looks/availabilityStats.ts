@@ -33,8 +33,9 @@
 // keeping the table proportional to pros a client can actually book soon, the
 // same "skip the zeros" rule the badge stats use.
 
-import { BookingStatus, type PrismaClient } from '@prisma/client'
+import { type PrismaClient } from '@prisma/client'
 
+import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 import {
   DEFAULT_TIME_ZONE,
   getZonedParts,
@@ -58,14 +59,6 @@ export const PRO_AVAILABILITY_STAT = {
   // floor standing in for "a bookable slot fits" without running the slot engine.
   minOpeningMinutes: 30,
 } as const
-
-// Bookings that occupy the pro's calendar (exclude terminal/non-occupancy states
-// — CANCELLED, NO_SHOW; COMPLETED is in the past). Mirrors the busy-days route.
-const BUSY_BOOKING_STATUSES: BookingStatus[] = [
-  BookingStatus.PENDING,
-  BookingStatus.ACCEPTED,
-  BookingStatus.IN_PROGRESS,
-]
 
 // A half-open occupancy interval [startUtc, endUtc) — the uniform shape every
 // occupancy source (booking, hold, block) is reduced to before summarizing.
@@ -326,7 +319,12 @@ export async function refreshProfessionalAvailabilityStats(
     db.booking.findMany({
       where: {
         professionalId: { in: professionalIds },
-        status: { in: BUSY_BOOKING_STATUSES },
+        // The shared occupancy set (F8), not a local copy — fullness must count
+        // the same bookings availability refuses to book over. This used to
+        // omit COMPLETED on the theory that "completed is in the past", which
+        // an early-finished or same-day session makes false, understating how
+        // booked the pro really is.
+        status: { in: [...BOOKING_BLOCKING_STATUSES] },
         scheduledFor: { gte: windowStart, lt: windowEnd },
       },
       select: {
