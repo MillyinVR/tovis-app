@@ -2551,14 +2551,17 @@ card's premise holds, prove every new guard RED before calling it green, include
 at least one ALLOW case, and drive the real artifact — the simulator — not just
 the tests.
 
-Two loose threads F12 surfaced and deliberately did not pull; pick them up only
-if F10 finishes early, and as separate commits:
+ONE loose thread F12 surfaced and deliberately did not pull; pick it up only if
+F10 finishes early, and as its own commit:
 - `POST /api/v1/pro/bookings/[id]/consultation-proposal` can COMMIT a proposal
   and then return 409, because `transitionSessionStepInTransaction` fails AFTER
   the upsert and the route `return`s (not throws) from `$transaction`. Reachable
-  on a NO_SHOW or PENDING booking. Written up at the end of "F12 — what shipped".
-- `tests/integration/pro-availability-stats.test.ts` compares two floats with
-  `toBe` and is flaky by construction (proven pre-existing on a clean tree).
+  on a NO_SHOW booking (the route's guards check CANCELLED and
+  COMPLETED/finishedAt but not NO_SHOW) and on a PENDING one (the transition
+  force-writes the step back and returns `forcedStep`). Written up at the end of
+  "F12 — what shipped". This is the standing "Prisma `$transaction`: return =
+  COMMIT" trap, and it is a WRITE path on real bookings — verify the two
+  reachability claims before fixing, they are code reads.
 
 Ship cadence: branch off origin/main, one PR per repo touched, watch CI, merge
 when green, fast-forward local main. 🚫 Do NOT deploy to Vercel — that stays
