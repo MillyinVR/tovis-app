@@ -394,6 +394,11 @@ through holds→finalize), but a phantom deal.
 **Fix.** Wrap in `withLockedProfessionalTransaction` **and** replace the inline
 block/booking/hold queries (`:1073–1160`) with `getTimeRangeConflict`. Two birds.
 
+> ✅ **Shipped.** The premise held on both halves — and the second half was not
+> the refactor the card called it: the inline hold math and the shared reader
+> **disagree**, so the swap fixed a second, unrelated bug. See "F6 — what
+> shipped" in §4.
+
 ### F7 — iOS: client MOBILE slots ignore the client's address 🟠
 
 `Tovis/BookingFlowView.swift:453` omits `clientAddressId` from
@@ -435,8 +440,11 @@ holds a fourth copy used for ranking aggregates.)
 | `normalizeLocationBufferMinutes` | ×2 — the two `calendar/blocked` routes |
 | `addDaysUtc` | ×3 — `clientBookingBuckets.ts:32`, `pro/calendar/route.ts:297`, `busy-days/route.ts:61` |
 
-Plus the whole block/booking/hold overlap query re-implemented inline in
-`createLastMinuteOpening.ts:1073` (folded into F6).
+~~Plus the whole block/booking/hold overlap query re-implemented inline in
+`createLastMinuteOpening.ts:1073`~~ — ✅ **done with F6 (#716)**, and it was not a
+tidy-up: that copy had drifted from the shared reader and mis-sized holds. Treat
+the rest of this table the same way — a "duplicate" that has drifted is a bug
+report, so diff the copies before assuming either one is correct.
 
 The `other-pros` fork matters more than it looks — that route is the unwired
 server half of a wanted feature, so its copy of the placement logic keeps
@@ -537,7 +545,7 @@ Named honestly rather than assumed safe:
 | F3 retire second engine | ✅ done — #703 |
 | F4 rebook token step grid | ✅ done — #705 |
 | F5 waitlist offer working hours | ✅ done — #710 (+ iOS #204) |
-| F6 last-minute opening lock | not started |
+| F6 last-minute opening lock | ✅ done — #716 (also fixed a hold-window gap the card thought was a refactor) |
 | F14 pro-chosen time must reserve | ✅ done — #713 (+ iOS #205) |
 | F15 stored client-visible time not re-checked | ✅ done — #714 (**Tori rule 2026-07-21**) |
 | F16 pro can't see their opening went dark | not started (opened by F15) |
@@ -548,6 +556,67 @@ Named honestly rather than assumed safe:
 | F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | not started (opened by F2) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
+
+### F6 — what shipped
+
+**Both halves of the card held, but they were not the same KIND of work.** The
+lock was the bug the card described. The query swap was filed as a tidy-up
+("two birds"), and it was not: the inline math and the shared reader disagree,
+so replacing one with the other **changed behaviour and closed a second hole**.
+
+**Half 1 — the lock.** `createLastMinuteOpening` now runs inside
+`withLockedProfessionalTransaction` instead of a bare `prisma.$transaction`.
+Measured, not argued: with another session holding that pro's advisory lock,
+a real `POST /api/v1/pro/openings` took **4.1s** and then returned 201 — it
+waited. With the lock removed, the same race publishes an opening over a
+booking that committed microseconds earlier (the integration test goes red in
+**54ms**, i.e. it never waited at all).
+
+**Half 2 — the two engines disagreed.** The card flagged this as unchecked, and
+it was the thing worth checking. The replaced code sized a hold's busy window
+from **the offering's current duration**; `getTimeRangeConflict` sizes it from
+**the hold's own snapshot columns**, floored to the database EXCLUDE range. So a
+hold reserving more time than its base offering — add-ons, or an offering
+shortened after the hold was taken — was **invisible past its first hour**.
+Proven by restoring the old math verbatim and re-running: the opening over a
+10:00–12:00 hold is published (`NO_REFUSAL`) under the old engine and refused
+(`HOLD_CONFLICT`) under the new one. Driven over HTTP too — 409 at 03:00Z,
+201 at 04:00Z where the hold actually ends.
+
+Everything else in the trio is byte-equivalent, checked line by line rather than
+assumed: the calendar-block `WHERE` matches `buildCalendarBlockConflictWhere`,
+the booking query matches `hasBookingConflict` (same window, same statuses, same
+`take`, same fallback), and `bufferOrZero` clamps to `MAX_BUFFER_MINUTES` exactly
+as the inline `clampInt` did. `BookingHold.locationId` is non-nullable, so the
+new `defaultBufferMinutes` argument only ever applies to a legacy row that has no
+location — which cannot exist.
+
+**Two checks stayed hand-written** because no shared reader knows about them: the
+rival-opening query and `LastMinuteBlock` are last-minute-specific, not pro-wide
+occupancy.
+
+**The refusal a pro reads is unchanged.** `getTimeRangeConflict` returns ONE code
+by its own priority (BLOCKED > BOOKING > HOLD), but the old code checked
+block → last-minute block → booking → hold. The three asserts are therefore split
+*around* the last-minute block rather than collapsed into one place. Collapsing
+them turns a `CALENDAR_BLOCK_CONFLICT` into a `LAST_MINUTE_BLOCK_CONFLICT` —
+proven by mutation, which is why there is a test for it.
+
+**The `tx` escape hatch is gone.** It had zero production callers (verified),
+and it was the one way to reach these checks without the lock. `DbClient` in
+that file is now `Prisma.TransactionClient` alone — not `| typeof prisma` — so
+"this only runs inside the locked transaction" is a type, not a convention.
+
+**Coverage:** `tests/integration/opening-create-lock.test.ts`, 5 cases against
+real Postgres, **two of them ALLOW cases**. Every one was proven red first, by
+four separate mutations: remove the lock (2 red), ignore the hold verdict
+(1 red), restore the old hold math verbatim (1 red), collapse the assert
+precedence (1 red), and refuse everything (4 red — this is what the ALLOW cases
+are for). No migration; revert is a straight code revert.
+
+**Net for F9:** the biggest single entry in the duplicate-logic table
+(`createLastMinuteOpening.ts:1073`, ~150 lines over five tables) is now gone —
+55 insertions against 145 deletions.
 
 ### F15 — what shipped
 
@@ -1535,65 +1604,60 @@ update to the table in §4.)
 >
 > **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
 > F13 ✅ #704, F4 ✅ #705, F5 ✅ #710 (+ iOS #204), F14 ✅ #713 (+ iOS #205),
-> F15 ✅ #714. NEXT = F6** (last-minute opening creation has no advisory lock).
+> F15 ✅ #714, F6 ✅ #716. NEXT = F8** (pin the three "occupied statuses"
+> definitions — and it carries a decision, see below).
 >
 > ⚠️ **A prod deploy is PENDING Tori's go-ahead.** Everything through **#704** is
 > live (`tovis-npx5cy47p`, 2026-07-21). **#705 (F4), #706, #707, #710 (F5),
-> #713 (F14) and #714 (F15) are merged and NOT deployed** — so prod still accepts
-> a crafted off-grid start on the public rebook link, a waitlist offer still
-> reserves nothing, and a dead last-minute opening is still shown to clients,
-> until it ships. **#713 carries migration `20260805000000`**
+> #713 (F14), #714 (F15), #715 and #716 (F6) are merged and NOT deployed** — so
+> prod still accepts a crafted off-grid start on the public rebook link, a
+> waitlist offer still reserves nothing, a dead last-minute opening is still
+> shown to clients, and an opening can still be published over a slot booked
+> microseconds earlier (or over a hold longer than its own offering), until it
+> ships. **#713 carries migration `20260805000000`**
 > (`BookingHold.waitlistOfferId`), which `prisma migrate deploy` applies on
-> deploy; **#714 carries none**. **Deploy is Tori's call every time**; never infer
-> standing permission from the last one.
+> deploy; **#714, #715 and #716 carry none**. **Deploy is Tori's call every
+> time**; never infer standing permission from the last one.
 >
 > **If `booking.event = overlap_backstop_fired` ever appears in Slack
 > `#tovis-ops-alerts`, drop everything** — that is the F3 refactor breaking in
 > production. It has never fired; the path is proven by configuration, not by
 > observation.
 >
-> ## Your card: F6 — last-minute opening creation has no advisory lock
+> ## Your card: F8 — pin the three "occupied statuses" definitions
 >
-> `lib/lastMinute/commands/createLastMinuteOpening.ts` wraps its checks in
-> `$transaction` but never calls `lockProfessionalSchedule`, unlike every other
-> write path. Under READ COMMITTED a concurrent booking is invisible, so a pro can
-> publish an opening over a slot that was taken microseconds earlier. Read card
-> **F6** in §2 — and note it now has a **sibling**: F15 shipped the read-time half
-> (`lib/booking/storedSlotLiveness.ts`), so an opening created over a taken slot is
-> already invisible to clients. That LOWERS F6's user-facing severity and does not
-> remove the card: a phantom row still occupies the pro's list and still consumes
-> the one-active-opening-per-window slot (`OPENING_OVERLAP`).
+> Three places define which booking statuses occupy time and they do **not**
+> agree: `BOOKING_BLOCKING_STATUSES` (`lib/booking/constants.ts:36`) includes
+> **COMPLETED**; the DB `EXCLUDE` predicate (migration `20260624020000`) and
+> `BUSY_STATUSES` (`app/api/v1/pro/availability/busy-days/route.ts:26`) do not.
+> `lib/looks/availabilityStats.ts:67` holds a fourth copy used for ranking.
+> Read card **F8** in §2.
 >
-> **Fix (from the card).** Wrap the create in `withLockedProfessionalTransaction`
-> **and** replace the inline conflict queries (`createLastMinuteOpening.ts`
-> `:1073`–`:1220`, ~150 lines that hand-roll interval math over five tables) with
-> `getTimeRangeConflict`. Two birds: the second half is also the biggest single
-> entry in F9's duplicate-logic table.
+> The app is *stricter* than the DB, so nothing unsafe slips through — the cost is
+> the other way round: a session **completed early** still blocks its full original
+> duration + buffer in availability, and the durable backstop covers only 3 of the
+> 4 statuses the app claims to enforce. Nothing pins them together.
 >
-> **Establish the facts first — measure before you assume.** Nine card premises
-> have met contact and five died. Checked already, so start from here:
-> - **`createLastMinuteOpening` has exactly ONE production caller**
->   (`app/api/v1/pro/openings/route.ts:554`) and it does **not** pass `tx`, so no
->   nested-transaction hazard exists today — the `tx` input is used by
->   `createInsideTransaction` and by tests. Verify that is still true before you
->   add a lock.
-> - **`getTimeRangeConflict` does NOT cover two of the five checks.** The
->   opening-overlap query (`lastMinuteOpening`, `:1073`) and `LastMinuteBlock`
->   (`:1103`) are last-minute-specific and must survive the swap; only the
->   `calendarBlock` / `booking` / `bookingHold` trio is replaceable.
-> - **NOT checked: does the inline math agree with `getTimeRangeConflict`?** It
->   builds hold windows through `holdToBusyInterval` while the shared reader uses
->   `holdRecordToBusyInterval`, and F3 found those two disagreeing by up to a full
->   duration. If they differ, the swap is a BEHAVIOUR change that needs its own
->   test, not a refactor note. Establish this first — it decides the shape of the
->   card.
+> **This card carries a DECISION, so surface it rather than picking silently:**
+> should a COMPLETED booking occupy FUTURE time at all? F11 found DB-side evidence
+> that excluding it from the constraint was deliberate, which points at dropping
+> COMPLETED from `BOOKING_BLOCKING_STATUSES` — but that widens what can be booked,
+> so it is a behaviour change on the money path and reads as Tori's call.
+> **Establish the blast radius before asking**: grep every consumer of
+> `BOOKING_BLOCKING_STATUSES` and say what each one starts allowing.
 >
-> **F8 next after that**, and it carries a decision (should COMPLETED occupy future
-> time? — F11 found DB-side evidence the constraint excluding it is deliberate, so
-> F8 probably resolves by dropping COMPLETED from `BOOKING_BLOCKING_STATUSES`).
-> Then F7 (iOS), F9, F10 (iOS), F12, F16. Do not batch-ask them up front.
+> **Then add the parity test** asserting the three (four) sets agree, so the next
+> divergence fails a build instead of being found by another audit.
 >
-> **Order from here: F6 → F8 → F7 (iOS) → F9 → F10 (iOS) → F12 → F16.**
+> **What F6 just proved, and applies directly here.** F6's second half was filed
+> as a refactor ("replace the inline queries with the shared reader") and turned
+> out to be a **behaviour change**: the two copies had drifted, and the inline one
+> mis-sized every hold whose snapshot exceeded its offering's duration. F8 is the
+> same shape — four copies of one definition — so **diff the copies and write down
+> what each difference DOES** before consolidating. A duplicate that has drifted
+> is a bug report, not a cleanup.
+>
+> **Order from here: F8 → F7 (iOS) → F9 → F10 (iOS) → F12 → F16.**
 > Tori wants the ENTIRE queue closed. F12 needs UI on web **and** iOS before its
 > server half can ship; F16 (new, opened by F15) is the same shape.
 >
@@ -1644,6 +1708,26 @@ update to the table in §4.)
 >   `JWT_SECRET`. Copy `.github/workflows/integration.yml:88`. Generate the keys
 >   ONCE into a file and source it — regenerating per run breaks decryption of
 >   rows an earlier run left behind.
+> - **Proving a write really takes the advisory lock — from OUTSIDE the app**
+>   (F6, and the only proof that survives a mocked client). Hold the lock in a
+>   psql session and time the real HTTP request against it:
+>   `docker exec -e PGPASSWORD=postgres tovis-test-postgres psql -U postgres -d
+>   tovis_test -c "BEGIN; SELECT pg_advisory_xact_lock(41021::int4,
+>   hashtext('<professionalId>')::int4); SELECT pg_sleep(5); COMMIT;" &` then
+>   `curl -w '%{time_total}'`. **4.1s = the lock is taken; ~0.1s = it is not.**
+>   `41021` is `BOOKING_SCHEDULE_LOCK_NAMESPACE` (`lib/booking/scheduleLock.ts:4`).
+> - **In-suite version of the same race** (`tests/integration/opening-create-lock.test.ts`,
+>   F6): a rival `$transaction` takes the lock, writes, then parks on a JS promise
+>   the test resolves, so there is no sleep-and-hope. ⚠️ Release it in a
+>   `finally` — an assertion failing first strands the transaction on its
+>   connection for Prisma's full 20s timeout and turns a 50ms red into a 20s one.
+> - ⚠️ **A hand-built fixture user 403s `VERIFICATION_REQUIRED` on every authed
+>   route** until `emailVerifiedAt` AND `phoneVerifiedAt` are both set
+>   (`lib/currentUser.ts:135`). Costs a cycle if you read it as an auth-token
+>   problem.
+> - ⚠️ **A scratch script outside the repo cannot resolve `@prisma/client`** —
+>   run it with `NODE_PATH=/Users/torimorales/Dev/tovis-app/node_modules npx tsx`
+>   rather than copying it into the tree (where it can be committed by accident).
 > - `tests/integration/opening-liveness.test.ts` (F15) is the newest compact
 >   real-Postgres pattern and the one closest to F6: it builds its openings with
 >   **`createLastMinuteOpening` itself**, so every fixture is proven publishable
