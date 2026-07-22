@@ -30,6 +30,8 @@ import {
   type StoredSlotCandidate,
 } from '@/lib/booking/storedSlotLiveness'
 import { openingLivenessCandidate } from '@/lib/lastMinute/openingLiveness'
+import { proOpeningSelect } from '@/lib/lastMinute/openingSelect'
+import { resolveProOpeningVisibility } from '@/lib/lastMinute/proOpeningVisibility'
 import { createLastMinuteOpening } from '@/lib/lastMinute/commands/createLastMinuteOpening'
 import { loadOfferingDetail } from '@/app/(main)/offerings/[offeringId]/_data/loadOfferingDetail'
 import { minutesSinceMidnightInTimeZone } from '@/lib/time'
@@ -531,7 +533,7 @@ describe('last-minute opening liveness (real DB)', () => {
     try {
       expect(await isOpeningVisible(openingId, fx.clientId)).toEqual({
         open: false,
-        reason: 'LOCATION_UNAVAILABLE',
+        reason: 'LOCATION_NOT_FOUND',
       })
     } finally {
       await db.professionalLocation.update({
@@ -630,5 +632,139 @@ describe('last-minute opening liveness (real DB)', () => {
     expect(verdicts.size).toBe(2)
     expect(verdicts.get(firstId)).toEqual({ open: true })
     expect(verdicts.get(secondId)).toEqual({ open: false, reason: 'TIME_BOOKED' })
+  })
+
+  // F16 — the same question, asked for the PRO. The rows are loaded through the
+  // route's own `proOpeningSelect`, so this fails if that select stops carrying
+  // a field the check needs; a hand-written select here would pass while the
+  // real endpoint threw.
+  describe('what the pro is told about their own opening', () => {
+    async function proVisibility(openingId: string): Promise<string> {
+      const rows = await db.lastMinuteOpening.findMany({
+        where: { id: openingId },
+        select: proOpeningSelect,
+      })
+
+      const visibility = await resolveProOpeningVisibility({ rows })
+      const answer = visibility.get(openingId)
+      if (!answer) throw new Error('no visibility for opening')
+
+      return answer
+    }
+
+    // THE ALLOW CASE.
+    it('says an opening the pro can still serve is visible', async () => {
+      const openingId = await createOpeningAt(futureLocal(3, 13))
+
+      expect(await proVisibility(openingId)).toBe('VISIBLE')
+    })
+
+    it('tells the pro when the slot went to an ordinary booking', async () => {
+      const start = futureLocal(3, 13)
+      const openingId = await createOpeningAt(start)
+
+      await bookOver(start)
+
+      // The row still looks perfectly healthy — which is the whole of F16.
+      const row = await db.lastMinuteOpening.findUniqueOrThrow({
+        where: { id: openingId },
+        select: { status: true, bookedAt: true, cancelledAt: true },
+      })
+      expect(row).toMatchObject({
+        status: 'ACTIVE',
+        bookedAt: null,
+        cancelledAt: null,
+      })
+
+      expect(await proVisibility(openingId)).toBe('TIME_BOOKED')
+    })
+
+    it('tells the pro when they blocked their own opening', async () => {
+      const start = futureLocal(3, 13)
+      const openingId = await createOpeningAt(start)
+
+      await db.calendarBlock.create({
+        data: {
+          professionalId: fx.professionalId,
+          locationId: fx.salonLocationId,
+          startsAt: new Date(start.getTime() - 15 * 60_000),
+          endsAt: new Date(start.getTime() + 15 * 60_000),
+          note: 'Dentist',
+        },
+      })
+
+      expect(await proVisibility(openingId)).toBe('TIME_BLOCKED')
+    })
+
+    it('tells the pro when their hours moved off it', async () => {
+      const openingId = await createOpeningAt(futureLocal(3, 16))
+
+      await db.professionalLocation.update({
+        where: { id: fx.salonLocationId },
+        data: { workingHours: workingHours('09:00', '15:00') },
+      })
+
+      expect(await proVisibility(openingId)).toBe('OUTSIDE_WORKING_HOURS')
+    })
+
+    // The judgment the client feeds never had to make. A client claiming this
+    // opening holds the slot, so the shared gate says TIME_HELD — reporting that
+    // as "gone dark" would call the feature broken at the moment it works.
+    it('reports a claim in flight as a claim, not as a failure', async () => {
+      const start = futureLocal(3, 13)
+      const openingId = await createOpeningAt(start)
+
+      await db.bookingHold.create({
+        data: {
+          professionalId: fx.professionalId,
+          clientId: fx.clientId,
+          offeringId: fx.offeringId,
+          locationId: fx.salonLocationId,
+          locationType: ServiceLocationType.SALON,
+          scheduledFor: start,
+          endsAtSnapshot: new Date(start.getTime() + 60 * 60_000),
+          durationMinutesSnapshot: 60,
+          bufferMinutesSnapshot: 0,
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        },
+      })
+
+      expect(await proVisibility(openingId)).toBe('BEING_CLAIMED')
+    })
+
+    // `proOpeningSelect` deliberately does NOT filter deactivated offerings (F9)
+    // so the pro can see the link. The client feeds require an active one, so
+    // the badge has to apply that filter itself — this is the row the pro would
+    // otherwise never learn had gone silent.
+    it('tells the pro when every offering behind it was deactivated', async () => {
+      const openingId = await createOpeningAt(futureLocal(3, 13))
+
+      await db.professionalServiceOffering.update({
+        where: { id: fx.offeringId },
+        data: { isActive: false },
+      })
+
+      try {
+        expect(await proVisibility(openingId)).toBe('NO_ACTIVE_SERVICE')
+      } finally {
+        await db.professionalServiceOffering.update({
+          where: { id: fx.offeringId },
+          data: { isActive: true },
+        })
+      }
+    })
+
+    // ALLOW CASE. A cancelled opening has nothing to signal — and F16 must not
+    // turn into a filter: the row stays, it just stops being badged.
+    it('says nothing about an opening the pro already cancelled', async () => {
+      const openingId = await createOpeningAt(futureLocal(3, 13))
+
+      await db.lastMinuteOpening.update({
+        where: { id: openingId },
+        data: { status: 'CANCELLED', cancelledAt: new Date() },
+      })
+
+      expect(await proVisibility(openingId)).toBe('NOT_CHECKED')
+    })
   })
 })

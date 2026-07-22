@@ -146,6 +146,12 @@ export type OpeningWithDetails = Prisma.LastMinuteOpeningGetPayload<{
  * That difference is the reason these are two selects and not one, and it was
  * verified against both call sites rather than assumed — do not "unify" them
  * without deciding what the pro's list should show.
+ *
+ * ⚠️ Because it does not filter, `offering.isActive` is SELECTED instead: F16's
+ * "can clients still see this?" badge is a client question asked over pro rows,
+ * so it re-applies that filter in code (`lib/lastMinute/proOpeningVisibility.ts`)
+ * before pricing the window it judges. `professional.timeZone` is here for the
+ * same check — it is the fallback zone the commit gate resolves against.
  */
 export const proOpeningSelect = {
   id: true,
@@ -202,6 +208,7 @@ export const proOpeningSelect = {
         select: {
           id: true,
           title: true,
+          isActive: true,
           offersInSalon: true,
           offersMobile: true,
           salonPriceStartingAt: true,
@@ -234,6 +241,14 @@ export const proOpeningSelect = {
       },
       createdAt: true,
       updatedAt: true,
+    },
+  },
+  professional: {
+    select: {
+      // The fallback time zone the booking gate resolves against when the
+      // location carries none — F16's visibility check has to resolve the same
+      // context a claim would.
+      timeZone: true,
     },
   },
   _count: {

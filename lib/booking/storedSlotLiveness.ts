@@ -89,8 +89,18 @@ export type StoredSlotCandidate = {
   releasedHoldId: string | null
 }
 
+/**
+ * Why a stored time is dead. The two location errors are the SAME two
+ * `resolveBookingLocationContext` returns, deliberately kept apart rather than
+ * collapsed: F15 had one `LOCATION_UNAVAILABLE` reason because all five call
+ * sites read only `verdict.open`, and noted the split belonged to whoever first
+ * had to EXPLAIN a verdict. F16's pro-facing badge is that caller, and the two
+ * are different jobs for the pro — a location that stopped being bookable versus
+ * one carrying no time zone.
+ */
 export type StoredSlotDeadReason =
-  | 'LOCATION_UNAVAILABLE'
+  | 'LOCATION_NOT_FOUND'
+  | 'TIMEZONE_REQUIRED'
   | SchedulingPolicyFailureCode
 
 export type StoredSlotVerdict =
@@ -132,7 +142,7 @@ type ResolvedGroupContext =
       maxDaysAhead: number
       workingHours: unknown
     }
-  | { ok: false }
+  | { ok: false; error: 'LOCATION_NOT_FOUND' | 'TIMEZONE_REQUIRED' }
 
 /**
  * The booking context the commit gate would resolve for this row — same
@@ -140,17 +150,14 @@ type ResolvedGroupContext =
  * `performLockedCreateHold` (`writeBoundary.ts:7377`): a row that names a
  * location is judged against THAT location, never a substitute.
  *
- * ⚠️ The failure is DELIBERATELY collapsed to one bit here, and the caller turns
- * it into a single `LOCATION_UNAVAILABLE` verdict. `resolveBookingLocationContext`
- * returns exactly two errors — `LOCATION_NOT_FOUND` and `TIMEZONE_REQUIRED` —
- * and both mean the commit refuses before it ever reaches the schedule, which is
- * all a hide/show decision needs. (Missing or invalid working hours do NOT come
- * through here: they reach `evaluateProSchedulingDecision` and keep their own
- * `WORKING_HOURS_REQUIRED` / `WORKING_HOURS_INVALID` reasons.) If a caller ever
- * has to EXPLAIN the verdict rather than act on it — the pro-facing F16 badge is
- * the likely one — widen `ResolvedGroupContext`'s false branch to carry
- * `resolved.error` and split `StoredSlotDeadReason` to match. Nothing reads the
- * difference today: all five call sites use `verdict.open`.
+ * The failure carries `resolved.error` through verbatim — exactly the two errors
+ * `resolveBookingLocationContext` returns, `LOCATION_NOT_FOUND` and
+ * `TIMEZONE_REQUIRED`. Both mean the commit refuses before it ever reaches the
+ * schedule, so a hide/show caller can treat them alike; F16's pro badge cannot,
+ * because they are two different things for the pro to go and fix. (Missing or
+ * invalid working hours do NOT come through here: they reach
+ * `evaluateProSchedulingDecision` and keep their own `WORKING_HOURS_REQUIRED` /
+ * `WORKING_HOURS_INVALID` reasons.)
  */
 async function resolveGroupContext(
   candidate: StoredSlotCandidate,
@@ -165,7 +172,7 @@ async function resolveGroupContext(
     allowFallback: !candidate.locationId,
   })
 
-  if (!resolved.ok) return { ok: false }
+  if (!resolved.ok) return { ok: false, error: resolved.error }
 
   return {
     ok: true,
@@ -278,9 +285,14 @@ export async function checkStoredSlotsAreOpen(
     const context = contextByGroup.get(groupKeyFor(candidate))
 
     if (!context?.ok) {
-      // The location the row named is gone or unbookable, so the commit would
-      // fail LOCATION_NOT_FOUND before it ever reached the schedule.
-      verdicts.set(candidate.key, { open: false, reason: 'LOCATION_UNAVAILABLE' })
+      // The location the row named is gone, unbookable, or carries no usable
+      // time zone, so the commit refuses before it ever reaches the schedule.
+      // `context` is only ever undefined if `groupKeyFor` disagreed with itself,
+      // which would be a bug — treat it as unresolvable rather than as open.
+      verdicts.set(candidate.key, {
+        open: false,
+        reason: context?.error ?? 'LOCATION_NOT_FOUND',
+      })
       return
     }
 
