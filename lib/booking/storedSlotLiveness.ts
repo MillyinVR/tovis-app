@@ -139,6 +139,18 @@ type ResolvedGroupContext =
  * function, same arguments. `allowFallback: !locationId` mirrors
  * `performLockedCreateHold` (`writeBoundary.ts:7377`): a row that names a
  * location is judged against THAT location, never a substitute.
+ *
+ * ⚠️ The failure is DELIBERATELY collapsed to one bit here, and the caller turns
+ * it into a single `LOCATION_UNAVAILABLE` verdict. `resolveBookingLocationContext`
+ * returns exactly two errors — `LOCATION_NOT_FOUND` and `TIMEZONE_REQUIRED` —
+ * and both mean the commit refuses before it ever reaches the schedule, which is
+ * all a hide/show decision needs. (Missing or invalid working hours do NOT come
+ * through here: they reach `evaluateProSchedulingDecision` and keep their own
+ * `WORKING_HOURS_REQUIRED` / `WORKING_HOURS_INVALID` reasons.) If a caller ever
+ * has to EXPLAIN the verdict rather than act on it — the pro-facing F16 badge is
+ * the likely one — widen `ResolvedGroupContext`'s false branch to carry
+ * `resolved.error` and split `StoredSlotDeadReason` to match. Nothing reads the
+ * difference today: all five call sites use `verdict.open`.
  */
 async function resolveGroupContext(
   candidate: StoredSlotCandidate,

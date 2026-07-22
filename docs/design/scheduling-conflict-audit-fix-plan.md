@@ -506,7 +506,18 @@ Named honestly rather than assumed safe:
 
 - **No runtime verification of the F1 double-book.** Traced through three call
   sites; not driven with a real ICS import.
-- **No simulator driving on iOS.** All iOS findings are code reads.
+- ~~**No simulator driving on iOS.**~~ Superseded: F5, F14 and F15 each drove the
+  simulator, and F14's pass caught a layout defect no test could see. The
+  remaining iOS cards (F7, F10) are still code reads.
+- **Read-time liveness cost under real concurrency (F15).** The five client feeds
+  now run ~3 indexed conflict queries per row shown, 8 in flight at a time.
+  Measured locally: ~0.9ms per row, ~18ms at 20 rows, projecting to ~45ms at a
+  feed's `take: 50` ceiling. **Not** measured against a pooled prod connection
+  with concurrent traffic, which is where a per-request query fan-out actually
+  bites. Needs a deploy (Tori's call) or a staging run; `tests/load/` is the
+  harness. Sizing note from the last staging proof: throughput there ceilinged
+  around **40rps** on the free-tier pooler (connection exhaustion), so the thing
+  to watch is pool saturation from the added fan-out, not per-request latency.
 - **Lock contention / transaction cost.** The advisory lock serialises all writes
   per professional inside a 20s transaction timeout; a busy pro's calendar-import
   commit loops `createProBooking` per event. Whether that can starve a live
@@ -696,13 +707,16 @@ is untouched.
 
 **Not verified / not checked:**
 
-- **The `LOCATION_UNAVAILABLE` verdict is coarser than the gate it mirrors.**
-  `resolveBookingLocationContext` can fail for a missing location, a missing time
-  zone or invalid working hours; all three collapse to one reason. The verdict is
-  only used as a boolean today, so nothing reads the difference — but a future
-  caller that wants to explain itself will need the distinction restored.
-- **No load test.** The per-candidate cost was measured on a local dev server
-  against local Postgres, not against a pooled prod connection under concurrency.
+- **The `LOCATION_UNAVAILABLE` verdict is coarser than the gate it mirrors** —
+  deliberately, and now written at the code site rather than only here.
+  `resolveBookingLocationContext` returns exactly **two** errors
+  (`LOCATION_NOT_FOUND`, `TIMEZONE_REQUIRED`) and both collapse to one reason;
+  working-hours failures do NOT collapse (they keep their own codes from the
+  scheduling policy). Nothing reads the difference today — all five call sites
+  use `verdict.open` — so the fix is scoped to whoever first needs to *explain*
+  the verdict, most likely F16's pro-facing badge.
+- **Read-time cost is measured locally only** — see §3, where it is registered so
+  a later session can pick it up rather than rediscover it.
 
 ### F14 — what shipped
 
