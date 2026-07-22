@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => ({
 
   findBookingAndHoldConflicts: vi.fn(),
   decideBookingOverlapPermission: vi.fn(),
-  getTimeRangeConflict: vi.fn(),
 
   computeLastMinuteDiscount: vi.fn(),
 
@@ -171,7 +170,6 @@ vi.mock('@/lib/booking/conflictQueries', async () => {
   return {
     ...actual,
     findBookingAndHoldConflicts: mocks.findBookingAndHoldConflicts,
-    getTimeRangeConflict: mocks.getTimeRangeConflict,
   }
 })
 
