@@ -15,9 +15,10 @@
  * whose only outcome is a refusal.
  *
  * THIS ADDS NO SECOND SCHEDULE ENGINE. It runs `evaluateProSchedulingDecision`
- * — the same gate the commits themselves run — with nothing written. A second,
- * hand-rolled check is exactly what opened F5 and F15 in the first place, and
- * F3 was spent deleting the last one.
+ * — the same gate the commits themselves run — with nothing written. F5 was a
+ * second, hand-rolled check drifting from the gate it was meant to mirror, and
+ * F3 was spent deleting the last parallel engine outright; a read-side copy of
+ * the schedule rules would be the same mistake in a third place.
  *
  * OVER-ENFORCING IS A BUG, NOT A SAFE DEFAULT. Hiding a row whose commit would
  * have succeeded loses the client a real appointment, silently. Two candidate
