@@ -12,6 +12,10 @@ const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
   resolveProOpeningVisibility: vi.fn(),
   findMany: vi.fn(),
+  findFirst: vi.fn(),
+  openingUpdateMany: vi.fn(),
+  tierPlanUpdateMany: vi.fn(),
+  recipientUpdateMany: vi.fn(),
   createLastMinuteOpening: vi.fn(),
 }))
 
@@ -25,7 +29,18 @@ vi.mock('@/lib/lastMinute/proOpeningVisibility', () => ({
 }))
 
 vi.mock('@/lib/prisma', () => ({
-  prisma: { lastMinuteOpening: { findMany: mocks.findMany } },
+  prisma: {
+    lastMinuteOpening: {
+      findMany: mocks.findMany,
+      findFirst: mocks.findFirst,
+    },
+    $transaction: (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        lastMinuteOpening: { updateMany: mocks.openingUpdateMany },
+        lastMinuteTierPlan: { updateMany: mocks.tierPlanUpdateMany },
+        lastMinuteRecipient: { updateMany: mocks.recipientUpdateMany },
+      }),
+  },
 }))
 
 vi.mock('@/lib/lastMinute/commands/createLastMinuteOpening', () => ({
@@ -33,7 +48,7 @@ vi.mock('@/lib/lastMinute/commands/createLastMinuteOpening', () => ({
   CreateLastMinuteOpeningError: class extends Error {},
 }))
 
-import { GET, POST } from './route'
+import { DELETE, GET, POST } from './route'
 
 function openingRow() {
   return {
@@ -76,6 +91,85 @@ beforeEach(() => {
   mocks.resolveProOpeningVisibility.mockResolvedValue(
     new Map([['opening_1', 'TIME_BOOKED']]),
   )
+})
+
+describe('DELETE /api/v1/pro/openings (cancel vs. claim race)', () => {
+  // The pre-cancel guards run on a read taken OUTSIDE the transaction, and a
+  // last-minute claim commits `status: BOOKED` under the professional's
+  // advisory lock — which cancel does not take. So the cancel write itself
+  // must be conditional: when the claim wins the race, the guarded updateMany
+  // matches nothing and the pro gets a 409, instead of CANCELLED being
+  // stamped over a booked opening whose Booking row survives.
+  it('refuses when a claim booked the opening between the read and the write', async () => {
+    // Pre-read still sees ACTIVE (the stale world) …
+    mocks.findFirst.mockResolvedValueOnce({
+      id: 'opening_1',
+      status: OpeningStatus.ACTIVE,
+      cancelledAt: null,
+      bookedAt: null,
+    })
+    // … but the guarded write matches nothing (the claim committed first) …
+    mocks.openingUpdateMany.mockResolvedValue({ count: 0 })
+    // … and the re-read shows what actually happened.
+    mocks.findFirst.mockResolvedValueOnce({
+      id: 'opening_1',
+      status: OpeningStatus.BOOKED,
+      cancelledAt: null,
+      bookedAt: new Date('2026-08-01T19:59:59.000Z'),
+    })
+
+    const res = await DELETE(
+      new Request('http://t/api/v1/pro/openings?id=opening_1', {
+        method: 'DELETE',
+      }),
+    )
+
+    expect(res.status).toBe(409)
+    // The cancel must have been attempted ONLY as a guarded write — one that
+    // cannot match a row the claim already consumed.
+    expect(mocks.openingUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'opening_1',
+          status: { notIn: [OpeningStatus.BOOKED, OpeningStatus.CANCELLED] },
+          bookedAt: null,
+          cancelledAt: null,
+        }),
+      }),
+    )
+    // Nothing downstream of a failed cancel may fire.
+    expect(mocks.tierPlanUpdateMany).not.toHaveBeenCalled()
+    expect(mocks.recipientUpdateMany).not.toHaveBeenCalled()
+  })
+
+  // ALLOW case: an uncontended cancel still lands, and still sweeps the
+  // outreach plans/recipients.
+  it('cancels an unclaimed opening and sweeps its outreach rows', async () => {
+    mocks.findFirst.mockResolvedValueOnce({
+      id: 'opening_1',
+      status: OpeningStatus.ACTIVE,
+      cancelledAt: null,
+      bookedAt: null,
+    })
+    mocks.openingUpdateMany.mockResolvedValue({ count: 1 })
+    mocks.tierPlanUpdateMany.mockResolvedValue({ count: 2 })
+    mocks.recipientUpdateMany.mockResolvedValue({ count: 3 })
+
+    const res = await DELETE(
+      new Request('http://t/api/v1/pro/openings?id=opening_1', {
+        method: 'DELETE',
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      id: 'opening_1',
+      alreadyCancelled: false,
+    })
+    expect(mocks.tierPlanUpdateMany).toHaveBeenCalled()
+    expect(mocks.recipientUpdateMany).toHaveBeenCalled()
+  })
 })
 
 describe('GET /api/v1/pro/openings', () => {

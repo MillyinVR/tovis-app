@@ -418,7 +418,11 @@ describe('waitlist offer → client confirm (real DB)', () => {
       durationMinutes: 60,
     })
 
-    // The slot evaporates between offer and confirm (no hold is placed — see F5).
+    // The slot evaporates between offer and confirm. Since F14 the offer DOES
+    // place a BookingHold — but a direct Booking insert bypasses the app gate,
+    // and the Booking-table EXCLUDE doesn't cross-check BookingHold, so the
+    // rival row lands anyway. Which is the point: confirm must still refuse
+    // cleanly when the reservation failed to protect the slot.
     await db.booking.create({
       data: {
         client: { connect: { id: fx.clientId } },

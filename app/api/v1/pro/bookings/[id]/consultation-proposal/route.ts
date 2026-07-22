@@ -966,6 +966,31 @@ export async function POST(req: Request, ctx: RouteContext) {
         }
       }
 
+      // The step gate runs BEFORE the proposal write, deliberately. Returning
+      // from this $transaction callback COMMITS, and this refusal is a return
+      // — so anything written above it would survive the 409. With the old
+      // order (upsert first) a NO_SHOW or PENDING booking left a committed
+      // PENDING proposal behind its refusal, resetting an APPROVED one's
+      // status/approvedAt if it existed. The transition's own forced-reset
+      // write (PENDING bookings pinned back to CONSULTATION) is the one thing
+      // that SHOULD survive this return, exactly as it does for its other
+      // callers. The transition does not read the approval row for this step,
+      // so running it first cannot change its verdict.
+      const stepRes = await transitionSessionStepInTransaction(tx, {
+        bookingId: booking.id,
+        professionalId,
+        nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+      })
+
+      if (!stepRes.ok) {
+        return {
+          ok: false,
+          status: stepRes.status,
+          error: stepRes.error,
+          forcedStep: stepRes.forcedStep,
+        }
+      }
+
       const approval = await tx.consultationApproval.upsert({
         where: { bookingId: booking.id },
         create: {
@@ -997,21 +1022,6 @@ export async function POST(req: Request, ctx: RouteContext) {
           updatedAt: true,
         },
       })
-
-      const stepRes = await transitionSessionStepInTransaction(tx, {
-        bookingId: booking.id,
-        professionalId,
-        nextStep: SessionStep.CONSULTATION_PENDING_CLIENT,
-      })
-
-      if (!stepRes.ok) {
-        return {
-          ok: false,
-          status: stepRes.status,
-          error: stepRes.error,
-          forcedStep: stepRes.forcedStep,
-        }
-      }
 
       await upsertClientNotification({
         tx,

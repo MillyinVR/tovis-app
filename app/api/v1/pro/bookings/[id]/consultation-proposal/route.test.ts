@@ -1159,6 +1159,34 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     expect(mocks.createConsultationActionDelivery).not.toHaveBeenCalled()
   })
 
+  it('a refused step transition writes NO proposal — the upsert must not have run', async () => {
+    // The $transaction callback RETURNS this refusal, and a return COMMITS
+    // whatever ran before it. So the step gate has to come before the first
+    // write: with the old order (upsert, then transition) a NO_SHOW or PENDING
+    // booking got a 409 while a PENDING proposal sat committed on the booking —
+    // clobbering an APPROVED one's status/approvedAt if it existed.
+    expectIdempotencyStarted('idem_forced_step_2')
+
+    mocks.transitionSessionStepInTransaction.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      error: 'Pending bookings are consultation-only.',
+      forcedStep: SessionStep.CONSULTATION,
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_forced_step_2',
+        body: makeRawProposalBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(409)
+    expect(mocks.txConsultationApprovalUpsert).not.toHaveBeenCalled()
+    expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
+  })
+
   // §22 MS1 — a pro re-opening the consultation to change the service from a
   // post-consultation step, gated on "no session photos captured yet".
   it('re-opens the consultation from BEFORE_PHOTOS when no photos are captured', async () => {

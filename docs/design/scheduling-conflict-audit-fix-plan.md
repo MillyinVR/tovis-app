@@ -2771,12 +2771,78 @@ closed.** The load-bearing entries:
 - **Advisory-lock contention is unmeasured** — whether a calendar-import commit
   looping `createProBooking` inside a 20s transaction can starve a live client
   booking.
-- **`allowsOverlap` blast radius is untraced** — the flag is never reset, so
-  whether a later reschedule of such a row re-enters the GIST constraint cleanly
-  is unknown.
+- **`allowsOverlap` blast radius — partially answered in code (re-audit,
+  2026-07-22):** `performLockedUpdateProBooking` re-stamps the flag in BOTH
+  directions on every occupancy-changing update (`writeBoundary.ts:10903-10931`),
+  so a flagged row rescheduled into a free slot re-enters the constraint. What
+  remains untraced is only the consultation-approve raise, which stays raised
+  until the next occupancy-changing pro update.
 - **`POST /pro/bookings/[id]/rebook` has no caller on either platform** — a
   product call, deliberately left alone.
 
 🟡 **#705–#722 are merged and NOT deployed.** Two migrations are pending, one an
 `ADD CONSTRAINT` (`20260806000000`, F8's widened occupied-status exclusion) that
 is worth re-checking against prod data before it runs. Deploys are Tori's call.
+
+## 6. Re-audit, 2026-07-22 — the original question re-run against the shipped queue
+
+Tori asked for the original audit re-run from scratch and the whole plan
+re-verified. Method: four independent audit passes (fresh web entry-point
+enumeration, fresh iOS flow enumeration, F1–F16 fix verification ×2, plus a
+duplicate-logic sweep), each claim then spot-checked against source before
+anything was acted on; full local suites both repos (typecheck/lint/guards,
+booking vitest, 882 TovisKit tests, iOS Debug + Release builds).
+
+**The queue held.** All sixteen fixes are present and behave as §4 records. The
+fresh enumeration found **no entry point missing a schedule check** — every
+client path is fatal on booked/blocked/hours, every pro overlap is the
+deliberate `allowsOverlap` design, blocks are fatal everywhere, and iOS remains
+a pure client of these endpoints (twelve flows enumerated, zero local writes).
+
+**Four defects were found and fixed in this PR — all in the audit's blind
+spots, none in the sixteen cards:**
+
+1. **The write-boundary guard matched only the literal receivers `prisma.` /
+   `tx.`** — `db.bookingHold.deleteMany(…)` (`lib/privacy/deleteUserData.ts`)
+   and `prismaClient.booking.create(…)` (test seed) walked straight past it, so
+   §0's "four statements, enforced" rested on a grep that a renamed client
+   variable defeats. The guard is now receiver-agnostic (regex over the write
+   verbs, `upsert`/`*AndReturn` included); both legitimate sites are
+   allowlisted with their reasoning. Proven red first: the hardened guard
+   caught exactly those two files and nothing else.
+2. **The propose route's return-commits defect** — the 🟡 F12-adjacent finding
+   §4 recorded as "worth its own card" is now CLOSED: the step gate runs before
+   `consultationApproval.upsert`, so a NO_SHOW/PENDING refusal no longer leaves
+   a committed PENDING proposal behind its 409 (which could clobber an APPROVED
+   one's status). Pinned by a route test proven red against the old order.
+3. **The opening-cancel race** (new finding): `cancelOpening` guarded on a read
+   taken OUTSIDE its transaction, then wrote `status: CANCELLED`
+   unconditionally, with no advisory lock — while claims commit `BOOKED` under
+   the lock. A claim landing in the window left a CANCELLED opening with a live
+   Booking and a surviving `bookedAt`. The cancel is now the same guarded
+   `updateMany` shape the claim uses to consume the opening; on a lost race the
+   pro gets the honest 409. Pinned red-first (both DELETE and PATCH share the
+   helper).
+4. A stale pre-F14 comment in `waitlist-offer.test.ts` claiming "no hold is
+   placed".
+
+**Also established from code:** §0's write-statement census is stale in the safe
+direction — F14 added a fifth row-creating site (the offer hold), aftercare save
+can also move/cancel its rebooked booking, and consultation approve extends
+occupancy in place; all inside the boundary, all gated.
+
+**Recorded, deliberately not acted on:** the `other-pros` placement fork has
+drifted further (its copy still accepts MOBILE without an address; wire it up or
+it keeps rotting — do not delete); the unwired `saved-services/providers` route
+is accumulating the same kind of drift (its `cacheGetJson` copy lost the lib's
+5s timeout race); the two hold-side 23P01 catches log `db_backstop` but never
+page Sentry, unlike the five booking-side ones; `addDaysToYMD` exists twice
+(`lib/timeZone.ts` private + `summaryWindow.ts` exported, identical today) and
+is the DST-critical primitive most deserving consolidation;
+`updateBookingLastMinuteDiscount` writes money fields without the professional
+lock (no schedule fields, so out of this audit's scope);
+`getTimeOverlapClientIds` counts NO_SHOW as occupying for priority-offer
+audience exclusion without documenting that its status set differs from
+`BOOKING_BLOCKING_STATUSES` on purpose. §3/§5's runtime unknowns (F15 cost
+under pooled concurrency, F1 never driven with a real ICS feed, lock-contention
+starvation) remain open — they need a deploy or staging run, not a code read.

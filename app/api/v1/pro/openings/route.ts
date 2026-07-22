@@ -379,15 +379,32 @@ async function cancelOpening(args: {
 
   const now = new Date()
 
-  await prisma.$transaction(async (tx) => {
-    await tx.lastMinuteOpening.update({
-      where: { id: existing.id },
+  // The guards above ran on a read taken OUTSIDE this transaction, and a
+  // last-minute claim commits `status: BOOKED` under the professional's
+  // advisory lock — which this path does not take. So the cancel itself must
+  // be conditional, the same guarded-updateMany shape the claim uses to
+  // consume the opening: if the claim won the race, this matches zero rows
+  // and we refuse instead of stamping CANCELLED over a booked opening whose
+  // Booking row would survive it.
+  const cancelled = await prisma.$transaction(async (tx) => {
+    const updated = await tx.lastMinuteOpening.updateMany({
+      where: {
+        id: existing.id,
+        professionalId,
+        status: { notIn: [OpeningStatus.BOOKED, OpeningStatus.CANCELLED] },
+        bookedAt: null,
+        cancelledAt: null,
+      },
       data: {
         status: OpeningStatus.CANCELLED,
         cancelledAt: now,
         publicVisibleUntil: now,
       },
     })
+
+    if (updated.count !== 1) {
+      return false
+    }
 
     await tx.lastMinuteTierPlan.updateMany({
       where: {
@@ -411,7 +428,27 @@ async function cancelOpening(args: {
         cancelledAt: now,
       },
     })
+
+    return true
   })
+
+  if (!cancelled) {
+    // Lost the race. Re-read to answer with what actually happened.
+    const current = await prisma.lastMinuteOpening.findFirst({
+      where: { id: existing.id, professionalId },
+      select: { id: true, status: true, cancelledAt: true, bookedAt: true },
+    })
+
+    if (!current) {
+      return { ok: false, status: 404, error: 'Opening not found.' }
+    }
+
+    if (current.status === OpeningStatus.BOOKED || current.bookedAt) {
+      return { ok: false, status: 409, error: 'Booked openings cannot be cancelled.' }
+    }
+
+    return { ok: true, openingId: current.id, alreadyCancelled: true }
+  }
 
   return { ok: true, openingId: existing.id, alreadyCancelled: false }
 }

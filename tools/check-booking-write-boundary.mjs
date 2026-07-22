@@ -34,6 +34,19 @@ const ALLOWED_FILES = new Set([
   // Referral reward application. Only writes discountAmount/totalAmount on
   // Booking when a referral reward is applied; never touches lifecycle fields.
   normalize('lib/referral/referralConversion.ts'),
+  // Account erasure. Its only BookingHold write is deleteMany over the erased
+  // user's own holds (client- or pro-side), which RELEASES reserved time —
+  // it can never create, move, or double-book an appointment, and the confirm
+  // paths all re-run the full conflict gate, so a hold vanishing early only
+  // reopens a slot. Bookings themselves are anonymized, not written, here.
+  normalize('lib/privacy/deleteUserData.ts'),
+  // Test-DB seed fixtures (`pnpm db:test:seed` → prisma/seed.cjs requires
+  // this). Creates bookings directly because the boundary's locks/policies are
+  // the thing the integration suites exercise against these rows. The seed
+  // refuses to run without `requireSafeScriptRun` clearing it
+  // (scripts/_safe-script-guard.cjs, ALLOW_SEED_SCRIPT opt-in, destructive
+  // mode), and `seed:test` pins DATABASE_URL to the local test Postgres.
+  normalize('prisma/test-data/_shared.cjs'),
 ])
 
 const TEMP_ALLOWED_FILES = new Set([
@@ -71,35 +84,16 @@ const IGNORE_FILE_SUFFIXES = [
   '.spec.tsx',
 ]
 
-const FORBIDDEN_PATTERNS = [
-  'prisma.booking.create(',
-  'prisma.booking.update(',
-  'prisma.booking.delete(',
-  'prisma.booking.createMany(',
-  'prisma.booking.updateMany(',
-  'prisma.booking.deleteMany(',
-
-  'tx.booking.create(',
-  'tx.booking.update(',
-  'tx.booking.delete(',
-  'tx.booking.createMany(',
-  'tx.booking.updateMany(',
-  'tx.booking.deleteMany(',
-
-  'prisma.bookingHold.create(',
-  'prisma.bookingHold.update(',
-  'prisma.bookingHold.delete(',
-  'prisma.bookingHold.createMany(',
-  'prisma.bookingHold.updateMany(',
-  'prisma.bookingHold.deleteMany(',
-
-  'tx.bookingHold.create(',
-  'tx.bookingHold.update(',
-  'tx.bookingHold.delete(',
-  'tx.bookingHold.createMany(',
-  'tx.bookingHold.updateMany(',
-  'tx.bookingHold.deleteMany(',
-]
+// Receiver-agnostic on purpose. This used to be a list of literal
+// `prisma.booking.create(` / `tx.bookingHold.update(` strings, so a client
+// bound to ANY other name — `db.bookingHold.deleteMany(…)`,
+// `prismaClient.booking.create(…)` — walked straight past the guard
+// (found in the 2026-07-22 re-audit; both shapes existed). The receiver name
+// is irrelevant: the write verb on the model is what the boundary owns.
+// `upsert` and the *AndReturn variants are included even though nothing uses
+// them today — they create/update rows just the same.
+const FORBIDDEN_PATTERN =
+  /\.(booking|bookingHold)\.(create|update|delete|createMany|updateMany|deleteMany|upsert|createManyAndReturn|updateManyAndReturn)\s*\(/g
 
 function normalize(filePath) {
   return filePath.split(path.sep).join('/')
@@ -165,10 +159,8 @@ function findViolations(files) {
 
     const content = fs.readFileSync(file, 'utf8')
 
-    for (const pattern of FORBIDDEN_PATTERNS) {
-      if (content.includes(pattern)) {
-        violations.push({ file: rel, pattern })
-      }
+    for (const match of content.matchAll(FORBIDDEN_PATTERN)) {
+      violations.push({ file: rel, pattern: match[0] })
     }
   }
 
