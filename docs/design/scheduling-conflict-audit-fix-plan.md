@@ -364,7 +364,7 @@ slot dies (read time). Neither subsumes the other.
 > **two** surfaces and there are **five**, and the fix had to answer a question the
 > card did not ask (which gate commits each row). See "F15 — what shipped" in §4.
 
-### F16 — a pro cannot tell that their own opening has gone dark 🟡
+### F16 — a pro cannot tell that their own opening has gone dark 🟡 ✅
 
 Fell out of F15, and **pre-dates it**: before F15 a dead opening was advertised to
 clients and every claim failed; after F15 it is hidden. Either way the pro's own
@@ -382,6 +382,11 @@ reservations applies here to disappearances.
 return the verdict as a per-row status. Needs a badge on web **and** iOS —
 "not visible to clients: that time is booked / blocked / outside your hours" —
 so it is a two-platform card like F12.
+
+> ✅ **Shipped.** The premise held. But the honest answer needed a state the card
+> never named — a hold on the slot is a client mid-claim on THIS opening, i.e. the
+> feature working — and wiring the check into the route introduced a 500-after-write
+> of its own. See "F16 — what shipped" in §4.
 
 ### F6 — Last-minute opening creation has no advisory lock 🟠
 
@@ -600,7 +605,7 @@ Named honestly rather than assumed safe:
 | F6 last-minute opening lock | ✅ done — #716 (also fixed a hold-window gap the card thought was a refactor) |
 | F14 pro-chosen time must reserve | ✅ done — #713 (+ iOS #205) |
 | F15 stored client-visible time not re-checked | ✅ done — #714 (**Tori rule 2026-07-21**) |
-| F16 pro can't see their opening went dark | not started (opened by F15) |
+| F16 pro can't see their opening went dark | ✅ done — #721 (+ iOS #208) (**premise held**; the fix opened a 500-after-write of its own, caught in review) |
 | F7 iOS mobile slot address | ✅ done — iOS #206 (**premise was wrong**: not imprecise slots, a 400 that killed the whole MOBILE flow; fix caught a second, stale-slot bug on the simulator) |
 | F8 occupied-status parity test | ✅ done — #717 (**Tori ruling 2026-07-21**; carries migration `20260806000000`) |
 | F9 duplicate-logic cleanup | ✅ done — #719 (**found a live DST bug**; 2 premises died; `other-pros` deferred with evidence) |
@@ -970,6 +975,150 @@ are for). No migration; revert is a straight code revert.
 **Net for F9:** the biggest single entry in the duplicate-logic table
 (`createLastMinuteOpening.ts:1073`, ~150 lines over five tables) is now gone —
 63 insertions against 147 deletions in that file.
+
+### F16 — what shipped
+
+**The card's premise held** — `GET /api/v1/pro/openings` really did return a dead
+opening as a plain `ACTIVE` row with no signal, confirmed on the wire before
+anything was changed. What the card did **not** anticipate is that the honest
+answer needs a state it never named, and that adding the check to the route
+introduces a failure mode on a **write** path.
+
+**🔴 A hold is not a failure — and reporting it as one would have been the bug.**
+`checkStoredSlotsAreOpen` answers `TIME_HELD` when anything holds the slot. On a
+client feed that means "someone beat you to it, hide the card". On the PRO's card
+the commonest cause is **a client mid-checkout on this very opening** — the
+feature working. A badge reading *"not visible to clients"* at that moment tells
+the pro their opening is broken exactly when it is succeeding, and invites them to
+cancel it. `TIME_HELD` therefore gets its own non-alarming state,
+`BEING_CLAIMED` — different copy, different colour, `isFault: false` on both
+platforms. Driven on device: teal + clock, not amber + eye-slash.
+
+**🔴 The pro's select does not filter deactivated offerings, so the badge had to.**
+F9 made `proOpeningSelect` deliberately omit `services.where.offering.isActive`
+so the pro can SEE a deactivated link. The badge answers a **client** question, so
+judging it over the pro's unfiltered rows disagrees with the feed it is reporting
+on, in both directions: a deactivated service could set the (longer) window the
+row is judged against, and an opening whose every offering is dead would read as
+`VISIBLE` while the client feeds drop it entirely. The filter is re-applied in
+code, and the all-dead case became its own reason, `NO_ACTIVE_SERVICE`. **Proven
+against real Postgres**: with the filter removed the row reads `VISIBLE` —
+`expected 'VISIBLE' to be 'NO_ACTIVE_SERVICE'`.
+
+**🔴 The fix's own defect, caught re-reading the diff, not by a test.** The check
+runs inside `mapOpeningDto`, which three handlers use — and **two of them have
+already written** by the time they map: POST has created the opening, PATCH has
+cancelled it or saved the note. Before this change `mapOpeningDto` was pure and
+could not throw; after it, a schedule query failing would have returned **500 for
+an opening that exists**, and the pro would have made another. Now
+`resolveVisibilitySafely` logs and falls back to `NOT_CHECKED`. Proven red:
+without it, `expected 500 to be 201`.
+
+**The `LOCATION_UNAVAILABLE` question F15 left here: split, and here is why.**
+F15 collapsed `LOCATION_NOT_FOUND` and `TIMEZONE_REQUIRED` into one reason because
+all five call sites read only `verdict.open`. A hide/show caller can treat them
+alike; a badge cannot — *"that location is no longer bookable"* and *"that
+location has no time zone set"* are two different jobs for the pro. The verdict
+now carries the gate's own error through verbatim, and the one file that asserted
+the old reason moved with it.
+
+**Shipped:**
+
+- **`lib/lastMinute/proOpeningVisibility.ts`** — `ProOpeningClientVisibility` (13
+  states) and `resolveProOpeningVisibility`. It adds **no** schedule logic: it
+  calls the same `checkStoredSlotsAreOpen` the four client feeds call, which is
+  itself the commit gate run with nothing written. `viewerClientId: null` — the
+  pro is not a client, so there is no viewer hold to discount.
+- **Total by contract, silent by default.** Every row gets an entry; terminal
+  rows (booked / cancelled / expired) and rows whose time has passed are
+  `NOT_CHECKED` rather than asked about — a past opening would otherwise answer
+  `ADVANCE_NOTICE_REQUIRED`, true but not what "too soon" means to a reader. An
+  unanswered row is never `VISIBLE`, on the server, on web, or on iOS.
+- **A SIGNAL, not a filter.** F15 left this list unfiltered on purpose so a dead
+  opening can still be cancelled. Nothing here removes a row — pinned by a test
+  on each platform, and driven: `rows=1` in all six states.
+- `proOpeningSelect` gains `offering.isActive` and `professional.timeZone`, both
+  documented at the code site as F16's, both proven load-bearing.
+- Web badge (`.lm-opening-visibility-notice`, tone tokens only) and iOS badge
+  (`ProOpeningClientVisibility` in **TovisKit**, so CI compiles and tests it —
+  nothing in iOS CI compiles `Tovis/`). Both platforms carry the same sentences
+  and an exhaustive switch with no `default`, so a new server state fails the
+  build rather than rendering blank.
+
+**Verified. Every guard proven red first — seventeen mutations:**
+
+| mutation | what goes red |
+| --- | --- |
+| `TIME_HELD` → treated as a fault | only `reports a hold as a claim in progress` (unit **and** real-DB twins) |
+| active-offering filter dropped | `NO_ACTIVE_SERVICE` + the window-pricing test; real DB: `expected 'VISIBLE' to be 'NO_ACTIVE_SERVICE'` |
+| `isWorthChecking` → always true | all 4 "leaves an X opening unchecked" |
+| unanswered row defaulted to `VISIBLE` | `never reports an unanswered row as visible` |
+| `viewerClientId` set to a client | `asks as nobody in particular` |
+| location errors re-collapsed | `tells a missing location apart from one with no time zone` |
+| badge removed from the web card | 4 badge tests; **both ALLOW cases stay green** |
+| web parser drops the field | the same 4 — this is the "nobody re-read it" failure |
+| web badges everything | **only** the 2 ALLOW cases — which is the point of having them |
+| `professional.timeZone` out of the select | 4 real-DB tests, `Cannot read properties of undefined` |
+| `offering.isActive` out of the select | 3 real-DB tests, every row reads `NO_ACTIVE_SERVICE` |
+| write-path safety removed | `expected 500 to be 201` (POST) and `expected 500 to be 200` (GET) |
+| iOS: `beingClaimed` marked a fault | 2 TovisKit tests |
+| iOS: unknown verdict → `.visible` | `saysNothingWhenThereIsNothingToSay` |
+| iOS: a state left with no copy | `everyStateIsEitherSilentOrExplained` |
+
+- **Real HTTP, all six reachable states**, against `pnpm dev:test-db` with its own
+  fixture: `VISIBLE` → book → `TIME_BOOKED` → block → `TIME_BLOCKED` → hold →
+  `BEING_CLAIMED` → narrow hours → `OUTSIDE_WORKING_HOURS` → deactivate →
+  `NO_ACTIVE_SERVICE` → revive → `VISIBLE`. **The row's own `status` stayed
+  `ACTIVE` in every one**, which is precisely the blindness F16 fixes.
+- **The real page**, driven in a browser as the signed-in pro: silent when live,
+  the right sentence in each dark state, the card and its Cancel button present
+  throughout. Light **and** dark checked — `rgb(183,131,31)` / `rgb(242,180,62)`,
+  the two `--tone-warn` values, so the badge follows `[data-mode]` (raw colours
+  are not caught by the static guards).
+- **iOS on device (iPhone 17 Pro)** — the live card with no badge, the amber
+  eye-slash for a booked slot, the teal clock for a claim in flight, and the
+  **longest** copy (`OFF_BOOKING_GRID`, 77 chars) **wrapping onto two lines
+  rather than truncating** — the F14 failure mode, checked rather than assumed.
+- **Cost A/B'd, not asserted.** Same fixture, 14 openings, check on vs
+  short-circuited: p50 **15.7 → 28.4ms**, p95 20.5 → 32.9ms — ~0.9ms per row,
+  matching F15's measurement. See "Not verified" below for the ceiling.
+- `typecheck` clean, `lint` **0 errors**, **all 13 static guards pass**, `next
+  build` succeeds (the type-only import into a `'use client'` file is erased),
+  **710 files / 6927 unit tests**, **34 files / 204 integration tests**, iOS app
+  target **BUILD SUCCEEDED** + 9 TovisKit tests.
+
+**Checked, so it is not a caveat:**
+
+- **The 3 integration files that fail locally are the known keyring gap, proven
+  not assumed.** All 10 failures throw from `getAeadKey` →
+  `Missing required env PII_AEAD_KEYS_JSON`. Re-run with a throwaway keyring
+  built exactly as `.github/workflows/integration.yml` builds it: **34/34 files,
+  204/204 tests pass.**
+- **`NO_ACTIVE_SERVICE` is reachable on the web page, but only for the right
+  reason.** Deactivating the pro's *only* offering redirects `/pro/last-minute`
+  to `/pro/services` behind the pre-existing "you are not bookable yet" gate, so
+  the badge never renders — nothing to do with F16. With a second active offering
+  the pro stays bookable and the badge shows. Found by driving the page, not by
+  reading it.
+- **The DTO is not in `lib/dto/index.ts`**, so no `gen:api-schema` regeneration —
+  `check:api-schema` passes, and the iOS contract job does not cover pro-side
+  routes.
+- **iOS decodes an older server.** `clientVisibility` is optional; the pre-existing
+  fixture, which has no such key, still decodes and reads `.notChecked`.
+
+**Not verified / not checked:**
+
+- **The cost ceiling is projected, not measured.** ~0.9ms per row was measured at
+  14 rows; the route's own limits are `take: 200` and `hours: 14d`, which project
+  to ~180ms added in a case no real pro reaches (both web and iOS ask for
+  `hours=48&take=100`). Deliberately **not** capped: a silent cap would badge some
+  rows and not others, which is worse than a slow page. Not measured against a
+  pooled prod connection — same open item F15 registered in §3.
+- **Three states were never driven end-to-end**, only unit-tested through the
+  mapping: `WORKING_HOURS_MISSING`, `TOO_FAR_AHEAD` and
+  `LOCATION_TIME_ZONE_MISSING`. Each is one `switch` arm over a verdict the
+  shared gate already produces and the other eight arms are driven, so the risk
+  is confined to the copy string.
 
 ### F15 — what shipped
 
@@ -2158,48 +2307,44 @@ This chain keeps its prompt here, not in the `NEXT-SESSION-PROMPT.md` memory
 each session.
 
 ```
-Do ONE step of the scheduling-conflict audit fix queue: F16.
+Do ONE step of the scheduling-conflict audit fix queue: F12.
 
 Read `docs/design/scheduling-conflict-audit-fix-plan.md` FIRST — it is both the
 queue AND the write-ups, including which card premises did NOT survive contact.
-Do not re-derive what is already written there. F1–F9, F11 and F13–F15 are done;
-F10, F12 and F16 are open.
+Do not re-derive what is already written there. F1–F9, F11 and F13–F16 are done;
+only F10 and F12 remain.
 
-F16 — "a pro cannot tell that their own opening has gone dark". Since F15 (#714)
-a last-minute opening whose slot is booked / blocked / outside-hours is hidden
-from clients, but the pro's own list (`GET /api/v1/pro/openings`) still shows it
-as a plain `ACTIVE` row — and the pro is the only person who can fix it (re-open
-the day, delete the block, cancel the opening). The card's proposed fix: run the
-same `checkStoredSlotsAreOpen` (`lib/booking/storedSlotLiveness.ts`) the client
-feeds already use, and return the verdict as a per-row status, with a badge on
-web AND iOS — "not visible to clients: that time is booked / blocked / outside
-your hours". Two-platform card like F12: land both sides together.
+F12 — "consultation proposal is authored with zero schedule validation" 🟠. Read
+the card in §2 and F2's two write-ups in §4 ("F2 — the follow-ups that only
+turned up by LOOKING" and "F2 — what shipped"): F12 was opened BY F2, which
+fixed the APPROVE side (the extension is now checked against blocks and hours)
+and deliberately left the PROPOSE side alone. So the pro can still author a
+consultation time nothing validated, and the client only finds out at approve.
+It is a two-platform card — check what iOS sends and shows before deciding the
+server shape.
 
-Three things earlier cards left for F16 specifically:
-- `storedSlotLiveness`'s `LOCATION_UNAVAILABLE` verdict is deliberately COARSER
-  than the gate it mirrors. Nothing reads the difference today because all five
-  call sites only use `verdict.open`. F16's badge is the first consumer that has
-  to EXPLAIN a verdict — decide there whether the reason codes need splitting.
-  (See the "Not verified / not checked" note under "F15 — what shipped".)
-- `pro/openings` now uses the shared `proOpeningSelect` from
-  `lib/lastMinute/openingSelect.ts` (F9, #719). It deliberately OMITS the
-  client-facing select's `services.where.offering.isActive` and
-  `tierPlans.where.cancelledAt: null` filters, so the pro sees the full truth.
-  Check the badge logic agrees with that before adding fields.
-- F15 deliberately left the pro's view untouched so the pro could still cancel a
-  dead opening. Do not hide the row — F16 is about a SIGNAL, not a filter.
+Things earlier cards left that bear on F12 specifically:
+- F16 shipped `lib/lastMinute/proOpeningVisibility.ts`, the first consumer that
+  EXPLAINS a `checkStoredSlotsAreOpen` verdict rather than acting on it. If F12
+  wants to warn a pro at proposal time rather than refuse, that file is the
+  precedent for the shape (13 states, exhaustive switch, silent by default).
+- F16 also found that adding a schedule check to a route that has ALREADY
+  WRITTEN turns a query failure into a 500 for work that succeeded. If F12 adds
+  validation to a write path, decide deliberately whether it refuses (before the
+  write) or informs (after it) — and never let a display concern fail a commit.
+- `StoredSlotDeadReason` now carries `LOCATION_NOT_FOUND` / `TIMEZONE_REQUIRED`
+  separately (F16 split what F15 collapsed). Nothing else needs changing there.
 
 House rules apply — read CLAUDE.md. In particular: diff/verify before assuming a
-card's premise holds (F9 was filed 🟡 and contained a live DST bug, and two of
-its rows' premises were wrong), prove every new guard RED before calling it
-green, include at least one ALLOW case, and drive the real artifact — the page
-and the simulator — not just the tests.
+card's premise holds, prove every new guard RED before calling it green, include
+at least one ALLOW case, and drive the real artifact — the page and the
+simulator — not just the tests.
 
 Ship cadence: branch off origin/main, one PR per repo touched, watch CI, merge
 when green, fast-forward local main. 🚫 Do NOT deploy to Vercel — that stays
-Tori's call. Note in the report that #705–#719 are merged and still awaiting a
+Tori's call. Note in the report that #705–#721 are merged and still awaiting a
 prod deploy (two migrations pending, one an ADD CONSTRAINT worth re-checking).
 
-Do not start other workstreams. If F16 finishes early, wrap up and hand off
-rather than pulling F12 or F10 in.
+Do not start other workstreams. If F12 finishes early, wrap up and hand off
+rather than pulling F10 in.
 ```

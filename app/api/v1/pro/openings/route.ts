@@ -23,6 +23,10 @@ import {
   proOpeningSelect,
   type ProOpeningRow,
 } from '@/lib/lastMinute/openingSelect'
+import {
+  resolveProOpeningVisibility,
+  type ProOpeningClientVisibility,
+} from '@/lib/lastMinute/proOpeningVisibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -190,8 +194,19 @@ function parseTierPlans(
 
 type OpeningRow = ProOpeningRow
 
-function mapOpeningDto(opening: OpeningRow) {
+function mapOpeningDto(
+  opening: OpeningRow,
+  clientVisibility: ProOpeningClientVisibility,
+) {
   return {
+    // F16: whether a client can still see and claim this opening's time, asked
+    // of the pro's live schedule rather than of the row's own state. The row
+    // stays ACTIVE when the slot is booked, blocked or falls out of hours — the
+    // client feeds hide it (F15) and the pro is the only one who can fix it.
+    // NEVER a filter: a dead opening must stay in this list so it can be
+    // cancelled.
+    clientVisibility,
+
     id: opening.id,
     professionalId: opening.professionalId,
     status: opening.status,
@@ -274,6 +289,51 @@ function mapOpeningDto(opening: OpeningRow) {
       updatedAt: plan.updatedAt.toISOString(),
     })),
   }
+}
+
+/**
+ * F16's visibility for the whole set at once — `checkStoredSlotsAreOpen`
+ * resolves one booking context per distinct (pro, location, mode, zone) and
+ * probes eight rows in flight, so the list goes through it together rather than
+ * once per card.
+ *
+ * It never throws. A badge is a DISPLAY concern reached from three handlers, two
+ * of which have already written by the time they map: POST has created the
+ * opening and PATCH has cancelled it or saved the note. Letting a schedule query
+ * fail those responses would report failure for work that succeeded — and would
+ * cost the pro their whole list on GET. Every row falls back to `NOT_CHECKED`,
+ * which renders as silence rather than as an assurance.
+ */
+async function resolveVisibilitySafely(
+  openings: readonly OpeningRow[],
+  nowUtc?: Date,
+): Promise<Map<string, ProOpeningClientVisibility>> {
+  try {
+    return await resolveProOpeningVisibility({ rows: openings, nowUtc })
+  } catch (e) {
+    console.error('pro/openings client-visibility check failed', e)
+    return new Map()
+  }
+}
+
+async function mapOpeningDtos(
+  openings: readonly OpeningRow[],
+  nowUtc?: Date,
+): Promise<ReturnType<typeof mapOpeningDto>[]> {
+  const visibility = await resolveVisibilitySafely(openings, nowUtc)
+
+  return openings.map((opening) =>
+    // The map is total by contract; defaulted anyway because the one thing this
+    // must never do is report an unanswered row as visible to clients.
+    mapOpeningDto(opening, visibility.get(opening.id) ?? 'NOT_CHECKED'),
+  )
+}
+
+async function mapOneOpeningDto(
+  opening: OpeningRow,
+): Promise<ReturnType<typeof mapOpeningDto>> {
+  const visibility = await resolveVisibilitySafely([opening])
+  return mapOpeningDto(opening, visibility.get(opening.id) ?? 'NOT_CHECKED')
 }
 
 function handleCreateError(error: unknown): Response | null {
@@ -393,7 +453,7 @@ export async function GET(req: Request) {
 
     return jsonOk(
       {
-        openings: openings.map(mapOpeningDto),
+        openings: await mapOpeningDtos(openings, now),
       },
       200,
     )
@@ -469,7 +529,7 @@ export async function POST(req: Request) {
       tierPlans: tierPlansResult.value,
     })
 
-    return jsonOk({ opening: mapOpeningDto(created) }, 201)
+    return jsonOk({ opening: await mapOneOpeningDto(created) }, 201)
   } catch (e) {
     const handled = handleCreateError(e)
     if (handled) return handled
@@ -592,7 +652,7 @@ export async function PATCH(req: Request) {
       return jsonFail(404, 'Opening not found.')
     }
 
-    return jsonOk({ opening: mapOpeningDto(refreshed) }, 200)
+    return jsonOk({ opening: await mapOneOpeningDto(refreshed) }, 200)
   } catch (e) {
     console.error('PATCH /api/v1/pro/openings error', e)
     return jsonFail(500, 'Failed to update opening.')

@@ -142,7 +142,29 @@ describe('checkStoredSlotsAreOpen', () => {
 
     expect(verdicts.get('row_1')).toEqual({
       open: false,
-      reason: 'LOCATION_UNAVAILABLE',
+      reason: 'LOCATION_NOT_FOUND',
+    })
+    expect(mocks.evaluateProSchedulingDecision).not.toHaveBeenCalled()
+  })
+
+  // F16 split what F15 collapsed: the two location errors are one decision for a
+  // feed (hide it) and two different jobs for the pro whose badge has to explain
+  // it, so the verdict carries the gate's own error through rather than one
+  // catch-all reason.
+  it('tells a missing location apart from one with no time zone', async () => {
+    mocks.resolveBookingLocationContext.mockResolvedValue({
+      ok: false,
+      error: 'TIMEZONE_REQUIRED',
+    })
+
+    const verdicts = await checkStoredSlotsAreOpen({
+      candidates: [candidate()],
+      viewerClientId: null,
+    })
+
+    expect(verdicts.get('row_1')).toEqual({
+      open: false,
+      reason: 'TIMEZONE_REQUIRED',
     })
     expect(mocks.evaluateProSchedulingDecision).not.toHaveBeenCalled()
   })

@@ -28,6 +28,7 @@ import { readErrorMessage, safeJsonRecord } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import type { ProOpeningClientVisibility } from '@/lib/lastMinute/proOpeningVisibility'
 
 export type OfferingLite = {
   id: string
@@ -130,6 +131,13 @@ type OpeningRow = {
   locationId: string
   timeZone: string
   recipientCount: number
+  /**
+   * F16: whether a client can still see and claim this time. The row itself
+   * stays ACTIVE when the slot is booked, blocked or falls out of hours — the
+   * client feeds hide it (F15) and this list is the only place the pro, who is
+   * the only one who can fix it, would ever find out.
+   */
+  clientVisibility: ProOpeningClientVisibility
   location: {
     id: string
     type: string
@@ -586,6 +594,33 @@ function parseTierPlanRow(value: unknown): TierPlanRow | null {
   }
 }
 
+const CLIENT_VISIBILITY_VALUES: ReadonlyArray<ProOpeningClientVisibility> = [
+  'VISIBLE',
+  'BEING_CLAIMED',
+  'TIME_BOOKED',
+  'TIME_BLOCKED',
+  'OUTSIDE_WORKING_HOURS',
+  'WORKING_HOURS_MISSING',
+  'TOO_SOON',
+  'TOO_FAR_AHEAD',
+  'OFF_BOOKING_GRID',
+  'LOCATION_UNAVAILABLE',
+  'LOCATION_TIME_ZONE_MISSING',
+  'NO_ACTIVE_SERVICE',
+  'NOT_CHECKED',
+]
+
+/**
+ * Anything unrecognised — including the field being absent — reads as
+ * `NOT_CHECKED`, which renders no badge. A missing answer must never be shown
+ * as a problem the pro has to act on, and must never be shown as an assurance
+ * either; both are the same silence here.
+ */
+function parseClientVisibility(value: unknown): ProOpeningClientVisibility {
+  const raw = pickStringOrEmpty(value)
+  return CLIENT_VISIBILITY_VALUES.find((known) => known === raw) ?? 'NOT_CHECKED'
+}
+
 function parseOpeningRow(value: unknown): OpeningRow | null {
   if (!isRecord(value)) {
     return null
@@ -674,6 +709,7 @@ function parseOpeningRow(value: unknown): OpeningRow | null {
     locationId,
     timeZone,
     recipientCount,
+    clientVisibility: parseClientVisibility(value.clientVisibility),
     location,
     services,
     tierPlans,
@@ -753,6 +789,92 @@ function locationSummary(opening: OpeningRow): string {
     opening.location?.formattedAddress ||
     opening.locationType
   )
+}
+
+type OpeningVisibilityNotice = {
+  tone: 'warn' | 'info'
+  text: string
+}
+
+/**
+ * F16's badge. Every sentence answers the pro's question — why can nobody see
+ * this, and what do I do about it — because the pro is the only person who can
+ * put any of these right.
+ *
+ * `warn` is for a slot that has gone dark and stays dark until the pro acts.
+ * `info` is for the one state that resolves itself: a booking in flight. A hold
+ * on the slot is usually a client mid-claim on THIS opening, so dressing it up
+ * as a fault would report the feature working as the feature broken.
+ *
+ * Exhaustive with no `default`: a new server state must fail the build here
+ * rather than render as a silent blank.
+ */
+function visibilityNotice(
+  visibility: ProOpeningClientVisibility,
+): OpeningVisibilityNotice | null {
+  switch (visibility) {
+    // Nothing to say: it is live, or its time has passed / it is already booked
+    // or cancelled, and the answer would be noise.
+    case 'VISIBLE':
+    case 'NOT_CHECKED':
+      return null
+
+    case 'BEING_CLAIMED':
+      return {
+        tone: 'info',
+        text: 'On hold — a booking for this time is in progress.',
+      }
+    case 'TIME_BOOKED':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — that time is already booked.',
+      }
+    case 'TIME_BLOCKED':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — you have blocked that time.',
+      }
+    case 'OUTSIDE_WORKING_HOURS':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — that time is outside your working hours.',
+      }
+    case 'WORKING_HOURS_MISSING':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — this location has no working hours set.',
+      }
+    case 'TOO_SOON':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — it is now inside your advance-notice window.',
+      }
+    case 'TOO_FAR_AHEAD':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — it is further ahead than you take bookings.',
+      }
+    case 'OFF_BOOKING_GRID':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — the start no longer lines up with your booking times.',
+      }
+    case 'LOCATION_UNAVAILABLE':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — that location is no longer bookable.',
+      }
+    case 'LOCATION_TIME_ZONE_MISSING':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — that location has no time zone set.',
+      }
+    case 'NO_ACTIVE_SERVICE':
+      return {
+        tone: 'warn',
+        text: 'Not visible to clients — none of its services is active any more.',
+      }
+  }
 }
 
 function statusLabel(status: string): string {
@@ -1553,6 +1675,7 @@ function OpeningCard({ opening }: { opening: OpeningRow }) {
   const { busy, cancelOpening } = useLastMinuteOpenings()
   const status = statusLabel(opening.status)
   const isActive = status === 'ACTIVE'
+  const notice = visibilityNotice(opening.clientVisibility)
 
   return (
     <article className="lm-opening-card">
@@ -1576,6 +1699,12 @@ function OpeningCard({ opening }: { opening: OpeningRow }) {
           <span>{opening.recipientCount} recipients</span>
         </div>
       </div>
+
+      {notice ? (
+        <p className="lm-opening-visibility-notice" data-tone={notice.tone}>
+          {notice.text}
+        </p>
+      ) : null}
 
       {opening.note ? (
         <p className="lm-opening-card-note">{opening.note}</p>

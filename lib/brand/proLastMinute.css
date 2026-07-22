@@ -1271,6 +1271,39 @@
   text-transform: uppercase;
 }
 
+/* F16: the opening is live as a row but no client can see its time. Tone tokens
+   only — these have to follow [data-mode] like everything else. */
+.lm-opening-visibility-notice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  border: 1px solid rgb(var(--tone-warn) / 0.3);
+  border-radius: 10px;
+  background: rgb(var(--tone-warn) / 0.09);
+  color: rgb(var(--tone-warn));
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  padding: 8px 10px;
+}
+
+.lm-opening-visibility-notice::before {
+  content: '';
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  height: 6px;
+  width: 6px;
+}
+
+/* A claim in flight is the feature working, not a fault. */
+.lm-opening-visibility-notice[data-tone='info'] {
+  border-color: rgb(var(--tone-info) / 0.3);
+  background: rgb(var(--tone-info) / 0.09);
+  color: rgb(var(--tone-info));
+}
+
 .lm-opening-card-note {
   margin: 0;
   border-left: 2px solid rgb(var(--accent-primary) / 0.4);
