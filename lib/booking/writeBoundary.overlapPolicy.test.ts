@@ -797,6 +797,62 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     expect(mocks.decideBookingOverlapPermission).not.toHaveBeenCalled()
   })
 
+  it('pages when the DB hold backstop refuses a hold the gate allowed', async () => {
+    // Same F13 reasoning as the five booking-side catches: expired holds are
+    // swept under the lock BEFORE the insert, so a 23P01 here is not a race we
+    // tolerate — it is a gate or lock regression, and it must reach a human,
+    // not just the log stream.
+    mocks.txBookingHoldCreate.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError(
+        'conflicting key value violates exclusion constraint "BookingHold_no_active_professional_overlap"',
+        { code: 'P2010', clientVersion: 'test' },
+      ),
+    )
+
+    await expect(
+      createHold({
+        clientId: 'client_1',
+        bookingEntryPoint: 'PRO_CREATED',
+        offering: makeOffering(),
+        requestedStart: REQUESTED_START,
+        requestedLocationId: 'location_1',
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+      }),
+    ).rejects.toMatchObject({ code: 'TIME_HELD' })
+
+    expect(mocks.captureOverlapBackstopFired).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'HOLD_CREATE',
+        professionalId: 'pro_1',
+        constraint: 'BookingHold_no_active_professional_overlap',
+      }),
+    )
+  })
+
+  it('does NOT page on the exact-start P2002 hold collision (different constraint, log-only)', async () => {
+    mocks.txBookingHoldCreate.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('unique violation', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    )
+
+    await expect(
+      createHold({
+        clientId: 'client_1',
+        bookingEntryPoint: 'PRO_CREATED',
+        offering: makeOffering(),
+        requestedStart: REQUESTED_START,
+        requestedLocationId: 'location_1',
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+      }),
+    ).rejects.toMatchObject({ code: 'TIME_HELD' })
+
+    expect(mocks.captureOverlapBackstopFired).not.toHaveBeenCalled()
+  })
+
   it('allows direct-profile client finalize when overlap policy allows the requested booking window', async () => {
     await expect(
       finalizeBookingFromHold({

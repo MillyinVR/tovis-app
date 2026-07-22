@@ -46,6 +46,7 @@ import {
   declinePriorityOffer,
   expireOverduePriorityOffers,
   hasActivePriorityOffer,
+  offerNextPriorityClient,
 } from './priorityOffer'
 
 beforeEach(() => {
@@ -151,5 +152,47 @@ describe('declinePriorityOffer', () => {
         data: { status: 'PRIORITY_DECLINED' },
       }),
     )
+  })
+})
+
+describe('the time-overlap audience exclusion is NOT the occupancy status set', () => {
+  // ⚠️ Pins the divergence documented on getTimeOverlapClientIds: this query
+  // answers "does this CLIENT already have plans in the window" (audience
+  // exclusion — conservative, NO_SHOW included), not "is the pro busy"
+  // (BOOKING_BLOCKING_STATUSES, which excludes NO_SHOW). "Consolidating" the
+  // two sets is a behaviour change, not a cleanup; this fails if you try.
+  it('excludes by NOT-CANCELLED (NO_SHOW stays occupying), never by a status allowlist', async () => {
+    mocks.openingFindUnique.mockResolvedValue({
+      id: 'opening-1',
+      status: 'ACTIVE',
+      startAt: new Date('2030-05-01T18:00:00.000Z'),
+      endAt: new Date('2030-05-01T19:00:00.000Z'),
+      timeZone: 'America/Los_Angeles',
+      services: [],
+    })
+    mocks.recipientFindFirst.mockResolvedValue(null)
+    mocks.recipientFindMany.mockResolvedValue([])
+    mocks.bookingFindMany.mockResolvedValue([])
+
+    const result = await offerNextPriorityClient({
+      openingId: 'opening-1',
+      professionalId: 'pro-1',
+      notificationContent: { title: 't', body: 'b', href: '/x', data: {} },
+    })
+    expect(result).toEqual({ offered: false, reason: 'no_candidates' })
+
+    expect(mocks.bookingFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          professionalId: 'pro-1',
+          NOT: { status: 'CANCELLED' },
+        }),
+      }),
+    )
+    // The nearly-made edit this guards against: swapping the NOT for
+    // `status: { in: BOOKING_BLOCKING_STATUSES }`, which would silently start
+    // offering slots to clients no-showed in that very window.
+    const where = mocks.bookingFindMany.mock.calls[0]?.[0]?.where ?? {}
+    expect(JSON.stringify(where)).not.toContain('"in"')
   })
 })

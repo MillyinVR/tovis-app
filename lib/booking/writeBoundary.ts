@@ -7610,6 +7610,22 @@ afterHoldPolicyMs = Date.now()
         },
       })
 
+      // A 23P01 here is the hold-side twin of logOverlapBackstopFired's
+      // reasoning: expired holds were swept under this same lock before the
+      // insert, so the GIST backstop refusing what the hold gate allowed is a
+      // gate or lock regression — page it like the five booking-side catches
+      // do. The P2002 exact-start collision stays log-only: different
+      // constraint, same clean refusal, no gate implicated.
+      if (isOverlapCollision) {
+        captureOverlapBackstopFired({
+          action: 'HOLD_CREATE',
+          professionalId: offering.professionalId,
+          requestedStart,
+          requestedEnd,
+          constraint: HOLD_OVERLAP_CONSTRAINT_NAME,
+        })
+      }
+
       throw bookingError('TIME_HELD')
     }
 
@@ -14670,6 +14686,19 @@ async function createWaitlistOfferHold(args: {
         note: 'waitlist_offer_hold_backstop_fired',
       },
     })
+
+    // Same F13 rule as the booking-side catches: rival offers were superseded
+    // and expired holds swept under the professional's lock before this
+    // insert, so a 23P01 means the gate or the lock regressed — page it.
+    if (isOverlapCollision) {
+      captureOverlapBackstopFired({
+        action: 'WAITLIST_OFFER_CREATE',
+        professionalId: args.professionalId,
+        requestedStart: args.startsAt,
+        requestedEnd: args.endsAtSnapshot,
+        constraint: HOLD_OVERLAP_CONSTRAINT_NAME,
+      })
+    }
 
     throw bookingError('TIME_HELD')
   }

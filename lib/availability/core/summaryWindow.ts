@@ -1,6 +1,7 @@
 // availability/core/summaryWindow.ts
 
 import { clampInt } from '@/lib/pick'
+import { addDaysToYMD } from '@/lib/time'
 
 export type YMD = {
   year: number
@@ -31,23 +32,6 @@ export function parseYYYYMMDD(value: unknown): YMD | null {
   if (day < 1 || day > 31) return null
 
   return { year, month, day }
-}
-
-export function addDaysToYMD(
-  year: number,
-  month: number,
-  day: number,
-  daysToAdd: number,
-): YMD {
-  const date = new Date(
-    Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0),
-  )
-
-  return {
-    year: date.getUTCFullYear(),
-    month: date.getUTCMonth() + 1,
-    day: date.getUTCDate(),
-  }
 }
 
 export function ymdSerial(ymd: YMD): number {

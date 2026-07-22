@@ -6,6 +6,7 @@ import {
   BookingStatus,
   LastMinuteOfferType,
   LastMinuteTier,
+  Prisma,
   ProfessionalLocationType,
   ServiceLocationType,
   WaitlistOfferStatus,
@@ -16,6 +17,7 @@ const TEST_AEAD_KEYRING = JSON.stringify({
 })
 
 const mocks = vi.hoisted(() => ({
+  captureOverlapBackstopFired: vi.fn(),
   withLockedProfessionalTransaction: vi.fn(),
   withLockedClientOwnedBookingTransaction: vi.fn(),
   lockProfessionalSchedule: vi.fn(),
@@ -201,7 +203,9 @@ vi.mock('@/lib/booking/holdCleanup', () => ({
   deleteExpiredHoldsForProfessional: mocks.deleteExpiredHoldsForProfessional,
 }))
 
-vi.mock('@/lib/observability/bookingEvents', () => ({}))
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureOverlapBackstopFired: mocks.captureOverlapBackstopFired,
+}))
 
 import {
   confirmClientWaitlistOffer,
@@ -967,6 +971,32 @@ describe('writeBoundary overlap policy integration', () => {
     )
     expect(mocks.evaluateProSchedulingDecision).toHaveBeenCalledWith(
       expect.objectContaining({ durationMinutes: 60 }),
+    )
+  })
+
+  it('pages when the DB hold backstop refuses the offer reservation the gate allowed', async () => {
+    // The offer path sweeps expired holds and supersedes rival offers under the
+    // professional's lock before inserting its reservation, so a 23P01 here is
+    // the same gate-regression evidence F13 established for the booking-side
+    // catches — and it must page, not just log.
+    setupOfferableWaitlistEntry()
+    mocks.prisma.bookingHold.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError(
+        'conflicting key value violates exclusion constraint "BookingHold_no_active_professional_overlap"',
+        { code: 'P2010', clientVersion: 'test' },
+      ),
+    )
+
+    await expect(createWaitlistOffer({ ...OFFER_ARGS })).rejects.toMatchObject({
+      code: 'TIME_HELD',
+    })
+
+    expect(mocks.captureOverlapBackstopFired).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'WAITLIST_OFFER_CREATE',
+        professionalId: 'pro_1',
+        constraint: 'BookingHold_no_active_professional_overlap',
+      }),
     )
   })
 })
