@@ -194,8 +194,12 @@ async function seed(): Promise<Ids> {
 
   const makeCompletedVisit = async (clientId: string, daysAgo: number) => {
     bookingSeq += 1
+    // Spread by more than a booking OCCUPIES (60 duration + 15 buffer), not by
+    // a token minute: these all share one pro, and since F8 a COMPLETED booking
+    // is covered by Booking_no_active_professional_overlap, so a 1-minute
+    // stagger made the fixture double-book the pro and the seed died on 23P01.
     const scheduledFor = new Date(
-      NOW.getTime() - daysAgo * DAY_MS + bookingSeq * 60 * 1000,
+      NOW.getTime() - daysAgo * DAY_MS + bookingSeq * 90 * 60 * 1000,
     )
     await prisma.booking.create({
       data: {

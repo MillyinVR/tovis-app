@@ -426,6 +426,11 @@ availability. Nothing pins these together.
 COMPLETED should occupy future time at all. (`lib/looks/availabilityStats.ts:67`
 holds a fourth copy used for ranking aggregates.)
 
+> ✅ **Shipped.** Every premise held (only the line numbers had drifted). The
+> decision went the way the doc did **not** predict: Tori ruled COMPLETED **does**
+> occupy its time, so the database moved to the app rather than the reverse. See
+> "F8 — what shipped" in §4.
+
 ### F9 — Duplicate-logic cleanup 🟡
 
 | Helper | Copies |
@@ -484,12 +489,16 @@ the suite has been dead:
   signup fail, so the duplicate-handle path it exists to cover was never
   actually exercised.
 
-**Useful side-evidence for F8:** the suite contains a test named *"database
-allows active booking to overlap completed and cancelled bookings"* — so the DB
-predicate excluding `COMPLETED` is deliberate and pinned. That makes
-`BOOKING_BLOCKING_STATUSES` (which includes `COMPLETED`) the odd one out, and
-F8 should probably resolve by dropping `COMPLETED` from the app constant rather
-than adding it to the constraint.
+**Side-evidence for F8 — and it pointed the wrong way.** The suite contained a
+test named *"database allows active booking to overlap completed and cancelled
+bookings"*, which read as proof that excluding `COMPLETED` from the predicate was
+deliberate, and suggested F8 resolve by dropping `COMPLETED` from the app
+constant. ~~That is what this section originally recommended.~~ It did not
+survive contact: a pinned test records what someone *once wrote*, not what the
+product *wants*, and nothing in it weighed the pro's post-service buffer against
+a 15-minute default advance notice. Tori ruled the other way and the constraint
+was widened instead (#717); that test now covers CANCELLED and NO_SHOW only. Read
+"F8 — what shipped" in §4 before citing this paragraph for anything.
 
 ### F10 — iOS follow-ups 🟢
 
@@ -550,12 +559,111 @@ Named honestly rather than assumed safe:
 | F15 stored client-visible time not re-checked | ✅ done — #714 (**Tori rule 2026-07-21**) |
 | F16 pro can't see their opening went dark | not started (opened by F15) |
 | F7 iOS mobile slot address | not started |
-| F8 occupied-status parity test | not started |
+| F8 occupied-status parity test | ✅ done — #717 (**Tori ruling 2026-07-21**; carries migration `20260806000000`) |
 | F9 duplicate-logic cleanup | not started |
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | not started (opened by F2) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
+
+### F8 — what shipped
+
+**The card was right about the facts and wrong about the remedy.** All four
+definitions were exactly as described (only the line numbers had rotted:
+`constants.ts:36` → `:55`). But the doc's own side-note from F11 — "F8 should
+probably resolve by dropping COMPLETED from the app constant" — pointed the wrong
+way, and one lookup killed it: **`advanceNoticeMinutes` defaults to 15**
+(`prisma/schema.prisma:2358`). Dropping COMPLETED would have freed the pro's
+post-service buffer the instant they closed out, so a client could book into
+their cleanup/travel time ~15 minutes later. Put to Tori with that number
+attached; the ruling was **a COMPLETED booking DOES occupy its time**, so the
+database moved to the app.
+
+**What changed.**
+
+- Migration `20260806000000` widens the `Booking` EXCLUDE predicate to
+  PENDING/ACCEPTED/IN_PROGRESS/**COMPLETED**. `BookingHold` is untouched (holds
+  carry no status).
+- `busy-days/route.ts` and `looks/availabilityStats.ts` no longer keep private
+  copies — both import `BOOKING_BLOCKING_STATUSES`. Per F6's lesson these were
+  diffed first, and both had **drifted**: each omitted COMPLETED on a comment
+  that said "completed is past". That is false for an early-finished or same-day
+  session, so the pro's busy-day popup and the ranking fullness signal were both
+  under-reporting occupancy. Consolidating is a behaviour change, and both now
+  have a test that says so.
+- `ESTABLISHED_BOOKING_STATUSES` (`resolveDiscoveryFinalize.ts:45`) is the same
+  P/A/IP/COMPLETED **shape** and was deliberately left alone — it answers "has
+  this client booked here before?", not "is the pro busy?". Same-shape ≠
+  same-intent.
+
+**The migration was checked against real data before it was written**, not after:
+production held 22 bookings, 8 COMPLETED (all unflagged), and **zero** pairs that
+the widened predicate would reject, so `ADD CONSTRAINT` applies cleanly. The
+local test DB was checked the same way (0), then actually migrated and the live
+predicate read back out of `pg_constraint`.
+
+Re-run this before deploying if prod has moved on much — a non-empty result means
+`prisma migrate deploy` will **fail the release**, which is the intended
+behaviour, not something to work around:
+
+```sql
+SELECT a.id, a.status, b.id, b.status
+FROM "Booking" a
+JOIN "Booking" b ON a."professionalId" = b."professionalId" AND a.id < b.id
+WHERE NOT a."allowsOverlap" AND NOT b."allowsOverlap"
+  AND a.status IN ('PENDING','ACCEPTED','IN_PROGRESS','COMPLETED')
+  AND b.status IN ('PENDING','ACCEPTED','IN_PROGRESS','COMPLETED')
+  AND tovis_booking_overlap_range(a."scheduledFor", a."totalDurationMinutes", a."bufferMinutes")
+   && tovis_booking_overlap_range(b."scheduledFor", b."totalDurationMinutes", b."bufferMinutes");
+```
+
+**No new 23P01 is reachable**, verified by reading every write rather than
+reasoning about it: all five `allowsOverlap` write sites derive the flag from
+`findBookingAndHoldConflicts`, which has always counted COMPLETED — so a
+pro-authorized overlap onto a completed slot was already being stamped exempt.
+And COMPLETED is reachable **only from IN_PROGRESS**
+(`lib/booking/lifecycleContract.ts:81`), which already sits in the index over the
+identical range, so completing a booking can never newly violate the constraint.
+A test pins that an authorized double-book stays exempt when it completes.
+
+**The parity test walks the enum, not a hand-written list.**
+`booking-overlap-concurrency.test.ts` now probes **every** `BookingStatus` value
+against real Postgres — insert a row with that status, try to overlap it with an
+ACCEPTED one, and record whether the database refused — then compares the whole
+map against `BOOKING_BLOCKING_STATUSES`. A status added to the schema later is
+covered the day it lands, and membership is read from what Postgres *does* rather
+than by parsing `pg_get_constraintdef`. **Proven red**: dropping COMPLETED from
+the constant fails it with `- "COMPLETED": false / + "COMPLETED": true`, naming
+the offending status. The two consolidated readers were proven red the same way.
+
+**Two integration fixtures were double-booking a pro and nobody knew.**
+`rebook-cadence` and `re-engagement-dispatch` both build a client's visit history
+by stamping bookings `bookingSeq * 60 * 1000` apart — a **one-minute** stagger for
+rows that occupy 60 + 15 minutes, several of them on the same pro and the same
+day. That was invisible while COMPLETED sat outside the index; the moment it went
+in, both seeds died on a real 23P01. The fixtures were wrong, not the constraint,
+so the stagger is now 90 minutes (> the occupied window) in both. This is the F11
+pattern again: a suite that has never been pointed at the invariant it depends on.
+
+⚠️ **The trap that follows that one, if you break a seed here.** Both suites'
+`cleanup()` opens with `if (!ids) return` — so when `beforeAll` throws, **nothing
+is cleaned up** and the pros, bookings and `ProfessionalAvailabilityStat` rows
+stay in your local test DB. The next run then fails somewhere else entirely:
+`rebook-cadence` asserts `openPros === 1` and reads **3**, because
+`loadOpenProAvailability` scans that table globally. It looks like a
+just-introduced leak and it is not — it is debris from the previous failed run,
+and it clears itself as soon as `booking-overlap-concurrency`'s
+`TRUNCATE … CASCADE` runs again. A "controlled experiment" that reverts a source
+change and re-runs will happily exonerate the wrong line if the truncate happened
+in between; verify against a **freshly truncated** database. CI never sees any of
+this — it starts from an empty Postgres every run. Three consecutive clean local
+runs: 34 files / 196 tests green.
+
+**Not checked.** The widened predicate is a larger GIST index (COMPLETED rows no
+longer leave it), so index size now grows with booking history instead of with
+open bookings. At 22 prod rows this is nothing; at scale the constraint is still
+`professionalId`-partitioned, so it is a bounded scan per pro either way. Not
+measured on a large table — there isn't one yet.
 
 ### F6 — what shipped
 
@@ -1604,60 +1712,62 @@ update to the table in §4.)
 >
 > **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
 > F13 ✅ #704, F4 ✅ #705, F5 ✅ #710 (+ iOS #204), F14 ✅ #713 (+ iOS #205),
-> F15 ✅ #714, F6 ✅ #716. NEXT = F8** (pin the three "occupied statuses"
-> definitions — and it carries a decision, see below).
+> F15 ✅ #714, F6 ✅ #716, F8 ✅ #717. NEXT = F7** (iOS: the client's mobile slot
+> query drops the client's address — the first iOS-only card in the queue).
 >
 > ⚠️ **A prod deploy is PENDING Tori's go-ahead.** Everything through **#704** is
 > live (`tovis-npx5cy47p`, 2026-07-21). **#705 (F4), #706, #707, #710 (F5),
-> #713 (F14), #714 (F15), #715 and #716 (F6) are merged and NOT deployed** — so
-> prod still accepts a crafted off-grid start on the public rebook link, a
-> waitlist offer still reserves nothing, a dead last-minute opening is still
-> shown to clients, and an opening can still be published over a slot booked
-> microseconds earlier (or over a hold longer than its own offering), until it
-> ships. **#713 carries migration `20260805000000`**
-> (`BookingHold.waitlistOfferId`), which `prisma migrate deploy` applies on
-> deploy; **#714, #715 and #716 carry none**. **Deploy is Tori's call every
-> time**; never infer standing permission from the last one.
+> #713 (F14), #714 (F15), #715, #716 (F6) and #717 (F8) are merged and NOT
+> deployed** — so prod still accepts a crafted off-grid start on the public rebook
+> link, a waitlist offer still reserves nothing, a dead last-minute opening is
+> still shown to clients, an opening can still be published over a slot booked
+> microseconds earlier (or over a hold longer than its own offering), and the
+> durable overlap backstop still ignores COMPLETED, until it ships. **#713 carries
+> migration `20260805000000`** (`BookingHold.waitlistOfferId`) and **#717 carries
+> `20260806000000`** (the widened overlap predicate), both applied by
+> `prisma migrate deploy` on deploy; **#714, #715 and #716 carry none**.
+> `20260806000000` was verified against prod data before merge — 0 rows would
+> reject it — but it is an `ADD CONSTRAINT`, so **re-run that check if the deploy
+> is much later than 2026-07-21**; the query is in "F8 — what shipped". **Deploy
+> is Tori's call every time**; never infer standing permission from the last one.
 >
 > **If `booking.event = overlap_backstop_fired` ever appears in Slack
 > `#tovis-ops-alerts`, drop everything** — that is the F3 refactor breaking in
 > production. It has never fired; the path is proven by configuration, not by
 > observation.
 >
-> ## Your card: F8 — pin the three "occupied statuses" definitions
+> ## Your card: F7 — iOS client mobile slots ignore the client's address
 >
-> Three places define which booking statuses occupy time and they do **not**
-> agree: `BOOKING_BLOCKING_STATUSES` (`lib/booking/constants.ts:36`) includes
-> **COMPLETED**; the DB `EXCLUDE` predicate (migration `20260624020000`) and
-> `BUSY_STATUSES` (`app/api/v1/pro/availability/busy-days/route.ts:26`) do not.
-> `lib/looks/availabilityStats.ts:67` holds a fourth copy used for ranking.
-> Read card **F8** in §2.
+> `Tovis/BookingFlowView.swift:453` omits `clientAddressId` when it asks
+> `/availability/day` for slots, but **sends it** on `createHold` at `:486`. So
+> mobile slots are computed against the pro's base rather than the client's travel
+> radius, and a slot the app happily offers can be refused at hold time. Read card
+> **F7** in §2. The web client passes it (`useDaySlots.ts:104`) and so does the
+> pro-side picker (`ProOpenSlotPicker.swift:108`) — this is a genuine web↔iOS gap,
+> not a spec question.
 >
-> The app is *stricter* than the DB, so nothing unsafe slips through — the cost is
-> the other way round: a session **completed early** still blocks its full original
-> duration + buffer in availability, and the durable backstop covers only 3 of the
-> 4 statuses the app claims to enforce. Nothing pins them together.
+> **This is the first iOS-only card in the queue, and iOS claims in this document
+> are CODE READS.** F14 is the precedent worth remembering: its premise held, but
+> only driving the simulator revealed a layout defect no test could see. The
+> repo's own rule (`green-tests-wrong-artifact`) is to drive the real thing —
+> `scripts/sim-login.sh`, and taps go through `group 1 of window 1` via cliclick.
+> Confirm on-device that the offered slots actually change once the address is
+> passed; a one-line diff that compiles is not evidence.
 >
-> **This card carries a DECISION, so surface it rather than picking silently:**
-> should a COMPLETED booking occupy FUTURE time at all? F11 found DB-side evidence
-> that excluding it from the constraint was deliberate, which points at dropping
-> COMPLETED from `BOOKING_BLOCKING_STATUSES` — but that widens what can be booked,
-> so it is a behaviour change on the money path and reads as Tori's call.
-> **Establish the blast radius before asking**: grep every consumer of
-> `BOOKING_BLOCKING_STATUSES` and say what each one starts allowing.
+> **Check the parameter is plumbed, not just added.** Before assuming it is a
+> one-liner: verify `booking.day()` in `TovisKit` forwards it, that the client's
+> selected address is in scope at `:453` (it may be chosen *after* the day query
+> in the flow's order), and what the endpoint does with a **nil** address for a
+> MOBILE offering — offering every slot and refusing at hold is the bug; offering
+> none would be a different one.
 >
-> **Then add the parity test** asserting the three (four) sets agree, so the next
-> divergence fails a build instead of being found by another audit.
+> **What F8 just proved, and applies directly here.** The doc's own recommendation
+> for F8 (drop COMPLETED) was **wrong**, and what killed it was one lookup —
+> `advanceNoticeMinutes` defaults to 15, so the "safe" cleanup would have exposed
+> the pro's travel buffer. A recommendation written by an earlier session is not
+> evidence; go and read the number it rests on.
 >
-> **What F6 just proved, and applies directly here.** F6's second half was filed
-> as a refactor ("replace the inline queries with the shared reader") and turned
-> out to be a **behaviour change**: the two copies had drifted, and the inline one
-> mis-sized every hold whose snapshot exceeded its offering's duration. F8 is the
-> same shape — four copies of one definition — so **diff the copies and write down
-> what each difference DOES** before consolidating. A duplicate that has drifted
-> is a bug report, not a cleanup.
->
-> **Order from here: F8 → F7 (iOS) → F9 → F10 (iOS) → F12 → F16.**
+> **Order from here: F7 (iOS) → F9 → F10 (iOS) → F12 → F16.**
 > Tori wants the ENTIRE queue closed. F12 needs UI on web **and** iOS before its
 > server half can ship; F16 (new, opened by F15) is the same shape.
 >

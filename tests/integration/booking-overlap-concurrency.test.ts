@@ -1215,31 +1215,11 @@ describe('booking overlap concurrency integration', () => {
     ).resolves.toBe(2)
   })
 
-  it('database allows active booking to overlap completed and cancelled bookings', async () => {
+  it('database allows active booking to overlap released (cancelled / no-show) bookings', async () => {
     if (!fixtures) throw new Error('Missing fixtures')
 
-    const completedStart = futureUtc(17, 18, 0)
-    const cancelledStart = futureUtc(17, 20, 0)
-
-    await createDirectBooking({
-      clientId: fixtures.clients[0].clientId,
-      start: completedStart,
-      locationId: fixtures.salonLocationId,
-      locationType: ServiceLocationType.SALON,
-      status: BookingStatus.COMPLETED,
-      durationMinutes: 60,
-      bufferMinutes: 15,
-    })
-
-    await createDirectBooking({
-      clientId: fixtures.clients[1].clientId,
-      start: addMinutes(completedStart, 30),
-      locationId: fixtures.suiteLocationId,
-      locationType: ServiceLocationType.SALON,
-      status: BookingStatus.ACCEPTED,
-      durationMinutes: 60,
-      bufferMinutes: 15,
-    })
+    const cancelledStart = futureUtc(17, 18, 0)
+    const noShowStart = futureUtc(17, 20, 0)
 
     await createDirectBooking({
       clientId: fixtures.clients[0].clientId,
@@ -1256,6 +1236,26 @@ describe('booking overlap concurrency integration', () => {
       start: addMinutes(cancelledStart, 30),
       locationId: fixtures.suiteLocationId,
       locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await createDirectBooking({
+      clientId: fixtures.clients[0].clientId,
+      start: noShowStart,
+      locationId: fixtures.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.NO_SHOW,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await createDirectBooking({
+      clientId: fixtures.clients[1].clientId,
+      start: addMinutes(noShowStart, 30),
+      locationId: fixtures.suiteLocationId,
+      locationType: ServiceLocationType.SALON,
       status: BookingStatus.PENDING,
       durationMinutes: 60,
       bufferMinutes: 15,
@@ -1268,6 +1268,150 @@ describe('booking overlap concurrency integration', () => {
         },
       }),
     ).resolves.toBe(4)
+  })
+
+  it('database rejects an active booking overlapping a COMPLETED one', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const completedStart = futureUtc(17, 22, 0)
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: completedStart,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.COMPLETED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await expectDbBookingOverlapRejection(() =>
+      createDirectBooking({
+        clientId: fx.clients[1].clientId,
+        start: addMinutes(completedStart, 30),
+        locationId: fx.suiteLocationId,
+        locationType: ServiceLocationType.SALON,
+        status: BookingStatus.ACCEPTED,
+        durationMinutes: 60,
+        bufferMinutes: 15,
+      }),
+    )
+
+    await expect(
+      db.booking.count({ where: { professionalId: fx.professionalId } }),
+    ).resolves.toBe(1)
+  })
+
+  // F8. Four definitions of "which statuses occupy a professional's calendar"
+  // had drifted apart, the durable one being the loosest. They are one constant
+  // now (BOOKING_BLOCKING_STATUSES), but the constant and the EXCLUDE predicate
+  // still live in two languages and can only be held together from outside.
+  //
+  // This walks EVERY value of the BookingStatus enum rather than a hand-listed
+  // few, so a status added to the schema later is covered the day it lands: it
+  // will be occupying or not in Postgres, and the array must agree.
+  //
+  // Membership is read behaviourally, never by parsing pg_get_constraintdef —
+  // what matters is what the database DOES. A pair is refused only when BOTH
+  // rows are in the predicate, so pairing the status under test against a known
+  // occupying status (ACCEPTED) isolates the one being probed.
+  it('the DB overlap predicate covers exactly BOOKING_BLOCKING_STATUSES', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const allStatuses = Object.values(BookingStatus)
+
+    // The partner must itself be occupying, or nothing is ever refused and
+    // every status reads as free — the walk would pass while proving nothing.
+    expect(BOOKING_BLOCKING_STATUSES).toContain(BookingStatus.ACCEPTED)
+    // Tripwire, not a mechanic: if this ever fails, every status has become
+    // occupying, which would mean CANCELLED / NO_SHOW stopped releasing their
+    // time. That is a product decision, so make someone look at it here.
+    expect(allStatuses.length).toBeGreaterThan(BOOKING_BLOCKING_STATUSES.length)
+
+    const dbOccupies: Record<string, boolean> = {}
+    const appOccupies: Record<string, boolean> = {}
+
+    for (const [index, status] of allStatuses.entries()) {
+      // A fresh day per status so neither the probe nor its partner can collide
+      // with a previous iteration's leftovers.
+      const start = futureUtc(30 + index, 18, 0)
+
+      await createDirectBooking({
+        clientId: fx.clients[0].clientId,
+        start,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        status,
+        durationMinutes: 60,
+        bufferMinutes: 15,
+      })
+
+      let refused = false
+      try {
+        await createDirectBooking({
+          clientId: fx.clients[1].clientId,
+          start: addMinutes(start, 30),
+          locationId: fx.suiteLocationId,
+          locationType: ServiceLocationType.SALON,
+          status: BookingStatus.ACCEPTED,
+          durationMinutes: 60,
+          bufferMinutes: 15,
+        })
+      } catch (error: unknown) {
+        // Only the overlap constraint counts as "occupied" — any other failure
+        // (a bad fixture, a schema change) must surface, not read as occupancy.
+        expect(errorText(error)).toContain(BOOKING_OVERLAP_CONSTRAINT)
+        refused = true
+      }
+
+      dbOccupies[status] = refused
+      appOccupies[status] = BOOKING_BLOCKING_STATUSES.includes(status)
+    }
+
+    // Compared as whole maps so a mismatch names every offending status at once
+    // and says which side is which, rather than failing on the first one.
+    expect(dbOccupies).toEqual(appOccupies)
+  })
+
+  it('an authorized overlap stays exempt once it completes', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const start = futureUtc(19, 18, 0)
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    // The pro's deliberate double-book: flagged, so it leaves the GIST index.
+    const overlappingId = await createDirectBooking({
+      clientId: fx.clients[1].clientId,
+      start: addMinutes(start, 30),
+      locationId: fx.suiteLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+      allowsOverlap: true,
+    })
+
+    // Completing it must not drag it back under the widened predicate — that
+    // would make a pro unable to close out their own authorized double-book.
+    await expect(
+      db.booking.update({
+        where: { id: overlappingId },
+        data: { status: BookingStatus.COMPLETED },
+        select: { id: true },
+      }),
+    ).resolves.toEqual({ id: overlappingId })
   })
 
   it('database rejects direct overlapping holds for the same professional', async () => {
