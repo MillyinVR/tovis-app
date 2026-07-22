@@ -2148,3 +2148,58 @@ update to the table in §4.)
 > - CI: `security-scan` / "Dependency audit" is **green** on main (#706 pinned
 >   `sharp` and `@babel/core` forward with `pnpm.overrides`). Those entries are a
 >   ceiling, not a cure — prune them when `next` ships its own patched range.
+
+---
+
+## 5. Next session — paste this in
+
+This chain keeps its prompt here, not in the `NEXT-SESSION-PROMPT.md` memory
+(that file belongs to the personalization/ranking chain). Overwrite this section
+each session.
+
+```
+Do ONE step of the scheduling-conflict audit fix queue: F16.
+
+Read `docs/design/scheduling-conflict-audit-fix-plan.md` FIRST — it is both the
+queue AND the write-ups, including which card premises did NOT survive contact.
+Do not re-derive what is already written there. F1–F9, F11 and F13–F15 are done;
+F10, F12 and F16 are open.
+
+F16 — "a pro cannot tell that their own opening has gone dark". Since F15 (#714)
+a last-minute opening whose slot is booked / blocked / outside-hours is hidden
+from clients, but the pro's own list (`GET /api/v1/pro/openings`) still shows it
+as a plain `ACTIVE` row — and the pro is the only person who can fix it (re-open
+the day, delete the block, cancel the opening). The card's proposed fix: run the
+same `checkStoredSlotsAreOpen` (`lib/booking/storedSlotLiveness.ts`) the client
+feeds already use, and return the verdict as a per-row status, with a badge on
+web AND iOS — "not visible to clients: that time is booked / blocked / outside
+your hours". Two-platform card like F12: land both sides together.
+
+Three things earlier cards left for F16 specifically:
+- `storedSlotLiveness`'s `LOCATION_UNAVAILABLE` verdict is deliberately COARSER
+  than the gate it mirrors. Nothing reads the difference today because all five
+  call sites only use `verdict.open`. F16's badge is the first consumer that has
+  to EXPLAIN a verdict — decide there whether the reason codes need splitting.
+  (See the "Not verified / not checked" note under "F15 — what shipped".)
+- `pro/openings` now uses the shared `proOpeningSelect` from
+  `lib/lastMinute/openingSelect.ts` (F9, #719). It deliberately OMITS the
+  client-facing select's `services.where.offering.isActive` and
+  `tierPlans.where.cancelledAt: null` filters, so the pro sees the full truth.
+  Check the badge logic agrees with that before adding fields.
+- F15 deliberately left the pro's view untouched so the pro could still cancel a
+  dead opening. Do not hide the row — F16 is about a SIGNAL, not a filter.
+
+House rules apply — read CLAUDE.md. In particular: diff/verify before assuming a
+card's premise holds (F9 was filed 🟡 and contained a live DST bug, and two of
+its rows' premises were wrong), prove every new guard RED before calling it
+green, include at least one ALLOW case, and drive the real artifact — the page
+and the simulator — not just the tests.
+
+Ship cadence: branch off origin/main, one PR per repo touched, watch CI, merge
+when green, fast-forward local main. 🚫 Do NOT deploy to Vercel — that stays
+Tori's call. Note in the report that #705–#719 are merged and still awaiting a
+prod deploy (two migrations pending, one an ADD CONSTRAINT worth re-checking).
+
+Do not start other workstreams. If F16 finishes early, wrap up and hand off
+rather than pulling F12 or F10 in.
+```
