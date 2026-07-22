@@ -616,7 +616,7 @@ are for). No migration; revert is a straight code revert.
 
 **Net for F9:** the biggest single entry in the duplicate-logic table
 (`createLastMinuteOpening.ts:1073`, ~150 lines over five tables) is now gone —
-55 insertions against 145 deletions.
+63 insertions against 147 deletions in that file.
 
 ### F15 — what shipped
 
