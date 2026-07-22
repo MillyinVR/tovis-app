@@ -315,7 +315,13 @@ test('an off-hours waitlist offer refuses inline and the pro can still send one'
     )?.status,
   ).toBe(WaitlistStatus.ACTIVE)
 
-  // 5) The pro fixes what only the pro can fix, and the same slot goes out.
+  // 5) The pro fixes what only the pro can fix, and the SAME slot goes out.
+  //
+  // The retry reuses the same idempotency key (scope + entry + slot ISO, in the
+  // same ~60s bucket), and that is deliberate rather than lucky: only a
+  // COMPLETED record replays, while the refusal left the row FAILED with an
+  // elapsed `lockedUntil`, so the identical request is re-claimed and re-run.
+  // A refused offer therefore does not burn the pro's key.
   await prisma.professionalLocation.update({
     where: { id: seed.locationId },
     data: { workingHours: workingHours('18:00') },
@@ -331,4 +337,8 @@ test('an off-hours waitlist offer refuses inline and the pro can still send one'
   expect(offers).toHaveLength(1)
   expect(offers[0]?.status).toBe(WaitlistOfferStatus.PENDING)
   expect(offers[0]?.durationMinutes).toBe(60)
+  // The last slot of a 09:00-18:00 day on a 60-minute grid, in the fixture's
+  // UTC zone — i.e. the very slot that was refused a moment ago, not some other
+  // one the picker happened to re-render.
+  expect(offers[0]?.startsAt.toISOString()).toBe(`${offerYmd()}T17:00:00.000Z`)
 })
