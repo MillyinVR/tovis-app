@@ -17,10 +17,16 @@ import {
 
 import {
   confirmClientWaitlistOffer,
+  createHold,
   createWaitlistOffer,
   declineClientWaitlistOffer,
+  releaseHold,
 } from '@/lib/booking/writeBoundary'
-import { minutesSinceMidnightInTimeZone } from '@/lib/time'
+import { WAITLIST_OFFER_TTL_MINUTES } from '@/lib/booking/constants'
+import { computeDaySlotsFast } from '@/lib/availability/core/dayComputation'
+import { parseYYYYMMDD } from '@/lib/availability/core/summaryWindow'
+import { loadBusyIntervalsForWindow } from '@/lib/booking/conflictQueries'
+import { minutesSinceMidnightInTimeZone, utcDateToLocalYmd } from '@/lib/time'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -36,6 +42,8 @@ type Fixtures = {
   proUserId: string
   professionalId: string
   clientId: string
+  /** A second client, for "someone else takes the slot" races. */
+  rivalClientId: string
   serviceId: string
   salonLocationId: string
   offeringId: string
@@ -130,6 +138,20 @@ beforeAll(async () => {
     select: { id: true },
   })
 
+  const rivalUser = await db.user.create({
+    data: { email: `${TAG}_rival@example.com`, password: 'x', role: Role.CLIENT },
+    select: { id: true },
+  })
+  const rivalClient = await db.clientProfile.create({
+    data: {
+      userId: rivalUser.id,
+      homeTenantId: tenant.id,
+      firstName: 'Riva',
+      lastName: 'Racer',
+    },
+    select: { id: true },
+  })
+
   const category = await db.serviceCategory.create({
     data: { name: `${TAG} Cat`, slug: `${TAG}-cat`, isActive: true },
     select: { id: true },
@@ -188,6 +210,7 @@ beforeAll(async () => {
     proUserId: proUser.id,
     professionalId: professional.id,
     clientId: client.id,
+    rivalClientId: rivalClient.id,
     serviceId: service.id,
     salonLocationId: salon.id,
     offeringId: offering.id,
@@ -204,6 +227,9 @@ afterAll(async () => {
     await db.reminder.deleteMany({ where: pro })
     await db.notification.deleteMany({ where: pro })
     await db.bookingServiceItem.deleteMany({ where: { booking: pro } })
+    // Holds before offers/locations: ProfessionalLocation RESTRICTs a referencing
+    // hold, and an offer's own hold would otherwise only go via its cascade.
+    await db.bookingHold.deleteMany({ where: pro })
     await db.waitlistOffer.deleteMany({ where: pro })
     await db.waitlistEntry.deleteMany({ where: pro })
     await db.booking.deleteMany({ where: pro })
@@ -212,11 +238,19 @@ afterAll(async () => {
     await db.professionalPaymentSettings.deleteMany({ where: pro })
     await db.service.deleteMany({ where: { id: fx.serviceId } })
     await db.serviceCategory.deleteMany({ where: { name: `${TAG} Cat` } })
-    await db.clientProfile.deleteMany({ where: { id: fx.clientId } })
+    await db.clientProfile.deleteMany({
+      where: { id: { in: [fx.clientId, fx.rivalClientId] } },
+    })
     await db.professionalProfile.deleteMany({ where: { id: fx.professionalId } })
     await db.user.deleteMany({
       where: {
-        email: { in: [`${TAG}_pro@example.com`, `${TAG}_client@example.com`] },
+        email: {
+          in: [
+            `${TAG}_pro@example.com`,
+            `${TAG}_client@example.com`,
+            `${TAG}_rival@example.com`,
+          ],
+        },
       },
     })
   }
@@ -628,6 +662,374 @@ describe('waitlist offer → client confirm (real DB)', () => {
       ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
     } finally {
       await db.booking.delete({ where: { id: taken.id } })
+    }
+  })
+
+  // ── F14: a pro-CHOSEN time reserves the spot ────────────────────────────────
+  //
+  // Tori, 2026-07-21: "if a pro chooses a time it should reserve the spot."
+  // The offer now places a BookingHold over the window it promised, released
+  // wherever the offer stops being live.
+
+  /** The hold reserving an offer's slot, or null. */
+  async function holdForOffer(offerId: string) {
+    return db.bookingHold.findFirst({ where: { waitlistOfferId: offerId } })
+  }
+
+  /** The offering fields createHold needs, for a rival client racing the slot. */
+  const holdOffering = () => ({
+    id: fx.offeringId,
+    professionalId: fx.professionalId,
+    offersInSalon: true,
+    offersMobile: false,
+    salonDurationMinutes: 60,
+    mobileDurationMinutes: null,
+    salonPriceStartingAt: new Prisma.Decimal('100.00'),
+    mobilePriceStartingAt: null,
+    professionalTimeZone: ZONE,
+  })
+
+  /** Does the pro's live availability still emit `start` as a bookable slot? */
+  async function availabilityOffers(start: Date): Promise<boolean> {
+    const busy = await loadBusyIntervalsForWindow({
+      professionalId: fx.professionalId,
+      locationId: fx.salonLocationId,
+      windowStartUtc: new Date(start.getTime() - 6 * 60 * 60_000),
+      windowEndUtc: new Date(start.getTime() + 6 * 60 * 60_000),
+      defaultBufferMinutes: 0,
+    })
+
+    const dateYMD = parseYYYYMMDD(utcDateToLocalYmd(start, ZONE))
+    if (!dateYMD) throw new Error('fixture start is not a valid local date')
+
+    const result = await computeDaySlotsFast({
+      dateYMD,
+      durationMinutes: 60,
+      stepMinutes: 15,
+      timeZone: ZONE,
+      workingHours: workingHours(),
+      leadTimeMinutes: 0,
+      locationBufferMinutes: 0,
+      maxAdvanceDays: 365,
+      busy,
+    })
+
+    if (!result.ok) throw new Error(`availability failed: ${result.code}`)
+
+    return result.slots.some(
+      (slot) => new Date(slot).getTime() === start.getTime(),
+    )
+  }
+
+  it('reserves the offered slot with a hold that expires with the offer', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(20, 13, 0)
+
+    // The slot is genuinely on offer before we take it, or the assertion below
+    // would pass against a slot that was never bookable.
+    expect(await availabilityOffers(start)).toBe(true)
+
+    const before = Date.now()
+    const { offer } = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: start,
+      endsAt: new Date(start.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    const hold = await holdForOffer(offer.id)
+    expect(hold).not.toBeNull()
+    expect(hold?.scheduledFor.getTime()).toBe(start.getTime())
+    expect(hold?.clientId).toBe(fx.clientId)
+    expect(hold?.durationMinutesSnapshot).toBe(60)
+    expect(hold?.endsAtSnapshot?.getTime()).toBe(start.getTime() + 60 * 60_000)
+
+    // The reservation and the offer die together: one policy, two rows.
+    expect(hold?.expiresAt.getTime()).toBe(offer.expiresAt.getTime())
+
+    // 24h TTL — the slot is 20 days out, so the advance-notice ceiling
+    // (advanceNoticeMinutes = 0 here) is not the binding one.
+    const ttlMs = WAITLIST_OFFER_TTL_MINUTES * 60_000
+    expect(offer.expiresAt.getTime()).toBeGreaterThanOrEqual(before + ttlMs - 5_000)
+    expect(offer.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + ttlMs)
+
+    // …and the point of all of it: the slot has left the pro's availability.
+    expect(await availabilityOffers(start)).toBe(false)
+  })
+
+  // The guarantee itself. Without the hold this create SUCCEEDS and the waitlist
+  // client's confirm later fails — exactly the promise F14 forbids.
+  it('stops another client taking the offered slot', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(21, 13, 0)
+
+    await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: start,
+      endsAt: new Date(start.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    await expect(
+      createHold({
+        clientId: fx.rivalClientId,
+        bookingEntryPoint: 'DIRECT_PROFILE',
+        offering: holdOffering(),
+        requestedStart: start,
+        requestedLocationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+      }),
+    ).rejects.toMatchObject({ code: 'TIME_HELD' })
+  })
+
+  // The offered client browsing for a DIFFERENT appointment must not silently
+  // hand their reservation back: performLockedCreateHold drops that client's
+  // live holds with this pro, and the offer's hold is exempt by waitlistOfferId.
+  it('survives the same client starting an unrelated hold', async () => {
+    const entryId = await createEntry()
+    const offered = futureLocal(22, 13, 0)
+    const elsewhere = futureLocal(22, 16, 0)
+
+    const { offer } = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: offered,
+      endsAt: new Date(offered.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    const own = await createHold({
+      clientId: fx.clientId,
+      bookingEntryPoint: 'DIRECT_PROFILE',
+      offering: holdOffering(),
+      requestedStart: elsewhere,
+      requestedLocationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      clientAddressId: null,
+    })
+
+    expect(await holdForOffer(offer.id)).not.toBeNull()
+    expect(await availabilityOffers(offered)).toBe(false)
+
+    // The client's own hold is still subject to the one-per-pro rule.
+    await db.bookingHold.deleteMany({ where: { id: own.hold.id } })
+  })
+
+  // Declining is how the client gives the time back.
+  it('decline releases the reservation', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(23, 13, 0)
+
+    const { offer } = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: start,
+      endsAt: new Date(start.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+    expect(await holdForOffer(offer.id)).not.toBeNull()
+
+    await declineClientWaitlistOffer({ offerId: offer.id, clientId: fx.clientId })
+
+    expect(await holdForOffer(offer.id)).toBeNull()
+    expect(await availabilityOffers(start)).toBe(true)
+  })
+
+  // Re-offering an OVERLAPPING time is the case the day-apart supersede test
+  // above cannot reach: the pro's own outstanding reservation is a fatal HOLD
+  // conflict at the gate, so the supersede has to release it FIRST.
+  it('re-offers an overlapping time, releasing the superseded reservation first', async () => {
+    const entryId = await createEntry()
+    const first = futureLocal(24, 13, 0)
+    const second = futureLocal(24, 13, 30) // overlaps the first 60-min window
+
+    const one = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: first,
+      endsAt: new Date(first.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    const two = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: second,
+      endsAt: new Date(second.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    expect(await holdForOffer(one.offer.id)).toBeNull()
+    expect(await holdForOffer(two.offer.id)).not.toBeNull()
+
+    // Exactly one reservation for this entry — the replacement's.
+    const liveHolds = await db.bookingHold.count({
+      where: { waitlistOffer: { waitlistEntryId: entryId } },
+    })
+    expect(liveHolds).toBe(1)
+  })
+
+  // Confirming books over the offer's OWN reservation. The create runs the
+  // overlap policy as a CLIENT, so an unreleased hold refuses with TIME_HELD.
+  it('confirm books the reserved slot and consumes the reservation', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(25, 13, 0)
+
+    const { offer } = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: start,
+      endsAt: new Date(start.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    const result = await confirmClientWaitlistOffer({
+      offerId: offer.id,
+      clientId: fx.clientId,
+      idempotencyKey: `${TAG}-confirm-reserved`,
+    })
+
+    expect(result.booking.status).toBe(BookingStatus.ACCEPTED)
+    expect(result.booking.scheduledFor.getTime()).toBe(start.getTime())
+    expect(await holdForOffer(offer.id)).toBeNull()
+  })
+
+  // The reservation is the pro's, not the client's: DECLINE gives it back, a
+  // hold release does not. Unreachable through the UI (the hold id is never on
+  // an offer surface) — asserted so it stays that way.
+  it('refuses a client releasing the reservation as an ordinary hold', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(26, 13, 0)
+
+    const { offer } = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: start,
+      endsAt: new Date(start.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    const hold = await holdForOffer(offer.id)
+    expect(hold).not.toBeNull()
+
+    await expect(
+      releaseHold({ holdId: hold!.id, clientId: fx.clientId }),
+    ).rejects.toMatchObject({ code: 'HOLD_FORBIDDEN' })
+
+    expect(await holdForOffer(offer.id)).not.toBeNull()
+  })
+
+  // The hold EXCLUDE constraint carries no expiry predicate, so a dead hold row
+  // still occupies the index until the 5-minute sweep cron clears it — while the
+  // app gate, which filters on expiresAt, calls the slot free. The offer must
+  // clear the pro's expired rows itself or the insert 23P01s on a hold the gate
+  // already waved through. An ALLOW case: the refusal side cannot show this.
+  it('offers a slot whose only occupant is an expired hold', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(28, 13, 0)
+
+    const stale = await db.bookingHold.create({
+      data: {
+        professionalId: fx.professionalId,
+        clientId: fx.rivalClientId,
+        offeringId: fx.offeringId,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        scheduledFor: start,
+        endsAtSnapshot: new Date(start.getTime() + 60 * 60_000),
+        durationMinutesSnapshot: 60,
+        bufferMinutesSnapshot: 0,
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+      select: { id: true },
+    })
+
+    const { offer } = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: start,
+      endsAt: new Date(start.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+
+    expect(await holdForOffer(offer.id)).not.toBeNull()
+    expect(
+      await db.bookingHold.findUnique({ where: { id: stale.id } }),
+    ).toBeNull()
+  })
+
+  // The TTL's other half: an offer must not outlive the moment its confirm
+  // starts refusing ADVANCE_NOTICE_REQUIRED, which lands well inside 24h for a
+  // pro with real advance notice.
+  it('expires at the advance-notice cutoff when that comes before 24h', async () => {
+    const entryId = await createEntry()
+    // Tomorrow at 13:00 local: 20–44h out depending on the clock, so the notice
+    // is derived from the real gap rather than assumed. One hour short of it
+    // keeps the offer sendable (the gate needs start >= now + notice) while
+    // putting the cutoff an hour from now — far inside the 24h TTL, whichever
+    // of the two would otherwise win.
+    const start = futureLocal(1, 13, 0)
+    const gapMinutes = Math.floor((start.getTime() - Date.now()) / 60_000)
+    const advanceNoticeMinutes = Math.min(24 * 60, Math.max(15, gapMinutes - 60))
+
+    await db.professionalLocation.update({
+      where: { id: fx.salonLocationId },
+      data: { advanceNoticeMinutes },
+    })
+
+    try {
+      const { offer } = await createWaitlistOffer({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        waitlistEntryId: entryId,
+        scheduledFor: start,
+        endsAt: new Date(start.getTime() + 60 * 60_000),
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      })
+
+      expect(offer.expiresAt.getTime()).toBe(
+        start.getTime() - advanceNoticeMinutes * 60_000,
+      )
+
+      const hold = await holdForOffer(offer.id)
+      expect(hold?.expiresAt.getTime()).toBe(offer.expiresAt.getTime())
+    } finally {
+      await db.professionalLocation.update({
+        where: { id: fx.salonLocationId },
+        data: { advanceNoticeMinutes: 0 },
+      })
     }
   })
 

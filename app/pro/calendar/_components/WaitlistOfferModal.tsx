@@ -149,7 +149,8 @@ export default function WaitlistOfferModal({
               <h2 className="brand-pro-calendar-block-title">Offer a time</h2>
               <p className="brand-pro-calendar-block-description">
                 Propose a time to {clientName || 'this client'} for {serviceName}.
-                They&rsquo;ll confirm before it books.
+                They&rsquo;ll confirm before it books, and the slot is held for
+                them until they answer.
               </p>
             </div>
 

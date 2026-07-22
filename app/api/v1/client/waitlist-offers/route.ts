@@ -49,9 +49,14 @@ function timeZoneFor(row: OfferRow): string {
 }
 
 /**
- * The client's outstanding pro-proposed waitlist time offers (PENDING only),
- * shaped like the priority-offer list so the /client/offers surface can render
- * Confirm/Decline cards alongside last-minute openings.
+ * The client's outstanding pro-proposed waitlist time offers (PENDING and not
+ * yet expired), shaped like the priority-offer list so the /client/offers
+ * surface can render Confirm/Decline cards alongside last-minute openings.
+ *
+ * The `expiresAt` filter mirrors `assertConfirmableWaitlistOffer` exactly: an
+ * expired offer is refused at confirm, so leaving it on the feed would show a
+ * live-looking card whose only outcome is a refusal. Offers written before F14
+ * carry a null `expiresAt` and never expire.
  */
 export async function GET() {
   const auth = await requireClient()
@@ -61,6 +66,7 @@ export async function GET() {
     where: {
       clientId: auth.clientId,
       status: WaitlistOfferStatus.PENDING,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
     orderBy: { createdAt: 'desc' },
     take: 50,
