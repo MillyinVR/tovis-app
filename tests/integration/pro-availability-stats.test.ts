@@ -284,8 +284,16 @@ describe('refreshProfessionalAvailabilityStats (real DB)', () => {
     if (!fx) throw new Error('Fixtures not initialized')
 
     const professionalId = fx.professionalId
+
+    // ONE clock for all three measurements. fullness14d is booked minutes over
+    // the bookable minutes in the next 14 days, and that denominator slides with
+    // the timestamp handed to the refresh — so re-reading `new Date()` each time
+    // made two runs over identical data differ in the 9th decimal, and the
+    // exact-equality assertion below failed at random. Pinning the instant makes
+    // the window identical, so any difference really is the bookings.
+    const at = new Date()
     const fullnessNow = async (): Promise<number> => {
-      await refreshProfessionalAvailabilityStats(db, new Date())
+      await refreshProfessionalAvailabilityStats(db, at)
       const row = await db.professionalAvailabilityStat.findUnique({
         where: { professionalId },
       })

@@ -765,12 +765,17 @@ static guards; this was found by looking at the screen.
   `Missing required env PII_AEAD_KEYS_JSON`. Re-run with a throwaway keyring
   built exactly as `.github/workflows/integration.yml` builds it: **34/35 files,
   212/213 tests.**
-- **The one remaining integration failure is pre-existing and not F12's.**
-  `pro-availability-stats.test.ts` compares two floats
-  (`0.01809659250789458` vs `0.01809659218950478`) that differ in the 9th
-  decimal because the fullness window moves with the clock. Reproduced on a
-  **stashed (clean) tree** at the same commit. Worth its own tiny card: the
-  assertion wants `toBeCloseTo`, not `toBe`.
+- **One pre-existing flake was exposed and FIXED, not documented and left.**
+  `pro-availability-stats.test.ts` failed on two floats differing in the 9th
+  decimal. Reproduced on a **stashed (clean) tree**, so not F12's — but it went
+  red on this PR's CI, and a red PR does not ship. The cause is structural, not
+  precision: `fullness14d` is booked minutes over the bookable minutes in the
+  next 14 days, and the test called `refreshProfessionalAvailabilityStats(db,
+  new Date())` afresh for each of its three measurements, so the DENOMINATOR
+  slid between them. The fix pins one instant for all three rather than
+  loosening the assertion to `toBeCloseTo` — the window is now identical, so
+  exact equality means what the test says it means. Proven: the old code fails
+  **3/3** locally, the pinned version passes 3/3.
 - **The propose route holds no advisory lock, deliberately.** The block probe
   here reserves nothing — it is an early read of the gate the approval runs under
   the per-professional lock. Adding a lock to a route that takes no time off the

@@ -113,20 +113,30 @@ function scheduleNoticeFor(
   }
 }
 
-const SCHEDULE_OUTLOOKS: readonly ConsultationScheduleOutlook[] = [
-  'WITHIN_WORKING_HOURS',
-  'PAST_WORKING_HOURS',
-  'ALREADY_OUTSIDE_WORKING_HOURS',
-  'WORKING_HOURS_MISSING',
-  'NOT_CHECKED',
-]
+/**
+ * A `Record` keyed by the union, not a string array: a state added to the server
+ * type fails to compile HERE as well as in the switch. An array typed
+ * `readonly ConsultationScheduleOutlook[]` would happily stay one short, and the
+ * new state would be silently unrecognised — half of the contract, quietly.
+ */
+const SCHEDULE_OUTLOOKS: Record<ConsultationScheduleOutlook, true> = {
+  WITHIN_WORKING_HOURS: true,
+  PAST_WORKING_HOURS: true,
+  ALREADY_OUTSIDE_WORKING_HOURS: true,
+  WORKING_HOURS_MISSING: true,
+  NOT_CHECKED: true,
+}
+
+function isScheduleOutlook(
+  value: string,
+): value is ConsultationScheduleOutlook {
+  return Object.prototype.hasOwnProperty.call(SCHEDULE_OUTLOOKS, value)
+}
 
 function readScheduleOutlook(value: unknown): ConsultationScheduleOutlook | null {
   const raw = pickString(value)
-  if (!raw) return null
-  return (
-    SCHEDULE_OUTLOOKS.find((outlook) => outlook === raw) ?? null
-  )
+  if (!raw || !isScheduleOutlook(raw)) return null
+  return raw
 }
 
 /**
