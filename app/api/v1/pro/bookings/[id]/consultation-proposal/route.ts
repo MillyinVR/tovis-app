@@ -27,8 +27,16 @@ import { upsertClientNotification } from '@/lib/notifications/clientNotification
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { createConsultationActionDelivery } from '@/lib/clientActions/createConsultationActionDelivery'
 import {
+  bookingError,
   isBookingError,
 } from '@/lib/booking/errors'
+import { hasCalendarBlockConflict } from '@/lib/booking/conflictQueries'
+import {
+  consultationExtensionWindow,
+  resolveConsultationMaterialization,
+  resolveConsultationScheduleOutlook,
+  type ConsultationScheduleOutlook,
+} from '@/lib/consultation/proposalSchedule'
 import {
   bookingErrorJsonFail,
   bookingJsonFail,
@@ -91,6 +99,23 @@ type TxFail = {
   forcedStep?: SessionStep
 }
 
+/**
+ * F12 — what the proposal does to the appointment's end time, returned on every
+ * success so the pro learns it from the act of sending rather than from the
+ * client bouncing off it later.
+ *
+ * `endsAt` is a UTC instant and `timeZone` the appointment's zone; when the zone
+ * could not be resolved it is null and `outlook` is `NOT_CHECKED`, and a client
+ * must not render a wall-clock time it has no zone for.
+ */
+type ProposalScheduleSummary = {
+  endsAt: Date
+  durationMinutes: number
+  bufferMinutes: number
+  timeZone: string | null
+  outlook: ConsultationScheduleOutlook
+}
+
 type TxOk = {
   ok: true
   approval: {
@@ -101,6 +126,7 @@ type TxOk = {
   }
   sessionStep: SessionStep
   proposedCents: number
+  schedule: ProposalScheduleSummary
   meta: {
     mutated: boolean
     noOp: boolean
@@ -628,7 +654,18 @@ export async function POST(req: Request, ctx: RouteContext) {
           startedAt: true,
           finishedAt: true,
           sessionStep: true,
-          professional: { select: professionalPublicDisplayNameSelect },
+          // F12 — the columns the propose-time schedule check reads.
+          // `locationId` because calendar blocks are location-aware; the rest
+          // to place the extension window and judge it against working hours.
+          scheduledFor: true,
+          totalDurationMinutes: true,
+          bufferMinutes: true,
+          locationId: true,
+          locationType: true,
+          locationTimeZone: true,
+          professional: {
+            select: { ...professionalPublicDisplayNameSelect, timeZone: true },
+          },
           serviceItems: {
             select: {
               id: true,
@@ -807,6 +844,96 @@ export async function POST(req: Request, ctx: RouteContext) {
         }
       }
 
+      // ── F12 ──────────────────────────────────────────────────────────────
+      // Everything above validates WHAT is being proposed. Nothing until now
+      // asked what it does to the CLOCK — the pro could author an end time no
+      // check had ever seen, and the client was the one who found out, at
+      // approve, on a link that leads nowhere useful.
+      //
+      // Both of these run BEFORE the first write in this transaction. That
+      // matters twice over: a refusal here rolls nothing back (this route
+      // returns plain objects from the tx callback, and a `return` COMMITS),
+      // and the informational half can never take down a proposal that
+      // otherwise succeeded.
+      const materialization = await resolveConsultationMaterialization({
+        tx,
+        professionalId,
+        locationType: booking.locationType,
+        proposedServicesJson: proposal.proposedServicesJson,
+      }).catch((error: unknown) => {
+        // The approval rebuilds every line item from the offering catalog and
+        // refuses what it cannot rebuild. The route's own validation above is
+        // looser — notably it never checks that an offering serves THIS
+        // booking's location mode — so this is the first place a
+        // salon-only service on a mobile appointment is caught. Before F12 it
+        // was caught at approve, as an opaque "Invalid service items." shown
+        // to the client.
+        if (isBookingError(error) && error.code === 'INVALID_SERVICE_ITEMS') {
+          throw bookingError('INVALID_SERVICE_ITEMS', {
+            message: `Consultation proposal cannot be materialized. bookingId=${booking.id}`,
+            userMessage:
+              'One of these services can’t be added to this appointment — it’s no longer active, or it isn’t offered at this appointment’s location. Remove it and send again.',
+          })
+        }
+        throw error
+      })
+
+      const extension = consultationExtensionWindow({
+        scheduledFor: booking.scheduledFor,
+        previousDurationMinutes: booking.totalDurationMinutes,
+        bufferMinutes: booking.bufferMinutes,
+        materializedDurationMinutes: materialization.computedDurationMinutes,
+      })
+
+      // A calendar block is fatal at approve (F2) and never override-gated
+      // anywhere in the repo. Sending a proposal that approval is certain to
+      // refuse only moves the dead end onto the client, so refuse it here —
+      // to the pro, who is the only person who can clear the block. The window
+      // and the probe are the approval's own, so this can never be stricter
+      // than the gate it is standing in front of.
+      if (extension.extendsAppointment) {
+        const blocked = await hasCalendarBlockConflict({
+          tx,
+          professionalId,
+          locationId: booking.locationId,
+          requestedStart: extension.extensionStart,
+          requestedEnd: extension.materializedEnd,
+        })
+
+        if (blocked) {
+          throw bookingError('TIME_BLOCKED', {
+            message: `Consultation proposal extension runs into blocked time. bookingId=${booking.id}`,
+            userMessage:
+              'These services run past this appointment into time you’ve blocked off. Clear the block or trim the proposal, then send again.',
+            // PICK_NEW_SLOT (the catalog default) belongs to the booking flow.
+            // The appointment is underway; there is no slot to pick.
+            uiAction: 'NONE',
+          })
+        }
+      }
+
+      // Working hours INFORM here, they do not refuse — the reasoning lives at
+      // resolveConsultationScheduleOutlook. This never throws.
+      const scheduleOutlook = await resolveConsultationScheduleOutlook({
+        tx,
+        professionalId,
+        locationId: booking.locationId,
+        bookingLocationTimeZone: booking.locationTimeZone,
+        professionalTimeZone: booking.professional?.timeZone ?? null,
+        scheduledFor: booking.scheduledFor,
+        previousEnd: extension.previousEnd,
+        materializedEnd: extension.materializedEnd,
+      })
+
+      const schedule: ProposalScheduleSummary = {
+        endsAt: extension.materializedEnd,
+        durationMinutes: materialization.computedDurationMinutes,
+        bufferMinutes: booking.bufferMinutes,
+        timeZone: scheduleOutlook.timeZone,
+        outlook: scheduleOutlook.outlook,
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       const existingApproval = booking.consultationApproval
       const sameProposal =
         existingApproval?.status === ConsultationApprovalStatus.PENDING &&
@@ -831,6 +958,7 @@ export async function POST(req: Request, ctx: RouteContext) {
           },
           sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
           proposedCents,
+          schedule,
           meta: {
             mutated: false,
             noOp: true,
@@ -946,6 +1074,7 @@ export async function POST(req: Request, ctx: RouteContext) {
         approval,
         sessionStep: stepRes.booking.sessionStep,
         proposedCents,
+        schedule,
         meta: {
           mutated: true,
           noOp: false,
@@ -976,6 +1105,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       approval: txResult.approval,
       sessionStep: txResult.sessionStep,
       proposedCents: txResult.proposedCents,
+      schedule: txResult.schedule,
       consultationActionDelivery,
       meta: txResult.meta,
     })

@@ -148,6 +148,12 @@ Needs the confirm-dialog wiring on **web + iOS** before the server side can ship
 with the flag defaulting to false — otherwise pros hit a refusal with no UI to
 clear it. Ship the two halves together.
 
+> ✅ **Shipped.** The BLOCK half shipped as written. The WORKING-HOURS half did
+> **not**: the override it proposed would have authorized a rule no later write
+> consults, so it informs instead of refusing. The card also missed that propose
+> and approve compute the end time from different numbers. Read "F12 — what
+> shipped" in §4 before reusing anything above.
+
 ### F3 — Retire the second conflict engine 🟠
 
 `lib/booking/schedulingConflicts.ts` (`findSchedulingConflicts`, bookings+holds,
@@ -611,8 +617,210 @@ Named honestly rather than assumed safe:
 | F9 duplicate-logic cleanup | ✅ done — #719 (**found a live DST bug**; 2 premises died; `other-pros` deferred with evidence) |
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — #694 |
-| F12 proposal-time validation | not started (opened by F2) |
+| F12 proposal-time validation | ✅ done — #722 (+ iOS #209) (opened by F2; **the card's working-hours half was rejected on evidence** — see the write-up) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
+
+### F12 — what shipped
+
+**The card's premise held, and half its prescription did not.** The propose route
+really did perform no scheduling check of any kind — confirmed by reading it
+before anything moved. What the card got wrong is *what to do about working
+hours*, and what it never noticed is that the two sides of the consultation were
+computing the end time from **different numbers**.
+
+**🔴 The number the card told F12 to compute is not the number that happens.**
+The card says "compute the materialized end from the proposed items". Taken
+literally that means adding up the `durationMinutes` on each proposal line — and
+those are discarded. `performLockedApproveConsultationMaterialization` rebuilds
+every item from the **offering catalog** (`buildNormalizedBookingItemsFromRequested
+Offerings`, snapped to 15-minute steps) and keeps only the proposal's agreed
+PRICE. The pro can type `1` into the duration box and the booking still
+materializes at the catalog's 180 minutes. A warning computed from the typed
+value would have been confidently wrong, and worse, wrong in the direction that
+lets a real conflict through. So the catalog computation was **extracted** into
+`lib/consultation/proposalSchedule.ts` and both sides now call it: propose and
+approve cannot drift, because there is one function. Pinned against real Postgres
+by `predicts exactly the end time the approval goes on to materialize`.
+
+**🔴 The working-hours override the card asked for would have authorized
+nothing.** The card wanted a 409 `OUTSIDE_WORKING_HOURS` carrying
+`allowOutsideWorkingHours`, matching pro create/reschedule, with a confirm dialog
+on both platforms. Three things say otherwise, and they were checked rather than
+assumed:
+
+1. **No later write consults the rule.** F2 decided — deliberately, with the
+   reasoning in the code — that approval does *not* check working hours. So a
+   `BookingOverrideAuditLog` row written at proposal time would record a pro's
+   consent for a gate that never runs again. The override flag exists on paths
+   where the pro is CHOOSING A TIME; here the time was chosen and validated when
+   the appointment was booked, and the pro is choosing SERVICES.
+2. **The appointment is already underway.** The route requires `startedAt`. A pro
+   who agrees to add a service to a client sitting in their chair has decided to
+   run late; there is no rule against that, and inventing one mid-session behind
+   a modal asking for a written reason is friction for its own sake.
+3. **A refusal here has no exit.** Blocks have one — clear the block. Closing
+   time does not; the pro cannot move it earlier in the day.
+
+So working hours **inform**: the 200 carries the new end time and a state, and the
+pro is told. Blocks are the opposite case and **refuse**, because approval refuses
+them too (F2) — letting the proposal through only moves the dead end onto the
+client, who cannot act on it.
+
+**A third defect fell out of running the real computation early.** The propose
+route never checked that an offering serves the booking's LOCATION MODE, and
+`consultation-services` does not filter the picker by it either. A pro on a MOBILE
+appointment could pick a salon-only service, send it, and the CLIENT would hit an
+opaque `Invalid service items.` at approve with nothing to do about it. Running
+the approval's own rebuild at proposal time catches it, and it gets pro-facing
+copy naming both possible causes. Driven against real Postgres:
+`refuses an offering that does not serve this appointment's location mode`.
+
+**Where the notice lives, and why it is not a badge.** Both platforms unmount the
+consultation form the moment a send succeeds — the screen flips to "Waiting on
+client". A notice rendered inline and then navigated away from is a notice nobody
+reads, which is the F14/F16 "green tests, wrong artifact" shape. So when there is
+something to say the form **holds**: it shows the sentence and does not navigate
+(web) / does not reload the hub (iOS). When there is nothing to say, both
+platforms behave exactly as before.
+
+Shipped:
+
+- **`lib/consultation/proposalSchedule.ts`** — `resolveConsultationMaterialization`
+  (the extracted catalog rebuild, now shared with the approval),
+  `consultationExtensionWindow` (the `[previousEnd, materializedEnd)` math F2
+  established, now in one place), and `resolveConsultationScheduleOutlook`
+  (5 states, exhaustive switch, silent by default, **never throws**).
+- **`ConsultationScheduleDb`** — the module takes a **narrow two-method DB
+  surface**, not `Prisma.TransactionClient`. The real client satisfies it
+  structurally and the test stub type-checks instead of casting through
+  `unknown`, which the type-escape guard rejects and which is exactly how a mock
+  drifts from the wire unnoticed.
+- `lib/booking/writeBoundary.ts` — the approve path now calls the shared module;
+  ~120 lines of duplicated parse/rebuild/window code deleted.
+- The propose route — the block refusal and the outlook, **both before the first
+  write in the transaction**. This route returns plain objects from its `$transaction`
+  callback, and a `return` COMMITS, so a refusal placed after the upsert would
+  have committed a proposal it was refusing.
+- Web: `.brand-pro-session-notice` (`rgb(var(--tone-warn))`, tone token, follows
+  `[data-mode]`) and a `notice` state kept separate from `message`.
+- iOS: `ConsultationScheduleOutlook` + `ConsultationProposalSchedule` in
+  **TovisKit** (nothing in iOS CI compiles `Tovis/`), `Wire.timeOnly`, and the
+  gold notice in `ProConsultationFormView`.
+
+**🟡 Caught by driving, not by a test: the caution rendered green.** The first
+working version reused the form's success `message`, so *"this appointment now
+runs past your working hours"* appeared in `--tone-success` on web and
+`BrandColor.emerald` on iOS — the one thing the pro needs to notice, painted as
+"all good". Both platforms now use the warn tone (`--tone-warn` /
+`BrandColor.gold` — the same two RGB values). Raw colours are not caught by the
+static guards; this was found by looking at the screen.
+
+**Verified. Every guard proven red first — fourteen mutations:**
+
+| mutation | what goes red |
+| --- | --- |
+| block refusal removed | `refuses a proposal whose extension runs into blocked time` |
+| probe the whole window, not the extension | `probes only the extension window…` (unit) + `ALLOWS a block that sits over the ALREADY-BOOKED window` (real DB) |
+| probe even when the proposal doesn't extend | `ALLOWS a proposal that does not grow the appointment` |
+| refuse on `PAST_WORKING_HOURS` | **only** `ALLOWS a proposal that runs past working hours` |
+| `schedule` dropped from the response | 6 tests, incl. 3 that predate F12 |
+| duration read from the pro's typed value | `probes only the extension window, using the catalog duration` |
+| approve materializes a different duration | `predicts exactly the end time the approval goes on to materialize` (real DB) |
+| never compare against the PREVIOUS end | `does NOT blame the proposal for an appointment already running late` (unit **and** real-DB twins) |
+| outlook resolver allowed to throw | `NEVER throws — a display concern must not take down the write` |
+| unanswered question → "you're fine" | 4 tests |
+| booking's location mode ignored | `refuses an offering that does not serve this appointment's location mode` |
+| web parser never reads `schedule` | 2 tests — the "nobody re-read it" failure |
+| web navigates away anyway | the same 2 |
+| web speaks in every state | **only** the 3 ALLOW cases — which is the point of having them |
+| web renders the clock in the BROWSER's zone | `drops the clock when the server could not resolve a time zone` |
+| iOS: unknown outlook → `.withinWorkingHours` | `anUnknownOutlookDecodesToNotChecked` |
+| iOS: blame a pre-existing after-hours appointment | 2 tests |
+| iOS: clock in the DEVICE zone | `dropsTheClockWhenTheServerCouldNotResolveAZone` |
+
+- **Real HTTP, all three outcomes**, against `pnpm dev:test-db` with its own
+  fixture and a minted pro JWT: a 12:00 start → `WITHIN_WORKING_HOURS`, `endsAt`
+  15:15 local, 200; a 16:00 start → `PAST_WORKING_HOURS`, `endsAt` 19:15 local,
+  **still 200**; a block laid at +120min → **409 `TIME_BLOCKED`, `uiAction:
+  NONE`**, and the DB confirmed the refusal left **nothing**: no
+  `ConsultationApproval`, no `Notification`, no `ClientActionToken`, `sessionStep`
+  unmoved.
+- **The real page**, driven in a browser as the signed-in pro: silent + advances
+  to "Waiting on client" on a clean send (verified in the DB); the amber sentence
+  with the form still mounted when it runs late; the ember refusal when blocked.
+  Light **and** dark — `rgb(183,131,31)` / `rgb(242,180,62)`, the two
+  `--tone-warn` values.
+- **iOS on device (iPhone 17 Pro)**, driven through the real session hub: the
+  gold notice with the time **wrapping onto two lines rather than truncating**
+  (the F14 failure mode, checked not assumed), the ember block refusal wrapping
+  onto three, and the DB proving the refusal wrote nothing.
+- `typecheck` clean, `lint` **0 errors**, **all 13 static guards pass**,
+  **713 files / 6963 unit tests**, iOS app target **BUILD SUCCEEDED** +
+  **872 TovisKit tests / 113 suites**.
+
+**Checked, so it is not a caveat:**
+
+- **The integration suite's local failures are the known keyring gap, proven not
+  assumed.** All 26 stack frames throw from `getAeadKey` →
+  `Missing required env PII_AEAD_KEYS_JSON`. Re-run with a throwaway keyring
+  built exactly as `.github/workflows/integration.yml` builds it: **34/35 files,
+  212/213 tests.**
+- **One pre-existing flake was exposed and FIXED, not documented and left.**
+  `pro-availability-stats.test.ts` failed on two floats differing in the 9th
+  decimal. Reproduced on a **stashed (clean) tree**, so not F12's — but it went
+  red on this PR's CI, and a red PR does not ship. The cause is structural, not
+  precision: `fullness14d` is booked minutes over the bookable minutes in the
+  next 14 days, and the test called `refreshProfessionalAvailabilityStats(db,
+  new Date())` afresh for each of its three measurements, so the DENOMINATOR
+  slid between them. The fix pins one instant for all three rather than
+  loosening the assertion to `toBeCloseTo` — the window is now identical, so
+  exact equality means what the test says it means. Proven: the old code fails
+  **3/3** locally, the pinned version passes 3/3.
+- **The propose route holds no advisory lock, deliberately.** The block probe
+  here reserves nothing — it is an early read of the gate the approval runs under
+  the per-professional lock. Adding a lock to a route that takes no time off the
+  calendar would be cost with no claim behind it.
+- **The DTO is not in `lib/dto/index.ts`**, so no `gen:api-schema` regeneration;
+  `check:api-schema` passes and the iOS contract job does not cover pro-side
+  routes. iOS decodes `schedule` as optional, so an older server still parses
+  (pinned by `aProposalResponseWithNoScheduleStillDecodes`).
+
+**Not verified / not checked:**
+
+- **iOS dark mode was not driven for this screen.** The app's theme preference
+  could not be set from outside the app (writing
+  `tovis.theme.preference` into the container plist did not reach
+  `UserDefaults.standard`), and reaching the in-app toggle was more taps than the
+  risk justified. What is confined here is one token's dark value:
+  `BrandColor.gold` is `dyn(dark: (242,180,62), light: (183,131,31))` — the same
+  pair web's `--tone-warn` resolves to, **both of which were confirmed in the
+  browser** — and it is shared with every other gold usage in the app.
+- **Cost was not measured.** The propose path gains 2–3 queries (offerings,
+  location, calendar blocks) inside a transaction that already does ~8. Sending a
+  consultation proposal is a once-per-appointment action, so this was judged fine
+  rather than benchmarked.
+- **`WORKING_HOURS_MISSING` and `NOT_CHECKED` were never driven end-to-end**,
+  only unit-tested through the mapping. Both are SILENT states, so the blast
+  radius is "the pro is told nothing", which is the safe direction. Attempting
+  to stage `NOT_CHECKED` on the live route turned up why: **`Booking.locationId`
+  is non-nullable**, so the "no location" branch is unreachable from a real
+  booking (it guards the helper's own `string | null` signature). What remains
+  reachable is a location row that does not come back for this professional, an
+  unresolvable time zone, or a failed query — none of which can be staged
+  against a live route without corrupting a row. The code comment and the test
+  name were corrected to stop implying otherwise.
+
+**🟡 A pre-existing defect in the same route, found while reading, NOT fixed
+(out of F12's scope — worth its own card):** `transitionSessionStepInTransaction`
+can return `{ ok: false }` **after** `consultationApproval.upsert` has already
+run, and this route `return`s that object from the `$transaction` callback — which
+**commits**. Two reachable paths: a `NO_SHOW` booking (the route's own guards
+check `CANCELLED` and `COMPLETED`/`finishedAt` but not `NO_SHOW`), and a `PENDING`
+booking, where the transition force-writes the step back to `CONSULTATION` and
+returns `forcedStep`. In both, the client gets a 409 while a `PENDING` proposal is
+left committed on the booking. This is the standing "Prisma `$transaction`:
+return = COMMIT" trap, one function away from the code F12 touched. F12's own
+additions are all placed **before** the first write precisely to avoid it.
 
 ### F9 — what shipped
 
@@ -2307,44 +2515,56 @@ This chain keeps its prompt here, not in the `NEXT-SESSION-PROMPT.md` memory
 each session.
 
 ```
-Do ONE step of the scheduling-conflict audit fix queue: F12.
+Do ONE step of the scheduling-conflict audit fix queue: F10 — the LAST one.
 
 Read `docs/design/scheduling-conflict-audit-fix-plan.md` FIRST — it is both the
-queue AND the write-ups, including which card premises did NOT survive contact.
-Do not re-derive what is already written there. F1–F9, F11 and F13–F16 are done;
-only F10 and F12 remain.
+queue AND the write-ups, including which card premises did NOT survive contact
+(nine of twenty-nine have now died). Do not re-derive what is already written
+there. F1–F9 and F11–F16 are done; only F10 remains.
 
-F12 — "consultation proposal is authored with zero schedule validation" 🟠. Read
-the card in §2 and F2's two write-ups in §4 ("F2 — the follow-ups that only
-turned up by LOOKING" and "F2 — what shipped"): F12 was opened BY F2, which
-fixed the APPROVE side (the extension is now checked against blocks and hours)
-and deliberately left the PROPOSE side alone. So the pro can still author a
-consultation time nothing validated, and the client only finds out at approve.
-It is a two-platform card — check what iOS sends and shows before deciding the
-server shape.
+F10 — "iOS follow-ups" 🟢. Read the card in §2. It is FOUR unrelated iOS items,
+not one, and it is the only card in the queue whose findings were never
+confirmed on a device — the audit header says plainly that every iOS claim in it
+is a CODE READ. So step one is to check each of the four is still true before
+fixing anything; F7's premise died exactly this way (the card described an
+imprecision bug and the real defect was a 400 that killed the whole MOBILE
+flow).
 
-Things earlier cards left that bear on F12 specifically:
-- F16 shipped `lib/lastMinute/proOpeningVisibility.ts`, the first consumer that
-  EXPLAINS a `checkStoredSlotsAreOpen` verdict rather than acting on it. If F12
-  wants to warn a pro at proposal time rather than refuse, that file is the
-  precedent for the shape (13 states, exhaustive switch, silent by default).
-- F16 also found that adding a schedule check to a route that has ALREADY
-  WRITTEN turns a query failure into a 500 for work that succeeded. If F12 adds
-  validation to a write path, decide deliberately whether it refuses (before the
-  write) or informs (after it) — and never let a display concern fail a commit.
-- `StoredSlotDeadReason` now carries `LOCATION_NOT_FOUND` / `TIMEZONE_REQUIRED`
-  separately (F16 split what F15 collapsed). Nothing else needs changing there.
+Things earlier cards left that bear on F10 specifically:
+- The two unpinned `DatePicker`s are the third-listed item and the highest-value
+  one — `ios-calendar-date-local-not-utc` in memory is the same class of bug and
+  says a `YYYY-MM-DD` wire field is a CALENDAR date, so a UTC formatter sends the
+  NEXT day west of UTC. Use `BoardEventDate`.
+- Nothing in iOS CI compiles `Tovis/`, and the contract job covers no PRO-side
+  fixtures. Anything you want tested has to live in TovisKit, and the app target
+  has to be built by hand (`xcodebuild -scheme Tovis`).
+- F12 established that a pro-facing caution belongs in `BrandColor.gold`, not
+  `.emerald` — the emerald/ember pair reads as "all good" / "you broke it", and
+  neither is right for a warning. Raw colours are NOT caught by any guard.
+- The simulator recipe is in memory: `scripts/sim-login.sh` (check
+  `xcrun simctl list devices booted` first — it picks the newest RUNTIME, not
+  the one you booted), taps via cliclick mapped off `group 1 of window 1`, and
+  scrolls need a slow multi-point drag.
 
 House rules apply — read CLAUDE.md. In particular: diff/verify before assuming a
 card's premise holds, prove every new guard RED before calling it green, include
-at least one ALLOW case, and drive the real artifact — the page and the
-simulator — not just the tests.
+at least one ALLOW case, and drive the real artifact — the simulator — not just
+the tests.
+
+Two loose threads F12 surfaced and deliberately did not pull; pick them up only
+if F10 finishes early, and as separate commits:
+- `POST /api/v1/pro/bookings/[id]/consultation-proposal` can COMMIT a proposal
+  and then return 409, because `transitionSessionStepInTransaction` fails AFTER
+  the upsert and the route `return`s (not throws) from `$transaction`. Reachable
+  on a NO_SHOW or PENDING booking. Written up at the end of "F12 — what shipped".
+- `tests/integration/pro-availability-stats.test.ts` compares two floats with
+  `toBe` and is flaky by construction (proven pre-existing on a clean tree).
 
 Ship cadence: branch off origin/main, one PR per repo touched, watch CI, merge
 when green, fast-forward local main. 🚫 Do NOT deploy to Vercel — that stays
-Tori's call. Note in the report that #705–#721 are merged and still awaiting a
+Tori's call. Note in the report that #705–#722 are merged and still awaiting a
 prod deploy (two migrations pending, one an ADD CONSTRAINT worth re-checking).
 
-Do not start other workstreams. If F12 finishes early, wrap up and hand off
-rather than pulling F10 in.
+Do not start other workstreams. When F10 lands the whole queue is done — say so,
+and hand off with what the audit did NOT cover (§3).
 ```

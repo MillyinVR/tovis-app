@@ -709,6 +709,16 @@
   line-height: 1.4;
 }
 
+/* F12 — the proposal saved, but the pro should know what it did to the clock.
+   Not `-success` (green reads "all good" for a caution) and not `-error` (the
+   send worked; nothing needs fixing). Tone token, so it follows [data-mode]. */
+.brand-pro-session-notice {
+  color: rgb(var(--tone-warn));
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.4;
+}
+
 /* ──────────────────────────────────────────────────────────────────
    Waiting / fallback
 ────────────────────────────────────────────────────────────────── */

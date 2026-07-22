@@ -14,6 +14,10 @@ import {
 } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickNumber, pickString } from '@/lib/pick'
+import { formatInTimeZone } from '@/lib/time'
+// Type-only: erased at build, so this client component pulls in none of the
+// server module it names.
+import type { ConsultationScheduleOutlook } from '@/lib/consultation/proposalSchedule'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -78,6 +82,86 @@ function pickNullableString(value: unknown): string | null {
 
 function pickNullableNumber(value: unknown): number | null {
   return pickNumber(value)
+}
+
+/**
+ * F12 — what the pro is told about the appointment's new end time.
+ *
+ * SILENT BY DEFAULT: only the state where these services are what pushed the
+ * end past the pro's hours is worth a word. An appointment that was already
+ * running late did not become a problem because a proposal was sent, and a
+ * question that could not be asked (`NOT_CHECKED`) must never be dressed up as
+ * an answer either way.
+ *
+ * Exhaustive with no `default`, so a new server state fails the build here
+ * rather than arriving as a blank line.
+ */
+function scheduleNoticeFor(
+  outlook: ConsultationScheduleOutlook,
+  endsAtLabel: string | null,
+): string | null {
+  switch (outlook) {
+    case 'PAST_WORKING_HOURS':
+      return endsAtLabel
+        ? `Sent. With these services the appointment now runs to ${endsAtLabel} — past your working hours.`
+        : 'Sent. With these services the appointment now runs past your working hours.'
+    case 'WITHIN_WORKING_HOURS':
+    case 'ALREADY_OUTSIDE_WORKING_HOURS':
+    case 'WORKING_HOURS_MISSING':
+    case 'NOT_CHECKED':
+      return null
+  }
+}
+
+/**
+ * A `Record` keyed by the union, not a string array: a state added to the server
+ * type fails to compile HERE as well as in the switch. An array typed
+ * `readonly ConsultationScheduleOutlook[]` would happily stay one short, and the
+ * new state would be silently unrecognised — half of the contract, quietly.
+ */
+const SCHEDULE_OUTLOOKS: Record<ConsultationScheduleOutlook, true> = {
+  WITHIN_WORKING_HOURS: true,
+  PAST_WORKING_HOURS: true,
+  ALREADY_OUTSIDE_WORKING_HOURS: true,
+  WORKING_HOURS_MISSING: true,
+  NOT_CHECKED: true,
+}
+
+function isScheduleOutlook(
+  value: string,
+): value is ConsultationScheduleOutlook {
+  return Object.prototype.hasOwnProperty.call(SCHEDULE_OUTLOOKS, value)
+}
+
+function readScheduleOutlook(value: unknown): ConsultationScheduleOutlook | null {
+  const raw = pickString(value)
+  if (!raw || !isScheduleOutlook(raw)) return null
+  return raw
+}
+
+/**
+ * The end time as a wall clock in the APPOINTMENT's zone. A null zone means the
+ * server could not resolve one, and a time with no zone is worse than no time —
+ * so the notice drops the clock rather than rendering it in the browser's.
+ */
+function readScheduleNotice(data: unknown): string | null {
+  if (!isRecord(data) || !isRecord(data.schedule)) return null
+
+  const outlook = readScheduleOutlook(data.schedule.outlook)
+  if (!outlook) return null
+
+  const endsAt = pickString(data.schedule.endsAt)
+  const timeZone = pickString(data.schedule.timeZone)
+
+  const endsAtLabel =
+    endsAt && timeZone
+      ? formatInTimeZone(endsAt, timeZone, {
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      : null
+
+  return scheduleNoticeFor(outlook, endsAtLabel)
 }
 
 function errorFromResponse(response: Response, data: unknown): string {
@@ -331,6 +415,10 @@ export default function ConsultationForm({
   const [loadingServices, setLoadingServices] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  // F12 — a caution about the appointment's new end time. Kept apart from
+  // `message` because the send SUCCEEDED: green would read "all good" and the
+  // danger tone would read "something needs fixing". Neither is true.
+  const [notice, setNotice] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
 
@@ -513,6 +601,7 @@ export default function ConsultationForm({
     event.preventDefault()
     setError(null)
     setMessage(null)
+    setNotice(null)
 
     if (!bookingId) {
       setError('Missing booking id.')
@@ -619,6 +708,19 @@ export default function ConsultationForm({
           'Consultation saved, but we couldn’t send the secure link — this client has no email or phone on file (or delivery failed). Add a contact method and resend.',
         )
         router.refresh()
+        return
+      }
+
+      // F12 — the send succeeded, and there is something about the new end time
+      // the pro should know. Hold the form open to say it, the same way the
+      // undeliverable-link branch above does: navigating flips the page to
+      // "Waiting on client" and unmounts this component, taking the notice with
+      // it. No `router.refresh()` here for the same reason.
+      const scheduleNotice = readScheduleNotice(data)
+
+      if (scheduleNotice) {
+        setNotice(scheduleNotice)
+        window.dispatchEvent(new Event(FORCE_EVENT))
         return
       }
 
@@ -880,6 +982,10 @@ export default function ConsultationForm({
 
       {message ? (
         <div className="brand-pro-session-success">{message}</div>
+      ) : null}
+
+      {notice ? (
+        <div className="brand-pro-session-notice">{notice}</div>
       ) : null}
 
       {error ? <div className="brand-pro-session-error">{error}</div> : null}
