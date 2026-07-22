@@ -132,3 +132,117 @@ export const openingSelect = {
 export type OpeningWithDetails = Prisma.LastMinuteOpeningGetPayload<{
   select: typeof openingSelect
 }>
+
+/**
+ * The PRO-side select: same relations as `openingSelect`, plus the lifecycle
+ * columns a pro manages an opening by (`launchAt`, `expiresAt`, `createdAt`,
+ * `updatedAt`, per-tier `processedAt`/`cancelledAt`/`lastError`, recipient
+ * count).
+ *
+ * It deliberately does NOT carry `openingSelect`'s two read filters —
+ * `services.where.offering.isActive` and `tierPlans.where.cancelledAt: null`.
+ * The pro is managing the row, so a deactivated offering link and a cancelled
+ * tier plan are facts they need to SEE; the client-facing reader hides both.
+ * That difference is the reason these are two selects and not one, and it was
+ * verified against both call sites rather than assumed — do not "unify" them
+ * without deciding what the pro's list should show.
+ */
+export const proOpeningSelect = {
+  id: true,
+  professionalId: true,
+  locationType: true,
+  locationId: true,
+  timeZone: true,
+  startAt: true,
+  endAt: true,
+  status: true,
+  visibilityMode: true,
+  launchAt: true,
+  expiresAt: true,
+  publicVisibleFrom: true,
+  publicVisibleUntil: true,
+  bookedAt: true,
+  cancelledAt: true,
+  note: true,
+  createdAt: true,
+  updatedAt: true,
+  location: {
+    select: {
+      id: true,
+      type: true,
+      name: true,
+      city: true,
+      state: true,
+      formattedAddress: true,
+      timeZone: true,
+      lat: true,
+      lng: true,
+    },
+  },
+  services: {
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      openingId: true,
+      serviceId: true,
+      offeringId: true,
+      sortOrder: true,
+      createdAt: true,
+      service: {
+        select: {
+          id: true,
+          name: true,
+          minPrice: true,
+          defaultDurationMinutes: true,
+          isAddOnEligible: true,
+          addOnGroup: true,
+        },
+      },
+      offering: {
+        select: {
+          id: true,
+          title: true,
+          offersInSalon: true,
+          offersMobile: true,
+          salonPriceStartingAt: true,
+          salonDurationMinutes: true,
+          mobilePriceStartingAt: true,
+          mobileDurationMinutes: true,
+        },
+      },
+    },
+  },
+  tierPlans: {
+    orderBy: [{ scheduledFor: 'asc' }, { tier: 'asc' }],
+    select: {
+      id: true,
+      openingId: true,
+      tier: true,
+      scheduledFor: true,
+      processedAt: true,
+      cancelledAt: true,
+      lastError: true,
+      offerType: true,
+      percentOff: true,
+      amountOff: true,
+      freeAddOnServiceId: true,
+      freeAddOnService: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
+  _count: {
+    select: {
+      recipients: true,
+    },
+  },
+} satisfies Prisma.LastMinuteOpeningSelect
+
+export type ProOpeningRow = Prisma.LastMinuteOpeningGetPayload<{
+  select: typeof proOpeningSelect
+}>

@@ -50,6 +50,7 @@ export {
   startOfDayUtcInTimeZone,
   ymdInTimeZone,
   minutesSinceMidnightInTimeZone,
+  daySerialInTimeZone,
   weekdayInTimeZone,
   utcFromDayAndMinutesInTimeZone,
 } from '@/lib/timeZone'

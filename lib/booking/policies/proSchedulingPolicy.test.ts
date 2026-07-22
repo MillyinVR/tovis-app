@@ -20,9 +20,19 @@ vi.mock('@/lib/booking/conflictQueries', () => ({
   getTimeRangeConflict: mocks.getTimeRangeConflict,
 }))
 
-vi.mock('@/lib/booking/workingHoursGuard', () => ({
-  ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
-}))
+// Only the GUARD is stubbed. The sentinel codec in the same module
+// (make/parse/isWorkingHoursGuardCode) is what encodes the messages this policy
+// passes in and decodes them on the way back out, so stubbing it too would make
+// the round-trip these tests assert on vacuous.
+vi.mock('@/lib/booking/workingHoursGuard', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/booking/workingHoursGuard')>()
+
+  return {
+    ...actual,
+    ensureWithinWorkingHours: mocks.ensureWithinWorkingHours,
+  }
+})
 
 vi.mock('@/lib/booking/slotReadiness', () => ({
   checkAdvanceNotice: mocks.checkAdvanceNotice,

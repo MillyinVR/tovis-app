@@ -123,30 +123,6 @@ function buildDayRequestPayload(args: {
   }
 }
 
-async function resolveRequestedDurationMinutes(args: {
-  professionalId: string
-  offeringId: string
-  addOnIds: string[]
-  locationType: ServiceLocationType
-  baseDurationMinutes: number
-}) {
-  if (args.addOnIds.length === 0) {
-    return {
-      ok: true as const,
-      durationMinutes: args.baseDurationMinutes,
-    }
-  }
-
-  return resolveDurationWithAddOns({
-    professionalId: args.professionalId,
-    offeringId: args.offeringId,
-    addOnIds: args.addOnIds,
-    locationType: args.locationType,
-    baseDurationMinutes: args.baseDurationMinutes,
-    client: prismaRead,
-  })
-}
-
 export async function GET(req: Request) {
   try {
     const {
@@ -257,12 +233,13 @@ export async function GET(req: Request) {
       )
     }
 
-    const addOnResult = await resolveRequestedDurationMinutes({
+    const addOnResult = await resolveDurationWithAddOns({
       professionalId,
       offeringId: offeringDbId,
       addOnIds,
       locationType: effectiveLocationType,
       baseDurationMinutes,
+      client: prismaRead,
     })
 
     if (!addOnResult.ok) {

@@ -7,14 +7,13 @@ import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
-import { clampInt } from '@/lib/pick'
+import { bufferOrZero } from '@/lib/booking/conflicts'
 import {
   assertNoCalendarBlockConflict,
   hasBookingConflict,
   hasHoldConflict,
 } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
-import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   bookingError,
@@ -89,10 +88,6 @@ type BlockDeleteTransactionResult =
 type BlockConflictType = 'BLOCKED' | 'BOOKING' | 'HOLD'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-function normalizeLocationBufferMinutes(value: unknown): number {
-  return clampInt(value, 0, MAX_BUFFER_MINUTES)
-}
 
 async function getBlockId(ctx: RouteContext): Promise<string | null> {
   const params = await resolveRouteParams(ctx)
@@ -438,7 +433,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           })
         }
 
-        const defaultBufferMinutes = normalizeLocationBufferMinutes(
+        const defaultBufferMinutes = bufferOrZero(
           location.bufferMinutes,
         )
 

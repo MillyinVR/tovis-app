@@ -2,7 +2,8 @@
 
 import { isRecord } from '@/lib/guards'
 import {
-  getZonedParts,
+  daySerialInTimeZone,
+  minutesSinceMidnightInTimeZone,
   sanitizeTimeZone,
   weekdayInTimeZone,
 } from '@/lib/time'
@@ -124,18 +125,6 @@ function weekdayKeyForDate(day: Date, timeZone: string): WeekdayKey | null {
   return WEEKDAY_KEYS[index] ?? null
 }
 
-function localMinutesSinceMidnight(date: Date, timeZone: string): number {
-  const parts = getZonedParts(date, timeZone)
-  return parts.hour * 60 + parts.minute
-}
-
-function localDaySerial(date: Date, timeZone: string): number {
-  const parts = getZonedParts(date, timeZone)
-  return Math.floor(
-    Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0) / 86_400_000,
-  )
-}
-
 function normalizeWindow(startMinutes: number, endMinutes: number): {
   startMinutes: number
   endMinutes: number
@@ -158,15 +147,33 @@ function normalizeWindow(startMinutes: number, endMinutes: number): {
   }
 }
 
-function offsetFromWindowStartDay(args: {
+/**
+ * Minutes from the local start-day used by `getWorkingWindowForDay()`, so a
+ * target instant can be compared against that window's `startMinutes` /
+ * `endMinutes` on the same scale — including overnight windows, where
+ * `endMinutes` exceeds 1440.
+ *
+ * Examples, relative to the window's own local day:
+ * - same local day 01:30 => 90
+ * - same local day 23:15 => 1395
+ * - next local day 00:30 => 1470
+ *
+ * Single source of truth: the working-hours guard, slot readiness and this
+ * module all measure that offset the same way, or a time inside the window for
+ * one of them is outside it for another.
+ */
+export function offsetFromWindowStartDay(args: {
   targetUtc: Date
   windowDayUtc: Date
   timeZone: string
 }): number {
   const { targetUtc, windowDayUtc, timeZone } = args
 
-  const dayDelta = localDaySerial(targetUtc, timeZone) - localDaySerial(windowDayUtc, timeZone)
-  return dayDelta * 1440 + localMinutesSinceMidnight(targetUtc, timeZone)
+  const dayDelta =
+    daySerialInTimeZone(targetUtc, timeZone) -
+    daySerialInTimeZone(windowDayUtc, timeZone)
+
+  return dayDelta * 1440 + minutesSinceMidnightInTimeZone(targetUtc, timeZone)
 }
 
 /**

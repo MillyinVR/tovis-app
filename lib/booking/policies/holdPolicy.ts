@@ -7,8 +7,10 @@ import {
   type SlotReadinessCode,
 } from '@/lib/booking/slotReadiness'
 import { type BookingErrorCode } from '@/lib/booking/errors'
-
-const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
+import {
+  isWorkingHoursGuardCode,
+  makeWorkingHoursGuardMessage,
+} from '@/lib/booking/workingHoursGuard'
 
 export type HoldPolicyConflictType =
   | 'BLOCKED'
@@ -131,13 +133,13 @@ function mapSlotReadinessFailure(args: {
     workingHoursError: args.workingHoursError,
   })
 
-  const workingHoursBreadcrumb = WORKING_HOURS_LOG_CODES.has(args.code)
+  const workingHoursBreadcrumb = isWorkingHoursGuardCode(args.code)
     ? {
         workingHoursError:
           args.code === 'OUTSIDE_WORKING_HOURS'
             ? args.workingHoursError ??
-              `${WORKING_HOURS_ERROR_PREFIX}OUTSIDE_WORKING_HOURS`
-            : `${WORKING_HOURS_ERROR_PREFIX}${args.code}`,
+              makeWorkingHoursGuardMessage('OUTSIDE_WORKING_HOURS')
+            : makeWorkingHoursGuardMessage(args.code),
       }
     : null
 
@@ -152,12 +154,6 @@ function mapSlotReadinessFailure(args: {
       : logHint,
   })
 }
-
-const WORKING_HOURS_LOG_CODES = new Set<SlotReadinessCode>([
-  'WORKING_HOURS_REQUIRED',
-  'WORKING_HOURS_INVALID',
-  'OUTSIDE_WORKING_HOURS',
-])
 
 export async function evaluateHoldCreationDecision(
   args: EvaluateHoldCreationDecisionArgs,

@@ -1,5 +1,5 @@
 // app/api/v1/pro/calendar/route.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => {
   return {
@@ -332,6 +332,95 @@ describe('GET /api/v1/pro/calendar', () => {
     expect(
       blockEvents.map((event: { blockId: string }) => event.blockId).sort(),
     ).toEqual(['block-global', 'block-mobile'])
+  })
+
+  // The "today" window is [local midnight, next local midnight). A local day is
+  // 23h on the spring transition and 25h on the autumn one, so stepping the
+  // boundary by a fixed 24h put it an hour inside tomorrow (spring) or an hour
+  // short of midnight (autumn) — and "blocked hours today" counted the wrong
+  // blocks on those two days a year. Viewport zone here is the primary salon,
+  // America/Los_Angeles.
+  describe('blocked-today window across a DST transition', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      mocks.bookingFindMany.mockResolvedValue([])
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    function blockAt(id: string, startIso: string, endIso: string) {
+      mocks.calendarBlockFindMany.mockResolvedValue([
+        {
+          id,
+          startsAt: new Date(startIso),
+          endsAt: new Date(endIso),
+          note: 'Block',
+          locationId: null,
+        },
+      ])
+    }
+
+    async function loadStats() {
+      const response = await GET(
+        new Request('https://example.test/api/v1/pro/calendar'),
+      )
+      expect(response.status).toBe(200)
+      return response.json()
+    }
+
+    it('excludes a block that starts at midnight TOMORROW (spring forward)', async () => {
+      // 2026-03-08 in LA: local midnight = 08:00Z, next local midnight = 07:00Z
+      // on 03-09 (a 23-hour day). This block is 00:00–00:30 local on the 9th, so
+      // it belongs to tomorrow — but it sits before the naive 08:00Z boundary.
+      vi.setSystemTime(new Date('2026-03-08T20:00:00.000Z'))
+      blockAt(
+        'block-tomorrow',
+        '2026-03-09T07:00:00.000Z',
+        '2026-03-09T07:30:00.000Z',
+      )
+
+      const body = await loadStats()
+
+      expect(body.viewportTimeZone).toBe('America/Los_Angeles')
+      expect(body.blockedMinutesToday).toBe(0)
+      expect(body.management.blockedToday).toHaveLength(0)
+    })
+
+    it("includes the local day's LAST hour (fall back)", async () => {
+      // 2026-11-01 in LA: local midnight = 07:00Z, next local midnight = 08:00Z
+      // on 11-02 (a 25-hour day). This block is 23:00–23:30 local on the 1st —
+      // still today, but past the naive 07:00Z boundary.
+      vi.setSystemTime(new Date('2026-11-01T20:00:00.000Z'))
+      blockAt(
+        'block-late-today',
+        '2026-11-02T07:00:00.000Z',
+        '2026-11-02T07:30:00.000Z',
+      )
+
+      const body = await loadStats()
+
+      expect(body.viewportTimeZone).toBe('America/Los_Angeles')
+      expect(body.blockedMinutesToday).toBe(30)
+      expect(body.management.blockedToday).toHaveLength(1)
+    })
+
+    it('still counts an ordinary midday block on a non-transition day', async () => {
+      // The ALLOW case: a window that simply refuses everything would pass both
+      // assertions above.
+      vi.setSystemTime(new Date('2026-06-10T20:00:00.000Z'))
+      blockAt(
+        'block-midday',
+        '2026-06-10T19:00:00.000Z',
+        '2026-06-10T20:00:00.000Z',
+      )
+
+      const body = await loadStats()
+
+      expect(body.blockedMinutesToday).toBe(60)
+      expect(body.management.blockedToday).toHaveLength(1)
+    })
   })
 
   it('computes todays management buckets using viewport-local day keys', async () => {

@@ -7,8 +7,7 @@ import {
   type SlotReadinessCode,
 } from '@/lib/booking/slotReadiness'
 import { type BookingErrorCode } from '@/lib/booking/errors'
-
-const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
+import { getReadableWorkingHoursMessage } from '@/lib/booking/workingHoursGuard'
 
 export type RescheduleDecision =
   | {
@@ -64,18 +63,6 @@ function decisionFail(
     message: overrides?.message,
     userMessage: overrides?.userMessage,
   }
-}
-
-function getReadableWorkingHoursMessage(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    return 'That time is outside working hours.'
-  }
-
-  if (value.startsWith(WORKING_HOURS_ERROR_PREFIX)) {
-    return 'That time is outside working hours.'
-  }
-
-  return value
 }
 
 function mapSlotReadinessCodeToBookingCode(

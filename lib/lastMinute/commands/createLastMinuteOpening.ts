@@ -27,6 +27,10 @@ import {
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
+import {
+  proOpeningSelect,
+  type ProOpeningRow,
+} from '@/lib/lastMinute/openingSelect'
 
 /**
  * Everything below runs inside the locked transaction, never against the bare
@@ -48,105 +52,8 @@ const TIER_ORDER = [
 
 type OrderedTier = (typeof TIER_ORDER)[number]
 
-const openingSelect = {
-  id: true,
-  professionalId: true,
-  locationType: true,
-  locationId: true,
-  timeZone: true,
-  startAt: true,
-  endAt: true,
-  status: true,
-  visibilityMode: true,
-  launchAt: true,
-  expiresAt: true,
-  publicVisibleFrom: true,
-  publicVisibleUntil: true,
-  bookedAt: true,
-  cancelledAt: true,
-  note: true,
-  createdAt: true,
-  updatedAt: true,
-  location: {
-    select: {
-      id: true,
-      type: true,
-      name: true,
-      city: true,
-      state: true,
-      formattedAddress: true,
-      timeZone: true,
-      lat: true,
-      lng: true,
-    },
-  },
-  services: {
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    select: {
-      id: true,
-      openingId: true,
-      serviceId: true,
-      offeringId: true,
-      sortOrder: true,
-      createdAt: true,
-      service: {
-        select: {
-          id: true,
-          name: true,
-          minPrice: true,
-          defaultDurationMinutes: true,
-          isAddOnEligible: true,
-          addOnGroup: true,
-        },
-      },
-      offering: {
-        select: {
-          id: true,
-          title: true,
-          offersInSalon: true,
-          offersMobile: true,
-          salonPriceStartingAt: true,
-          salonDurationMinutes: true,
-          mobilePriceStartingAt: true,
-          mobileDurationMinutes: true,
-        },
-      },
-    },
-  },
-    tierPlans: {
-    orderBy: [{ scheduledFor: 'asc' }, { tier: 'asc' }],
-    select: {
-      id: true,
-      openingId: true,
-      tier: true,
-      scheduledFor: true,
-      processedAt: true,
-      cancelledAt: true,
-      lastError: true,
-      offerType: true,
-      percentOff: true,
-      amountOff: true,
-      freeAddOnServiceId: true,
-      freeAddOnService: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      createdAt: true,
-      updatedAt: true,
-    },
-  },
-  _count: {
-    select: {
-      recipients: true,
-    },
-  },
-} satisfies Prisma.LastMinuteOpeningSelect
 
-export type CreatedLastMinuteOpening = Prisma.LastMinuteOpeningGetPayload<{
-  select: typeof openingSelect
-}>
+export type CreatedLastMinuteOpening = ProOpeningRow
 
 export class CreateLastMinuteOpeningError extends Error {
   readonly status: number
@@ -1185,7 +1092,7 @@ async function createInsideTransaction(args: {
 
   const fullOpening = await database.lastMinuteOpening.findUnique({
     where: { id: created.id },
-    select: openingSelect,
+    select: proOpeningSelect,
   })
 
   assert(fullOpening, 500, 'OPENING_CREATE_FAILED', 'Failed to load created last-minute opening.')

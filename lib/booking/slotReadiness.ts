@@ -9,9 +9,16 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { sanitizeTimeZone } from '@/lib/timeZone'
-import { getZonedParts, minutesSinceMidnightInTimeZone } from '@/lib/time'
-import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
-import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
+import {
+  getWorkingWindowForDay,
+  offsetFromWindowStartDay,
+} from '@/lib/scheduling/workingHours'
+import {
+  ensureWithinWorkingHours,
+  getReadableWorkingHoursMessage,
+  makeWorkingHoursGuardMessage,
+  parseWorkingHoursGuardMessage,
+} from '@/lib/booking/workingHoursGuard'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import { type BookingErrorCode } from '@/lib/booking/errors'
 
@@ -89,13 +96,6 @@ export type CheckSlotReadinessArgs = {
 }
 
 const DEFAULT_FALLBACK_TIME_ZONE = 'UTC'
-const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
-const WORKING_HOURS_FALLBACK_MESSAGE = 'That time is outside working hours.'
-
-type WorkingHoursGuardCode =
-  | 'WORKING_HOURS_REQUIRED'
-  | 'WORKING_HOURS_INVALID'
-  | 'OUTSIDE_WORKING_HOURS'
 
 type PreparedStepAlignmentArgs = {
   startUtc: Date
@@ -121,29 +121,6 @@ type ResolvedWorkingWindow =
       stepMinutes: number
       meta?: Record<string, unknown>
     }
-
-function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
-  return `${WORKING_HOURS_ERROR_PREFIX}${code}`
-}
-
-function parseWorkingHoursGuardMessage(
-  value: string,
-): WorkingHoursGuardCode | null {
-  if (!value.startsWith(WORKING_HOURS_ERROR_PREFIX)) return null
-
-  const code = value.slice(WORKING_HOURS_ERROR_PREFIX.length)
-
-  switch (code) {
-    case 'WORKING_HOURS_REQUIRED':
-      return 'WORKING_HOURS_REQUIRED'
-    case 'WORKING_HOURS_INVALID':
-      return 'WORKING_HOURS_INVALID'
-    case 'OUTSIDE_WORKING_HOURS':
-      return 'OUTSIDE_WORKING_HOURS'
-    default:
-      return null
-  }
-}
 
 function isValidDate(value: Date): boolean {
   return value instanceof Date && Number.isFinite(value.getTime())
@@ -175,35 +152,6 @@ function normalizeMaxDaysAhead(value: unknown): number {
   if (!Number.isFinite(parsed)) return 1
 
   return clampInt(Math.trunc(parsed), 1, MAX_DAYS_AHEAD)
-}
-
-function localDaySerial(date: Date, timeZone: string): number {
-  const { year, month, day } = getZonedParts(date, timeZone)
-
-  return Math.floor(
-    Date.UTC(year, month - 1, day, 12, 0, 0, 0) / 86_400_000,
-  )
-}
-
-/**
- * Returns minutes from the local start-day used by getWorkingWindowForDay().
- *
- * Examples:
- * - same local day 01:30 => 90
- * - same local day 23:15 => 1395
- * - next local day 00:30 => 1470
- */
-function offsetFromWindowStartDay(args: {
-  targetUtc: Date
-  windowDayUtc: Date
-  timeZone: string
-}): number {
-  const { targetUtc, windowDayUtc, timeZone } = args
-
-  const dayDelta =
-    localDaySerial(targetUtc, timeZone) - localDaySerial(windowDayUtc, timeZone)
-
-  return dayDelta * 1440 + minutesSinceMidnightInTimeZone(targetUtc, timeZone)
 }
 
 function resolveWorkingWindowForPreparedArgs(
@@ -752,7 +700,7 @@ export function mapSlotReadinessToBookingError(args: {
     }
 
     case 'OUTSIDE_WORKING_HOURS': {
-      const message = readWorkingHoursMessage(args.workingHoursError)
+      const message = getReadableWorkingHoursMessage(args.workingHoursError)
       return { code: 'OUTSIDE_WORKING_HOURS', message, userMessage: message }
     }
 
@@ -784,20 +732,4 @@ export function mapSlotReadinessToBookingError(args: {
         userMessage: 'That time is not available.',
       }
   }
-}
-
-/**
- * The working-hours guard encodes its own codes into the error string; anything
- * else is already human copy and passes through unchanged.
- */
-function readWorkingHoursMessage(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    return WORKING_HOURS_FALLBACK_MESSAGE
-  }
-
-  if (value.startsWith(WORKING_HOURS_ERROR_PREFIX)) {
-    return WORKING_HOURS_FALLBACK_MESSAGE
-  }
-
-  return value
 }
