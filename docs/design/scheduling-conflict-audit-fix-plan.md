@@ -520,6 +520,13 @@ time:**
   A verbatim capture of the refusal body now pins that the copy survives the
   wire — `APIClient` lifts it off `error`, so an envelope change would otherwise
   silently degrade the sheet to "Something went wrong."
+  **Scope note, checked:** iOS has *two* "Offer a time" entry points and only
+  one reaches this code. `ProWaitlistView.swift` opens `ProWaitlistOfferSheet`
+  → the offer route (covered here); `ProCalendarManagementSheet.swift:124`
+  navigates to `ProNewBookingView` and books **directly**, so it never creates
+  a WaitlistOffer at all. That second path is F10's card and is unaffected —
+  it already ran the pro-create working-hours gate, with the pro's own override
+  available.
 - **Cost measured, not asserted.** The advisory-lock section goes from
   p50 **8.7ms** / p95 9.6ms to p50 **9.8ms** / p95 11.6ms (n=50 after warmup,
   local Postgres) — two extra round trips (readiness + `pickBookableLocation`).
