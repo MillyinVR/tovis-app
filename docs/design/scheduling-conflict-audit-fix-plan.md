@@ -835,6 +835,19 @@ never booked is absent from the batched set and *is* viewable. That is the whole
 "message them, then offer them a time" flow the outreach workspace is built
 around.
 
+**That last step was driven, not reasoned.** Both real functions were run against
+the local dev DB for the captured waitlist pair, creating and then deleting a
+single `WAITLIST` thread:
+
+```
+BEFORE (no thread): canViewClient=false reason=NONE          | inBatchedSet=false
+AFTER  (thread only): canViewClient=true  reason=ACTIVE_THREAD | inBatchedSet=false
+CLEANED UP:          canViewClient=false reason=NONE          | inBatchedSet=false
+```
+
+The middle line is the divergence, observed rather than inferred — and it is
+exactly the state a "consistency fix" would have broken.
+
 **What was actually wrong was the comment, and the absence of a test.** Both
 fixed: `getVisibleClientIdSetForPro`'s doc now says it is deliberately narrower
 and names the consumer split; `buildWaitlistOfferHref` records why the raw id is
