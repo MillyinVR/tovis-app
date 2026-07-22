@@ -404,7 +404,7 @@ block/booking/hold queries (`:1073–1160`) with `getTimeRangeConflict`. Two bir
 **The card's premise was wrong, and the truth is worse.** It read as a precision
 bug — "mobile slots are computed against the pro's base rather than the client's
 travel radius, so an offered slot can be rejected at hold". There is no such
-fallback. `validateAvailabilityPlacement` (`lib/availability/core/placement.ts:504`)
+fallback. `validateAvailabilityPlacement` (`lib/availability/core/placement.ts:502-510`)
 refuses a MOBILE placement outright when `clientAddressId` is absent:
 
 ```
@@ -432,7 +432,7 @@ simulator** — screenshot + a `400` in the dev log. Client-side MOBILE booking 
 iOS was 100% impossible, and so was a MOBILE reschedule.
 
 Web never hit this because `useAvailability`'s `canFetch` withholds the request
-until an address is chosen (`useAvailability.ts:238-247`); the address is an
+until an address is chosen (`useAvailability.ts:242-248`); the address is an
 INPUT to availability there, not a later step.
 
 **Fix (iOS #206).** Mirror web's gate: `bootstrap` gains `clientAddressId`;
