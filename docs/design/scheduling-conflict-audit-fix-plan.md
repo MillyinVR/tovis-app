@@ -570,7 +570,7 @@ Named honestly rather than assumed safe:
 
 **The card was right about the facts and wrong about the remedy.** All four
 definitions were exactly as described (only the line numbers had rotted:
-`constants.ts:36` → `:55`). But the doc's own side-note from F11 — "F8 should
+`constants.ts:36` → `:69`). But the doc's own side-note from F11 — "F8 should
 probably resolve by dropping COMPLETED from the app constant" — pointed the wrong
 way, and one lookup killed it: **`advanceNoticeMinutes` defaults to 15**
 (`prisma/schema.prisma:2358`). Dropping COMPLETED would have freed the pro's
@@ -591,7 +591,7 @@ database moved to the app.
   session, so the pro's busy-day popup and the ranking fullness signal were both
   under-reporting occupancy. Consolidating is a behaviour change, and both now
   have a test that says so.
-- `ESTABLISHED_BOOKING_STATUSES` (`resolveDiscoveryFinalize.ts:45`) is the same
+- `ESTABLISHED_BOOKING_STATUSES` (`resolveDiscoveryFinalize.ts:42`) is the same
   P/A/IP/COMPLETED **shape** and was deliberately left alone — it answers "has
   this client booked here before?", not "is the pro busy?". Same-shape ≠
   same-intent.
