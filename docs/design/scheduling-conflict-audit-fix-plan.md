@@ -494,6 +494,10 @@ The `other-pros` fork matters more than it looks — that route is the unwired
 server half of a wanted feature, so its copy of the placement logic keeps
 drifting from the real one until it is wired up. **Do not delete the route.**
 
+> ✅ **Shipped.** Eleven of the table's rows were diffed; **two premises did not
+> survive**, one row was a **real bug** and the `other-pros` warning above proved
+> exactly right. See "F9 — what shipped" in §4.
+
 ### F11 — the booking-overlap integration suite is dead 🟠
 
 Found while trying to verify F1. `tests/integration/booking-overlap-concurrency.test.ts`
@@ -599,11 +603,155 @@ Named honestly rather than assumed safe:
 | F16 pro can't see their opening went dark | not started (opened by F15) |
 | F7 iOS mobile slot address | ✅ done — iOS #206 (**premise was wrong**: not imprecise slots, a 400 that killed the whole MOBILE flow; fix caught a second, stale-slot bug on the simulator) |
 | F8 occupied-status parity test | ✅ done — #717 (**Tori ruling 2026-07-21**; carries migration `20260806000000`) |
-| F9 duplicate-logic cleanup | not started |
+| F9 duplicate-logic cleanup | ✅ done — #719 (**found a live DST bug**; 2 premises died; `other-pros` deferred with evidence) |
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | not started (opened by F2) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
+
+### F9 — what shipped
+
+**A 🟡 tidy-up card contained a live bug.** F6 taught this exact lesson and F9's
+own header repeats it, so every row was diffed before anything moved. The result:
+seven rows were genuinely identical and collapsed mechanically, **two premises
+were wrong**, one row was **not a duplicate at all but a DST defect**, and the
+`other-pros` row is real drift that is deliberately *not* fixed here.
+
+**🔴 The real find: the pro's "blocked hours today" was wrong on DST days.**
+`app/api/v1/pro/calendar/route.ts` built the today-window as
+`startOfDayUtcInTimeZone(now, tz)` then `+ 86_400_000ms`. A local day is **23
+hours** on the spring transition and **25** on the autumn one, so that boundary
+landed at 01:00 the next day or 23:00 the same day. Measured with the real
+helpers, `America/Los_Angeles`:
+
+| date | naive `+24h` boundary | true next local midnight | effect |
+| --- | --- | --- | --- |
+| 2026-03-08 (spring) | 2026-03-09 **01:00** local | 2026-03-09 00:00 | counted **tomorrow's** first hour as today |
+| 2026-11-01 (autumn) | 2026-11-01 **23:00** local | 2026-11-02 00:00 | **dropped** today's last hour |
+| 2026-06-10 (ordinary) | 00:00 | 00:00 | correct |
+
+Twice a year, for every pro in a DST zone, `stats.blockedHours` and the
+Management panel's `blockedToday` list counted the wrong blocks. Not a
+double-book — a wrong number on a screen the pro plans their day from.
+
+**The fix is a shared primitive, not a patch.** `startOfDayUtcInTimeZone` gains
+an optional `dayOffset` that steps whole LOCAL days through the calendar parts
+(via the `addDaysToYMD` that already lived in `lib/timeZone.ts`). Existing
+two-argument callers are byte-identical — `dayOffset` defaults to `0` and takes
+the original branch. The route's remaining `addDaysUtc` is renamed
+**`addRangeSpanUtc`** and documented: it is the 42-day *range guard*, where
+`from` is an arbitrary caller-supplied instant (checked — `useCalendarFetch`,
+`NewBookingForm` and iOS `ProCalendarService` all send explicit ISO instants,
+never a local midnight), so a fixed span is the correct meaning there. Naming the
+two apart is what stops the next reader repeating the category error.
+
+**Verified, every guard proven red first:**
+
+| mutation | what goes red |
+| --- | --- |
+| `startOfDayUtcInTimeZone` reverted to `base + dayOffset * 86_400_000` | 3 unit tests — `expected '2026-03-09T05:00:00.000Z' to be '2026-03-09T04:00:00.000Z'`, the autumn twin, and `expected 86400000 to be 82800000` |
+| route boundary reverted to `addRangeSpanUtc(viewportTodayStart, 1)` | both route tests — `expected 30 to be +0` (spring counts tomorrow) and `expected +0 to be 30` (autumn drops today) |
+
+The **ordinary-day case stays green under both mutations**, which is the point: a
+test that only asserted "the two differ" would pass against a boundary that is
+merely differently wrong. Both route tests are paired with an ALLOW case (a
+midday block on a non-transition day still counts 60 minutes).
+
+**What collapsed, and where it went.**
+
+- **The working-hours sentinel protocol — the biggest item, and it was bigger
+  than the card said.** The card counted `make`/`parse` ×3 and
+  `getReadableWorkingHoursMessage` ×3. The *prefix string itself* was declared in
+  **six** files, the code union in three, and `slotReadiness.ts` had a fourth
+  reader under a different name (`readWorkingHoursMessage`) while `holdPolicy.ts`
+  hand-built the sentinel from a template literal instead of calling the encoder
+  at all. That is an encode/decode wire protocol with 4 independent producers and
+  7 independent consumers. All of it now lives in `lib/booking/workingHoursGuard.ts`
+  — the module that already owned `ensureWithinWorkingHours`, which every
+  consumer already imported, so no cycle and no new file. A new
+  `isWorkingHoursGuardCode` type-predicate replaces `holdPolicy`'s private
+  `Set<SlotReadinessCode>` — the old `.has()` narrowed nothing, which is *why*
+  that call site had to hand-roll the string.
+- **`localMinutesSinceMidnight` / `localDaySerial` / `offsetFromWindowStartDay`**
+  — identical in all copies, and `minutesSinceMidnightInTimeZone` in
+  `lib/timeZone.ts` already *was* the first one. `daySerialInTimeZone` is new and
+  exported through the `@/lib/time` barrel (house rule); `offsetFromWindowStartDay`
+  is exported from `lib/scheduling/workingHours.ts`, next to the
+  `getWorkingWindowForDay` whose scale it exists to match.
+- **`resolveRequestedDurationMinutes` ×3** — byte-identical, and all three were
+  thin wrappers whose empty-`addOnIds` guard `resolveDurationWithAddOns` already
+  performs internally. Deleted outright; the three routes call the shared helper.
+- **`normalizeLocationBufferMinutes`** — the card said ×2; there is a third under
+  a different name, `safeBufferMinutes` in `pro/calendar/route.ts`. All three now
+  call the already-exported `bufferOrZero` (`lib/booking/conflicts.ts`). Checked
+  rather than assumed equivalent: `bufferOrZero` coerces through
+  `Number(x ?? 0) || 0` first, which differs from bare `clampInt` **only** for a
+  boolean input — and every call site passes a Prisma `Int?` column.
+- **`openingSelect`** — F15 deferred this here. `pro/openings/route.ts` and
+  `createLastMinuteOpening.ts` were the same 95 lines twice, differing by a
+  two-space indent typo on `tierPlans`. Now one exported `proOpeningSelect` in
+  `lib/lastMinute/openingSelect.ts`. It is deliberately **separate** from that
+  file's client-facing `openingSelect`: the pro-side select omits
+  `services.where.offering.isActive` and `tierPlans.where.cancelledAt: null`
+  because the pro is *managing* the row and needs to see a deactivated offering
+  link and a cancelled tier that the client-facing reader must hide. That
+  difference is now written at the code site so it cannot be "unified" by
+  accident.
+
+**Two of the card's premises did not survive.**
+
+1. **`decisionOk` / `decisionFail` ×3 are not three copies of one helper.** The
+   card says `policies/types.ts` "already exports `policyOk`/`policyFail`". It
+   does — but `PolicyFailure` is `{ok, code, logHint?}` and carries **no**
+   `message`/`userMessage`, which all three `decisionFail`s return and their
+   callers read. They also each return a different named result type. Collapsing
+   them would mean widening `PolicyFailure` for every consumer to serve three
+   callers. Left alone, deliberately.
+2. **`mapSlotReadinessCodeToBookingCode` ×2 / `mapSlotReadinessFailure` ×2 are
+   caller-specific by design, not drifted.** They *do* disagree — finalize maps
+   `INVALID_START`/`INVALID_RANGE` to `INVALID_SCHEDULED_FOR`, reschedule maps
+   them to `HOLD_TIME_INVALID` — but that is each policy agreeing with **its own
+   entry guard**: `evaluateFinalizeDecision` opens with
+   `decisionFail('INVALID_SCHEDULED_FOR')` and `evaluateRescheduleDecision` with
+   `decisionFail('HOLD_TIME_INVALID')`. Unifying them would flip the reschedule
+   path's `uiAction` from `PICK_NEW_SLOT` to `NONE` and `retryable` from true to
+   false — removing the client's "pick a new slot" affordance. Same shape ≠ same
+   intent.
+
+**🟡 Left open, with evidence — the `other-pros` fork.** The card's warning was
+right and the drift is worse than "a copy": the two `AvailabilityPlacementResult`
+types share a name and are **different types**.
+`app/api/v1/availability/other-pros/route.ts` never passes `professionalTimeZone`
+and hardcodes `fallbackTimeZone: 'UTC'`, so a location carrying no timezone
+resolves to **UTC** where `lib/availability/core/placement.ts` resolves to the
+**pro's** zone; its result omits `timeZoneSource`, `workingHours`, `stepMinutes`,
+`leadTimeMinutes` and `locationBufferMinutes`; and where the canonical checks a
+requested location exists before validating, the fork does not. It is **latent,
+not live** — re-verified this session that nothing fetches the route (only its
+own `route.test.ts`), which is exactly what `docs/BACKLOG.md`'s wiring item says.
+Consolidating it changes the route's response shape and error mapping with no
+caller to validate against, so it belongs **with the wiring task**, not in a
+cleanup PR. Pointer added to the BACKLOG item.
+
+**Not checked / not changed.** `lib/booking/errors.ts` carries its own
+`"That time is outside working hours."` as the `OUTSIDE_WORKING_HOURS`
+catalogue copy. It is the same sentence as the guard's fallback but a different
+surface — the catalogue is the wire contract for the error code, the guard's is
+the fallback when a sentinel leaks — so they were left independent rather than
+coupled backwards.
+
+**Coverage.** `typecheck` clean, `lint` **0 errors**, **all 13 static guards
+pass**, **708 files / 6898 unit tests** green, integration **31 of 34 files**.
+The 3 integration files that fail do so **identically on clean `main` at
+`7c533df3`** — diffed the failure sets, byte-identical — and fail on
+`Missing required env PII_AEAD_KEYS_JSON`, the known local keyring gap; CI
+supplies it. `opening-create-lock` and `opening-liveness`, which cover the
+`createLastMinuteOpening` and `pro/openings` edits, are in the passing set.
+
+One test needed a real change: `proSchedulingPolicy.test.ts` stubbed the whole
+`workingHoursGuard` module, which now also owns the codec that policy encodes and
+decodes with. It uses `importOriginal` so only `ensureWithinWorkingHours` is
+stubbed — otherwise the round-trip those tests assert would have been vacuous.
 
 ### F7 — what shipped
 

@@ -220,11 +220,23 @@ export function zonedTimeToUtc(args: {
 
 /**
  * Start of day in `timeZone`, returned as UTC instant.
+ *
+ * `dayOffset` moves whole LOCAL days — `1` is the next local midnight, not
+ * "+24h". Those differ: across a DST transition a local day is 23 or 25 hours
+ * long, so `startOfDay + 86_400_000` lands at 01:00 (spring) or 23:00 the same
+ * day (autumn). Day arithmetic runs on the calendar parts, which cannot drift.
  */
-export function startOfDayUtcInTimeZone(dateUtcInstant: Date, timeZone: string) {
+export function startOfDayUtcInTimeZone(
+  dateUtcInstant: Date,
+  timeZone: string,
+  dayOffset = 0,
+) {
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(dateUtcInstant, tz)
-  return zonedTimeToUtc({ year: p.year, month: p.month, day: p.day, hour: 0, minute: 0, second: 0, timeZone: tz })
+  const { year, month, day } = dayOffset
+    ? addDaysToYMD(p.year, p.month, p.day, dayOffset)
+    : p
+  return zonedTimeToUtc({ year, month, day, hour: 0, minute: 0, second: 0, timeZone: tz })
 }
 
 /**
@@ -246,6 +258,25 @@ export function minutesSinceMidnightInTimeZone(dateUtc: Date, timeZone: string) 
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
   const p = getZonedParts(dateUtc, tz)
   return p.hour * 60 + p.minute
+}
+
+/**
+ * Ordinal local-day number for a UTC instant as seen in `timeZone`, counted in
+ * whole days from the epoch. Only differences between two serials are
+ * meaningful; the absolute value is an implementation detail.
+ *
+ * The zoned Y/M/D is re-anchored at 12:00 UTC on purpose: midday is far enough
+ * from either boundary that no DST shift (±1h, historically up to ±2h) can push
+ * the reconstructed instant into an adjacent day, so `Math.floor` never lands a
+ * local date on the wrong serial.
+ */
+export function daySerialInTimeZone(dateUtc: Date, timeZone: string): number {
+  const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+  const p = getZonedParts(dateUtc, tz)
+
+  return Math.floor(
+    Date.UTC(p.year, p.month - 1, p.day, 12, 0, 0, 0) / 86_400_000,
+  )
 }
 
 /**

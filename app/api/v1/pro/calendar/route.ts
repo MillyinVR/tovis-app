@@ -14,7 +14,6 @@ import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 import {
   DEFAULT_DURATION_MINUTES,
-  MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes } from '@/lib/booking/conflicts'
@@ -25,6 +24,7 @@ import {
   type TimeZoneTruthSource,
 } from '@/lib/booking/timeZoneTruth'
 import { clampInt } from '@/lib/pick'
+import { bufferOrZero } from '@/lib/booking/conflicts'
 import { prisma } from '@/lib/prisma'
 import {
   isValidIanaTimeZone,
@@ -294,7 +294,16 @@ type CalendarBlockRow = Prisma.CalendarBlockGetPayload<{
 
 // ─── Date / number helpers ────────────────────────────────────────────────────
 
-function addDaysUtc(date: Date, days: number): Date {
+/**
+ * Fixed-length step over INSTANTS — deliberately not local-day arithmetic.
+ *
+ * Only the range guard uses this, where `from` is an arbitrary caller-supplied
+ * instant and the ceiling means "at most this much time", not "this many days
+ * on the pro's calendar". Anything anchored to a local midnight must use
+ * `startOfDayUtcInTimeZone(…, dayOffset)` instead, or it drifts by an hour
+ * across a DST transition.
+ */
+function addRangeSpanUtc(date: Date, days: number): Date {
   return new Date(date.getTime() + days * CALENDAR_MS_PER_DAY)
 }
 
@@ -347,10 +356,6 @@ function supportsMobile(type: ProfessionalLocationType): boolean {
 
 function safeDurationMinutes(value: number | null | undefined): number {
   return clampInt(value, DEFAULT_DURATION_MINUTES, 15, MAX_SLOT_DURATION_MINUTES)
-}
-
-function safeBufferMinutes(value: number | null | undefined): number {
-  return clampInt(value, 0, 0, MAX_BUFFER_MINUTES)
 }
 
 function safeEventTimeZone(value: string | null | undefined): string {
@@ -464,7 +469,7 @@ function getCalendarRange(args: {
   )
 
   const from = toDateOrNull(args.url.searchParams.get('from')) ?? defaultFrom
-  const defaultToExclusive = addDaysUtc(from, DEFAULT_CALENDAR_RANGE_DAYS)
+  const defaultToExclusive = addRangeSpanUtc(from, DEFAULT_CALENDAR_RANGE_DAYS)
 
   const requestedToExclusive =
     toDateOrNull(args.url.searchParams.get('to')) ?? defaultToExclusive
@@ -478,7 +483,7 @@ function getCalendarRange(args: {
     }
   }
 
-  const maxToExclusive = addDaysUtc(from, MAX_CALENDAR_RANGE_DAYS)
+  const maxToExclusive = addRangeSpanUtc(from, MAX_CALENDAR_RANGE_DAYS)
 
   if (requestedToExclusive.getTime() > maxToExclusive.getTime()) {
     return {
@@ -583,7 +588,7 @@ function toBookingEvent(args: {
   if (!Number.isFinite(start.getTime())) return null
 
   const durationMinutes = safeDurationMinutes(booking.totalDurationMinutes)
-  const bufferMinutes = safeBufferMinutes(booking.bufferMinutes)
+  const bufferMinutes = bufferOrZero(booking.bufferMinutes)
   const end = addMinutes(start, durationMinutes + bufferMinutes)
 
   // Timezone precedence (booking snapshot → location → professional → UTC) is
@@ -995,7 +1000,16 @@ export async function GET(req: Request) {
 
     const viewportTodayKey = utcDateToLocalYmd(now, viewportTimeZone)
     const viewportTodayStart = startOfDayUtcInTimeZone(now, viewportTimeZone)
-    const viewportTomorrowStart = addDaysUtc(viewportTodayStart, 1)
+    // Whole LOCAL days, not +24h: on the two DST days a year the pro's local day
+    // is 23 or 25 hours long, and a fixed 86_400_000ms step put this boundary an
+    // hour inside the next day (spring) or an hour short of midnight (autumn) —
+    // so "blocked minutes today" counted tomorrow's blocks, or dropped the last
+    // hour of today's.
+    const viewportTomorrowStart = startOfDayUtcInTimeZone(
+      now,
+      viewportTimeZone,
+      1,
+    )
 
     const todaysBookingsEvents = bookingEvents.filter(
       (event) =>

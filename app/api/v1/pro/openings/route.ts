@@ -5,7 +5,6 @@ import {
   CreateLastMinuteOpeningError,
   createLastMinuteOpening,
   type CreateLastMinuteOpeningTierInput,
-  type CreatedLastMinuteOpening,
 } from '@/lib/lastMinute/commands/createLastMinuteOpening'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
@@ -18,9 +17,12 @@ import {
   LastMinuteTier,
   LastMinuteVisibilityMode,
   OpeningStatus,
-  Prisma,
   ServiceLocationType,
 } from '@prisma/client'
+import {
+  proOpeningSelect,
+  type ProOpeningRow,
+} from '@/lib/lastMinute/openingSelect'
 
 export const dynamic = 'force-dynamic'
 
@@ -185,105 +187,8 @@ function parseTierPlans(
   return { ok: true, value: plans }
 }
 
-const openingSelect = {
-  id: true,
-  professionalId: true,
-  locationType: true,
-  locationId: true,
-  timeZone: true,
-  startAt: true,
-  endAt: true,
-  status: true,
-  visibilityMode: true,
-  launchAt: true,
-  expiresAt: true,
-  publicVisibleFrom: true,
-  publicVisibleUntil: true,
-  bookedAt: true,
-  cancelledAt: true,
-  note: true,
-  createdAt: true,
-  updatedAt: true,
-  location: {
-    select: {
-      id: true,
-      type: true,
-      name: true,
-      city: true,
-      state: true,
-      formattedAddress: true,
-      timeZone: true,
-      lat: true,
-      lng: true,
-    },
-  },
-  services: {
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    select: {
-      id: true,
-      openingId: true,
-      serviceId: true,
-      offeringId: true,
-      sortOrder: true,
-      createdAt: true,
-      service: {
-        select: {
-          id: true,
-          name: true,
-          minPrice: true,
-          defaultDurationMinutes: true,
-          isAddOnEligible: true,
-          addOnGroup: true,
-        },
-      },
-      offering: {
-        select: {
-          id: true,
-          title: true,
-          offersInSalon: true,
-          offersMobile: true,
-          salonPriceStartingAt: true,
-          salonDurationMinutes: true,
-          mobilePriceStartingAt: true,
-          mobileDurationMinutes: true,
-        },
-      },
-    },
-  },
-  tierPlans: {
-    orderBy: [{ scheduledFor: 'asc' }, { tier: 'asc' }],
-    select: {
-      id: true,
-      openingId: true,
-      tier: true,
-      scheduledFor: true,
-      processedAt: true,
-      cancelledAt: true,
-      lastError: true,
-      offerType: true,
-      percentOff: true,
-      amountOff: true,
-      freeAddOnServiceId: true,
-      freeAddOnService: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      createdAt: true,
-      updatedAt: true,
-    },
-  },
-  _count: {
-    select: {
-      recipients: true,
-    },
-  },
-} satisfies Prisma.LastMinuteOpeningSelect
 
-type OpeningRow = Prisma.LastMinuteOpeningGetPayload<{
-  select: typeof openingSelect
-}>
+type OpeningRow = ProOpeningRow
 
 function mapOpeningDto(opening: OpeningRow) {
   return {
@@ -483,7 +388,7 @@ export async function GET(req: Request) {
       },
       orderBy: [{ startAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       take,
-      select: openingSelect,
+      select: proOpeningSelect,
     })
 
     return jsonOk(
@@ -680,7 +585,7 @@ export async function PATCH(req: Request) {
 
     const refreshed = await prisma.lastMinuteOpening.findUnique({
       where: { id: openingId },
-      select: openingSelect,
+      select: proOpeningSelect,
     })
 
     if (!refreshed) {

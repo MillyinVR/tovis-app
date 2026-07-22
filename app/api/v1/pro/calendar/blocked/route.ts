@@ -3,10 +3,9 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
-import { clampInt } from '@/lib/pick'
+import { bufferOrZero } from '@/lib/booking/conflicts'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
-import { MAX_BUFFER_MINUTES } from '@/lib/booking/constants'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   bookingError,
@@ -76,10 +75,6 @@ const DEFAULT_BLOCK_LOOKAHEAD_DAYS = 60
 const BLOCK_GET_TAKE_LIMIT = 1000
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-function normalizeLocationBufferMinutes(value: unknown): number {
-  return clampInt(value, 0, MAX_BUFFER_MINUTES)
-}
 
 function blockCreateFailure(args: {
   status: number
@@ -300,7 +295,7 @@ export async function POST(req: Request) {
           locationId,
           requestedStart: startsAt,
           requestedEnd: endsAt,
-          defaultBufferMinutes: normalizeLocationBufferMinutes(
+          defaultBufferMinutes: bufferOrZero(
             location.bufferMinutes,
           ),
         })

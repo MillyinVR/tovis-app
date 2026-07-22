@@ -64,6 +64,11 @@ import {
 } from '@/lib/booking/rampedUnitPrice'
 import { snapStartToWorkingWindowStep } from '@/lib/booking/slotReadiness'
 import {
+  getReadableWorkingHoursMessage,
+  makeWorkingHoursGuardMessage,
+  parseWorkingHoursGuardMessage,
+} from '@/lib/booking/workingHoursGuard'
+import {
   computeDiscoveryDepositPlan,
   type DepositSettings,
 } from '@/lib/booking/discoveryDepositPlan'
@@ -1176,11 +1181,6 @@ type UpdateProBookingResult = {
   meta: MutationMeta
 }
 
-type WorkingHoursGuardCode =
-  | 'WORKING_HOURS_REQUIRED'
-  | 'WORKING_HOURS_INVALID'
-  | 'OUTSIDE_WORKING_HOURS'
-
 type HoldConflictType =
   | 'BLOCKED'
   | 'BOOKING'
@@ -1188,8 +1188,6 @@ type HoldConflictType =
   | 'WORKING_HOURS'
   | 'STEP_BOUNDARY'
   | 'TIME_NOT_AVAILABLE'
-
-const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
 
 const CANCEL_BOOKING_SELECT = {
   id: true,
@@ -3925,41 +3923,6 @@ async function assertProfessionalIsBookingReady(args: {
   throw bookingError('PRO_NOT_READY', {
     message: `Professional is not ready to accept bookings: ${readiness.blockers.join(', ')}`,
   })
-}
-
-function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
-  return `${WORKING_HOURS_ERROR_PREFIX}${code}`
-}
-
-function parseWorkingHoursGuardMessage(
-  value: string,
-): WorkingHoursGuardCode | null {
-  if (!value.startsWith(WORKING_HOURS_ERROR_PREFIX)) return null
-
-  const code = value.slice(WORKING_HOURS_ERROR_PREFIX.length)
-
-  switch (code) {
-    case 'WORKING_HOURS_REQUIRED':
-      return 'WORKING_HOURS_REQUIRED'
-    case 'WORKING_HOURS_INVALID':
-      return 'WORKING_HOURS_INVALID'
-    case 'OUTSIDE_WORKING_HOURS':
-      return 'OUTSIDE_WORKING_HOURS'
-    default:
-      return null
-  }
-}
-
-function getReadableWorkingHoursMessage(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    return 'That time is outside working hours.'
-  }
-
-  if (value.startsWith(WORKING_HOURS_ERROR_PREFIX)) {
-    return 'That time is outside working hours.'
-  }
-
-  return value
 }
 
 function normalizeOutputTimeZone(value: string): string {

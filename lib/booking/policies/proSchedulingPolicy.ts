@@ -2,7 +2,11 @@
 
 import { Prisma, ServiceLocationType } from '@prisma/client'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
-import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
+import {
+  ensureWithinWorkingHours,
+  makeWorkingHoursGuardMessage,
+  parseWorkingHoursGuardMessage,
+} from '@/lib/booking/workingHoursGuard'
 import {
   checkAdvanceNotice,
   checkMaxDaysAheadExact,
@@ -15,36 +19,6 @@ import {
   type PolicyResult,
   type SchedulingPolicyFailureCode,
 } from './types'
-
-const WORKING_HOURS_ERROR_PREFIX = 'BOOKING_WORKING_HOURS:'
-
-type WorkingHoursGuardCode =
-  | 'WORKING_HOURS_REQUIRED'
-  | 'WORKING_HOURS_INVALID'
-  | 'OUTSIDE_WORKING_HOURS'
-
-function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
-  return `${WORKING_HOURS_ERROR_PREFIX}${code}`
-}
-
-function parseWorkingHoursGuardMessage(
-  value: string,
-): WorkingHoursGuardCode | null {
-  if (!value.startsWith(WORKING_HOURS_ERROR_PREFIX)) return null
-
-  const code = value.slice(WORKING_HOURS_ERROR_PREFIX.length)
-
-  switch (code) {
-    case 'WORKING_HOURS_REQUIRED':
-      return 'WORKING_HOURS_REQUIRED'
-    case 'WORKING_HOURS_INVALID':
-      return 'WORKING_HOURS_INVALID'
-    case 'OUTSIDE_WORKING_HOURS':
-      return 'OUTSIDE_WORKING_HOURS'
-    default:
-      return null
-  }
-}
 
 export type ProSchedulingAppliedOverride =
   | 'ADVANCE_NOTICE'
