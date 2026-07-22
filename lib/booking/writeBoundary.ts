@@ -78,6 +78,7 @@ import {
   HOLD_OVERLAP_CONSTRAINT_NAME,
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
+  WAITLIST_OFFER_TTL_MINUTES,
 } from '@/lib/booking/constants'
 import { isExclusionConstraintError } from '@/lib/prismaErrors'
 import {
@@ -1236,6 +1237,7 @@ const HOLD_OWNERSHIP_SELECT = {
   id: true,
   clientId: true,
   professionalId: true,
+  waitlistOfferId: true,
 } satisfies Prisma.BookingHoldSelect
 
 type HoldOwnershipRecord = Prisma.BookingHoldGetPayload<{
@@ -14245,6 +14247,17 @@ export async function releaseHold(
     holdId: args.holdId,
     clientId: args.clientId,
     run: async ({ tx, hold }) => {
+      // A waitlist offer's reservation (F14) is not the client's to release: the
+      // PRO chose and promised that time, and DECLINE is how it goes back. The
+      // hold id is never surfaced on an offer surface, so this is a belt on an
+      // unreachable path rather than a UX branch.
+      if (hold.waitlistOfferId) {
+        throw bookingError('HOLD_FORBIDDEN', {
+          message: 'Hold belongs to a waitlist offer.',
+          userMessage: 'Decline the offer to give this time back.',
+        })
+      }
+
       await tx.bookingHold.delete({
         where: { id: hold.id },
       })
@@ -14682,7 +14695,6 @@ type CreateWaitlistOfferArgs = {
   locationId: string
   locationType: ServiceLocationType
   durationMinutes: number
-  expiresAt?: Date | null
 }
 
 type CreateWaitlistOfferResult = {
@@ -14692,6 +14704,169 @@ type CreateWaitlistOfferResult = {
     startsAt: Date
     endsAt: Date
     locationType: ServiceLocationType
+    expiresAt: Date
+  }
+}
+
+/**
+ * When a waitlist offer stops being confirmable, which is both the offer's
+ * `expiresAt` and its reservation's (F14). Not a caller parameter: the value has
+ * to agree with the confirm's own advance-notice rule, and a caller that could
+ * pass a longer one would re-open the offer/confirm asymmetry F5 closed.
+ *
+ * `startsAt − advanceNoticeMinutes` is the exact instant `checkAdvanceNotice`
+ * starts refusing the confirm, so an offer that outlived it would be a live card
+ * the client cannot accept.
+ */
+function resolveWaitlistOfferExpiry(args: {
+  now: Date
+  startsAt: Date
+  advanceNoticeMinutes: number
+}): Date {
+  const ttlExpiry = addMinutes(args.now, WAITLIST_OFFER_TTL_MINUTES)
+  const confirmableUntil = addMinutes(
+    args.startsAt,
+    -Math.max(0, Math.trunc(args.advanceNoticeMinutes)),
+  )
+
+  const expiresAt =
+    confirmableUntil.getTime() < ttlExpiry.getTime()
+      ? confirmableUntil
+      : ttlExpiry
+
+  // Unreachable behind the scheduling gate above, which has already required
+  // `startsAt >= now + advanceNoticeMinutes` (and, separately, a start at least
+  // a minute out). Asserted rather than clamped: silently shipping an offer that
+  // is already expired would notify the client about a card that cannot be
+  // confirmed, which is the exact failure this card exists to remove.
+  if (expiresAt.getTime() <= args.now.getTime()) {
+    throw bookingError('ADVANCE_NOTICE_REQUIRED', {
+      message: 'Offer would expire before the client could confirm it.',
+      userMessage: 'That time is too soon to offer. Pick a later time.',
+    })
+  }
+
+  return expiresAt
+}
+
+/**
+ * Cancel every still-PENDING offer for a waitlist entry and drop the slot each
+ * one was reserving (F14).
+ *
+ * The two halves belong together: an offer that is no longer PENDING must not
+ * keep a slot off the pro's calendar, and the `BookingHold` is the only thing
+ * holding it. Cascade would eventually do this if the offer row were deleted,
+ * but offers are cancelled, not deleted, so the release is explicit.
+ *
+ * Caller must already hold the professional's schedule lock.
+ */
+async function releasePendingWaitlistOffersForEntry(args: {
+  tx: Prisma.TransactionClient
+  waitlistEntryId: string
+  now: Date
+}): Promise<{ cancelled: number }> {
+  const pending = await args.tx.waitlistOffer.findMany({
+    where: {
+      waitlistEntryId: args.waitlistEntryId,
+      status: WaitlistOfferStatus.PENDING,
+    },
+    select: { id: true },
+  })
+
+  if (pending.length === 0) return { cancelled: 0 }
+
+  const offerIds = pending.map((offer) => offer.id)
+
+  await args.tx.bookingHold.deleteMany({
+    where: { waitlistOfferId: { in: offerIds } },
+  })
+
+  const cancelled = await args.tx.waitlistOffer.updateMany({
+    where: { id: { in: offerIds } },
+    data: { status: WaitlistOfferStatus.CANCELLED, respondedAt: args.now },
+  })
+
+  return { cancelled: cancelled.count }
+}
+
+/**
+ * Place the `BookingHold` that reserves a waitlist offer's window (F14).
+ *
+ * `waitlistOfferId` is what separates this row from a client's own hold: it
+ * exempts the reservation from `deleteActiveHoldsForClient` (a client starting
+ * an unrelated booking must not silently drop the slot their pro promised them)
+ * and from `releaseHold` (declining is how a client gives it back).
+ *
+ * A collision here means another write won the slot between the gate and this
+ * insert while holding the same schedule lock — effectively unreachable, but it
+ * maps to a clean `TIME_HELD` rather than a raw 500 for the same reason
+ * `performLockedCreateHold` does.
+ */
+async function createWaitlistOfferHold(args: {
+  tx: Prisma.TransactionClient
+  offerId: string
+  professionalId: string
+  clientId: string
+  offeringId: string
+  locationId: string
+  locationTimeZone: string
+  startsAt: Date
+  endsAtSnapshot: Date
+  durationMinutes: number
+  bufferMinutes: number
+  expiresAt: Date
+}): Promise<void> {
+  try {
+    await args.tx.bookingHold.create({
+      data: {
+        waitlistOfferId: args.offerId,
+        professionalId: args.professionalId,
+        clientId: args.clientId,
+        offeringId: args.offeringId,
+        locationId: args.locationId,
+        locationType: ServiceLocationType.SALON,
+        locationTimeZone: args.locationTimeZone,
+        scheduledFor: args.startsAt,
+        endsAtSnapshot: args.endsAtSnapshot,
+        durationMinutesSnapshot: args.durationMinutes,
+        bufferMinutesSnapshot: args.bufferMinutes,
+        expiresAt: args.expiresAt,
+      },
+      select: { id: true },
+    })
+  } catch (error: unknown) {
+    const isExactStartCollision =
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    const isOverlapCollision = isExclusionConstraintError(
+      error,
+      HOLD_OVERLAP_CONSTRAINT_NAME,
+    )
+
+    if (!isExactStartCollision && !isOverlapCollision) throw error
+
+    logBookingConflict({
+      action: 'WAITLIST_OFFER_CREATE',
+      professionalId: args.professionalId,
+      locationId: args.locationId,
+      locationType: ServiceLocationType.SALON,
+      requestedStart: args.startsAt,
+      requestedEnd: args.endsAtSnapshot,
+      conflictType: 'HOLD',
+      meta: {
+        route: 'lib/booking/writeBoundary.ts',
+        offeringId: args.offeringId,
+        clientId: args.clientId,
+        waitlistOfferId: args.offerId,
+        layer: 'db_backstop',
+        prismaCode: isExactStartCollision ? 'P2002' : '23P01',
+        conflictKind: isExactStartCollision ? 'exact_start' : 'overlap_range',
+        constraint: HOLD_OVERLAP_CONSTRAINT_NAME,
+        note: 'waitlist_offer_hold_backstop_fired',
+      },
+    })
+
+    throw bookingError('TIME_HELD')
   }
 }
 
@@ -14707,11 +14882,19 @@ type CreateWaitlistOfferResult = {
  * the offer is a promise, and a promise the client cannot accept is a refusal
  * aimed at the one person who cannot act on it. The pro can pick another time;
  * the client, holding the offer, cannot. What can still change between offer
- * and confirm — the pro edits their hours, or the slot is taken (no hold is
- * placed) — surfaces at confirm as a clean 4xx with the offer left PENDING.
+ * and confirm — the pro edits their hours — surfaces at confirm as a clean 4xx
+ * with the offer left PENDING.
+ *
+ * F14 (Tori, 2026-07-21): a pro-CHOSEN time reserves the spot, so the offer also
+ * places a `BookingHold` over the window for as long as the offer is live. A
+ * hold rather than a Booking precisely because the client still has something to
+ * confirm — the aftercare `BOOKED_NEXT_APPOINTMENT` case books outright only
+ * because there the client has nothing to accept.
  *
  * A partial unique index enforces one PENDING offer per entry, so any prior
- * still-pending offer for the entry is superseded (CANCELLED) first.
+ * still-pending offer for the entry is superseded (CANCELLED) first — and its
+ * reservation released BEFORE the gate runs, or a re-offer would collide with
+ * the pro's own outstanding promise.
  */
 export async function createWaitlistOffer(
   args: CreateWaitlistOfferArgs,
@@ -14887,7 +15070,29 @@ export async function createWaitlistOffer(
         })
       const endsAt = addMinutes(startsAt, durationMinutes)
 
-      await enforceProCreateScheduling({
+      // Supersede BEFORE the gate, not after. A still-pending offer for this
+      // entry now holds its own slot, and the gate treats a hold as fatal — so
+      // re-offering the same (or an overlapping) time would otherwise refuse
+      // against the pro's own outstanding promise. Everything here is inside the
+      // one locked transaction, so a refusal below rolls the supersede back.
+      await releasePendingWaitlistOffersForEntry({
+        tx,
+        waitlistEntryId: entry.id,
+        now,
+      })
+
+      // The hold EXCLUDE constraint has no expiry predicate, so an expired row
+      // still occupies the index until the 5-minute sweep cron clears it. The
+      // gate ignores expired holds, so without this the insert below could 23P01
+      // on a hold the gate had already declared gone. Same reason
+      // performLockedCreateHold opens with it.
+      await deleteExpiredHoldsForProfessional({
+        tx,
+        professionalId: args.professionalId,
+        now,
+      })
+
+      const schedulingDecision = await enforceProCreateScheduling({
         tx,
         now,
         requestedStart: startsAt,
@@ -14917,13 +15122,10 @@ export async function createWaitlistOffer(
         clientId: entry.clientId,
       })
 
-      // Supersede any still-pending offer for this entry (partial unique index).
-      await tx.waitlistOffer.updateMany({
-        where: {
-          waitlistEntryId: entry.id,
-          status: WaitlistOfferStatus.PENDING,
-        },
-        data: { status: WaitlistOfferStatus.CANCELLED, respondedAt: now },
+      const expiresAt = resolveWaitlistOfferExpiry({
+        now,
+        startsAt,
+        advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
       })
 
       const offer = await tx.waitlistOffer.create({
@@ -14938,7 +15140,7 @@ export async function createWaitlistOffer(
           endsAt,
           durationMinutes,
           status: WaitlistOfferStatus.PENDING,
-          expiresAt: args.expiresAt ?? null,
+          expiresAt,
         },
         select: {
           id: true,
@@ -14946,7 +15148,26 @@ export async function createWaitlistOffer(
           startsAt: true,
           endsAt: true,
           locationType: true,
+          expiresAt: true,
         },
+      })
+
+      // F14: reserve the slot the pro just chose. The window is the one the gate
+      // validated — duration PLUS buffer — so the reservation covers exactly
+      // what the confirm will book.
+      await createWaitlistOfferHold({
+        tx,
+        offerId: offer.id,
+        professionalId: args.professionalId,
+        clientId: entry.clientId,
+        offeringId: offering.id,
+        locationId: locationContext.locationId,
+        locationTimeZone: locationContext.timeZone,
+        startsAt,
+        endsAtSnapshot: schedulingDecision.requestedEnd,
+        durationMinutes,
+        bufferMinutes,
+        expiresAt,
       })
 
       await tx.waitlistEntry.update({
@@ -14978,7 +15199,12 @@ export async function createWaitlistOffer(
         },
       })
 
-      return { offer }
+      // The reservation removed a slot from every availability surface (and a
+      // superseded one may have freed a different slot), so the cached schedule
+      // must not keep serving the old picture.
+      await bumpProfessionalScheduleVersion(args.professionalId)
+
+      return { offer: { ...offer, expiresAt } }
     },
   )
 }
@@ -15078,6 +15304,15 @@ export async function confirmClientWaitlistOffer(
         throw bookingError('PRO_NOT_READY')
       }
 
+      // Hand the reservation back before booking over it (F14). The create below
+      // runs the overlap policy as a CLIENT, so this offer's own hold would
+      // otherwise refuse the very booking it exists to protect. `deleteMany`
+      // rather than `delete`: an idempotent replay reaches here with the hold
+      // already consumed.
+      await tx.bookingHold.deleteMany({
+        where: { waitlistOfferId: locked.id },
+      })
+
       const result = await performLockedCreateProBooking({
         tx,
         now,
@@ -15146,12 +15381,23 @@ type DeclineClientWaitlistOfferArgs = {
   clientId: string
 }
 
+const WAITLIST_OFFER_DECLINE_SELECT = {
+  id: true,
+  status: true,
+  clientId: true,
+  professionalId: true,
+  waitlistEntryId: true,
+} satisfies Prisma.WaitlistOfferSelect
+
 /**
  * Session-authenticated decline of a pro-proposed waitlist time. Marks the offer
- * DECLINED and returns the entry to ACTIVE (from NOTIFIED) so the pro can offer
- * another time. No booking is created. (A pro-facing "client passed" nudge is
- * intentionally omitted in v1 — the pro sees the entry return to their active
- * waitlist and the offer flip to DECLINED.)
+ * DECLINED, releases the slot it was reserving, and returns the entry to ACTIVE
+ * (from NOTIFIED) so the pro can offer another time. No booking is created.
+ * (A pro-facing "client passed" nudge is intentionally omitted in v1 — the pro
+ * sees the entry return to their active waitlist and the offer flip to DECLINED.)
+ *
+ * Runs under the professional's schedule lock — declining removes occupancy, and
+ * every booking/hold state transition serializes the same way (see releaseHold).
  */
 export async function declineClientWaitlistOffer(
   args: DeclineClientWaitlistOfferArgs,
@@ -15161,15 +15407,21 @@ export async function declineClientWaitlistOffer(
     throw bookingError('WAITLIST_OFFER_NOT_FOUND')
   }
 
-  return prisma.$transaction(async (tx) => {
+  // Pre-lock read to resolve whose schedule to lock, matching the confirm. The
+  // ownership and status checks are re-run under the lock below; this one only
+  // fails fast.
+  const pre = await prisma.waitlistOffer.findUnique({
+    where: { id: args.offerId },
+    select: WAITLIST_OFFER_DECLINE_SELECT,
+  })
+  if (!pre || pre.clientId !== args.clientId) {
+    throw bookingError('WAITLIST_OFFER_NOT_FOUND')
+  }
+
+  return withLockedProfessionalTransaction(pre.professionalId, async ({ tx }) => {
     const offer = await tx.waitlistOffer.findUnique({
       where: { id: args.offerId },
-      select: {
-        id: true,
-        status: true,
-        clientId: true,
-        waitlistEntryId: true,
-      },
+      select: WAITLIST_OFFER_DECLINE_SELECT,
     })
     if (!offer || offer.clientId !== args.clientId) {
       throw bookingError('WAITLIST_OFFER_NOT_FOUND')
@@ -15183,6 +15435,11 @@ export async function declineClientWaitlistOffer(
       data: { status: WaitlistOfferStatus.DECLINED, respondedAt: new Date() },
     })
 
+    // F14: the offer is over, so the slot it reserved goes back on the market.
+    await tx.bookingHold.deleteMany({
+      where: { waitlistOfferId: offer.id },
+    })
+
     // Return the entry to ACTIVE so the pro can re-offer. Only flip a NOTIFIED
     // entry (the state a sent offer left it in) — never disturb one already
     // BOOKED or CANCELLED.
@@ -15193,6 +15450,8 @@ export async function declineClientWaitlistOffer(
       },
       data: { status: WaitlistStatus.ACTIVE },
     })
+
+    await bumpProfessionalScheduleVersion(offer.professionalId)
 
     return { ok: true as const }
   })

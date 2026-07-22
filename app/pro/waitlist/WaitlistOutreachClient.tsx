@@ -12,6 +12,11 @@ import {
   getViewerTimeZone,
 } from '@/lib/time'
 
+export type OutreachPendingOffer = {
+  id: string
+  startsAt: string
+}
+
 export type OutreachEntry = {
   rank: number
   waitlistEntryId: string
@@ -19,6 +24,10 @@ export type OutreachEntry = {
   avatarUrl: string | null
   preferenceLabel: string
   joinedAt: string
+  // A still-confirmable time already offered to this client. Since F14 that
+  // offer also reserves the slot, so the badge is what explains the time missing
+  // from the pro's own availability.
+  pendingOffer: OutreachPendingOffer | null
 }
 
 export type OutreachServiceGroup = {
@@ -62,6 +71,18 @@ function formatJoinedAt(iso: string): string | null {
   })
 }
 
+function formatOfferedAt(iso: string): string | null {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  return formatInTimeZone(date, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -82,6 +103,14 @@ function parseEntry(raw: unknown): OutreachEntry | null {
   ) {
     return null
   }
+  const offerRaw = raw.pendingOffer
+  const pendingOffer =
+    isRecord(offerRaw) &&
+    typeof offerRaw.id === 'string' &&
+    typeof offerRaw.startsAt === 'string'
+      ? { id: offerRaw.id, startsAt: offerRaw.startsAt }
+      : null
+
   return {
     rank,
     waitlistEntryId,
@@ -89,6 +118,7 @@ function parseEntry(raw: unknown): OutreachEntry | null {
     avatarUrl: typeof raw.avatarUrl === 'string' ? raw.avatarUrl : null,
     preferenceLabel,
     joinedAt,
+    pendingOffer,
   }
 }
 
@@ -118,6 +148,9 @@ function messageHref(waitlistEntryId: string): string {
 
 function WaitlistRow({ entry }: { entry: OutreachEntry }) {
   const joined = formatJoinedAt(entry.joinedAt)
+  const offeredAt = entry.pendingOffer
+    ? formatOfferedAt(entry.pendingOffer.startsAt)
+    : null
 
   return (
     <div className="flex items-center gap-3 border-b border-textPrimary/10 py-3 last:border-b-0">
@@ -150,6 +183,11 @@ function WaitlistRow({ entry }: { entry: OutreachEntry }) {
           {entry.preferenceLabel}
           {joined ? ` · joined ${joined}` : ''}
         </div>
+        {offeredAt ? (
+          <div className="mt-1 truncate text-[11.5px] font-semibold text-toneInfo">
+            {`Offered · ${offeredAt} — that time is held until they answer`}
+          </div>
+        ) : null}
       </div>
 
       <Link

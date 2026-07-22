@@ -3576,6 +3576,16 @@ model BookingHold {
   bufferMinutesSnapshot   Int?
   endsAtSnapshot          DateTime?
 
+  // Set when this hold is a pro's waitlist offer reserving the slot it promised
+  // (F14: "if a pro chooses a time it should reserve the spot"). Null for an
+  // ordinary client-picked hold, which is the discriminator two paths rely on:
+  // deleteActiveHoldsForClient must not drop an offer's reservation when the
+  // client starts an unrelated booking, and releaseHold must not let the client
+  // un-reserve it without declining. Cascade because a reservation cannot
+  // outlive the offer it belongs to.
+  waitlistOfferId String?        @unique
+  waitlistOffer   WaitlistOffer? @relation(fields: [waitlistOfferId], references: [id], onDelete: Cascade)
+
   // Server-validated at hold creation (looks-feed lookPost ownership / discovery
   // attribution / NFC / relationship). Copied to Booking.discoveryProvenance at
   // finalize so the platform-fee decision never trusts client input.
@@ -4895,6 +4905,11 @@ model WaitlistOffer {
   // Set when the client confirms → the booking this offer materialized.
   bookingId String?  @unique
   booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  // The BookingHold reserving the offered window while the offer is live (F14).
+  // Deleted the moment the offer stops being live — confirmed, declined,
+  // superseded — and otherwise expires with the offer.
+  hold BookingHold?
 
   respondedAt DateTime?
   createdAt   DateTime  @default(now())

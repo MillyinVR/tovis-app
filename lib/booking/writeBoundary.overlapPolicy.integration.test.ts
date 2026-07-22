@@ -103,6 +103,7 @@ const mocks = vi.hoisted(() => ({
 
     waitlistOffer: {
       findUnique: vi.fn(),
+      findMany: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
       create: vi.fn(),
@@ -841,6 +842,11 @@ describe('writeBoundary overlap policy integration', () => {
     })
     mocks.prisma.waitlistOffer.updateMany.mockResolvedValue({ count: 0 })
     mocks.prisma.waitlistEntry.update.mockResolvedValue({ id: 'entry_1' })
+    // F14: the offer supersedes any live one for the entry (releasing its
+    // reservation first) and then reserves the slot it just promised.
+    mocks.prisma.waitlistOffer.findMany.mockResolvedValue([])
+    mocks.prisma.bookingHold.deleteMany.mockResolvedValue({ count: 0 })
+    mocks.prisma.bookingHold.create.mockResolvedValue({ id: 'hold_offer_1' })
   }
 
   const OFFER_ARGS = {

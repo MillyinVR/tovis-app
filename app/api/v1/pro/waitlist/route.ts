@@ -5,13 +5,23 @@
 // list top-down to fill a spot from the waitlist — so the rank here is honest
 // (it reflects who has been waiting longest), unlike a client-facing "in line"
 // number, which the first-come last-minute engine doesn't honor.
-import { WaitlistStatus } from '@prisma/client'
+import {
+  ServiceLocationType,
+  WaitlistOfferStatus,
+  WaitlistStatus,
+} from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { prismaRead } from '@/lib/prisma'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 
 export const dynamic = 'force-dynamic'
+
+type WaitlistOutreachPendingOffer = {
+  id: string
+  startsAt: string
+  locationType: ServiceLocationType
+}
 
 type WaitlistOutreachEntry = {
   rank: number
@@ -20,6 +30,10 @@ type WaitlistOutreachEntry = {
   avatarUrl: string | null
   preferenceLabel: string
   joinedAt: string
+  // A still-confirmable time already offered to this client, so the row reads
+  // "Offered · <time>" instead of inviting another offer. Since F14 that offer
+  // also holds the slot, and this is the pro's only surface saying so.
+  pendingOffer: WaitlistOutreachPendingOffer | null
 }
 
 type WaitlistOutreachServiceGroup = {
@@ -45,10 +59,15 @@ export async function GET() {
   if (!auth.ok) return auth.res
 
   try {
+    // NOTIFIED entries are listed alongside ACTIVE ones: sending an offer moves
+    // the entry there, and filtering them out made the client silently vanish
+    // from the pro's own waitlist the moment they were offered a time. Since F14
+    // that offer reserves the slot, so a row the pro cannot see is a slot they
+    // cannot account for.
     const rows = await prismaRead.waitlistEntry.findMany({
       where: {
         professionalId: auth.professionalId,
-        status: WaitlistStatus.ACTIVE,
+        status: { in: [WaitlistStatus.ACTIVE, WaitlistStatus.NOTIFIED] },
       },
       // FIFO: the client who joined first is rank #1 within their service.
       orderBy: { createdAt: 'asc' },
@@ -67,6 +86,38 @@ export async function GET() {
         },
       },
     })
+
+    // Live offers for the listed entries. The expiry filter matches
+    // assertConfirmableWaitlistOffer: an expired offer can no longer be
+    // confirmed, so it must stop suppressing the offer action.
+    const entryIds = rows.map((row) => row.id)
+    const pendingOfferRows =
+      entryIds.length > 0
+        ? await prismaRead.waitlistOffer.findMany({
+            where: {
+              waitlistEntryId: { in: entryIds },
+              status: WaitlistOfferStatus.PENDING,
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+            },
+            select: {
+              id: true,
+              waitlistEntryId: true,
+              startsAt: true,
+              locationType: true,
+            },
+          })
+        : []
+
+    const pendingOfferByEntryId = new Map<string, WaitlistOutreachPendingOffer>(
+      pendingOfferRows.map((offer) => [
+        offer.waitlistEntryId,
+        {
+          id: offer.id,
+          startsAt: offer.startsAt.toISOString(),
+          locationType: offer.locationType,
+        },
+      ]),
+    )
 
     const groups = new Map<string, WaitlistOutreachServiceGroup>()
 
@@ -101,6 +152,7 @@ export async function GET() {
           windowEndMin: row.windowEndMin,
         }),
         joinedAt: row.createdAt.toISOString(),
+        pendingOffer: pendingOfferByEntryId.get(row.id) ?? null,
       })
     }
 

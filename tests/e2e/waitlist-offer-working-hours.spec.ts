@@ -341,4 +341,27 @@ test('an off-hours waitlist offer refuses inline and the pro can still send one'
   // UTC zone — i.e. the very slot that was refused a moment ago, not some other
   // one the picker happened to re-render.
   expect(offers[0]?.startsAt.toISOString()).toBe(`${offerYmd()}T17:00:00.000Z`)
+
+  // 6) F14: that offer RESERVED the slot, so the pro must be able to see it.
+  //
+  // Sending an offer moves the entry to NOTIFIED, and the calendar used to list
+  // ACTIVE entries only — so the client vanished from the rail and the pro had
+  // no surface anywhere showing an outstanding offer, let alone the slot it now
+  // takes off their own calendar.
+  const reservation = await prisma.bookingHold.findFirst({
+    where: { waitlistOffer: { waitlistEntryId: seed.waitlistEntryId } },
+    select: { scheduledFor: true },
+  })
+  expect(reservation?.scheduledFor.toISOString()).toBe(
+    `${offerYmd()}T17:00:00.000Z`,
+  )
+
+  await page.goto('/pro/calendar')
+  await expect(waitlistTile.first()).toBeVisible({ timeout: 30_000 })
+  await waitlistTile.first().click()
+
+  // The row is still there, now reading "Offered · <time>" instead of inviting
+  // another offer.
+  await expect(page.getByText(/^Offered · /)).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: 'Offer a time' })).toHaveCount(0)
 })

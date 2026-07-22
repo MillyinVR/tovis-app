@@ -13,6 +13,19 @@ export const MAX_DAYS_AHEAD = 3650
 export const HOLD_MINUTES = 10
 
 /**
+ * How long a pro's waitlist offer stays live — and therefore how long its
+ * BookingHold reserves the offered slot (F14).
+ *
+ * Deliberately NOT `HOLD_MINUTES`: a client-picked hold covers the seconds
+ * between picking a slot and paying for it, while an offer is a push
+ * notification the client may not see for hours. 24h is the default; the real
+ * expiry is `min(now + this, startsAt − advanceNoticeMinutes)`, because past
+ * that second the client's confirm would refuse ADVANCE_NOTICE_REQUIRED and the
+ * offer is a promise nobody can accept.
+ */
+export const WAITLIST_OFFER_TTL_MINUTES = 24 * 60
+
+/**
  * Names of the database GIST EXCLUDE constraints that durably forbid
  * overlapping scheduled ranges for a professional. Defined in the migrations
  * 20260522000000_add_booking_overlap_exclusion (bookings) and

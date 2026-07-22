@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
   jsonFail: vi.fn(),
   waitlistFindMany: vi.fn(),
+  offerFindMany: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -18,6 +19,9 @@ vi.mock('@/lib/prisma', () => ({
   prismaRead: {
     waitlistEntry: {
       findMany: mocks.waitlistFindMany,
+    },
+    waitlistOffer: {
+      findMany: mocks.offerFindMany,
     },
   },
 }))
@@ -33,6 +37,7 @@ type Payload = {
       waitlistEntryId: string
       clientName: string
       preferenceLabel: string
+      pendingOffer: { id: string; startsAt: string } | null
     }[]
   }[]
   total: number
@@ -68,6 +73,7 @@ function row(over: {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro-1' })
+  mocks.offerFindMany.mockResolvedValue([])
   // jsonOk returns the payload so we can assert on it directly.
   mocks.jsonOk.mockImplementation((data: unknown) => data)
   mocks.jsonFail.mockImplementation((status: number, error: string) => ({
@@ -115,10 +121,64 @@ describe('GET /api/v1/pro/waitlist', () => {
       ['w2', 1],
     ])
 
-    // Query is FIFO + scoped to the authed pro's ACTIVE entries.
+    // Query is FIFO + scoped to the authed pro. NOTIFIED is listed alongside
+    // ACTIVE (F14): sending an offer moves the entry there, so an ACTIVE-only
+    // filter made the client vanish from the pro's own waitlist the moment they
+    // were offered a — now reserved — time.
     const args = mocks.waitlistFindMany.mock.calls[0]?.[0]
-    expect(args?.where).toMatchObject({ professionalId: 'pro-1', status: 'ACTIVE' })
+    expect(args?.where).toMatchObject({
+      professionalId: 'pro-1',
+      status: { in: ['ACTIVE', 'NOTIFIED'] },
+    })
     expect(args?.orderBy).toEqual({ createdAt: 'asc' })
+  })
+
+  it('attaches a live offer to its entry and leaves the others null', async () => {
+    mocks.waitlistFindMany.mockResolvedValue([
+      row({ id: 'w1', serviceId: 's1', serviceName: 'Balayage', createdAt: '2026-06-10T00:00:00Z' }),
+      row({ id: 'w2', serviceId: 's1', serviceName: 'Balayage', createdAt: '2026-06-11T00:00:00Z' }),
+    ])
+    mocks.offerFindMany.mockResolvedValue([
+      {
+        id: 'off_1',
+        waitlistEntryId: 'w2',
+        startsAt: new Date('2026-08-01T17:00:00Z'),
+        locationType: 'SALON',
+      },
+    ])
+
+    const raw: unknown = await GET()
+    const payload = raw as Payload
+    const entries = payload.services[0]?.entries ?? []
+
+    expect(entries[0]?.pendingOffer).toBeNull()
+    expect(entries[1]?.pendingOffer).toEqual({
+      id: 'off_1',
+      startsAt: '2026-08-01T17:00:00.000Z',
+      locationType: 'SALON',
+    })
+
+    // Only the listed entries are queried, and only offers the client can still
+    // confirm count — an expired one must stop suppressing the offer action.
+    const args = mocks.offerFindMany.mock.calls[0]?.[0]
+    expect(args?.where).toMatchObject({
+      waitlistEntryId: { in: ['w1', 'w2'] },
+      status: 'PENDING',
+    })
+    expect(args?.where?.OR).toEqual([
+      { expiresAt: null },
+      { expiresAt: { gt: expect.any(Date) } },
+    ])
+  })
+
+  it('skips the offer query entirely when nobody is waiting', async () => {
+    mocks.waitlistFindMany.mockResolvedValue([])
+
+    const raw: unknown = await GET()
+    const payload = raw as Payload
+
+    expect(payload.total).toBe(0)
+    expect(mocks.offerFindMany).not.toHaveBeenCalled()
   })
 
   it('renders the client name and preference label', async () => {

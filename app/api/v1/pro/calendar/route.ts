@@ -1025,10 +1025,16 @@ export async function GET(req: Request) {
     // The pro's full active waitlist (FIFO by join time), so the calendar's
     // Waitlist tab shows every client waiting — with their requested service and
     // preferred-time label — not just same-day holds.
+    //
+    // NOTIFIED entries are included because sending an offer moves the entry
+    // there: filtering them out made the "Offered · <time>" badge below
+    // unreachable and left the pro with no surface anywhere showing an offer
+    // they had sent. Since F14 that offer also RESERVES the slot, so this row is
+    // the pro's only explanation for the time missing from their availability.
     const waitlistRows = await prisma.waitlistEntry.findMany({
       where: {
         professionalId,
-        status: WaitlistStatus.ACTIVE,
+        status: { in: [WaitlistStatus.ACTIVE, WaitlistStatus.NOTIFIED] },
       },
       select: waitlistSelect,
       orderBy: { createdAt: 'asc' },
@@ -1056,8 +1062,11 @@ export async function GET(req: Request) {
       offeringRows.map((offering) => [offering.serviceId, offering.id]),
     )
 
-    // Any still-PENDING offers already sent for the listed entries, so the
-    // Waitlist tab shows "Offer pending · <time>" instead of re-offering.
+    // Any still-live offers already sent for the listed entries, so the Waitlist
+    // tab shows "Offered · <time>" instead of re-offering. The expiry filter
+    // matches assertConfirmableWaitlistOffer: an expired offer is one the client
+    // can no longer confirm, so it must stop suppressing the offer action or the
+    // pro is stuck looking at a promise nobody can accept.
     const waitlistEntryIds = waitlistRows.map((entry) => entry.id)
     const pendingOfferRows =
       waitlistEntryIds.length > 0
@@ -1065,6 +1074,7 @@ export async function GET(req: Request) {
             where: {
               waitlistEntryId: { in: waitlistEntryIds },
               status: WaitlistOfferStatus.PENDING,
+              OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
             },
             select: {
               id: true,

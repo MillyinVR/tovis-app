@@ -411,6 +411,48 @@ describe('GET /api/v1/pro/calendar', () => {
     ).toBe(false)
   })
 
+  // Sending an offer moves the entry to NOTIFIED. While the query filtered on
+  // ACTIVE alone, such an entry left the tab entirely and the "Offered · <time>"
+  // badge below it could never render — so the pro had no surface at all showing
+  // an offer they had sent, and (since F14) none explaining the slot it reserves.
+  it('lists a NOTIFIED entry and hangs its live offer on the row', async () => {
+    mocks.waitlistEntryFindMany.mockResolvedValue([
+      { ...makeWaitlistEntry({ id: 'wl-offered', preferenceType: 'ANY_TIME' }), status: 'NOTIFIED' },
+    ])
+    mocks.professionalServiceOfferingFindMany.mockResolvedValue([
+      { id: 'offering-1', serviceId: 'svc-1' },
+    ])
+    mocks.waitlistOfferFindMany.mockResolvedValue([
+      {
+        id: 'off-1',
+        waitlistEntryId: 'wl-offered',
+        startsAt: new Date('2030-02-01T17:00:00.000Z'),
+        locationType: 'SALON',
+      },
+    ])
+
+    const response = await GET(new Request('https://example.test/api/v1/pro/calendar'))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.management.waitlistToday).toHaveLength(1)
+    expect(body.management.waitlistToday[0].pendingOffer).toEqual({
+      id: 'off-1',
+      startsAt: '2030-02-01T17:00:00.000Z',
+      locationType: 'SALON',
+    })
+
+    const entryArgs = mocks.waitlistEntryFindMany.mock.calls[0]?.[0]
+    expect(entryArgs?.where?.status).toEqual({ in: ['ACTIVE', 'NOTIFIED'] })
+
+    // Only offers the client can still confirm suppress the offer action.
+    const offerArgs = mocks.waitlistOfferFindMany.mock.calls[0]?.[0]
+    expect(offerArgs?.where?.OR).toEqual([
+      { expiresAt: null },
+      { expiresAt: { gt: expect.any(Date) } },
+    ])
+  })
+
   it('shows the full active waitlist regardless of a SPECIFIC_DATE preference date', async () => {
     mocks.waitlistEntryFindMany.mockResolvedValue([
       makeWaitlistEntry({
