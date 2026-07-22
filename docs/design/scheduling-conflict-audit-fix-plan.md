@@ -399,15 +399,54 @@ block/booking/hold queries (`:1073–1160`) with `getTimeRangeConflict`. Two bir
 > **disagree**, so the swap fixed a second, unrelated bug. See "F6 — what
 > shipped" in §4.
 
-### F7 — iOS: client MOBILE slots ignore the client's address 🟠
+### F7 — iOS: client MOBILE booking was dead on arrival 🔴 (was 🟠)
 
-`Tovis/BookingFlowView.swift:453` omits `clientAddressId` from
-`/availability/day` but sends it on `createHold` at `:486`. `booking.day()`
-accepts the param, `ProOpenSlotPicker.swift:108` passes it, and web passes it
-(`useDaySlots.ts:104`). Mobile slots are computed against the pro's base rather
-than the client's travel radius, so an offered slot can be rejected at hold.
+**The card's premise was wrong, and the truth is worse.** It read as a precision
+bug — "mobile slots are computed against the pro's base rather than the client's
+travel radius, so an offered slot can be rejected at hold". There is no such
+fallback. `validateAvailabilityPlacement` (`lib/availability/core/placement.ts:502-510`)
+refuses a MOBILE placement outright when `clientAddressId` is absent:
 
-**Fix.** One-line iOS change; pairs with a parity note. Real web↔iOS gap.
+```
+CLIENT_SERVICE_ADDRESS_REQUIRED → HTTP 400
+```
+
+Both `/availability/bootstrap` and `/availability/day` route through it, so the
+whole flow died at the FIRST call. Driven against `pnpm dev` on 2026-07-22:
+
+| request | result |
+| --- | --- |
+| `bootstrap?…&locationType=MOBILE` (what iOS sent) | **400** `CLIENT_SERVICE_ADDRESS_REQUIRED` |
+| `bootstrap?…&locationType=MOBILE&clientAddressId=…` | 200 |
+| `day?…&locationType=MOBILE` (what iOS sent) | **400** |
+| `day?…&locationType=MOBILE&clientAddressId=…` | 200, 14 slots |
+
+The card also aimed at the wrong call. `booking.day()` already accepted the
+param; **`booking.bootstrap()` had no `clientAddressId` parameter at all**, and
+bootstrap runs first. Worse, iOS only loaded the client's addresses *after* a
+successful bootstrap, so a client who HAD a saved address could never reach the
+picker: tapping "Mobile (they come to you)" replaced the entire sheet with
+"Add or select a mobile service address before booking this in-home appointment"
+and a "Try again" that re-fired the same doomed request. **Confirmed on the
+simulator** — screenshot + a `400` in the dev log. Client-side MOBILE booking on
+iOS was 100% impossible, and so was a MOBILE reschedule.
+
+Web never hit this because `useAvailability`'s `canFetch` withholds the request
+until an address is chosen (`useAvailability.ts:242-248`); the address is an
+INPUT to availability there, not a later step.
+
+**Fix (iOS #206).** Mirror web's gate: `bootstrap` gains `clientAddressId`;
+`BookingFlowView` loads addresses *before* asking for availability, withholds the
+request when MOBILE has none, and passes the address to bootstrap AND day — the
+same one `createHold` already sent, so the offer and the hold now agree.
+
+**Second live bug, found only by driving it.** With MOBILE reachable, switching
+modes kept the previous mode's times on screen: `form`'s `.task { if slots.isEmpty }`
+saw a full list and skipped the reload, so salon's 15-minute grid rendered under
+Mobile — bookable, and refusable at hold. Unreachable before (MOBILE always
+failed), live the moment this card's fix landed. `loadBootstrap` now clears
+`slots`/`selectedSlot`, since every reload means the placement changed. Unit
+tests were green across both defects; only the screenshot showed them.
 
 ### F8 — Pin the three "occupied statuses" definitions 🟡
 
@@ -523,9 +562,9 @@ Named honestly rather than assumed safe:
 
 - **No runtime verification of the F1 double-book.** Traced through three call
   sites; not driven with a real ICS import.
-- ~~**No simulator driving on iOS.**~~ Superseded: F5, F14 and F15 each drove the
-  simulator, and F14's pass caught a layout defect no test could see. The
-  remaining iOS cards (F7, F10) are still code reads.
+- ~~**No simulator driving on iOS.**~~ Superseded: F5, F14, F15 and F7 each drove
+  the simulator, and both F14's and F7's passes caught defects no test could see.
+  The remaining iOS card (F10) is still a code read.
 - **Read-time liveness cost under real concurrency (F15).** The five client feeds
   now run ~3 indexed conflict queries per row shown, 8 in flight at a time.
   Measured locally: ~0.9ms per row, ~18ms at 20 rows, projecting to ~45ms at a
@@ -558,13 +597,57 @@ Named honestly rather than assumed safe:
 | F14 pro-chosen time must reserve | ✅ done — #713 (+ iOS #205) |
 | F15 stored client-visible time not re-checked | ✅ done — #714 (**Tori rule 2026-07-21**) |
 | F16 pro can't see their opening went dark | not started (opened by F15) |
-| F7 iOS mobile slot address | not started |
+| F7 iOS mobile slot address | ✅ done — iOS #206 (**premise was wrong**: not imprecise slots, a 400 that killed the whole MOBILE flow; fix caught a second, stale-slot bug on the simulator) |
 | F8 occupied-status parity test | ✅ done — #717 (**Tori ruling 2026-07-21**; carries migration `20260806000000`) |
 | F9 duplicate-logic cleanup | not started |
 | F10 iOS follow-ups | not started |
 | F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | not started (opened by F2) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
+
+### F7 — what shipped
+
+**A 🟠 "one-line iOS change" was a 🔴 dead feature.** See the card above for the
+premise autopsy. What matters for the next reader: the audit's iOS findings were
+code reads, and this one described a *degraded* experience the code could not
+produce — the server has no pro's-base fallback to degrade to. Reading the
+refusal in `placement.ts` was enough to kill the premise; driving it was what
+showed the user-facing shape (a full-screen dead end with a "Try again" that
+re-fires the same 400).
+
+**What changed (iOS #206, no web change).**
+
+- `BookingService.bootstrap` gains `clientAddressId` — it had none, and bootstrap
+  runs before the `day` call the card named.
+- `BookingFlowView.loadBootstrap` loads the client's addresses **before** asking
+  for availability and withholds the request entirely when MOBILE has no address,
+  mirroring web's `canFetch`. A new `.needsAddress` phase renders the offering
+  summary + Where switch + address picker so the client can add one and continue —
+  and can still switch back to salon. Verified both directions on the simulator.
+- Both `bootstrap` and `day` now send the same address `createHold` already sent.
+- `loadBootstrap` clears `slots`/`selectedSlot` (the stale-slot bug in the card).
+- A failed address fetch is no longer silently indistinguishable from "you have
+  none" — it gets an error + retry, like `slotError` already did for days.
+
+**Verified end to end on the simulator**, not just in tests: switching to Mobile
+now issues `bootstrap…&clientAddressId=…` → 200 and `day…&clientAddressId=…` →
+200 against the MOBILE_BASE location, the slot grid changes from salon's 15-minute
+to mobile's 30-minute steps, and a real booking completed — `POST /holds` 201 →
+`POST /bookings/finalize` 201, landing a `MOBILE` row with the right
+`clientAddressId` at the picked time. Four wire tests pin the query
+(`AvailabilityMobileAddressTests`); 858 TovisKit tests pass.
+
+**Two things this pass did NOT settle.** (1) `ClaimOpeningView` and the aftercare
+rebook path also send `clientAddressId` on the hold; they were read, not driven —
+they take a fixed slot rather than browsing availability, so the gate doesn't
+apply, but neither was exercised. (2) A **separate, pre-existing** iOS bug is
+visible in every screenshot here: the booking sheet opened from the pro profile's
+Services tab shows "with" and "Request sent · Haircut & Style with" — an empty pro
+name. Not a scheduling bug and out of F7's scope, but diagnosed while here:
+`displayName` is correct on the wire (`/professionals/{id}` returns
+"TOVIS Test Pro"), so the fault is client-side in `ProProfileView`'s `onBook`,
+which sets `bookingProName` and `bookingOffering` as two separate `@State` writes
+and presents `.sheet(item:)` off the second. Worth its own card.
 
 ### F8 — what shipped
 
