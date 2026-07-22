@@ -275,6 +275,87 @@ decide whether an offer should reserve.
 > reserve-the-slot question is still open and is genuinely Tori's. See
 > "F5 — what shipped" in §4.
 
+### F14 — A pro-CHOSEN time must reserve the slot 🔴
+
+> **Tori's ruling, 2026-07-21, answering the question F5 left open:** *"if a pro
+> chooses a time it should reserve the spot. if a pro gives a time window it
+> shouldn't reserve a specific spot."*
+
+The rule cuts cleanly along a distinction the schema already draws:
+
+| proposal | reserves? | today |
+| --- | --- | --- |
+| Aftercare `BOOKED_NEXT_APPOINTMENT` (pro picks a slot) | **yes** | ✅ already books a real Booking at save (Tori, 2026-07-20) |
+| Aftercare `RECOMMENDED_WINDOW` (pro gives a window) | **no** | ✅ nothing reserved — correct as-is |
+| **Waitlist offer** (pro picks a slot) | **yes** | ❌ **nothing is reserved** |
+
+So the only gap is the waitlist offer. It is a pro-chosen concrete time, and
+between offer and confirm anyone can take it.
+
+**Fix.** Place a `BookingHold` over the offered window inside
+`createWaitlistOffer`'s existing locked transaction, and release it wherever the
+offer stops being live (decline, supersede, expiry, confirm-consumes-it). A hold
+— not a Booking — is the right primitive precisely because the waitlist client
+*does* have something to confirm; the aftercare case books outright only because
+there the client has nothing to accept.
+
+**Carries a sub-decision Tori's ruling does not settle: how long.** Ordinary
+holds are `HOLD_MINUTES = 10`, far too short for an offer a client may see hours
+later. The `WaitlistOffer.expiresAt` column already exists, is honoured by
+`assertConfirmableWaitlistOffer`, and **is never set by the pro route** — so
+offers currently never expire at all, while the client-facing copy says *"before
+it's gone"*. Pick one TTL and give it to both the offer and its hold. Propose a
+default (24h is the obvious candidate), state it, and let Tori correct it —
+don't open with the question.
+
+⚠️ Reserving a slot takes it off the pro's own calendar too. Check what the pro
+sees where a held-but-unconfirmed offer sits, and that a superseded offer
+releases its hold before the replacement takes one (the partial unique index
+supersedes inside the same transaction).
+
+### F15 — A stored client-visible time is never re-checked against the pro's schedule 🔴
+
+> **Tori's rule, 2026-07-21:** *"if a time is outside a pro's working hours,
+> blocked off by the pro, or already booked it shouldn't be visible to the client
+> at all."*
+
+**Where this already holds.** Every slot a client *picks* comes from
+`computeDaySlotsFast`, which filters candidates through `checkSlotReadiness`
+(working hours, advance notice, max-days, step) **and** the busy set from
+`loadBusyIntervalsForWindow` — bookings, holds **and** calendar blocks. Checked,
+not assumed. Nothing to do there.
+
+**Where it does not.** Two surfaces show the client a time that was stored
+earlier and is never re-validated at read time:
+
+1. **The last-minute openings feed** (`/api/v1/client/openings`). It filters on
+   the *opening row's own* state — `status: ACTIVE`, `bookedAt: null`,
+   `cancelledAt: null`, `startAt >= now` — and never consults the pro's live
+   schedule. And an opening only leaves `ACTIVE` when **that opening itself** is
+   claimed (`writeBoundary.ts:8846`) or the pro cancels it by hand
+   (`pro/openings/route.ts:418`, `:673`). Verified: there is **no** sweep that
+   retires an opening when the slot is taken through the normal booking flow,
+   blocked, or dropped out of newly-narrowed working hours. So a client can be
+   shown — and can tap — a slot that is already gone. The claim still refuses
+   (holds → finalize enforce everything), so it is not a double-book; it is
+   exactly the visibility Tori's rule forbids.
+2. **The waitlist offer card** (`/api/v1/client/waitlist-offers`) — filters on
+   `status: PENDING` only. F14's hold closes the "someone else took it" half,
+   but a pro who blocks that time or shortens their day afterwards still leaves
+   a visible, unconfirmable card.
+
+**Fix.** Filter these reads against the same live schedule availability uses,
+rather than teaching every writer to sweep. `getTimeRangeConflict` /
+`loadBusyIntervalsForWindow` already answer the question in one pass; the feed
+knows the professional and window, so this is a read-side join, not a new engine.
+Decide whether a dead row is *hidden* or *shown as expired* — hiding is what the
+rule says, but a client who was notified about a slot may deserve to know it
+went rather than have it vanish.
+
+**This is distinct from F6 and both are needed.** F6 stops an opening being
+*created* over a taken slot (write time); F15 stops one being *shown* after the
+slot dies (read time). Neither subsumes the other.
+
 ### F6 — Last-minute opening creation has no advisory lock 🟠
 
 `lib/lastMinute/commands/createLastMinuteOpening.ts` wraps its checks in
@@ -419,6 +500,8 @@ Named honestly rather than assumed safe:
 | F4 rebook token step grid | ✅ done — #705 |
 | F5 waitlist offer working hours | ✅ done — #710 (+ iOS #204) |
 | F6 last-minute opening lock | not started |
+| F14 pro-chosen time must reserve | not started — **Tori ruling 2026-07-21** |
+| F15 stored client-visible time not re-checked | not started — **Tori rule 2026-07-21** |
 | F7 iOS mobile slot address | not started |
 | F8 occupied-status parity test | not started |
 | F9 duplicate-logic cleanup | not started |
@@ -561,11 +644,15 @@ has no answer; here is what happens today.
 
 **Not verified / not checked:**
 
-- **No iOS simulator driving.** The sheet's refusal rendering is covered by the
-  verbatim-wire test above and by reading `ProWaitlistOfferSheet.send()`, which
-  has exactly one error branch and no path that unmounts the picker — but it was
-  not seen on a device. It is also not a *new* path: the same route already
-  returned `TIME_BOOKED` / `TIME_BLOCKED` through the identical envelope.
+- ~~No iOS simulator driving.~~ **Driven, 2026-07-21.** Signed in as a seeded
+  pro on iPhone 17 Pro, Profile → Waitlist → "Offer a time", picked the real
+  5:00 PM slot, narrowed the pro's hours to 09:00–10:00 behind the open sheet,
+  then tapped Send offer: **"That time is outside working hours." renders inline
+  in ember, the sheet stays open, the picker stays live with the slot still
+  selected, and the DB shows `offers: []` with the entry still `ACTIVE`.**
+  Restoring the hours and tapping Send again sends the *same* slot — `PENDING`
+  offer at `2026-07-22T17:00Z`, entry → `NOTIFIED`. Both halves of the web e2e,
+  reproduced on device.
 - **The decay window is unchanged and unclosed by design.** Offer-time
   validation cannot cover a pro who edits their hours *after* offering; that
   still refuses at confirm, with the offer left PENDING so the pro can re-offer.
@@ -1099,35 +1186,39 @@ update to the table in §4.)
 > production. It has never fired; the path is proven by configuration, not by
 > observation.
 >
-> ## Your card: F6 — last-minute opening creation has no advisory lock
+> ## Your card: F14 — a pro-CHOSEN time must reserve the slot (Tori's ruling)
 >
-> `lib/lastMinute/commands/createLastMinuteOpening.ts` wraps its checks in
-> `$transaction` but never calls `lockProfessionalSchedule`, unlike every other
-> write path. Under READ COMMITTED a concurrent booking is invisible, so an
-> opening can be advertised over a slot that was just taken. Not a double-book
-> (the claim still goes holds → finalize), but a phantom deal in the feed.
+> **This is a direct Tori ruling (2026-07-21), not an audit finding**, so it
+> jumps the queue ahead of F6: *"if a pro chooses a time it should reserve the
+> spot. if a pro gives a time window it shouldn't reserve a specific spot."*
+> Read card **F14** in §2 — the table there shows the rule already holds for both
+> aftercare modes, so the **waitlist offer is the only gap**.
 >
-> **Fix as written:** wrap in `withLockedProfessionalTransaction` **and** replace
-> the inline block/booking/hold queries (`:1073–1160`) with the shared conflict
-> engine. Two birds — that inline copy is also the last item on F9's duplicate
-> list.
+> Place a `BookingHold` over the offered window inside `createWaitlistOffer`'s
+> existing locked transaction and release it wherever the offer stops being live.
+> A hold, not a Booking — the waitlist client *does* have something to confirm.
 >
-> **Establish the facts first.** Seven card premises have now met contact and
-> five died; F4 and F5 are the two that held. Before writing anything, read the
-> command end to end and check: does the inline query agree with
-> `getTimeRangeConflict` on scope (blocks? holds? buffers?), and is the missing
-> lock actually reachable — i.e. is there a real interleaving, or does something
-> downstream already serialize it? F5's shape is worth copying if it fits: the
-> repo's own rule for this exact pair is written down in
-> `lib/booking/slotReadiness.ts` — *"an opening a pro is allowed to create has to
-> be one a client is allowed to hold"* — and `createLastMinuteOpening` is the
-> other half of the pair `checkSlotReadiness` was factored for. Prefer running the
-> claim's own gate over hand-rolling a second one; a second hand-rolled check is
-> what created F5.
+> **It carries one sub-decision the ruling does not settle: the TTL.** Holds are
+> `HOLD_MINUTES = 10`; an offer needs far longer. `WaitlistOffer.expiresAt`
+> already exists, is honoured at confirm, and **is never set** — so offers never
+> expire while the copy says "before it's gone". Pick a default (24h is the
+> obvious candidate), ship it, and say so. Don't open with the question.
 >
-> A lock is easy to add and hard to prove. Ask what test can actually fail
-> without it — a real concurrent interleaving on real Postgres, not a mock —
-> before claiming the fix works.
+> Then **F15** — the other Tori rule from the same exchange: *"if a time is
+> outside a pro's working hours, blocked off by the pro, or already booked it
+> shouldn't be visible to the client at all."* Already verified true for every
+> slot a client PICKS (`computeDaySlotsFast` filters working hours + bookings +
+> holds + blocks). Verified FALSE for the last-minute openings feed and the
+> waitlist offer card, which re-show a stored time nothing re-validates. F15 is
+> read-time; **F6 is write-time; neither subsumes the other.**
+>
+> **Establish the facts first.** Seven card premises have met contact and five
+> died; F4 and F5 are the two that held — and F5 held only because it was driven
+> before a line was written. F14's premise is Tori's own ruling, so the premise is
+> safe; what is NOT established is the blast radius. Reserving a slot takes it off
+> the pro's own calendar too — check what the pro sees where a held-but-unconfirmed
+> offer sits, and that a superseded offer releases its hold before the replacement
+> takes one.
 >
 > **Tori wants the ENTIRE queue closed.** After F6: F7 (iOS), F8, F9, F10 (iOS),
 > F12. F8 carries a decision (should COMPLETED occupy future time? — F11 found
@@ -1136,15 +1227,15 @@ update to the table in §4.)
 > UI on web **and** iOS before its server half can ship. Do not batch-ask them up
 > front.
 >
-> ## 🟡 One thing waiting on Tori, from F5 — surface it, do not re-derive it
+> ## ✅ F5's open question is ANSWERED — do not re-ask it
 >
-> **Should a waitlist offer RESERVE the slot?** No hold is placed between offer
-> and confirm. Evidence is written up under "F5 — what shipped": it fails cleanly
-> today (app gate, not the DB backstop, offer left claimable), the aftercare
-> sibling resolved the same tension by booking immediately at Tori's direction —
-> but that flow has nothing for the client to confirm and this one does — and the
-> pro route never sets `expiresAt`, so offers never expire despite the copy saying
-> "before it's gone". Prod holds **0** offers, so this is a pre-launch design call.
+> Tori, 2026-07-21: *"yes if a pro chooses a time it should reserve the spot. if
+> a pro gives a time window it shouldn't reserve a specific spot."* That is card
+> **F14** above, and it is your card. The second rule from the same exchange —
+> *"if a time is outside a pro's working hours, blocked off by the pro, or
+> already booked it shouldn't be visible to the client at all"* — is **F15**.
+> Both are written up in §2 with the evidence already gathered; start from there
+> rather than re-deriving it.
 >
 > ## House rules that have bitten across eight sessions (all in `CLAUDE.md`)
 >
