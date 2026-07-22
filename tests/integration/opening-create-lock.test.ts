@@ -155,9 +155,11 @@ function bookUnderLock(startAt: Date): {
   release: () => void
 } {
   let signalLocked!: () => void
+  let failLocked!: (error: unknown) => void
   let release!: () => void
-  const locked = new Promise<void>((resolve) => {
+  const locked = new Promise<void>((resolve, reject) => {
     signalLocked = resolve
+    failLocked = reject
   })
   const held = new Promise<void>((resolve) => {
     release = resolve
@@ -172,6 +174,13 @@ function bookUnderLock(startAt: Date): {
     },
     { maxWait: 10_000, timeout: 20_000 },
   )
+
+  // If the rival dies before it signals — a bad fixture, a constraint it tripped
+  // — `locked` would otherwise never settle and every test here would hang until
+  // the suite timeout with nothing naming the cause. Attaching this also marks
+  // `committed` handled, so the real error surfaces at `await committed` rather
+  // than as a bare unhandled rejection.
+  committed.catch((error) => failLocked(error))
 
   return { committed, locked, release }
 }
