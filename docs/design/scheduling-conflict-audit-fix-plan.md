@@ -430,8 +430,9 @@ Named honestly rather than assumed safe:
 ### F5 — what shipped
 
 **The premise held, and driving it is what proved it.** Against a pro open
-09:00–18:00, a 21:00 offer was created happily, the client was pushed *"HTTP
-Studio has Tue, Aug 11 at 9:00 PM open … Tap to confirm before it's gone"*, and
+09:00–18:00, a 21:00 offer was created happily, the client was notified *"HTTP
+Studio has Tue, Aug 11 at 9:00 PM open … Tap to confirm before it's gone"*
+(the real `ClientNotification` row, read back from the DB), and
 Confirm returned **400** `OUTSIDE_WORKING_HOURS` with `uiAction: PICK_NEW_SLOT`
 — a picker the client does not have on the offers surface. The offer stayed
 `PENDING` with `bookingId: null`, and because the pro route never sets
