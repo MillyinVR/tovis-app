@@ -567,10 +567,16 @@ lives where that notification actually lands: the claim page, which already rend
 **"This opening is no longer available / It may have just been booked or expired"**
 — naming no time and offering a way onward. `loadOfferingDetail` now returns
 `claimable: false` for a dead *schedule*, not just a dead row, so both the web page
-and the native 404 reach it. (`/client/offers` has the same shape for the other two
-feeds: an empty state that names no time.) The one place the repo already shows a
-lapsed row — the priority list's `expired: true` — is about the OFFER's own clock,
-not about the slot, and is untouched.
+and the native 404 reach it.
+
+The other two feeds have no such destination — a push for a priority or waitlist
+offer lands on `/client/offers`, which is a list. Checked rather than assumed:
+the priority section renders *"No active offers right now…"* and the waitlist
+section (`WaitlistOfferCards`) renders **nothing** when empty. Neither shows a
+time, so both comply; neither explains, which is the cost of the rule and is
+accepted. The one place the repo already shows a lapsed row — the priority
+list's `expired: true` — is about the OFFER's own clock, not about the slot, and
+is untouched.
 
 **Shipped:**
 
