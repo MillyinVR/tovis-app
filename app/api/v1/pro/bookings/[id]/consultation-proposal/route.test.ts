@@ -9,6 +9,7 @@ import {
   NotificationEventKey,
   Prisma,
   Role,
+  ServiceLocationType,
   SessionStep,
 } from '@prisma/client'
 
@@ -25,8 +26,14 @@ const mocks = vi.hoisted(() => ({
 
   isRecord: vi.fn(),
 
-  getBookingFailPayload: vi.fn(),
-  isBookingError: vi.fn(),
+  // F12 — the propose-time schedule check. The computation itself is covered by
+  // lib/consultation/proposalSchedule.test.ts and, against real Postgres, by
+  // tests/integration/consultation-proposal-schedule.test.ts; here it is a seam
+  // so this file can keep asserting the ROUTE's behaviour.
+  resolveConsultationMaterialization: vi.fn(),
+  consultationExtensionWindow: vi.fn(),
+  resolveConsultationScheduleOutlook: vi.fn(),
+  hasCalendarBlockConflict: vi.fn(),
 
   prismaTransaction: vi.fn(),
   deliveryBookingFindUnique: vi.fn(),
@@ -70,9 +77,19 @@ vi.mock('@/lib/guards', () => ({
   isRecord: mocks.isRecord,
 }))
 
-vi.mock('@/lib/booking/errors', () => ({
-  getBookingFailPayload: mocks.getBookingFailPayload,
-  isBookingError: mocks.isBookingError,
+// NOT mocked. The route throws a BookingError and the assertions below read the
+// resulting envelope off the wire — a hand-rolled stub of the catalog would only
+// be asserting on itself, and it silently swallowed the `uiAction` override that
+// F2's #701 existed to fix.
+
+vi.mock('@/lib/consultation/proposalSchedule', () => ({
+  resolveConsultationMaterialization: mocks.resolveConsultationMaterialization,
+  consultationExtensionWindow: mocks.consultationExtensionWindow,
+  resolveConsultationScheduleOutlook: mocks.resolveConsultationScheduleOutlook,
+}))
+
+vi.mock('@/lib/booking/conflictQueries', () => ({
+  hasCalendarBlockConflict: mocks.hasCalendarBlockConflict,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -118,6 +135,8 @@ vi.mock('@/lib/observability/bookingEvents', () => ({
 vi.mock('@/lib/security/notesPrivacy', () => ({
   encryptedNoteInput: (value: unknown) => ({ encrypted: value }),
 }))
+
+import { bookingError } from '@/lib/booking/errors'
 
 import { POST } from './route'
 
@@ -329,6 +348,7 @@ function makeSuccessResponseBody(overrides?: {
     },
     sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
     proposedCents: 12500,
+    schedule: makeExpectedSchedule(),
     consultationActionDelivery:
       overrides?.consultationActionDelivery ?? {
         attempted: true,
@@ -346,6 +366,7 @@ function makeSuccessResponseBody(overrides?: {
 function makeTxBooking(overrides?: {
   professionalId?: string
   clientId?: string
+  locationId?: string | null
   status?: BookingStatus
   startedAt?: Date | null
   finishedAt?: Date | null
@@ -371,6 +392,13 @@ function makeTxBooking(overrides?: {
     finishedAt:
       overrides && 'finishedAt' in overrides ? overrides.finishedAt : null,
     sessionStep: overrides?.sessionStep ?? SessionStep.CONSULTATION,
+    // F12 — what the propose-time schedule check reads off the booking.
+    scheduledFor: new Date('2026-04-13T18:00:00.000Z'),
+    totalDurationMinutes: 80,
+    bufferMinutes: 10,
+    locationId: overrides && 'locationId' in overrides ? overrides.locationId : 'loc_1',
+    locationType: ServiceLocationType.SALON,
+    locationTimeZone: 'America/Los_Angeles',
     // §12 NC1 #10: proposal notif is personalized with the pro's display name.
     professional: {
       businessName: 'Glow Studio',
@@ -378,6 +406,7 @@ function makeTxBooking(overrides?: {
       lastName: null,
       handle: null,
       nameDisplay: null,
+      timeZone: 'America/Los_Angeles',
     },
     serviceItems: [
       {
@@ -397,6 +426,45 @@ function makeTxBooking(overrides?: {
       overrides && 'consultationApproval' in overrides
         ? overrides.consultationApproval
         : null,
+  }
+}
+
+function makeMaterialization(overrides?: { durationMinutes?: number }) {
+  return {
+    proposedItems: [],
+    normalizedItems: [],
+    primaryServiceId: 'svc_base_1',
+    primaryOfferingId: 'off_1',
+    // Note this is NOT 105 (the 90 + 15 the pro typed): the approval rebuilds
+    // durations from the offering catalog, and F12 exists so both sides use the
+    // same number. 120 here makes an accidental read of the typed value visible.
+    computedDurationMinutes: overrides?.durationMinutes ?? 120,
+    computedSubtotal: new Prisma.Decimal('125.00'),
+  }
+}
+
+function makeExtensionWindow(overrides?: { extendsAppointment?: boolean }) {
+  return {
+    previousEnd: new Date('2026-04-13T19:30:00.000Z'),
+    materializedEnd: new Date('2026-04-13T20:00:00.000Z'),
+    extensionStart: new Date('2026-04-13T19:30:00.000Z'),
+    extendsAppointment: overrides?.extendsAppointment ?? true,
+  }
+}
+
+function makeExpectedSchedule(overrides?: {
+  outlook?: string
+  timeZone?: string | null
+}) {
+  return {
+    endsAt: '2026-04-13T20:00:00.000Z',
+    durationMinutes: 120,
+    bufferMinutes: 10,
+    timeZone:
+      overrides && 'timeZone' in overrides
+        ? overrides.timeZone
+        : 'America/Los_Angeles',
+    outlook: overrides?.outlook ?? 'WITHIN_WORKING_HOURS',
   }
 }
 
@@ -541,38 +609,6 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
         typeof value === 'object' && value !== null && !Array.isArray(value),
     )
 
-    mocks.isBookingError.mockReturnValue(false)
-
-    mocks.getBookingFailPayload.mockImplementation(
-      (
-        code: string,
-        overrides?: { message?: string; userMessage?: string },
-      ) => {
-        const statusByCode: Record<string, number> = {
-          BOOKING_ID_REQUIRED: 400,
-          BOOKING_NOT_FOUND: 404,
-          FORBIDDEN: 403,
-        }
-
-        const messageByCode: Record<string, string> = {
-          BOOKING_ID_REQUIRED: 'Missing booking id.',
-          BOOKING_NOT_FOUND: 'Booking not found.',
-          FORBIDDEN: 'Forbidden.',
-        }
-
-        return {
-          httpStatus: statusByCode[code] ?? 409,
-          userMessage: overrides?.userMessage ?? messageByCode[code] ?? code,
-          extra: {
-            code,
-            retryable: false,
-            uiAction: 'toast',
-            message: overrides?.message ?? messageByCode[code] ?? code,
-          },
-        }
-      },
-    )
-
     mocks.prismaTransaction.mockImplementation(
       async (
         callback: (tx: {
@@ -613,6 +649,18 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     // Default: no session photos captured (the §22 MS1 pre-capture guard reads
     // this only on the post-consultation reopen path).
     mocks.txMediaAssetCount.mockResolvedValue(0)
+
+    // F12 defaults: a proposal that materializes cleanly, extends the
+    // appointment, hits no block, and lands inside the pro's working hours.
+    mocks.resolveConsultationMaterialization.mockResolvedValue(
+      makeMaterialization(),
+    )
+    mocks.consultationExtensionWindow.mockReturnValue(makeExtensionWindow())
+    mocks.hasCalendarBlockConflict.mockResolvedValue(false)
+    mocks.resolveConsultationScheduleOutlook.mockResolvedValue({
+      outlook: 'WITHIN_WORKING_HOURS',
+      timeZone: 'America/Los_Angeles',
+    })
 
     mocks.transitionSessionStepInTransaction.mockResolvedValue({
       ok: true,
@@ -663,8 +711,8 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
       error: 'Missing booking id.',
       code: 'BOOKING_ID_REQUIRED',
       retryable: false,
-      uiAction: 'toast',
-      message: 'Missing booking id.',
+      uiAction: 'NONE',
+      message: 'Booking id is required.',
     })
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
@@ -1202,23 +1250,15 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     expect(mocks.transitionSessionStepInTransaction).not.toHaveBeenCalled()
   })
 
-  it('maps BookingError through bookingJsonFail and marks idempotency failed', async () => {
+  it('maps BookingError through bookingErrorJsonFail and marks idempotency failed', async () => {
     expectIdempotencyStarted('idem_forbidden_1')
 
-    mocks.prismaTransaction.mockRejectedValueOnce({
-      code: 'FORBIDDEN',
-      message: 'Not allowed.',
-      userMessage: 'Not allowed.',
-    })
-    mocks.isBookingError.mockReturnValueOnce(true)
-    mocks.getBookingFailPayload.mockReturnValueOnce({
-      httpStatus: 403,
-      userMessage: 'Not allowed.',
-      extra: {
-        code: 'FORBIDDEN',
+    mocks.prismaTransaction.mockRejectedValueOnce(
+      bookingError('FORBIDDEN', {
         message: 'Not allowed.',
-      },
-    })
+        userMessage: 'Not allowed.',
+      }),
+    )
 
     const result = await POST(
       makeIdempotentRequest({
@@ -1233,16 +1273,13 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
       operation: OPERATION,
     })
 
-    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith('FORBIDDEN', {
-      message: 'Not allowed.',
-      userMessage: 'Not allowed.',
-    })
-
     expect(result.status).toBe(403)
     await expect(result.json()).resolves.toEqual({
       ok: false,
       error: 'Not allowed.',
       code: 'FORBIDDEN',
+      retryable: false,
+      uiAction: 'NONE',
       message: 'Not allowed.',
     })
   })
@@ -1274,6 +1311,174 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     await expect(result.json()).resolves.toEqual({
       ok: false,
       error: 'Internal server error',
+    })
+  })
+
+  // ── F12 — the propose-time schedule check ────────────────────────────────
+  //
+  // The route's job here is narrow: ask the shared computation, refuse a block
+  // BEFORE it writes anything, and carry the working-hours answer out on the
+  // 200. The computation itself is proven in lib/consultation/
+  // proposalSchedule.test.ts and against real Postgres in
+  // tests/integration/consultation-proposal-schedule.test.ts.
+
+  describe('F12 propose-time schedule check', () => {
+    it('refuses a proposal whose extension runs into blocked time', async () => {
+      mocks.hasCalendarBlockConflict.mockResolvedValueOnce(true)
+
+      const result = await POST(
+        makeIdempotentRequest({ body: makeRawProposalBody() }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(409)
+      const body: unknown = await result.json()
+      expect(body).toMatchObject({
+        ok: false,
+        code: 'TIME_BLOCKED',
+        // PICK_NEW_SLOT is the catalog default and is meaningless mid-session.
+        uiAction: 'NONE',
+        error:
+          'These services run past this appointment into time you\u2019ve blocked off. Clear the block or trim the proposal, then send again.',
+      })
+
+      // Nothing was written, and the client was never told about a proposal
+      // that does not exist.
+      expect(mocks.txConsultationApprovalUpsert).not.toHaveBeenCalled()
+      expect(mocks.transitionSessionStepInTransaction).not.toHaveBeenCalled()
+      expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
+      expect(mocks.createConsultationActionDelivery).not.toHaveBeenCalled()
+      expect(mocks.failStartedRouteIdempotency).toHaveBeenCalled()
+    })
+
+    it('probes only the extension window, using the catalog duration', async () => {
+      await POST(
+        makeIdempotentRequest({ body: makeRawProposalBody() }),
+        makeCtx(),
+      )
+
+      // The window is derived from the booking's CURRENT duration and the
+      // duration the catalog rebuild returned (120) - never from the 90 + 15
+      // the pro typed into the form, which the approval discards.
+      expect(mocks.consultationExtensionWindow).toHaveBeenCalledWith({
+        scheduledFor: new Date('2026-04-13T18:00:00.000Z'),
+        previousDurationMinutes: 80,
+        bufferMinutes: 10,
+        materializedDurationMinutes: 120,
+      })
+
+      // extensionStart, not scheduledFor: a block already overlapping the
+      // booked time is a pre-existing condition nobody in the room caused.
+      expect(mocks.hasCalendarBlockConflict).toHaveBeenCalledWith({
+        tx: expect.anything(),
+        professionalId: 'pro_1',
+        locationId: 'loc_1',
+        requestedStart: new Date('2026-04-13T19:30:00.000Z'),
+        requestedEnd: new Date('2026-04-13T20:00:00.000Z'),
+      })
+    })
+
+    it('ALLOWS a proposal that does not grow the appointment, without probing', async () => {
+      mocks.consultationExtensionWindow.mockReturnValueOnce(
+        makeExtensionWindow({ extendsAppointment: false }),
+      )
+
+      const result = await POST(
+        makeIdempotentRequest({ body: makeRawProposalBody() }),
+        makeCtx(),
+      )
+
+      expect(mocks.hasCalendarBlockConflict).not.toHaveBeenCalled()
+      expect(result.status).toBe(200)
+      expect(mocks.txConsultationApprovalUpsert).toHaveBeenCalled()
+    })
+
+    it('ALLOWS a proposal that runs past working hours, and says so on the 200', async () => {
+      mocks.resolveConsultationScheduleOutlook.mockResolvedValueOnce({
+        outlook: 'PAST_WORKING_HOURS',
+        timeZone: 'America/Los_Angeles',
+      })
+
+      const result = await POST(
+        makeIdempotentRequest({ body: makeRawProposalBody() }),
+        makeCtx(),
+      )
+
+      // Running late is the pro's call, and no later write consults the rule -
+      // so this INFORMS. A refusal here would be a rule Tovis does not have.
+      expect(result.status).toBe(200)
+      expect(mocks.txConsultationApprovalUpsert).toHaveBeenCalled()
+      await expect(result.json()).resolves.toMatchObject({
+        schedule: makeExpectedSchedule({ outlook: 'PAST_WORKING_HOURS' }),
+      })
+    })
+
+    it('still sends when the outlook cannot be resolved', async () => {
+      mocks.resolveConsultationScheduleOutlook.mockResolvedValueOnce({
+        outlook: 'NOT_CHECKED',
+        timeZone: null,
+      })
+
+      const result = await POST(
+        makeIdempotentRequest({ body: makeRawProposalBody() }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(200)
+      await expect(result.json()).resolves.toMatchObject({
+        schedule: makeExpectedSchedule({
+          outlook: 'NOT_CHECKED',
+          timeZone: null,
+        }),
+      })
+    })
+
+    it('translates an un-materializable proposal into pro-facing copy', async () => {
+      mocks.resolveConsultationMaterialization.mockRejectedValueOnce(
+        bookingError('INVALID_SERVICE_ITEMS'),
+      )
+
+      const result = await POST(
+        makeIdempotentRequest({ body: makeRawProposalBody() }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(400)
+      // The catalog copy ("Invalid service items.") is written for a client
+      // approving a proposal. This is the pro who built it.
+      await expect(result.json()).resolves.toMatchObject({
+        code: 'INVALID_SERVICE_ITEMS',
+        error:
+          'One of these services can\u2019t be added to this appointment \u2014 it\u2019s no longer active, or it isn\u2019t offered at this appointment\u2019s location. Remove it and send again.',
+      })
+      expect(mocks.txConsultationApprovalUpsert).not.toHaveBeenCalled()
+    })
+
+    it('reports the schedule on a no-op re-send too', async () => {
+      mocks.txBookingFindUnique.mockResolvedValueOnce(
+        makeTxBooking({
+          sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+          consultationApproval: {
+            id: 'approval_1',
+            status: ConsultationApprovalStatus.PENDING,
+            proposedServicesJson: makeExpectedProposalJson(),
+            proposedTotal: new Prisma.Decimal('125.00'),
+            notes: 'Please review the updated plan.',
+            updatedAt: new Date('2026-04-13T18:30:00.000Z'),
+          },
+        }),
+      )
+
+      const result = await POST(
+        makeIdempotentRequest({ body: makeRawProposalBody() }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(200)
+      await expect(result.json()).resolves.toMatchObject({
+        meta: { mutated: false, noOp: true },
+        schedule: makeExpectedSchedule(),
+      })
     })
   })
 })

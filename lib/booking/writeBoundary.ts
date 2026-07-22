@@ -144,6 +144,10 @@ import {
   normalizePositiveDurationMinutes,
   snapToStepMinutes,
 } from '@/lib/booking/serviceItems'
+import {
+  consultationExtensionWindow,
+  resolveConsultationMaterialization,
+} from '@/lib/consultation/proposalSchedule'
 import { resolveBookingAddOns } from '@/lib/booking/addOnResolution'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
 import { moneyToFixed2String } from '@/lib/money'
@@ -7948,94 +7952,6 @@ await enforceBookingOverlapPolicy({
   }
 }
 
-type ConsultationProposedServiceItem = {
-  offeringId: string
-  serviceId: string
-  // Each proposed line item carries its own type. Multiple BASE items are
-  // co-equal services (e.g. cut + color); ADD_ON items hang off a base.
-  itemType: BookingServiceItemType
-  sortOrder: number
-  // The price the pro and client agreed on during the consultation, in dollars.
-  // Stored on the proposal as a decimal string (e.g. "120.00"); null when the
-  // proposal carried no usable price, in which case we fall back to the
-  // offering's catalog price during materialization.
-  agreedPrice: Prisma.Decimal | null
-}
-
-function parseProposedItemType(
-  value: Prisma.JsonValue,
-): BookingServiceItemType {
-  return value === BookingServiceItemType.ADD_ON
-    ? BookingServiceItemType.ADD_ON
-    : BookingServiceItemType.BASE
-}
-
-function isJsonObjectRecord(
-  value: Prisma.JsonValue,
-): value is Prisma.JsonObject {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-// The consultation proposal stores each line item's agreed price as a decimal
-// dollars string (see buildProposalJson in the consultation-proposal route).
-// Parse it back into a Decimal so the approved booking snapshots reflect what
-// was actually quoted, not the offering's catalog "starting at" price.
-function parseConsultationAgreedPrice(
-  value: Prisma.JsonValue,
-): Prisma.Decimal | null {
-  if (typeof value !== 'string' && typeof value !== 'number') return null
-  const trimmed = String(value).trim()
-  if (!trimmed) return null
-  try {
-    const decimal = new Prisma.Decimal(trimmed)
-    if (!decimal.isFinite() || decimal.isNegative()) return null
-    return decimal
-  } catch {
-    return null
-  }
-}
-
-function parseConsultationProposedItems(
-  value: Prisma.JsonValue,
-): ConsultationProposedServiceItem[] {
-  if (!isJsonObjectRecord(value)) {
-    throw bookingError('INVALID_SERVICE_ITEMS')
-  }
-
-  const rawItems = value.items
-
-  if (!Array.isArray(rawItems) || rawItems.length === 0) {
-    throw bookingError('INVALID_SERVICE_ITEMS')
-  }
-
-  return rawItems.map((row, index) => {
-    if (!isJsonObjectRecord(row)) {
-      throw bookingError('INVALID_SERVICE_ITEMS')
-    }
-
-    const offeringId =
-      typeof row.offeringId === 'string' ? row.offeringId.trim() : ''
-
-    if (!offeringId) {
-      throw bookingError('INVALID_SERVICE_ITEMS')
-    }
-
-    const serviceId =
-      typeof row.serviceId === 'string' ? row.serviceId.trim() : ''
-
-    return {
-      offeringId,
-      serviceId,
-      itemType: parseProposedItemType(row.itemType ?? null),
-      sortOrder:
-        typeof row.sortOrder === 'number' && Number.isFinite(row.sortOrder)
-          ? row.sortOrder
-          : index,
-      agreedPrice: parseConsultationAgreedPrice(row.price ?? null),
-    }
-  })
-}
-
 async function performLockedApproveConsultationMaterialization(
   args: ApproveConsultationMaterializationArgs,
 ): Promise<ApproveConsultationMaterializationResult> {
@@ -8078,128 +7994,54 @@ async function performLockedApproveConsultationMaterialization(
     })
   }
 
-  const proposedItems = parseConsultationProposedItems(
-    approval.proposedServicesJson,
-  )
-
-const offeringIds = Array.from(
-  new Set(proposedItems.map((item) => item.offeringId)),
-).slice(0, 50)
-
-  const offerings = await args.tx.professionalServiceOffering.findMany({
-    where: {
-      id: { in: offeringIds },
-      professionalId: booking.professionalId,
-      isActive: true,
-    },
-    select: {
-      id: true,
-      serviceId: true,
-      offersInSalon: true,
-      offersMobile: true,
-      salonDurationMinutes: true,
-      mobileDurationMinutes: true,
-      salonPriceStartingAt: true,
-      mobilePriceStartingAt: true,
-      service: {
-        select: {
-          defaultDurationMinutes: true,
-        },
-      },
-    },
-    take: 100,
-  })
-
-  const offeringById = new Map(
-    offerings.map((offering) => [offering.id, offering]),
-  )
-
-  // Preserve each proposed line item's type so co-equal BASE services (e.g.
-  // cut + color) materialize as independent services rather than being demoted
-  // to add-ons. ADD_ON items still hang off a base.
-  const requestedItems: RequestedServiceItemInput[] = proposedItems.map((item) => {
-  const offering = offeringById.get(item.offeringId)
-
-  if (!offering) {
-    throw bookingError('INVALID_SERVICE_ITEMS')
-  }
-
-  return {
-    serviceId: offering.serviceId,
-    offeringId: offering.id,
-    sortOrder: item.sortOrder,
-    itemType: item.itemType,
-  }
-})
-
-  const normalizedItemsFromCatalog =
-    buildNormalizedBookingItemsFromRequestedOfferings({
-      requestedItems,
-      locationType: booking.locationType,
-      stepMinutes: 15,
-      offeringById,
-      badItemsCode: 'INVALID_SERVICE_ITEMS',
-    })
-
-  // Honor the price the pro and client agreed on during the consultation.
-  // requestedItems/normalizedItems are built in the same order as proposedItems,
-  // so index alignment holds. Where the proposal carried an agreed price, it is
-  // the source of truth for the booking snapshot; otherwise we keep the
-  // offering's catalog price.
-  const normalizedItems = normalizedItemsFromCatalog.map((item, index) => {
-    const agreedPrice = proposedItems[index]?.agreedPrice ?? null
-    if (!agreedPrice) return item
-    return { ...item, priceSnapshot: agreedPrice }
-  })
-
+  // Rebuilt from the OFFERING CATALOG, not from the durations the pro typed
+  // into the proposal form. Shared with the propose route since F12 so both
+  // sides of the consultation compute the same end time — see
+  // lib/consultation/proposalSchedule.ts.
   const {
+    proposedItems,
+    normalizedItems,
     primaryServiceId,
     primaryOfferingId,
     computedDurationMinutes,
     computedSubtotal,
-  } = computeBookingItemLikeTotals(
-    normalizedItems.map((item) => ({
-      serviceId: item.serviceId,
-      offeringId: item.offeringId,
-      durationMinutesSnapshot: item.durationMinutesSnapshot,
-      priceSnapshot: item.priceSnapshot,
-      itemType: item.itemType,
-    })),
-    'INVALID_SERVICE_ITEMS',
-  )
+  } = await resolveConsultationMaterialization({
+    tx: args.tx,
+    professionalId: booking.professionalId,
+    locationType: booking.locationType,
+    proposedServicesJson: approval.proposedServicesJson,
+  })
 
-  const materializedEnd = new Date(
-    booking.scheduledFor.getTime() +
-      (computedDurationMinutes + booking.bufferMinutes) * 60_000,
-  )
+  const extension = consultationExtensionWindow({
+    scheduledFor: booking.scheduledFor,
+    previousDurationMinutes: booking.totalDurationMinutes,
+    bufferMinutes: booking.bufferMinutes,
+    materializedDurationMinutes: computedDurationMinutes,
+  })
+
+  const materializedEnd = extension.materializedEnd
 
   // A CALENDAR BLOCK is not a collision the pro can absorb by working through
   // it — it is time they explicitly declared unavailable, and blocks are fatal
   // on every other write path in the repo (never override-gated, unlike working
   // hours).
   //
-  // Only the EXTENSION window [previousEnd, materializedEnd) is probed, never
-  // the original window. A block may legitimately already overlap the booked
-  // time: the ICS importer's createBlockIfAbsent writes blocks with no
-  // booking-conflict check, so a migrated pro can have a block laid straight
-  // over a live appointment. Probing the full window would refuse those
-  // approvals for a pre-existing condition the client cannot act on.
+  // Only the EXTENSION window is probed, never the original booking window —
+  // see consultationExtensionWindow for why.
   //
   // This runs BEFORE the service-item rewrite: the refusal rolls back either
   // way, but there is no reason to spend the writes only to undo them.
-  const previousEnd = new Date(
-    booking.scheduledFor.getTime() +
-      ((booking.totalDurationMinutes ?? 0) + booking.bufferMinutes) * 60_000,
-  )
-  const extensionStart =
-    previousEnd > booking.scheduledFor ? previousEnd : booking.scheduledFor
-
-  if (materializedEnd > extensionStart) {
+  //
+  // Since F12 the PROPOSE route runs this same probe, so a proposal that would
+  // land here should already have been refused to the pro. This stays: the
+  // block can appear in the gap between proposing and approving, and this is
+  // the side holding the lock.
+  if (extension.extendsAppointment) {
     const blocked = await hasCalendarBlockConflict({
       tx: args.tx,
       professionalId: booking.professionalId,
       locationId: booking.locationId,
-      requestedStart: extensionStart,
+      requestedStart: extension.extensionStart,
       requestedEnd: materializedEnd,
     })
 
