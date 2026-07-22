@@ -679,9 +679,18 @@ function getWaitlistClientName(entry: WaitlistRow): string {
 /**
  * Deep-link into the pre-filled new-booking flow so the pro can offer a
  * waitlist client a matching slot. Returns null when there's no active offering
- * for the requested service (nothing bookable to pre-fill). The new-booking page
- * grants client visibility via the waitlist message thread and lets the pro pick
- * the concrete time / location before it books.
+ * for the requested service (nothing bookable to pre-fill).
+ *
+ * ⚠️ `clientProfileId` here is the RAW id, deliberately — not the gated one the
+ * event's own `clientProfileId` field carries. The two answer different
+ * questions and are allowed to disagree: the field decides whether to render a
+ * chart LINK (booking-based, `getVisibleClientIdSetForPro`), while this href is
+ * just a destination, and that destination runs the real, broader gate itself —
+ * `BookingCreateContent` calls `getProClientVisibility` and pre-fills nothing
+ * unless it passes. Narrowing this to the gated id would delete the offer link
+ * for exactly the clients it exists for: waitlist clients the pro has messaged
+ * but never booked, who are viewable via `ACTIVE_THREAD` yet absent from the
+ * booking-based set.
  */
 function buildWaitlistOfferHref(args: {
   clientProfileId: string | null | undefined

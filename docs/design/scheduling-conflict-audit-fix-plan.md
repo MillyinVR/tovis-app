@@ -572,7 +572,9 @@ was widened instead (#717); that test now covers CANCELLED and NO_SHOW only. Rea
 > ✅ **Shipped.** Four items, **two premises died** (both by comparing against
 > web rather than reading iOS alone): #1 is parity, not a bug, and #4 is dead on
 > **both** platforms. The two that held were fixed and driven on the simulator
-> with the device deliberately in another timezone. See "F10 — what shipped" in §4.
+> with the device deliberately in another timezone. A third finding this session
+> raised itself — a "gate mismatch" on the offer deep-link — also died on being
+> chased down; what was really wrong was a comment. See "F10 — what shipped" in §4.
 
 ---
 
@@ -592,8 +594,10 @@ Named honestly rather than assumed safe:
   BOOKED mode instead. Whether it should be wired up, folded into aftercare, or
   retired is a product call, not an audit finding — see `other-pros` for why it
   was not deleted on sight.
-- **The deep-link `clientId` vs `clientProfileId` gate mismatch** (F10, §4).
-  Untidy rather than unsafe; unfixed.
+- ~~**The deep-link `clientId` vs `clientProfileId` gate mismatch** (F10).~~
+  **Not a finding — the premise was wrong** (see "F10 — what shipped"). The two
+  gates differ on purpose; the misleading comment that produced the claim, and
+  the missing test, are fixed.
 - **Read-time liveness cost under real concurrency (F15).** The five client feeds
   now run ~3 indexed conflict queries per row shown, 8 in flight at a time.
   Measured locally: ~0.9ms per row, ~18ms at 20 rows, projecting to ~45ms at a
@@ -629,7 +633,7 @@ Named honestly rather than assumed safe:
 | F7 iOS mobile slot address | ✅ done — iOS #206 (**premise was wrong**: not imprecise slots, a 400 that killed the whole MOBILE flow; fix caught a second, stale-slot bug on the simulator) |
 | F8 occupied-status parity test | ✅ done — #717 (**Tori ruling 2026-07-21**; carries migration `20260806000000`) |
 | F9 duplicate-logic cleanup | ✅ done — #719 (**found a live DST bug**; 2 premises died; `other-pros` deferred with evidence) |
-| F10 iOS follow-ups | ✅ done — iOS #210 (**2 of 4 premises died**; the two real ones proved on the simulator with the device in `Asia/Tokyo`) |
+| F10 iOS follow-ups | ✅ done — iOS #210 + web #723 (**2 of 4 card premises died, plus one this session raised itself**; the two real ones proved on the simulator with the device in `Asia/Tokyo`) |
 | F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | ✅ done — #722 (+ iOS #209) (opened by F2; **the card's working-hours half was rejected on evidence** — see the write-up) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
@@ -639,7 +643,9 @@ Named honestly rather than assumed safe:
 **The last card in the queue, and the only one whose findings had never touched a
 device.** Four unrelated items. Each was checked before anything moved, against
 the thing that decides it — which for an iOS-vs-web parity card means reading
-**web**, not re-reading iOS. Two of the four did not survive that.
+**web**, not re-reading iOS. Two of the four did not survive that — and a third
+finding, raised by this session during the write-up, did not survive being chased
+down either (see the end of this section).
 
 **🔴 Item 1's premise died: forcing a custom time on calendar tap is PARITY, not
 a bug.** The card reads `manualMode = true` at `ProNewBookingView.swift:175` and
@@ -803,13 +809,39 @@ this card exists to remove. Web's shared label is a wart worth its own card.
 - **Nothing was measured.** These are view-layer changes plus four decoded
   fields; no new queries, no new round trips.
 
-**🟡 Found while reading, NOT fixed (out of F10's scope):**
-`buildWaitlistOfferHref` builds its `clientId` from the raw `entry.client?.id`,
-while the same event's `clientProfileId` goes through `linkableClientProfileId`.
-So a row whose chart the pro may **not** open still hands them that client's id in
-the deep-link — visible in the verbatim capture pinned in the test. It is the
-pro's own waitlist entry, so this is untidiness rather than a leak to a stranger,
-but the two fields disagreeing about the same gate is worth a card.
+**🔴 A fourth premise died — this one was MINE.** This session first reported
+that `buildWaitlistOfferHref` builds its `clientId` from the raw
+`entry.client?.id` while the same event's `clientProfileId` goes through
+`linkableClientProfileId`, and filed it as "untidy, worth a card". **That was
+wrong, and acting on it would have been a regression.** Chased down on request:
+
+The two fields are gated by two *different* helpers, on purpose.
+`getVisibleClientIdSetForPro` (which backs `linkableClientProfileId`) is
+**booking-based only**. `getProClientVisibility` also accepts a bare message
+thread (`ACTIVE_THREAD`). The comment on the former claimed "Same policy as
+getProClientVisibility, just batched" — **it is not**, it silently omits the
+thread clause, and that false comment is what produced the bogus finding.
+
+The split is deliberate and documented on `getProClientVisibility`: the clients
+LIST stays booking-based "so inquiry-only contacts don't flood the CRM", while
+the access gate has to let a pro open someone they are only messaging. And the
+deep-link is not a bypass — its **destination** runs the real gate:
+`BookingCreateContent` calls `getProClientVisibility(professionalId,
+requestedClient.id)` and pre-fills nothing unless it passes.
+
+So gating the href on the booking-based set would have deleted the offer link for
+precisely the clients it exists for: a waitlist client the pro has messaged but
+never booked is absent from the batched set and *is* viewable. That is the whole
+"message them, then offer them a time" flow the outreach workspace is built
+around.
+
+**What was actually wrong was the comment, and the absence of a test.** Both
+fixed: `getVisibleClientIdSetForPro`'s doc now says it is deliberately narrower
+and names the consumer split; `buildWaitlistOfferHref` records why the raw id is
+correct; and `clientVisibility.test.ts` gained two cases pinning the divergence —
+a thread-only client is viewable one-by-one, stays OUT of the batched set, and
+the batched path must never even query threads. Proven RED against the exact
+"make the two gates consistent" edit that was nearly made.
 
 ### F12 — what shipped
 
@@ -2704,10 +2736,11 @@ update to the table in §4.)
 **All sixteen cards are shipped (F1–F16).** There is no next step in this chain;
 this section used to carry the next session's prompt and no longer needs to.
 
-Of the **thirty-three** card premises that met contact across the queue, **eleven
-did not survive** — the two most recent being F10's items 1 and 4, both of which
-looked like iOS defects until web was read and turned out to be parity and
-dead-on-both-platforms respectively. Several cards were also *understated*: F6
+Of the **thirty-four** premises that met contact across the queue, **twelve did
+not survive** — the last three all in F10, and one of them was this session's
+own: items 1 and 4 looked like iOS defects until web was read (parity, and
+dead-on-both-platforms), and a "gate mismatch" filed during the write-up turned
+out to be two gates that differ deliberately, mis-described by a stale comment. Several cards were also *understated*: F6
 hid a real hold-window gap behind a "refactor", F9's tidy-up contained a live DST
 bug, F7's "imprecise slots" was a 400 that killed the whole MOBILE flow, and
 F10's item 3 was missing two web branches rather than one.

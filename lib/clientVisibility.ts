@@ -198,8 +198,20 @@ async function hasProClientThread(
 }
 
 /**
- * For list pages: visible client ids for this pro.
- * Same policy as getProClientVisibility, just batched.
+ * For list pages: which client ids get a chart LINK for this pro.
+ *
+ * ⚠️ NOT "getProClientVisibility, batched" — it is deliberately NARROWER. This
+ * one is **booking-based only**; the per-client gate also accepts a bare message
+ * thread (`ACTIVE_THREAD`). That is the same split described on
+ * getProClientVisibility: the clients LIST stays booking-based so inquiry-only
+ * contacts don't flood the CRM, while the gate has to let the pro open someone
+ * they are only messaging.
+ *
+ * So a client can legitimately be absent here and still be viewable — a waitlist
+ * client the pro has only messaged is exactly that. Consumers must pick the
+ * right one: use this to decide whether to render a link, and
+ * getProClientVisibility to decide whether access is allowed. Making the two
+ * agree is a regression, and `clientVisibility.test.ts` fails if you try.
  */
 export async function getVisibleClientIdSetForPro(proId: string): Promise<Set<string>> {
   const now = new Date()
