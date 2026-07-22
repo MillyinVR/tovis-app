@@ -1295,6 +1295,17 @@ update to the table in §4.)
 >     leaves them). Seed it with the e2e's own env or the accounts get the wrong
 >     email keyring and login 404s/401s: `pnpm exec dotenv -e .env.e2e.local -e
 >     .env.local -- pnpm db:test:seed`.
+> - **iOS simulator** (F5's recipe, proven 2026-07-21): `cd ~/Dev/tovis-app &&
+>   pnpm dev` (dev DB on :5434), then
+>   `~/Dev/tovis-ios/scripts/sim-login.sh --email <pro>` — it mints a bearer token
+>   because local password login is broken by the PII keyring. **Build your own
+>   fixture pro** rather than mutating the shared seed accounts (the dev DB is
+>   shared with sibling sessions). Taps need `cliclick`, mapped through
+>   **`group 1 of window 1`**, not `window 1`. The pro waitlist workspace is
+>   **Profile → Business → Waitlist**, and that is the entry point that hits the
+>   offer route — the calendar's WAITLIST tile goes to `ProNewBookingView` and
+>   books directly (F10). Mutating the DB behind an open sheet is how you drive a
+>   stale-state refusal, exactly as the web e2e does.
 > - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
 >   HTTP without touching dev data. ⚠️ **A stale `.next` made every `/api/v1/*`
 >   route 404 while `/api/health` answered 200**; `rm -rf .next` fixed it. Don't
