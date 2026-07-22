@@ -1172,7 +1172,8 @@ update to the table in §4.)
 > in the work, not a note about it.
 >
 > **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
-> F13 ✅ #704, F4 ✅ #705, F5 ✅ #710 (+ iOS #204). NEXT = F6.**
+> F13 ✅ #704, F4 ✅ #705, F5 ✅ #710 (+ iOS #204). NEXT = F14** (a Tori ruling,
+> which jumps ahead of F6 — see the card below).
 >
 > ⚠️ **A prod deploy is PENDING Tori's go-ahead.** Everything through **#704** is
 > live (`tovis-npx5cy47p`, 2026-07-21). **#705 (F4), #706, #707 and #710 (F5) are
@@ -1220,8 +1221,8 @@ update to the table in §4.)
 > offer sits, and that a superseded offer releases its hold before the replacement
 > takes one.
 >
-> **Tori wants the ENTIRE queue closed.** After F6: F7 (iOS), F8, F9, F10 (iOS),
-> F12. F8 carries a decision (should COMPLETED occupy future time? — F11 found
+> **Tori wants the ENTIRE queue closed.** Order from here: **F14 → F15 → F6** →
+> F7 (iOS), F8, F9, F10 (iOS), F12. F8 carries a decision (should COMPLETED occupy future time? — F11 found
 > DB-side evidence the constraint excluding it is deliberate, so F8 probably
 > resolves by dropping COMPLETED from `BOOKING_BLOCKING_STATUSES`), and F12 needs
 > UI on web **and** iOS before its server half can ship. Do not batch-ask them up
