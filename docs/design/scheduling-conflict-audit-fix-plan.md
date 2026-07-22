@@ -270,6 +270,11 @@ the promise. Separately: no hold is placed between offer and confirm, so the slo
 can evaporate (fails cleanly with `TIME_BOOKED`, but the offer was a promise) —
 decide whether an offer should reserve.
 
+> ✅ **Shipped.** The premise held — only the second card in seven to survive
+> contact. The direction question resolved in the repo, not with Tori; the
+> reserve-the-slot question is still open and is genuinely Tori's. See
+> "F5 — what shipped" in §4.
+
 ### F6 — Last-minute opening creation has no advisory lock 🟠
 
 `lib/lastMinute/commands/createLastMinuteOpening.ts` wraps its checks in
@@ -412,7 +417,7 @@ Named honestly rather than assumed safe:
 | F2 consultation extension | ✅ done — #699, + #700 (page) + #701 (uiAction), iOS #203 |
 | F3 retire second engine | ✅ done — #703 |
 | F4 rebook token step grid | ✅ done — #705 |
-| F5 waitlist offer working hours | not started |
+| F5 waitlist offer working hours | ✅ done — #710 (+ iOS #204) |
 | F6 last-minute opening lock | not started |
 | F7 iOS mobile slot address | not started |
 | F8 occupied-status parity test | not started |
@@ -421,6 +426,145 @@ Named honestly rather than assumed safe:
 | F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | not started (opened by F2) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
+
+### F5 — what shipped
+
+**The premise held, and driving it is what proved it.** Against a pro open
+09:00–18:00, a 21:00 offer was created happily, the client was pushed *"HTTP
+Studio has Tue, Aug 11 at 9:00 PM open … Tap to confirm before it's gone"*, and
+Confirm returned **400** `OUTSIDE_WORKING_HOURS` with `uiAction: PICK_NEW_SLOT`
+— a picker the client does not have on the offers surface. The offer stayed
+`PENDING` with `bookingId: null`, and because the pro route never sets
+`expiresAt`, an unconfirmable card sits there indefinitely.
+
+**The direction was decided from the repo, not raised with Tori.** Three pieces
+of evidence, all pointing the same way:
+
+1. `lib/booking/slotReadiness.ts` (the `mapSlotReadinessToBookingError` doc
+   comment) already states the rule for the identical shape — last-minute
+   opening *create* vs client *claim*: *"an opening a pro is allowed to create
+   has to be one a client is allowed to hold, or the opening lands in the feed
+   and every claim fails."* A waitlist offer is that shape exactly.
+2. The nearest sibling agrees. Aftercare `BOOKED_NEXT_APPOINTMENT` (pro
+   proposes → client confirms) validates working hours on **both** sides:
+   `performLockedCreateRebookedBooking` runs `allowOutsideWorkingHours: false`
+   at author time *and* at the client's confirm.
+3. "Who can fix this?" — only the pro. Relaxing the confirm instead would let a
+   client book outside the pro's current hours with **no**
+   `BookingOverrideAuditLog` row, while `OUTSIDE_WORKING_HOURS` is
+   override-gated for the pro everywhere else (`lib/booking/overridePrompts.ts`).
+
+**So the fix is not "add a working-hours check" — it is "run the confirm's own
+gate."** A second, hand-rolled check is what created this gap in the first
+place. Shipped:
+
+- `lib/booking/writeBoundary.ts` — `createWaitlistOffer` resolves its context
+  through `resolveValidatedBookingContext` (the same call the confirm makes) and
+  runs `enforceProCreateScheduling` with the confirm's flags:
+  `allowOutsideWorkingHours` / `allowShortNotice` / `allowFarFuture` all false;
+  `enforceStepGrid: false` because the **pro** picked the minute (F4's rule);
+  `deferBusyConflictsToOverlapPolicy: false` because nothing runs after it to
+  pick a booking/hold verdict up. `assertProfessionalIsBookingReady` was added
+  for the same reason — the confirm opens with it.
+- `resolveProBookingDurations`, extracted from `performLockedCreateProBooking`
+  and shared, so the stored window is the **offering's** length. An offer could
+  previously promise 45 minutes and book 60; `endsAt` is now derived from the
+  validated duration rather than echoed from the request.
+- **Two flags on `enforceProCreateScheduling` are required, not defaulted** —
+  `deferBusyConflictsToOverlapPolicy` (true is only correct when the overlap
+  policy runs next) and `action`. The latter adds `WAITLIST_OFFER_CREATE` to
+  `BookingConflictAction`: this gate now serves a caller that writes no Booking,
+  and an ops reader must be able to tell an offer refusal from a create that was
+  turned away. Without it, offer refusals would have silently inflated the
+  `booking_conflict action=BOOKING_CREATE` stream.
+
+Two side effects of running the real gate, both closing smaller versions of the
+same bug: the conflict window now includes the location **buffer** (the old
+standalone check used the raw start/end pair), and a **non-bookable** location is
+refused at offer time (`pickBookableLocation` filters `isBookable`; the old
+check only looked at `type`).
+
+**Verified. Every guard proven red first — seven mutations, one literal at a
+time:**
+
+| mutation | what goes red |
+| --- | --- |
+| `enforceStepGrid` false → true | integration "…not STEP_MISMATCH" (`Start time must be on a 15-minute boundary.`) + the flags test |
+| `allowOutsideWorkingHours` false → true | both working-hours integration tests + the e2e (`element(s) not found` for the inline refusal) |
+| `deferBusyConflictsToOverlapPolicy` false → true | "still refuses an offer over an existing booking" — the **block** test stays green, which is exactly why the booking one had to exist |
+| `action` → `BOOKING_CREATE` | `expected 'BOOKING_CREATE' to be 'WAITLIST_OFFER_CREATE'` |
+| duration / `endsAt` derivation reverted | "stores the offering-derived window, not a shorter requested one" |
+| checked window widened by 15 min | the boundary **ALLOW** test — over-enforcement is invisible from the refusal side |
+| readiness gate removed | "refuses when the pro is not booking-ready" |
+
+- **Real Postgres** (`tests/integration/waitlist-offer.test.ts`, 6 → 11 tests):
+  past-closing; before-opening asserting `OUTSIDE_WORKING_HOURS` and **not**
+  `STEP_MISMATCH` (that assertion is what pins `enforceStepGrid: false`); a
+  window ending *exactly* at closing that must still offer **and** confirm; and
+  block/booking conflicts surviving the gate swap.
+- **Real HTTP** (`pnpm dev:test-db`, a seeded pro session, the actual route):
+  21:00 → **400**, 17:30 (ends 18:30) → **400**, 14:00 → **201** with the entry
+  flipped to `NOTIFIED` and `endsAt` derived as start + 60.
+- **Real browser** — `tests/e2e/waitlist-offer-working-hours.spec.ts`, green on
+  **chromium and mobile-chrome**. The refusal is unreachable through normal UI
+  (both pickers only offer `/availability/day` slots), so the spec drives the one
+  path that reaches it, a **stale modal**: pick a real slot → the pro's closing
+  time moves behind it → **inline refusal, modal still open, picker still live,
+  nothing written** → hours restored → the same slot sends and a PENDING offer
+  exists. The recovery half is the point; a refusal the pro cannot escape would
+  be worse than the looseness this card closed.
+- **iOS #204** — no app change was needed (`ProWaitlistOfferSheet` already
+  renders `APIError.userMessage` inline with the picker live), but the sheet's
+  error path had **zero** coverage: every case in `ProWaitlistTests` served 200.
+  A verbatim capture of the refusal body now pins that the copy survives the
+  wire — `APIClient` lifts it off `error`, so an envelope change would otherwise
+  silently degrade the sheet to "Something went wrong."
+- **Cost measured, not asserted.** The advisory-lock section goes from
+  p50 **8.7ms** / p95 9.6ms to p50 **9.8ms** / p95 11.6ms (n=50 after warmup,
+  local Postgres) — two extra round trips (readiness + `pickBookableLocation`).
+- **Retroactivity: nothing to migrate**, and the number says why. Prod holds
+  **0** `WaitlistOffer` rows and **0** `WaitlistEntry` rows — the feature has
+  never been used there.
+- `typecheck` clean, `lint` 0 errors, all static guards pass, **704 files /
+  6856 unit tests**, **32 files / 159 integration tests**, full chromium e2e
+  **28 passed**, iOS **852 tests / 111 suites**.
+
+**🟡 Open, and genuinely Tori's: should an offer RESERVE the slot?** The code
+has no answer; here is what happens today.
+
+- No hold is placed between offer and confirm, so the slot can be taken. That
+  fails *cleanly* — pinned, and pinned to the **app gate** rather than the DB
+  backstop (the offer stays `PENDING` and claimable, nothing half-written) — but
+  the client was told "a spot opened up."
+- The closest decided precedent went the other way. On 2026-07-20 Tori ruled
+  that an aftercare `BOOKED_NEXT_APPOINTMENT` slot books a **real appointment at
+  save**, reasoning recorded in the code: *"the slot is a pro-confirmed
+  appointment, not a proposal, and the client has nothing to confirm."* A
+  waitlist offer is different in exactly that respect — the client explicitly
+  does have something to confirm, and may decline — so a **hold** is the
+  analogue, not a booking.
+- Cheap and related either way: the pro route never passes `expiresAt`, so
+  offers never expire, even though the client-facing copy says *"before it's
+  gone"* and `assertConfirmableWaitlistOffer` already honours the column. A hold
+  would need a TTL; an expiry alone would bound the stale-offer problem without
+  reserving anything.
+- Sizing: with **0** offers in prod this is a pre-launch design call, not a
+  live-data cleanup.
+
+**Not verified / not checked:**
+
+- **No iOS simulator driving.** The sheet's refusal rendering is covered by the
+  verbatim-wire test above and by reading `ProWaitlistOfferSheet.send()`, which
+  has exactly one error branch and no path that unmounts the picker — but it was
+  not seen on a device. It is also not a *new* path: the same route already
+  returned `TIME_BOOKED` / `TIME_BLOCKED` through the identical envelope.
+- **The decay window is unchanged and unclosed by design.** Offer-time
+  validation cannot cover a pro who edits their hours *after* offering; that
+  still refuses at confirm, with the offer left PENDING so the pro can re-offer.
+  Deliberate — the pro's current configuration is the truth — but it is a
+  behaviour, not a fix.
+- The gate's `logAndThrowStepMismatch` branch stays unreachable from this path
+  (`enforceStepGrid: false`), same as the other two callers.
 
 ### F4 — what shipped
 
@@ -916,9 +1060,9 @@ update to the table in §4.)
 
 > Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
-> it first, especially §4's status table, **"F4 — what shipped"**,
-> **"F3 — what shipped"** and **"F13 — what shipped"** (each contains a trap that
-> cost real time), and the "Not checked" list in §3.
+> it first, especially §4's status table, **"F5 — what shipped"**,
+> **"F4 — what shipped"**, **"F3 — what shipped"** and **"F13 — what shipped"**
+> (each contains a trap that cost real time), and the "Not checked" list in §3.
 >
 > 🔴 **FIRST, THE STANDING RULE THAT OVERRIDES YOUR INSTINCT TO WRAP UP** (Tori,
 > 2026-07-21; now in `CLAUDE.md` under Final self-review): **if anything is not
@@ -933,78 +1077,88 @@ update to the table in §4.)
 > in the work, not a note about it.
 >
 > **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
-> F13 ✅ #704, F4 ✅ #705. NEXT = F5.**
+> F13 ✅ #704, F4 ✅ #705, F5 ✅ #710 (+ iOS #204). NEXT = F6.**
 >
 > ⚠️ **A prod deploy is PENDING Tori's go-ahead.** Everything through **#704** is
-> live (`tovis-npx5cy47p`, 2026-07-21). **#705 (F4), #706 (dependency advisories)
-> and #707 (gitignore) are merged and NOT deployed** — so prod still accepts a
-> crafted off-grid start on the public rebook link until it ships. **Deploy is
-> Tori's call every time**; never infer standing permission from the last one.
+> live (`tovis-npx5cy47p`, 2026-07-21). **#705 (F4), #706, #707 and #710 (F5) are
+> merged and NOT deployed** — so prod still accepts a crafted off-grid start on the
+> public rebook link, and a pro can still send an unconfirmable off-hours waitlist
+> offer, until it ships. **Deploy is Tori's call every time**; never infer standing
+> permission from the last one.
 >
 > **If `booking.event = overlap_backstop_fired` ever appears in Slack
 > `#tovis-ops-alerts`, drop everything** — that is the F3 refactor breaking in
 > production. It has never fired; the path is proven by configuration, not by
 > observation.
 >
-> ## Your card: F5 — waitlist offer / confirm disagree on working hours
+> ## Your card: F6 — last-minute opening creation has no advisory lock
 >
-> `createWaitlistOffer` (`writeBoundary.ts:~14490`) checks blocks/bookings/holds
-> but **not working hours**; the client's confirm runs
-> `performLockedCreateProBooking` with `allowOutsideWorkingHours: false`. So a pro
-> can send an off-hours offer the client physically cannot accept.
+> `lib/lastMinute/commands/createLastMinuteOpening.ts` wraps its checks in
+> `$transaction` but never calls `lockProfessionalSchedule`, unlike every other
+> write path. Under READ COMMITTED a concurrent booking is invisible, so an
+> opening can be advertised over a slot that was just taken. Not a double-book
+> (the claim still goes holds → finalize), but a phantom deal in the feed.
 >
-> **Establish the facts before asking Tori anything.** F4's card also "carried a
-> Tori decision" — whether the recommended-window guard being skipped outside
-> `RECOMMENDED_WINDOW` was intended — and the code already answered it: the
-> pro-side writer refuses to store a window in any other mode, so the guard was
-> exactly scoped and there was nothing to decide. **Six card premises have now met
-> contact; five died.** Read `createWaitlistOffer`, the confirm path, and what the
-> pro's offer UI actually lets them pick, and check whether the mismatch is even
-> reachable, before escalating.
+> **Fix as written:** wrap in `withLockedProfessionalTransaction` **and** replace
+> the inline block/booking/hold queries (`:1073–1160`) with the shared conflict
+> engine. Two birds — that inline copy is also the last item on F9's duplicate
+> list.
 >
-> Two halves, and only one is likely Tori's:
-> - **Working hours at offer time vs `allowOutsideWorkingHours: true` at confirm.**
->   Recommend the former — the offer is the promise. If the evidence is clear,
->   just do it and explain; don't manufacture a question.
-> - **Should an offer RESERVE the slot?** Today no hold is placed between offer and
->   confirm, so the slot can evaporate (it fails cleanly with `TIME_BOOKED`, but
->   the offer was a promise). This one has no code answer — it is a real product
->   decision. Surface it **with evidence about what happens today**, not as an
->   open-ended question.
+> **Establish the facts first.** Seven card premises have now met contact and
+> five died; F4 and F5 are the two that held. Before writing anything, read the
+> command end to end and check: does the inline query agree with
+> `getTimeRangeConflict` on scope (blocks? holds? buffers?), and is the missing
+> lock actually reachable — i.e. is there a real interleaving, or does something
+> downstream already serialize it? F5's shape is worth copying if it fits: the
+> repo's own rule for this exact pair is written down in
+> `lib/booking/slotReadiness.ts` — *"an opening a pro is allowed to create has to
+> be one a client is allowed to hold"* — and `createLastMinuteOpening` is the
+> other half of the pair `checkSlotReadiness` was factored for. Prefer running the
+> claim's own gate over hand-rolling a second one; a second hand-rolled check is
+> what created F5.
 >
-> **Tori wants the ENTIRE queue closed.** After F5: F6, F7 (iOS), F8, F9, F10
-> (iOS), F12. F8 carries a decision too (should COMPLETED occupy future time? —
-> F11 found DB-side evidence the constraint excluding it is deliberate, so F8
-> probably resolves by dropping COMPLETED from `BOOKING_BLOCKING_STATUSES`), and
-> F12 needs UI on web **and** iOS before its server half can ship. Do not
-> batch-ask them up front.
+> A lock is easy to add and hard to prove. Ask what test can actually fail
+> without it — a real concurrent interleaving on real Postgres, not a mock —
+> before claiming the fix works.
 >
-> ## House rules that have bitten across seven sessions (all in `CLAUDE.md`)
+> **Tori wants the ENTIRE queue closed.** After F6: F7 (iOS), F8, F9, F10 (iOS),
+> F12. F8 carries a decision (should COMPLETED occupy future time? — F11 found
+> DB-side evidence the constraint excluding it is deliberate, so F8 probably
+> resolves by dropping COMPLETED from `BOOKING_BLOCKING_STATUSES`), and F12 needs
+> UI on web **and** iOS before its server half can ship. Do not batch-ask them up
+> front.
+>
+> ## 🟡 One thing waiting on Tori, from F5 — surface it, do not re-derive it
+>
+> **Should a waitlist offer RESERVE the slot?** No hold is placed between offer
+> and confirm. Evidence is written up under "F5 — what shipped": it fails cleanly
+> today (app gate, not the DB backstop, offer left claimable), the aftercare
+> sibling resolved the same tension by booking immediately at Tori's direction —
+> but that flow has nothing for the client to confirm and this one does — and the
+> pro route never sets `expiresAt`, so offers never expire despite the copy saying
+> "before it's gone". Prod holds **0** offers, so this is a pre-launch design call.
+>
+> ## House rules that have bitten across eight sessions (all in `CLAUDE.md`)
 >
 > - **Don't guess — read the tool's own output, or ask.** A red check is not yours
->   until you diff it against `main`; the F13 Sentry endpoint I "remembered" was
->   half-retired (`GET .../rules/` is `410`, the `POST` still works).
+>   until you diff it against `main`.
 > - **Prove a guard fails before trusting that it passes.** Every guard in #703,
->   #704 and #705 was proven red first — reverting the builder, swapping the probe
->   order, blinding the finder, removing the alert call, and flipping each
->   permissive literal one at a time.
+>   #704, #705 and #710 was proven red first — #710 took seven mutations, one
+>   permissive literal at a time.
 > - **Ask which LAYER made a test pass; to isolate a permissive layer, test what it
->   should ALLOW.** Refusals are over-determined — a real-Postgres test asserting a
->   client path refuses with `TIME_BOOKED` passed *with the conflict finder
->   blinded*, because the database was doing the refusing. F4's corollary: when a
->   rule becomes conditional, write one ALLOW test per call site that opts out, and
->   prove each red by flipping only its own literal. Over-enforcement is invisible
->   from the refusal side.
-> - **Branch on WHO CHOSE the value, not who is acting.** F4's near-miss: three of
->   four callers of `performLockedCreateRebookedBooking` are pro-driven, and the
->   fourth has a `clientId` but books the *pro's* chosen minute. Keying the refusal
->   on the actor would have dead-ended clients on a time only the pro can change.
->   Make such a flag **required, not defaulted** — TypeScript then finds every call
->   site and forces each to state its intent.
-> - **Ask "who can fix this?" of every new refusal.** A refusal the user cannot act
->   on is worse than the looseness it closes.
-> - **Check your own "not verified" list before publishing it** — and now, per the
->   rule at the top, before publishing it, go close it.
+>   should ALLOW.** Refusals are over-determined. F5's live example: flipping
+>   `deferBusyConflictsToOverlapPolicy` leaves the calendar-**block** test green and
+>   only the **booking** test red, because blocks are fatal either way.
+> - **Branch on WHO CHOSE the value, not who is acting.** The waitlist confirm has
+>   a `clientId` and books the PRO's chosen minute — so the step grid must not bind
+>   it. Make such a flag **required, not defaulted**; TypeScript then finds every
+>   call site and forces each to state its intent.
+> - **Ask "who can fix this?" of every new refusal** — and check the refusal is
+>   rendered where that person is looking, not just returned on the wire.
+> - **A new caller of a shared gate needs its own log identity.** F5's offer path
+>   reuses the booking-create gate but writes no Booking; without a distinct
+>   `action` its refusals would have polluted `booking_conflict
+>   action=BOOKING_CREATE` invisibly.
 >
 > ## Verification tools, proven and worth reusing
 >
@@ -1012,53 +1166,57 @@ update to the table in §4.)
 >   ⚠️ needs a keyring **in CI's exact shape** or two suites fail:
 >   `PII_AEAD_KEYS_JSON` keyed by `address-aead-v1` / `email-aead-v1` /
 >   `phone-aead-v1` / `notes-aead-v1`, plus `PII_LOOKUP_HMAC_KEYS_JSON` and
->   `JWT_SECRET`. A single generic key fails with `Missing AEAD key for key
->   version: address-aead-v1`. Copy `.github/workflows/integration.yml:88`.
-> - `tests/integration/rebook-token-step-grid.test.ts` (F4) is the compact pattern
->   for driving a rebook/aftercare write path against real Postgres — self-contained
->   fixture, no shared seed. Two gotchas it encodes: the pro-readiness gate needs
->   **`lat`/`lng` on the location** or `createProBooking` dies with
->   `LOCATION_MISSING_GEO, NO_BOOKABLE_LOCATION`, and a `beforeEach` must clear
->   prior rebooks or the `existingRebook` short-circuit makes the next case pass
->   for the wrong reason. `tests/integration/booking-overlap-concurrency.test.ts` is
->   the heavier equivalent (its fixture needs `mobileBasePostalCode` +
->   `mobileRadiusMiles` whenever a bookable MOBILE_BASE exists).
+>   `JWT_SECRET`. Copy `.github/workflows/integration.yml:88`.
+> - `tests/integration/waitlist-offer.test.ts` (F5) and
+>   `tests/integration/rebook-token-step-grid.test.ts` (F4) are the compact
+>   real-Postgres patterns — self-contained fixtures, no shared seed. Gotchas they
+>   encode: the pro-readiness gate needs **`lat`/`lng` on the location**, and
+>   `CalendarBlock`'s note column is `note`, not `reason`.
 > - `computeDaySlotsFast` (`lib/availability/core/dayComputation.ts`) is callable
->   straight from a test — book a slot the availability engine **actually emitted**
->   instead of hand-picking one you believe is valid.
+>   straight from a test — book a slot the availability engine **actually emitted**.
 > - **Browser:** `pnpm test:e2e:local -- <spec> --project=chromium`.
 >   🔴 **NEVER bare `npx playwright test`** — it skips the
 >   `dotenv -e .env.e2e.local -e .env.local` layering, so `DATABASE_URL` falls back
->   to `.env.local`, which is **PROD**. A spec that seeds in `beforeAll` would write
->   fixtures into production. Needs the test-postgres container + `pnpm db:test:seed`
->   once. Patterns: `tests/e2e/rebook-token-stale-slot.spec.ts` (F4 — seed → render
->   → mutate the pro's config mid-session → assert the refusal AND the recovery) and
->   `tests/e2e/consultation-token-retryable-refusal.spec.ts`.
-> - **A public tokened link in a test:** build the `ClientActionToken` row directly
->   with `tokenHash: hashClientActionToken(rawToken)`
->   (`lib/consultation/clientActionTokens.ts`) rather than via a `create*Delivery`
->   helper, which enqueues a real email/SMS.
+>   to `.env.local`, which is **PROD**.
+>   - ⚠️ **`pnpm test:e2e:local -- <args>` swallows the args** (the extra `--`).
+>     To run one spec: `pnpm exec dotenv -e .env.e2e.local -e .env.local --
+>     playwright test <spec> --project=chromium --no-deps` — `--no-deps` skips the
+>     client-auth setup, which needs a seeded DB.
+>   - **A PRO-authed spec is possible** and `tests/e2e/waitlist-offer-working-hours.spec.ts`
+>     is the pattern: seed the pro yourself (`emailLookupHashV2` for `emailHashV2`,
+>     bcrypt password, **both** `emailVerifiedAt` and `phoneVerifiedAt` or every
+>     authed screen 403s), `test.use({ storageState: { cookies: [], origins: [] } })`
+>     to drop the suite's client session, then log in through `/login`. The pro
+>     calendar's waitlist rail tile is `getByRole('button', { name: /^Waitlist: / })`.
+>   - Run **`--project=mobile-chrome`** too. It only runs on `main`, so a failure
+>     there is a post-merge surprise.
+>   - `pnpm db:test:seed` is needed for the full e2e run; it did **not** drop the
+>     overlap EXCLUDE constraints (checked — `db push` onto an existing schema
+>     leaves them). Seed it with the e2e's own env or the accounts get the wrong
+>     email keyring and login 404s/401s: `pnpm exec dotenv -e .env.e2e.local -e
+>     .env.local -- pnpm db:test:seed`.
 > - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
->   HTTP without touching dev data. (F4's 400/201 wire behaviour was confirmed this
->   way.) Don't exercise storage/upload paths under it.
+>   HTTP without touching dev data. ⚠️ **A stale `.next` made every `/api/v1/*`
+>   route 404 while `/api/health` answered 200**; `rm -rf .next` fixed it. Don't
+>   theorize about the router until you have cleared it. State-changing requests
+>   need an `origin` header (proxy.ts CSRF gate).
 > - **Prod reads via the Supabase MCP** (project `rqhhvuaoksuvbvlypztn`, "tovis-dev"
->   IS prod). Useful for answering "is this retroactive?" with a number. Note
->   `scheduledFor` is `timestamp WITHOUT time zone` holding UTC — convert with
->   `("scheduledFor" AT TIME ZONE 'UTC') AT TIME ZONE '<zone>'`, and don't trust a
->   `minute % 15` proxy for grid alignment; pull the rows and run the real
->   `isStartAlignedToWorkingWindowStep`.
+>   IS prod). Answers "is this retroactive?" with a number — F5 got **0 rows** in
+>   `WaitlistOffer`/`WaitlistEntry` in one query. `scheduledFor` is `timestamp
+>   WITHOUT time zone` holding UTC.
+> - 🔴 **The Bash tool's working directory persists between calls.** A `cd` into
+>   `~/Dev/tovis-ios` earlier in the session made a later `git stash` run in the
+>   WRONG repo. Nothing was lost (that stash list was empty) but the app repo
+>   carries **two sibling sessions' stashes** — prefix commands with an absolute
+>   `cd`, and never `git stash` to make a temporary edit. `git show HEAD:<path> >
+>   <path>` + a `/tmp` copy is the safe way to A/B a file.
 > - Deploy verification (reusable): `npx vercel --prod --yes`, then check the REAL
 >   thing rather than the exit code — `vercel inspect`, the live domain
->   (`www.tovis.me`; bare `tovis.me` 307s to it), the `_prisma_migrations` row via
->   the Supabase MCP, and unauthenticated POST probes on the booking routes
->   expecting 401/400 and **never** 500.
+>   (`www.tovis.me`), the `_prisma_migrations` row via the Supabase MCP, and
+>   unauthenticated POST probes expecting 401/400 and **never** 500.
 > - Observability: booking-domain alerts go through
->   `lib/observability/bookingEvents.ts` (Sentry + a structured log line). Sentry is
->   live in prod and an active catch-all rule routes every NEW issue in `tovis-app`
->   to Slack `#tovis-ops-alerts`. A dedicated rule is scriptable:
->   `POST /api/0/projects/tovis/tovis-app/rules/` (the GET is `410`; listing moved
->   to `/organizations/{org}/combined-rules/`), token in `.env.production.local`
->   has `alerts:write`.
-> - CI: `security-scan` / "Dependency audit" is **green** again (#706 pinned
+>   `lib/observability/bookingEvents.ts`. An active catch-all Sentry rule routes
+>   every NEW issue in `tovis-app` to Slack `#tovis-ops-alerts`.
+> - CI: `security-scan` / "Dependency audit" is **green** on main (#706 pinned
 >   `sharp` and `@babel/core` forward with `pnpm.overrides`). Those entries are a
 >   ceiling, not a cure — prune them when `next` ships its own patched range.
