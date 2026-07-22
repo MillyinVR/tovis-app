@@ -408,19 +408,19 @@ Named honestly rather than assumed safe:
 
 | Item | State |
 | --- | --- |
-| F1 ICS import double-book | ✅ done — branch `fix/scheduling-conflict-audit` |
+| F1 ICS import double-book | ✅ done — #693 |
 | F2 consultation extension | ✅ done — #699, + #700 (page) + #701 (uiAction), iOS #203 |
-| F3 retire second engine | ✅ done — branch `fix/f3-retire-second-conflict-engine` |
-| F4 rebook token step grid | ✅ done — branch `fix/f4-rebook-token-step-grid` |
+| F3 retire second engine | ✅ done — #703 |
+| F4 rebook token step grid | ✅ done — #705 |
 | F5 waitlist offer working hours | not started |
 | F6 last-minute opening lock | not started |
 | F7 iOS mobile slot address | not started |
 | F8 occupied-status parity test | not started |
 | F9 duplicate-logic cleanup | not started |
 | F10 iOS follow-ups | not started |
-| F11 integration suite dead | ✅ done — branch `fix/integration-suite-ci` |
+| F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | not started (opened by F2) |
-| F13 backstop refused silently | ✅ done — branch `fix/f13-log-overlap-backstop` (opened by F3) |
+| F13 backstop refused silently | ✅ done — #704 (opened by F3) |
 
 ### F4 — what shipped
 
