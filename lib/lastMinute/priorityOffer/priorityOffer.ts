@@ -291,6 +291,28 @@ async function getAlreadyOfferedClientIds(openingId: string): Promise<string[]> 
   return rows.map((r) => r.clientId).filter(isNonEmptyString)
 }
 
+/**
+ * Which clients should NOT be offered this opening because they already have a
+ * booking with this professional overlapping its window.
+ *
+ * ⚠️ This is AUDIENCE EXCLUSION, not schedule occupancy — it deliberately does
+ * not share `BOOKING_BLOCKING_STATUSES`, and "consolidating" them would change
+ * behaviour. The occupancy set answers "is the PRO's calendar busy"; this
+ * answers "does this CLIENT already have plans in this window", and it is
+ * conservative on purpose, because the cost of over-excluding is one skipped
+ * notification while under-excluding messages a client about a slot they
+ * appear to already hold:
+ *
+ * - `NOT: CANCELLED` means **NO_SHOW counts as occupying** here, unlike every
+ *   occupancy set. A client marked no-show for that very window is skipped —
+ *   "grab this slot you were just marked absent for" is not a message worth
+ *   an edge case.
+ * - `bufferMinutes` is ignored: buffer protects the pro's cleanup/travel time,
+ *   not the client's availability, so it has no bearing on whether the client
+ *   is free.
+ * - A null duration falls back to 60 minutes rather than zero, keeping the
+ *   exclusion window real for legacy rows.
+ */
 async function getTimeOverlapClientIds(args: {
   professionalId: string
   startAt: Date

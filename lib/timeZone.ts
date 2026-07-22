@@ -93,8 +93,20 @@ export function friendlyTimeZoneLabel(tz: unknown): string | null {
   }
 }
 
-function addDaysToYMD(year: number, month: number, day: number, daysToAdd: number) {
-  // Anchor at noon UTC to avoid DST weirdness while rolling dates
+/**
+ * Step a calendar date by whole days. The single home for this primitive — it
+ * is DST-critical (a "next day" anchored to a local midnight must step
+ * calendar days, never +24h of milliseconds), and it existed twice for a while
+ * (here and in availability/core/summaryWindow.ts, identical by luck rather
+ * than by construction). Anchoring at noon UTC keeps Date.UTC's day-rollover
+ * arithmetic away from any midnight boundary.
+ */
+export function addDaysToYMD(
+  year: number,
+  month: number,
+  day: number,
+  daysToAdd: number,
+): { year: number; month: number; day: number } {
   const d = new Date(Date.UTC(year, month - 1, day + daysToAdd, 12, 0, 0, 0))
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
 }

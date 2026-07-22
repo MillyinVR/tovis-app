@@ -44,6 +44,7 @@ export {
 // Low-level timezone math (UTC <-> zoned parts / offset / day boundaries).
 // Prefer the higher-level helpers below; reach for these only for custom math.
 export {
+  addDaysToYMD,
   getZonedParts,
   timeZoneOffsetMinutes,
   zonedTimeToUtc,
