@@ -21,6 +21,7 @@ vi.mock('@/lib/prisma', () => ({
 import {
   RECENT_COMPLETED_WINDOW_DAYS,
   getProClientVisibility,
+  getVisibleClientIdSetForPro,
   proClientVisibilityWhere,
 } from './clientVisibility'
 
@@ -188,6 +189,53 @@ describe('getProClientVisibility', () => {
     const result = await getProClientVisibility('pro1', 'client1')
     expect(result.canViewClient).toBe(false)
     expect(result.reason).toBe('NONE')
+  })
+})
+
+describe('getVisibleClientIdSetForPro is deliberately NARROWER than the per-client gate', () => {
+  // ⚠️ These two are NOT the same policy, and making them agree is a regression,
+  // not a cleanup. The batched set answers "which clients get a chart LINK in a
+  // list", and is booking-based on purpose so inquiry-only contacts don't flood
+  // the CRM. The per-client gate answers "may this pro open this client at all",
+  // and a message thread is enough for that.
+  //
+  // The divergence is load-bearing for waitlist outreach: a waitlist client the
+  // pro has only messaged is NOT in the batched set (so the calendar row renders
+  // their name as plain text) but IS viewable, so `/pro/bookings/new?clientId=…`
+  // pre-fills them. Gating the offer deep-link on the batched set would delete
+  // the "message them, then offer them a time" flow.
+  it('a thread-only client is viewable one-by-one but stays OUT of the batched set', async () => {
+    findMany.mockResolvedValue([])
+    findThread.mockResolvedValue({ id: 'thread1', clientId: 'threadOnly' })
+
+    const single = await getProClientVisibility('pro1', 'threadOnly')
+    expect(single.canViewClient).toBe(true)
+    expect(single.reason).toBe('ACTIVE_THREAD')
+
+    findThread.mockClear()
+    findMany.mockResolvedValue([{ clientId: 'hasBooking' }])
+
+    const set = await getVisibleClientIdSetForPro('pro1')
+    expect(set.has('hasBooking')).toBe(true)
+    expect(set.has('threadOnly')).toBe(false)
+    // Not "it happens to miss threads" — it must never ask about them.
+    expect(findThread).not.toHaveBeenCalled()
+  })
+
+  // ALLOW case: the batched set still returns everything the booking filter
+  // matched, so narrowing it further would be just as wrong.
+  it('every client with a qualifying booking is in the set', async () => {
+    findMany.mockResolvedValue([
+      { clientId: 'a' },
+      { clientId: 'b' },
+      { clientId: 'c' },
+    ])
+    const set = await getVisibleClientIdSetForPro('pro1')
+    expect([...set].sort()).toEqual(['a', 'b', 'c'])
+    expect(findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: { professionalId: 'pro1' },
+      distinct: ['clientId'],
+    })
   })
 })
 
