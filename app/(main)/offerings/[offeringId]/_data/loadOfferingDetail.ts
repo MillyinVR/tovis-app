@@ -26,6 +26,8 @@ import {
   type OpeningServiceDto,
   type PublicIncentiveDto,
 } from '@/lib/lastMinute/openingDto'
+import { checkStoredSlotsAreOpen } from '@/lib/booking/storedSlotLiveness'
+import { resolveOpeningModeDurationMinutes } from '@/lib/lastMinute/openingDuration'
 import { moneyToString } from '@/lib/money'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import {
@@ -130,6 +132,50 @@ export async function loadOfferingDetail(
   )
 
   if (!opening || !serviceRow || !claimable) {
+    return { claimable: false }
+  }
+
+  // Tori's rule (F15), and the place it is answered rather than merely obeyed.
+  //
+  // Every feed HIDES an opening whose slot has since been booked, blocked or
+  // dropped out of the pro's hours — the rule says a dead time must not be
+  // visible, and a card reading "2:00 PM — no longer available" still shows the
+  // time. But a client who was PUSHED a notification deserves better than a
+  // vanished card, and this page is exactly where that notification lands (the
+  // notification, the home invite and the feed's "Grab it" all link here). So
+  // the honest answer lives here: the page already renders "This opening is no
+  // longer available", which names no time and offers a way onward.
+  //
+  // This is a SINGLE-service question, unlike the feeds: the client is claiming
+  // one offering, so it is that offering's duration that has to fit, not the
+  // opening's longest.
+  const stillOpen = await checkStoredSlotsAreOpen({
+    candidates: [
+      {
+        key: opening.id,
+        professionalId: opening.professionalId,
+        professionalTimeZone: opening.professional.timeZone ?? null,
+        locationId: opening.locationId,
+        locationType: opening.locationType,
+        startUtc: opening.startAt,
+        durationMinutes: resolveOpeningModeDurationMinutes(
+          {
+            salonDurationMinutes: serviceRow.offering.salonDurationMinutes,
+            mobileDurationMinutes: serviceRow.offering.mobileDurationMinutes,
+            defaultDurationMinutes: serviceRow.service.defaultDurationMinutes,
+          },
+          opening.locationType,
+        ),
+        // The claim runs through the client hold path — see
+        // `openingLivenessCandidate` for what that decides.
+        commitGate: 'CLIENT_HOLD',
+        releasedHoldId: null,
+      },
+    ],
+    viewerClientId: clientId,
+  })
+
+  if (stillOpen.get(opening.id)?.open !== true) {
     return { claimable: false }
   }
 

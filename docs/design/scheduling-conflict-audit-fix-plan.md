@@ -360,6 +360,29 @@ went rather than have it vanish.
 *created* over a taken slot (write time); F15 stops one being *shown* after the
 slot dies (read time). Neither subsumes the other.
 
+> ✅ **Shipped.** The premise was Tori's own rule, so it held — but the card named
+> **two** surfaces and there are **five**, and the fix had to answer a question the
+> card did not ask (which gate commits each row). See "F15 — what shipped" in §4.
+
+### F16 — a pro cannot tell that their own opening has gone dark 🟡
+
+Fell out of F15, and **pre-dates it**: before F15 a dead opening was advertised to
+clients and every claim failed; after F15 it is hidden. Either way the pro's own
+list (`GET /api/v1/pro/openings`) shows it as plain `ACTIVE`, with no hint that it
+is unadvertisable — and the pro is the only person who can fix it (re-open the
+day, delete the block, cancel the opening).
+
+Deliberately out of F15's scope because F15 makes the pro's information state no
+**worse**: the same slot produced no bookings and no signal before. But the same
+"ask who can fix this, and check they can SEE it" rule that F14 turned on
+reservations applies here to disappearances.
+
+**Fix.** Have the pro's opening list run the same `checkStoredSlotsAreOpen`
+(`lib/booking/storedSlotLiveness.ts`) it already has all the fields for, and
+return the verdict as a per-row status. Needs a badge on web **and** iOS —
+"not visible to clients: that time is booked / blocked / outside your hours" —
+so it is a two-platform card like F12.
+
 ### F6 — Last-minute opening creation has no advisory lock 🟠
 
 `lib/lastMinute/commands/createLastMinuteOpening.ts` wraps its checks in
@@ -505,7 +528,8 @@ Named honestly rather than assumed safe:
 | F5 waitlist offer working hours | ✅ done — #710 (+ iOS #204) |
 | F6 last-minute opening lock | not started |
 | F14 pro-chosen time must reserve | ✅ done — #713 (+ iOS #205) |
-| F15 stored client-visible time not re-checked | not started — **Tori rule 2026-07-21** |
+| F15 stored client-visible time not re-checked | ✅ done — #714 (**Tori rule 2026-07-21**) |
+| F16 pro can't see their opening went dark | not started (opened by F15) |
 | F7 iOS mobile slot address | not started |
 | F8 occupied-status parity test | not started |
 | F9 duplicate-logic cleanup | not started |
@@ -513,6 +537,172 @@ Named honestly rather than assumed safe:
 | F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | not started (opened by F2) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
+
+### F15 — what shipped
+
+**The premise was Tori's own rule, so it held. What the card got wrong was the
+SIZE: it named two client-facing surfaces and there are five.** All five show the
+same two kinds of stored row, and all five are fixed:
+
+| surface | shows | consumed by |
+| --- | --- | --- |
+| `GET /api/v1/client/openings` | last-minute opening | web feed + iOS `OpeningsFeedView` (and the iOS priority-claim resolution) |
+| `GET /api/v1/client/priority-offer` | the SAME opening, reached first | web `/client/offers` + iOS `PriorityOffersView` |
+| `getClientHomeData` invites | the same opening, on home | web `/client` **and** `GET /api/v1/client/home`, which iOS reads |
+| `GET /api/v1/client/waitlist-offers` | pro-proposed waitlist time | web cards + iOS |
+| `loadOfferingDetail` | the claim page itself | `/offerings/[id]` page **and** `GET /api/v1/offerings/[id]` (iOS `ClaimOpeningView`) |
+
+A sixth reader, `GET /client/saved-services/providers`, is **deliberately not
+filtered**: nothing on web or iOS calls it (verified by grep, and `docs/BACKLOG.md`
+says so), so it displays nothing to anybody today. It carries a pointer comment and
+a BACKLOG note instead, because the cost of checking across MANY professionals — it
+is the one opening feed not scoped to a single pro — should be measured against a
+real caller rather than guessed at now.
+
+**Hidden, not shown-as-expired — and the notified client is answered at the
+destination.** The rule says a dead time must not be visible, and a card reading
+*"2:00 PM — no longer available"* still shows the time. But a client who was pushed
+a notification deserves better than a card that silently vanishes, so the answer
+lives where that notification actually lands: the claim page, which already renders
+**"This opening is no longer available / It may have just been booked or expired"**
+— naming no time and offering a way onward. `loadOfferingDetail` now returns
+`claimable: false` for a dead *schedule*, not just a dead row, so both the web page
+and the native 404 reach it.
+
+The other two feeds have no such destination — a push for a priority or waitlist
+offer lands on `/client/offers`, which is a list. Checked rather than assumed:
+the priority section renders *"No active offers right now…"* and the waitlist
+section (`WaitlistOfferCards`) renders **nothing** when empty. Neither shows a
+time, so both comply; neither explains, which is the cost of the rule and is
+accepted. The one place the repo already shows a lapsed row — the priority
+list's `expired: true` — is about the OFFER's own clock, not about the slot, and
+is untouched.
+
+**Shipped:**
+
+- **`lib/booking/storedSlotLiveness.ts`** — `checkStoredSlotsAreOpen` /
+  `filterStillOpenRows`. It adds **no second schedule engine**: it calls
+  `evaluateProSchedulingDecision`, the gate the commits themselves run, with
+  nothing written. F3 was spent deleting the last parallel engine; a hand-rolled
+  second check is what opened F5 in the first place.
+- **`commitGate: 'CLIENT_HOLD' | 'PRO_CREATE'`** on each candidate, required and
+  not defaulted (F4's rule). It names the domain fact — *which gate will commit
+  this row* — rather than its two consequences, because they do not travel
+  together and both are invisible from the refusal side:
+  - an opening is claimed via `POST /holds`, where an off-grid start is fatal and
+    `deleteActiveHoldsForClient` runs FIRST;
+  - a waitlist offer is confirmed via `performLockedCreateProBooking`, which
+    defers the step grid (the PRO picked the minute) and runs **no** client-hold
+    sweep at all.
+- **`releasedHoldId`** — the hold a row's own commit releases before it checks.
+  For a waitlist offer that is F14's reservation, and without it **every offer
+  would hide itself the moment it was made**.
+- `lib/lastMinute/openingLiveness.ts` and `lib/waitlist/offerLiveness.ts` — one
+  adapter per row kind, so four surfaces cannot ask four different questions.
+- `lib/lastMinute/openingDuration.ts` — the "longest of the opening's services"
+  rule, extracted from `createLastMinuteOpening` and now shared, so the window
+  validated at publish is the window re-checked at read.
+- `onUncheckable: 'keep' | 'drop'`, required, for a row with no window to ask
+  about. The priority list renders a serviceless opening **on purpose** (its claim
+  falls back to the pro's profile), so hiding it would have been a different fix
+  wearing F15's clothes.
+
+**Two defects were caught in the review pass, not by a test:**
+
+1. **The viewer's own hold.** A client mid-checkout holds the very slot they are
+   claiming. A naive "is this free?" read hides the card from the one person it
+   belongs to — and tells them their own reservation is somebody else's. The
+   claim's own `deleteActiveHoldsForClient` is the answer, mirrored exactly
+   (`waitlistOfferId: null` included, so an offer-bound hold stays counted).
+2. **That mirror was then wrong for the OTHER gate.** `deleteActiveHoldsForClient`
+   has exactly ONE call site — `performLockedCreateHold` — so a `PRO_CREATE`
+   commit never runs it, and discounting the viewer's hold there would show an
+   offer the confirm refuses. Found by reading the call sites, fixed by
+   `commitGate`, and pinned in both places.
+
+**Verified. Every guard proven red first — nine mutations:**
+
+| mutation | what goes red |
+| --- | --- |
+| gate bypassed (always "open") | 8 of the opening tests + 3 waitlist tests; the **ALLOW** cases stay green, which is the point |
+| viewer's own-hold exclusion dropped | only `still shows an opening the VIEWING client is holding` — `expected { open: false, reason: 'TIME_HELD' } to deeply equal { open: true }` |
+| own-hold exclusion applied to PRO_CREATE too (the pre-fix shape) | `hides an unreserved offer the client's own ordinary hold now covers` + the unit twin |
+| `enforceStepGrid` forced true | only the pro-chosen half of `splits an off-grid start by which gate will commit it` |
+| `enforceStepGrid` forced false | only the opening half of the same test |
+| `LOCATION_UNAVAILABLE` branch reports open | `hides an opening whose location stopped being bookable` |
+| `releasedHoldId` dropped (waitlist) | `shows a live offer, discounting the reservation the offer itself placed` |
+| the claim page's check removed | 2 claim-page tests, incl. the client's own-hold ALLOW case |
+| each of the 4 routes' filter removed | that route's own wiring test (all 4 confirmed) |
+
+- **Real Postgres** — `tests/integration/opening-liveness.test.ts` (new, 13
+  tests) and the F15 block in `waitlist-offer.test.ts` (20 → 26). The openings
+  fixture is built by `createLastMinuteOpening` itself, so every row is proven
+  publishable before it is killed. **Six of the tests are ALLOW cases** — a clean
+  slot, the viewer's own hold, the rival's view of that same hold, a cancelled
+  booking, a pro-chosen off-grid start, a live offer over its own reservation —
+  because a suite made only of "it disappeared" assertions passes against a
+  filter that hides everything.
+- **Real HTTP** (`pnpm dev:test-db`, own fixture, the actual routes), driven twice
+  — once before the `commitGate` refactor and again after it, because a
+  remembered result is not a checked one. Live: openings **1**, home **1**,
+  waitlist **1**, priority **1**, claim **200**. Then a booking through the
+  ordinary flow over the opening and a block over the offer — with the opening row
+  still reading `ACTIVE / bookedAt: null`, which is exactly why the feeds' own
+  filters miss it — and: openings **0**, home **0**, waitlist **0**, priority
+  **0**, claim **404** `This opening is no longer available.`, and the real page
+  HTML containing that same sentence. Undo the two rows and all five come back.
+  The viewer's own hold was driven too: the owner still sees the opening, a rival
+  client does not.
+- **iOS on device (iPhone 17 Pro), and no app change was needed** — the three
+  feeds are server-filtered and the native claim read already maps
+  `claimable: false` to a 404. Seen: the home LAST-MINUTE OPENINGS card with the
+  live opening → after the slot dies, its existing empty state (*"No last-minute
+  openings right now"*); the Openings screen likewise (*"No openings right
+  now"*); the slot revived → the card returns in full. And the waitlist offer
+  renders **with its own F14 reservation in place** — the case that would have
+  looked catastrophic if `releasedHoldId` were wrong.
+- **Cost measured, not asserted.** A/B'd in one process by short-circuiting the
+  filter: at **1** row the delta is inside dev-server noise (±2ms either way); at
+  **20** rows the openings feed goes p50 **16.0 → 34.0ms**, p95 16.8 → 40.0ms.
+  That is ~0.9ms per candidate — three indexed conflict queries each, eight in
+  flight at a time — so the route's `take: 50` ceiling projects to ~45ms added in
+  the worst case a feed can reach. Context resolution is batched per distinct
+  (pro, location, mode, tz), which is where a feed of one pro's openings pays.
+- **Retroactivity: nothing, and the number says why.** Prod holds **0**
+  `LastMinuteOpening`, **0** `LastMinuteRecipient`, **0** `WaitlistOffer`, **0**
+  `WaitlistEntry` and **0** `BookingHold` rows, so no live client's feed changes
+  on deploy. No migration.
+- `typecheck` clean, `lint` 0 errors, **all 13 static guards pass**, **708 files /
+  6885 unit tests**, **33 files / 187 integration tests**, full e2e green on
+  **chromium and mobile-chrome** (29 passed / 2 skipped each), iOS builds.
+
+**Checked, so it is not a caveat:**
+
+- **The pro's own view is untouched, deliberately.** `GET /api/v1/pro/openings`
+  still lists a dead opening as `ACTIVE` so the pro can cancel it. That the pro
+  gets no *signal* is real, pre-dates F15, and is now filed as **F16**.
+- **Nothing else reads these rows.** Enumerated every `lastMinuteOpening.` /
+  `lastMinuteRecipient.` / `waitlistOffer.` reader in the repo; the client-facing
+  ones are the five above, the rest are pro-side or the notification engine.
+- **`lib/lastMinute/openingSelect.ts` has exactly one consumer** (the claim page
+  and its native twin). Its header claimed a second, `app/api/openings`, which
+  **does not exist**; corrected. The other three opening readers each declare
+  their own local `openingSelect` — a real duplicate, left for F9.
+- **The e2e run that aborted once was not this change.** `booking-lifecycle.spec.ts`
+  navigates only to `/login` and otherwise drives APIs — it never renders home,
+  the feeds or the claim page — and its own header comment documents a real-time
+  wait for a quarter-hour window. It passed on the two full re-runs and two
+  isolated runs that followed.
+
+**Not verified / not checked:**
+
+- **The `LOCATION_UNAVAILABLE` verdict is coarser than the gate it mirrors.**
+  `resolveBookingLocationContext` can fail for a missing location, a missing time
+  zone or invalid working hours; all three collapse to one reason. The verdict is
+  only used as a boolean today, so nothing reads the difference — but a future
+  caller that wants to explain itself will need the distinction restored.
+- **No load test.** The per-candidate cost was measured on a local dev server
+  against local Postgres, not against a pooled prod connection under concurrency.
 
 ### F14 — what shipped
 
@@ -1305,9 +1495,7 @@ keep `allowsOverlap = true` — this change is not retroactive. Whether the
 migration feature flag (`isProMigrationEnabled`) is on in production is
 unchecked.
 
----
-
-## 5. Next-session prompt
+---## 5. Next-session prompt
 
 Copy-paste this to continue the queue. (Session-chaining protocol: one queue
 step per session; end with a completion report + the next prompt + a status
@@ -1315,8 +1503,8 @@ update to the table in §4.)
 
 > Continue the scheduling-conflict audit queue in `tovis-app`. The full findings
 > and fix plan are in `docs/design/scheduling-conflict-audit-fix-plan.md` — read
-> it first, especially §4's status table, **"F14 — what shipped"**,
-> **"F5 — what shipped"**, **"F4 — what shipped"** and **"F3 — what shipped"**
+> it first, especially §4's status table, **"F15 — what shipped"**,
+> **"F14 — what shipped"**, **"F5 — what shipped"** and **"F3 — what shipped"**
 > (each contains a trap that cost real time), and the "Not checked" list in §3.
 >
 > 🔴 **FIRST, THE STANDING RULE THAT OVERRIDES YOUR INSTINCT TO WRAP UP** (Tori,
@@ -1332,104 +1520,106 @@ update to the table in §4.)
 > in the work, not a note about it.
 >
 > **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
-> F13 ✅ #704, F4 ✅ #705, F5 ✅ #710 (+ iOS #204), F14 ✅ #713 (+ iOS #205).
-> NEXT = F15** (the second Tori rule, still ahead of F6 — see the card below).
+> F13 ✅ #704, F4 ✅ #705, F5 ✅ #710 (+ iOS #204), F14 ✅ #713 (+ iOS #205),
+> F15 ✅ #714. NEXT = F6** (last-minute opening creation has no advisory lock).
 >
 > ⚠️ **A prod deploy is PENDING Tori's go-ahead.** Everything through **#704** is
-> live (`tovis-npx5cy47p`, 2026-07-21). **#705 (F4), #706, #707, #710 (F5) and
-> #713 (F14) are merged and NOT deployed** — so prod still accepts a crafted
-> off-grid start on the public rebook link, and a waitlist offer still reserves
-> nothing, until it ships. **#713 also carries migration `20260805000000`**
+> live (`tovis-npx5cy47p`, 2026-07-21). **#705 (F4), #706, #707, #710 (F5),
+> #713 (F14) and #714 (F15) are merged and NOT deployed** — so prod still accepts
+> a crafted off-grid start on the public rebook link, a waitlist offer still
+> reserves nothing, and a dead last-minute opening is still shown to clients,
+> until it ships. **#713 carries migration `20260805000000`**
 > (`BookingHold.waitlistOfferId`), which `prisma migrate deploy` applies on
-> deploy. **Deploy is Tori's call every time**; never infer standing permission
-> from the last one.
+> deploy; **#714 carries none**. **Deploy is Tori's call every time**; never infer
+> standing permission from the last one.
 >
 > **If `booking.event = overlap_backstop_fired` ever appears in Slack
 > `#tovis-ops-alerts`, drop everything** — that is the F3 refactor breaking in
 > production. It has never fired; the path is proven by configuration, not by
 > observation.
 >
-> ## Your card: F15 — a stored client-visible time is never re-checked
+> ## Your card: F6 — last-minute opening creation has no advisory lock
 >
-> **Tori's rule, 2026-07-21:** *"if a time is outside a pro's working hours,
-> blocked off by the pro, or already booked it shouldn't be visible to the client
-> at all."* Read card **F15** in §2 — the evidence is already gathered, so start
-> from there rather than re-deriving it.
+> `lib/lastMinute/commands/createLastMinuteOpening.ts` wraps its checks in
+> `$transaction` but never calls `lockProfessionalSchedule`, unlike every other
+> write path. Under READ COMMITTED a concurrent booking is invisible, so a pro can
+> publish an opening over a slot that was taken microseconds earlier. Read card
+> **F6** in §2 — and note it now has a **sibling**: F15 shipped the read-time half
+> (`lib/booking/storedSlotLiveness.ts`), so an opening created over a taken slot is
+> already invisible to clients. That LOWERS F6's user-facing severity and does not
+> remove the card: a phantom row still occupies the pro's list and still consumes
+> the one-active-opening-per-window slot (`OPENING_OVERLAP`).
 >
-> **Already true** for every slot a client PICKS: `computeDaySlotsFast` filters
-> working hours, advance notice, max-days and step through `checkSlotReadiness`,
-> **and** the busy set from `loadBusyIntervalsForWindow` (bookings + holds +
-> calendar blocks). Checked, not assumed. Nothing to do there.
+> **Fix (from the card).** Wrap the create in `withLockedProfessionalTransaction`
+> **and** replace the inline conflict queries (`createLastMinuteOpening.ts`
+> `:1073`–`:1220`, ~150 lines that hand-roll interval math over five tables) with
+> `getTimeRangeConflict`. Two birds: the second half is also the biggest single
+> entry in F9's duplicate-logic table.
 >
-> **False on two surfaces** that re-show a stored time nothing re-validates:
-> 1. **the last-minute openings feed** (`/api/v1/client/openings`) — filters only
->    the opening row's own state, and **no sweep retires an opening when the slot
->    is taken through the normal booking flow, blocked, or dropped out of
->    newly-narrowed hours**;
-> 2. **the waitlist offer card** (`/api/v1/client/waitlist-offers`) — F14 closed
->    the "someone else took it" half with a real reservation **and** added an
->    expiry filter, so what remains is a pro who blocks that time or shortens
->    their day afterwards.
+> **Establish the facts first — measure before you assume.** Nine card premises
+> have met contact and five died. Checked already, so start from here:
+> - **`createLastMinuteOpening` has exactly ONE production caller**
+>   (`app/api/v1/pro/openings/route.ts:554`) and it does **not** pass `tx`, so no
+>   nested-transaction hazard exists today — the `tx` input is used by
+>   `createInsideTransaction` and by tests. Verify that is still true before you
+>   add a lock.
+> - **`getTimeRangeConflict` does NOT cover two of the five checks.** The
+>   opening-overlap query (`lastMinuteOpening`, `:1073`) and `LastMinuteBlock`
+>   (`:1103`) are last-minute-specific and must survive the swap; only the
+>   `calendarBlock` / `booking` / `bookingHold` trio is replaceable.
+> - **NOT checked: does the inline math agree with `getTimeRangeConflict`?** It
+>   builds hold windows through `holdToBusyInterval` while the shared reader uses
+>   `holdRecordToBusyInterval`, and F3 found those two disagreeing by up to a full
+>   duration. If they differ, the swap is a BEHAVIOUR change that needs its own
+>   test, not a refactor note. Establish this first — it decides the shape of the
+>   card.
 >
-> **Fix.** Filter these reads against the same live schedule availability uses
-> (`getTimeRangeConflict` / `loadBusyIntervalsForWindow` answer it in one pass;
-> the feed already knows the professional and window) rather than teaching every
-> writer to sweep. **Decide whether a dead row is hidden or shown as expired** —
-> the rule says hidden, but a client who was *notified* about a slot may deserve
-> to know it went rather than have it vanish. F14 chose hiding for lapsed offers;
-> say whether the same answer fits a slot the client was pushed a notification
-> about, and why.
+> **F8 next after that**, and it carries a decision (should COMPLETED occupy future
+> time? — F11 found DB-side evidence the constraint excluding it is deliberate, so
+> F8 probably resolves by dropping COMPLETED from `BOOKING_BLOCKING_STATUSES`).
+> Then F7 (iOS), F9, F10 (iOS), F12, F16. Do not batch-ask them up front.
 >
-> **F15 is read-time; F6 is write-time. Neither subsumes the other.**
+> **Order from here: F6 → F8 → F7 (iOS) → F9 → F10 (iOS) → F12 → F16.**
+> Tori wants the ENTIRE queue closed. F12 needs UI on web **and** iOS before its
+> server half can ship; F16 (new, opened by F15) is the same shape.
 >
-> **Establish the facts first.** Eight card premises have met contact and five
-> died. F14's held because it was Tori's own ruling — but its ⚠️ still turned up
-> something the card had not predicted (the pro could see *nothing, anywhere*),
-> which is the real lesson: **the premise being safe does not make the blast
-> radius known.** For F15, the thing NOT established is what the client should see
-> where a dead row was, and whether hiding a notified slot silently is worse than
-> the visibility the rule forbids.
->
-> **Tori wants the ENTIRE queue closed.** Order from here: **F15 → F6** → F7
-> (iOS), F8, F9, F10 (iOS), F12. F8 carries a decision (should COMPLETED occupy
-> future time? — F11 found DB-side evidence the constraint excluding it is
-> deliberate, so F8 probably resolves by dropping COMPLETED from
-> `BOOKING_BLOCKING_STATUSES`), and F12 needs UI on web **and** iOS before its
-> server half can ship. Do not batch-ask them up front.
->
-> ## ✅ Both Tori rulings from 2026-07-21 are now ANSWERED — do not re-ask
+> ## ✅ Both Tori rulings from 2026-07-21 are ANSWERED — do not re-ask
 >
 > *"if a pro chooses a time it should reserve the spot. if a pro gives a time
-> window it shouldn't reserve a specific spot"* → **F14, shipped (#713)**. The
-> waitlist offer now places a `BookingHold`; both aftercare modes already
-> complied. *"if a time is outside a pro's working hours, blocked off by the pro,
-> or already booked it shouldn't be visible to the client at all"* → **F15, your
-> card.**
+> window it shouldn't reserve a specific spot"* → **F14, shipped (#713)**.
+> *"if a time is outside a pro's working hours, blocked off by the pro, or already
+> booked it shouldn't be visible to the client at all"* → **F15, shipped (#714)**:
+> five client-facing surfaces now run the commit gate at read time, and the
+> answer to "hidden or shown as expired" was **hidden**, with the notified client
+> answered at the claim page ("This opening is no longer available"), which names
+> no time.
 >
-> ## House rules that have bitten across nine sessions (all in `CLAUDE.md`)
+> ## House rules that have bitten across ten sessions (all in `CLAUDE.md`)
 >
 > - **Don't guess — read the tool's own output, or ask.** A red check is not yours
->   until you diff it against `main`. F14's live example: an availability probe
->   returned `slots: []` and looked like proof the slot was reserved — it was
->   actually `{"ok":false,"error":"Missing professionalId or serviceId."}` being
->   parsed by a sloppy one-liner.
+>   until you prove it can reach your code. F15's live example: one e2e run aborted
+>   mid-suite; the implicated spec turned out to `goto` only `/login` and to
+>   document its own real-time wait, and it passed four times after.
 > - **Prove a guard fails before trusting that it passes.** Every guard in #703,
->   #704, #705, #710 and #713 was proven red first — #713 took twelve mutations.
+>   #704, #705, #710, #713 and #714 was proven red first — #713 took twelve
+>   mutations, #714 took nine.
 > - **Ask which LAYER made a test pass; to isolate a permissive layer, test what it
->   should ALLOW.** Refusals are over-determined. F14's live example: moving the
->   supersede after the gate leaves the day-apart supersede test green and only the
->   **overlapping** re-offer red.
-> - **Branch on WHO CHOSE the value, not who is acting.** Make such a flag
->   **required, not defaulted**; TypeScript then finds every call site.
-> - **Ask "who can fix this?" of every new refusal** — and check the refusal is
->   rendered where that person is looking, not just returned on the wire. F14
->   generalizes it: ask the same of every new *reservation*. Taking a slot off the
->   calendar is invisible unless something says why.
-> - **A new caller of a shared gate needs its own log identity.**
-> - **Setting a field the reads don't filter on creates the bug you were closing.**
->   F14's `expiresAt` would have turned "PENDING forever, usually bookable" into
->   "PENDING forever, refuses with *This offer has expired*" until both feeds
->   filtered it.
+>   should ALLOW.** F15's live example: six of its thirteen new integration tests
+>   are ALLOW cases, because a suite of "it disappeared" assertions passes against
+>   a filter that hides everything.
+> - **Branch on the domain FACT, not on its consequences.** F15 started with an
+>   `enforceStepGrid` boolean and got it wrong: the real fact is WHICH GATE commits
+>   the row, and it decides two unrelated things. Make such a field **required**;
+>   TypeScript then finds every call site.
+> - **Ask "who can fix this?" of every new refusal, reservation — and now
+>   disappearance.** F15 hides a dead opening from clients; the pro who caused it
+>   still sees `ACTIVE` with no explanation. That became F16 rather than a caveat.
+> - **Setting a field the reads don't filter on creates the bug you were closing** —
+>   and its mirror: **a read that doesn't discount the row's OWN reservation hides
+>   everything.** F14's hold would have made every waitlist offer hide itself from
+>   F15's filter.
+> - **`toMatchObject` does not typecheck.** Renaming a candidate field compiled
+>   clean and broke four route tests at runtime. Run the suites after a rename.
 >
 > ## Verification tools, proven and worth reusing
 >
@@ -1440,66 +1630,61 @@ update to the table in §4.)
 >   `JWT_SECRET`. Copy `.github/workflows/integration.yml:88`. Generate the keys
 >   ONCE into a file and source it — regenerating per run breaks decryption of
 >   rows an earlier run left behind.
-> - `tests/integration/waitlist-offer.test.ts` (F5 + F14) and
->   `tests/integration/rebook-token-step-grid.test.ts` (F4) are the compact
->   real-Postgres patterns — self-contained fixtures, no shared seed. Gotchas they
->   encode: the pro-readiness gate needs **`lat`/`lng` on the location**;
->   `CalendarBlock`'s note column is `note`, not `reason`; and a suite that creates
->   holds must `bookingHold.deleteMany` in teardown BEFORE the location
->   (`ProfessionalLocation` RESTRICTs a referencing hold).
+> - `tests/integration/opening-liveness.test.ts` (F15) is the newest compact
+>   real-Postgres pattern and the one closest to F6: it builds its openings with
+>   **`createLastMinuteOpening` itself**, so every fixture is proven publishable
+>   before the test kills its slot. Gotchas it encodes: `tierPlans` must carry
+>   **all three** tiers; `lastMinuteSettings` must exist and be `enabled`;
+>   `Booking` needs `subtotalSnapshot` + `proTenantId` + `clientHomeTenantId` and
+>   the timezone column is **`locationTimeZone`**, not `timeZone`; `CalendarBlock`'s
+>   note column is `note`; a suite creating holds must `bookingHold.deleteMany`
+>   before the location (`ProfessionalLocation` RESTRICTs a referencing hold).
 > - `computeDaySlotsFast` (`lib/availability/core/dayComputation.ts`) is callable
 >   straight from a test — book a slot the availability engine **actually emitted**.
->   ⚠️ `dateYMD` is a **`YMD` object**, not a string: pass
->   `parseYYYYMMDD(utcDateToLocalYmd(d, zone))` or it silently becomes
->   `"undefined-undefined-undefined"`. `loadBusyIntervalsForWindow` requires
->   `defaultBufferMinutes`, and the result is a discriminated union — check
->   `result.ok` before `.slots`, whose entries are ISO **strings**.
+>   ⚠️ `dateYMD` is a **`YMD` object**, not a string.
 > - **Browser:** 🔴 **NEVER bare `npx playwright test`** — it skips the
 >   `dotenv -e .env.e2e.local -e .env.local` layering, so `DATABASE_URL` falls back
 >   to `.env.local`, which is **PROD**.
->   - ⚠️ **`pnpm test:e2e:local -- <args>` swallows the args.** To run one spec:
+>   - ⚠️ **`pnpm test:e2e:local -- <args>` swallows the args.** One spec:
 >     `pnpm exec dotenv -e .env.e2e.local -e .env.local -- playwright test <spec>
->     --project=chromium --no-deps` — `--no-deps` skips the client-auth setup.
->   - The **full** run needs that setup, so seed first with the e2e's own env:
->     `pnpm exec dotenv -e .env.e2e.local -e .env.local -- pnpm db:test:seed`.
->     Verified again 2026-07-21: the seed leaves **both** overlap EXCLUDE
->     constraints intact and carries new schema (F14's column, unique index and
->     cascade FK all present after it).
->   - **A PRO-authed spec is possible** — `tests/e2e/waitlist-offer-working-hours.spec.ts`
->     is the pattern (seed the pro yourself with `emailLookupHashV2`, bcrypt
->     password, **both** `emailVerifiedAt` and `phoneVerifiedAt`;
->     `test.use({ storageState: { cookies: [], origins: [] } })`; log in via
->     `/login`). The calendar's waitlist rail tile is
->     `getByRole('button', { name: /^Waitlist: / })`.
->   - Run **`--project=mobile-chrome`** too. It only runs on `main`.
->   - 2 e2e tests skip by design (`booking-lifecycle-smoke`, needs
->     `E2E_LIFECYCLE_BOOKING_ID`) — that is not your red.
-> - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
->   HTTP without touching dev data. ⚠️ **A stale `.next` made every `/api/v1/*`
->   route 404 while `/api/health` answered 200**; `rm -rf .next` fixed it.
+>     --project=chromium --no-deps`.
+>   - Full run: seed first with the e2e's own env
+>     (`pnpm exec dotenv -e .env.e2e.local -e .env.local -- pnpm db:test:seed`),
+>     then run **both** `--project=chromium` and `--project=mobile-chrome`.
+>     Baseline is **29 passed / 2 skipped** each; the 2 are a pre-existing
+>     conditional skip needing `E2E_LIFECYCLE_BOOKING_ID`.
+>   - ⚠️ `booking-lifecycle.spec.ts` sleeps in REAL TIME for a quarter-hour window
+>     (its own comment says so, `test.setTimeout(240_000)`). Locally `retries: 0`,
+>     so one slow cycle aborts the whole run with "N did not run". Re-run before
+>     owning it.
+> - `pnpm dev:test-db` runs a real server against the test DB. Auth is a **bearer
+>   token**, not a cookie: `DATABASE_URL=…5433… npx tsx scripts/dev/mint-dev-jwt.ts
+>   --email <x>` then `curl -H "Authorization: Bearer $TOKEN"`. ⚠️ A stale `.next`
+>   404s every `/api/v1/*` route while `/api/health` answers 200; `rm -rf .next`.
 >   State-changing requests need an `origin` header (proxy.ts CSRF gate).
-> - **iOS simulator, and it is worth the time — F14's device pass caught a layout
->   defect no test could see** (a trailing pill squeezed the row to "Hett…", and
->   the fixed version still truncated the *time*). Recipe, proven twice:
->   `pnpm dev` (dev DB :5434) then `~/Dev/tovis-ios/scripts/sim-login.sh --email
->   <pro>`. To drive a **test-DB** fixture instead, keep `pnpm dev:test-db` up,
->   mint the token yourself (`DATABASE_URL=…5433… npx tsx scripts/dev/mint-dev-jwt.ts
->   --email <pro>`) and launch with
->   `SIMCTL_CHILD_TOVIS_DEBUG_TOKEN="$TOKEN" xcrun simctl launch <udid> app.tovis.Tovis`
->   — that is all `sim-login.sh` does with it. Taps need `cliclick` mapped through
->   **`group 1 of window 1`**; a scroll needs a **slow** drag (8 intermediate
->   `m:` points with `-e 20`) — a two-point drag reads as a flick and does nothing.
->   The pro waitlist workspace is **Profile → Business → Waitlist**.
+> - **iOS simulator against the TEST db** (proven again in F15):
+>   `xcodebuild build -project tovis-ios.xcodeproj -scheme Tovis -configuration
+>   Debug -destination "id=<udid>"`, `xcrun simctl install`, then
+>   `SIMCTL_CHILD_TOVIS_DEBUG_TOKEN="$TOKEN" xcrun simctl launch <udid>
+>   app.tovis.Tovis`. ⚠️ `scripts/sim-login.sh --email` mints against the **dev**
+>   DB (:5434) and fails for a test-DB fixture — mint the token yourself.
+>   Taps need `cliclick` mapped through **`group 1 of window 1`**
+>   (`osascript -e 'tell application "System Events" to tell process "Simulator" to
+>   get {position, size} of group 1 of window 1'`); the screenshot is 1206×2622 and
+>   scales linearly into that rect. A first launch shows the notifications prompt —
+>   dismiss it before anything else.
 > - **Prod reads via the Supabase MCP** (project `rqhhvuaoksuvbvlypztn`, "tovis-dev"
->   IS prod). Answers "is this retroactive?" with a number — F14 re-checked **0**
->   rows in `WaitlistOffer` / `WaitlistEntry` / `BookingHold`.
+>   IS prod). Answers "is this retroactive?" with a number — F15 re-checked **0**
+>   rows in `LastMinuteOpening` / `LastMinuteRecipient` / `WaitlistOffer` /
+>   `WaitlistEntry` / `BookingHold`.
 > - **A/B a perf claim in one process** rather than trusting a remembered number:
->   `git show origin/main:<path> > <path>`, run the harness, restore from a `$TMPDIR`
->   copy. F14 measured the lock section at p50 10.4 → 11.2ms that way.
-> - 🔴 **The Bash tool's working directory persists between calls.** It bit again
->   this session (a `node -e` requiring `@prisma/client` ran from `~/Dev/tovis-ios`
->   and died). Prefix commands with an absolute `cd`, and never `git stash` to make
->   a temporary edit — the app repo carries two sibling sessions' stashes.
+>   short-circuit the new code with a `python3` patch, measure, restore from a
+>   `$TMPDIR` copy, `diff` to prove the restore. ⚠️ At small N the dev server's
+>   noise exceeds the signal — scale the fixture until the difference is real
+>   (F15 needed 20 rows to see +18ms).
+> - 🔴 **The Bash tool's working directory persists between calls.** Prefix
+>   commands with an absolute `cd`, and never `git stash` to make a temporary edit —
+>   the app repo carries sibling sessions' stashes.
 > - Deploy verification (reusable): `npx vercel --prod --yes`, then check the REAL
 >   thing rather than the exit code — `vercel inspect`, the live domain
 >   (`www.tovis.me`), the `_prisma_migrations` row via the Supabase MCP, and

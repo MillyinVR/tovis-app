@@ -13,10 +13,19 @@ const mocks = vi.hoisted(() => ({
   pickProfessionalPublicDisplayName: vi.fn(() => 'Ava Pro'),
   professionalProfileHref: vi.fn((id: string) => `/professionals/${id}`),
   pickRecipientTierPlan: vi.fn(),
+  filterStillOpenRows: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
   prisma: { lastMinuteRecipient: { findMany: mocks.findMany } },
+}))
+
+// The filter runs against real Postgres in
+// tests/integration/opening-liveness.test.ts. Here we pin what this route asks
+// it — including that a serviceless opening, which this list renders on purpose,
+// is KEPT rather than quietly hidden by a schedule question it cannot ask.
+vi.mock('@/lib/booking/storedSlotLiveness', () => ({
+  filterStillOpenRows: mocks.filterStillOpenRows,
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -38,9 +47,17 @@ vi.mock('@/lib/lastMinute/pickTierPlan', () => ({
 
 import { GET } from './route'
 
-function makeRow(overrides?: {
-  services?: Array<{ serviceId: string | null; offeringId: string | null; service: { name: string } }>
-}) {
+type ServiceFixture = {
+  serviceId: string | null
+  offeringId: string | null
+  service: { name: string; defaultDurationMinutes: number | null }
+  offering: {
+    salonDurationMinutes: number | null
+    mobileDurationMinutes: number | null
+  }
+}
+
+function makeRow(overrides?: { services?: ServiceFixture[] }) {
   return {
     id: 'recip_1',
     status: LastMinuteRecipientStatus.PRIORITY_OFFERED,
@@ -50,11 +67,13 @@ function makeRow(overrides?: {
     firstMatchedTier: 'WAITLIST',
     opening: {
       id: 'opening_1',
+      professionalId: 'pro_1',
       startAt: new Date('2026-07-10T17:00:00.000Z'),
       endAt: new Date('2026-07-10T18:00:00.000Z'),
       note: null,
       timeZone: 'America/Los_Angeles',
       locationType: 'SALON',
+      locationId: 'loc_1',
       professional: {
         id: 'pro_1',
         businessName: 'Ava Studio',
@@ -63,9 +82,15 @@ function makeRow(overrides?: {
         handle: 'ava',
         nameDisplay: 'FULL',
         avatarUrl: null,
+        timeZone: 'America/Los_Angeles',
       },
       services: overrides?.services ?? [
-        { serviceId: 'svc_1', offeringId: 'off_1', service: { name: 'Balayage' } },
+        {
+          serviceId: 'svc_1',
+          offeringId: 'off_1',
+          service: { name: 'Balayage', defaultDurationMinutes: 60 },
+          offering: { salonDurationMinutes: 90, mobileDurationMinutes: null },
+        },
       ],
       tierPlans: [],
     },
@@ -85,6 +110,9 @@ describe('GET /api/v1/client/priority-offer', () => {
       amountOff: null,
       freeAddOnService: null,
     })
+    mocks.filterStillOpenRows.mockImplementation(
+      async (args: { rows: unknown[] }) => args.rows,
+    )
   })
 
   // Read the mapped offers off the mocked `jsonOk({ offers }, 200)` call so we
@@ -131,5 +159,44 @@ describe('GET /api/v1/client/priority-offer', () => {
     expect(offer.professionalId).toBe('pro_1')
     expect(offer.serviceId).toBeNull()
     expect(offer.offeringId).toBeNull()
+  })
+
+  // F15. This list shows a stored opening time, so a slot that has since been
+  // booked, blocked or dropped out of the pro's hours must not appear — and
+  // claiming here spends the client's exclusive priority window, which makes a
+  // dead card cost more here than on any other surface.
+  it('asks the schedule about the opening, with the claim gate the claim runs', async () => {
+    mocks.findMany.mockResolvedValueOnce([makeRow()])
+
+    await GET()
+
+    const [args] = mocks.filterStillOpenRows.mock.calls[0]!
+    const call = args as {
+      viewerClientId: string
+      onUncheckable: string
+      toCandidate: (row: ReturnType<typeof makeRow>) => Record<string, unknown> | null
+    }
+
+    expect(call.viewerClientId).toBe('client_1')
+    // A serviceless opening renders on purpose here (its claim falls back to the
+    // pro's profile), so it must survive a check that cannot describe it.
+    expect(call.onUncheckable).toBe('keep')
+    expect(call.toCandidate(makeRow({ services: [] }))).toBeNull()
+
+    expect(call.toCandidate(makeRow())).toMatchObject({
+      key: 'opening_1',
+      professionalId: 'pro_1',
+      professionalTimeZone: 'America/Los_Angeles',
+      locationId: 'loc_1',
+      locationType: 'SALON',
+      startUtc: new Date('2026-07-10T17:00:00.000Z'),
+      // The offering's salon duration wins over the service default — the same
+      // window `createLastMinuteOpening` validated before publishing.
+      durationMinutes: 90,
+      // The claim is a CLIENT hold: an off-grid start is fatal, and the
+      // viewer's own plain hold is dropped by that claim before it checks.
+      commitGate: 'CLIENT_HOLD',
+      releasedHoldId: null,
+    })
   })
 })

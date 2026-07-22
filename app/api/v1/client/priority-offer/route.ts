@@ -10,6 +10,8 @@ import {
   Prisma,
 } from '@prisma/client'
 import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
+import { filterStillOpenRows } from '@/lib/booking/storedSlotLiveness'
+import { openingLivenessCandidate } from '@/lib/lastMinute/openingLiveness'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,11 +46,13 @@ const offerSelect = {
   opening: {
     select: {
       id: true,
+      professionalId: true,
       startAt: true,
       endAt: true,
       note: true,
       timeZone: true,
       locationType: true,
+      locationId: true,
       professional: {
         select: {
           id: true,
@@ -58,6 +62,10 @@ const offerSelect = {
           handle: true,
           nameDisplay: true,
           avatarUrl: true,
+          // Only the fallback time zone the booking gate uses when the location
+          // carries none — the read-time liveness check has to resolve the same
+          // context the claim will.
+          timeZone: true,
         },
       },
       services: {
@@ -66,7 +74,13 @@ const offerSelect = {
         select: {
           serviceId: true,
           offeringId: true,
-          service: { select: { name: true } },
+          service: { select: { name: true, defaultDurationMinutes: true } },
+          offering: {
+            select: {
+              salonDurationMinutes: true,
+              mobileDurationMinutes: true,
+            },
+          },
         },
       },
       tierPlans: {
@@ -136,7 +150,25 @@ export async function GET() {
     select: offerSelect,
   })
 
-  const offers = rows.map((row) => {
+  // Tori's rule (F15). A priority offer is the SAME stored opening the openings
+  // feed shows, reached first — so a slot that has since been booked, blocked or
+  // dropped out of the pro's hours has to disappear from both. Claiming spends
+  // the client's exclusive window, which makes showing a dead one worse here
+  // than anywhere else.
+  const stillOpen = await filterStillOpenRows({
+    rows,
+    toCandidate: (row) => openingLivenessCandidate(row.opening),
+    viewerClientId: auth.clientId,
+    // Unlike the openings feed, this list does NOT require an active service:
+    // a serviceless opening renders on purpose and its "Claim it" falls back to
+    // the pro's profile (`ClientPriorityOffer.isBookable`). There is no window
+    // to check on such a row, and hiding it here would be a different fix
+    // wearing F15's clothes.
+    onUncheckable: 'keep',
+    nowUtc: now,
+  })
+
+  const offers = stillOpen.map((row) => {
     const opening = row.opening
     const matchedTierPlan = pickRecipientTierPlan({
       notifiedTier: row.notifiedTier,

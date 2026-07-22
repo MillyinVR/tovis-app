@@ -26,6 +26,8 @@ import { WAITLIST_OFFER_TTL_MINUTES } from '@/lib/booking/constants'
 import { computeDaySlotsFast } from '@/lib/availability/core/dayComputation'
 import { parseYYYYMMDD } from '@/lib/availability/core/summaryWindow'
 import { loadBusyIntervalsForWindow } from '@/lib/booking/conflictQueries'
+import { checkStoredSlotsAreOpen } from '@/lib/booking/storedSlotLiveness'
+import { waitlistOfferLivenessCandidate } from '@/lib/waitlist/offerLiveness'
 import { minutesSinceMidnightInTimeZone, utcDateToLocalYmd } from '@/lib/time'
 
 const databaseUrl = process.env.DATABASE_URL
@@ -1060,5 +1062,239 @@ describe('waitlist offer → client confirm (real DB)', () => {
     await expect(
       declineClientWaitlistOffer({ offerId: offer.id, clientId: 'someone_else' }),
     ).rejects.toMatchObject({ code: 'WAITLIST_OFFER_NOT_FOUND' })
+  })
+
+  // ---------------------------------------------------------------------------
+  // F15 — the client's offer card is re-checked against the live schedule.
+  //
+  // F14 closed "someone else took it" with a real reservation. What a hold
+  // cannot stop is the PRO changing their mind afterwards: blocking that time,
+  // or shortening the day around it. Either leaves a Confirm button whose only
+  // outcome is a refusal, which is the shape of card F5 existed to remove.
+  // ---------------------------------------------------------------------------
+  describe('client feed liveness (F15)', () => {
+    /** The offer as `GET /api/v1/client/waitlist-offers` reads it. */
+    async function offerVisibility(offerId: string) {
+      const row = await db.waitlistOffer.findUniqueOrThrow({
+        where: { id: offerId },
+        select: {
+          id: true,
+          professionalId: true,
+          professional: { select: { timeZone: true } },
+          locationId: true,
+          locationType: true,
+          startsAt: true,
+          durationMinutes: true,
+          hold: { select: { id: true } },
+        },
+      })
+
+      const candidate = waitlistOfferLivenessCandidate(row)
+      const verdicts = await checkStoredSlotsAreOpen({
+        candidates: [candidate],
+        viewerClientId: fx.clientId,
+      })
+
+      const verdict = verdicts.get(candidate.key)
+      if (!verdict) throw new Error('no verdict for offer')
+      return verdict.open ? { open: true } : { open: false, reason: verdict.reason }
+    }
+
+    async function offerAt(start: Date) {
+      const entryId = await createEntry()
+      const { offer } = await createWaitlistOffer({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        waitlistEntryId: entryId,
+        scheduledFor: start,
+        endsAt: new Date(start.getTime() + 60 * 60_000),
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      })
+      return offer
+    }
+
+    // THE ALLOW CASE, and the one that matters most here: F14 gave the offer its
+    // own hold, so a naive "is this slot free?" read would answer NO for every
+    // live offer and empty the feed.
+    it('shows a live offer, discounting the reservation the offer itself placed', async () => {
+      const offer = await offerAt(futureLocal(30, 13, 0))
+
+      // The reservation really is there — this is not passing because F14 is off.
+      const hold = await holdForOffer(offer.id)
+      expect(hold).not.toBeNull()
+
+      expect(await offerVisibility(offer.id)).toEqual({ open: true })
+    })
+
+    it('hides an offer the pro blocked off afterwards', async () => {
+      const start = futureLocal(31, 13, 0)
+      const offer = await offerAt(start)
+
+      await db.calendarBlock.create({
+        data: {
+          professionalId: fx.professionalId,
+          locationId: fx.salonLocationId,
+          startsAt: new Date(start.getTime() - 15 * 60_000),
+          endsAt: new Date(start.getTime() + 15 * 60_000),
+          note: 'Closed',
+        },
+      })
+
+      expect(await offerVisibility(offer.id)).toEqual({
+        open: false,
+        reason: 'TIME_BLOCKED',
+      })
+    })
+
+    it('hides an offer that fell outside newly-narrowed working hours', async () => {
+      const start = futureLocal(32, 16, 0)
+      const offer = await offerAt(start)
+
+      const original = await db.professionalLocation.findUniqueOrThrow({
+        where: { id: fx.salonLocationId },
+        select: { workingHours: true },
+      })
+
+      const narrowed = { enabled: true, start: '09:00', end: '15:00' }
+      await db.professionalLocation.update({
+        where: { id: fx.salonLocationId },
+        data: {
+          workingHours: {
+            mon: narrowed,
+            tue: narrowed,
+            wed: narrowed,
+            thu: narrowed,
+            fri: narrowed,
+            sat: narrowed,
+            sun: narrowed,
+          },
+        },
+      })
+
+      try {
+        expect(await offerVisibility(offer.id)).toEqual({
+          open: false,
+          reason: 'OUTSIDE_WORKING_HOURS',
+        })
+      } finally {
+        await db.professionalLocation.update({
+          where: { id: fx.salonLocationId },
+          data: {
+            workingHours: (original.workingHours ?? {}) as Prisma.InputJsonValue,
+          },
+        })
+      }
+    })
+
+    // A pro MAY double-book themselves (`PRO_AUTHORIZED_OVERLAP` stamps
+    // allowsOverlap), so a booking really can land on top of the reservation —
+    // and then the client's confirm, which runs as a CLIENT, refuses.
+    it('hides an offer the pro booked over', async () => {
+      const start = futureLocal(33, 13, 0)
+      const offer = await offerAt(start)
+
+      await db.booking.create({
+        data: {
+          professionalId: fx.professionalId,
+          clientId: fx.rivalClientId,
+          serviceId: fx.serviceId,
+          offeringId: fx.offeringId,
+          locationId: fx.salonLocationId,
+          locationType: ServiceLocationType.SALON,
+          scheduledFor: start,
+          totalDurationMinutes: 60,
+          bufferMinutes: 0,
+          status: BookingStatus.ACCEPTED,
+          locationTimeZone: ZONE,
+          subtotalSnapshot: new Prisma.Decimal('100.00'),
+          proTenantId: fx.tenantId,
+          clientHomeTenantId: fx.tenantId,
+          allowsOverlap: true,
+        },
+      })
+
+      expect(await offerVisibility(offer.id)).toEqual({
+        open: false,
+        reason: 'TIME_BOOKED',
+      })
+    })
+
+    // The confirm runs `performLockedCreateProBooking`, which never calls
+    // `deleteActiveHoldsForClient` (that helper has exactly one call site and it
+    // is `performLockedCreateHold`). So the offered client's own ORDINARY hold
+    // over the same window really does refuse this confirm, and really must hide
+    // the card — unlike an opening, whose claim drops that hold first.
+    //
+    // Reachable only for a pre-F14 offer that reserved nothing: while the
+    // offer's own hold exists no second hold can overlap it.
+    it('hides an unreserved offer the client’s own ordinary hold now covers', async () => {
+      const start = futureLocal(35, 13, 0)
+      const offer = await offerAt(start)
+
+      // Drop the reservation, leaving the pre-F14 shape.
+      await db.bookingHold.deleteMany({ where: { waitlistOfferId: offer.id } })
+      expect(await offerVisibility(offer.id)).toEqual({ open: true })
+
+      await db.bookingHold.create({
+        data: {
+          professionalId: fx.professionalId,
+          clientId: fx.clientId,
+          offeringId: fx.offeringId,
+          locationId: fx.salonLocationId,
+          locationType: ServiceLocationType.SALON,
+          scheduledFor: start,
+          endsAtSnapshot: new Date(start.getTime() + 60 * 60_000),
+          durationMinutesSnapshot: 60,
+          bufferMinutesSnapshot: 0,
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        },
+      })
+
+      expect(await offerVisibility(offer.id)).toEqual({
+        open: false,
+        reason: 'TIME_HELD',
+      })
+    })
+
+    // ALLOW CASE. The pro chose this minute, and the confirm does not enforce the
+    // slot grid (F4) — so a re-anchored grid must not hide the offer.
+    it('keeps an offer whose start no longer sits on the pro’s grid', async () => {
+      const start = futureLocal(34, 13, 0)
+      const offer = await offerAt(start)
+
+      const original = await db.professionalLocation.findUniqueOrThrow({
+        where: { id: fx.salonLocationId },
+        select: { workingHours: true },
+      })
+
+      const shifted = { enabled: true, start: '09:07', end: '18:00' }
+      await db.professionalLocation.update({
+        where: { id: fx.salonLocationId },
+        data: {
+          workingHours: {
+            mon: shifted,
+            tue: shifted,
+            wed: shifted,
+            thu: shifted,
+            fri: shifted,
+            sat: shifted,
+            sun: shifted,
+          },
+        },
+      })
+
+      try {
+        expect(await offerVisibility(offer.id)).toEqual({ open: true })
+      } finally {
+        await db.professionalLocation.update({
+          where: { id: fx.salonLocationId },
+          data: {
+            workingHours: (original.workingHours ?? {}) as Prisma.InputJsonValue,
+          },
+        })
+      }
+    })
   })
 })

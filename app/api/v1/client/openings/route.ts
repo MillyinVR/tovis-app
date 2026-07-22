@@ -20,6 +20,8 @@ import {
   mapOpeningServiceDtos,
   mapPublicIncentiveDto,
 } from '@/lib/lastMinute/openingDto'
+import { filterStillOpenRows } from '@/lib/booking/storedSlotLiveness'
+import { openingLivenessCandidate } from '@/lib/lastMinute/openingLiveness'
 
 export const dynamic = 'force-dynamic'
 
@@ -254,17 +256,31 @@ export async function GET(req: Request) {
       select: recipientSelect,
     })
 
-    const notifications = recipients
-      .filter((recipient) => recipient.opening.services.length > 0)
-      .map((recipient) => ({
-        id: recipient.id,
-        tier: recipient.notifiedTier ?? recipient.firstMatchedTier,
-        sentAt: (recipient.notifiedAt ?? recipient.createdAt).toISOString(),
-        openedAt: recipient.openedAt ? recipient.openedAt.toISOString() : null,
-        clickedAt: recipient.clickedAt ? recipient.clickedAt.toISOString() : null,
-        bookedAt: recipient.bookedAt ? recipient.bookedAt.toISOString() : null,
-        opening: mapOpening(recipient),
-      }))
+    // Tori's rule (F15): a stored time the pro's schedule can no longer serve is
+    // not shown at all. The row's own state (ACTIVE / not booked / not cancelled)
+    // only moves when THIS opening is claimed or the pro cancels it by hand —
+    // nothing retires it when the slot goes to an ordinary booking, gets blocked,
+    // or drops out of newly-narrowed hours. So the read asks the schedule.
+    const stillOpen = await filterStillOpenRows({
+      rows: recipients.filter((recipient) => recipient.opening.services.length > 0),
+      toCandidate: (recipient) => openingLivenessCandidate(recipient.opening),
+      viewerClientId: clientId,
+      // Unreachable — the query and the filter above both require an active
+      // service — but stated rather than defaulted: a row with no window to
+      // check is a row this feed has nothing to offer for.
+      onUncheckable: 'drop',
+      nowUtc: now,
+    })
+
+    const notifications = stillOpen.map((recipient) => ({
+      id: recipient.id,
+      tier: recipient.notifiedTier ?? recipient.firstMatchedTier,
+      sentAt: (recipient.notifiedAt ?? recipient.createdAt).toISOString(),
+      openedAt: recipient.openedAt ? recipient.openedAt.toISOString() : null,
+      clickedAt: recipient.clickedAt ? recipient.clickedAt.toISOString() : null,
+      bookedAt: recipient.bookedAt ? recipient.bookedAt.toISOString() : null,
+      opening: mapOpening(recipient),
+    }))
 
     return jsonOk({ notifications }, 200)
   } catch (e) {

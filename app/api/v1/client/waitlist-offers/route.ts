@@ -9,6 +9,8 @@ import {
   professionalPublicDisplayNameSelect,
 } from '@/lib/privacy/professionalDisplayName'
 import { professionalProfileHref } from '@/lib/profiles/profileHrefs'
+import { filterStillOpenRows } from '@/lib/booking/storedSlotLiveness'
+import { waitlistOfferLivenessCandidate } from '@/lib/waitlist/offerLiveness'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +20,10 @@ const offerSelect = {
   startsAt: true,
   endsAt: true,
   locationType: true,
+  locationId: true,
+  durationMinutes: true,
   expiresAt: true,
+  professionalId: true,
   professional: {
     select: {
       id: true,
@@ -36,6 +41,12 @@ const offerSelect = {
   },
   location: {
     select: { timeZone: true },
+  },
+  // The reservation this offer placed (F14). It is the offer's OWN hold, and the
+  // confirm deletes it before booking — so the liveness check below has to
+  // discount it, or every offer would hide itself.
+  hold: {
+    select: { id: true },
   },
 } satisfies Prisma.WaitlistOfferSelect
 
@@ -62,18 +73,34 @@ export async function GET() {
   const auth = await requireClient()
   if (!auth.ok) return auth.res
 
+  const now = new Date()
+
   const rows = await prisma.waitlistOffer.findMany({
     where: {
       clientId: auth.clientId,
       status: WaitlistOfferStatus.PENDING,
-      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
     },
     orderBy: { createdAt: 'desc' },
     take: 50,
     select: offerSelect,
   })
 
-  const offers = rows.map((row) => ({
+  // Tori's rule (F15). F14's hold closed the "someone else took it" half; what
+  // it cannot close is the pro changing their own mind afterwards — blocking
+  // that time, or shortening the day around it. Either leaves a Confirm button
+  // whose only outcome is a refusal, so the read runs the confirm's own gate.
+  const stillOpen = await filterStillOpenRows({
+    rows,
+    toCandidate: waitlistOfferLivenessCandidate,
+    viewerClientId: auth.clientId,
+    // Unreachable — every offer stores its own duration — but stated rather
+    // than defaulted.
+    onUncheckable: 'drop',
+    nowUtc: now,
+  })
+
+  const offers = stillOpen.map((row) => ({
     offerId: row.id,
     status: row.status,
     proName:

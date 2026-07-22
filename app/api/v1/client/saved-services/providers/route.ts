@@ -1,4 +1,14 @@
 // app/api/v1/client/saved-services/providers/route.ts
+//
+// ⚠️ NOT WIRED — nothing on web or iOS calls this route (see docs/BACKLOG.md).
+// It shows stored last-minute opening TIMES, so before it gets a UI it must run
+// `filterStillOpenRows` (`lib/booking/storedSlotLiveness.ts`) over the rows it
+// returns, the way /api/v1/client/openings and the client home already do:
+// Tori's rule of 2026-07-21 is that a time the pro's schedule can no longer
+// serve is not shown to a client at all. It was deliberately left out of F15
+// because it displays nothing to anyone today, and the cost of the check across
+// MANY professionals (this feed is not scoped to one) should be measured
+// against a real caller rather than guessed at now.
 import { createHash } from 'crypto'
 
 import {

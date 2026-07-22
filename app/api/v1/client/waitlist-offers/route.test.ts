@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
   jsonOk: vi.fn(),
   offerFindMany: vi.fn(),
+  filterStillOpenRows: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -16,6 +17,13 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     waitlistOffer: { findMany: mocks.offerFindMany },
   },
+}))
+
+// The filter itself is driven against real Postgres in
+// tests/integration/waitlist-offer.test.ts. What matters HERE is the candidate
+// this route hands it: both of its knobs are silently wrong in both directions.
+vi.mock('@/lib/booking/storedSlotLiveness', () => ({
+  filterStillOpenRows: mocks.filterStillOpenRows,
 }))
 
 import { GET } from './route'
@@ -31,6 +39,9 @@ function offerRow(over?: { id?: string; expiresAt?: Date | null }) {
     startsAt: new Date('2026-08-01T17:00:00Z'),
     endsAt: new Date('2026-08-01T18:00:00Z'),
     locationType: 'SALON',
+    locationId: 'loc_1',
+    durationMinutes: 60,
+    professionalId: 'pro_1',
     // `??` would swallow an explicit null, which is the pre-F14 row this
     // fixture exists to reproduce.
     expiresAt:
@@ -48,6 +59,7 @@ function offerRow(over?: { id?: string; expiresAt?: Date | null }) {
     },
     offering: { service: { name: 'Balayage' } },
     location: { timeZone: 'America/Los_Angeles' },
+    hold: { id: 'hold_1' },
   }
 }
 
@@ -56,6 +68,9 @@ beforeEach(() => {
   mocks.requireClient.mockResolvedValue({ ok: true, clientId: 'client-1' })
   mocks.jsonOk.mockImplementation((data: unknown) => data)
   mocks.offerFindMany.mockResolvedValue([offerRow()])
+  mocks.filterStillOpenRows.mockImplementation(
+    async (args: { rows: unknown[] }) => args.rows,
+  )
 })
 
 describe('GET /api/v1/client/waitlist-offers', () => {
@@ -97,5 +112,52 @@ describe('GET /api/v1/client/waitlist-offers', () => {
     const raw: unknown = await GET()
     const payload = raw as Payload
     expect(payload.offers[0]?.expiresAt).toBeNull()
+  })
+
+  // F15. The two knobs below decide whether the read agrees with the confirm,
+  // and both are invisible when wrong:
+  //
+  // - `releasedHoldId` must be the offer's OWN reservation (F14). Without it the
+  //   feed asks "is this slot free?" about a slot the offer itself is holding,
+  //   and every offer hides itself the moment it is made.
+  // - `commitGate` must be PRO_CREATE: the confirm books through
+  //   `performLockedCreateProBooking`, which does not enforce the step (the PRO
+  //   picked the minute, F4) and does not sweep the client's own holds.
+  //   CLIENT_HOLD here would hide an offer the confirm would take.
+  it('asks the schedule about the offer with the confirm gate its confirm runs', async () => {
+    await GET()
+
+    const [args] = mocks.filterStillOpenRows.mock.calls[0]!
+    const call = args as {
+      viewerClientId: string
+      onUncheckable: string
+      toCandidate: (row: ReturnType<typeof offerRow>) => Record<string, unknown>
+    }
+
+    expect(call.viewerClientId).toBe('client-1')
+    expect(call.onUncheckable).toBe('drop')
+
+    expect(call.toCandidate(offerRow())).toMatchObject({
+      key: 'off_1',
+      professionalId: 'pro_1',
+      professionalTimeZone: 'America/Los_Angeles',
+      locationId: 'loc_1',
+      locationType: 'SALON',
+      startUtc: new Date('2026-08-01T17:00:00Z'),
+      durationMinutes: 60,
+      commitGate: 'PRO_CREATE',
+      releasedHoldId: 'hold_1',
+    })
+  })
+
+  it('carries a null releasedHoldId for a pre-F14 offer that reserved nothing', async () => {
+    await GET()
+
+    const [args] = mocks.filterStillOpenRows.mock.calls[0]!
+    const { toCandidate } = args as {
+      toCandidate: (row: unknown) => { releasedHoldId: string | null }
+    }
+
+    expect(toCandidate({ ...offerRow(), hold: null }).releasedHoldId).toBeNull()
   })
 })
