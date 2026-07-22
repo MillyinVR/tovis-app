@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => ({
 
   findBookingAndHoldConflicts: vi.fn(),
   decideBookingOverlapPermission: vi.fn(),
-  getTimeRangeConflict: vi.fn(),
 
   computeLastMinuteDiscount: vi.fn(),
 
@@ -171,7 +170,6 @@ vi.mock('@/lib/booking/conflictQueries', async () => {
   return {
     ...actual,
     findBookingAndHoldConflicts: mocks.findBookingAndHoldConflicts,
-    getTimeRangeConflict: mocks.getTimeRangeConflict,
   }
 })
 
@@ -809,7 +807,7 @@ describe('writeBoundary overlap policy integration', () => {
     expect(mocks.prisma.waitlistEntry.update).not.toHaveBeenCalled()
   })
 
-  it('waitlist offer creation refuses when the window already conflicts', async () => {
+  function setupOfferableWaitlistEntry() {
     mocks.prisma.waitlistEntry.findFirst.mockResolvedValue({
       id: 'entry_1',
       clientId: 'client_1',
@@ -818,38 +816,151 @@ describe('writeBoundary overlap policy integration', () => {
     mocks.prisma.professionalServiceOffering.findFirst.mockResolvedValue({
       id: 'offering_1',
       offersInSalon: true,
+      offersMobile: false,
+      salonDurationMinutes: 60,
+      mobileDurationMinutes: null,
+      salonPriceStartingAt: '100.00',
+      mobilePriceStartingAt: null,
       service: { name: 'Haircut' },
-      professional: { businessName: 'Salon', displayName: 'Pro' },
+      professional: {
+        businessName: 'Salon',
+        displayName: 'Pro',
+        timeZone: 'America/Los_Angeles',
+      },
     })
     mocks.prisma.professionalLocation.findFirst.mockResolvedValue({
       id: 'location_1',
       type: ProfessionalLocationType.SALON,
-      timeZone: 'America/Los_Angeles',
     })
-    mocks.getTimeRangeConflict.mockResolvedValue('BOOKING')
+    mocks.prisma.waitlistOffer.create.mockResolvedValue({
+      id: 'offer_1',
+      status: WaitlistOfferStatus.PENDING,
+      startsAt: new Date('2030-05-01T18:00:00.000Z'),
+      endsAt: new Date('2030-05-01T19:00:00.000Z'),
+      locationType: ServiceLocationType.SALON,
+    })
+    mocks.prisma.waitlistOffer.updateMany.mockResolvedValue({ count: 0 })
+    mocks.prisma.waitlistEntry.update.mockResolvedValue({ id: 'entry_1' })
+  }
 
-    await expect(
-      createWaitlistOffer({
-        professionalId: 'pro_1',
-        actorUserId: 'user_1',
-        waitlistEntryId: 'entry_1',
-        scheduledFor: new Date('2030-05-01T18:00:00.000Z'),
-        endsAt: new Date('2030-05-01T19:00:00.000Z'),
-        locationId: 'location_1',
-        locationType: ServiceLocationType.SALON,
-        durationMinutes: 60,
-      }),
-    ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+  const OFFER_ARGS = {
+    professionalId: 'pro_1',
+    actorUserId: 'user_1',
+    waitlistEntryId: 'entry_1',
+    scheduledFor: new Date('2030-05-01T18:00:00.000Z'),
+    endsAt: new Date('2030-05-01T19:00:00.000Z'),
+    locationId: 'location_1',
+    locationType: ServiceLocationType.SALON,
+    durationMinutes: 60,
+  } as const
 
-    expect(mocks.getTimeRangeConflict).toHaveBeenCalledWith(
+  it('waitlist offer creation refuses when the window already conflicts', async () => {
+    setupOfferableWaitlistEntry()
+    mocks.evaluateProSchedulingDecision.mockResolvedValue({
+      ok: false,
+      code: 'TIME_BOOKED',
+      logHint: {
+        requestedStart: new Date('2030-05-01T18:00:00.000Z'),
+        requestedEnd: new Date('2030-05-01T19:15:00.000Z'),
+        conflictType: 'BOOKING',
+      },
+    })
+
+    const conflictLines: string[] = []
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation((...parts: unknown[]) => {
+        conflictLines.push(parts.map((part) => String(part)).join(' '))
+      })
+
+    try {
+      await expect(
+        createWaitlistOffer({ ...OFFER_ARGS }),
+      ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+    } finally {
+      warnSpy.mockRestore()
+    }
+
+    // The offer gate and the booking-create gate are the same function, so the
+    // trail has to say which one refused: nothing was being booked here.
+    const conflict = conflictLines
+      .map((line) => {
+        try {
+          return JSON.parse(line) as { event?: string; action?: string }
+        } catch {
+          return null
+        }
+      })
+      .find((parsed) => parsed?.event === 'booking_conflict')
+    expect(conflict?.action).toBe('WAITLIST_OFFER_CREATE')
+
+    expect(mocks.prisma.waitlistOffer.updateMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.waitlistOffer.create).not.toHaveBeenCalled()
+  })
+
+  // F5. The offer is a promise, so it must run the client confirm's own gate
+  // with the client confirm's own flags. Each literal below is load-bearing in a
+  // different direction and none of them is visible from a refusal:
+  //   • allow* true would let the pro author a time the confirm then refuses;
+  //   • enforceStepGrid true would refuse a minute only the PRO can change;
+  //   • deferBusyConflicts true would stop the offer refusing a taken slot,
+  //     because no overlap policy runs here to pick the verdict up.
+  it('waitlist offer creation runs the confirm’s gate with the confirm’s flags', async () => {
+    setupOfferableWaitlistEntry()
+
+    const result = await createWaitlistOffer({ ...OFFER_ARGS })
+    expect(result.offer.id).toBe('offer_1')
+
+    expect(mocks.evaluateProSchedulingDecision).toHaveBeenCalledWith(
       expect.objectContaining({
         professionalId: 'pro_1',
         locationId: 'location_1',
         requestedStart: new Date('2030-05-01T18:00:00.000Z'),
-        requestedEnd: new Date('2030-05-01T19:00:00.000Z'),
+        // Duration from the OFFERING (60) + the location's buffer (15) — the
+        // window the confirm reserves, not the caller's raw start/end pair.
+        durationMinutes: 60,
+        bufferMinutes: 15,
+        allowOutsideWorkingHours: false,
+        allowShortNotice: false,
+        allowFarFuture: false,
+        enforceStepGrid: false,
+        deferBusyConflictsToOverlapPolicy: false,
       }),
     )
-    expect(mocks.prisma.waitlistOffer.updateMany).not.toHaveBeenCalled()
+  })
+
+  // The confirm opens with this same readiness gate, so a not-ready pro who can
+  // still send offers is sending offers that can only fail. Refuse to the pro.
+  it('waitlist offer creation refuses when the pro is not booking-ready', async () => {
+    setupOfferableWaitlistEntry()
+    mocks.checkProReadinessForEntryPointWithDb.mockResolvedValue({
+      ok: false,
+      blockers: ['NO_BOOKABLE_LOCATION'],
+    })
+
+    await expect(createWaitlistOffer({ ...OFFER_ARGS })).rejects.toMatchObject({
+      code: 'PRO_NOT_READY',
+    })
     expect(mocks.prisma.waitlistOffer.create).not.toHaveBeenCalled()
+  })
+
+  // The offer's stored window must be the one that was validated, or the client
+  // is shown (and promised) a different appointment from the one that books.
+  it('stores the offering-derived window, not a shorter requested one', async () => {
+    setupOfferableWaitlistEntry()
+
+    await createWaitlistOffer({ ...OFFER_ARGS, durationMinutes: 30 })
+
+    expect(mocks.prisma.waitlistOffer.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          durationMinutes: 60,
+          endsAt: new Date('2030-05-01T19:00:00.000Z'),
+        }),
+      }),
+    )
+    expect(mocks.evaluateProSchedulingDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ durationMinutes: 60 }),
+    )
   })
 })

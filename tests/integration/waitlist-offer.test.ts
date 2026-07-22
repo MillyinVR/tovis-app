@@ -20,6 +20,7 @@ import {
   createWaitlistOffer,
   declineClientWaitlistOffer,
 } from '@/lib/booking/writeBoundary'
+import { minutesSinceMidnightInTimeZone } from '@/lib/time'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -42,12 +43,28 @@ type Fixtures = {
 
 let fx: Fixtures
 
+const ZONE = 'America/Los_Angeles'
+
 /** A future UTC instant that lands mid-day (9:00–18:00) in America/Los_Angeles. */
 function futureUtc(daysAhead: number, hourUtc: number): Date {
   const d = new Date()
   d.setUTCDate(d.getUTCDate() + daysAhead)
   d.setUTCHours(hourUtc, 0, 0, 0)
   return d
+}
+
+/**
+ * A future UTC instant at exactly `hh:mm` LOCAL time in the fixture's zone,
+ * derived from the zone itself rather than a hardcoded UTC offset (the suite
+ * runs on both sides of a DST switch). Anchored at 20:00Z, which is the same
+ * local calendar day in PT year-round, then shifted by the local delta.
+ */
+function futureLocal(daysAhead: number, hh: number, mm = 0): Date {
+  const anchor = futureUtc(daysAhead, 20)
+  const anchorLocalMinutes = minutesSinceMidnightInTimeZone(anchor, ZONE)
+  return new Date(
+    anchor.getTime() + (hh * 60 + mm - anchorLocalMinutes) * 60_000,
+  )
 }
 
 function workingHours(): Prisma.InputJsonValue {
@@ -440,6 +457,178 @@ describe('waitlist offer → client confirm (real DB)', () => {
     })
     expect(offerRow?.status).toBe(WaitlistOfferStatus.PENDING)
     expect(offerRow?.bookingId).toBeNull()
+  })
+
+  // ── F5: the offer must promise only what the confirm can actually book ──────
+  //
+  // `confirmClientWaitlistOffer` runs `performLockedCreateProBooking` with
+  // `allowOutsideWorkingHours: false`, so an off-hours offer is one the client
+  // physically cannot accept. Before the fix these three cases were asymmetric:
+  // the offer was created happily and the client's Confirm 400'd — a refusal
+  // aimed at the one person who cannot act on it.
+
+  it('refuses an offer whose window runs past the pro’s closing time', async () => {
+    const entryId = await createEntry()
+    // 17:30 local start + 60 min = 18:30, past the fixture's 18:00 close. The
+    // START is inside working hours, so only the full-range guard can catch it.
+    const start = futureLocal(14, 17, 30)
+
+    await expect(
+      createWaitlistOffer({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        waitlistEntryId: entryId,
+        scheduledFor: start,
+        endsAt: new Date(start.getTime() + 60 * 60_000),
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      }),
+    ).rejects.toMatchObject({ code: 'OUTSIDE_WORKING_HOURS' })
+
+    // The refusal wrote nothing: no offer row, and the entry never left ACTIVE.
+    const offerCount = await db.waitlistOffer.count({
+      where: { waitlistEntryId: entryId },
+    })
+    expect(offerCount).toBe(0)
+
+    const entry = await db.waitlistEntry.findUnique({ where: { id: entryId } })
+    expect(entry?.status).toBe(WaitlistStatus.ACTIVE)
+  })
+
+  // A start BEFORE the window opens fails the step-alignment helper first
+  // (`reason: before-window-start`). The confirm passes `enforceStepGrid: false`
+  // because the PRO picked the minute, so the offer gate must too — if this ever
+  // reports STEP_MISMATCH the offer became stricter than the confirm it mirrors.
+  it('refuses an offer before the pro opens — as OUTSIDE_WORKING_HOURS, not STEP_MISMATCH', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(15, 7, 0) // 07:00 local, two hours before the 09:00 open
+
+    await expect(
+      createWaitlistOffer({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        waitlistEntryId: entryId,
+        scheduledFor: start,
+        endsAt: new Date(start.getTime() + 60 * 60_000),
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      }),
+    ).rejects.toMatchObject({ code: 'OUTSIDE_WORKING_HOURS' })
+  })
+
+  // The discriminating half. A refusal test proves nothing about a gate that is
+  // too strict, and over-enforcement here is invisible from the refusal side: it
+  // shows up only as an offer the pro should be able to send and cannot. This
+  // pins the exact boundary — a window ending ON the closing minute — and takes
+  // it all the way through the client's confirm.
+  it('still offers, and confirms, a window that ends exactly at closing time', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(16, 17, 0) // 17:00 + 60 min = 18:00 sharp
+
+    const { offer } = await createWaitlistOffer({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      waitlistEntryId: entryId,
+      scheduledFor: start,
+      endsAt: new Date(start.getTime() + 60 * 60_000),
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 60,
+    })
+    expect(offer.status).toBe(WaitlistOfferStatus.PENDING)
+
+    const result = await confirmClientWaitlistOffer({
+      offerId: offer.id,
+      clientId: fx.clientId,
+      idempotencyKey: `${TAG}-confirm-closing-edge`,
+    })
+    expect(result.booking.status).toBe(BookingStatus.ACCEPTED)
+    expect(result.booking.scheduledFor.getTime()).toBe(start.getTime())
+  })
+
+  // The conflict check moved from a standalone getTimeRangeConflict call into
+  // the shared scheduling gate, so this pins that a calendar block still stops
+  // an offer on real Postgres — and now over the buffered window the confirm
+  // reserves, not the caller's raw start/end pair.
+  it('still refuses an offer over a calendar block', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(17, 13, 0)
+
+    const block = await db.calendarBlock.create({
+      data: {
+        professionalId: fx.professionalId,
+        locationId: fx.salonLocationId,
+        startsAt: new Date(start.getTime() + 30 * 60_000),
+        endsAt: new Date(start.getTime() + 90 * 60_000),
+        note: 'Lunch',
+      },
+      select: { id: true },
+    })
+
+    try {
+      await expect(
+        createWaitlistOffer({
+          professionalId: fx.professionalId,
+          actorUserId: fx.proUserId,
+          waitlistEntryId: entryId,
+          scheduledFor: start,
+          endsAt: new Date(start.getTime() + 60 * 60_000),
+          locationId: fx.salonLocationId,
+          locationType: ServiceLocationType.SALON,
+          durationMinutes: 60,
+        }),
+      ).rejects.toMatchObject({ code: 'TIME_BLOCKED' })
+    } finally {
+      await db.calendarBlock.delete({ where: { id: block.id } })
+    }
+  })
+
+  // Booking/hold conflicts are only fatal in the shared gate when the caller
+  // says no overlap policy will run afterwards. Nothing runs after this one, so
+  // deferring would silently let the pro promise a slot that is already taken.
+  it('still refuses an offer over an existing booking', async () => {
+    const entryId = await createEntry()
+    const start = futureLocal(18, 13, 0)
+
+    const taken = await db.booking.create({
+      data: {
+        client: { connect: { id: fx.clientId } },
+        professional: { connect: { id: fx.professionalId } },
+        proTenant: { connect: { id: fx.tenantId } },
+        clientHomeTenant: { connect: { id: fx.tenantId } },
+        service: { connect: { id: fx.serviceId } },
+        offering: { connect: { id: fx.offeringId } },
+        location: { connect: { id: fx.salonLocationId } },
+        status: BookingStatus.ACCEPTED,
+        scheduledFor: new Date(start.getTime() + 30 * 60_000),
+        totalDurationMinutes: 60,
+        bufferMinutes: 0,
+        locationType: ServiceLocationType.SALON,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal('100.00'),
+        totalAmount: new Prisma.Decimal('100.00'),
+      },
+      select: { id: true },
+    })
+
+    try {
+      await expect(
+        createWaitlistOffer({
+          professionalId: fx.professionalId,
+          actorUserId: fx.proUserId,
+          waitlistEntryId: entryId,
+          scheduledFor: start,
+          endsAt: new Date(start.getTime() + 60 * 60_000),
+          locationId: fx.salonLocationId,
+          locationType: ServiceLocationType.SALON,
+          durationMinutes: 60,
+        }),
+      ).rejects.toMatchObject({ code: 'TIME_BOOKED' })
+    } finally {
+      await db.booking.delete({ where: { id: taken.id } })
+    }
   })
 
   it('decline marks the offer DECLINED and returns the entry to ACTIVE', async () => {
