@@ -385,7 +385,10 @@ describe('resolveConsultationScheduleOutlook', () => {
     expect(result.outlook).toBe('WORKING_HOURS_MISSING')
   })
 
-  it('does not ask when the booking has no location', async () => {
+  // `Booking.locationId` is non-nullable, so this pins the HELPER's contract
+  // rather than a state the propose route can reach — it takes `string | null`
+  // and must not treat "nothing to ask about" as "all clear".
+  it('does not ask when it is given no location', async () => {
     const result = await resolveConsultationScheduleOutlook({
       tx: makeTx(),
       ...outlookArgs({ locationId: null }),

@@ -800,9 +800,15 @@ static guards; this was found by looking at the screen.
   consultation proposal is a once-per-appointment action, so this was judged fine
   rather than benchmarked.
 - **`WORKING_HOURS_MISSING` and `NOT_CHECKED` were never driven end-to-end**,
-  only unit-tested through the mapping. Each is one `switch` arm over a verdict
-  the shared helper already produces, and both are SILENT states, so the blast
-  radius is "the pro is told nothing", which is the safe direction.
+  only unit-tested through the mapping. Both are SILENT states, so the blast
+  radius is "the pro is told nothing", which is the safe direction. Attempting
+  to stage `NOT_CHECKED` on the live route turned up why: **`Booking.locationId`
+  is non-nullable**, so the "no location" branch is unreachable from a real
+  booking (it guards the helper's own `string | null` signature). What remains
+  reachable is a location row that does not come back for this professional, an
+  unresolvable time zone, or a failed query — none of which can be staged
+  against a live route without corrupting a row. The code comment and the test
+  name were corrected to stop implying otherwise.
 
 **🟡 A pre-existing defect in the same route, found while reading, NOT fixed
 (out of F12's scope — worth its own card):** `transitionSessionStepInTransaction`

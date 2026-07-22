@@ -404,10 +404,16 @@ export type ConsultationScheduleOutlook =
   /** This location has no usable working hours, so there is nothing to judge against. */
   | 'WORKING_HOURS_MISSING'
   /**
-   * Not asked, or asked and the answer did not arrive: no location on the
-   * booking, no resolvable time zone, or the lookup failed. A distinct state
-   * rather than `WITHIN_WORKING_HOURS` so "we did not ask" can never be read as
-   * "you are fine".
+   * Not asked, or asked and the answer did not arrive. A distinct state rather
+   * than `WITHIN_WORKING_HOURS` so "we did not ask" can never be read as "you
+   * are fine".
+   *
+   * Reachable causes, from a real `Booking`: the location row does not come
+   * back for this professional (archived, reassigned), no time zone can be
+   * resolved for it, or the query failed. NOT reachable from a Booking:
+   * `locationId` is non-nullable on the model, so the null guard below is
+   * defensive for the helper's own signature rather than a state the propose
+   * route can produce.
    */
   | 'NOT_CHECKED'
 
