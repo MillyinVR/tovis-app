@@ -15,6 +15,10 @@ export type BookingConflictAction =
   | 'BOOKING_UPDATE'
   | 'BOOKING_RESCHEDULE'
   | 'BOOKING_FINALIZE'
+  // A pro proposing a waitlist time. It runs the booking-create scheduling gate
+  // but writes no Booking, so its refusals must not read as a create that was
+  // turned away — nobody was trying to book yet.
+  | 'WAITLIST_OFFER_CREATE'
 
 export type BookingConflictLogArgs = {
   action: BookingConflictAction

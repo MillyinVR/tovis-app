@@ -85,7 +85,10 @@ import {
   durationOrFallback,
   normalizeToMinute,
 } from '@/lib/booking/conflicts'
-import { logBookingConflict } from '@/lib/booking/conflictLogging'
+import {
+  logBookingConflict,
+  type BookingConflictAction,
+} from '@/lib/booking/conflictLogging'
 import {
   normalizeStepMinutes,
   resolveValidatedBookingContext,
@@ -200,7 +203,6 @@ import {
 } from '@/lib/booking/overlapPolicy'
 import {
   findBookingAndHoldConflicts,
-  getTimeRangeConflict,
   hasCalendarBlockConflict,
 } from '@/lib/booking/conflictQueries'
 import { resolveAftercarePreselectedSlot } from '@/lib/booking/aftercarePreselectedSlot'
@@ -5180,6 +5182,7 @@ async function enforceBookingOverlapPolicy(args: {
   )
 }
 function logAndThrowStepMismatch(args: {
+  action: BookingConflictAction
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
@@ -5190,7 +5193,7 @@ function logAndThrowStepMismatch(args: {
   meta?: Record<string, unknown>
 }): never {
   logBookingConflict({
-    action: 'BOOKING_CREATE',
+    action: args.action,
     professionalId: args.professionalId,
     locationId: args.locationId,
     locationType: args.locationType,
@@ -5213,6 +5216,7 @@ function logAndThrowStepMismatch(args: {
 }
 
 function logAndThrowWorkingHoursFailure(args: {
+  action: BookingConflictAction
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
@@ -5223,7 +5227,7 @@ function logAndThrowWorkingHoursFailure(args: {
   workingHoursError: string
 }): never {
   logBookingConflict({
-    action: 'BOOKING_CREATE',
+    action: args.action,
     professionalId: args.professionalId,
     locationId: args.locationId,
     locationType: args.locationType,
@@ -5264,6 +5268,7 @@ function logAndThrowWorkingHoursFailure(args: {
 }
 
 function logAndThrowAdvanceNoticeFailure(args: {
+  action: BookingConflictAction
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
@@ -5274,7 +5279,7 @@ function logAndThrowAdvanceNoticeFailure(args: {
   advanceNoticeMinutes: number
 }): never {
   logBookingConflict({
-    action: 'BOOKING_CREATE',
+    action: args.action,
     professionalId: args.professionalId,
     locationId: args.locationId,
     locationType: args.locationType,
@@ -5298,6 +5303,7 @@ function logAndThrowAdvanceNoticeFailure(args: {
 }
 
 function logAndThrowMaxDaysAheadFailure(args: {
+  action: BookingConflictAction
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
@@ -5308,7 +5314,7 @@ function logAndThrowMaxDaysAheadFailure(args: {
   maxDaysAhead: number
 }): never {
   logBookingConflict({
-    action: 'BOOKING_CREATE',
+    action: args.action,
     professionalId: args.professionalId,
     locationId: args.locationId,
     locationType: args.locationType,
@@ -5332,6 +5338,7 @@ function logAndThrowMaxDaysAheadFailure(args: {
 }
 
 function logAndThrowTimeRangeConflict(args: {
+  action: BookingConflictAction
   conflict: 'BLOCKED' | 'BOOKING' | 'HOLD'
   professionalId: string
   locationId: string
@@ -5342,7 +5349,7 @@ function logAndThrowTimeRangeConflict(args: {
   clientId: string
 }): never {
   logBookingConflict({
-    action: 'BOOKING_CREATE',
+    action: args.action,
     professionalId: args.professionalId,
     locationId: args.locationId,
     locationType: args.locationType,
@@ -5368,6 +5375,56 @@ function logAndThrowTimeRangeConflict(args: {
   }
 }
 
+/**
+ * The appointment length a pro-created booking actually reserves: the offering's
+ * mode duration snapped to the pro's slot grid, plus every selected add-on, with
+ * a caller-requested total honored only when it EXTENDS that — never below the
+ * real service length.
+ *
+ * Shared by `performLockedCreateProBooking` and `createWaitlistOffer` so an
+ * offer is validated against the exact window its confirm will book. Checking a
+ * shorter window at offer time would clear working hours the real appointment
+ * then overruns, which is the same offer/confirm asymmetry F5 closes.
+ */
+function resolveProBookingDurations(args: {
+  baseDurationMinutes: number
+  addOnsDurationMinutes: number
+  requestedTotalDurationMinutes: number | null
+  stepMinutes: number
+}): {
+  /** The base service alone, snapped to the grid — the BASE line item snapshot. */
+  serviceDurationMinutes: number
+  /** What the appointment reserves: base + add-ons, extended by a requested total. */
+  totalDurationMinutes: number
+} {
+  const serviceDurationMinutes = clampInt(
+    snapToStepMinutes(args.baseDurationMinutes, args.stepMinutes),
+    args.stepMinutes,
+    MAX_SLOT_DURATION_MINUTES,
+  )
+
+  const durationWithAddOns = clampInt(
+    serviceDurationMinutes + args.addOnsDurationMinutes,
+    serviceDurationMinutes,
+    MAX_SLOT_DURATION_MINUTES,
+  )
+
+  const requested = args.requestedTotalDurationMinutes
+
+  const totalDurationMinutes =
+    requested != null &&
+    requested >= durationWithAddOns &&
+    requested <= MAX_SLOT_DURATION_MINUTES
+      ? clampInt(
+          snapToStepMinutes(requested, args.stepMinutes),
+          durationWithAddOns,
+          MAX_SLOT_DURATION_MINUTES,
+        )
+      : durationWithAddOns
+
+  return { serviceDurationMinutes, totalDurationMinutes }
+}
+
 async function enforceProCreateScheduling(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -5384,6 +5441,20 @@ async function enforceProCreateScheduling(args: {
   allowOutsideWorkingHours: boolean
   /** See {@link EvaluateProSchedulingDecisionArgs.enforceStepGrid}. */
   enforceStepGrid: boolean
+  /**
+   * See {@link EvaluateProSchedulingDecisionArgs.deferBusyConflictsToOverlapPolicy}.
+   * Required, not defaulted: `true` is only correct when the caller runs
+   * `enforceBookingOverlapPolicy` immediately afterwards, and a caller that
+   * doesn't would silently stop refusing double-books.
+   */
+  deferBusyConflictsToOverlapPolicy: boolean
+  /**
+   * What the caller was doing, for the `booking_conflict` trail. Not every
+   * caller of this gate is creating a booking — a waitlist offer runs it to
+   * decide whether a time is PROMISABLE — and an ops reader must be able to
+   * tell those refusals apart from a real create that was turned away.
+   */
+  action: BookingConflictAction
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
@@ -5411,10 +5482,8 @@ async function enforceProCreateScheduling(args: {
     allowFarFuture: args.allowFarFuture,
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
     enforceStepGrid: args.enforceStepGrid,
-    // Booking/hold overlaps are decided by enforceBookingOverlapPolicy right
-    // after this gate (a pro may intentionally double-book their own calendar;
-    // an aftercare pre-selected slot may land on a conflict).
-    deferBusyConflictsToOverlapPolicy: true,
+    deferBusyConflictsToOverlapPolicy:
+      args.deferBusyConflictsToOverlapPolicy,
   })
 
   if (decision.ok) {
@@ -5427,6 +5496,7 @@ async function enforceProCreateScheduling(args: {
   switch (decision.code) {
     case 'STEP_MISMATCH':
       return logAndThrowStepMismatch({
+        action: args.action,
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
@@ -5439,6 +5509,7 @@ async function enforceProCreateScheduling(args: {
 
     case 'WORKING_HOURS_REQUIRED':
       return logAndThrowWorkingHoursFailure({
+        action: args.action,
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
@@ -5458,6 +5529,7 @@ async function enforceProCreateScheduling(args: {
 
     case 'WORKING_HOURS_INVALID':
       return logAndThrowWorkingHoursFailure({
+        action: args.action,
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
@@ -5477,6 +5549,7 @@ async function enforceProCreateScheduling(args: {
 
     case 'OUTSIDE_WORKING_HOURS':
       return logAndThrowWorkingHoursFailure({
+        action: args.action,
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
@@ -5497,6 +5570,7 @@ async function enforceProCreateScheduling(args: {
 
     case 'ADVANCE_NOTICE_REQUIRED':
       return logAndThrowAdvanceNoticeFailure({
+        action: args.action,
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
@@ -5514,6 +5588,7 @@ async function enforceProCreateScheduling(args: {
 
     case 'MAX_DAYS_AHEAD_EXCEEDED':
       return logAndThrowMaxDaysAheadFailure({
+        action: args.action,
         professionalId: args.professionalId,
         locationId: args.locationId,
         locationType: args.locationType,
@@ -5531,6 +5606,7 @@ async function enforceProCreateScheduling(args: {
 
     case 'TIME_BLOCKED':
       return logAndThrowTimeRangeConflict({
+        action: args.action,
         conflict: 'BLOCKED',
         professionalId: args.professionalId,
         locationId: args.locationId,
@@ -5548,6 +5624,7 @@ async function enforceProCreateScheduling(args: {
 
     case 'TIME_BOOKED':
       return logAndThrowTimeRangeConflict({
+        action: args.action,
         conflict: 'BOOKING',
         professionalId: args.professionalId,
         locationId: args.locationId,
@@ -5565,6 +5642,7 @@ async function enforceProCreateScheduling(args: {
 
     case 'TIME_HELD':
       return logAndThrowTimeRangeConflict({
+        action: args.action,
         conflict: 'HOLD',
         professionalId: args.professionalId,
         locationId: args.locationId,
@@ -9515,32 +9593,17 @@ async function performLockedCreateProBooking(args: {
           MAX_BUFFER_MINUTES,
         )
 
-  const computedDurationMinutes = clampInt(
-    snapToStepMinutes(baseDurationMinutes, stepMinutes),
-    stepMinutes,
-    MAX_SLOT_DURATION_MINUTES,
-  )
-
   // The appointment reserves the base service plus every selected add-on. A
   // requested total may only extend it further, never below the real length.
-  const durationWithAddOns = clampInt(
-    computedDurationMinutes + addOnsDurationTotal,
-    computedDurationMinutes,
-    MAX_SLOT_DURATION_MINUTES,
-  )
+  const { serviceDurationMinutes: computedDurationMinutes, totalDurationMinutes } =
+    resolveProBookingDurations({
+      baseDurationMinutes,
+      addOnsDurationMinutes: addOnsDurationTotal,
+      requestedTotalDurationMinutes: args.requestedTotalDurationMinutes,
+      stepMinutes,
+    })
 
-  const totalDurationMinutes =
-    args.requestedTotalDurationMinutes != null &&
-    args.requestedTotalDurationMinutes >= durationWithAddOns &&
-    args.requestedTotalDurationMinutes <= MAX_SLOT_DURATION_MINUTES
-      ? clampInt(
-          snapToStepMinutes(args.requestedTotalDurationMinutes, stepMinutes),
-          durationWithAddOns,
-          MAX_SLOT_DURATION_MINUTES,
-        )
-      : durationWithAddOns
-
-    const schedulingDecision = await enforceProCreateScheduling({
+  const schedulingDecision = await enforceProCreateScheduling({
     tx: args.tx,
     now: args.now,
     requestedStart,
@@ -9556,6 +9619,10 @@ async function performLockedCreateProBooking(args: {
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
     // Pro-created appointments (incl. the ICS import) own the minute.
     enforceStepGrid: false,
+    action: 'BOOKING_CREATE',
+    // enforceBookingOverlapPolicy runs immediately below and owns the
+    // booking/hold verdict (a pro may intentionally double-book).
+    deferBusyConflictsToOverlapPolicy: true,
     professionalId: args.professionalId,
     locationId: locationContext.locationId,
     locationType: args.locationType,
@@ -10219,6 +10286,10 @@ assertCanCreateRebookFromSourceBooking({
     allowFarFuture: false,
     allowOutsideWorkingHours: false,
     enforceStepGrid: args.startChosenBy === 'CLIENT',
+    action: 'BOOKING_CREATE',
+    // enforceBookingOverlapPolicy runs immediately below and owns the
+    // booking/hold verdict (an aftercare pre-selected slot may land on one).
+    deferBusyConflictsToOverlapPolicy: true,
     professionalId: source.professionalId,
     locationId: locationContext.locationId,
     locationType: effectiveLocationType,
@@ -14630,11 +14701,17 @@ type CreateWaitlistOfferResult = {
  * NOTIFIED, and notifies the client to Confirm/Decline. NO booking is created
  * yet — the client's confirm (confirmClientWaitlistOffer) materializes it.
  *
- * v1 is in-salon only. The proposed slot comes from the pro's live availability
- * picker, so it is not re-validated for working-hours/overlap here; that full
- * check happens at confirm (TIME_BOOKED if the slot was taken since). A partial
- * unique index enforces one PENDING offer per entry, so any prior still-pending
- * offer for the entry is superseded (CANCELLED) first.
+ * v1 is in-salon only. The offer runs the SAME scheduling gate the client's
+ * confirm will run (`enforceProCreateScheduling` over the context
+ * `performLockedCreateProBooking` re-resolves), with identical flags — because
+ * the offer is a promise, and a promise the client cannot accept is a refusal
+ * aimed at the one person who cannot act on it. The pro can pick another time;
+ * the client, holding the offer, cannot. What can still change between offer
+ * and confirm — the pro edits their hours, or the slot is taken (no hold is
+ * placed) — surfaces at confirm as a clean 4xx with the offer left PENDING.
+ *
+ * A partial unique index enforces one PENDING offer per entry, so any prior
+ * still-pending offer for the entry is superseded (CANCELLED) first.
  */
 export async function createWaitlistOffer(
   args: CreateWaitlistOfferArgs,
@@ -14655,17 +14732,23 @@ export async function createWaitlistOffer(
   }
 
   const startsAt = normalizeToMinute(new Date(args.scheduledFor))
-  const endsAt = new Date(args.endsAt)
+  const requestedEndsAt = new Date(args.endsAt)
   if (
     !Number.isFinite(startsAt.getTime()) ||
-    !Number.isFinite(endsAt.getTime()) ||
-    endsAt.getTime() <= startsAt.getTime()
+    !Number.isFinite(requestedEndsAt.getTime()) ||
+    requestedEndsAt.getTime() <= startsAt.getTime()
   ) {
     throw bookingError('INVALID_SCHEDULED_FOR')
   }
-  const durationMinutes = clampInt(
+  // Request shape only. The window actually stored (and validated) is derived
+  // from the offering below, so the offer never promises a shorter appointment
+  // than the confirm will book.
+  const requestedDurationMinutes = clampInt(
     args.durationMinutes,
-    Math.max(15, Math.round((endsAt.getTime() - startsAt.getTime()) / 60_000)),
+    Math.max(
+      15,
+      Math.round((requestedEndsAt.getTime() - startsAt.getTime()) / 60_000),
+    ),
     15,
     MAX_SLOT_DURATION_MINUTES,
   )
@@ -14705,9 +14788,20 @@ export async function createWaitlistOffer(
         select: {
           id: true,
           offersInSalon: true,
+          offersMobile: true,
+          salonDurationMinutes: true,
+          mobileDurationMinutes: true,
+          salonPriceStartingAt: true,
+          mobilePriceStartingAt: true,
           service: { select: { name: true } },
-          // §12 NC1 #25: pro name for the "{pro} has {when} open …" copy.
-          professional: { select: professionalPublicDisplayNameSelect },
+          professional: {
+            select: {
+              // §12 NC1 #25: pro name for the "{pro} has {when} open …" copy.
+              ...professionalPublicDisplayNameSelect,
+              // Timezone fallback, matching performLockedCreateProBooking.
+              timeZone: true,
+            },
+          },
         },
       })
       if (!offering) {
@@ -14720,16 +14814,19 @@ export async function createWaitlistOffer(
         })
       }
 
-      const location = await tx.professionalLocation.findFirst({
+      // Kept ahead of the shared resolve purely for the message: a MOBILE_BASE
+      // location id is a wrong-mode mistake the pro can correct, and
+      // pickBookableLocation would flatten it into LOCATION_NOT_FOUND.
+      const requestedLocation = await tx.professionalLocation.findFirst({
         where: { id: args.locationId, professionalId: args.professionalId },
-        select: { id: true, type: true, timeZone: true, bufferMinutes: true },
+        select: { id: true, type: true },
       })
-      if (!location) {
+      if (!requestedLocation) {
         throw bookingError('LOCATION_NOT_FOUND')
       }
       if (
-        location.type !== ProfessionalLocationType.SALON &&
-        location.type !== ProfessionalLocationType.SUITE
+        requestedLocation.type !== ProfessionalLocationType.SALON &&
+        requestedLocation.type !== ProfessionalLocationType.SUITE
       ) {
         throw bookingError('BAD_LOCATION', {
           message: 'Waitlist offers require a salon location.',
@@ -14737,27 +14834,88 @@ export async function createWaitlistOffer(
         })
       }
 
-      // An offer promises the client a bookable time, so refuse creation when
-      // the window already collides with a booking, hold, or calendar block —
-      // otherwise the client receives an offer whose confirm can only fail.
-      const offerConflict = await getTimeRangeConflict({
+      // ── The offer must promise only what the confirm can book (F5) ─────────
+      // Everything below mirrors confirmClientWaitlistOffer →
+      // performLockedCreateProBooking: same readiness gate, same resolved
+      // context, same appointment length, same scheduling policy with the same
+      // flags. Anything the pro must fix is refused HERE, to the pro.
+      await assertProfessionalIsBookingReady({
         tx,
         professionalId: args.professionalId,
-        locationId: location.id,
-        requestedStart: startsAt,
-        requestedEnd: endsAt,
-        defaultBufferMinutes: location.bufferMinutes,
-        nowUtc: now,
+        bookingEntryPoint: 'PRO_CREATED',
       })
-      if (offerConflict) {
+
+      const validatedContextResult = await resolveValidatedBookingContext({
+        tx,
+        professionalId: args.professionalId,
+        requestedLocationId: requestedLocation.id,
+        locationType: ServiceLocationType.SALON,
+        professionalTimeZone: offering.professional?.timeZone ?? null,
+        fallbackTimeZone: 'UTC',
+        requireValidTimeZone: true,
+        allowFallback: false,
+        requireCoordinates: false,
+        offering: {
+          offersInSalon: offering.offersInSalon,
+          offersMobile: offering.offersMobile,
+          salonDurationMinutes: offering.salonDurationMinutes,
+          mobileDurationMinutes: offering.mobileDurationMinutes,
+          salonPriceStartingAt: offering.salonPriceStartingAt,
+          mobilePriceStartingAt: offering.mobilePriceStartingAt,
+        },
+      })
+      if (!validatedContextResult.ok) {
         throw bookingError(
-          offerConflict === 'BLOCKED'
-            ? 'TIME_BLOCKED'
-            : offerConflict === 'HOLD'
-              ? 'TIME_HELD'
-              : 'TIME_BOOKED',
+          mapSchedulingReadinessErrorToBookingCode(validatedContextResult.error),
         )
       }
+
+      const locationContext = validatedContextResult.context
+      const bufferMinutes = clampInt(
+        Number(locationContext.bufferMinutes ?? 0),
+        0,
+        MAX_BUFFER_MINUTES,
+      )
+      // Waitlist offers carry no add-ons, so the length is the offering's own
+      // (a requested total may only extend it) — exactly what confirm derives.
+      const { totalDurationMinutes: durationMinutes } =
+        resolveProBookingDurations({
+          baseDurationMinutes: validatedContextResult.durationMinutes,
+          addOnsDurationMinutes: 0,
+          requestedTotalDurationMinutes: requestedDurationMinutes,
+          stepMinutes: locationContext.stepMinutes,
+        })
+      const endsAt = addMinutes(startsAt, durationMinutes)
+
+      await enforceProCreateScheduling({
+        tx,
+        now,
+        requestedStart: startsAt,
+        durationMinutes,
+        bufferMinutes,
+        workingHours: locationContext.workingHours,
+        timeZone: locationContext.timeZone,
+        stepMinutes: locationContext.stepMinutes,
+        advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
+        maxDaysAhead: locationContext.maxDaysAhead,
+        // All false, because the confirm has all three false. An override the
+        // client's confirm cannot replay would just move the dead end.
+        allowShortNotice: false,
+        allowFarFuture: false,
+        allowOutsideWorkingHours: false,
+        // The PRO picked this minute, so the slot grid does not bind them —
+        // matching the confirm, which reaches the same gate with the flag off.
+        enforceStepGrid: false,
+        // No overlap policy runs here: an offer creates no booking, and the
+        // confirm refuses a taken slot as a CLIENT. A conflict is fatal now.
+        deferBusyConflictsToOverlapPolicy: false,
+        action: 'WAITLIST_OFFER_CREATE',
+        professionalId: args.professionalId,
+        locationId: locationContext.locationId,
+        locationType: ServiceLocationType.SALON,
+        offeringId: offering.id,
+        clientId: entry.clientId,
+      })
 
       // Supersede any still-pending offer for this entry (partial unique index).
       await tx.waitlistOffer.updateMany({
@@ -14774,7 +14932,7 @@ export async function createWaitlistOffer(
           professionalId: args.professionalId,
           clientId: entry.clientId,
           offeringId: offering.id,
-          locationId: location.id,
+          locationId: locationContext.locationId,
           locationType: ServiceLocationType.SALON,
           startsAt,
           endsAt,
@@ -14801,10 +14959,9 @@ export async function createWaitlistOffer(
       const offerProName = formatProfessionalPublicDisplayName(
         offering.professional,
       )
-      const offerTz =
-        location.timeZone && isValidIanaTimeZone(location.timeZone)
-          ? location.timeZone
-          : DEFAULT_TIME_ZONE
+      const offerTz = isValidIanaTimeZone(locationContext.timeZone)
+        ? locationContext.timeZone
+        : DEFAULT_TIME_ZONE
       const offerWhen = `${formatBookingDateLabel(offer.startsAt, offerTz)} at ${formatBookingTimeLabel(offer.startsAt, offerTz)}`
       await upsertClientNotification({
         tx,
