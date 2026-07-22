@@ -626,6 +626,20 @@ And COMPLETED is reachable **only from IN_PROGRESS**
 identical range, so completing a booking can never newly violate the constraint.
 A test pins that an authorized double-book stays exempt when it completes.
 
+**One of those five sites deserved more than an argument.** Consultation approval
+(`writeBoundary.ts:8322`) is the only write that **grows a booking's occupied
+range in place**, so it is the single place a genuinely new 23P01 could appear —
+an extension can now collide with a finished appointment that used to sit outside
+the index entirely. Its existing `allowsOverlap` stamp covers it, but that stamp
+only became **load-bearing** with this migration and nothing pinned it. It does
+now (`consultation-extension-blocked.test.ts`): an approval extending over a
+COMPLETED booking commits and leaves the row flagged. **Proven red by deleting
+the stamp** — the approval then dies exactly as predicted, `23P01` on
+`Booking_no_active_professional_overlap`, extension `[12:00, 15:15)` against the
+completed `[14:00, 14:30)`. Worth noting the refusal also tripped F13's backstop
+log (`db_overlap_backstop_fired`), the first time that alert has fired on demand
+rather than by configuration.
+
 **The parity test walks the enum, not a hand-written list.**
 `booking-overlap-concurrency.test.ts` now probes **every** `BookingStatus` value
 against real Postgres — insert a row with that status, try to overlap it with an

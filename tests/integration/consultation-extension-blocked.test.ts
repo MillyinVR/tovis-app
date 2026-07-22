@@ -264,6 +264,11 @@ afterAll(async () => {
 beforeEach(async () => {
   await db.calendarBlock.deleteMany({ where: { professionalId } })
   await db.consultationApproval.deleteMany({ where: { bookingId } })
+  // Any extra booking a test parked on this pro's calendar. Kept here rather
+  // than in the test so a mid-test failure can't leak one into the next.
+  await db.booking.deleteMany({
+    where: { professionalId, id: { not: bookingId } },
+  })
   await db.bookingServiceItem.deleteMany({ where: { bookingId } })
 
   await db.bookingServiceItem.create({
@@ -387,6 +392,53 @@ describe('consultation approval vs calendar blocks (F2)', () => {
       select: { status: true },
     })
     expect(approval.status).toBe(ConsultationApprovalStatus.APPROVED)
+  })
+
+  // F8. This is the ONE path that grows a booking's occupied range IN PLACE, so
+  // widening the EXCLUDE predicate to cover COMPLETED made it the only place a
+  // brand-new 23P01 could appear: the extension can now collide with a finished
+  // appointment that used to sit outside the index entirely. It doesn't, because
+  // the same write already stamps allowsOverlap from a conflict reader that has
+  // always counted COMPLETED — but that stamp only became load-bearing here with
+  // the migration, and nothing pinned it. This does.
+  it('extends over a COMPLETED booking as an authorized overlap, not a 23P01', async () => {
+    // Sits at +120..+150min: inside the 180min extension, clear of the original
+    // 60+15min window — the same geometry the calendar-block case above uses.
+    await db.booking.create({
+      data: {
+        clientId,
+        professionalId,
+        serviceId,
+        offeringId: baseOfferingId,
+        scheduledFor: minutesAfterStart(120),
+        status: BookingStatus.COMPLETED,
+        finishedAt: minutesAfterStart(150),
+        locationType: ServiceLocationType.SALON,
+        locationId,
+        subtotalSnapshot: new Prisma.Decimal('40.00'),
+        totalDurationMinutes: 30,
+        bufferMinutes: 0,
+        proTenantId: tenantId,
+        clientHomeTenantId: tenantId,
+      },
+      select: { id: true },
+    })
+
+    const result = await approve()
+
+    // The pro authored the proposal knowing the appointment is underway, so the
+    // collision is authorized — it must commit, not refuse and not blow up.
+    expect(isBookingError(result)).toBe(false)
+
+    const booking = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { totalDurationMinutes: true, allowsOverlap: true },
+    })
+    expect(booking.totalDurationMinutes).toBe(PROPOSED_DURATION_MINUTES)
+    // The row must have LEFT the GIST index, or Postgres would have rejected
+    // the update above. Asserted directly so a future refactor that drops the
+    // stamp fails here rather than as an unhandled 500 in production.
+    expect(booking.allowsOverlap).toBe(true)
   })
 
   it('still approves when a block covers only the ALREADY-BOOKED window', async () => {
