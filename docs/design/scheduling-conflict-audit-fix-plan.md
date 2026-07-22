@@ -656,10 +656,12 @@ item 2 fixes the harm item 1 was pointing at.
 
 **🔴 Item 4's premise died the other way: `rebook` is unreachable on WEB too.**
 The card frames `POST /pro/bookings/{id}/rebook` as an iOS gap — implemented in
-`ProBookingService.swift:352`, called by no view. The first half is true (`grep`
-for `.rebook(` across `Tovis/`, `TovisKit/` and `TovisTests/` returns the
-definition and nothing else). The second half is where it fails: **nothing on web
-calls that route either.** Its only references outside its own directory are
+`ProBookingService.swift` (the card says `:352`; `public func rebook` is at
+`:333` today), called by no view. The first half is true, and more completely so
+than the card claims: `grep -rn "\.rebook("` across `Tovis/`, `TovisKit/` and
+`TovisTests/` returns **zero** hits, and `ProRebookMode` appears nowhere outside
+the service file. The second half is where it fails: **nothing on web calls that
+route either.** Its only references outside its own directory are
 `lib/idempotency/routeMeta.ts` and its own tests; `app/pro/**` has no caller. So
 this is not iOS trailing web — it is a server route with no UI on either
 platform, and the capability it would provide *already exists on both* through
