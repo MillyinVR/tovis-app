@@ -1,9 +1,15 @@
 // lib/lastMinute/openingSelect.ts
 //
-// Shared Prisma select for loading a LastMinuteOpening with everything needed to display it
-// (services → offering/service, professional, location, tier plans). Used by the public
-// openings list (app/api/openings) and the single-opening claim page
-// (app/(main)/offerings/[offeringId]). One select so the two never drift.
+// Prisma select for loading a LastMinuteOpening with everything needed to display it
+// (services → offering/service, professional, location, tier plans).
+//
+// Its only consumer today is the single-opening claim page
+// (app/(main)/offerings/[offeringId], via _data/loadOfferingDetail) and the native
+// read that shares it, GET /api/v1/offerings/[id]. The header used to name a
+// public openings list at app/api/openings as a second consumer; that route does
+// not exist. The three other opening readers — pro/openings,
+// client/saved-services/providers and createLastMinuteOpening — each declare
+// their own local `openingSelect` rather than this one.
 
 import { Prisma } from '@prisma/client'
 
@@ -104,6 +110,10 @@ export const openingSelect = {
       avatarUrl: true,
       professionType: true,
       location: true,
+      // The fallback time zone the booking gate resolves against when the
+      // location carries none — the read-time liveness check has to resolve the
+      // same context the claim will.
+      timeZone: true,
       lastMinuteSettings: {
         select: {
           disableMon: true,

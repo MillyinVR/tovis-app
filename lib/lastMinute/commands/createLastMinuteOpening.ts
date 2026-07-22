@@ -12,7 +12,6 @@ import {
   BOOKING_BLOCKING_STATUSES,
   MAX_BUFFER_MINUTES,
   MAX_OTHER_OVERLAP_MINUTES,
-  MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import {
   checkSlotReadiness,
@@ -20,6 +19,10 @@ import {
 } from '@/lib/booking/slotReadiness'
 import { resolveBookingLocationContext } from '@/lib/booking/locationContext'
 import { getBookingErrorDescriptor } from '@/lib/booking/errors'
+import {
+  MIN_OPENING_DURATION_MINUTES,
+  resolveOpeningModeDurationMinutes,
+} from '@/lib/lastMinute/openingDuration'
 import {
   isValidIanaTimeZone,
   utcFromDayAndMinutesInTimeZone,
@@ -291,16 +294,14 @@ function resolveModeDurationMinutes(
   offering: OfferingRow,
   locationType: ServiceLocationType,
 ): number {
-  const raw =
-    locationType === ServiceLocationType.MOBILE
-      ? offering.mobileDurationMinutes
-      : offering.salonDurationMinutes
-
-  const fallback = offering.service.defaultDurationMinutes || 60
-  const picked =
-    typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : fallback
-
-  return clampInt(picked, 15, MAX_SLOT_DURATION_MINUTES)
+  return resolveOpeningModeDurationMinutes(
+    {
+      salonDurationMinutes: offering.salonDurationMinutes,
+      mobileDurationMinutes: offering.mobileDurationMinutes,
+      defaultDurationMinutes: offering.service.defaultDurationMinutes,
+    },
+    locationType,
+  )
 }
 
 function resolveModePrice(
@@ -929,7 +930,7 @@ async function createInsideTransaction(args: {
   const longestDurationMinutes = offerings.reduce((max, offering) => {
     const duration = resolveModeDurationMinutes(offering, locationType)
     return Math.max(max, duration)
-  }, 15)
+  }, MIN_OPENING_DURATION_MINUTES)
 
   // An opening is a PROMISE that a client can claim this exact instant, and the
   // claim runs `checkSlotReadiness` inside the hold (via `evaluateHoldCreationDecision`).

@@ -227,7 +227,10 @@ or carry deployed-caller risk. Tori's calls, 2026-07-19:
 - [ ] **A pro's followers LIST has no screen on either platform.** `GET /pros/{id}/followers`
   (pro-auth, own id only) is complete and unused; pros currently see a follower **count** only.
   Either build "your followers" or delete the route.
-- [ ] **`GET /client/saved-services/providers` has no UI.** Given service ids the client cares
+- [ ] **`GET /client/saved-services/providers` has no UI.** ⚠️ Wiring it up means adding the
+  F15 read-time liveness filter first (`filterStillOpenRows`, `lib/booking/storedSlotLiveness.ts`) —
+  it returns stored opening times and is the one client-facing opening surface F15 skipped,
+  precisely because it shows nothing today. Given service ids the client cares
   about, it returns nearby pros with last-minute openings for those services, grouped by service,
   soonest-then-nearest, 30s cached. `/client/openings` is the general feed; this is the
   service-targeted one. Note there is **no `SavedService` model** — the caller passes ids, so a UI

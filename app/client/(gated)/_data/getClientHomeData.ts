@@ -17,6 +17,8 @@ import {
   loadBookingBeforeAfterThumbsFor,
   type BookingBeforeAfterThumbs,
 } from '@/lib/media/bookingBeforeAfter'
+import { filterStillOpenRows } from '@/lib/booking/storedSlotLiveness'
+import { openingLivenessCandidate } from '@/lib/lastMinute/openingLiveness'
 
 export const clientHomeBookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   id: true,
@@ -641,6 +643,20 @@ export async function getClientHomeData({
     }),
   ])
 
+  // Tori's rule (F15): a stored time the pro's schedule can no longer serve is
+  // not shown at all. These are the same opening rows /api/v1/client/openings
+  // serves, on the home screen — and this loader backs BOTH the web home and
+  // GET /api/v1/client/home, which iOS reads, so one filter covers both.
+  const liveInvites = await filterStillOpenRows({
+    rows: invites,
+    toCandidate: (invite) => openingLivenessCandidate(invite.opening),
+    viewerClientId: clientId,
+    // Unreachable — the query requires an active service — but stated rather
+    // than defaulted.
+    onUncheckable: 'drop',
+    nowUtc: now,
+  })
+
   let action: ClientHomeAction = null
   if (pendingConsultation) {
     action = {
@@ -664,7 +680,7 @@ export async function getClientHomeData({
     upcoming,
     upcomingCount,
     action,
-    invites,
+    invites: liveInvites,
     waitlists,
     favoritePros,
     favoriteServices,
