@@ -82,6 +82,20 @@ Do these in order, as a **reviewer** who did not write the code:
    there a kill switch, and does the repo's convention expect one? Irreversible +
    user-triggerable + no way to stop it is not shippable just because it is correct.
 
+**Anything not clean, not perfect, or not double-checked means it is NOT finished
+(Tori, 2026-07-21).** If step 4 leaves you writing "I didn't verify X" — go back and
+verify X. If something is untidy, half-done, or resting on an assumption you could
+test in a few commands, that is not a caveat to report, it is **work still to do**.
+Re-run the check instead of remembering its result; re-read the artifact instead of
+trusting the diff. Only say "done" when there is nothing you would want to go back
+and look at.
+
+The narrow exception is a thing you genuinely *cannot* check from here — prod
+credentials you don't hold, a device you don't have, a decision that is Tori's. Say
+so explicitly, say why it is unreachable, and say what would settle it. "It's
+probably fine" is not that; neither is "I ran out of steam". A caveat you could have
+closed in five minutes is a defect in the work, not a disclosure about it.
+
 Then report honestly: what you verified and HOW, what you changed, and what you are
 unsure about. A confident summary of unverified work is worse than no summary — it
 spends trust you have not earned yet.

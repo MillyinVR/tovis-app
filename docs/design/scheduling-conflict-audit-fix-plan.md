@@ -920,34 +920,57 @@ update to the table in §4.)
 > **"F3 — what shipped"** and **"F13 — what shipped"** (each contains a trap that
 > cost real time), and the "Not checked" list in §3.
 >
+> 🔴 **FIRST, THE STANDING RULE THAT OVERRIDES YOUR INSTINCT TO WRAP UP** (Tori,
+> 2026-07-21; now in `CLAUDE.md` under Final self-review): **if anything is not
+> clean, not perfect, or not double-checked, it is NOT finished.** Do not report
+> it, caveat it, and move on — **go back, check it, and fix it.** If you catch
+> yourself writing "I didn't verify X", that sentence is a work item, not a
+> disclosure. Re-run the check rather than remembering its result; re-open the
+> artifact rather than trusting the diff. The only acceptable open item is one you
+> genuinely cannot reach from here (a credential you don't hold, a device you
+> don't have, a decision that is Tori's) — and then say why it's unreachable and
+> what would settle it. A caveat you could have closed in five minutes is a defect
+> in the work, not a note about it.
+>
 > **F1 ✅ #693, F11 ✅ #694, F2 ✅ #699 (+#700, #701, iOS #203), F3 ✅ #703,
 > F13 ✅ #704, F4 ✅ #705. NEXT = F5.**
 >
-> ✅ Everything through **#704** is DEPLOYED (2026-07-21, `tovis-npx5cy47p`).
-> **#705 is merged but NOT deployed** — a prod deploy is pending Tori's
-> go-ahead, and **deploy is Tori's call every time**; never infer standing
-> permission from the last one. Until it ships, prod still accepts an off-grid
-> start on the public rebook link.
+> ⚠️ **A prod deploy is PENDING Tori's go-ahead.** Everything through **#704** is
+> live (`tovis-npx5cy47p`, 2026-07-21). **#705 (F4), #706 (dependency advisories)
+> and #707 (gitignore) are merged and NOT deployed** — so prod still accepts a
+> crafted off-grid start on the public rebook link until it ships. **Deploy is
+> Tori's call every time**; never infer standing permission from the last one.
 >
 > **If `booking.event = overlap_backstop_fired` ever appears in Slack
 > `#tovis-ops-alerts`, drop everything** — that is the F3 refactor breaking in
 > production. It has never fired; the path is proven by configuration, not by
 > observation.
 >
-> ⚠️ **F5 carries a decision that is Tori's, not yours** — and F4 is the reason
-> to be careful how you ask. F4's card also "carried a Tori decision" (was the
-> recommended-window skip intended?) and it turned out the code already answered
-> it: the pro-side writer refuses to store a rebook window in any mode but
-> `RECOMMENDED_WINDOW`, so the guard was exactly scoped and there was nothing to
-> decide. **Establish the facts first, and only escalate what the repo genuinely
-> cannot answer.** For F5 that means reading `createWaitlistOffer`
-> (`writeBoundary.ts:14490`), the client confirm path, and what the pro's offer
-> UI actually lets them pick, before asking whether an offer should check working
-> hours at offer time (recommended — the offer is the promise) or pass
-> `allowOutsideWorkingHours: true` at confirm. The second half — should an offer
-> *reserve* the slot with a hold? — is a real product decision with no code
-> answer; surface it with evidence about what happens today (it fails cleanly
-> with `TIME_BOOKED`, but the offer was a promise).
+> ## Your card: F5 — waitlist offer / confirm disagree on working hours
+>
+> `createWaitlistOffer` (`writeBoundary.ts:~14490`) checks blocks/bookings/holds
+> but **not working hours**; the client's confirm runs
+> `performLockedCreateProBooking` with `allowOutsideWorkingHours: false`. So a pro
+> can send an off-hours offer the client physically cannot accept.
+>
+> **Establish the facts before asking Tori anything.** F4's card also "carried a
+> Tori decision" — whether the recommended-window guard being skipped outside
+> `RECOMMENDED_WINDOW` was intended — and the code already answered it: the
+> pro-side writer refuses to store a window in any other mode, so the guard was
+> exactly scoped and there was nothing to decide. **Six card premises have now met
+> contact; five died.** Read `createWaitlistOffer`, the confirm path, and what the
+> pro's offer UI actually lets them pick, and check whether the mismatch is even
+> reachable, before escalating.
+>
+> Two halves, and only one is likely Tori's:
+> - **Working hours at offer time vs `allowOutsideWorkingHours: true` at confirm.**
+>   Recommend the former — the offer is the promise. If the evidence is clear,
+>   just do it and explain; don't manufacture a question.
+> - **Should an offer RESERVE the slot?** Today no hold is placed between offer and
+>   confirm, so the slot can evaporate (it fails cleanly with `TIME_BOOKED`, but
+>   the offer was a promise). This one has no code answer — it is a real product
+>   decision. Surface it **with evidence about what happens today**, not as an
+>   open-ended question.
 >
 > **Tori wants the ENTIRE queue closed.** After F5: F6, F7 (iOS), F8, F9, F10
 > (iOS), F12. F8 carries a decision too (should COMPLETED occupy future time? —
@@ -956,84 +979,86 @@ update to the table in §4.)
 > F12 needs UI on web **and** iOS before its server half can ship. Do not
 > batch-ask them up front.
 >
-> ✅ **`security-scan` / "Dependency audit" is GREEN again** (#706): `sharp` and
-> `@babel/core` are pinned forward with `pnpm.overrides`. Those two entries are a
-> ceiling, not a cure — when `next` ships its own `sharp@>=0.35`, the
-> `sharp@<0.35.0` key silently stops matching and should be pruned, like the rest
-> of that list.
+> ## House rules that have bitten across seven sessions (all in `CLAUDE.md`)
 >
-> **House rules that have bitten across seven sessions**, all in `CLAUDE.md`:
->
-> - **Don't guess — read the tool's own output, or ask.** The "Dependency audit"
->   red above looks like a PR failure until you diff it against `main`; the F13
->   Sentry endpoint I "remembered" was half-retired (`GET .../rules/` is `410`,
->   the `POST` still works).
+> - **Don't guess — read the tool's own output, or ask.** A red check is not yours
+>   until you diff it against `main`; the F13 Sentry endpoint I "remembered" was
+>   half-retired (`GET .../rules/` is `410`, the `POST` still works).
 > - **Prove a guard fails before trusting that it passes.** Every guard in #703,
->   #704 and #705 was proven red first — by reverting the builder, swapping the
->   probe order, blinding the finder, removing the alert call, and (F4) flipping
->   each permissive literal one at a time.
-> - **Ask which LAYER made a test pass, and to isolate a permissive layer, test
->   what it should ALLOW.** Refusals are over-determined: a real-Postgres test
->   asserting a client path refuses with `TIME_BOOKED` passed *with the conflict
->   finder blinded*, because the database was doing the refusing. F4's corollary:
->   when a rule becomes conditional, write one ALLOW test per call site that opts
->   out, and prove each red by flipping only its own literal — over-enforcement
->   is invisible from the refusal side.
-> - **Branch on WHO CHOSE the value, not who is acting.** F4's near-miss: three
->   of four callers of `performLockedCreateRebookedBooking` are pro-driven, and
->   the fourth has a `clientId` but books the *pro's* chosen minute. Keying the
->   new refusal on the actor would have dead-ended clients on a time only the pro
->   can change. Make such a flag **required, not defaulted** — TypeScript then
->   finds every call site and forces each to state its intent.
-> - **Check your own "not verified" list before publishing it.** Twice in F13 I
->   wrote something off as unverifiable and it took one command.
-> - **Ask "who can fix this?" of every new refusal.** A refusal the user cannot
->   act on is worse than the looseness it closes.
+>   #704 and #705 was proven red first — reverting the builder, swapping the probe
+>   order, blinding the finder, removing the alert call, and flipping each
+>   permissive literal one at a time.
+> - **Ask which LAYER made a test pass; to isolate a permissive layer, test what it
+>   should ALLOW.** Refusals are over-determined — a real-Postgres test asserting a
+>   client path refuses with `TIME_BOOKED` passed *with the conflict finder
+>   blinded*, because the database was doing the refusing. F4's corollary: when a
+>   rule becomes conditional, write one ALLOW test per call site that opts out, and
+>   prove each red by flipping only its own literal. Over-enforcement is invisible
+>   from the refusal side.
+> - **Branch on WHO CHOSE the value, not who is acting.** F4's near-miss: three of
+>   four callers of `performLockedCreateRebookedBooking` are pro-driven, and the
+>   fourth has a `clientId` but books the *pro's* chosen minute. Keying the refusal
+>   on the actor would have dead-ended clients on a time only the pro can change.
+>   Make such a flag **required, not defaulted** — TypeScript then finds every call
+>   site and forces each to state its intent.
+> - **Ask "who can fix this?" of every new refusal.** A refusal the user cannot act
+>   on is worse than the looseness it closes.
+> - **Check your own "not verified" list before publishing it** — and now, per the
+>   rule at the top, before publishing it, go close it.
 >
-> Verification tools now proven and worth reusing:
+> ## Verification tools, proven and worth reusing
+>
 > - `pnpm test:integration` (needs the test-postgres container on :5433).
->   ⚠️ it needs a keyring **in CI's exact shape** or two suites fail:
+>   ⚠️ needs a keyring **in CI's exact shape** or two suites fail:
 >   `PII_AEAD_KEYS_JSON` keyed by `address-aead-v1` / `email-aead-v1` /
 >   `phone-aead-v1` / `notes-aead-v1`, plus `PII_LOOKUP_HMAC_KEYS_JSON` and
 >   `JWT_SECRET`. A single generic key fails with `Missing AEAD key for key
 >   version: address-aead-v1`. Copy `.github/workflows/integration.yml:88`.
-> - `tests/integration/rebook-token-step-grid.test.ts` (F4) is the compact
->   pattern for driving a rebook / aftercare write path against real Postgres —
->   a self-contained fixture, no shared seed. Two gotchas it already encodes: the
->   pro-readiness gate needs **`lat`/`lng` on the location** or `createProBooking`
->   dies with `LOCATION_MISSING_GEO, NO_BOOKABLE_LOCATION`, and a `beforeEach`
->   must clear prior rebooks or the `existingRebook` short-circuit makes the next
->   case pass for the wrong reason. `tests/integration/booking-overlap-concurrency.test.ts`
->   is the heavier equivalent (its fixture needs `mobileBasePostalCode` +
+> - `tests/integration/rebook-token-step-grid.test.ts` (F4) is the compact pattern
+>   for driving a rebook/aftercare write path against real Postgres — self-contained
+>   fixture, no shared seed. Two gotchas it encodes: the pro-readiness gate needs
+>   **`lat`/`lng` on the location** or `createProBooking` dies with
+>   `LOCATION_MISSING_GEO, NO_BOOKABLE_LOCATION`, and a `beforeEach` must clear
+>   prior rebooks or the `existingRebook` short-circuit makes the next case pass
+>   for the wrong reason. `tests/integration/booking-overlap-concurrency.test.ts` is
+>   the heavier equivalent (its fixture needs `mobileBasePostalCode` +
 >   `mobileRadiusMiles` whenever a bookable MOBILE_BASE exists).
 > - `computeDaySlotsFast` (`lib/availability/core/dayComputation.ts`) is callable
->   straight from a test — use it to book a slot the availability engine *actually
->   emitted* instead of hand-picking one you believe is valid.
+>   straight from a test — book a slot the availability engine **actually emitted**
+>   instead of hand-picking one you believe is valid.
+> - **Browser:** `pnpm test:e2e:local -- <spec> --project=chromium`.
+>   🔴 **NEVER bare `npx playwright test`** — it skips the
+>   `dotenv -e .env.e2e.local -e .env.local` layering, so `DATABASE_URL` falls back
+>   to `.env.local`, which is **PROD**. A spec that seeds in `beforeAll` would write
+>   fixtures into production. Needs the test-postgres container + `pnpm db:test:seed`
+>   once. Patterns: `tests/e2e/rebook-token-stale-slot.spec.ts` (F4 — seed → render
+>   → mutate the pro's config mid-session → assert the refusal AND the recovery) and
+>   `tests/e2e/consultation-token-retryable-refusal.spec.ts`.
+> - **A public tokened link in a test:** build the `ClientActionToken` row directly
+>   with `tokenHash: hashClientActionToken(rawToken)`
+>   (`lib/consultation/clientActionTokens.ts`) rather than via a `create*Delivery`
+>   helper, which enqueues a real email/SMS.
 > - `pnpm dev:test-db` runs a real server against the test DB — drive routes over
->   HTTP without touching dev data. For a tokened public route, seed a
->   `ClientActionToken` with `tokenHash = sha256hex(rawToken)` (see
->   `hashClientActionToken`, `lib/consultation/clientActionTokens.ts:113`) and
->   POST to it directly; that is how F4's 400/201 wire behaviour was confirmed.
->   ⚠️ the dev server also loads `.env.local` (PROD Supabase) — `dev:test-db`
->   overrides `DATABASE_URL` **and** `DIRECT_URL` on the command line, but do not
->   exercise storage/upload paths under it.
-> - `tests/e2e/consultation-token-retryable-refusal.spec.ts` is the pattern for
->   driving a real page (seed → act → assert DB state → act again).
-> - `~/Dev/tovis-ios/scripts/sim-login.sh --email <seeded user>` for the
->   simulator. Two traps: a seeded user needs BOTH `emailVerifiedAt` and
->   `phoneVerifiedAt` or every authed screen 403s `VERIFICATION_REQUIRED`, and the
->   script picks the newest-runtime device — check
->   `xcrun simctl list devices booted` before screenshotting. Taps need
->   `cliclick`, mapped through `group 1 of window 1` of Simulator.
-> - Deploy verification (used 2026-07-21, reusable): `npx vercel --prod --yes`,
->   then check the REAL thing rather than the exit code — `vercel inspect`, the
->   live domain (`www.tovis.me`, note bare `tovis.me` 307s to it), the
->   `_prisma_migrations` row via the Supabase MCP, and unauthenticated POST probes
->   on the booking routes expecting 401/400 and **never** 500.
+>   HTTP without touching dev data. (F4's 400/201 wire behaviour was confirmed this
+>   way.) Don't exercise storage/upload paths under it.
+> - **Prod reads via the Supabase MCP** (project `rqhhvuaoksuvbvlypztn`, "tovis-dev"
+>   IS prod). Useful for answering "is this retroactive?" with a number. Note
+>   `scheduledFor` is `timestamp WITHOUT time zone` holding UTC — convert with
+>   `("scheduledFor" AT TIME ZONE 'UTC') AT TIME ZONE '<zone>'`, and don't trust a
+>   `minute % 15` proxy for grid alignment; pull the rows and run the real
+>   `isStartAlignedToWorkingWindowStep`.
+> - Deploy verification (reusable): `npx vercel --prod --yes`, then check the REAL
+>   thing rather than the exit code — `vercel inspect`, the live domain
+>   (`www.tovis.me`; bare `tovis.me` 307s to it), the `_prisma_migrations` row via
+>   the Supabase MCP, and unauthenticated POST probes on the booking routes
+>   expecting 401/400 and **never** 500.
 > - Observability: booking-domain alerts go through
->   `lib/observability/bookingEvents.ts` (Sentry + a structured log line). Sentry
->   is live in prod and an active catch-all rule routes every NEW issue in
->   `tovis-app` to Slack `#tovis-ops-alerts`. A dedicated rule is scriptable:
+>   `lib/observability/bookingEvents.ts` (Sentry + a structured log line). Sentry is
+>   live in prod and an active catch-all rule routes every NEW issue in `tovis-app`
+>   to Slack `#tovis-ops-alerts`. A dedicated rule is scriptable:
 >   `POST /api/0/projects/tovis/tovis-app/rules/` (the GET is `410`; listing moved
 >   to `/organizations/{org}/combined-rules/`), token in `.env.production.local`
 >   has `alerts:write`.
+> - CI: `security-scan` / "Dependency audit" is **green** again (#706 pinned
+>   `sharp` and `@babel/core` forward with `pnpm.overrides`). Those entries are a
+>   ceiling, not a cure — prune them when `next` ships its own patched range.
