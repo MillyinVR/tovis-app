@@ -1,18 +1,9 @@
 // lib/lastMinute/commands/createLastMinuteOpening.ts
 import { clampInt } from '@/lib/pick'
-import { prisma } from '@/lib/prisma'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
-import {
-  addMinutes,
-  bookingToBusyInterval,
-  holdToBusyInterval,
-  overlaps,
-} from '@/lib/booking/conflicts'
-import {
-  BOOKING_BLOCKING_STATUSES,
-  MAX_BUFFER_MINUTES,
-  MAX_OTHER_OVERLAP_MINUTES,
-} from '@/lib/booking/constants'
+import { addMinutes } from '@/lib/booking/conflicts'
+import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
+import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
   checkSlotReadiness,
   mapSlotReadinessToBookingError,
@@ -37,7 +28,14 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
-type DbClient = Prisma.TransactionClient | typeof prisma
+/**
+ * Everything below runs inside the locked transaction, never against the bare
+ * client. Deliberately NOT `| typeof prisma`: the whole point of F6 is that
+ * these checks cannot be reached without holding the professional's advisory
+ * lock, and a type that still admits the unlocked client leaves that one
+ * refactor away from being untrue again.
+ */
+type DbClient = Prisma.TransactionClient
 
 const OPENING_FUTURE_BUFFER_MINUTES = 5
 const MAX_NOTE_LENGTH = 500
@@ -181,7 +179,6 @@ export type CreateLastMinuteOpeningInput = {
   note?: string | null
   launchAt?: Date | null
   tierPlans: CreateLastMinuteOpeningTierInput[]
-  tx?: DbClient
   now?: Date
 }
 
@@ -229,10 +226,6 @@ type NormalizedTierPlan = {
 
 type ScheduledTierPlan = NormalizedTierPlan & {
   scheduledFor: Date
-}
-
-function db(tx?: DbClient): DbClient {
-  return tx ?? prisma
 }
 
 function cleanId(value: unknown): string {
@@ -1089,17 +1082,36 @@ async function createInsideTransaction(args: {
     'You already have an active opening overlapping that time.',
   )
 
-  const calendarBlock = await database.calendarBlock.findFirst({
-    where: {
-      professionalId,
-      startsAt: { lt: finalEndAt },
-      endsAt: { gt: startAt },
-      OR: [{ locationId: location.id }, { locationId: null }],
-    },
-    select: { id: true },
+  // Pro-wide occupancy — blocks, bookings and holds — through the SAME reader
+  // every other schedule write uses. This replaced ~150 lines that re-derived
+  // those three queries and their busy-window math inline, and the two were not
+  // equivalent: the inline hold window was built from the OFFERING's current
+  // duration, while `getTimeRangeConflict` builds it from the hold's own
+  // snapshot columns floored to the database EXCLUDE range. A hold whose
+  // snapshot is longer than its base offering (add-ons, or an offering shortened
+  // after the hold was taken) reserves time this gate could not see, so openings
+  // were publishable over it. One call, three queries in parallel.
+  //
+  // The two last-minute-specific checks stay hand-written on purpose: a rival
+  // opening and a `LastMinuteBlock` are not pro-wide occupancy and no shared
+  // reader knows about them.
+  const conflict = await getTimeRangeConflict({
+    tx: database,
+    professionalId,
+    locationId: location.id,
+    requestedStart: startAt,
+    requestedEnd: finalEndAt,
+    defaultBufferMinutes: policyContext.context.bufferMinutes,
+    fallbackDurationMinutes: longestDurationMinutes,
+    nowUtc: now,
   })
 
-  assert(!calendarBlock, 409, 'CALENDAR_BLOCK_CONFLICT', 'That time is blocked.')
+  // Asserted in three places rather than one so the refusal a pro sees is
+  // unchanged: the old code checked block → last-minute block → booking → hold
+  // in that order, and `getTimeRangeConflict` reports only its own
+  // highest-priority code (BLOCKED > BOOKING > HOLD). Splitting around the
+  // last-minute block keeps every precedence pair identical.
+  assert(conflict !== 'BLOCKED', 409, 'CALENDAR_BLOCK_CONFLICT', 'That time is blocked.')
 
   const lastMinuteBlock = await database.lastMinuteBlock.findFirst({
     where: {
@@ -1117,107 +1129,19 @@ async function createInsideTransaction(args: {
     'That time overlaps a last-minute block.',
   )
 
-  const earliestStart = addMinutes(startAt, -MAX_OTHER_OVERLAP_MINUTES)
+  assert(
+    conflict !== 'BOOKING',
+    409,
+    'BOOKING_CONFLICT',
+    'That time overlaps an existing booking.',
+  )
 
-  const nearbyBookings = await database.booking.findMany({
-    where: {
-      professionalId,
-      status: { in: [...BOOKING_BLOCKING_STATUSES] },
-      scheduledFor: { gte: earliestStart, lt: finalEndAt },
-    },
-    select: {
-      scheduledFor: true,
-      totalDurationMinutes: true,
-      bufferMinutes: true,
-    },
-    take: 2000,
-  })
-
-  const overlapsBooking = nearbyBookings.some((booking) => {
-    const busy = bookingToBusyInterval(booking)
-    return overlaps(startAt, finalEndAt, busy.start, busy.end)
-  })
-
-  assert(!overlapsBooking, 409, 'BOOKING_CONFLICT', 'That time overlaps an existing booking.')
-
-  const activeHolds = await database.bookingHold.findMany({
-    where: {
-      professionalId,
-      expiresAt: { gt: now },
-      scheduledFor: { gte: earliestStart, lt: finalEndAt },
-    },
-    select: {
-      id: true,
-      offeringId: true,
-      locationId: true,
-      locationType: true,
-      scheduledFor: true,
-    },
-    take: 2000,
-  })
-
-  if (activeHolds.length > 0) {
-    const holdOfferingIds = Array.from(new Set(activeHolds.map((hold) => hold.offeringId)))
-
-    const holdOfferings = holdOfferingIds.length
-      ? await database.professionalServiceOffering.findMany({
-          where: { id: { in: holdOfferingIds } },
-          select: {
-            id: true,
-            salonDurationMinutes: true,
-            mobileDurationMinutes: true,
-          },
-          take: 2000,
-        })
-      : []
-
-    const holdOfferingById = new Map(holdOfferings.map((row) => [row.id, row]))
-
-    const holdLocationIds = Array.from(
-      new Set(
-        activeHolds
-          .map((hold) => hold.locationId)
-          .filter((value): value is string => typeof value === 'string' && value.length > 0),
-      ),
-    )
-
-    const holdLocations = holdLocationIds.length
-      ? await database.professionalLocation.findMany({
-          where: { id: { in: holdLocationIds } },
-          select: {
-            id: true,
-            bufferMinutes: true,
-          },
-          take: 2000,
-        })
-      : []
-
-    const holdBufferByLocationId = new Map(
-      holdLocations.map((row) => [
-        row.id,
-        clampInt(Number(row.bufferMinutes ?? 0) || 0, 0, MAX_BUFFER_MINUTES),
-      ]),
-    )
-
-    const overlapsHold = activeHolds.some((hold) => {
-      const holdOffering = holdOfferingById.get(hold.offeringId)
-      const busy = holdToBusyInterval({
-        hold,
-        salonDurationMinutes: holdOffering?.salonDurationMinutes ?? null,
-        mobileDurationMinutes: holdOffering?.mobileDurationMinutes ?? null,
-        bufferMinutes: holdBufferByLocationId.get(hold.locationId) ?? 0,
-      })
-
-      return overlaps(startAt, finalEndAt, busy.start, busy.end)
-    })
-
-    assert(
-      !overlapsHold,
-      409,
-      'HOLD_CONFLICT',
-      'That time is currently being held by a client.',
-    )
-  }
+  assert(
+    conflict !== 'HOLD',
+    409,
+    'HOLD_CONFLICT',
+    'That time is currently being held by a client.',
+  )
 
   const created = await database.lastMinuteOpening.create({
     data: {
@@ -1285,26 +1209,18 @@ export async function createLastMinuteOpening(
   assert(professionalId, 400, 'MISSING_PROFESSIONAL_ID', 'Missing professionalId.')
   assert(offeringIds.length > 0, 400, 'MISSING_OFFERINGS', 'Select at least one offering.')
 
-  const database = db(input.tx)
-
-  if (input.tx) {
-    return createInsideTransaction({
-      db: database,
-      professionalId,
-      offeringIds,
-      startAt,
-      endAt,
-      locationType: input.locationType,
-      requestedLocationId,
-      visibilityMode: input.visibilityMode ?? null,
-      note,
-      launchAt,
-      tierPlans: input.tierPlans,
-      now,
-    })
-  }
-
-  return prisma.$transaction((tx) =>
+  // Publishing an opening is a schedule write: it reads the pro's bookings,
+  // holds and blocks and then commits a row that promises that time is free. It
+  // used to do that in a bare `$transaction`, which under READ COMMITTED is no
+  // protection at all — a booking committing between this read and this write is
+  // simply invisible, and the pro ends up advertising a slot that was taken
+  // microseconds earlier. Every other write against a professional's schedule
+  // takes their advisory lock first; this one now does too.
+  //
+  // The lock is unconditional by construction: there is no `tx` parameter to
+  // hand in an outer transaction with, so no caller can reach the checks below
+  // without holding it.
+  return withLockedProfessionalTransaction(professionalId, ({ tx }) =>
     createInsideTransaction({
       db: tx,
       professionalId,
