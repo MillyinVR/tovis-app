@@ -569,6 +569,11 @@ was widened instead (#717); that test now covers CANCELLED and NO_SHOW only. Rea
 - `TovisKit/.../ProBookingService.swift:352` — `POST /pro/bookings/{id}/rebook`
   is fully implemented but unreachable from any view.
 
+> ✅ **Shipped.** Four items, **two premises died** (both by comparing against
+> web rather than reading iOS alone): #1 is parity, not a bug, and #4 is dead on
+> **both** platforms. The two that held were fixed and driven on the simulator
+> with the device deliberately in another timezone. See "F10 — what shipped" in §4.
+
 ---
 
 ## 3. Not checked
@@ -577,9 +582,18 @@ Named honestly rather than assumed safe:
 
 - **No runtime verification of the F1 double-book.** Traced through three call
   sites; not driven with a real ICS import.
-- ~~**No simulator driving on iOS.**~~ Superseded: F5, F14, F15 and F7 each drove
-  the simulator, and both F14's and F7's passes caught defects no test could see.
-  The remaining iOS card (F10) is still a code read.
+- ~~**No simulator driving on iOS.**~~ ✅ **Closed.** F5, F14, F15, F7, F12 and
+  finally F10 each drove the simulator; F14's, F7's and F10's passes each caught
+  something no test could see. **No iOS claim in this document is still an
+  un-driven code read.**
+- **`POST /pro/bookings/[id]/rebook` has no caller on either platform** (F10).
+  The route is live, idempotency-registered and tested, and no UI anywhere
+  invokes it; the capability it offers is shipped through the aftercare author's
+  BOOKED mode instead. Whether it should be wired up, folded into aftercare, or
+  retired is a product call, not an audit finding — see `other-pros` for why it
+  was not deleted on sight.
+- **The deep-link `clientId` vs `clientProfileId` gate mismatch** (F10, §4).
+  Untidy rather than unsafe; unfixed.
 - **Read-time liveness cost under real concurrency (F15).** The five client feeds
   now run ~3 indexed conflict queries per row shown, 8 in flight at a time.
   Measured locally: ~0.9ms per row, ~18ms at 20 rows, projecting to ~45ms at a
@@ -615,10 +629,185 @@ Named honestly rather than assumed safe:
 | F7 iOS mobile slot address | ✅ done — iOS #206 (**premise was wrong**: not imprecise slots, a 400 that killed the whole MOBILE flow; fix caught a second, stale-slot bug on the simulator) |
 | F8 occupied-status parity test | ✅ done — #717 (**Tori ruling 2026-07-21**; carries migration `20260806000000`) |
 | F9 duplicate-logic cleanup | ✅ done — #719 (**found a live DST bug**; 2 premises died; `other-pros` deferred with evidence) |
-| F10 iOS follow-ups | not started |
+| F10 iOS follow-ups | ✅ done — iOS #210 (**2 of 4 premises died**; the two real ones proved on the simulator with the device in `Asia/Tokyo`) |
 | F11 integration suite dead | ✅ done — #694 |
 | F12 proposal-time validation | ✅ done — #722 (+ iOS #209) (opened by F2; **the card's working-hours half was rejected on evidence** — see the write-up) |
 | F13 backstop refused silently | ✅ done — #704 (opened by F3) |
+
+### F10 — what shipped
+
+**The last card in the queue, and the only one whose findings had never touched a
+device.** Four unrelated items. Each was checked before anything moved, against
+the thing that decides it — which for an iOS-vs-web parity card means reading
+**web**, not re-reading iOS. Two of the four did not survive that.
+
+**🔴 Item 1's premise died: forcing a custom time on calendar tap is PARITY, not
+a bug.** The card reads `manualMode = true` at `ProNewBookingView.swift:175` and
+concludes the pro's most-used create path "never consults `/availability/day`".
+The code is exactly as described. It is not a defect: web does the same thing.
+`useCalendarData.chooseCreateAppointment` deep-links
+`/pro/bookings/new?scheduledAt=…` with the tapped instant rendered by
+`toDatetimeLocalValueInTimeZone`, and the web form's `timeMode` for that entry is
+the free `datetime-local` input — not the slot picker. Both platforms honour the
+time the pro *pointed at*; substituting a slot grid would discard it. The card
+even concedes "server checks still apply". What is real here is that the tapped
+instant was then displayed by an unpinned picker — which is item 2, and fixing
+item 2 fixes the harm item 1 was pointing at.
+
+**🔴 Item 4's premise died the other way: `rebook` is unreachable on WEB too.**
+The card frames `POST /pro/bookings/{id}/rebook` as an iOS gap — implemented in
+`ProBookingService.swift:352`, called by no view. The first half is true (`grep`
+for `.rebook(` across `Tovis/`, `TovisKit/` and `TovisTests/` returns the
+definition and nothing else). The second half is where it fails: **nothing on web
+calls that route either.** Its only references outside its own directory are
+`lib/idempotency/routeMeta.ts` and its own tests; `app/pro/**` has no caller. So
+this is not iOS trailing web — it is a server route with no UI on either
+platform, and the capability it would provide *already exists on both* through
+the aftercare author's BOOKED mode (`POST /pro/bookings/[id]/aftercare`, entry
+point #7 in §1's matrix — which is why the matrix lists them as two separate
+rows). iOS's `ProAftercareAuthorView` ships it as "Next booking date". **No screen
+was invented for it.** Wiring a UI to a route nobody asked for, to close a gap
+that isn't one, is how `other-pros` got its warning label. Left in place,
+deliberately, and recorded in §3.
+
+**Item 2 held, and is the one that mattered.** Both pickers are unpinned exactly
+as described. The card's *wording* is loose — "the only pickers in the app not
+pinned" is false, there are a dozen unpinned `DatePicker`s (working hours,
+notification quiet hours, birthdays, board event dates) — but every one of them
+is a wall-clock or calendar-date field where the device zone is correct or
+irrelevant. Of the pickers that **create a scheduling instant**, these two were
+the only unpinned ones, and that is what the card meant.
+
+The divergence is real and web-vs-iOS: web reads the same field with
+`datetimeLocalToUtcIsoStrict(scheduledAt, bookingTimeZone)` where `bookingTimeZone`
+is the selected location's zone, **and tells the pro so** ("Interpreted in
+`{tz}` based on the selected booking location, then stored as UTC"). iOS read it
+in whatever zone the phone was in, and said nothing.
+
+Fixed by pinning both pickers to the booking's zone and mirroring web's caption.
+The zone resolution went into TovisKit as `Wire.bookingZone` so it could be
+tested and so the next picker gets it for free — deliberately **not** sharing the
+`?? .current` fallback the display formatters beside it use, because those render
+an instant the server already fixed while this one *creates* one.
+
+**Item 3 held and understated itself.** The card says the management sheet's
+"Offer a time" books directly instead of using the offer route. True. What it
+missed is that web's `ManagementModal` has **three** branches on a waitlist row,
+and iOS had only the last: an "Offered · {time}" badge when an offer is already
+outstanding, the real offer button, and *then* the new-booking deep-link as a
+fallback. So iOS was missing both F14's held-offer state and the offer action
+itself, on a surface where the button says "Offer a time" and the client got a
+booking they never agreed to.
+
+The server had been sending everything needed all along — `waitlistEntryId`,
+`serviceId`, `offeringId`, `pendingOffer` are in `toWaitlistEvent`
+(`app/api/v1/pro/calendar/route.ts:744`). **iOS's `ProCalendarEvent` simply
+didn't decode them.** No backend change; the model gained four fields and web's
+exact branch order, and `ProWaitlistOfferSheet` was re-shaped to take
+`waitlistEntryId + clientName` (web's `WaitlistOfferModal` props) instead of a
+whole `ProWaitlistEntry`, so the calendar can reach it too.
+
+One deliberate copy divergence: the fallback branch is labelled **"Book a time"**,
+not web's shared "Offer a time". The two actions do materially different things —
+one asks, one commits — and a button that says "offer" and books is the defect
+this card exists to remove. Web's shared label is a wart worth its own card.
+
+**How it was verified:**
+
+- **The device was put in the wrong timezone, and the fix A/B'd against itself.**
+  Launching with `SIMCTL_CHILD_TZ=Asia/Tokyo` while the salon stays
+  `America/Los_Angeles`, the new-booking picker seeded from a calendar tap reads
+  **"Jul 22, 2026 · 11:45 AM"** pinned. The pin was then *removed*, rebuilt,
+  reinstalled and relaunched identically: the same instant reads **"Jul 23, 2026
+  · 3:45 AM"** — a different clock time on a **different calendar day**. That
+  control is what proves both that `TZ` reached the app and that the pin is what
+  fixes it; without it, a screenshot showing salon time proves nothing on a
+  machine that is already in the salon's zone.
+- **The reschedule screen shows the contradiction closing.** In Tokyo it reads
+  "Now: Mon, Jul 27 · 6:00 PM" above a picker reading "Jul 27, 2026 · 6:00 PM".
+  Unpinned those two lines disagreed by 17 hours and a day, on one screen, about
+  the booking being moved.
+- **The offer flow was driven end-to-end and checked in the DATABASE, not the
+  UI.** Tapping "Offer a time" on the management sheet's waitlist row now opens
+  the offer sheet ("They'll confirm before it books", live availability, "Times
+  are in America/Los_Angeles"); sending it produced `WaitlistOffer` **PENDING**
+  with `bookingId: null`, a `BookingHold` reserving 20:00Z–23:15Z (duration +
+  15min buffer), and the entry moved `ACTIVE → NOTIFIED`. **Booking count
+  unchanged at 6.** The old path would have created a booking outright. The row
+  then reloaded to "Offered · Wed, Jul 22 · 1:00 PM · slot held" with the offer
+  action gone, and the second row still offerable.
+- **The wire fixture is a real capture, not a mock.** `ProCalendarWaitlistEventTests`
+  pins `management.waitlistToday[0]` verbatim from a live
+  `GET /api/v1/pro/calendar?view=day`. It carries something a hand-written mock
+  would have got wrong: `clientProfileId` is **null** (withheld by the chart-link
+  gate) while `offerHref` still carries a clientId — so `canOfferWaitlistTime`
+  correctly asks for neither.
+- **Both new suites were proven RED first, against the real bug rather than
+  against a missing symbol.** `Wire.bookingZone` was first written *wrong* (the
+  `?? .current` the app actually had) and the tests failed 7 ways; the decode
+  tests were re-run with `waitlistEntryId` pointed at a wrong wire key and went
+  red on the key name, which is the thing that rots. Both suites carry ALLOW
+  cases: legacy aliases (`PST`/`EST`/`GMT`) that both platforms accept must NOT
+  fall back to UTC, a plain booking row must still decode, and an `offerHref`
+  without the offer ids must still leave the deep-link.
+- **882 TovisKit tests / 115 suites pass; the app target `BUILD SUCCEEDED`** by
+  hand (`xcodebuild -scheme Tovis`) — nothing in iOS CI compiles `Tovis/`, and
+  every view change here lives there.
+
+**Checked, so it is not a caveat:**
+
+- **`PST` is not a fallback case.** The first draft of `Wire.bookingZone` rejected
+  non-`Region/City` identifiers. Checked instead of assumed: Node's ICU accepts
+  `PST`/`EST`/`PST8PDT`, Darwin's `TimeZone(identifier:)` accepts them too, and
+  Darwin gives `PST` the **-7** August offset ICU does. Rejecting them would have
+  been an iOS-only refusal sending the booking to UTC where web sends it to the
+  real zone.
+- **The UTC fallback matches web, and trimming matches the SERVER.** Web falls
+  back to `'UTC'` without trimming; the server's `cleanIana` trims *then*
+  validates, and the location write path trims on the way in (`pickString`), so a
+  padded value cannot be stored through the API in the first place. iOS trims, so
+  it agrees with the arbiter. Darwin canonicalizes the identifier `UTC` to `GMT`,
+  which is what the caption would print in that (unreachable-through-the-API)
+  case.
+- **Both pendingOffer surfaces render in the zone their web counterpart uses**,
+  confirmed by reading both: the outreach feed uses the **viewer's** zone (web
+  `getViewerTimeZone()`, iOS `timeZone: nil`), the calendar management sheet uses
+  the **viewport** zone (web `viewportTimeZone`, iOS `event.timeZone ?? timeZone`).
+  They differ from each other on purpose, on both platforms.
+- **No new caution colour was introduced.** The "Offered ·" badge and the
+  confirmation use `BrandColor.accent`, matching the outreach row and web's
+  `data-tone="info"`. This is a state, not a warning, so F12's gold rule does not
+  apply. No raw colours.
+- **The ISO serialization in both views was de-duplicated** onto the existing
+  `ProCalendarGrid.iso` — byte-identical (`ISO8601DateFormatter` +
+  `.withInternetDateTime`), so no behaviour change, and two per-submit formatter
+  allocations gone.
+
+**Not verified / not checked:**
+
+- **The "Book a time" fallback branch was never rendered on a device.** It needs
+  `offerHref` present while `waitlistEntryId`/`serviceId` are absent — i.e. a
+  server older than those fields — which cannot be staged against the live route
+  without faking a response. Its *selection* is unit-tested
+  (`fallsBackToTheDeepLink`), and the branch body is the pre-existing code path,
+  unchanged apart from its label.
+- **Dark mode was not driven for either screen.** Same reason as F12: the theme
+  preference could not be set from outside the app. No new colour tokens were
+  introduced, so what is confined here is the dark values of `accent` and
+  `textMuted`, both already shared with every other screen.
+- **Only the SALON path was driven.** The new-booking picker was exercised
+  In-salon; MOBILE resolves its zone through the same `selectedLocation` (the
+  mobile base), so the code path is identical, but it was not clicked.
+- **Nothing was measured.** These are view-layer changes plus four decoded
+  fields; no new queries, no new round trips.
+
+**🟡 Found while reading, NOT fixed (out of F10's scope):**
+`buildWaitlistOfferHref` builds its `clientId` from the raw `entry.client?.id`,
+while the same event's `clientProfileId` goes through `linkableClientProfileId`.
+So a row whose chart the pro may **not** open still hands them that client's id in
+the deep-link — visible in the verbatim capture pinned in the test. It is the
+pro's own waitlist entry, so this is untidiness rather than a leak to a stranger,
+but the two fields disagreeing about the same gate is worth a card.
 
 ### F12 — what shipped
 
@@ -2508,66 +2697,38 @@ update to the table in §4.)
 
 ---
 
-## 5. Next session — paste this in
+## 5. The queue is done
 
-This chain keeps its prompt here, not in the `NEXT-SESSION-PROMPT.md` memory
-(that file belongs to the personalization/ranking chain). Overwrite this section
-each session.
+**All sixteen cards are shipped (F1–F16).** There is no next step in this chain;
+this section used to carry the next session's prompt and no longer needs to.
 
-```
-Do ONE step of the scheduling-conflict audit fix queue: F10 — the LAST one.
+Of the **thirty-three** card premises that met contact across the queue, **eleven
+did not survive** — the two most recent being F10's items 1 and 4, both of which
+looked like iOS defects until web was read and turned out to be parity and
+dead-on-both-platforms respectively. Several cards were also *understated*: F6
+hid a real hold-window gap behind a "refactor", F9's tidy-up contained a live DST
+bug, F7's "imprecise slots" was a 400 that killed the whole MOBILE flow, and
+F10's item 3 was missing two web branches rather than one.
 
-Read `docs/design/scheduling-conflict-audit-fix-plan.md` FIRST — it is both the
-queue AND the write-ups, including which card premises did NOT survive contact
-(nine of twenty-nine have now died). Do not re-derive what is already written
-there. F1–F9 and F11–F16 are done; only F10 remains.
+**What this audit did NOT cover is in §3 — read it before assuming scheduling is
+closed.** The load-bearing entries:
 
-F10 — "iOS follow-ups" 🟢. Read the card in §2. It is FOUR unrelated iOS items,
-not one, and it is the only card in the queue whose findings were never
-confirmed on a device — the audit header says plainly that every iOS claim in it
-is a CODE READ. So step one is to check each of the four is still true before
-fixing anything; F7's premise died exactly this way (the card described an
-imprecision bug and the real defect was a 400 that killed the whole MOBILE
-flow).
+- **F15's read-time liveness cost is unmeasured under real concurrency.** Five
+  client feeds now run ~3 indexed conflict queries per row shown. Measured
+  locally (~0.9ms/row, ~45ms projected at a feed's `take: 50`), never against a
+  pooled prod connection — and the last staging proof ceilinged at ~40rps on the
+  free-tier pooler through connection exhaustion. This needs a deploy or a
+  staging run.
+- **F1's ICS double-book was never driven with a real import**, only traced.
+- **Advisory-lock contention is unmeasured** — whether a calendar-import commit
+  looping `createProBooking` inside a 20s transaction can starve a live client
+  booking.
+- **`allowsOverlap` blast radius is untraced** — the flag is never reset, so
+  whether a later reschedule of such a row re-enters the GIST constraint cleanly
+  is unknown.
+- **`POST /pro/bookings/[id]/rebook` has no caller on either platform** — a
+  product call, deliberately left alone.
 
-Things earlier cards left that bear on F10 specifically:
-- The two unpinned `DatePicker`s are the third-listed item and the highest-value
-  one — `ios-calendar-date-local-not-utc` in memory is the same class of bug and
-  says a `YYYY-MM-DD` wire field is a CALENDAR date, so a UTC formatter sends the
-  NEXT day west of UTC. Use `BoardEventDate`.
-- Nothing in iOS CI compiles `Tovis/`, and the contract job covers no PRO-side
-  fixtures. Anything you want tested has to live in TovisKit, and the app target
-  has to be built by hand (`xcodebuild -scheme Tovis`).
-- F12 established that a pro-facing caution belongs in `BrandColor.gold`, not
-  `.emerald` — the emerald/ember pair reads as "all good" / "you broke it", and
-  neither is right for a warning. Raw colours are NOT caught by any guard.
-- The simulator recipe is in memory: `scripts/sim-login.sh` (check
-  `xcrun simctl list devices booted` first — it picks the newest RUNTIME, not
-  the one you booted), taps via cliclick mapped off `group 1 of window 1`, and
-  scrolls need a slow multi-point drag.
-
-House rules apply — read CLAUDE.md. In particular: diff/verify before assuming a
-card's premise holds, prove every new guard RED before calling it green, include
-at least one ALLOW case, and drive the real artifact — the simulator — not just
-the tests.
-
-ONE loose thread F12 surfaced and deliberately did not pull; pick it up only if
-F10 finishes early, and as its own commit:
-- `POST /api/v1/pro/bookings/[id]/consultation-proposal` can COMMIT a proposal
-  and then return 409, because `transitionSessionStepInTransaction` fails AFTER
-  the upsert and the route `return`s (not throws) from `$transaction`. Reachable
-  on a NO_SHOW booking (the route's guards check CANCELLED and
-  COMPLETED/finishedAt but not NO_SHOW) and on a PENDING one (the transition
-  force-writes the step back and returns `forcedStep`). Written up at the end of
-  "F12 — what shipped". This is the standing "Prisma `$transaction`: return =
-  COMMIT" trap, and it is a WRITE path on real bookings — verify the two
-  reachability claims before fixing, they are code reads.
-
-Ship cadence: branch off origin/main, one PR per repo touched, watch CI, merge
-when green, fast-forward local main. 🚫 Do NOT deploy to Vercel — that stays
-Tori's call. Note in the report that #705–#722 are merged and still awaiting a
-prod deploy (two migrations pending, one an ADD CONSTRAINT worth re-checking).
-
-Do not start other workstreams. When F10 lands the whole queue is done — say so,
-and hand off with what the audit did NOT cover (§3).
-```
+🟡 **#705–#722 are merged and NOT deployed.** Two migrations are pending, one an
+`ADD CONSTRAINT` (`20260806000000`, F8's widened occupied-status exclusion) that
+is worth re-checking against prod data before it runs. Deploys are Tori's call.
