@@ -536,6 +536,12 @@ enum BookingCloseoutAuditAction {
   AFTERCARE_DRAFT_SAVED
   AFTERCARE_FINALIZED
   CHECKOUT_UPDATED
+  // Pro undid a mistaken MANUAL close-out (mark-paid / waive) on a still-in-
+  // progress booking: checkoutStatus PAID/WAIVED → READY, collected/authorized
+  // timestamps cleared. Distinct from CHECKOUT_UPDATED so the money-reversal
+  // trail is queryable on its own. Never written for a live Stripe capture
+  // (that reverses via a refund) or a COMPLETED booking (out of scope).
+  CHECKOUT_REOPENED
   CHECKOUT_PRODUCTS_UPDATED
   REBOOK_CREATED
   REVIEW_CREATED

@@ -57,6 +57,8 @@ export type BookingErrorCode =
   | "BOOKING_CANNOT_EDIT_COMPLETED"
   | "BOOKING_STATUS_CHANGE_NOT_ALLOWED"
   | "CHECKOUT_ALREADY_PAID_BY_STRIPE"
+  | "CHECKOUT_REOPEN_STRIPE_REQUIRES_REFUND"
+  | "CHECKOUT_REOPEN_COMPLETED_UNSUPPORTED"
   | "BAD_LOCATION"
   | "BAD_LOCATION_MODE"
   | "DURATION_MISMATCH"
@@ -547,6 +549,37 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     message: "This booking's final bill was already paid by Stripe card.",
     userMessage:
       "This booking was already paid by card. It can't also be marked paid or waived here.",
+  },
+  // M9 follow-up (reopen). A pro tried to UNDO a close-out on a booking whose
+  // final bill was actually paid by Stripe card (`stripePaymentStatus=SUCCEEDED`
+  // = real captured money). A record-only reopen would leave a live card charge
+  // detached from the booking's payment state, so it is refused — the money must
+  // move via a refund, not a reopen. Distinct from CHECKOUT_ALREADY_PAID_BY_STRIPE
+  // (that guards the FORWARD manual close-out; this guards the reversal) so the UI
+  // can point the pro at the refund flow rather than "already paid".
+  CHECKOUT_REOPEN_STRIPE_REQUIRES_REFUND: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message:
+      "A booking paid by Stripe card cannot be reopened; issue a refund instead.",
+    userMessage:
+      "This booking was paid by card, so it can't be reopened here. Issue a refund to return the money.",
+  },
+  // M9 follow-up (reopen), deferred slice. The booking already auto-COMPLETED
+  // (aftercare sent + payment collected + after-photos), which is terminal in the
+  // lifecycle contract and fired completion side effects. Reversing that needs a
+  // new lifecycle edge + deliberate side-effect unwinding, out of this first
+  // slice's scope — refused with a distinct, honest code (not a generic
+  // "completed" error) so a later card can light it up.
+  CHECKOUT_REOPEN_COMPLETED_UNSUPPORTED: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message:
+      "A completed booking's close-out cannot be reopened yet.",
+    userMessage:
+      "This booking is already completed, so its payment can't be reopened here. Contact support if you need to correct it.",
   },
   BAD_LOCATION: {
     httpStatus: 409,

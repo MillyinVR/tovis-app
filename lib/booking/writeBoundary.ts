@@ -655,6 +655,14 @@ type WaiveProBookingCheckoutArgs = {
   reason?: string | null
 }
 
+type ReopenProBookingCheckoutArgs = {
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
 type UpdateClientBookingCheckoutArgs = {
   bookingId: string
   clientId: string
@@ -1068,6 +1076,21 @@ type ProCheckoutCloseoutResult = {
   }
   meta: MutationMeta & {
     completedBooking: boolean
+  }
+}
+
+type ReopenProBookingCheckoutResult = {
+  booking: {
+    id: string
+    status: BookingStatus
+    sessionStep: SessionStep
+    checkoutStatus: BookingCheckoutStatus
+    paymentCollectedAt: Date | null
+  }
+  // `reopened` is true only when a PAID/WAIVED close-out was actually reversed;
+  // false on the idempotent no-op (nothing was closed out to undo).
+  meta: MutationMeta & {
+    reopened: boolean
   }
 }
 
@@ -12760,6 +12783,170 @@ async function performLockedUpdateProCheckoutCloseout(args: {
 }
 
 /**
+ * Undo a mistaken MANUAL close-out (mark-paid / waive) on a still-in-progress
+ * booking — the M9 follow-up. `performLockedUpdateProCheckoutCloseout` refuses
+ * PAID↔WAIVED swaps and no-ops a re-mark, so before this there was no product
+ * path to reverse a fat-fingered manual collect: reversal meant a refund or an
+ * admin/DB edit.
+ *
+ * This is deliberately the SMALL, SAFE slice (Tori's scope call):
+ *  - it reverses ONLY the checkout record — checkoutStatus PAID/WAIVED → READY,
+ *    clearing `paymentCollectedAt` / `paymentAuthorizedAt`. It never touches
+ *    `status` / `sessionStep` (so it stays outside the lifecycle contract) and
+ *    never re-runs completion (READY + null collected can't complete);
+ *  - it refuses a live Stripe capture (`stripePaymentStatus=SUCCEEDED`) — real
+ *    money reverses via a refund, not a record-only reopen;
+ *  - it refuses a COMPLETED booking — that terminal state fired side effects and
+ *    is a later card's job to unwind.
+ *
+ * `selectedPaymentMethod` is left intact (harmless once uncollected; the pro
+ * overwrites it on the next mark-paid). A coupled aftercare rebook that a prior
+ * confirm-payment approved is NOT un-approved: it is a real future appointment
+ * the client wants, and un-accepting it would be more disruptive than the stray
+ * approval — documented boundary of this slice.
+ */
+async function performLockedReopenProBookingCheckout(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+  route: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}): Promise<ReopenProBookingCheckoutResult> {
+  assertNonEmptyUserId(args.actorUserId)
+
+  const booking: ProCheckoutCloseoutRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: PRO_CHECKOUT_CLOSEOUT_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  // Money safety FIRST (mirrors M9's ordering). A SUCCEEDED final-bill Stripe
+  // payment is a real captured card charge; a record-only reopen would strand
+  // that live charge detached from the booking's payment state. Refuse so the
+  // money routes to a refund instead — regardless of status, so a card-paid
+  // booking always gets the refund message. Runs before the first write.
+  if (booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED) {
+    throw bookingError('CHECKOUT_REOPEN_STRIPE_REQUIRES_REFUND')
+  }
+
+  // Completed-booking reopen is the deferred slice. COMPLETED is terminal in the
+  // lifecycle contract and completion already fired its side effects (review
+  // scheduling + eligibility, any coupled-rebook approval); reversing that needs
+  // a new contract edge + explicit unwinding. `finishedAt` is only ever set at
+  // completion, so this mirrors the closeout's own completed guard.
+  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+    throw bookingError('CHECKOUT_REOPEN_COMPLETED_UNSUPPORTED')
+  }
+
+  // Nothing to undo unless a manual close-out actually landed. Anything else
+  // (never closed out, AWAITING_CONFIRMATION, PARTIALLY_PAID) is an idempotent
+  // no-op so a stale client / double-tap doesn't error.
+  if (
+    booking.checkoutStatus !== BookingCheckoutStatus.PAID &&
+    booking.checkoutStatus !== BookingCheckoutStatus.WAIVED
+  ) {
+    return {
+      booking: {
+        id: booking.id,
+        status: booking.status,
+        sessionStep: booking.sessionStep ?? SessionStep.NONE,
+        checkoutStatus: booking.checkoutStatus,
+        paymentCollectedAt: booking.paymentCollectedAt,
+      },
+      meta: {
+        ...buildMeta(false),
+        reopened: false,
+      },
+    }
+  }
+
+  const reversedFromCheckoutStatus = booking.checkoutStatus
+
+  const oldCheckoutState = buildCheckoutAuditSnapshot({
+    checkoutStatus: booking.checkoutStatus,
+    selectedPaymentMethod: booking.selectedPaymentMethod,
+    serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: booking.productSubtotalSnapshot,
+    subtotalSnapshot: booking.subtotalSnapshot,
+    tipAmount: booking.tipAmount,
+    taxAmount: booking.taxAmount,
+    discountAmount: booking.discountAmount,
+    totalAmount: booking.totalAmount,
+    paymentAuthorizedAt: booking.paymentAuthorizedAt,
+    paymentCollectedAt: booking.paymentCollectedAt,
+  })
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      checkoutStatus: BookingCheckoutStatus.READY,
+      paymentCollectedAt: null,
+      paymentAuthorizedAt: null,
+    },
+    select: PRO_CHECKOUT_CLOSEOUT_SELECT,
+  })
+
+  // Distinct CHECKOUT_REOPENED action (not CHECKOUT_UPDATED) so the money-
+  // reversal trail is queryable on its own — one-code-two-meanings discipline.
+  // The metadata records which closed state was reversed.
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    actorUserId: args.actorUserId,
+    action: BookingCloseoutAuditAction.CHECKOUT_REOPENED,
+    route: args.route,
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: oldCheckoutState,
+    newValue: buildCheckoutAuditSnapshot({
+      checkoutStatus: updated.checkoutStatus,
+      selectedPaymentMethod: updated.selectedPaymentMethod,
+      serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: updated.productSubtotalSnapshot,
+      subtotalSnapshot: updated.subtotalSnapshot,
+      tipAmount: updated.tipAmount,
+      taxAmount: updated.taxAmount,
+      discountAmount: updated.discountAmount,
+      totalAmount: updated.totalAmount,
+      paymentAuthorizedAt: updated.paymentAuthorizedAt,
+      paymentCollectedAt: updated.paymentCollectedAt,
+    }),
+    metadata: {
+      reversedFromCheckoutStatus,
+    },
+  })
+
+  return {
+    booking: {
+      id: updated.id,
+      status: updated.status,
+      sessionStep: updated.sessionStep ?? SessionStep.NONE,
+      checkoutStatus: updated.checkoutStatus,
+      paymentCollectedAt: updated.paymentCollectedAt,
+    },
+    meta: {
+      ...buildMeta(true),
+      reopened: true,
+    },
+  }
+}
+
+/**
  * Approves any aftercare-sourced next appointments that were coupled to a
  * source booking's off-platform payment. When the client checked out with an
  * unverifiable method (AWAITING_CONFIRMATION) they could still book the next
@@ -14242,6 +14429,34 @@ export async function waiveProBookingCheckout(
         checkoutStatus: BookingCheckoutStatus.WAIVED,
         paymentCollectedAt: now,
         route: 'lib/booking/writeBoundary.ts:waiveProBookingCheckout',
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      }),
+  )
+}
+
+/**
+ * Pro undoes a mistaken manual mark-paid / waive (M9 follow-up). Reverses the
+ * checkout record back to READY under the same pro schedule lock the close-out
+ * took, refuses a live Stripe capture / a completed booking, and writes a
+ * CHECKOUT_REOPENED audit row. See `performLockedReopenProBookingCheckout`.
+ */
+export async function reopenProBookingCheckout(
+  args: ReopenProBookingCheckoutArgs,
+): Promise<ReopenProBookingCheckoutResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx }) =>
+      performLockedReopenProBookingCheckout({
+        tx,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        actorUserId: args.actorUserId,
+        route: 'lib/booking/writeBoundary.ts:reopenProBookingCheckout',
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),

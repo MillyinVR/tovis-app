@@ -12,6 +12,7 @@ import {
   MediaPhase,
   Role,
   SessionStep,
+  StripePaymentStatus,
 } from '@prisma/client'
 
 import ConsultationForm, {
@@ -20,6 +21,7 @@ import ConsultationForm, {
 import PendingActionButton from './PendingActionButton'
 import ElapsedTimer from './_components/ElapsedTimer'
 import MarkPaidButton from './MarkPaidButton'
+import ReopenCheckoutButton from './ReopenCheckoutButton'
 import ConfirmPaymentReceivedButton from '../ConfirmPaymentReceivedButton'
 
 import { getCurrentUser } from '@/lib/currentUser'
@@ -1148,6 +1150,7 @@ function WrapUpView({
   hasPaymentCollected,
   awaitingPaymentConfirmation,
   hasCheckoutClosed,
+  paidByStripeCard,
   hasConsultationApproved,
   markPaidMethods,
   timeZone,
@@ -1164,6 +1167,7 @@ function WrapUpView({
   hasPaymentCollected: boolean
   awaitingPaymentConfirmation: boolean
   hasCheckoutClosed: boolean
+  paidByStripeCard: boolean
   hasConsultationApproved: boolean
   markPaidMethods: ManualCollectablePaymentMethod[]
   timeZone: string
@@ -1280,6 +1284,8 @@ function WrapUpView({
                   bookingId={bookingId}
                   methods={markPaidMethods}
                 />
+              ) : !paidByStripeCard ? (
+                <ReopenCheckoutButton bookingId={bookingId} />
               ) : null}
             </div>
 
@@ -1551,6 +1557,9 @@ export default async function ProBookingSessionPage(props: PageProps) {
       totalAmount: true,
       checkoutStatus: true,
       paymentCollectedAt: true,
+      // Gates the "undo" (reopen) control: a live Stripe capture reverses via a
+      // refund, not a record-only reopen, so the control is hidden for it.
+      stripePaymentStatus: true,
       consultationNotes: true,
 
       service: {
@@ -1727,6 +1736,11 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const hasCheckoutClosed =
     booking.checkoutStatus === BookingCheckoutStatus.PAID ||
     booking.checkoutStatus === BookingCheckoutStatus.WAIVED
+  // A live Stripe capture reverses via a refund, never a record-only reopen (the
+  // reopen route refuses it), so the undo control only shows for a manual
+  // close-out. Mirrors the server's `CHECKOUT_REOPEN_STRIPE_REQUIRES_REFUND` gate.
+  const paidByStripeCard =
+    booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED
   const hasConsultationApproved = isConsultationApproved(approvalStatus)
   const effectiveStep = resolveEffectiveSessionStep({
     bookingStatus,
@@ -1894,6 +1908,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
         hasPaymentCollected={hasPaymentCollected}
         awaitingPaymentConfirmation={awaitingPaymentConfirmation}
         hasCheckoutClosed={hasCheckoutClosed}
+        paidByStripeCard={paidByStripeCard}
         hasConsultationApproved={hasConsultationApproved}
         markPaidMethods={markPaidMethods}
         timeZone={appointmentTimeZone}
