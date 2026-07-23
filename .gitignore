@@ -78,3 +78,11 @@ docs/design/brand-handoff/
 # perf-availability workflow, which mkdir -p's it and uploads it via
 # actions/upload-artifact — unaffected by this ignore).
 artifacts/
+
+# Internal docs (plans, audits, specs, runbooks) stay LOCAL, off the public repo.
+# The whole docs/ tree is untracked on purpose (Tori, 2026-07-22): files remain on
+# disk where every code comment / handoff pointer already references them, they
+# just never get pushed. Nothing in the build/CI/runtime reads a doc file — all
+# references are comments — so this breaks nothing. Re-track a subpath with
+# `git add -f docs/<path>` if something ever needs to be public again.
+docs/
