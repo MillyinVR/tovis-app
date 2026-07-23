@@ -73,6 +73,8 @@ import {
   type DepositSettings,
 } from '@/lib/booking/discoveryDepositPlan'
 import {
+  SCHEDULE_TX_MAX_WAIT_MS,
+  SCHEDULE_TX_TIMEOUT_MS,
   withLockedClientOwnedBookingTransaction,
   withLockedProfessionalTransaction,
 } from '@/lib/booking/scheduleTransaction'
@@ -14848,7 +14850,7 @@ export async function createClientRebookedBookingFromAftercare(
       requestId: args.requestId ?? null,
       idempotencyKey: args.idempotencyKey ?? null,
     })
-  })
+  }, { maxWait: SCHEDULE_TX_MAX_WAIT_MS, timeout: SCHEDULE_TX_TIMEOUT_MS })
 }
 
 const AFTERCARE_NEXT_APPOINTMENT_SELECT = {
@@ -14946,7 +14948,7 @@ export async function confirmClientAftercareNextAppointment(
       requestId: args.requestId ?? null,
       idempotencyKey: args.idempotencyKey ?? null,
     })
-  })
+  }, { maxWait: SCHEDULE_TX_MAX_WAIT_MS, timeout: SCHEDULE_TX_TIMEOUT_MS })
 }
 
 type DeclineClientAftercareNextAppointmentArgs = {
