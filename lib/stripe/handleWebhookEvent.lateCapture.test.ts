@@ -151,3 +151,40 @@ describe('handleStripeEvent — lateCaptureRefund propagation', () => {
     expect(result.lateCaptureRefund).toBeUndefined()
   })
 })
+
+// M9 — a card charge that applies onto a booking already closed out by hand must
+// carry manualCloseoutOverCollection so the arrival paths page a human to refund
+// the over-collected card. Only the SERVICE (final-bill) applier reports it; the
+// deposit rides its own PI and has no manual mark-paid/waive path.
+describe('handleStripeEvent — manualCloseoutOverCollection propagation (M9)', () => {
+  it('carries manualCloseoutOverCollection when the card raced a manual close-out', async () => {
+    mocks.applyStripePaymentSucceededInTransaction.mockResolvedValue({
+      bookingId: 'booking_1',
+      bookingCompleted: false,
+      meta: { mutated: true },
+      capturedAfterManualCloseout: true,
+    })
+
+    const result = await handleStripeEvent(tx, paymentIntentEvent())
+
+    expect(result.handled).toBe(true)
+    expect(result.manualCloseoutOverCollection).toEqual({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+  })
+
+  it('omits manualCloseoutOverCollection for a normal card payment', async () => {
+    mocks.applyStripePaymentSucceededInTransaction.mockResolvedValue({
+      bookingId: 'booking_1',
+      bookingCompleted: false,
+      meta: { mutated: true },
+      capturedAfterManualCloseout: false,
+    })
+
+    const result = await handleStripeEvent(tx, paymentIntentEvent())
+
+    expect(result.handled).toBe(true)
+    expect(result.manualCloseoutOverCollection).toBeUndefined()
+  })
+})

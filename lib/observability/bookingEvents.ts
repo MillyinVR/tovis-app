@@ -342,6 +342,54 @@ export function captureLateCaptureOnCancelledBooking(input: {
 }
 
 /**
+ * M9 — a Stripe card charge for the final bill landed AFTER the pro had already
+ * closed the booking out by hand (mark-paid cash / waive). The client was
+ * double-collected (cash + card) or charged despite a waive. The card money is
+ * already captured at Stripe and cannot be un-charged from the webhook
+ * transaction, so this pages a human to refund the card via the existing
+ * pro/admin refund endpoint. Alert-only by design (Tori, 2026-07-23): the
+ * platform does not auto-refund here. Fires post-commit on the arrival path that
+ * first records the over-collection (live webhook, requeue, or orphan-recovery).
+ */
+export function captureManualCloseoutStripeOverCollection(input: {
+  bookingId: string
+  flavor: 'SERVICE'
+  source: 'WEBHOOK' | 'REQUEUE' | 'ORPHAN_RECOVERY'
+}): void {
+  Sentry.withScope((scope) => {
+    scope.setLevel('error')
+    scope.setTag('area', 'payments')
+    scope.setTag('payments.event', 'manual_closeout_stripe_over_collection')
+    scope.setTag('payments.over_collection.flavor', input.flavor)
+    scope.setTag('payments.over_collection.source', input.source)
+    scope.setTag('booking.id', input.bookingId)
+
+    scope.setContext('manual_closeout_stripe_over_collection', {
+      bookingId: input.bookingId,
+      flavor: input.flavor,
+      source: input.source,
+    })
+
+    Sentry.captureMessage(
+      `Stripe card charge landed on manually closed-out booking ${input.bookingId} — client over-collected, refund the card (${input.source})`,
+      'error',
+    )
+  })
+
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      app: 'tovis',
+      namespace: 'payments',
+      event: 'manual_closeout_stripe_over_collection',
+      bookingId: input.bookingId,
+      flavor: input.flavor,
+      source: input.source,
+    }),
+  )
+}
+
+/**
  * The hourly refund-retry sweep has used up its attempt budget for a FAILED
  * auto-cancel refund (M3). The client is owed money the platform can no longer
  * return automatically — a human must settle it (discretionary refund endpoint

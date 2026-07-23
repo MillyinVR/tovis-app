@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe/server'
 import { handleStripeEvent } from '@/lib/stripe/handleWebhookEvent'
 import { applyLateCaptureCancelRefund } from '@/lib/booking/cancelRefund'
+import { captureManualCloseoutStripeOverCollection } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 
@@ -125,6 +126,17 @@ const result = await prisma.$transaction(
     // so it cannot flip a processed event back to failed.
     if (result.lateCaptureRefund) {
       await applyLateCaptureCancelRefund(result.lateCaptureRefund)
+    }
+
+    // M9 — a card charge landed on a booking the pro already closed out by hand
+    // (mark-paid cash / waive): the client was over-collected. Page a human to
+    // refund the card (alert-only; the money is already captured at Stripe).
+    if (result.manualCloseoutOverCollection) {
+      captureManualCloseoutStripeOverCollection({
+        bookingId: result.manualCloseoutOverCollection.bookingId,
+        flavor: result.manualCloseoutOverCollection.flavor,
+        source: 'WEBHOOK',
+      })
     }
 
     return jsonOk(

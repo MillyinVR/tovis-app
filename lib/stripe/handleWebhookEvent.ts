@@ -44,6 +44,15 @@ export type StripeWebhookResult = {
    * live inside the webhook transaction. See cancelRefund.ts.
    */
   lateCaptureRefund?: { bookingId: string; flavor: LateCaptureRefundFlavor }
+  /**
+   * M9 — present when a card charge applied onto a booking the pro had already
+   * closed out by hand (mark-paid cash / waive): the client was over-collected.
+   * The caller MUST page a human post-commit
+   * (captureManualCloseoutStripeOverCollection); the money is already captured,
+   * so a human refunds the card via the existing refund endpoint. Alert-only —
+   * no automated refund (Tori, 2026-07-23).
+   */
+  manualCloseoutOverCollection?: { bookingId: string; flavor: 'SERVICE' }
 }
 
 function jsonArrayFromStrings(values: string[]): Prisma.InputJsonValue {
@@ -269,6 +278,14 @@ async function handlePaymentIntentSucceeded(
     ...(result.capturedOnCancelledBooking
       ? {
           lateCaptureRefund: {
+            bookingId: result.bookingId,
+            flavor: 'SERVICE' as const,
+          },
+        }
+      : {}),
+    ...(result.capturedAfterManualCloseout
+      ? {
+          manualCloseoutOverCollection: {
             bookingId: result.bookingId,
             flavor: 'SERVICE' as const,
           },

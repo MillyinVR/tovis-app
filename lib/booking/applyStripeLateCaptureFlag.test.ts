@@ -280,3 +280,111 @@ describe('applyStripePaymentSucceededInTransaction — cancelled-booking flag', 
     expect(result?.capturedOnCancelledBooking).toBeUndefined()
   })
 })
+
+// ─── M9: manual close-out over-collection flag ───────────────────────────────
+//
+// A card charge that lands AFTER the pro closed the booking out by hand
+// (mark-paid cash / waive) over-collects the client. The manual close-out stamps
+// paymentCollectedAt while stripePaymentStatus is still not SUCCEEDED; the normal
+// card flow has paymentCollectedAt == null at apply time. So a non-null
+// paymentCollectedAt on a not-yet-SUCCEEDED booking is the flag. The money is
+// already captured, so the applier records it and flags for a post-commit page.
+
+describe('applyStripePaymentSucceededInTransaction — manual close-out flag (M9)', () => {
+  const COLLECTED = new Date('2026-06-01T00:00:00Z')
+
+  it('flags a card charge that lands on a mark-paid (cash) booking', async () => {
+    const { tx, update } = makeServiceTx({
+      bookingOverrides: {
+        status: BookingStatus.IN_PROGRESS,
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        selectedPaymentMethod: 'CASH',
+        paymentCollectedAt: COLLECTED,
+        stripePaymentStatus: StripePaymentStatus.NOT_STARTED,
+      },
+      updatedStatus: BookingStatus.IN_PROGRESS,
+    })
+
+    const result = await applyStripePaymentSucceededInTransaction(tx, {
+      bookingIdHint: null,
+      stripePaymentIntentId: 'pi_1',
+      stripeEventId: 'evt_m9_1',
+      amountReceivedCents: 10000,
+      currency: 'usd',
+    })
+
+    // The money IS recorded (the card captured — that's real), and flagged.
+    expect(update).toHaveBeenCalledOnce()
+    expect(result?.capturedAfterManualCloseout).toBe(true)
+    expect(result?.capturedOnCancelledBooking).toBe(false)
+  })
+
+  it('flags a card charge that lands on a WAIVED booking', async () => {
+    const { tx } = makeServiceTx({
+      bookingOverrides: {
+        status: BookingStatus.IN_PROGRESS,
+        checkoutStatus: BookingCheckoutStatus.WAIVED,
+        paymentCollectedAt: COLLECTED,
+        stripePaymentStatus: StripePaymentStatus.NOT_STARTED,
+      },
+      updatedStatus: BookingStatus.IN_PROGRESS,
+    })
+
+    const result = await applyStripePaymentSucceededInTransaction(tx, {
+      bookingIdHint: null,
+      stripePaymentIntentId: 'pi_1',
+      stripeEventId: 'evt_m9_2',
+      amountReceivedCents: 10000,
+      currency: 'usd',
+    })
+
+    expect(result?.capturedAfterManualCloseout).toBe(true)
+  })
+
+  it('does not flag the normal card flow (no manual collection)', async () => {
+    const { tx } = makeServiceTx({
+      bookingOverrides: {
+        status: BookingStatus.ACCEPTED,
+        checkoutStatus: BookingCheckoutStatus.READY,
+        paymentCollectedAt: null,
+        stripePaymentStatus: StripePaymentStatus.NOT_STARTED,
+      },
+      updatedStatus: BookingStatus.ACCEPTED,
+    })
+
+    const result = await applyStripePaymentSucceededInTransaction(tx, {
+      bookingIdHint: null,
+      stripePaymentIntentId: 'pi_1',
+      stripeEventId: 'evt_m9_3',
+      amountReceivedCents: 10000,
+      currency: 'usd',
+    })
+
+    expect(result?.capturedAfterManualCloseout).toBe(false)
+  })
+
+  it('does not re-flag on redelivery once the card charge is recorded', async () => {
+    // First application already recorded SUCCEEDED + PAID + collected → the
+    // alreadyApplied replay guard short-circuits; the manual signal is consumed.
+    const { tx, update } = makeServiceTx({
+      bookingOverrides: {
+        status: BookingStatus.IN_PROGRESS,
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        paymentCollectedAt: COLLECTED,
+        stripePaymentStatus: StripePaymentStatus.SUCCEEDED,
+      },
+      updatedStatus: BookingStatus.IN_PROGRESS,
+    })
+
+    const result = await applyStripePaymentSucceededInTransaction(tx, {
+      bookingIdHint: null,
+      stripePaymentIntentId: 'pi_1',
+      stripeEventId: 'evt_m9_4',
+      amountReceivedCents: 10000,
+      currency: 'usd',
+    })
+
+    expect(update).not.toHaveBeenCalled()
+    expect(result?.capturedAfterManualCloseout).toBeUndefined()
+  })
+})

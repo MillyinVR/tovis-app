@@ -18,6 +18,13 @@
 // - was created at least MIN_AGE_MINUTES ago, so normal webhook flow gets first shot
 // - was created no more than MAX_AGE_HOURS ago, so the sweep stays bounded
 //
+// M9 D3 — a SECOND candidate class covers the mirror gap: a booking already
+// closed out by hand (paymentCollectedAt set, so the "not collected locally"
+// filter drops it) of ANY status incl. COMPLETED, still carrying a live Stripe
+// session whose success webhook was lost. If Stripe says that session is paid,
+// the client was over-collected (cash+card, or a charge despite a waive); the
+// applier records it and we page a human to refund the card (alert-only).
+//
 // We ask Stripe whether the Checkout Session is actually paid.
 // If yes, we replay applyStripePaymentSucceeded with a synthetic event id.
 // The write boundary owns the actual mutation and idempotency rules.
@@ -36,7 +43,10 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import { applyStripePaymentSucceeded } from '@/lib/booking/writeBoundary'
 import { applyLateCaptureCancelRefund } from '@/lib/booking/cancelRefund'
-import { captureBookingException } from '@/lib/observability/bookingEvents'
+import {
+  captureBookingException,
+  captureManualCloseoutStripeOverCollection,
+} from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
 
@@ -53,6 +63,10 @@ type RecoveryOutcome = {
   stripeCheckoutSessionId: string
   outcome:
     | 'recovered'
+    // M9 D3 — recovered money whose booking was already closed out by hand
+    // (mark-paid cash / waive): the client was over-collected. Recorded + paged
+    // for a human to refund the card (distinct from a clean 'recovered').
+    | 'over_collected'
     | 'session_not_paid'
     | 'session_missing_payment_intent'
     | 'stripe_lookup_failed'
@@ -178,6 +192,23 @@ async function recoverBooking(args: {
       })
     }
 
+    // M9 D3 — a lost card-success webhook whose booking was already closed out by
+    // hand: the recovery just recorded a card charge on top of a manual collect /
+    // waive. Page a human to refund the over-collected card (alert-only).
+    if (result?.capturedAfterManualCloseout) {
+      captureManualCloseoutStripeOverCollection({
+        bookingId: result.bookingId,
+        flavor: 'SERVICE',
+        source: 'ORPHAN_RECOVERY',
+      })
+
+      return {
+        bookingId: args.bookingId,
+        stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+        outcome: 'over_collected',
+      }
+    }
+
     return {
       bookingId: args.bookingId,
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
@@ -249,9 +280,39 @@ async function runJob(req: Request): Promise<Response> {
     take: MAX_CANDIDATES_PER_RUN,
   })
 
+  // M9 D3 — the mirror class the primary query deliberately EXCLUDES: a booking
+  // the pro already closed out by hand (paymentCollectedAt set → the `null`
+  // filter above drops it) which ALSO carries a live Stripe checkout session
+  // whose success webhook was lost. Any status, INCLUDING COMPLETED (a manual
+  // close-out usually completes the booking, which the primary query also
+  // excludes). If Stripe says that session is paid, the client was
+  // over-collected; recoverBooking re-drives the applier, which detects the
+  // conflict and pages. Mutually exclusive with the primary query on
+  // paymentCollectedAt, so no candidate is processed twice.
+  const overCollectionCandidates = await prisma.booking.findMany({
+    where: {
+      paymentProvider: PaymentProvider.STRIPE,
+      stripeCheckoutSessionId: { not: null },
+      stripePaymentStatus: {
+        not: StripePaymentStatus.SUCCEEDED,
+      },
+      paymentCollectedAt: { not: null },
+      createdAt: {
+        lte: minCreatedBefore,
+        gte: maxCreatedAfter,
+      },
+    },
+    select: {
+      id: true,
+      stripeCheckoutSessionId: true,
+    },
+    orderBy: { createdAt: 'asc' },
+    take: MAX_CANDIDATES_PER_RUN,
+  })
+
   const results: RecoveryOutcome[] = []
 
-  for (const candidate of candidates) {
+  for (const candidate of [...candidates, ...overCollectionCandidates]) {
     if (!candidate.stripeCheckoutSessionId) continue
 
     const outcome = await recoverBooking({
@@ -269,6 +330,7 @@ async function runJob(req: Request): Promise<Response> {
     },
     {
       recovered: 0,
+      over_collected: 0,
       session_not_paid: 0,
       session_missing_payment_intent: 0,
       stripe_lookup_failed: 0,
@@ -280,7 +342,7 @@ async function runJob(req: Request): Promise<Response> {
   return jsonOk(
     {
       ok: true,
-      candidatesScanned: candidates.length,
+      candidatesScanned: candidates.length + overCollectionCandidates.length,
       tally,
       sample: results.slice(0, 20),
       ranAt: now.toISOString(),
