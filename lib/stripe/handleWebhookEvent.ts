@@ -26,7 +26,10 @@ import {
   DISCOVERY_DEPOSIT_CHECKOUT_KIND,
   type StripeDisputeOutcome,
 } from '@/lib/booking/writeBoundary'
-import { reconcileChargeRefundInTransaction } from '@/lib/booking/refunds'
+import {
+  mapStripeRefundToReconcileInput,
+  reconcileChargeRefundInTransaction,
+} from '@/lib/booking/refunds'
 import type { LateCaptureRefundFlavor } from '@/lib/booking/cancelRefund'
 import { captureStripeDisputeAlert } from '@/lib/observability/bookingEvents'
 import { applyStripeSubscriptionInTransaction } from '@/lib/membership/syncSubscription'
@@ -337,15 +340,10 @@ async function handleChargeRefunded(
     return { handled: true, message: 'charge.refunded reconciled deposit.' }
   }
 
-  const refunds = (charge.refunds?.data ?? []).map((refund) => ({
-    id: refund.id,
-    status: refund.status,
-    amountCents: typeof refund.amount === 'number' ? refund.amount : 0,
-    // We stamp the reserved BookingRefund id into the refund metadata at
-    // creation; reconcile uses it to recover a row that was reserved but never
-    // settled (N3). Absent for Dashboard/external refunds.
-    bookingRefundId: getMetadataString(refund.metadata, 'bookingRefundId'),
-  }))
+  // Shared mapper with the hourly reconciliation sweep (lib/booking/refunds) so
+  // the two paths can never drift — notably the metadata.bookingRefundId
+  // pass-through the N3 reserved-but-unsettled-row recovery depends on.
+  const refunds = (charge.refunds?.data ?? []).map(mapStripeRefundToReconcileInput)
 
   const result = await reconcileChargeRefundInTransaction(tx, {
     paymentIntentId,

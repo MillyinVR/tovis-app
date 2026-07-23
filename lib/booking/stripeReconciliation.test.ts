@@ -25,9 +25,16 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-vi.mock('@/lib/booking/refunds', () => ({
-  reconcileChargeRefundInTransaction: mocks.reconcileChargeRefund,
-}))
+// Keep the REAL mapStripeRefundToReconcileInput (a pure function the sweep uses
+// to build the reconcile input) so the test exercises the same mapping the live
+// webhook does; only the reconcile transaction itself is stubbed.
+vi.mock('@/lib/booking/refunds', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/booking/refunds')>()
+  return {
+    mapStripeRefundToReconcileInput: actual.mapStripeRefundToReconcileInput,
+    reconcileChargeRefundInTransaction: mocks.reconcileChargeRefund,
+  }
+})
 
 // Mock the (large) writeBoundary module so we only pull in the one deposit
 // reconcile helper the deposit sweep depends on.
@@ -129,6 +136,42 @@ describe('reconcileStripeRefunds', () => {
       chargeAmountCents: 10_000,
       refunds: [{ id: 're_1', status: 'succeeded', amountCents: 2_500 }],
     })
+  })
+
+  it('forwards the reserved BookingRefund id from refund metadata (N3 recovery via sweep)', async () => {
+    // A reserved-but-unsettled PENDING row (stranded by a crash between
+    // reserve→settle) reserves refund headroom forever. The webhook adopts it
+    // via metadata.bookingRefundId; the sweep must carry the SAME field so it can
+    // run that recovery too when the webhook was lost — the exact hole M7 closed.
+    mocks.findMany.mockResolvedValue([
+      candidate({ stripeAmountRefunded: 0, pendingRefundIds: ['refund_row_stranded'] }),
+    ])
+    mocks.paymentIntentsRetrieve.mockResolvedValue(
+      chargeIntent({ amount: 10_000, amountRefunded: 2_500 }),
+    )
+    mocks.refundsList.mockResolvedValue({
+      data: [
+        {
+          id: 're_1',
+          status: 'succeeded',
+          amount: 2_500,
+          metadata: { bookingRefundId: 'refund_row_stranded' },
+        },
+      ],
+    })
+
+    await reconcileStripeRefunds()
+
+    expect(mocks.reconcileChargeRefund).toHaveBeenCalledTimes(1)
+    const input = mocks.reconcileChargeRefund.mock.calls[0]![1]
+    expect(input.refunds).toEqual([
+      {
+        id: 're_1',
+        status: 'succeeded',
+        amountCents: 2_500,
+        bookingRefundId: 'refund_row_stranded',
+      },
+    ])
   })
 
   it('settles in-flight PENDING refund rows even when the amount already matches', async () => {

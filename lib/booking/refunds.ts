@@ -720,6 +720,31 @@ export type ChargeRefundReconcileInput = {
 }
 
 /**
+ * Map a Stripe refund object to the `ChargeRefundReconcileInput` refund shape.
+ * The single mapper for BOTH the live `charge.refunded` webhook and the hourly
+ * reconciliation sweep, so the two paths can never drift. In particular it
+ * always carries the `metadata.bookingRefundId` pass-through the N3 recovery
+ * depends on — a sweep that dropped it (as this one silently did) could not
+ * adopt a reserved-but-unsettled row the way the webhook can.
+ */
+export function mapStripeRefundToReconcileInput(
+  refund: Stripe.Refund,
+): ChargeRefundReconcileInput['refunds'][number] {
+  const rawBookingRefundId = refund.metadata?.bookingRefundId
+  const bookingRefundId =
+    typeof rawBookingRefundId === 'string' && rawBookingRefundId.trim()
+      ? rawBookingRefundId.trim()
+      : null
+
+  return {
+    id: refund.id,
+    status: refund.status,
+    amountCents: typeof refund.amount === 'number' ? refund.amount : 0,
+    bookingRefundId,
+  }
+}
+
+/**
  * Reconcile a Stripe `charge.refunded` webhook against our records. Runs INSIDE
  * the webhook's transaction (tx-scoped, like the other apply*InTransaction
  * handlers). Two jobs:
