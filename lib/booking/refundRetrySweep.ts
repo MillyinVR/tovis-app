@@ -106,6 +106,7 @@ const RETRY_CANDIDATE_BOOKING_SELECT = {
   stripePaymentStatus: true,
   depositStripePaymentIntentId: true,
   depositStatus: true,
+  depositDisputedAt: true,
   cancelledAt: true,
   cancelledByRole: true,
 } satisfies Prisma.BookingSelect
@@ -260,6 +261,17 @@ async function retryPair(pair: CandidatePair, now: Date): Promise<RefundRetryRes
     }
 
     if (flavor === 'DEPOSIT') {
+      // A disputed deposit charge is frozen: Stripe already pulled the funds via
+      // the chargeback, so re-driving the refund would double-return them. The
+      // deposit dispute (M4) leaves depositStatus=PAID untouched — the freeze
+      // lives on depositDisputedAt — so this gate is what keeps the sweep off a
+      // disputed charge (refundDiscoveryDeposit also refuses, but the sweep must
+      // not even attempt / burn the attempt budget). The SERVICE flavor is
+      // already safe below: reserveRefund refuses stripePaymentStatus=DISPUTED.
+      if (pair.booking.depositDisputedAt) {
+        return { ...base, flavor, outcome: 'not_retryable' }
+      }
+
       // The deposit re-drive needs the cancel's provenance to re-resolve the
       // deposit plan; without it nothing can decide the fee split — leave the
       // row to a human (the original failure was already Sentry-captured).

@@ -184,6 +184,12 @@ export function captureOverlapBackstopFired(input: {
  * a destination-charge dispute reverses the transfer off the pro and debits the
  * platform — so a human must see every one. Fired on dispute OPEN and LOST; a
  * won dispute (which restores the payment) does not alert.
+ *
+ * `flavor` distinguishes the two charges a booking can carry: the final-bill PI
+ * (`SERVICE`, default) and the up-front discovery deposit's OWN PI (`DEPOSIT`).
+ * A deposit dispute is a distinct money-path with its own freeze, so it carries
+ * a distinct log identity (`stripe_deposit_dispute`) while the SERVICE identity
+ * (`stripe_dispute`) stays unchanged for existing alerting.
  */
 export function captureStripeDisputeAlert(input: {
   bookingId: string
@@ -192,12 +198,18 @@ export function captureStripeDisputeAlert(input: {
   disputeStatus: string
   outcome: 'OPEN' | 'WON' | 'LOST'
   eventType: string
+  flavor: 'SERVICE' | 'DEPOSIT'
 }): void {
+  const logEvent =
+    input.flavor === 'DEPOSIT' ? 'stripe_deposit_dispute' : 'stripe_dispute'
+  const label = input.flavor === 'DEPOSIT' ? 'Stripe deposit dispute' : 'Stripe dispute'
+
   Sentry.withScope((scope) => {
     scope.setLevel('error')
     scope.setTag('area', 'payments')
-    scope.setTag('payments.event', 'stripe_dispute')
+    scope.setTag('payments.event', logEvent)
     scope.setTag('payments.dispute.outcome', input.outcome)
+    scope.setTag('payments.dispute.flavor', input.flavor)
     scope.setTag('booking.id', input.bookingId)
 
     scope.setContext('stripe_dispute', {
@@ -207,10 +219,11 @@ export function captureStripeDisputeAlert(input: {
       disputeStatus: input.disputeStatus,
       outcome: input.outcome,
       eventType: input.eventType,
+      flavor: input.flavor,
     })
 
     Sentry.captureMessage(
-      `Stripe dispute (${input.outcome}) on booking ${input.bookingId} [${input.eventType}]`,
+      `${label} (${input.outcome}) on booking ${input.bookingId} [${input.eventType}]`,
       'error',
     )
   })
@@ -220,7 +233,8 @@ export function captureStripeDisputeAlert(input: {
       level: 'error',
       app: 'tovis',
       namespace: 'payments',
-      event: 'stripe_dispute',
+      event: logEvent,
+      flavor: input.flavor,
       outcome: input.outcome,
       eventType: input.eventType,
       bookingId: input.bookingId,

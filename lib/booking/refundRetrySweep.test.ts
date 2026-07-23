@@ -146,6 +146,29 @@ describe('retryFailedAutoCancelRefunds — discovery', () => {
     expect(run.tally.retried_succeeded).toBe(1)
   })
 
+  it('skips a deposit-flavor pair whose deposit charge is under dispute (M4) — never attempts', async () => {
+    // A disputed deposit still reads depositStatus=PAID and passes backoff/
+    // provenance; the depositDisputedAt freeze is what keeps the sweep off it,
+    // so Stripe already pulled the funds and a retry would double-return them.
+    mocks.refundFindMany.mockResolvedValue([
+      failedRow({
+        stripePaymentIntentId: 'pi_deposit',
+        createdAt: new Date(NOW.getTime() - DEPOSIT_RETRY_BACKOFF_MS - 1000),
+        booking: serviceBooking({
+          depositStatus: BookingDepositStatus.PAID,
+          depositDisputedAt: new Date('2026-07-21T00:00:00.000Z'),
+        }),
+      }),
+    ])
+
+    const run = await retryFailedAutoCancelRefunds({ now: NOW })
+
+    expect(mocks.applyLateCaptureCancelRefund).not.toHaveBeenCalled()
+    expect(mocks.refundBookingPayment).not.toHaveBeenCalled()
+    expect(run.tally.not_retryable).toBe(1)
+    expect(run.tally.retried_succeeded).toBe(0)
+  })
+
   it('collapses several FAILED rows for one pair into a single retry', async () => {
     mocks.refundFindMany.mockResolvedValue([
       failedRow({ createdAt: new Date(NOW.getTime() - 5 * RETRY_BACKOFF_MS) }),
