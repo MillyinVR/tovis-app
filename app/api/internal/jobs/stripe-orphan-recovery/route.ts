@@ -11,7 +11,10 @@
 // - uses Stripe as the payment provider
 // - has not collected payment locally
 // - has not already recorded a succeeded Stripe payment
-// - is not COMPLETED or CANCELLED
+// - is not COMPLETED (a CANCELLED booking IS a candidate: money Stripe holds
+//   for a cancelled booking must be recorded and then settled by the cancel's
+//   refund policy — see applyLateCaptureCancelRefund. Excluding CANCELLED made
+//   that money invisible forever when the success webhook was lost outright.)
 // - was created at least MIN_AGE_MINUTES ago, so normal webhook flow gets first shot
 // - was created no more than MAX_AGE_HOURS ago, so the sweep stays bounded
 //
@@ -32,6 +35,7 @@ import {
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import { applyStripePaymentSucceeded } from '@/lib/booking/writeBoundary'
+import { applyLateCaptureCancelRefund } from '@/lib/booking/cancelRefund'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
@@ -165,6 +169,15 @@ async function recoverBooking(args: {
       currency,
     })
 
+    // Recovered money on an already-CANCELLED booking settles by the cancel's
+    // refund policy, post-commit — same contract as the live webhook route.
+    if (result?.capturedOnCancelledBooking) {
+      await applyLateCaptureCancelRefund({
+        bookingId: result.bookingId,
+        flavor: 'SERVICE',
+      })
+    }
+
     return {
       bookingId: args.bookingId,
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
@@ -221,7 +234,7 @@ async function runJob(req: Request): Promise<Response> {
       },
       paymentCollectedAt: null,
       status: {
-        notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED],
+        notIn: [BookingStatus.COMPLETED],
       },
       createdAt: {
         lte: minCreatedBefore,

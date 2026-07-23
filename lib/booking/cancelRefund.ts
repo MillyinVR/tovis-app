@@ -25,6 +25,7 @@
 import {
   BookingDepositStatus,
   BookingRefundTrigger,
+  BookingStatus,
   Role,
 } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
@@ -36,6 +37,7 @@ import {
   type RefundResult,
 } from '@/lib/booking/refunds'
 import { resolveDepositRefundPlan } from '@/lib/booking/discoveryDepositPlan'
+import { captureLateCaptureOnCancelledBooking } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
 
 export const CLIENT_FULL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -256,6 +258,116 @@ export async function applyDiscoveryDepositCancelRefund(args: {
     return { outcome: 'NOT_ATTEMPTED' }
   } catch (error) {
     console.error('applyDiscoveryDepositCancelRefund: unexpected error', {
+      bookingId: args.bookingId,
+      error: safeError(error),
+    })
+    Sentry.captureException(error)
+    return { outcome: 'NOT_ATTEMPTED' }
+  }
+}
+
+export type LateCaptureRefundFlavor = 'DEPOSIT' | 'SERVICE'
+
+export type LateCaptureCancelRefundResult =
+  | AutoCancelRefundResult
+  | DepositCancelRefundResult
+  | { outcome: 'UNKNOWN_PROVENANCE' }
+
+function cancelRoleToActorKind(role: Role): CancelRefundActorKind {
+  if (role === Role.PRO) return 'pro'
+  if (role === Role.ADMIN) return 'admin'
+  return 'client'
+}
+
+/**
+ * A Stripe success (service payment or discovery deposit) landed on a booking
+ * that was already CANCELLED — webhook delay/outage, requeue replay, or orphan
+ * recovery. The cancel-time refund helpers skipped it (the money had not landed
+ * locally yet), so this is the one place that knows both facts and must settle
+ * them: re-run the SAME policy the cancel ran, decided as of the cancel — actor
+ * from `cancelledByRole`, the 24h window evaluated at `cancelledAt`, via the
+ * same isAutoCancelRefundEligible / resolveDepositRefundPlan gates. No policy
+ * is re-derived here.
+ *
+ * Fired post-commit by every arrival path (live webhook route, webhook requeue
+ * cron, orphan recovery) — Stripe I/O cannot run inside their transactions.
+ * Best-effort: never throws. A booking cancelled before the provenance columns
+ * existed (or by a system cancel with no acting role) cannot be settled by
+ * policy — that alerts for manual resolution, as does a failed refund attempt.
+ */
+export async function applyLateCaptureCancelRefund(args: {
+  bookingId: string
+  flavor: LateCaptureRefundFlavor
+}): Promise<LateCaptureCancelRefundResult> {
+  try {
+    const booking = await prisma.booking.findUnique({
+      where: { id: args.bookingId },
+      select: { status: true, cancelledAt: true, cancelledByRole: true },
+    })
+
+    if (!booking || booking.status !== BookingStatus.CANCELLED) {
+      return { outcome: 'NOT_ATTEMPTED' }
+    }
+
+    if (!booking.cancelledAt || !booking.cancelledByRole) {
+      captureLateCaptureOnCancelledBooking({
+        bookingId: args.bookingId,
+        flavor: args.flavor,
+        reason: 'UNKNOWN_CANCEL_PROVENANCE',
+        detail:
+          'Booking is CANCELLED with no cancel provenance (pre-migration cancel or system cancel) — refund policy cannot be derived.',
+      })
+      return { outcome: 'UNKNOWN_PROVENANCE' }
+    }
+
+    const actorKind = cancelRoleToActorKind(booking.cancelledByRole)
+
+    const result =
+      args.flavor === 'DEPOSIT'
+        ? await applyDiscoveryDepositCancelRefund({
+            bookingId: args.bookingId,
+            actorKind,
+            actorUserId: null,
+            cancelMutated: true,
+            now: booking.cancelledAt,
+            reason: `Deposit refund on payment captured after ${actorKind} cancellation.`,
+          })
+        : await applyAutoCancelRefund({
+            bookingId: args.bookingId,
+            actorKind,
+            actorUserId: null,
+            cancelMutated: true,
+            now: booking.cancelledAt,
+            reason: `Automatic refund on payment captured after ${actorKind} cancellation.`,
+          })
+
+    // Distinct log identity from the cancel-time refund path, so a late-capture
+    // settle is always tellable apart in the logs.
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        app: 'tovis',
+        namespace: 'payments',
+        event: 'late_capture_cancel_refund',
+        bookingId: args.bookingId,
+        flavor: args.flavor,
+        actorKind,
+        outcome: result.outcome,
+      }),
+    )
+
+    if (result.outcome === 'FAILED') {
+      captureLateCaptureOnCancelledBooking({
+        bookingId: args.bookingId,
+        flavor: args.flavor,
+        reason: 'REFUND_FAILED',
+        detail: result.message,
+      })
+    }
+
+    return result
+  } catch (error) {
+    console.error('applyLateCaptureCancelRefund: unexpected error', {
       bookingId: args.bookingId,
       error: safeError(error),
     })

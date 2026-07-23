@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest'
 import {
   BookingStatus,
   NotificationEventKey,
+  Role,
   SessionStep,
 } from '@prisma/client'
 
@@ -169,6 +170,9 @@ describe('lib/booking/writeBoundary', () => {
         sessionStep: SessionStep.NONE,
         startedAt: null,
         finishedAt: null,
+        // M1: cancel provenance for the late-capture refund path.
+        cancelledAt: expect.any(Date),
+        cancelledByRole: Role.CLIENT,
       },
       select: {
         id: true,

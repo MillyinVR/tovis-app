@@ -18,6 +18,7 @@
 import type Stripe from 'stripe'
 
 import { handleStripeEvent } from '@/lib/stripe/handleWebhookEvent'
+import { applyLateCaptureCancelRefund } from '@/lib/booking/cancelRefund'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 
@@ -116,6 +117,13 @@ async function requeueEvent(row: FailedEventRow): Promise<WebhookRequeueResult> 
       },
       { timeout: 30_000, maxWait: 10_000 },
     )
+
+    // Same contract as the live webhook route: a payment that replayed onto an
+    // already-CANCELLED booking settles by the cancel's refund policy, after
+    // the transaction commits. Best-effort — never throws.
+    if (result.lateCaptureRefund) {
+      await applyLateCaptureCancelRefund(result.lateCaptureRefund)
+    }
 
     return {
       ...base,

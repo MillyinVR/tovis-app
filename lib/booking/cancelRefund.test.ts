@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   refundDiscoveryDeposit: vi.fn(),
   bookingFindUnique: vi.fn(),
   captureException: vi.fn(),
+  captureLateCaptureOnCancelledBooking: vi.fn(),
 }))
 
 vi.mock('@/lib/booking/refunds', () => ({
@@ -21,11 +22,17 @@ vi.mock('@sentry/nextjs', () => ({
   captureException: mocks.captureException,
 }))
 
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureLateCaptureOnCancelledBooking:
+    mocks.captureLateCaptureOnCancelledBooking,
+}))
+
 import { BookingDepositStatus } from '@prisma/client'
 
 import {
   applyAutoCancelRefund,
   applyDiscoveryDepositCancelRefund,
+  applyLateCaptureCancelRefund,
   isAutoCancelRefundEligible,
   CLIENT_FULL_REFUND_WINDOW_MS,
 } from './cancelRefund'
@@ -37,6 +44,7 @@ beforeEach(() => {
   mocks.refundDiscoveryDeposit.mockReset()
   mocks.bookingFindUnique.mockReset()
   mocks.captureException.mockReset()
+  mocks.captureLateCaptureOnCancelledBooking.mockReset()
   mocks.refundBookingPayment.mockResolvedValue({
     outcome: 'REFUNDED',
     refund: { id: 'refund_1' },
@@ -259,5 +267,253 @@ describe('applyDiscoveryDepositCancelRefund — pro cancel still refunds', () =>
       refundAmountCents: 2500,
       feeRefunded: true,
     })
+  })
+})
+
+// ─── M1: late-captured payment on a CANCELLED booking ────────────────────────
+//
+// A Stripe success that lands AFTER the cancel must settle by the SAME policy
+// the cancel ran, decided AS OF the cancel: actor from cancelledByRole, the 24h
+// window evaluated at cancelledAt — never at webhook-delivery time.
+describe('applyLateCaptureCancelRefund', () => {
+  const SCHEDULED_FOR = new Date('2026-04-12T12:00:00.000Z')
+  // 26h before the appointment — outside the 24h window (refund-eligible).
+  const CANCELLED_EARLY = new Date('2026-04-11T10:00:00.000Z')
+  // 2h before the appointment — inside the 24h window (forfeit).
+  const CANCELLED_LATE = new Date('2026-04-12T10:00:00.000Z')
+
+  function primeProvenance(args: {
+    cancelledAt: Date | null
+    cancelledByRole: Role | null
+    status?: string
+  }) {
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      status: args.status ?? 'CANCELLED',
+      cancelledAt: args.cancelledAt,
+      cancelledByRole: args.cancelledByRole,
+    })
+  }
+
+  it('SERVICE × admin cancel → full refund through refundBookingPayment', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_LATE,
+      cancelledByRole: Role.ADMIN,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+
+    expect(mocks.refundBookingPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+        actor: { userId: null, role: Role.ADMIN },
+        reason: 'Automatic refund on payment captured after admin cancellation.',
+      }),
+    )
+    expect(result.outcome).toBe('REFUNDED')
+  })
+
+  it('SERVICE × client cancel ≥24h out → refund, judged at cancelledAt', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_EARLY,
+      cancelledByRole: Role.CLIENT,
+    })
+    // applyAutoCancelRefund's own read of scheduledFor.
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      scheduledFor: SCHEDULED_FOR,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+
+    expect(mocks.refundBookingPayment).toHaveBeenCalledOnce()
+    expect(result.outcome).toBe('REFUNDED')
+  })
+
+  it('SERVICE × client cancel <24h out → policy says no refund, no Stripe call', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_LATE,
+      cancelledByRole: Role.CLIENT,
+    })
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      scheduledFor: SCHEDULED_FOR,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+
+    expect(mocks.refundBookingPayment).not.toHaveBeenCalled()
+    expect(result.outcome).toBe('NOT_ATTEMPTED')
+  })
+
+  it('SERVICE × pro cancel → pro discretion, no auto refund', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_EARLY,
+      cancelledByRole: Role.PRO,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+
+    expect(mocks.refundBookingPayment).not.toHaveBeenCalled()
+    expect(result.outcome).toBe('NOT_ATTEMPTED')
+  })
+
+  it('DEPOSIT × client cancel ≥24h out → deposit back, fee kept', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_EARLY,
+      cancelledByRole: Role.CLIENT,
+    })
+    // applyDiscoveryDepositCancelRefund's own booking read.
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      scheduledFor: SCHEDULED_FOR,
+      depositStatus: BookingDepositStatus.PAID,
+      depositStripePaymentIntentId: 'pi_deposit_1',
+      depositAmount: 25, // dollars -> 2500 cents
+      discoveryFeeAmount: 500,
+    })
+    mocks.refundDiscoveryDeposit.mockResolvedValue({
+      outcome: 'REFUNDED',
+      refundAmountCents: 2500,
+      feeRefunded: false,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'DEPOSIT',
+    })
+
+    expect(mocks.refundDiscoveryDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentIntentId: 'pi_deposit_1',
+        refundAmountCents: 2500,
+        refundFee: false,
+        // Policy must be evaluated AS OF the cancel, not delivery time.
+        now: CANCELLED_EARLY,
+      }),
+    )
+    expect(result.outcome).toBe('REFUNDED')
+  })
+
+  it('DEPOSIT × client cancel <24h out → forfeited, no Stripe call', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_LATE,
+      cancelledByRole: Role.CLIENT,
+    })
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      scheduledFor: SCHEDULED_FOR,
+      depositStatus: BookingDepositStatus.PAID,
+      depositStripePaymentIntentId: 'pi_deposit_1',
+      depositAmount: 25,
+      discoveryFeeAmount: 500,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'DEPOSIT',
+    })
+
+    expect(mocks.refundDiscoveryDeposit).not.toHaveBeenCalled()
+    expect(result.outcome).toBe('FORFEITED')
+  })
+
+  it('DEPOSIT × pro cancel → deposit AND fee back', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_LATE,
+      cancelledByRole: Role.PRO,
+    })
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      scheduledFor: SCHEDULED_FOR,
+      depositStatus: BookingDepositStatus.PAID,
+      depositStripePaymentIntentId: 'pi_deposit_1',
+      depositAmount: 25,
+      discoveryFeeAmount: 500,
+    })
+    mocks.refundDiscoveryDeposit.mockResolvedValue({
+      outcome: 'REFUNDED',
+      refundAmountCents: 3000,
+      feeRefunded: true,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'DEPOSIT',
+    })
+
+    expect(mocks.refundDiscoveryDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({ refundAmountCents: 3000, refundFee: true }),
+    )
+    expect(result.outcome).toBe('REFUNDED')
+  })
+
+  it('unknown provenance (pre-migration cancel) → alert, no refund attempt', async () => {
+    primeProvenance({ cancelledAt: null, cancelledByRole: null })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'DEPOSIT',
+    })
+
+    expect(mocks.captureLateCaptureOnCancelledBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        flavor: 'DEPOSIT',
+        reason: 'UNKNOWN_CANCEL_PROVENANCE',
+      }),
+    )
+    expect(mocks.refundBookingPayment).not.toHaveBeenCalled()
+    expect(mocks.refundDiscoveryDeposit).not.toHaveBeenCalled()
+    expect(result.outcome).toBe('UNKNOWN_PROVENANCE')
+  })
+
+  it('booking no longer CANCELLED → silent no-op', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_EARLY,
+      cancelledByRole: Role.CLIENT,
+      status: 'ACCEPTED',
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+
+    expect(mocks.refundBookingPayment).not.toHaveBeenCalled()
+    expect(mocks.captureLateCaptureOnCancelledBooking).not.toHaveBeenCalled()
+    expect(result.outcome).toBe('NOT_ATTEMPTED')
+  })
+
+  it('refund FAILED → pages via the late-capture alert', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_LATE,
+      cancelledByRole: Role.ADMIN,
+    })
+    mocks.refundBookingPayment.mockResolvedValue({
+      outcome: 'FAILED',
+      refund: { id: 'refund_1' },
+      message: 'stripe exploded',
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+
+    expect(mocks.captureLateCaptureOnCancelledBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'REFUND_FAILED',
+        detail: 'stripe exploded',
+      }),
+    )
+    expect(result.outcome).toBe('FAILED')
   })
 })

@@ -737,6 +737,13 @@ type ApplyStripePaymentResult = {
   bookingId: string
   bookingCompleted: boolean
   meta: MutationMeta
+  /**
+   * Set only by the payment-succeeded applier: the captured money is (now)
+   * recorded on a CANCELLED booking, so the cancel-time refund helpers never
+   * saw it. The caller must run applyLateCaptureCancelRefund AFTER its
+   * transaction commits (Stripe I/O cannot live in the webhook transaction).
+   */
+  capturedOnCancelledBooking?: boolean
 }
 
 type ApplyStripePaymentFailedArgs = {
@@ -5634,6 +5641,12 @@ async function enforceProCreateScheduling(args: {
   )
 }
 
+function cancelActorRole(actor: CancelActor): Role {
+  if (actor.kind === 'client') return Role.CLIENT
+  if (actor.kind === 'pro') return Role.PRO
+  return Role.ADMIN
+}
+
 async function performLockedCancel(args: {
   tx: Prisma.TransactionClient
   bookingId: string
@@ -5676,6 +5689,11 @@ async function performLockedCancel(args: {
       sessionStep: SessionStep.NONE,
       startedAt: null,
       finishedAt: null,
+      // Provenance for the late-capture refund path: a payment webhook landing
+      // after this cancel re-runs the cancel refund policy, which is decided by
+      // WHO cancelled and WHEN (see applyLateCaptureCancelRefund).
+      cancelledAt: new Date(),
+      cancelledByRole: cancelActorRole(args.actor),
     },
     select: {
       id: true,
@@ -10605,7 +10623,12 @@ async function performLockedUpdateProBooking(args: {
   if (args.nextStatus === BookingStatus.CANCELLED) {
     const updated = await args.tx.booking.update({
     where: { id: existing.id },
-    data: { status: BookingStatus.CANCELLED },
+    data: {
+      status: BookingStatus.CANCELLED,
+      // Provenance for the late-capture refund path (this surface is pro-only).
+      cancelledAt: new Date(),
+      cancelledByRole: Role.PRO,
+    },
     select: {
       id: true,
       status: true,
@@ -14212,7 +14235,9 @@ export async function cancelImportedBookingIfPristine(args: {
       status: BookingStatus.ACCEPTED,
       startedAt: null,
     },
-    data: { status: BookingStatus.CANCELLED },
+    // cancelledByRole stays null: this is a SYSTEM cancel with no acting role
+    // (and an imported booking carries no payment for the late-capture path).
+    data: { status: BookingStatus.CANCELLED, cancelledAt: new Date() },
   })
   if (result.count > 0) {
     await bumpProfessionalScheduleVersion(args.professionalId)
@@ -16083,7 +16108,18 @@ export async function recordDepositCheckoutAttached(args: {
   })
 }
 
-export type ApplyDepositResult = { handled: boolean; alreadyPaid: boolean }
+export type ApplyDepositResult = {
+  handled: boolean
+  alreadyPaid: boolean
+  bookingId: string | null
+  /**
+   * The deposit money is (now) recorded on a CANCELLED booking — the cancel-time
+   * refund helpers skipped it because the deposit had not landed locally yet.
+   * The caller must run applyLateCaptureCancelRefund AFTER its transaction
+   * commits (Stripe I/O cannot live in the webhook transaction).
+   */
+  capturedOnCancelledBooking: boolean
+}
 
 /**
  * Mark a discovery deposit paid from a Stripe webhook. Idempotent: a second
@@ -16102,7 +16138,7 @@ export async function applyStripeDepositSucceededInTransaction(
 
   const booking = await tx.booking.findFirst({
     where: { depositStripePaymentIntentId: args.stripePaymentIntentId },
-    select: { id: true, depositStatus: true },
+    select: { id: true, depositStatus: true, status: true },
   })
 
   const resolved =
@@ -16110,17 +16146,32 @@ export async function applyStripeDepositSucceededInTransaction(
     (args.bookingIdHint
       ? await tx.booking.findUnique({
           where: { id: args.bookingIdHint },
-          select: { id: true, depositStatus: true },
+          select: { id: true, depositStatus: true, status: true },
         })
       : null)
 
-  if (!resolved) return { handled: false, alreadyPaid: false }
-
-  if (resolved.depositStatus === BookingDepositStatus.PAID) {
-    return { handled: true, alreadyPaid: true }
+  if (!resolved) {
+    return {
+      handled: false,
+      alreadyPaid: false,
+      bookingId: null,
+      capturedOnCancelledBooking: false,
+    }
   }
 
-  await tx.booking.update({
+  if (resolved.depositStatus === BookingDepositStatus.PAID) {
+    // Replay path: the money already landed. Still flag a CANCELLED booking so
+    // a redelivery can re-trigger the refund attempt if the first one failed
+    // (the refund itself is idempotent — PAID→REFUNDED claims exactly once).
+    return {
+      handled: true,
+      alreadyPaid: true,
+      bookingId: resolved.id,
+      capturedOnCancelledBooking: resolved.status === BookingStatus.CANCELLED,
+    }
+  }
+
+  const updated = await tx.booking.update({
     where: { id: resolved.id },
     data: {
       depositStatus: BookingDepositStatus.PAID,
@@ -16128,9 +16179,20 @@ export async function applyStripeDepositSucceededInTransaction(
       depositStripePaymentIntentId: args.stripePaymentIntentId,
       depositStripeChargeId: args.chargeId,
     },
+    // Status must come from the UPDATE's row, not the read above: this applier
+    // takes no schedule lock, so a concurrent cancel can commit between the
+    // read and this write. The update waits on that cancel's row lock, so the
+    // returned status is current — and a cancel that has NOT committed yet will
+    // itself wait on ours, then find the deposit PAID and refund on its side.
+    select: { status: true } satisfies Prisma.BookingSelect,
   })
 
-  return { handled: true, alreadyPaid: false }
+  return {
+    handled: true,
+    alreadyPaid: false,
+    bookingId: resolved.id,
+    capturedOnCancelledBooking: updated.status === BookingStatus.CANCELLED,
+  }
 }
 
 /**
@@ -16315,10 +16377,14 @@ async function performLockedApplyStripePaymentSucceeded(args: {
     booking.paymentCollectedAt !== null
 
   if (alreadyApplied) {
+    // Replay path: still flag a CANCELLED booking so a redelivery can
+    // re-trigger the late-capture refund if the first attempt failed (the
+    // refund path itself is idempotent per reserved row).
     return {
       bookingId: booking.id,
       bookingCompleted: booking.status === BookingStatus.COMPLETED,
       meta: buildMeta(false),
+      capturedOnCancelledBooking: booking.status === BookingStatus.CANCELLED,
     }
   }
 
@@ -16441,6 +16507,11 @@ async function performLockedApplyStripePaymentSucceeded(args: {
     bookingId: booking.id,
     bookingCompleted,
     meta: buildMeta(true),
+    // From the UPDATE's returned row (not the earlier read): this applier runs
+    // under the schedule lock the cancel paths also take, and the update's row
+    // reflects any cancel that committed first — so a payment applying onto a
+    // CANCELLED booking is always flagged for the post-commit refund.
+    capturedOnCancelledBooking: updated.status === BookingStatus.CANCELLED,
   }
 }
 
