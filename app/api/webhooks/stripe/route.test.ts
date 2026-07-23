@@ -78,9 +78,15 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   DISCOVERY_DEPOSIT_CHECKOUT_KIND: 'DISCOVERY_DEPOSIT',
 }))
 
-vi.mock('@/lib/booking/refunds', () => ({
-  reconcileChargeRefundInTransaction: mocks.reconcileChargeRefundInTransaction,
-}))
+// Keep the REAL mapStripeRefundToReconcileInput (pure mapper handleChargeRefunded
+// uses to build the reconcile input); only the reconcile transaction is stubbed.
+vi.mock('@/lib/booking/refunds', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/booking/refunds')>()
+  return {
+    mapStripeRefundToReconcileInput: actual.mapStripeRefundToReconcileInput,
+    reconcileChargeRefundInTransaction: mocks.reconcileChargeRefundInTransaction,
+  }
+})
 
 vi.mock('@/lib/booking/cancelRefund', () => ({
   applyLateCaptureCancelRefund: mocks.applyLateCaptureCancelRefund,

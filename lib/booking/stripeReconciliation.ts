@@ -32,6 +32,7 @@ import {
 } from '@prisma/client'
 
 import {
+  mapStripeRefundToReconcileInput,
   reconcileChargeRefundInTransaction,
   type ChargeRefundReconcileInput,
 } from '@/lib/booking/refunds'
@@ -231,11 +232,12 @@ async function reconcileBooking(candidate: Candidate): Promise<BookingReconcileR
       payment_intent: candidate.stripePaymentIntentId,
       limit: STRIPE_REFUND_PAGE_SIZE,
     })
-    refunds = list.data.map((refund) => ({
-      id: refund.id,
-      status: refund.status,
-      amountCents: typeof refund.amount === 'number' ? refund.amount : 0,
-    }))
+    // Same mapper as the live webhook — critically, this carries
+    // metadata.bookingRefundId so the sweep can run the N3 stranded-PENDING-row
+    // recovery, not just amount/status sync. Dropping it here is exactly the
+    // hole M7 closed: the sweep that exists to cover lost webhooks must do the
+    // full recovery the webhook does.
+    refunds = list.data.map(mapStripeRefundToReconcileInput)
   } catch (error: unknown) {
     captureBookingException({
       error,
