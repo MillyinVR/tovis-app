@@ -147,18 +147,30 @@ async function handleCheckoutSession(
       ? session.client_reference_id.trim()
       : null)
 
-  // Discovery deposit checkout: a separate up-front charge that carries the platform
-  // fee — never touch the final-bill payment fields for it.
-  if (
-    status === StripeCheckoutSessionStatus.COMPLETE &&
-    isDiscoveryDepositMetadata(session.metadata)
-  ) {
-    return handleDepositPaid(tx, {
-      stripePaymentIntentId: getSessionPaymentIntentId(session),
-      chargeId: null,
-      bookingIdHint,
-      eventLabel,
-    })
+  // Discovery deposit checkout: a separate up-front charge that carries the
+  // platform fee. Route on the session's KIND, not its status — a deposit
+  // session must never fall through to the final-bill field writer below,
+  // whatever its outcome (an expired deposit session used to stamp the deposit's
+  // session id / PI / amounts plus paymentProvider=STRIPE into the final-bill
+  // fields of a booking that never chose card).
+  if (isDiscoveryDepositMetadata(session.metadata)) {
+    if (status === StripeCheckoutSessionStatus.COMPLETE) {
+      return handleDepositPaid(tx, {
+        stripePaymentIntentId: getSessionPaymentIntentId(session),
+        chargeId: null,
+        bookingIdHint,
+        eventLabel,
+      })
+    }
+
+    // Expired (abandoned) deposit checkout: deliberately write nothing. The
+    // deposit stays PENDING so the client can re-open a fresh checkout; what
+    // should happen to the booking itself (deadline, auto-cancel, pro-facing
+    // surface) is a policy decision that does not belong in this handler.
+    return {
+      handled: true,
+      message: `${eventLabel} deposit session ignored — deposit checkout expiry does not modify the booking.`,
+    }
   }
 
   const stripeCheckoutSessionId = session.id
