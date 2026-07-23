@@ -911,3 +911,53 @@ describe('refundDiscoveryDeposit — failure leg (M3)', () => {
     expect(captured.some((msg) => msg.includes('stripe down'))).toBe(true)
   })
 })
+
+describe('refundDiscoveryDeposit — dispute freeze (M4)', () => {
+  it('a disputed deposit is NOT_ATTEMPTED — no Stripe call, no counter change', async () => {
+    // A PAID deposit whose charge is under a Stripe dispute: Stripe already
+    // pulled the funds via the chargeback, so re-refunding would double-return.
+    setBooking({
+      depositStatus: BookingDepositStatus.PAID,
+      depositAmount: 30,
+      discoveryFeeAmount: 1000,
+      depositRefundedCents: 0,
+      depositDisputedAt: new Date('2026-07-22T00:00:00.000Z'),
+    })
+
+    const result = await refundDiscoveryDeposit({
+      bookingId: 'booking_1',
+      paymentIntentId: 'pi_dep_1',
+      refundAmountCents: 4000,
+      refundFee: true,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result).toEqual({ outcome: 'NOT_ATTEMPTED' })
+    // Froze BEFORE reserving: no claim write, no Stripe refund, no refund row.
+    expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
+    expect(mocks.bookingUpdates).toEqual([])
+    expect(mocks.refundRows).toEqual([])
+  })
+
+  it('an undisputed PAID deposit still refunds (control — the freeze is the only gate added)', async () => {
+    setBooking({
+      depositStatus: BookingDepositStatus.PAID,
+      depositAmount: 30,
+      discoveryFeeAmount: 1000,
+      depositRefundedCents: 0,
+      depositDisputedAt: null,
+    })
+    mocks.stripeRefundsCreate.mockResolvedValue({ id: 're_ok' })
+
+    const result = await refundDiscoveryDeposit({
+      bookingId: 'booking_1',
+      paymentIntentId: 'pi_dep_1',
+      refundAmountCents: 4000,
+      refundFee: true,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    expect(mocks.stripeRefundsCreate).toHaveBeenCalledTimes(1)
+  })
+})

@@ -12,11 +12,13 @@ import type { Prisma } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   applyStripeDisputeInTransaction: vi.fn(),
+  applyStripeDepositDisputeInTransaction: vi.fn(),
   captureStripeDisputeAlert: vi.fn(),
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   applyStripeCheckoutSessionStatusInTransaction: vi.fn(),
+  applyStripeDepositDisputeInTransaction: mocks.applyStripeDepositDisputeInTransaction,
   applyStripeDepositSucceededInTransaction: vi.fn(),
   applyStripeDisputeInTransaction: mocks.applyStripeDisputeInTransaction,
   applyStripePaymentFailedInTransaction: vi.fn(),
@@ -52,12 +54,15 @@ function dispute(overrides: Partial<Stripe.Dispute>): Stripe.Dispute {
 
 beforeEach(() => {
   mocks.applyStripeDisputeInTransaction.mockReset()
+  mocks.applyStripeDepositDisputeInTransaction.mockReset()
   mocks.captureStripeDisputeAlert.mockReset()
   mocks.applyStripeDisputeInTransaction.mockResolvedValue({
     bookingId: 'booking_1',
     bookingCompleted: false,
     meta: { mutated: true },
   })
+  // Default: no deposit PI matches (the service path handles the common case).
+  mocks.applyStripeDepositDisputeInTransaction.mockResolvedValue(null)
 })
 
 describe('resolveDisputeOutcome', () => {
@@ -108,8 +113,10 @@ describe('handleChargeDispute', () => {
       }),
     )
     expect(mocks.captureStripeDisputeAlert).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: 'OPEN', bookingId: 'booking_1' }),
+      expect.objectContaining({ outcome: 'OPEN', bookingId: 'booking_1', flavor: 'SERVICE' }),
     )
+    // A final-bill match never falls through to the deposit matcher.
+    expect(mocks.applyStripeDepositDisputeInTransaction).not.toHaveBeenCalled()
   })
 
   it('closed-won → applies WON and does NOT alert', async () => {
@@ -171,8 +178,9 @@ describe('handleChargeDispute', () => {
     expect(mocks.captureStripeDisputeAlert).not.toHaveBeenCalled()
   })
 
-  it('returns unhandled (no alert) when no booking matches', async () => {
+  it('returns unhandled (no alert) when neither a final-bill nor a deposit PI matches', async () => {
     mocks.applyStripeDisputeInTransaction.mockResolvedValue(null)
+    mocks.applyStripeDepositDisputeInTransaction.mockResolvedValue(null)
 
     const result = await handleChargeDispute(
       tx,
@@ -182,6 +190,53 @@ describe('handleChargeDispute', () => {
     )
 
     expect(result.handled).toBe(false)
+    expect(mocks.captureStripeDisputeAlert).not.toHaveBeenCalled()
+  })
+
+  it('a deposit-PI dispute (no final-bill match) freezes the deposit and alerts with DEPOSIT flavor', async () => {
+    // Final-bill matcher misses (dispute is on the deposit PI); deposit matcher
+    // hits. Previously this returned handled:false — no freeze, no alert (M4).
+    mocks.applyStripeDisputeInTransaction.mockResolvedValue(null)
+    mocks.applyStripeDepositDisputeInTransaction.mockResolvedValue({
+      bookingId: 'booking_dep',
+    })
+
+    const result = await handleChargeDispute(
+      tx,
+      dispute({ payment_intent: 'pi_deposit', status: 'needs_response' }),
+      'charge.dispute.created',
+      'evt_1',
+    )
+
+    expect(result.handled).toBe(true)
+    expect(result.message).toContain('deposit')
+    expect(mocks.applyStripeDepositDisputeInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ depositPaymentIntentId: 'pi_deposit', outcome: 'OPEN' }),
+    )
+    expect(mocks.captureStripeDisputeAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'OPEN', bookingId: 'booking_dep', flavor: 'DEPOSIT' }),
+    )
+  })
+
+  it('a WON deposit dispute clears the freeze and does NOT alert', async () => {
+    mocks.applyStripeDisputeInTransaction.mockResolvedValue(null)
+    mocks.applyStripeDepositDisputeInTransaction.mockResolvedValue({
+      bookingId: 'booking_dep',
+    })
+
+    const result = await handleChargeDispute(
+      tx,
+      dispute({ payment_intent: 'pi_deposit', status: 'won' }),
+      'charge.dispute.closed',
+      'evt_1',
+    )
+
+    expect(result.handled).toBe(true)
+    expect(mocks.applyStripeDepositDisputeInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ outcome: 'WON' }),
+    )
     expect(mocks.captureStripeDisputeAlert).not.toHaveBeenCalled()
   })
 })

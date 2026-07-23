@@ -16845,6 +16845,74 @@ export async function applyStripeDisputeInTransaction(
   })
 }
 
+/**
+ * Apply a dispute (chargeback) on the DISCOVERY DEPOSIT PaymentIntent. The
+ * deposit rides its own charge/PI, separate from the final bill, so a deposit
+ * dispute never matches applyStripeDisputeInTransaction (which resolves by the
+ * final-bill `stripePaymentIntentId`). Resolves the booking by
+ * `depositStripePaymentIntentId` and records the freeze on `depositDisputedAt`:
+ *   OPEN / LOST -> set (Stripe pulled or is pulling the deposit funds) so
+ *     refundDiscoveryDeposit + the M3 retry sweep refuse to double-return them.
+ *     Keeps the earliest dispute time; LOST leaves the freeze in place forever
+ *     (the funds are gone via the chargeback, nothing to refund).
+ *   WON -> clear (the deposit was restored) so refunds may resume.
+ *
+ * Returns the matched bookingId (even on a no-op idempotent re-delivery) or null
+ * when no booking carries this deposit PI. Field-level idempotency (set-if-unset
+ * / clear-if-set) plus the webhook route's event-id dedupe make replays safe
+ * without a deposit-specific last-event column.
+ */
+export async function applyStripeDepositDisputeInTransaction(
+  tx: Prisma.TransactionClient,
+  args: {
+    depositPaymentIntentId: string
+    outcome: StripeDisputeOutcome
+    now?: Date
+  },
+): Promise<{ bookingId: string } | null> {
+  const depositPaymentIntentId = args.depositPaymentIntentId.trim()
+
+  if (!depositPaymentIntentId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe deposit payment intent id is required.',
+    })
+  }
+
+  const booking = await tx.booking.findFirst({
+    where: { depositStripePaymentIntentId: depositPaymentIntentId },
+    select: { id: true, professionalId: true },
+  })
+
+  if (!booking) return null
+
+  await lockProfessionalSchedule(tx, booking.professionalId)
+
+  const locked = await tx.booking.findFirst({
+    where: { depositStripePaymentIntentId: depositPaymentIntentId },
+    select: { id: true, depositDisputedAt: true },
+  })
+
+  if (!locked) return null
+
+  if (args.outcome === 'WON') {
+    // Restore: only if we had frozen it. Never invent a clear.
+    if (locked.depositDisputedAt) {
+      await tx.booking.update({
+        where: { id: locked.id },
+        data: { depositDisputedAt: null },
+      })
+    }
+  } else if (!locked.depositDisputedAt) {
+    // OPEN / LOST: freeze once, keeping the earliest dispute timestamp.
+    await tx.booking.update({
+      where: { id: locked.id },
+      data: { depositDisputedAt: args.now ?? new Date() },
+    })
+  }
+
+  return { bookingId: locked.id }
+}
+
 export async function applyStripeCheckoutSessionStatusInTransaction(
   tx: Prisma.TransactionClient,
   args: ApplyStripeCheckoutSessionStatusArgs,

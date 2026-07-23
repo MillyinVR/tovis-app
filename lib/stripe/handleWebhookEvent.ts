@@ -17,6 +17,7 @@ import {
 
 import {
   applyStripeCheckoutSessionStatusInTransaction,
+  applyStripeDepositDisputeInTransaction,
   applyStripeDepositSucceededInTransaction,
   applyStripeDisputeInTransaction,
   applyStripePaymentFailedInTransaction,
@@ -407,30 +408,55 @@ export async function handleChargeDispute(
 
   const outcome = resolveDisputeOutcome(eventType, dispute)
 
-  const result = await applyStripeDisputeInTransaction(tx, {
+  // Alert on an active or lost dispute (money at risk). A won dispute is good
+  // news (payment restored) and needs no page.
+  const alerting = outcome !== 'WON'
+
+  // A dispute event carries no bookingId hint and one PI, but a booking has TWO
+  // charges: the final-bill PI and the discovery-deposit PI. Try the final bill
+  // first (the common case), then the deposit — each has its own freeze.
+  const serviceResult = await applyStripeDisputeInTransaction(tx, {
     stripePaymentIntentId: paymentIntentId,
     stripeEventId,
     outcome,
   })
 
-  if (!result) {
-    return { handled: false, message: `${eventType} booking not found.` }
+  if (serviceResult) {
+    if (alerting) {
+      captureStripeDisputeAlert({
+        bookingId: serviceResult.bookingId,
+        paymentIntentId,
+        disputeId: dispute.id,
+        disputeStatus: dispute.status,
+        outcome,
+        eventType,
+        flavor: 'SERVICE',
+      })
+    }
+    return { handled: true, message: `${eventType} applied (${outcome}).` }
   }
 
-  // Alert on an active or lost dispute (money at risk). A won dispute is good
-  // news (payment restored) and needs no page.
-  if (outcome !== 'WON') {
-    captureStripeDisputeAlert({
-      bookingId: result.bookingId,
-      paymentIntentId,
-      disputeId: dispute.id,
-      disputeStatus: dispute.status,
-      outcome,
-      eventType,
-    })
+  const depositResult = await applyStripeDepositDisputeInTransaction(tx, {
+    depositPaymentIntentId: paymentIntentId,
+    outcome,
+  })
+
+  if (depositResult) {
+    if (alerting) {
+      captureStripeDisputeAlert({
+        bookingId: depositResult.bookingId,
+        paymentIntentId,
+        disputeId: dispute.id,
+        disputeStatus: dispute.status,
+        outcome,
+        eventType,
+        flavor: 'DEPOSIT',
+      })
+    }
+    return { handled: true, message: `${eventType} applied to deposit (${outcome}).` }
   }
 
-  return { handled: true, message: `${eventType} applied (${outcome}).` }
+  return { handled: false, message: `${eventType} booking not found.` }
 }
 
 async function handleSubscriptionEvent(

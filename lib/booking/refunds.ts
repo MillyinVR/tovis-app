@@ -462,6 +462,7 @@ export async function refundDiscoveryDeposit(args: {
         depositAmount: true,
         discoveryFeeAmount: true,
         depositRefundedCents: true,
+        depositDisputedAt: true,
       },
     })
 
@@ -469,6 +470,17 @@ export async function refundDiscoveryDeposit(args: {
     // never had funds; REFUNDED already returned the full deposit portion.
     if (!booking || booking.depositStatus !== BookingDepositStatus.PAID) {
       return { ok: false as const }
+    }
+
+    // A disputed deposit charge has had (or is having) its funds pulled by Stripe
+    // via the chargeback, and the transfer reversed off the pro. Issuing our own
+    // refund on top would double-return the deposit and over-claw the pro. Freeze
+    // the automated deposit refund until the dispute resolves — a WON dispute
+    // clears depositDisputedAt (applyStripeDepositDisputeInTransaction), re-opening
+    // refunds; a LOST dispute keeps it frozen forever (the money is already gone).
+    // Mirrors reserveRefund's DISPUTED gate on the final-bill PI (M4).
+    if (booking.depositDisputedAt) {
+      return { ok: false as const, disputed: true as const }
     }
 
     const depositCents = booking.depositAmount
@@ -504,7 +516,26 @@ export async function refundDiscoveryDeposit(args: {
     }
   })
 
-  if (!claim.ok) return { outcome: 'NOT_ATTEMPTED' }
+  if (!claim.ok) {
+    if (claim.disputed) {
+      // The freeze fired: a refund was requested against a deposit whose charge
+      // is under (or lost) a Stripe dispute. Benign — the dispute already paged
+      // (captureStripeDisputeAlert) — but log it with a distinct identity so the
+      // refusal is visible and not mistaken for "nothing to refund".
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          app: 'tovis',
+          namespace: 'payments',
+          event: 'deposit_refund_frozen_disputed',
+          bookingId: args.bookingId,
+          paymentIntentId: args.paymentIntentId,
+          trigger: args.trigger,
+        }),
+      )
+    }
+    return { outcome: 'NOT_ATTEMPTED' }
+  }
 
   try {
     const stripe = getStripe()

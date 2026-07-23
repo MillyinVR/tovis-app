@@ -3254,6 +3254,14 @@ model Booking {
   // refund keeps depositStatus PAID + records the cents so a later full refund
   // isn't blocked and we can't over-refund. See lib/booking/refunds.ts.
   depositRefundedCents         Int                  @default(0)
+  // Set when the deposit charge is under (or lost) a Stripe dispute; cleared if
+  // the dispute is WON. The deposit rides its OWN PaymentIntent, so a deposit
+  // dispute never touches stripePaymentStatus (that tracks the final-bill PI) —
+  // this is the deposit's equivalent freeze. While set, refundDiscoveryDeposit
+  // and the M3 retry sweep refuse to refund: Stripe has already pulled the
+  // funds via the dispute, so issuing our own refund would double-return them.
+  // See lib/booking/writeBoundary.ts (applyStripeDepositDisputeInTransaction).
+  depositDisputedAt            DateTime?
 
   // One-time platform discovery fee (cents), captured as the Stripe application
   // fee on the deposit charge. refundedAt is set when the fee is returned, so a
