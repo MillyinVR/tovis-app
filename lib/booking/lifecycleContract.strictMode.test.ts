@@ -238,3 +238,126 @@ describe('lib/booking/lifecycleContract strict mode', () => {
     expect(events).toHaveLength(0)
   })
 })
+
+// M8 — the cancel & closeout transitions the write boundary routes through the
+// contract. These pin the contract shape the boundary now depends on (SYSTEM
+// auto-release is legal; a client/pro cancel of a started session is not; a late
+// payment can never drag a terminal booking to COMPLETED).
+describe('lib/booking/lifecycleContract — M8 cancel & closeout coverage', () => {
+  beforeEach(() => {
+    unregisterDriftSinks = []
+    setLifecycleStrictMode('true')
+  })
+
+  afterEach(() => {
+    for (const unregister of unregisterDriftSinks) {
+      unregister()
+    }
+    unregisterDriftSinks = []
+    restoreLifecycleStrictModeEnv()
+  })
+
+  // SYSTEM auto-cancels (M5 unpaid-deposit release + pristine import cleanup) are
+  // legal from the two occupying pre-session statuses.
+  it.each([[BookingStatus.PENDING], [BookingStatus.ACCEPTED]])(
+    'allows SYSTEM to cancel a %s booking (auto-release) without drift',
+    (from) => {
+      const events = captureDriftEvents()
+
+      expect(() => {
+        recordStatusTransition({
+          from,
+          to: BookingStatus.CANCELLED,
+          actor: 'SYSTEM',
+          route: TEST_ROUTE,
+          bookingId: TEST_BOOKING_ID,
+          professionalId: TEST_PROFESSIONAL_ID,
+        })
+      }).not.toThrow()
+
+      expect(events).toHaveLength(0)
+    },
+  )
+
+  // A started session (IN_PROGRESS) may only be cancelled by ADMIN — a client
+  // (the reachable iOS bypass), pro, or the system are all refused.
+  it.each([['CLIENT'], ['PRO'], ['SYSTEM']] as const)(
+    'refuses %s cancelling a started IN_PROGRESS booking',
+    (actor) => {
+      const events = captureDriftEvents()
+
+      expect(() => {
+        recordStatusTransition({
+          from: BookingStatus.IN_PROGRESS,
+          to: BookingStatus.CANCELLED,
+          actor,
+          route: TEST_ROUTE,
+          bookingId: TEST_BOOKING_ID,
+          professionalId: TEST_PROFESSIONAL_ID,
+        })
+      }).toThrowError(LifecycleViolationError)
+
+      expect(events).toHaveLength(1)
+      expect(events[0]?.from).toBe(BookingStatus.IN_PROGRESS)
+      expect(events[0]?.to).toBe(BookingStatus.CANCELLED)
+    },
+  )
+
+  it('allows ADMIN to cancel a started IN_PROGRESS booking without drift', () => {
+    const events = captureDriftEvents()
+
+    expect(() => {
+      recordStatusTransition({
+        from: BookingStatus.IN_PROGRESS,
+        to: BookingStatus.CANCELLED,
+        actor: 'ADMIN',
+        route: TEST_ROUTE,
+        bookingId: TEST_BOOKING_ID,
+        professionalId: TEST_PROFESSIONAL_ID,
+      })
+    }).not.toThrow()
+
+    expect(events).toHaveLength(0)
+  })
+
+  // M1 tie-in at the contract layer: there is no transition INTO COMPLETED from a
+  // terminal status, so a late-arriving payment can never complete a CANCELLED or
+  // NO_SHOW booking even if the closeout predicate were somehow bypassed.
+  it.each([[BookingStatus.CANCELLED], [BookingStatus.NO_SHOW]])(
+    'refuses SYSTEM completing a %s booking (late payment cannot drag it to COMPLETED)',
+    (from) => {
+      const events = captureDriftEvents()
+
+      expect(() => {
+        recordStatusTransition({
+          from,
+          to: BookingStatus.COMPLETED,
+          actor: 'SYSTEM',
+          route: TEST_ROUTE,
+          bookingId: TEST_BOOKING_ID,
+          professionalId: TEST_PROFESSIONAL_ID,
+        })
+      }).toThrowError(LifecycleViolationError)
+
+      expect(events).toHaveLength(1)
+    },
+  )
+
+  // NO_SHOW is terminal (revenue protection): nothing may cancel it back out.
+  it('refuses cancelling a NO_SHOW booking (terminal)', () => {
+    const events = captureDriftEvents()
+
+    expect(() => {
+      recordStatusTransition({
+        from: BookingStatus.NO_SHOW,
+        to: BookingStatus.CANCELLED,
+        actor: 'ADMIN',
+        route: TEST_ROUTE,
+        bookingId: TEST_BOOKING_ID,
+        professionalId: TEST_PROFESSIONAL_ID,
+      })
+    }).toThrowError(LifecycleViolationError)
+
+    expect(events).toHaveLength(1)
+  })
+})

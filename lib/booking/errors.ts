@@ -55,6 +55,7 @@ export type BookingErrorCode =
   | "HOLD_TIME_INVALID"
   | "BOOKING_CANNOT_EDIT_CANCELLED"
   | "BOOKING_CANNOT_EDIT_COMPLETED"
+  | "BOOKING_STATUS_CHANGE_NOT_ALLOWED"
   | "BAD_LOCATION"
   | "BAD_LOCATION_MODE"
   | "DURATION_MISMATCH"
@@ -517,6 +518,18 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Completed bookings cannot be edited.",
     userMessage: "Completed bookings cannot be edited.",
+  },
+  // A booking status transition the lifecycle contract does not permit for the
+  // acting role (M8) — e.g. a client or pro trying to cancel a booking whose
+  // session has already started (IN_PROGRESS → CANCELLED is admin-only). Surfaces
+  // the strict-mode LifecycleViolationError as a clean 4xx instead of a raw 500.
+  BOOKING_STATUS_CHANGE_NOT_ALLOWED: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "CONTACT_SUPPORT",
+    message: "This booking status change is not allowed.",
+    userMessage:
+      "This appointment can no longer be changed here. Please contact support if you need to make a change.",
   },
   BAD_LOCATION: {
     httpStatus: 409,
