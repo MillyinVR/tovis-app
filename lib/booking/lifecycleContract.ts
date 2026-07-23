@@ -64,14 +64,22 @@ export const BOOKING_STATUS_TRANSITIONS: Map<
     BookingStatus.PENDING,
     new Map<BookingStatus, LifecycleActor[]>([
       [BookingStatus.ACCEPTED, ['PRO', 'ADMIN', 'SYSTEM']],
-      [BookingStatus.CANCELLED, ['PRO', 'CLIENT', 'ADMIN']],
+      // SYSTEM cancels a PENDING booking in two automated paths: the M5 unpaid-
+      // deposit auto-release sweep (releaseUnpaidDepositBookingBySystem) and the
+      // calendar-migration pristine-import cleanup (cancelImportedBookingIfPristine).
+      // Both stamp cancelledByRole=null. A live human cancel is still PRO/CLIENT/ADMIN.
+      [BookingStatus.CANCELLED, ['PRO', 'CLIENT', 'ADMIN', 'SYSTEM']],
     ]),
   ],
   [
     BookingStatus.ACCEPTED,
     new Map<BookingStatus, LifecycleActor[]>([
       [BookingStatus.IN_PROGRESS, ['PRO']],
-      [BookingStatus.CANCELLED, ['PRO', 'CLIENT', 'ADMIN']],
+      // SYSTEM here is the same two automated paths as PENDING→CANCELLED above
+      // (an auto-accept pro's unpaid-deposit hold is ACCEPTED, and imported
+      // bookings are created ACCEPTED). A started session (IN_PROGRESS) may only
+      // be cancelled by ADMIN — see that map below.
+      [BookingStatus.CANCELLED, ['PRO', 'CLIENT', 'ADMIN', 'SYSTEM']],
       // Client did not attend a confirmed appointment (Phase 2 revenue
       // protection). Terminal, like CANCELLED. Pro- or admin-driven only.
       [BookingStatus.NO_SHOW, ['PRO', 'ADMIN']],

@@ -201,8 +201,10 @@ import {
 } from '@/lib/consultation/consultationConfirmationProof'
 import {
   isTerminalBookingStatus,
+  LifecycleViolationError,
   recordStatusTransition,
   recordStepTransition,
+  type LifecycleActor,
 } from '@/lib/booking/lifecycleContract'
 import {
   checkProReadinessForEntryPointWithDb,
@@ -5661,6 +5663,53 @@ function cancelActorRole(actor: CancelActor): Role | null {
   return null
 }
 
+/** Maps a cancel actor to its lifecycle-contract actor (M8). */
+function cancelActorToLifecycle(actor: CancelActor): LifecycleActor {
+  switch (actor.kind) {
+    case 'client':
+      return 'CLIENT'
+    case 'pro':
+      return 'PRO'
+    case 'admin':
+      return 'ADMIN'
+    case 'system':
+      return 'SYSTEM'
+  }
+}
+
+/**
+ * Records a BookingStatus transition through the lifecycle contract (M8) — drift
+ * telemetry (#724) plus strict-mode enforcement — and converts the strict-mode
+ * `LifecycleViolationError` into a clean, client-facing `bookingError` so an
+ * illegal transition (e.g. a client trying to cancel a started IN_PROGRESS
+ * session, which the contract restricts to ADMIN) surfaces as a 4xx product
+ * refusal rather than a raw 500. The drift event has already been emitted inside
+ * `recordStatusTransition` before it threw, so observability is unaffected.
+ *
+ * Callers place this immediately before the status write so a refusal aborts the
+ * write. Legal transitions are silent (the contract stays the single source of
+ * truth — no policy is re-derived here).
+ */
+function recordStatusTransitionOrRefuse(args: {
+  from: BookingStatus
+  to: BookingStatus
+  actor: LifecycleActor
+  route: string
+  bookingId?: string | null
+  professionalId?: string | null
+}): void {
+  try {
+    recordStatusTransition(args)
+  } catch (err) {
+    if (err instanceof LifecycleViolationError) {
+      throw bookingError('BOOKING_STATUS_CHANGE_NOT_ALLOWED', {
+        message: err.message,
+      })
+    }
+    throw err
+  }
+}
+
 async function performLockedCancel(args: {
   tx: Prisma.TransactionClient
   bookingId: string
@@ -5694,6 +5743,20 @@ async function performLockedCancel(args: {
   assertAllowedCancelStatus({
     booking,
     allowedStatuses: args.allowedStatuses,
+  })
+
+  // M8: run every cancel through the lifecycle contract. Legal cancels (human
+  // from PENDING/ACCEPTED, ADMIN from IN_PROGRESS, SYSTEM auto-release) are
+  // silent; an out-of-contract cancel (e.g. a client/pro cancelling a started
+  // IN_PROGRESS session, or any NO_SHOW cancel) emits a #724 drift event and is
+  // refused as a clean 4xx.
+  recordStatusTransitionOrRefuse({
+    from: booking.status,
+    to: BookingStatus.CANCELLED,
+    actor: cancelActorToLifecycle(args.actor),
+    route: 'lib/booking/writeBoundary.ts:performLockedCancel',
+    bookingId: booking.id,
+    professionalId: booking.professionalId,
   })
 
   const updated = await args.tx.booking.update({
@@ -10643,6 +10706,18 @@ async function performLockedUpdateProBooking(args: {
   }
 
   if (args.nextStatus === BookingStatus.CANCELLED) {
+    // M8: this pro PATCH-cancel path (the live web pro-cancel surface, M6) now
+    // runs through the lifecycle contract. PENDING/ACCEPTED → CANCELLED by a pro
+    // is legal; a started (IN_PROGRESS) or NO_SHOW booking is refused as a clean
+    // 4xx (the web UI never offers cancel there — this closes the API hole).
+    recordStatusTransitionOrRefuse({
+      from: existing.status,
+      to: BookingStatus.CANCELLED,
+      actor: 'PRO',
+      route: 'lib/booking/writeBoundary.ts:performLockedUpdateProBooking#cancel',
+      bookingId: existing.id,
+      professionalId: existing.professionalId,
+    })
     const updated = await args.tx.booking.update({
     where: { id: existing.id },
     data: {
@@ -11024,6 +11099,21 @@ if (args.notifyClient) {
     status: true,
     subtotalSnapshot: true,
   } satisfies Prisma.BookingSelect
+
+  // M8: a pro accepting a booking (PENDING → ACCEPTED) runs through the lifecycle
+  // contract. Legal for a PENDING request; an accept targeting a started/terminal
+  // booking is refused as a clean 4xx (the UI only offers accept on PENDING
+  // requests). No-op when the booking is already ACCEPTED (from === to).
+  if (args.nextStatus === BookingStatus.ACCEPTED) {
+    recordStatusTransitionOrRefuse({
+      from: existing.status,
+      to: BookingStatus.ACCEPTED,
+      actor: 'PRO',
+      route: 'lib/booking/writeBoundary.ts:performLockedUpdateProBooking#accept',
+      bookingId: existing.id,
+      professionalId: existing.professionalId,
+    })
+  }
 
   let updated: Prisma.BookingGetPayload<{ select: typeof updatedBookingSelect }>
 
@@ -14360,6 +14450,18 @@ export async function cancelImportedBookingIfPristine(args: {
     data: { status: BookingStatus.CANCELLED, cancelledAt: new Date() },
   })
   if (result.count > 0) {
+    // M8: record the bulk ACCEPTED → CANCELLED (SYSTEM) transition through the
+    // contract for #724 observability. The WHERE pins the from-state to ACCEPTED,
+    // so this is a contract tripwire — legal today (silent); if the candidate
+    // filter ever drifted to a non-ACCEPTED status, strict mode would throw and
+    // surface the regression rather than silently cancelling out-of-contract.
+    recordStatusTransition({
+      from: BookingStatus.ACCEPTED,
+      to: BookingStatus.CANCELLED,
+      actor: 'SYSTEM',
+      route: 'lib/booking/writeBoundary.ts:cancelImportedBookingIfPristine',
+      professionalId: args.professionalId,
+    })
     await bumpProfessionalScheduleVersion(args.professionalId)
   }
   return result.count
