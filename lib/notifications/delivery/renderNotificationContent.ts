@@ -377,6 +377,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   payment_confirmation_required: 'Confirm payment',
   payment_refunded: 'View refund',
   no_show_fee_charged: 'View details',
+  deposit_reminder: 'Complete your deposit',
   look_follower_new: 'View your profile',
   client_follow: 'View activity',
   look_commented: 'View comment',
@@ -399,6 +400,9 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
 const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = {
   booking_request_created: buildStandardTemplateRenderer(
     templateCtaLabels.booking_request_created,
+  ),
+  deposit_reminder: buildStandardTemplateRenderer(
+    templateCtaLabels.deposit_reminder,
   ),
   booking_confirmed: buildStandardTemplateRenderer(
     templateCtaLabels.booking_confirmed,

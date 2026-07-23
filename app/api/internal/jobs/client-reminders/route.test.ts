@@ -221,6 +221,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
           in: [
             NotificationEventKey.APPOINTMENT_REMINDER,
             NotificationEventKey.REVIEW_REQUESTED,
+            NotificationEventKey.DEPOSIT_REMINDER,
           ],
         },
         cancelledAt: null,

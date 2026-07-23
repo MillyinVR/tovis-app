@@ -816,6 +816,12 @@ export default async function ClientBookingPage(props: {
   const checkoutBanner = normalizeCheckoutBanner(
     firstSearchParam(resolvedSearchParams.checkout),
   )
+  // Discovery-deposit checkout returns to `?deposit=success|cancelled`
+  // (lib/checkout/nativeReturn.ts). Same success/cancelled shape as the
+  // final-bill checkout banner, so reuse its normalizer.
+  const depositBanner = normalizeCheckoutBanner(
+    firstSearchParam(resolvedSearchParams.deposit),
+  )
 
   const {
     user,
@@ -1317,6 +1323,30 @@ export default async function ClientBookingPage(props: {
 
           {step === 'overview' ? (
             <div className="mt-4 grid gap-4">
+              {String(raw.depositStatus ?? '').toUpperCase() === 'PENDING' &&
+              depositBanner === 'cancelled' ? (
+                <div
+                  role="status"
+                  className="rounded-card border border-toneWarn/30 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                >
+                  Deposit checkout wasn&apos;t completed. Your booking isn&apos;t
+                  secured until the deposit is paid — complete it below to hold
+                  your appointment.
+                </div>
+              ) : null}
+
+              {String(raw.depositStatus ?? '').toUpperCase() === 'PENDING' &&
+              depositBanner === 'success' ? (
+                <div
+                  role="status"
+                  className="rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                >
+                  Deposit payment received. We&apos;re confirming it — this page
+                  will show your deposit as paid as soon as it finishes
+                  processing.
+                </div>
+              ) : null}
+
               <ClientDepositCard
                 bookingId={booking.id}
                 depositStatus={raw.depositStatus}

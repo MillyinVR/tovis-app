@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
+  BookingDepositStatus,
   BookingRefundStatus,
   NoShowFeeReason,
   NoShowFeeStatus,
@@ -81,6 +82,23 @@ const TONE_DOT: Record<Tone, string> = {
   muted: 'border-white/10 bg-bgPrimary text-textMuted',
 }
 
+function depositStatusTone(status: BookingDepositStatus): Tone {
+  switch (status) {
+    case BookingDepositStatus.PAID:
+      return 'success'
+    case BookingDepositStatus.REFUNDED:
+      return 'muted'
+    case BookingDepositStatus.PENDING:
+      // Not yet collected — must NOT read as money received (green). A deposit
+      // whose checkout was never completed sits here indefinitely (see M5).
+      return 'warn'
+    case BookingDepositStatus.FAILED:
+      return 'danger'
+    default:
+      return 'muted'
+  }
+}
+
 function refundStatusTone(status: BookingRefundStatus): Tone {
   switch (status) {
     case BookingRefundStatus.SUCCEEDED:
@@ -119,6 +137,12 @@ function buildEntries(trail: BookingMoneyTrail): TrailEntry[] {
 
   if (trail.deposit) {
     const d = trail.deposit
+    // Money is only "in" once the deposit was actually captured (PAID, or PAID
+    // then partially/fully refunded). A PENDING deposit whose checkout was never
+    // completed has collected nothing — it must not render as green money-in.
+    const captured =
+      d.status === BookingDepositStatus.PAID ||
+      d.status === BookingDepositStatus.REFUNDED
     entries.push({
       key: 'deposit',
       label: 'Deposit',
@@ -127,10 +151,12 @@ function buildEntries(trail: BookingMoneyTrail): TrailEntry[] {
           ? `${money(d.refundedCents, currency)} refunded`
           : d.creditedAt
             ? 'Credited to the final total'
-            : null,
+            : d.status === BookingDepositStatus.PENDING
+              ? 'Unpaid — deposit checkout not completed'
+              : null,
       amount: money(d.amountCents, currency),
-      flow: 'in',
-      tone: d.status === 'REFUNDED' ? 'muted' : 'success',
+      flow: captured ? 'in' : 'none',
+      tone: depositStatusTone(d.status),
       status: d.status,
       at: d.paidAt,
     })
