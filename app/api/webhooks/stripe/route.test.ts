@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   reconcileDepositChargeRefundInTransaction: vi.fn(),
   reconcileChargeRefundInTransaction: vi.fn(),
 
+  applyLateCaptureCancelRefund: vi.fn(),
+
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'NonErrorThrown',
     message: error instanceof Error ? error.message : String(error),
@@ -78,6 +80,10 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 vi.mock('@/lib/booking/refunds', () => ({
   reconcileChargeRefundInTransaction: mocks.reconcileChargeRefundInTransaction,
+}))
+
+vi.mock('@/lib/booking/cancelRefund', () => ({
+  applyLateCaptureCancelRefund: mocks.applyLateCaptureCancelRefund,
 }))
 
 vi.mock('@/lib/security/logging', () => ({
@@ -547,6 +553,32 @@ describe('POST /api/webhooks/stripe', () => {
       handled: true,
       message: 'payment_intent.succeeded marked booking paid.',
     })
+  })
+
+  // M1: money that applied onto an already-CANCELLED booking settles by the
+  // cancel's refund policy AFTER the webhook transaction commits.
+  it('runs the late-capture cancel refund post-commit when the payment landed on a cancelled booking', async () => {
+    mocks.applyStripePaymentSucceededInTransaction.mockResolvedValueOnce({
+      bookingId: 'booking_1',
+      bookingCompleted: false,
+      meta: { mutated: true, noOp: false },
+      capturedOnCancelledBooking: true,
+    })
+
+    const response = await POST(makeWebhookRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.applyLateCaptureCancelRefund).toHaveBeenCalledExactlyOnceWith({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+  })
+
+  it('does not run the late-capture refund for a payment on a live booking', async () => {
+    const response = await POST(makeWebhookRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.applyLateCaptureCancelRefund).not.toHaveBeenCalled()
   })
 
   it('reports the completed-booking variant when applyStripePaymentSucceededInTransaction auto-completes the booking', async () => {

@@ -279,6 +279,54 @@ export function captureStripeAmountMismatch(input: {
   )
 }
 
+/**
+ * A Stripe payment landed on a booking that was already CANCELLED, and the
+ * automatic late-capture refund could not settle it: either the cancel predates
+ * the provenance columns (who/when unknown — policy cannot be derived) or the
+ * refund attempt itself failed. Money is sitting on a cancelled booking with no
+ * automated owner — a human must resolve it, so this must page, not just log.
+ */
+export function captureLateCaptureOnCancelledBooking(input: {
+  bookingId: string
+  flavor: 'DEPOSIT' | 'SERVICE'
+  reason: 'UNKNOWN_CANCEL_PROVENANCE' | 'REFUND_FAILED'
+  detail: string | null
+}): void {
+  Sentry.withScope((scope) => {
+    scope.setLevel('error')
+    scope.setTag('area', 'payments')
+    scope.setTag('payments.event', 'late_capture_on_cancelled_booking')
+    scope.setTag('payments.late_capture.flavor', input.flavor)
+    scope.setTag('payments.late_capture.reason', input.reason)
+    scope.setTag('booking.id', input.bookingId)
+
+    scope.setContext('late_capture_on_cancelled_booking', {
+      bookingId: input.bookingId,
+      flavor: input.flavor,
+      reason: input.reason,
+      detail: input.detail,
+    })
+
+    Sentry.captureMessage(
+      `Stripe ${input.flavor} payment captured on cancelled booking ${input.bookingId} needs manual resolution (${input.reason})`,
+      'error',
+    )
+  })
+
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      app: 'tovis',
+      namespace: 'payments',
+      event: 'late_capture_on_cancelled_booking',
+      bookingId: input.bookingId,
+      flavor: input.flavor,
+      reason: input.reason,
+      detail: input.detail,
+    }),
+  )
+}
+
 // Register the Sentry sink once at module load. The lifecycleContract module
 // keeps a registry of sinks and emits to all of them on drift.
 let driftSinkRegistered = false

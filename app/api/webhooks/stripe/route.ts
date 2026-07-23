@@ -5,6 +5,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe/server'
 import { handleStripeEvent } from '@/lib/stripe/handleWebhookEvent'
+import { applyLateCaptureCancelRefund } from '@/lib/booking/cancelRefund'
 
 export const dynamic = 'force-dynamic'
 
@@ -118,6 +119,13 @@ const result = await prisma.$transaction(
   },
   { timeout: 30_000, maxWait: 10_000 },
 )
+
+    // Payment landed on an already-CANCELLED booking: settle it by the cancel's
+    // own refund policy, post-commit (Stripe I/O). Best-effort — never throws,
+    // so it cannot flip a processed event back to failed.
+    if (result.lateCaptureRefund) {
+      await applyLateCaptureCancelRefund(result.lateCaptureRefund)
+    }
 
     return jsonOk(
       {

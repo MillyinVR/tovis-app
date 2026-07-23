@@ -3146,6 +3146,16 @@ model Booking {
   scheduledFor DateTime
   status       BookingStatus @default(PENDING)
 
+  // Cancellation provenance, stamped by the boundary's terminal-cancel writers
+  // alongside status=CANCELLED. A payment webhook that lands AFTER the cancel
+  // must run the same refund policy the cancel-time helpers ran (who cancelled +
+  // when decide eligibility — see lib/booking/cancelRefund.ts,
+  // applyLateCaptureCancelRefund). Null on bookings cancelled before these
+  // columns existed, and on system cancels with no acting role — the late-capture
+  // path alerts instead of guessing policy for those.
+  cancelledAt     DateTime?
+  cancelledByRole Role?
+
   // When true, this booking is exempt from the overlap EXCLUDE constraint
   // (Booking_no_active_professional_overlap). Set only by the write boundary when
   // a PRO/ADMIN intentionally double-books, or an aftercare pre-selected slot

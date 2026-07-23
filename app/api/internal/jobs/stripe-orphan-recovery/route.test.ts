@@ -10,6 +10,7 @@ import {
 const mocks = vi.hoisted(() => ({
   bookingFindMany: vi.fn(),
   applyStripePaymentSucceeded: vi.fn(),
+  applyLateCaptureCancelRefund: vi.fn(),
   stripeRetrieve: vi.fn(),
   captureBookingException: vi.fn(),
 }))
@@ -24,6 +25,10 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   applyStripePaymentSucceeded: mocks.applyStripePaymentSucceeded,
+}))
+
+vi.mock('@/lib/booking/cancelRefund', () => ({
+  applyLateCaptureCancelRefund: mocks.applyLateCaptureCancelRefund,
 }))
 
 vi.mock('@/lib/stripe/server', () => ({
@@ -76,6 +81,7 @@ beforeEach(() => {
 
   mocks.bookingFindMany.mockReset()
   mocks.applyStripePaymentSucceeded.mockReset()
+  mocks.applyLateCaptureCancelRefund.mockReset()
   mocks.stripeRetrieve.mockReset()
   mocks.captureBookingException.mockReset()
 })
@@ -208,8 +214,11 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
           not: StripePaymentStatus.SUCCEEDED,
         },
         paymentCollectedAt: null,
+        // M1: CANCELLED bookings ARE candidates — money paid at Stripe for a
+        // cancelled booking must be recorded, then settled by the cancel's
+        // refund policy (applyLateCaptureCancelRefund).
         status: {
-          notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED],
+          notIn: [BookingStatus.COMPLETED],
         },
       },
       select: {
@@ -297,6 +306,73 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
       amountReceivedCents: 5000,
       currency: 'usd',
     })
+  })
+
+  // M1: a recovered payment that applied onto an already-CANCELLED booking
+  // settles by the cancel's refund policy after the apply.
+  it('runs the late-capture cancel refund when the recovered booking is cancelled', async () => {
+    mocks.bookingFindMany.mockResolvedValue([
+      { id: 'bk_cancelled', stripeCheckoutSessionId: 'cs_cancelled' },
+    ])
+
+    mocks.stripeRetrieve.mockResolvedValue({
+      id: 'cs_cancelled',
+      payment_status: 'paid',
+      payment_intent: {
+        id: 'pi_cancelled',
+        object: 'payment_intent',
+        amount_received: 5000,
+        currency: 'usd',
+      },
+      amount_total: 5000,
+      currency: 'usd',
+    })
+
+    mocks.applyStripePaymentSucceeded.mockResolvedValue({
+      bookingId: 'bk_cancelled',
+      bookingCompleted: false,
+      meta: { mutated: true, noOp: false },
+      capturedOnCancelledBooking: true,
+    })
+
+    const response = await GET(authedRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.applyLateCaptureCancelRefund).toHaveBeenCalledExactlyOnceWith({
+      bookingId: 'bk_cancelled',
+      flavor: 'SERVICE',
+    })
+  })
+
+  it('does not run the late-capture refund when the recovered booking is live', async () => {
+    mocks.bookingFindMany.mockResolvedValue([
+      { id: 'bk_1', stripeCheckoutSessionId: 'cs_1' },
+    ])
+
+    mocks.stripeRetrieve.mockResolvedValue({
+      id: 'cs_1',
+      payment_status: 'paid',
+      payment_intent: {
+        id: 'pi_1',
+        object: 'payment_intent',
+        amount_received: 5000,
+        currency: 'usd',
+      },
+      amount_total: 5000,
+      currency: 'usd',
+    })
+
+    mocks.applyStripePaymentSucceeded.mockResolvedValue({
+      bookingId: 'bk_1',
+      bookingCompleted: false,
+      meta: { mutated: true, noOp: false },
+      capturedOnCancelledBooking: false,
+    })
+
+    const response = await GET(authedRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.applyLateCaptureCancelRefund).not.toHaveBeenCalled()
   })
 
   it('replays applyStripePaymentSucceeded for paid sessions when payment_intent is only a string', async () => {

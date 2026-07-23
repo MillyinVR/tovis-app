@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   handleStripeEvent: vi.fn(),
   captureException: vi.fn(),
+  applyLateCaptureCancelRefund: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -22,6 +23,10 @@ vi.mock('@/lib/stripe/handleWebhookEvent', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureException,
+}))
+
+vi.mock('@/lib/booking/cancelRefund', () => ({
+  applyLateCaptureCancelRefund: mocks.applyLateCaptureCancelRefund,
 }))
 
 import { requeueFailedStripeWebhookEvents } from '@/lib/stripe/requeueFailedWebhookEvents'
@@ -63,12 +68,32 @@ beforeEach(() => {
 })
 
 describe('requeueFailedStripeWebhookEvents', () => {
+  // M1: a replay that applied money onto an already-CANCELLED booking must run
+  // the late-capture cancel refund AFTER the replay transaction commits.
+  it('settles a late capture on a cancelled booking after the replay commits', async () => {
+    mocks.findMany.mockResolvedValue([failedRow()])
+    mocks.handleStripeEvent.mockResolvedValue({
+      handled: true,
+      message: 'payment_intent.succeeded marked booking paid.',
+      lateCaptureRefund: { bookingId: 'booking_1', flavor: 'SERVICE' },
+    })
+
+    const run = await requeueFailedStripeWebhookEvents()
+
+    expect(run.tally.reprocessed).toBe(1)
+    expect(mocks.applyLateCaptureCancelRefund).toHaveBeenCalledExactlyOnceWith({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+    })
+  })
+
   it('replays a failed event and marks it processed', async () => {
     mocks.findMany.mockResolvedValue([failedRow()])
 
     const run = await requeueFailedStripeWebhookEvents()
 
     expect(run.tally.reprocessed).toBe(1)
+    expect(mocks.applyLateCaptureCancelRefund).not.toHaveBeenCalled()
     expect(mocks.handleStripeEvent).toHaveBeenCalledTimes(1)
     // The stored payload is passed straight through as the Stripe event.
     expect(mocks.handleStripeEvent.mock.calls[0]![1]).toMatchObject({

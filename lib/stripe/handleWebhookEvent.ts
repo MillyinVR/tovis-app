@@ -26,12 +26,20 @@ import {
   type StripeDisputeOutcome,
 } from '@/lib/booking/writeBoundary'
 import { reconcileChargeRefundInTransaction } from '@/lib/booking/refunds'
+import type { LateCaptureRefundFlavor } from '@/lib/booking/cancelRefund'
 import { captureStripeDisputeAlert } from '@/lib/observability/bookingEvents'
 import { applyStripeSubscriptionInTransaction } from '@/lib/membership/syncSubscription'
 
 export type StripeWebhookResult = {
   handled: boolean
   message: string
+  /**
+   * Present when a payment success applied onto an already-CANCELLED booking.
+   * The caller MUST run applyLateCaptureCancelRefund with this after its
+   * transaction commits — the refund policy involves Stripe I/O, which cannot
+   * live inside the webhook transaction. See cancelRefund.ts.
+   */
+  lateCaptureRefund?: { bookingId: string; flavor: LateCaptureRefundFlavor }
 }
 
 function jsonArrayFromStrings(values: string[]): Prisma.InputJsonValue {
@@ -116,6 +124,14 @@ async function handleDepositPaid(
     message: result.alreadyPaid
       ? `${args.eventLabel} deposit already recorded.`
       : `${args.eventLabel} deposit marked paid.`,
+    ...(result.capturedOnCancelledBooking && result.bookingId
+      ? {
+          lateCaptureRefund: {
+            bookingId: result.bookingId,
+            flavor: 'DEPOSIT' as const,
+          },
+        }
+      : {}),
   }
 }
 
@@ -234,6 +250,14 @@ async function handlePaymentIntentSucceeded(
     message: result.bookingCompleted
       ? 'payment_intent.succeeded marked booking paid and completed.'
       : 'payment_intent.succeeded marked booking paid.',
+    ...(result.capturedOnCancelledBooking
+      ? {
+          lateCaptureRefund: {
+            bookingId: result.bookingId,
+            flavor: 'SERVICE' as const,
+          },
+        }
+      : {}),
   }
 }
 
