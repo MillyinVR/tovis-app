@@ -125,6 +125,10 @@ vi.mock('@/lib/notifications/appointmentReminders', () => ({
   cancelBookingAppointmentReminders: vi.fn(),
 }))
 
+vi.mock('@/lib/notifications/depositReminders', () => ({
+  scheduleDepositReminderOnBooking: vi.fn(),
+}))
+
 vi.mock('@/lib/notifications/clientNotifications', () => ({
   upsertClientNotification: vi.fn(),
   scheduleClientNotification: vi.fn(),

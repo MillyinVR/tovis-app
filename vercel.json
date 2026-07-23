@@ -22,6 +22,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/internal/jobs/deposit-release",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/notifications/process",
       "schedule": "* * * * *"
     },

@@ -55,6 +55,10 @@ function makeDepositTx(args: {
       findUnique: vi.fn(),
       update,
     },
+    // The deposit-paid applier cancels the pending M5 deposit reminder (M5).
+    scheduledClientNotification: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
   })
 
   return { tx, update }

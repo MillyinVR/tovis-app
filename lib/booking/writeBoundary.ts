@@ -174,7 +174,11 @@ import {
   areAuditValuesEqual,
   createBookingCloseoutAuditLog,
 } from '@/lib/booking/closeoutAudit'
-import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
+import {
+  cancelScheduledClientNotificationsForBooking,
+  upsertClientNotification,
+} from '@/lib/notifications/clientNotifications'
+import { scheduleDepositReminderOnBooking } from '@/lib/notifications/depositReminders'
 import {
   cancelBookingAppointmentReminders,
   syncBookingAppointmentReminders,
@@ -265,6 +269,13 @@ type CancelActor =
   | {
       kind: 'admin'
       professionalId?: string | null
+    }
+  // Automated cancel with no human actor (e.g. the unpaid-deposit auto-release
+  // sweep, M5). Stamps cancelledByRole=null — the SYSTEM provenance M1 uses so a
+  // late-arriving payment routes through UNKNOWN_CANCEL_PROVENANCE paging rather
+  // than silently assuming a refund policy.
+  | {
+      kind: 'system'
     }
 
 type ConsultationDecisionProvenance =
@@ -5641,10 +5652,13 @@ async function enforceProCreateScheduling(args: {
   )
 }
 
-function cancelActorRole(actor: CancelActor): Role {
+function cancelActorRole(actor: CancelActor): Role | null {
   if (actor.kind === 'client') return Role.CLIENT
   if (actor.kind === 'pro') return Role.PRO
-  return Role.ADMIN
+  if (actor.kind === 'admin') return Role.ADMIN
+  // system → null: no human role. M1's late-capture path treats a null role as
+  // UNKNOWN_CANCEL_PROVENANCE and pages rather than guessing a refund policy.
+  return null
 }
 
 async function performLockedCancel(args: {
@@ -9165,6 +9179,14 @@ if (args.openingId) {
   await syncBookingAppointmentReminders({
     tx: args.tx,
     bookingId: created.id,
+  })
+
+  // M5: nudge the client to finish an unpaid discovery deposit before the
+  // auto-release sweep frees the slot. No-ops for non-deposit bookings.
+  await scheduleDepositReminderOnBooking({
+    tx: args.tx,
+    bookingId: created.id,
+    now: new Date(),
   })
 
   await bumpProfessionalScheduleVersion(created.professionalId)
@@ -13395,6 +13417,13 @@ export async function cancelBooking(
     )
   }
 
+  if (args.actor.kind !== 'admin') {
+    // 'system' cancels do not flow through here — they have a dedicated entry
+    // point (releaseUnpaidDepositBookingBySystem) that re-checks depositStatus
+    // under a row lock. Guard so a future caller can't smuggle one in.
+    throw new Error('cancelBooking: unsupported actor kind')
+  }
+
   const professionalId =
     args.actor.professionalId?.trim() ||
     (await resolveAdminProfessionalId(args.bookingId))
@@ -13409,6 +13438,97 @@ export async function cancelBooking(
       allowedStatuses: args.allowedStatuses,
     }),
   )
+}
+
+/**
+ * Reason surfaced to the client when the unpaid-deposit auto-release sweep (M5)
+ * cancels a booking whose discovery deposit was never paid. Rides the standard
+ * cancel notification's "Reason:" suffix.
+ */
+export const DEPOSIT_UNPAID_RELEASE_REASON =
+  'The deposit was not completed in time, so the hold was released. You can rebook anytime.'
+
+export type ReleaseUnpaidDepositOutcome =
+  | { released: true; bookingId: string; previousStatus: BookingStatus }
+  | {
+      released: false
+      reason: 'NOT_FOUND' | 'DEPOSIT_NOT_PENDING' | 'STATUS_NOT_RELEASABLE'
+    }
+
+/**
+ * System auto-release of a booking whose discovery deposit was never paid (M5).
+ * Cancels the booking (freeing the pro's slot), stamps SYSTEM provenance
+ * (cancelledByRole=null), and notifies the client via the standard cancel
+ * receipt with a deposit-specific reason.
+ *
+ * The deposit-paid webhook (applyStripeDepositSucceededInTransaction) takes NO
+ * schedule lock, so the advisory lock alone cannot serialize this against a
+ * payment landing mid-sweep. We `SELECT … FOR UPDATE` the booking row and
+ * re-check `depositStatus`/`status` UNDER that row lock: a concurrent
+ * deposit-PAID update waits on it, so we either observe PAID and skip, or we
+ * cancel first and M1's late-capture path refunds the deposit that then lands on
+ * the now-CANCELLED booking. Either way the client never loses a paid deposit.
+ */
+export async function releaseUnpaidDepositBookingBySystem(args: {
+  bookingId: string
+}): Promise<ReleaseUnpaidDepositOutcome> {
+  assertNonEmptyBookingId(args.bookingId)
+
+  // professionalId is needed to take the schedule lock; it never changes.
+  const ref = await prisma.booking.findUnique({
+    where: { id: args.bookingId },
+    select: { professionalId: true },
+  })
+  if (!ref) return { released: false, reason: 'NOT_FOUND' }
+
+  return withLockedProfessionalTransaction(ref.professionalId, async ({ tx }) => {
+    const rows = await tx.$queryRaw<
+      Array<{ depositStatus: BookingDepositStatus; status: BookingStatus }>
+    >`
+      SELECT "depositStatus", "status"
+      FROM "Booking"
+      WHERE "id" = ${args.bookingId}
+      FOR UPDATE
+    `
+    const locked = rows[0]
+    if (!locked) return { released: false, reason: 'NOT_FOUND' }
+
+    if (locked.depositStatus !== BookingDepositStatus.PENDING) {
+      // Paid (or refunded/none) — nothing to release. The FOR UPDATE lock means
+      // this reflects any deposit-PAID commit that raced us.
+      return { released: false, reason: 'DEPOSIT_NOT_PENDING' }
+    }
+
+    if (
+      locked.status !== BookingStatus.PENDING &&
+      locked.status !== BookingStatus.ACCEPTED
+    ) {
+      return { released: false, reason: 'STATUS_NOT_RELEASABLE' }
+    }
+
+    await performLockedCancel({
+      tx,
+      bookingId: args.bookingId,
+      actor: { kind: 'system' },
+      notifyClient: true,
+      reason: DEPOSIT_UNPAID_RELEASE_REASON,
+      allowedStatuses: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
+    })
+
+    // Drop the pending deposit-reminder so it never fires for a released hold
+    // (the reminder validator also self-heals, but cancel it eagerly).
+    await cancelScheduledClientNotificationsForBooking({
+      tx,
+      bookingId: args.bookingId,
+      eventKeys: [NotificationEventKey.DEPOSIT_REMINDER],
+    })
+
+    return {
+      released: true,
+      bookingId: args.bookingId,
+      previousStatus: locked.status,
+    }
+  })
 }
 
 export async function startBookingSession(
@@ -16185,6 +16305,15 @@ export async function applyStripeDepositSucceededInTransaction(
     // returned status is current — and a cancel that has NOT committed yet will
     // itself wait on ours, then find the deposit PAID and refund on its side.
     select: { status: true } satisfies Prisma.BookingSelect,
+  })
+
+  // The deposit is now paid — drop the pending M5 auto-release nudge so it never
+  // fires for a paid booking. (The reminder validator also self-heals; this just
+  // clears the inbox row eagerly.)
+  await cancelScheduledClientNotificationsForBooking({
+    tx,
+    bookingId: resolved.id,
+    eventKeys: [NotificationEventKey.DEPOSIT_REMINDER],
   })
 
   return {

@@ -6,6 +6,7 @@ import {
   validateDueAppointmentReminder,
 } from '@/lib/notifications/appointmentReminders'
 import { validateDueReviewRequest } from '@/lib/notifications/reviewRequests'
+import { validateDueDepositReminder } from '@/lib/notifications/depositReminders'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import { prisma } from '@/lib/prisma'
 import { NotificationEventKey, Prisma } from '@prisma/client'
@@ -30,6 +31,7 @@ const DUE_REMINDER_ORDER_BY = [
 const DRAINED_EVENT_KEYS = [
   NotificationEventKey.APPOINTMENT_REMINDER,
   NotificationEventKey.REVIEW_REQUESTED,
+  NotificationEventKey.DEPOSIT_REMINDER,
 ] as const
 
 const dueReminderCandidateSelect = {
@@ -136,11 +138,17 @@ async function processReminder(args: {
               scheduledClientNotificationId: args.rowId,
               now: args.now,
             })
-          : await validateDueAppointmentReminder({
-              tx,
-              scheduledClientNotificationId: args.rowId,
-              now: args.now,
-            })
+          : args.eventKey === NotificationEventKey.DEPOSIT_REMINDER
+            ? await validateDueDepositReminder({
+                tx,
+                scheduledClientNotificationId: args.rowId,
+                now: args.now,
+              })
+            : await validateDueAppointmentReminder({
+                tx,
+                scheduledClientNotificationId: args.rowId,
+                now: args.now,
+              })
 
       if (validation.action === 'SKIP') {
         return {

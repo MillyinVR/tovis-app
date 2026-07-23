@@ -34,6 +34,7 @@ export type NotificationTemplateKey =
   | 'payment_confirmation_required'
   | 'payment_refunded'
   | 'no_show_fee_charged'
+  | 'deposit_reminder'
   | 'look_follower_new'
   | 'client_follow'
   | 'look_commented'
@@ -191,6 +192,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.NO_SHOW_FEE_CHARGED,
+  NotificationEventKey.DEPOSIT_REMINDER,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
   NotificationEventKey.CLIENT_FOLLOW,
   NotificationEventKey.LOOK_COMMENTED,
@@ -695,6 +697,21 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  [NotificationEventKey.DEPOSIT_REMINDER]: {
+    key: NotificationEventKey.DEPOSIT_REMINDER,
+    defaultPriority: NotificationPriority.NORMAL,
+    // A nudge to finish an unpaid deposit before the hold is auto-released (M5),
+    // NOT a transactional receipt — so no SMS, and it RESPECTS quiet hours (a
+    // payment nudge at 3am is bad form; the deadline gives ample daytime room).
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'deposit_reminder',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: {
     key: NotificationEventKey.LOOK_FOLLOWER_NEW,
     defaultPriority: NotificationPriority.NORMAL,
@@ -996,6 +1013,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.NO_SHOW_FEE_CHARGED,
+  NotificationEventKey.DEPOSIT_REMINDER,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
