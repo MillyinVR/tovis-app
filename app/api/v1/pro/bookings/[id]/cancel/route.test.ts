@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   cancelBooking: vi.fn(),
   applyAutoCancelRefund: vi.fn(),
   applyDiscoveryDepositCancelRefund: vi.fn(),
+  summarizeCancelRefund: vi.fn(),
   getBookingFailPayload: vi.fn(),
   isBookingError: vi.fn(),
 
@@ -41,6 +42,7 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 vi.mock('@/lib/booking/cancelRefund', () => ({
   applyAutoCancelRefund: mocks.applyAutoCancelRefund,
   applyDiscoveryDepositCancelRefund: mocks.applyDiscoveryDepositCancelRefund,
+  summarizeCancelRefund: mocks.summarizeCancelRefund,
 }))
 
 vi.mock('@/lib/booking/errors', () => ({
@@ -172,6 +174,10 @@ describe('app/api/v1/pro/bookings/[id]/cancel/route.ts', () => {
     mocks.applyAutoCancelRefund.mockResolvedValue({ outcome: 'NOT_ATTEMPTED' })
     mocks.applyDiscoveryDepositCancelRefund.mockResolvedValue({
       outcome: 'NOT_ATTEMPTED',
+    })
+    mocks.summarizeCancelRefund.mockReturnValue({
+      status: 'NONE',
+      message: 'Your booking is cancelled.',
     })
 
     expectIdempotencyStarted()
@@ -335,51 +341,35 @@ describe('app/api/v1/pro/bookings/[id]/cancel/route.ts', () => {
       reason: 'Running behind',
     })
 
+    const expectedBody = {
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.CANCELLED,
+        sessionStep: SessionStep.NONE,
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+      // Honest refund summary rides the response (M6).
+      refund: {
+        status: 'NONE',
+        message: 'Your booking is cancelled.',
+      },
+    }
+
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
-      responseBody: {
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.CANCELLED,
-          sessionStep: SessionStep.NONE,
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
+      responseBody: expectedBody,
     })
 
-    expect(mocks.jsonOk).toHaveBeenCalledWith(
-      {
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.CANCELLED,
-          sessionStep: SessionStep.NONE,
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
-      200,
-    )
+    expect(mocks.jsonOk).toHaveBeenCalledWith(expectedBody, 200)
 
     expect(result).toEqual({
       ok: true,
       status: 200,
-      data: {
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.CANCELLED,
-          sessionStep: SessionStep.NONE,
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
+      data: expectedBody,
     })
   })
 

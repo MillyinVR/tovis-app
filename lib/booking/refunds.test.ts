@@ -961,3 +961,84 @@ describe('refundDiscoveryDeposit — dispute freeze (M4)', () => {
     expect(mocks.stripeRefundsCreate).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('refundDiscoveryDeposit — success receipt (M6)', () => {
+  it('emits a refund receipt with a webhook-matching discriminator', async () => {
+    // A successful cancel-time deposit refund used to notify NO ONE: the deposit
+    // charge.refunded webhook stays silent because this path pre-advances the
+    // counter, and the function never emitted. Now it emits here.
+    setBooking({
+      depositStatus: BookingDepositStatus.PAID,
+      depositAmount: 30, // 3000 cents
+      discoveryFeeAmount: 1000,
+      depositRefundedCents: 0,
+      depositDisputedAt: null,
+    })
+    mocks.stripeRefundsCreate.mockResolvedValue({ id: 're_ok' })
+
+    const result = await refundDiscoveryDeposit({
+      bookingId: 'booking_1',
+      paymentIntentId: 'pi_dep_1',
+      refundAmountCents: 4000,
+      refundFee: true,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    expect(mockEmitPaymentRefunded).toHaveBeenCalledTimes(1)
+    expect(mockEmitPaymentRefunded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        // cumulative after this refund = 0 + 4000 — identical to what the deposit
+        // charge.refunded webhook would use, so a later replay dedupes.
+        refundDiscriminator: 'deposit:pi_dep_1:4000',
+        amountRefundedCents: 4000,
+      }),
+    )
+  })
+
+  it('does NOT emit a receipt when the deposit refund fails (no money moved)', async () => {
+    setBooking({
+      depositStatus: BookingDepositStatus.PAID,
+      depositAmount: 30,
+      discoveryFeeAmount: 1000,
+      depositRefundedCents: 0,
+      depositDisputedAt: null,
+    })
+    mocks.stripeRefundsCreate.mockRejectedValue(new Error('refund refused'))
+
+    const result = await refundDiscoveryDeposit({
+      bookingId: 'booking_1',
+      paymentIntentId: 'pi_dep_1',
+      refundAmountCents: 4000,
+      refundFee: true,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result.outcome).toBe('FAILED')
+    expect(mockEmitPaymentRefunded).not.toHaveBeenCalled()
+  })
+
+  it('a receipt-emit failure never unwinds a completed refund', async () => {
+    setBooking({
+      depositStatus: BookingDepositStatus.PAID,
+      depositAmount: 30,
+      discoveryFeeAmount: 1000,
+      depositRefundedCents: 0,
+      depositDisputedAt: null,
+    })
+    mocks.stripeRefundsCreate.mockResolvedValue({ id: 're_ok' })
+    mockEmitPaymentRefunded.mockRejectedValue(new Error('notif boom'))
+
+    const result = await refundDiscoveryDeposit({
+      bookingId: 'booking_1',
+      paymentIntentId: 'pi_dep_1',
+      refundAmountCents: 4000,
+      refundFee: true,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    expect(mocks.captureException).toHaveBeenCalled()
+  })
+})

@@ -279,7 +279,10 @@ function clientActions(input: LifecycleViewModelInput): LifecycleAction[] {
       label: 'Cancel booking',
       method: 'POST',
       href: `/api/v1/bookings/${safeId}/cancel`,
-      confirmCopy: 'Cancel this booking?',
+      // Disclose the refund policy BEFORE the client commits (M6): the deposit and
+      // any payment are non-refundable within 24h of the appointment.
+      confirmCopy:
+        'Cancel this booking? Cancelling within 24 hours of your appointment means your deposit and any payment may not be refunded.',
     })
   }
 

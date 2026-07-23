@@ -20,6 +20,8 @@ import { cancelBooking } from '@/lib/booking/writeBoundary'
 import {
   applyAutoCancelRefund,
   applyDiscoveryDepositCancelRefund,
+  summarizeCancelRefund,
+  type CancelRefundSummary,
 } from '@/lib/booking/cancelRefund'
 import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
@@ -51,6 +53,12 @@ type CancelResponseBody = {
   status: string
   sessionStep: string
   meta: Prisma.InputJsonValue
+  /**
+   * Honest, client-facing summary of what happened to the client's money on this
+   * cancel (M6). Present so the acting client's UI can tell them the truth instead
+   * of silence — never a refund promise the ledger can't back.
+   */
+  refund: CancelRefundSummary
 }
 
 function toCancelActor(args: {
@@ -130,6 +138,7 @@ function buildCancelIdempotencyBody(args: {
 
 function toCancelResponseBody(
   result: Awaited<ReturnType<typeof cancelBooking>>,
+  refund: CancelRefundSummary,
 ): CancelResponseBody {
   return {
     ok: true,
@@ -137,6 +146,7 @@ function toCancelResponseBody(
     status: result.booking.status,
     sessionStep: result.booking.sessionStep,
     meta: result.meta,
+    refund,
   }
 }
 
@@ -236,7 +246,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
         // Auto-refund per policy (pro/admin always; client only ≥24h out).
         // Best-effort: never throws, so it can't fail the committed cancel.
-        await applyAutoCancelRefund({
+        const serviceRefund = await applyAutoCancelRefund({
           bookingId,
           actorKind: actor.kind,
           actorUserId: user.id,
@@ -245,11 +255,17 @@ export async function POST(req: Request, ctx: RouteContext) {
 
         // New-client discovery deposit + fee refund per policy (pro/admin refund
         // both; client ≥24h refunds deposit, keeps fee; client <24h forfeits).
-        await applyDiscoveryDepositCancelRefund({
+        const depositRefund = await applyDiscoveryDepositCancelRefund({
           bookingId,
           actorKind: actor.kind,
           actorUserId: user.id,
           cancelMutated: result.meta.mutated,
+        })
+
+        // Collapse both outcomes into one honest, client-facing summary (M6).
+        const refund = summarizeCancelRefund({
+          service: serviceRefund,
+          deposit: depositRefund,
         })
 
         // Late-cancel fee (Phase 2 revenue protection). Only a CLIENT cancel can
@@ -271,7 +287,7 @@ export async function POST(req: Request, ctx: RouteContext) {
           })
         }
 
-        return { status: 200, body: toCancelResponseBody(result) }
+        return { status: 200, body: toCancelResponseBody(result, refund) }
       },
     )
 

@@ -11,6 +11,8 @@ import {
 
 type Props = {
   bookingId: string
+  /** Booking status — the deposit card is only truthful for an active booking. */
+  bookingStatus: string | null | undefined
   depositStatus: string | null | undefined
   /** Deposit dollars (Decimal serialized to string). */
   depositAmount: string | number | null | undefined
@@ -30,6 +32,7 @@ function centsToMoney(cents: number): string {
 
 export default function ClientDepositCard({
   bookingId,
+  bookingStatus,
   depositStatus,
   depositAmount,
   discoveryFeeCents,
@@ -37,6 +40,18 @@ export default function ClientDepositCard({
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+
+  // On a terminal booking the deposit card lies: a <24h cancel FORFEITS the
+  // deposit but leaves depositStatus=PAID, so the PAID branch below would still
+  // tell the client their money "is held and will be credited toward your service
+  // total." It won't — it's gone to the pro. And a still-PENDING deposit can't be
+  // paid on a cancelled booking. So the card is only meaningful while the booking
+  // is live; hide it once cancelled/completed/no-show. The honest cancel outcome
+  // reaches the client via the cancel response + the refund receipt (M6).
+  const bookingTerminal = ['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(
+    (bookingStatus ?? '').toUpperCase(),
+  )
+  if (bookingTerminal) return null
 
   const status = (depositStatus ?? 'NONE').toUpperCase()
   if (status !== 'PENDING' && status !== 'PAID') return null

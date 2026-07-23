@@ -54,6 +54,21 @@ function toDateIsoUtc(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
+/**
+ * Pull the honest cancel-refund message out of the cancel response (M6). The
+ * client cancel route returns `refund: { status, message, refundedAmountCents? }`
+ * describing what actually happened to the client's money — surface that instead
+ * of a bare "Saved." so the client is never left in silence (or told a refund is
+ * coming when it isn't).
+ */
+function cancelRefundMessage(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null
+  const refund = (data as { refund?: unknown }).refund
+  if (!refund || typeof refund !== 'object') return null
+  const message = (refund as { message?: unknown }).message
+  return typeof message === 'string' && message.trim() ? message : null
+}
+
 function errorFromResponse(res: Response, data: unknown) {
   const rec =
     data && typeof data === 'object' ? (data as Record<string, unknown>) : null
@@ -181,7 +196,11 @@ export default function BookingActions({
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorFromResponse(res, data))
 
-      setSuccess('Saved.')
+      // A client cancel carries an honest refund summary; show it verbatim so the
+      // client learns the money outcome. Every other action keeps the plain ack.
+      setSuccess(
+        (action.verb === 'CLIENT_CANCEL' && cancelRefundMessage(data)) || 'Saved.',
+      )
       setMode('none')
       router.refresh()
     } catch (e: unknown) {
