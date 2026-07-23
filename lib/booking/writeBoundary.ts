@@ -757,6 +757,18 @@ type ApplyStripePaymentResult = {
    * transaction commits (Stripe I/O cannot live in the webhook transaction).
    */
   capturedOnCancelledBooking?: boolean
+  /**
+   * M9 — set only by the payment-succeeded applier: a card charge landed AFTER
+   * the pro had already closed the booking out by hand (mark-paid cash / waive),
+   * so the client was double-collected (cash + card) or charged despite a waive.
+   * The money is already captured at Stripe and cannot be un-charged in the
+   * webhook transaction, so the applier records it and the caller must PAGE a
+   * human post-commit (captureManualCloseoutStripeOverCollection); a human
+   * refunds the card via the existing refund endpoint. Alert-only by design
+   * (Tori, 2026-07-23): no automated refund. Set on the first application only —
+   * once recorded the manual signal is consumed, so a redelivery no-ops.
+   */
+  capturedAfterManualCloseout?: boolean
 }
 
 type ApplyStripePaymentFailedArgs = {
@@ -1825,6 +1837,10 @@ const PRO_CHECKOUT_CLOSEOUT_SELECT = {
   finishedAt: true,
   checkoutStatus: true,
   selectedPaymentMethod: true,
+  // M9: a SUCCEEDED final-bill Stripe payment means the card already collected —
+  // a manual mark-paid / waive must be refused (CHECKOUT_ALREADY_PAID_BY_STRIPE),
+  // never allowed to race a real capture into a double-collect.
+  stripePaymentStatus: true,
   serviceSubtotalSnapshot: true,
   productSubtotalSnapshot: true,
   subtotalSnapshot: true,
@@ -12539,6 +12555,19 @@ async function performLockedUpdateProCheckoutCloseout(args: {
     throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
   }
 
+  // M9 — Stripe already collected the final bill by card. A manual close-out
+  // that reaches here would either double-collect (cash + card) or comp a client
+  // the card already charged, so it is refused with a distinct code the pro UI
+  // can act on. This runs BEFORE the idempotent no-op / PAID↔WAIVED checks so a
+  // card payment always wins over a racing manual action. It never fires for a
+  // genuine manual replay: only a real Stripe capture sets stripePaymentStatus
+  // to SUCCEEDED (a manually-marked PAID leaves it NOT_STARTED). The mirror case
+  // — a card charge landing AFTER a manual close-out — cannot be refused (the
+  // money is already captured) and is detected + paged by the payment applier.
+  if (booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED) {
+    throw bookingError('CHECKOUT_ALREADY_PAID_BY_STRIPE')
+  }
+
   if (
     booking.status === BookingStatus.COMPLETED &&
     booking.sessionStep === SessionStep.DONE &&
@@ -16619,6 +16648,22 @@ async function performLockedApplyStripePaymentSucceeded(args: {
     }
   }
 
+  // M9 — did the pro already close this booking out by hand before the card
+  // charge landed? A manual mark-paid (PAID) or waive (WAIVED) stamps
+  // paymentCollectedAt while stripePaymentStatus is still NOT_STARTED; the normal
+  // card flow has paymentCollectedAt == null at this point. So a non-null
+  // paymentCollectedAt on a not-yet-SUCCEEDED booking means this card capture is
+  // an OVER-COLLECTION on top of a manual close-out (double collection, or a
+  // charge despite a waive). The money is already captured at Stripe — we still
+  // record it below (it IS the money that moved), but the caller must page a
+  // human to refund the card. Read from the pre-update row: the applier holds the
+  // pro schedule lock the manual close-out also takes, so this reflects the
+  // committed manual write. (The DISPUTED / already-SUCCEEDED replays returned
+  // above, so this only fires on the first application onto a manual close-out.)
+  const capturedAfterManualCloseout =
+    booking.paymentCollectedAt !== null &&
+    booking.stripePaymentStatus !== StripePaymentStatus.SUCCEEDED
+
   // Reconcile captured vs expected: the captured amount IS the money that moved,
   // so we still record it below — but a mismatch against the booking's expected
   // total means a short-pay / over-pay / wrong-currency capture that must be
@@ -16743,6 +16788,10 @@ async function performLockedApplyStripePaymentSucceeded(args: {
     // reflects any cancel that committed first — so a payment applying onto a
     // CANCELLED booking is always flagged for the post-commit refund.
     capturedOnCancelledBooking: updated.status === BookingStatus.CANCELLED,
+    // M9 — flagged from the pre-update read (the manual close-out that raced this
+    // capture committed first under the shared lock). The caller pages a human to
+    // refund the card; the write above already recorded the money.
+    capturedAfterManualCloseout,
   }
 }
 

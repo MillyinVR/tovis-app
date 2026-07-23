@@ -19,7 +19,10 @@ import type Stripe from 'stripe'
 
 import { handleStripeEvent } from '@/lib/stripe/handleWebhookEvent'
 import { applyLateCaptureCancelRefund } from '@/lib/booking/cancelRefund'
-import { captureBookingException } from '@/lib/observability/bookingEvents'
+import {
+  captureBookingException,
+  captureManualCloseoutStripeOverCollection,
+} from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 
 const ROUTE = 'GET /api/internal/jobs/stripe-webhook-requeue'
@@ -123,6 +126,16 @@ async function requeueEvent(row: FailedEventRow): Promise<WebhookRequeueResult> 
     // the transaction commits. Best-effort — never throws.
     if (result.lateCaptureRefund) {
       await applyLateCaptureCancelRefund(result.lateCaptureRefund)
+    }
+
+    // M9 — a replayed card charge landed on a booking already closed out by hand:
+    // page a human to refund the over-collected card (alert-only).
+    if (result.manualCloseoutOverCollection) {
+      captureManualCloseoutStripeOverCollection({
+        bookingId: result.manualCloseoutOverCollection.bookingId,
+        flavor: result.manualCloseoutOverCollection.flavor,
+        source: 'REQUEUE',
+      })
     }
 
     return {

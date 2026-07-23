@@ -13,7 +13,21 @@ const mocks = vi.hoisted(() => ({
   applyLateCaptureCancelRefund: vi.fn(),
   stripeRetrieve: vi.fn(),
   captureBookingException: vi.fn(),
+  captureManualCloseoutStripeOverCollection: vi.fn(),
 }))
+
+// The route runs TWO candidate queries: the primary orphan sweep
+// (paymentCollectedAt === null) and the M9 D3 over-collection sweep
+// (paymentCollectedAt: { not: null }). Route each to its own result set so a
+// single primary candidate is not returned twice.
+function setCandidates(primary: unknown[], overCollection: unknown[] = []) {
+  mocks.bookingFindMany.mockImplementation(
+    (args: { where?: { paymentCollectedAt?: unknown } }) =>
+      Promise.resolve(
+        args?.where?.paymentCollectedAt === null ? primary : overCollection,
+      ),
+  )
+}
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -43,6 +57,8 @@ vi.mock('@/lib/stripe/server', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+  captureManualCloseoutStripeOverCollection:
+    mocks.captureManualCloseoutStripeOverCollection,
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -84,6 +100,7 @@ beforeEach(() => {
   mocks.applyLateCaptureCancelRefund.mockReset()
   mocks.stripeRetrieve.mockReset()
   mocks.captureBookingException.mockReset()
+  mocks.captureManualCloseoutStripeOverCollection.mockReset()
 })
 
 afterEach(() => {
@@ -160,7 +177,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('accepts x-internal-job-secret authorization', async () => {
-    mocks.bookingFindMany.mockResolvedValue([])
+    setCandidates([])
 
     const response = await GET(
       makeJobRequest({
@@ -169,11 +186,11 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
     )
 
     expect(response.status).toBe(200)
-    expect(mocks.bookingFindMany).toHaveBeenCalledTimes(1)
+    expect(mocks.bookingFindMany).toHaveBeenCalledTimes(2)
   })
 
   it('returns zero tally when no candidates exist', async () => {
-    mocks.bookingFindMany.mockResolvedValue([])
+    setCandidates([])
 
     const response = await GET(authedRequest())
 
@@ -198,11 +215,11 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('queries Prisma with the correct candidate filter', async () => {
-    mocks.bookingFindMany.mockResolvedValue([])
+    setCandidates([])
 
     await GET(authedRequest())
 
-    expect(mocks.bookingFindMany).toHaveBeenCalledTimes(1)
+    expect(mocks.bookingFindMany).toHaveBeenCalledTimes(2)
 
     const call = mocks.bookingFindMany.mock.calls[0]?.[0]
 
@@ -234,7 +251,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('retrieves Stripe sessions with payment_intent expanded', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_1', stripeCheckoutSessionId: 'cs_1' },
     ])
 
@@ -252,7 +269,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('replays applyStripePaymentSucceeded for paid sessions with expanded payment intent', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_1', stripeCheckoutSessionId: 'cs_1' },
     ])
 
@@ -311,7 +328,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   // M1: a recovered payment that applied onto an already-CANCELLED booking
   // settles by the cancel's refund policy after the apply.
   it('runs the late-capture cancel refund when the recovered booking is cancelled', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_cancelled', stripeCheckoutSessionId: 'cs_cancelled' },
     ])
 
@@ -345,7 +362,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('does not run the late-capture refund when the recovered booking is live', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_1', stripeCheckoutSessionId: 'cs_1' },
     ])
 
@@ -376,7 +393,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('replays applyStripePaymentSucceeded for paid sessions when payment_intent is only a string', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_string_pi', stripeCheckoutSessionId: 'cs_string_pi' },
     ])
 
@@ -414,7 +431,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('skips unpaid sessions without calling apply', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_2', stripeCheckoutSessionId: 'cs_2' },
     ])
 
@@ -439,7 +456,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('reports session_missing_payment_intent when a paid session has no payment intent id', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_missing_pi', stripeCheckoutSessionId: 'cs_missing_pi' },
     ])
 
@@ -465,7 +482,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('reports stripe_lookup_failed when retrieve throws', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_3', stripeCheckoutSessionId: 'cs_3' },
     ])
 
@@ -492,7 +509,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('reports apply_failed when applyStripePaymentSucceeded throws', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_apply_failed', stripeCheckoutSessionId: 'cs_apply_failed' },
     ])
 
@@ -530,7 +547,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('treats null apply results as already recovered/no-op', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_null_apply', stripeCheckoutSessionId: 'cs_null_apply' },
     ])
 
@@ -559,7 +576,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('treats non-mutating apply results as already recovered/no-op', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_4', stripeCheckoutSessionId: 'cs_4' },
     ])
 
@@ -592,7 +609,7 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
   })
 
   it('continues processing later candidates after one candidate fails', async () => {
-    mocks.bookingFindMany.mockResolvedValue([
+    setCandidates([
       { id: 'bk_bad', stripeCheckoutSessionId: 'cs_bad' },
       { id: 'bk_good', stripeCheckoutSessionId: 'cs_good' },
     ])
@@ -630,11 +647,82 @@ describe('GET /api/internal/jobs/stripe-orphan-recovery', () => {
 
     expect(mocks.applyStripePaymentSucceeded).toHaveBeenCalledTimes(1)
   })
+
+  // M9 D3 — a lost card-success webhook on a booking already closed out by hand.
+  it('pages over_collected when a recovered payment lands on a manual close-out', async () => {
+    setCandidates([], [{ id: 'bk_oc', stripeCheckoutSessionId: 'cs_oc' }])
+
+    mocks.stripeRetrieve.mockResolvedValue({
+      id: 'cs_oc',
+      payment_status: 'paid',
+      payment_intent: {
+        id: 'pi_oc',
+        object: 'payment_intent',
+        amount_received: 5000,
+        currency: 'usd',
+      },
+      amount_total: 5000,
+      currency: 'usd',
+    })
+
+    mocks.applyStripePaymentSucceeded.mockResolvedValue({
+      bookingId: 'bk_oc',
+      bookingCompleted: false,
+      meta: { mutated: true, noOp: false },
+      capturedAfterManualCloseout: true,
+    })
+
+    const response = await GET(authedRequest())
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      candidatesScanned: 1,
+      tally: { over_collected: 1, recovered: 0 },
+      sample: [
+        {
+          bookingId: 'bk_oc',
+          stripeCheckoutSessionId: 'cs_oc',
+          outcome: 'over_collected',
+        },
+      ],
+    })
+
+    expect(
+      mocks.captureManualCloseoutStripeOverCollection,
+    ).toHaveBeenCalledExactlyOnceWith({
+      bookingId: 'bk_oc',
+      flavor: 'SERVICE',
+      source: 'ORPHAN_RECOVERY',
+    })
+    // A clean (non-over-collection) recovery must NOT page.
+    expect(mocks.applyLateCaptureCancelRefund).not.toHaveBeenCalled()
+  })
+
+  it('M9 D3 candidate query targets manually-collected bookings of ANY status', async () => {
+    setCandidates([])
+
+    await GET(authedRequest())
+
+    const d3Call = mocks.bookingFindMany.mock.calls[1]?.[0]
+
+    expect(d3Call).toMatchObject({
+      where: {
+        paymentProvider: PaymentProvider.STRIPE,
+        stripeCheckoutSessionId: { not: null },
+        stripePaymentStatus: { not: StripePaymentStatus.SUCCEEDED },
+        paymentCollectedAt: { not: null },
+      },
+      take: 200,
+    })
+    // No status filter — a COMPLETED manually-closed booking must be reachable
+    // (the primary query excludes COMPLETED; this class must not).
+    expect(d3Call.where.status).toBeUndefined()
+  })
 })
 
 describe('POST /api/internal/jobs/stripe-orphan-recovery', () => {
   it('runs the same job as GET', async () => {
-    mocks.bookingFindMany.mockResolvedValue([])
+    setCandidates([])
 
     const response = await POST(
       new Request(
@@ -647,6 +735,6 @@ describe('POST /api/internal/jobs/stripe-orphan-recovery', () => {
     )
 
     expect(response.status).toBe(200)
-    expect(mocks.bookingFindMany).toHaveBeenCalledTimes(1)
+    expect(mocks.bookingFindMany).toHaveBeenCalledTimes(2)
   })
 })

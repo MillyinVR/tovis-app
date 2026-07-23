@@ -56,6 +56,7 @@ export type BookingErrorCode =
   | "BOOKING_CANNOT_EDIT_CANCELLED"
   | "BOOKING_CANNOT_EDIT_COMPLETED"
   | "BOOKING_STATUS_CHANGE_NOT_ALLOWED"
+  | "CHECKOUT_ALREADY_PAID_BY_STRIPE"
   | "BAD_LOCATION"
   | "BAD_LOCATION_MODE"
   | "DURATION_MISMATCH"
@@ -530,6 +531,22 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     message: "This booking status change is not allowed.",
     userMessage:
       "This appointment can no longer be changed here. Please contact support if you need to make a change.",
+  },
+  // The client already paid this booking's final bill by Stripe card (M9): a
+  // manual mark-paid / waive would race a real capture and double-collect (cash
+  // + card) or comp a client the card already charged. The manual close-out is
+  // refused with this distinct code so the pro UI can say "already paid by card"
+  // rather than silently no-op (mark-paid) or return a generic FORBIDDEN
+  // (waive). The reverse order — a card charge landing AFTER a manual close-out —
+  // is unpreventable (the money is already captured) and is detected + paged by
+  // the payment-succeeded applier instead.
+  CHECKOUT_ALREADY_PAID_BY_STRIPE: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "This booking's final bill was already paid by Stripe card.",
+    userMessage:
+      "This booking was already paid by card. It can't also be marked paid or waived here.",
   },
   BAD_LOCATION: {
     httpStatus: 409,
