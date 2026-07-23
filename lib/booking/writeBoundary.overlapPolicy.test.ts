@@ -86,11 +86,16 @@ const mocks = vi.hoisted(() => ({
   evaluateProSchedulingDecision: vi.fn(),
 }))
 
-vi.mock('@/lib/booking/scheduleTransaction', () => ({
-  withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
-  withLockedClientOwnedBookingTransaction:
-    mocks.withLockedClientOwnedBookingTransaction,
-}))
+vi.mock('@/lib/booking/scheduleTransaction', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/booking/scheduleTransaction')>()
+  return {
+    ...actual,
+    withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
+    withLockedClientOwnedBookingTransaction:
+      mocks.withLockedClientOwnedBookingTransaction,
+  }
+})
 
 vi.mock('@/lib/booking/scheduleLock', () => ({
   lockProfessionalSchedule: vi.fn(),

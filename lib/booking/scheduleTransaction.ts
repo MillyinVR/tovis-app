@@ -8,8 +8,13 @@ export type LockedScheduleContext = {
   now: Date
 }
 
-const SCHEDULE_TX_MAX_WAIT_MS = 10_000
-const SCHEDULE_TX_TIMEOUT_MS = 20_000
+// Interactive-transaction budgets for every schedule-locked write. Exported so
+// the few hand-rolled `prisma.$transaction` creation paths that can't use the
+// wrappers below (they read → lock → re-read inside the same tx) still run with
+// the SAME budgets — a lock-contending booking-create must not abort on Prisma's
+// tight 2s/5s defaults where every wrapper-based create would wait and succeed.
+export const SCHEDULE_TX_MAX_WAIT_MS = 10_000
+export const SCHEDULE_TX_TIMEOUT_MS = 20_000
 
 export async function withLockedProfessionalTransaction<T>(
   professionalId: string,
