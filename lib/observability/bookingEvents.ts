@@ -327,6 +327,56 @@ export function captureLateCaptureOnCancelledBooking(input: {
   )
 }
 
+/**
+ * The hourly refund-retry sweep has used up its attempt budget for a FAILED
+ * auto-cancel refund (M3). The client is owed money the platform can no longer
+ * return automatically — a human must settle it (discretionary refund endpoint
+ * for the service payment, Stripe Dashboard for the deposit PI), so this must
+ * page, not just log. Fires once, at the attempt that exhausts the budget.
+ */
+export function captureAutoCancelRefundRetriesExhausted(input: {
+  bookingId: string
+  paymentIntentId: string
+  flavor: 'DEPOSIT' | 'SERVICE'
+  attempts: number
+  detail: string | null
+}): void {
+  Sentry.withScope((scope) => {
+    scope.setLevel('error')
+    scope.setTag('area', 'payments')
+    scope.setTag('payments.event', 'auto_cancel_refund_retries_exhausted')
+    scope.setTag('payments.refund_retry.flavor', input.flavor)
+    scope.setTag('booking.id', input.bookingId)
+
+    scope.setContext('auto_cancel_refund_retries_exhausted', {
+      bookingId: input.bookingId,
+      paymentIntentId: input.paymentIntentId,
+      flavor: input.flavor,
+      attempts: input.attempts,
+      detail: input.detail,
+    })
+
+    Sentry.captureMessage(
+      `Auto-cancel ${input.flavor} refund on booking ${input.bookingId} still failing after ${input.attempts} attempts — manual refund required`,
+      'error',
+    )
+  })
+
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      app: 'tovis',
+      namespace: 'payments',
+      event: 'auto_cancel_refund_retries_exhausted',
+      bookingId: input.bookingId,
+      paymentIntentId: input.paymentIntentId,
+      flavor: input.flavor,
+      attempts: input.attempts,
+      detail: input.detail,
+    }),
+  )
+}
+
 // Register the Sentry sink once at module load. The lifecycleContract module
 // keeps a registry of sinks and emits to all of them on drift.
 let driftSinkRegistered = false

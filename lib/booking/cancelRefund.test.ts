@@ -516,4 +516,53 @@ describe('applyLateCaptureCancelRefund', () => {
     )
     expect(result.outcome).toBe('FAILED')
   })
+
+  it('refund FAILED from the RETRY_SWEEP source → no per-attempt page, distinct log identity', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_LATE,
+      cancelledByRole: Role.ADMIN,
+    })
+    mocks.refundBookingPayment.mockResolvedValue({
+      outcome: 'FAILED',
+      refund: { id: 'refund_1' },
+      message: 'stripe exploded',
+    })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'SERVICE',
+      source: 'RETRY_SWEEP',
+    })
+
+    expect(result.outcome).toBe('FAILED')
+    // The sweep owns escalation (retries-exhausted); a per-attempt page here
+    // would fire hourly for a booking the sweep is still working.
+    expect(mocks.captureLateCaptureOnCancelledBooking).not.toHaveBeenCalled()
+
+    const events = logSpy.mock.calls.map((call) => {
+      try {
+        return (JSON.parse(String(call[0])) as { event?: string }).event ?? null
+      } catch {
+        return null
+      }
+    })
+    expect(events).toContain('auto_cancel_refund_retry')
+    expect(events).not.toContain('late_capture_cancel_refund')
+  })
+
+  it('unknown provenance still pages even from the RETRY_SWEEP source', async () => {
+    primeProvenance({ cancelledAt: null, cancelledByRole: null })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'DEPOSIT',
+      source: 'RETRY_SWEEP',
+    })
+
+    expect(result.outcome).toBe('UNKNOWN_PROVENANCE')
+    expect(mocks.captureLateCaptureOnCancelledBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'UNKNOWN_CANCEL_PROVENANCE' }),
+    )
+  })
 })

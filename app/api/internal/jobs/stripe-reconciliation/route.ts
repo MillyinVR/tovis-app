@@ -12,9 +12,14 @@
 //
 // Per-booking failures are captured and tallied; one bad PaymentIntent never
 // blocks the rest of the sweep.
+//
+// After the reconcile phases, the run also re-drives FAILED auto-cancel
+// refunds (bounded retry sweep, lib/booking/refundRetrySweep.ts) so a refund
+// the cancellation policy promised is never a silent dead end (M3).
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
+import { retryFailedAutoCancelRefunds } from '@/lib/booking/refundRetrySweep'
 import {
   reconcileStripeDeposits,
   reconcileStripeRefunds,
@@ -49,6 +54,11 @@ async function runJob(req: Request): Promise<Response> {
       reconcileStripeDeposits({ now }),
     ])
 
+    // After the reconciles, so the retry math reads Stripe-fresh refunded
+    // totals: re-drive FAILED auto-cancel refunds that still have no settled
+    // outcome (M3 — a FAILED refund must not be a dead end).
+    const refundRetries = await retryFailedAutoCancelRefunds({ now })
+
     const shape = (run: ReconcileRunResult) => ({
       candidatesScanned: run.candidatesScanned,
       capped: run.capped,
@@ -61,6 +71,12 @@ async function runJob(req: Request): Promise<Response> {
       ok: true,
       refunds: shape(refunds),
       deposits: shape(deposits),
+      refundRetries: {
+        pairsScanned: refundRetries.pairsScanned,
+        capped: refundRetries.capped,
+        tally: refundRetries.tally,
+        sample: refundRetries.results.slice(0, 20),
+      },
       ranAt: now.toISOString(),
     })
   } catch (error: unknown) {
