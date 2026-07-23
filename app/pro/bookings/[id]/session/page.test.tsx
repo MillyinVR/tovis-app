@@ -7,6 +7,7 @@ import {
   MediaPhase,
   Role,
   SessionStep,
+  StripePaymentStatus,
 } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
@@ -115,6 +116,11 @@ vi.mock('./MarkPaidButton', () => ({
     React.createElement('div', { 'data-testid': 'mark-paid-button' }),
 }))
 
+vi.mock('./ReopenCheckoutButton', () => ({
+  default: () =>
+    React.createElement('div', { 'data-testid': 'reopen-checkout-button' }),
+}))
+
 vi.mock('@/lib/booking/writeBoundary', () => ({
   confirmBookingFinalReview: mocks.confirmBookingFinalReview,
   transitionSessionStep: mocks.transitionSessionStep,
@@ -154,6 +160,7 @@ function makeCurrentUser() {
     finishedAt?: Date | null
     checkoutStatus?: BookingCheckoutStatus
     paymentCollectedAt?: Date | null
+    stripePaymentStatus?: StripePaymentStatus | null
     consultationStatus?: ConsultationApprovalStatus | null
   proof?: {
     id: string
@@ -180,6 +187,7 @@ function makeCurrentUser() {
     sessionStep: overrides?.sessionStep ?? SessionStep.CONSULTATION_PENDING_CLIENT,
     checkoutStatus: overrides?.checkoutStatus ?? BookingCheckoutStatus.NOT_READY,
     paymentCollectedAt: overrides?.paymentCollectedAt ?? null,
+    stripePaymentStatus: overrides?.stripePaymentStatus ?? null,
 
     service: {
       name: 'Haircut',
@@ -278,6 +286,31 @@ function extractText(node: PageNode): string {
 
 function hasText(node: PageNode, text: string): boolean {
   return extractText(node).includes(text)
+}
+
+// Walk the rendered server-component tree for an element carrying `data-testid`.
+// Client components (MarkPaidButton / ReopenCheckoutButton) are stubbed to a
+// testid-bearing div, so their presence/absence is observable here even though
+// they emit no text.
+function hasTestId(node: PageNode, testId: string): boolean {
+  if (node == null || typeof node === 'boolean') return false
+
+  if (Array.isArray(node)) {
+    return node.some((child) => hasTestId(child, testId))
+  }
+
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    const props = node.props as Record<string, unknown>
+    if (props['data-testid'] === testId) return true
+
+    if (typeof node.type === 'function' && isFunctionComponent(node.type)) {
+      return hasTestId(node.type(node.props), testId)
+    }
+
+    return hasTestId(node.props.children, testId)
+  }
+
+  return false
 }
 
 describe('app/pro/bookings/[id]/session/page.tsx', () => {
@@ -630,6 +663,40 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
 
     expect(hasText(page, 'Complete session')).toBe(false)
     expect(mocks.transitionSessionStep).not.toHaveBeenCalled()
+  })
+
+  it('offers the reopen (undo) control for a manual PAID close-out, not the mark-paid control', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        status: BookingStatus.IN_PROGRESS,
+        sessionStep: SessionStep.AFTER_PHOTOS,
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        paymentCollectedAt: new Date('2026-04-12T20:20:00.000Z'),
+        stripePaymentStatus: null,
+        consultationStatus: ConsultationApprovalStatus.APPROVED,
+      }),
+      afterCount: 1,
+    })
+
+    expect(hasTestId(page, 'reopen-checkout-button')).toBe(true)
+    expect(hasTestId(page, 'mark-paid-button')).toBe(false)
+  })
+
+  it('hides the reopen control when the final bill was paid by Stripe card (refund path only)', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        status: BookingStatus.IN_PROGRESS,
+        sessionStep: SessionStep.AFTER_PHOTOS,
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        paymentCollectedAt: new Date('2026-04-12T20:20:00.000Z'),
+        stripePaymentStatus: StripePaymentStatus.SUCCEEDED,
+        consultationStatus: ConsultationApprovalStatus.APPROVED,
+      }),
+      afterCount: 1,
+    })
+
+    expect(hasTestId(page, 'reopen-checkout-button')).toBe(false)
+    expect(hasTestId(page, 'mark-paid-button')).toBe(false)
   })
 
   it('shows completed booking state and aftercare link', async () => {
