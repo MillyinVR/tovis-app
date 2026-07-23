@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  BookingDepositStatus,
   BookingRefundStatus,
   BookingRefundTrigger,
   PaymentProvider,
@@ -74,12 +75,18 @@ function makeTx() {
         async ({
           where,
         }: {
-          where: { bookingId: string; status: unknown }
+          where: {
+            bookingId: string
+            stripePaymentIntentId?: string
+            status: unknown
+          }
         }) => {
           const sum = mocks.refundRows
             .filter(
               (r) =>
                 r.bookingId === where.bookingId &&
+                (where.stripePaymentIntentId === undefined ||
+                  r.stripePaymentIntentId === where.stripePaymentIntentId) &&
                 matchesStatus(r.status, where.status),
             )
             .reduce((acc, r) => acc + (r.amountCents as number), 0)
@@ -126,15 +133,22 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     $transaction: (cb: (tx: ReturnType<typeof makeTx>) => unknown) =>
       cb(txRef.current),
+    booking: {
+      update: (args: { where: { id: string }; data: Record<string, unknown> }) =>
+        txRef.current.booking.update(args),
+    },
     bookingRefund: {
       update: (args: { where: { id: string }; data: Record<string, unknown> }) =>
         txRef.current.bookingRefund.update(args),
+      create: (args: { data: Record<string, unknown> }) =>
+        txRef.current.bookingRefund.create(args),
     },
   },
 }))
 
 import {
   refundBookingPayment,
+  refundDiscoveryDeposit,
   reconcileChargeRefundInTransaction,
 } from './refunds'
 
@@ -226,6 +240,7 @@ describe('refundBookingPayment — eligibility', () => {
     mocks.refundRows.push({
       id: 'refund_existing',
       bookingId: 'booking_1',
+      stripePaymentIntentId: 'pi_123',
       amountCents: 10000,
       status: BookingRefundStatus.SUCCEEDED,
     })
@@ -382,6 +397,7 @@ describe('refundBookingPayment — partial refunds', () => {
     mocks.refundRows.push({
       id: 'refund_prior',
       bookingId: 'booking_1',
+      stripePaymentIntentId: 'pi_123',
       amountCents: 8000,
       status: BookingRefundStatus.SUCCEEDED,
     })
@@ -450,6 +466,7 @@ describe('refundBookingPayment — dashboard/external refunds (no BookingRefund 
     mocks.refundRows.push({
       id: 'refund_pending',
       bookingId: 'booking_1',
+      stripePaymentIntentId: 'pi_123',
       amountCents: 4000,
       status: BookingRefundStatus.PENDING,
     })
@@ -472,6 +489,7 @@ describe('refundBookingPayment — dashboard/external refunds (no BookingRefund 
     mocks.refundRows.push({
       id: 'refund_ours',
       bookingId: 'booking_1',
+      stripePaymentIntentId: 'pi_123',
       amountCents: 4000,
       stripeRefundId: 're_ours',
       status: BookingRefundStatus.SUCCEEDED,
@@ -735,5 +753,161 @@ describe('reconcileChargeRefundInTransaction', () => {
     expect(
       mocks.bookingUpdates.some((u) => 'stripeAmountRefunded' in u),
     ).toBe(false)
+  })
+})
+
+describe('refundBookingPayment — per-PaymentIntent scoping (M3)', () => {
+  it('a SUCCEEDED deposit refund row does not shrink the service remainder', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+    // Deposit refund (separate PI) already settled — e.g. the cancel refunded
+    // the discovery deposit before the service payment landed late (M1).
+    mocks.refundRows.push({
+      id: 'refund_dep',
+      bookingId: 'booking_1',
+      stripePaymentIntentId: 'pi_dep_1',
+      status: BookingRefundStatus.SUCCEEDED,
+      amountCents: 4000,
+    })
+    mocks.stripeRefundsCreate.mockResolvedValue({ id: 're_1' })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    // Full service amount, NOT 10000 − 4000: the deposit rides its own charge.
+    expect(mocks.stripeRefundsCreate.mock.calls.at(-1)?.[0]).toMatchObject({
+      amount: 10000,
+    })
+  })
+
+  it('cross-PI rows never flip the booking to REFUNDED on a partial service refund', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+    mocks.refundRows.push({
+      id: 'refund_dep',
+      bookingId: 'booking_1',
+      stripePaymentIntentId: 'pi_dep_1',
+      status: BookingRefundStatus.SUCCEEDED,
+      amountCents: 4000,
+    })
+    mocks.stripeRefundsCreate.mockResolvedValue({ id: 're_1' })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.DISCRETIONARY,
+      amountCents: 6000,
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    if (result.outcome === 'REFUNDED') {
+      // 6000 of 10000 refunded on the service PI; the 4000 deposit row must not
+      // pad the sum to a phantom "fully refunded".
+      expect(result.bookingFullyRefunded).toBe(false)
+    }
+    expect(mocks.bookingUpdates).not.toContainEqual({
+      stripePaymentStatus: StripePaymentStatus.REFUNDED,
+    })
+  })
+
+  it('does not flip REFUNDED when the booking moved to a new PaymentIntent mid-flight', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+    mocks.stripeRefundsCreate.mockImplementation(async () => {
+      // Between reserve and settle, a new checkout session replaced the PI.
+      mocks.booking = { ...(mocks.booking ?? {}), stripePaymentIntentId: 'pi_new' }
+      return { id: 're_1' }
+    })
+
+    const result = await refundBookingPayment({
+      bookingId: 'booking_1',
+      trigger: BookingRefundTrigger.DISCRETIONARY,
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    if (result.outcome === 'REFUNDED') {
+      expect(result.bookingFullyRefunded).toBe(false)
+    }
+    expect(mocks.bookingUpdates).not.toContainEqual({
+      stripePaymentStatus: StripePaymentStatus.REFUNDED,
+    })
+  })
+})
+
+describe('refundDiscoveryDeposit — failure leg (M3)', () => {
+  function setDepositBooking(overrides: Record<string, unknown> = {}) {
+    setBooking({
+      depositStatus: BookingDepositStatus.PAID,
+      depositAmount: 30, // dollars → 3000 cents
+      discoveryFeeAmount: 1000,
+      depositRefundedCents: 0,
+      ...overrides,
+    })
+  }
+
+  it('a Stripe failure rolls the claim back AND records a durable FAILED row', async () => {
+    setDepositBooking()
+    mocks.stripeRefundsCreate.mockRejectedValue(new Error('refund refused'))
+
+    const result = await refundDiscoveryDeposit({
+      bookingId: 'booking_1',
+      paymentIntentId: 'pi_dep_1',
+      refundAmountCents: 4000,
+      refundFee: true,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+      reason: 'Deposit refund on client cancellation.',
+    })
+
+    expect(result.outcome).toBe('FAILED')
+
+    // Claim rolled back: cents released and the REFUNDED flip reverted.
+    expect(mocks.bookingUpdates).toContainEqual({
+      depositRefundedCents: { decrement: 4000 },
+      depositStatus: BookingDepositStatus.PAID,
+    })
+
+    // The durable artifact: without it the failure is invisible to the money
+    // trail and unreachable for the retry sweep.
+    const failedRow = mocks.refundRows.find(
+      (r) => r.status === BookingRefundStatus.FAILED,
+    )
+    expect(failedRow).toMatchObject({
+      bookingId: 'booking_1',
+      stripePaymentIntentId: 'pi_dep_1',
+      amountCents: 4000,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+      applicationFeeRefunded: false,
+      failureMessage: 'refund refused',
+    })
+  })
+
+  it('a double fault (rollback tx fails) is captured, not swallowed', async () => {
+    setDepositBooking()
+    mocks.stripeRefundsCreate.mockRejectedValue(new Error('stripe down'))
+
+    const originalUpdate = txRef.current.booking.update
+    txRef.current.booking.update = vi.fn(
+      async (args: { data: Record<string, unknown> }) => {
+        const cents = args.data.depositRefundedCents
+        if (cents !== null && typeof cents === 'object' && 'decrement' in cents) {
+          throw new Error('db down')
+        }
+        return originalUpdate(args)
+      },
+    )
+
+    const result = await refundDiscoveryDeposit({
+      bookingId: 'booking_1',
+      paymentIntentId: 'pi_dep_1',
+      refundAmountCents: 4000,
+      refundFee: false,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+    })
+
+    // Still reports FAILED to the caller, and the rollback failure itself is
+    // captured (previously a bare .catch(() => {}) swallowed it).
+    expect(result.outcome).toBe('FAILED')
+    const captured = mocks.captureException.mock.calls.map((c) => String(c[0]))
+    expect(captured.some((msg) => msg.includes('db down'))).toBe(true)
+    expect(captured.some((msg) => msg.includes('stripe down'))).toBe(true)
   })
 })

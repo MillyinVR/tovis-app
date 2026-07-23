@@ -13,6 +13,8 @@
 // Money-correctness invariants:
 //   - Only ever refund a genuinely captured Stripe payment.
 //   - Never refund more than the remaining (captured − already PENDING/SUCCEEDED).
+//   - Refund accounting is scoped PER PaymentIntent: the discovery deposit's
+//     rows never count against the final bill's remainder (or vice versa).
 //   - A per-booking advisory lock serializes concurrent refunds so two callers
 //     can't both reserve the same remaining amount.
 //   - The Stripe call runs OUTSIDE any DB transaction, made idempotent by a key
@@ -100,14 +102,21 @@ async function lockBookingForRefund(
   `
 }
 
-/** Sum of BookingRefund amounts for the given statuses on a booking. */
+/**
+ * Sum of BookingRefund amounts for the given statuses on a booking, scoped to
+ * one PaymentIntent. A booking can carry refund rows for TWO charges — the
+ * final-bill PI and the separate discovery-deposit PI — and each PI's
+ * reservation math must only ever count its own rows: a SUCCEEDED deposit
+ * refund must not shrink the service payment's refundable remainder.
+ */
 async function sumRefundCents(
   tx: Prisma.TransactionClient,
   bookingId: string,
+  paymentIntentId: string,
   statuses: BookingRefundStatus[],
 ): Promise<number> {
   const reserved = await tx.bookingRefund.aggregate({
-    where: { bookingId, status: { in: statuses } },
+    where: { bookingId, stripePaymentIntentId: paymentIntentId, status: { in: statuses } },
     _sum: { amountCents: true },
   })
 
@@ -175,6 +184,7 @@ async function reserveRefund(input: RefundBookingInput): Promise<Reservation> {
     }
 
     const capturedTotal = booking.stripeAmountTotal as number
+    const paymentIntentId = booking.stripePaymentIntentId as string
 
     // Refunds come from two sources that must BOTH count against the captured
     // total, without double-counting their overlap:
@@ -190,9 +200,10 @@ async function reserveRefund(input: RefundBookingInput): Promise<Reservation> {
     const reservedByRows = await sumRefundCents(
       tx,
       input.bookingId,
+      paymentIntentId,
       RESERVING_STATUSES,
     )
-    const succeededByRows = await sumRefundCents(tx, input.bookingId, [
+    const succeededByRows = await sumRefundCents(tx, input.bookingId, paymentIntentId, [
       BookingRefundStatus.SUCCEEDED,
     ])
     const refundedPerStripe = booking.stripeAmountRefunded ?? 0
@@ -245,7 +256,7 @@ async function reserveRefund(input: RefundBookingInput): Promise<Reservation> {
     return {
       kind: 'reserved',
       refund,
-      paymentIntentId: booking.stripePaymentIntentId as string,
+      paymentIntentId,
       refundApplicationFee,
     }
   })
@@ -259,6 +270,7 @@ async function reserveRefund(input: RefundBookingInput): Promise<Reservation> {
 async function settleSucceededRefund(args: {
   refundId: string
   bookingId: string
+  paymentIntentId: string
   stripeRefundId: string
   refundApplicationFee: boolean
 }): Promise<{ refund: BookingRefund; bookingFullyRefunded: boolean }> {
@@ -278,17 +290,22 @@ async function settleSucceededRefund(args: {
 
     const booking = await tx.booking.findUnique({
       where: { id: args.bookingId },
-      select: { stripeAmountTotal: true },
+      select: { stripeAmountTotal: true, stripePaymentIntentId: true },
     })
 
-    const succeeded = await tx.bookingRefund.aggregate({
-      where: { bookingId: args.bookingId, status: BookingRefundStatus.SUCCEEDED },
-      _sum: { amountCents: true },
-    })
+    const succeeded = await sumRefundCents(tx, args.bookingId, args.paymentIntentId, [
+      BookingRefundStatus.SUCCEEDED,
+    ])
 
-    const refundedTotal = succeeded._sum.amountCents ?? 0
     const capturedTotal = booking?.stripeAmountTotal ?? 0
-    const bookingFullyRefunded = capturedTotal > 0 && refundedTotal >= capturedTotal
+    // stripeAmountTotal describes the booking's CURRENT final-bill PI; only
+    // compare (and only flip the booking-level status) when the refund we just
+    // settled belongs to that PI — deposit rows and rows from a superseded
+    // checkout must never flip the live payment to REFUNDED.
+    const bookingFullyRefunded =
+      booking?.stripePaymentIntentId === args.paymentIntentId &&
+      capturedTotal > 0 &&
+      succeeded >= capturedTotal
 
     if (bookingFullyRefunded) {
       await tx.booking.update({
@@ -389,6 +406,7 @@ export async function refundBookingPayment(
   const settled = await settleSucceededRefund({
     refundId: refund.id,
     bookingId: input.bookingId,
+    paymentIntentId,
     stripeRefundId: stripeRefund.id,
     refundApplicationFee,
   })
@@ -542,11 +560,19 @@ export async function refundDiscoveryDeposit(args: {
       feeRefunded: args.refundFee,
     }
   } catch (error) {
-    // Release the reservation so the refund can be retried: roll back the cents
-    // and the REFUNDED flip (if this call set it). Under the lock so a concurrent
+    const failureCode =
+      error instanceof Stripe.errors.StripeError ? error.code ?? error.type : null
+    const failureMessage =
+      error instanceof Error ? error.message : 'Deposit refund failed.'
+
+    // Release the reservation so the refund can be retried — roll back the
+    // cents and the REFUNDED flip (if this call set it) — and record a durable
+    // FAILED row in the SAME transaction: the rollback alone leaves no trace,
+    // which made a failed deposit refund invisible to the money trail and
+    // unreachable for the retry sweep (M3). Under the lock so a concurrent
     // refund sees a consistent counter.
-    await prisma
-      .$transaction(async (tx) => {
+    try {
+      await prisma.$transaction(async (tx) => {
         await lockBookingForRefund(tx, args.bookingId)
         await tx.booking.update({
           where: { id: args.bookingId },
@@ -557,8 +583,34 @@ export async function refundDiscoveryDeposit(args: {
               : {}),
           },
         })
+        await tx.bookingRefund.create({
+          data: {
+            bookingId: args.bookingId,
+            amountCents: args.refundAmountCents,
+            currency: 'usd',
+            status: BookingRefundStatus.FAILED,
+            trigger: args.trigger,
+            reverseTransfer: true,
+            applicationFeeRefunded: false,
+            initiatedByUserId: args.actor?.userId ?? null,
+            initiatedByRole: args.actor?.role ?? null,
+            reason: args.reason ?? null,
+            stripePaymentIntentId: args.paymentIntentId,
+            failureCode,
+            failureMessage: failureMessage.slice(0, 500),
+          },
+        })
       })
-      .catch(() => {})
+    } catch (rollbackError) {
+      // Double fault: the claim rollback itself failed. depositRefundedCents is
+      // stranded claiming cents the client never received, and no FAILED row
+      // exists for the sweep to retry — a human must reconcile this booking.
+      console.error('refundDiscoveryDeposit: reservation rollback failed', {
+        bookingId: args.bookingId,
+        error: safeError(rollbackError),
+      })
+      Sentry.captureException(rollbackError)
+    }
 
     console.error('refundDiscoveryDeposit: Stripe refund failed', {
       bookingId: args.bookingId,
@@ -568,7 +620,7 @@ export async function refundDiscoveryDeposit(args: {
 
     return {
       outcome: 'FAILED',
-      message: error instanceof Error ? error.message : 'Deposit refund failed.',
+      message: failureMessage,
     }
   }
 }

@@ -268,6 +268,17 @@ export async function applyDiscoveryDepositCancelRefund(args: {
 
 export type LateCaptureRefundFlavor = 'DEPOSIT' | 'SERVICE'
 
+/**
+ * Who is re-running the cancel policy on a CANCELLED booking:
+ *   LATE_CAPTURE — a Stripe success just landed on the cancelled booking
+ *                  (webhook / requeue / orphan recovery).
+ *   RETRY_SWEEP  — the hourly refund-retry sweep re-driving a FAILED
+ *                  auto-cancel refund (M3). Same gates, distinct log identity;
+ *                  the sweep owns its own escalation (retries-exhausted alert),
+ *                  so per-attempt REFUND_FAILED paging stays with LATE_CAPTURE.
+ */
+export type LateCaptureRefundSource = 'LATE_CAPTURE' | 'RETRY_SWEEP'
+
 export type LateCaptureCancelRefundResult =
   | AutoCancelRefundResult
   | DepositCancelRefundResult
@@ -298,7 +309,9 @@ function cancelRoleToActorKind(role: Role): CancelRefundActorKind {
 export async function applyLateCaptureCancelRefund(args: {
   bookingId: string
   flavor: LateCaptureRefundFlavor
+  source?: LateCaptureRefundSource
 }): Promise<LateCaptureCancelRefundResult> {
+  const source: LateCaptureRefundSource = args.source ?? 'LATE_CAPTURE'
   try {
     const booking = await prisma.booking.findUnique({
       where: { id: args.bookingId },
@@ -341,14 +354,18 @@ export async function applyLateCaptureCancelRefund(args: {
             reason: `Automatic refund on payment captured after ${actorKind} cancellation.`,
           })
 
-    // Distinct log identity from the cancel-time refund path, so a late-capture
-    // settle is always tellable apart in the logs.
+    // Distinct log identity per promise site, so a late-capture settle and a
+    // sweep retry are always tellable apart in the logs (and from the
+    // cancel-time refund path).
     console.log(
       JSON.stringify({
         level: 'info',
         app: 'tovis',
         namespace: 'payments',
-        event: 'late_capture_cancel_refund',
+        event:
+          source === 'RETRY_SWEEP'
+            ? 'auto_cancel_refund_retry'
+            : 'late_capture_cancel_refund',
         bookingId: args.bookingId,
         flavor: args.flavor,
         actorKind,
@@ -356,7 +373,11 @@ export async function applyLateCaptureCancelRefund(args: {
       }),
     )
 
-    if (result.outcome === 'FAILED') {
+    // A late-capture failure pages per attempt (no other owner exists at that
+    // point). A sweep-retry failure does not: every Stripe failure is already
+    // Sentry-captured in the refund service, and the sweep pages once with
+    // retries-exhausted when the attempt budget runs out.
+    if (result.outcome === 'FAILED' && source === 'LATE_CAPTURE') {
       captureLateCaptureOnCancelledBooking({
         bookingId: args.bookingId,
         flavor: args.flavor,
