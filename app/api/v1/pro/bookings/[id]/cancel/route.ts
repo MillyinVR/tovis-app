@@ -19,6 +19,7 @@ import { cancelBooking } from '@/lib/booking/writeBoundary'
 import {
   applyAutoCancelRefund,
   applyDiscoveryDepositCancelRefund,
+  summarizeCancelRefund,
 } from '@/lib/booking/cancelRefund'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -46,6 +47,7 @@ function buildCancelRequestBody(args: {
 
 function buildCancelResponseBody(
   result: Awaited<ReturnType<typeof cancelBooking>>,
+  refund: ReturnType<typeof summarizeCancelRefund>,
 ): CancelResponseBody {
   return {
     booking: {
@@ -54,6 +56,9 @@ function buildCancelResponseBody(
       sessionStep: result.booking.sessionStep,
     },
     meta: result.meta,
+    // Honest refund summary (M6) — the pro UI ignores it today, but it makes the
+    // response self-describing and matches the client + PATCH-cancel routes.
+    refund,
   }
 }
 
@@ -131,8 +136,8 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       allowedStatuses: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
     })
 
-    // Pro cancellation → auto full refund to the client (best-effort, never throws).
-    await applyAutoCancelRefund({
+    // Pro cancellation → no service auto-refund (pro discretion); best-effort.
+    const serviceRefund = await applyAutoCancelRefund({
       bookingId,
       actorKind: 'pro',
       actorUserId,
@@ -141,7 +146,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     })
 
     // New-client discovery deposit + fee: pro cancel refunds both (resets the pair).
-    await applyDiscoveryDepositCancelRefund({
+    const depositRefund = await applyDiscoveryDepositCancelRefund({
       bookingId,
       actorKind: 'pro',
       actorUserId,
@@ -149,7 +154,12 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       reason,
     })
 
-    const responseBody = buildCancelResponseBody(result)
+    const refund = summarizeCancelRefund({
+      service: serviceRefund,
+      deposit: depositRefund,
+    })
+
+    const responseBody = buildCancelResponseBody(result, refund)
 
     await completeRouteIdempotency({
       idempotencyRecordId,

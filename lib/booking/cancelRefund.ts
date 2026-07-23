@@ -30,6 +30,7 @@ import {
 } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 
+import { formatCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 import {
   refundBookingPayment,
@@ -263,6 +264,102 @@ export async function applyDiscoveryDepositCancelRefund(args: {
     })
     Sentry.captureException(error)
     return { outcome: 'NOT_ATTEMPTED' }
+  }
+}
+
+// ─── Cancel-time refund honesty (M6) ────────────────────────────────────────
+//
+// The two cancel refund helpers above run post-commit and, historically, their
+// outcomes were DISCARDED: the cancel response carried no refund information and
+// only a SUCCESSFUL refund ever produced a client-facing receipt (via the
+// charge.refunded webhook). A FORFEITED, FAILED or NOT_ATTEMPTED outcome told
+// the client nothing. summarizeCancelRefund collapses the two helper results
+// into one honest, client-safe summary the cancel routes return in their
+// response body (rendered on web + iOS), so the acting client learns what
+// actually happened to their money at cancel time — never a promise the ledger
+// can't back (cron-populated-signal honesty, in reverse).
+
+export type CancelRefundOutcomeStatus =
+  | 'REFUND_ISSUED' // at least one refund succeeded — refundedAmountCents is set
+  | 'FORFEITED' // deposit forfeited per the <24h client policy; nothing refunded
+  | 'PROCESSING' // a refund was attempted but not confirmed (FAILED → retry owns it)
+  | 'NONE' // nothing captured to refund, and nothing forfeited
+
+export type CancelRefundSummary = {
+  status: CancelRefundOutcomeStatus
+  /**
+   * Total returned to the client across the service + deposit PIs. Omitted (not
+   * null) when no refund was issued, so the shape stays a valid Prisma JSON object
+   * for idempotency storage and an absent-key optional for the iOS decoder.
+   */
+  refundedAmountCents?: number
+  /** Short, client-facing sentence describing the money outcome of the cancel. */
+  message: string
+}
+
+/**
+ * Collapse the service + deposit cancel-refund outcomes into one honest,
+ * client-facing summary. Pure — no I/O, fully unit-testable.
+ *
+ * Precedence is honesty-first: a real refund is always surfaced (REFUND_ISSUED),
+ * but a FAILED refund never gets dressed up as "on its way" — it reads as
+ * PROCESSING (the M3 retry sweep owns settling it; the eventual success emits the
+ * receipt). A FORFEITED deposit (only a client cancel <24h out reaches this) is
+ * named plainly rather than left silent. NONE is the common established-client
+ * case where nothing was captured up front.
+ */
+export function summarizeCancelRefund(args: {
+  service: AutoCancelRefundResult
+  deposit: DepositCancelRefundResult
+}): CancelRefundSummary {
+  const { service, deposit } = args
+
+  const serviceRefundedCents =
+    service.outcome === 'REFUNDED' ? service.refund.amountCents : 0
+  const depositRefundedCents =
+    deposit.outcome === 'REFUNDED' ? deposit.refundAmountCents : 0
+  const refundedCents = serviceRefundedCents + depositRefundedCents
+
+  const hasRefund = refundedCents > 0
+  const hasFailure =
+    service.outcome === 'FAILED' || deposit.outcome === 'FAILED'
+  const hasForfeiture = deposit.outcome === 'FORFEITED'
+
+  if (hasRefund) {
+    const base = `Your booking is cancelled. A refund of ${formatCents(
+      refundedCents,
+    )} is on its way — expect it in 5–10 business days.`
+    return {
+      status: 'REFUND_ISSUED',
+      refundedAmountCents: refundedCents,
+      // A mixed success+failure at cancel time is vanishingly rare (a booking
+      // rarely has both a captured service payment AND a paid deposit settling
+      // at once), but if it happens we do NOT hide the unfinished part.
+      message: hasFailure
+        ? `${base} Part of your refund is still being processed.`
+        : base,
+    }
+  }
+
+  if (hasFailure) {
+    return {
+      status: 'PROCESSING',
+      message:
+        'Your booking is cancelled. We’re finalizing your refund — this can take a little longer than usual.',
+    }
+  }
+
+  if (hasForfeiture) {
+    return {
+      status: 'FORFEITED',
+      message:
+        'Your booking is cancelled. Because it was cancelled within 24 hours of the appointment, the deposit is non-refundable.',
+    }
+  }
+
+  return {
+    status: 'NONE',
+    message: 'Your booking is cancelled.',
   }
 }
 

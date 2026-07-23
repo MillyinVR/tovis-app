@@ -559,31 +559,61 @@ export async function refundDiscoveryDeposit(args: {
       },
     )
 
-    // Refund-reset: stamp the fee as refunded only when we actually returned it.
-    // Never clear an existing timestamp (a prior refund may have returned it).
-    if (args.refundFee) {
-      await prisma.booking.update({
-        where: { id: args.bookingId },
-        data: { discoveryFeeRefundedAt: args.now ?? new Date() },
-      })
-    }
+    // Refund-reset + the SUCCEEDED row, recorded atomically. (Refund-reset stamps
+    // the fee as refunded only when we actually returned it; never clears an
+    // existing timestamp — a prior refund may have returned it.)
+    await prisma.$transaction(async (tx) => {
+      if (args.refundFee) {
+        await tx.booking.update({
+          where: { id: args.bookingId },
+          data: { discoveryFeeRefundedAt: args.now ?? new Date() },
+        })
+      }
 
-    await prisma.bookingRefund.create({
-      data: {
-        bookingId: args.bookingId,
-        amountCents: args.refundAmountCents,
-        currency: 'usd',
-        status: BookingRefundStatus.SUCCEEDED,
-        trigger: args.trigger,
-        reverseTransfer: true,
-        applicationFeeRefunded: args.refundFee,
-        stripeRefundId: stripeRefund.id,
-        stripePaymentIntentId: args.paymentIntentId,
-        initiatedByUserId: args.actor?.userId ?? null,
-        initiatedByRole: args.actor?.role ?? null,
-        reason: args.reason ?? null,
-      },
+      await tx.bookingRefund.create({
+        data: {
+          bookingId: args.bookingId,
+          amountCents: args.refundAmountCents,
+          currency: 'usd',
+          status: BookingRefundStatus.SUCCEEDED,
+          trigger: args.trigger,
+          reverseTransfer: true,
+          applicationFeeRefunded: args.refundFee,
+          stripeRefundId: stripeRefund.id,
+          stripePaymentIntentId: args.paymentIntentId,
+          initiatedByUserId: args.actor?.userId ?? null,
+          initiatedByRole: args.actor?.role ?? null,
+          reason: args.reason ?? null,
+        },
+      })
     })
+
+    // Client + pro refund receipt (M6). A SUCCESSFUL cancel-time deposit refund
+    // used to notify NO ONE: this path advances depositRefundedCents in the claim
+    // tx above, so when the deposit `charge.refunded` webhook later lands,
+    // reconcileDepositChargeRefundInTransaction sees no cumulative rise and stays
+    // silent — and refundDiscoveryDeposit itself never emitted. The client was
+    // refunded in silence. Emit it here (covers every caller: cancel, M1
+    // late-capture, M3 retry sweep), best-effort so a receipt failure can never
+    // unwind a completed refund, with a discriminator that carries the post-refund
+    // cumulative — identical to what the webhook would use — so any replay dedupes.
+    const refundedCumulativeCents = claim.alreadyRefunded + args.refundAmountCents
+    try {
+      await prisma.$transaction((tx) =>
+        emitPaymentRefundedNotifications({
+          tx,
+          bookingId: args.bookingId,
+          refundDiscriminator: `deposit:${args.paymentIntentId}:${refundedCumulativeCents}`,
+          amountRefundedCents: args.refundAmountCents,
+        }),
+      )
+    } catch (notifyError) {
+      console.error('refundDiscoveryDeposit: refund receipt emit failed', {
+        bookingId: args.bookingId,
+        error: safeError(notifyError),
+      })
+      Sentry.captureException(notifyError)
+    }
 
     return {
       outcome: 'REFUNDED',

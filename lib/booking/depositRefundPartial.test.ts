@@ -48,6 +48,16 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  // refundDiscoveryDeposit records the row (and the fee-reset) inside a
+  // prisma.$transaction now (M6), so the tx client needs bookingRefund.create too.
+  const bookingRefundCreate = vi.fn(
+    async ({ data }: { data: Record<string, unknown> }) => {
+      const row = { id: `refund_${state.refundRows.length + 1}`, ...data }
+      state.refundRows.push(row)
+      return row
+    },
+  )
+
   const txMock = {
     $executeRaw: vi.fn().mockResolvedValue(1),
     booking: {
@@ -58,18 +68,13 @@ const mocks = vi.hoisted(() => {
         return { ...state.booking }
       }),
     },
+    bookingRefund: { create: bookingRefundCreate },
   }
 
   const prismaMock = {
     $transaction: (cb: (tx: typeof txMock) => unknown) => cb(txMock),
     booking: { update: txMock.booking.update },
-    bookingRefund: {
-      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `refund_${state.refundRows.length + 1}`, ...data }
-        state.refundRows.push(row)
-        return row
-      }),
-    },
+    bookingRefund: { create: bookingRefundCreate },
   }
 
   return {

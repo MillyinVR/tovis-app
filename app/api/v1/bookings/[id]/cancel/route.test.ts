@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   cancelBooking: vi.fn(),
   applyAutoCancelRefund: vi.fn(),
   applyDiscoveryDepositCancelRefund: vi.fn(),
+  summarizeCancelRefund: vi.fn(),
 
   withRouteIdempotency: vi.fn(),
   beginRouteIdempotency: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 vi.mock('@/lib/booking/cancelRefund', () => ({
   applyAutoCancelRefund: mocks.applyAutoCancelRefund,
   applyDiscoveryDepositCancelRefund: mocks.applyDiscoveryDepositCancelRefund,
+  summarizeCancelRefund: mocks.summarizeCancelRefund,
 }))
 
 vi.mock('@/lib/rateLimit/enforce', () => ({
@@ -223,6 +225,10 @@ describe('app/api/v1/bookings/[id]/cancel/route.ts', () => {
     mocks.applyAutoCancelRefund.mockResolvedValue({ outcome: 'NOT_ATTEMPTED' })
     mocks.applyDiscoveryDepositCancelRefund.mockResolvedValue({
       outcome: 'NOT_ATTEMPTED',
+    })
+    mocks.summarizeCancelRefund.mockReturnValue({
+      status: 'NONE',
+      message: 'Your booking is cancelled.',
     })
 
     setStartedIdempotencyDefault()
@@ -527,47 +533,63 @@ describe('app/api/v1/bookings/[id]/cancel/route.ts', () => {
       },
     })
 
+    const expectedBody = {
+      ok: true,
+      id: 'booking_1',
+      status: BookingStatus.CANCELLED,
+      sessionStep: SessionStep.NONE,
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+      // Honest refund summary rides the response (M6).
+      refund: {
+        status: 'NONE',
+        message: 'Your booking is cancelled.',
+      },
+    }
+
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
-      responseBody: {
-        ok: true,
-        id: 'booking_1',
-        status: BookingStatus.CANCELLED,
-        sessionStep: SessionStep.NONE,
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
+      responseBody: expectedBody,
     })
 
-    expect(mocks.jsonOk).toHaveBeenCalledWith(
-      {
-        ok: true,
-        id: 'booking_1',
-        status: BookingStatus.CANCELLED,
-        sessionStep: SessionStep.NONE,
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
-      200,
-    )
+    expect(mocks.jsonOk).toHaveBeenCalledWith(expectedBody, 200)
 
     expect(result).toEqual({
       ok: true,
       status: 200,
+      data: expectedBody,
+    })
+  })
+
+  it('summarizes both refund outcomes and returns them in the response (M6)', async () => {
+    const serviceOutcome = { outcome: 'NOT_ATTEMPTED' }
+    const depositOutcome = {
+      outcome: 'REFUNDED',
+      refundAmountCents: 4000,
+      feeRefunded: true,
+    }
+    mocks.applyAutoCancelRefund.mockResolvedValueOnce(serviceOutcome)
+    mocks.applyDiscoveryDepositCancelRefund.mockResolvedValueOnce(depositOutcome)
+    mocks.summarizeCancelRefund.mockReturnValueOnce({
+      status: 'REFUND_ISSUED',
+      refundedAmountCents: 4000,
+      message: 'Your booking is cancelled. A refund of $40.00 is on its way.',
+    })
+
+    const result = await POST(makeRequest(), makeCtx('booking_1'))
+
+    // The summary is computed from BOTH helper outcomes …
+    expect(mocks.summarizeCancelRefund).toHaveBeenCalledWith({
+      service: serviceOutcome,
+      deposit: depositOutcome,
+    })
+    // … and rides the response for the client UI to render honestly.
+    expect(result).toMatchObject({
       data: {
-        ok: true,
-        id: 'booking_1',
-        status: BookingStatus.CANCELLED,
-        sessionStep: SessionStep.NONE,
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
+        refund: { status: 'REFUND_ISSUED', refundedAmountCents: 4000 },
       },
     })
   })

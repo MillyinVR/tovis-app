@@ -54,6 +54,12 @@ import {
   type JsonObjectPayload,
 } from '@/app/api/_utils/jsonPayload'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
+import {
+  applyAutoCancelRefund,
+  applyDiscoveryDepositCancelRefund,
+  summarizeCancelRefund,
+  type CancelRefundSummary,
+} from '@/lib/booking/cancelRefund'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { clientCanBeMessaged } from '@/lib/messages/clientThreadEligibility'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -688,7 +694,40 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       idempotencyKey: idempotency.idempotencyKey,
     })
 
-    const responseBody = normalizeJsonObjectPayload(result)
+    // A pro cancel via this general-update route (the path EVERY web pro
+    // cancel/deny takes — the dedicated /cancel route has no web caller) skipped
+    // both cancel-refund helpers, so a PAID-deposit booking's deposit+fee refund
+    // that pro-cancel policy promises never ran. Run them post-commit here,
+    // mirroring the dedicated /cancel routes (the write boundary stays DB-only, so
+    // Stripe I/O can't live inside updateProBooking's transaction). Best-effort:
+    // neither helper throws, so a refund failure can't fail the committed cancel.
+    let refund: CancelRefundSummary | null = null
+    if (
+      nextStatus === BookingStatus.CANCELLED &&
+      result.meta.mutated &&
+      result.booking.status === BookingStatus.CANCELLED
+    ) {
+      const serviceRefund = await applyAutoCancelRefund({
+        bookingId,
+        actorKind: 'pro',
+        actorUserId,
+        cancelMutated: true,
+      })
+      const depositRefund = await applyDiscoveryDepositCancelRefund({
+        bookingId,
+        actorKind: 'pro',
+        actorUserId,
+        cancelMutated: true,
+      })
+      refund = summarizeCancelRefund({
+        service: serviceRefund,
+        deposit: depositRefund,
+      })
+    }
+
+    const responseBody = normalizeJsonObjectPayload(
+      refund ? { ...result, refund } : result,
+    )
 
     await completeRouteIdempotency({
       idempotencyRecordId,
@@ -696,8 +735,9 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       responseBody,
     })
 
-    // Booking edited — if the client was notified of the change, deliver it now.
-    if (notifyClient === true) {
+    // Deliver now if the client was notified of the change, or if a cancel refund
+    // ran (a successful deposit refund emits a client + pro receipt).
+    if (notifyClient === true || refund !== null) {
       kickNotificationDrain()
     }
 

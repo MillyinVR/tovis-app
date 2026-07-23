@@ -1349,6 +1349,7 @@ export default async function ClientBookingPage(props: {
 
               <ClientDepositCard
                 bookingId={booking.id}
+                bookingStatus={booking.status}
                 depositStatus={raw.depositStatus}
                 depositAmount={raw.depositAmount?.toString() ?? null}
                 discoveryFeeCents={raw.discoveryFeeAmount}

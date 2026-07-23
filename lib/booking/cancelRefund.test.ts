@@ -34,8 +34,12 @@ import {
   applyDiscoveryDepositCancelRefund,
   applyLateCaptureCancelRefund,
   isAutoCancelRefundEligible,
+  summarizeCancelRefund,
   CLIENT_FULL_REFUND_WINDOW_MS,
+  type AutoCancelRefundResult,
+  type DepositCancelRefundResult,
 } from './cancelRefund'
+import { BookingRefundStatus, type BookingRefund } from '@prisma/client'
 
 const NOW = new Date('2026-04-10T12:00:00.000Z')
 
@@ -564,5 +568,139 @@ describe('applyLateCaptureCancelRefund', () => {
     expect(mocks.captureLateCaptureOnCancelledBooking).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'UNKNOWN_CANCEL_PROVENANCE' }),
     )
+  })
+})
+
+describe('summarizeCancelRefund', () => {
+  // A type-complete BookingRefund (summarizeCancelRefund reads only amountCents,
+  // but the AutoCancelRefundResult.REFUNDED variant carries the whole row).
+  function makeRefund(amountCents: number): BookingRefund {
+    return {
+      id: 'refund_1',
+      bookingId: 'booking_1',
+      amountCents,
+      currency: 'usd',
+      status: BookingRefundStatus.SUCCEEDED,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+      reverseTransfer: true,
+      applicationFeeRefunded: false,
+      initiatedByUserId: null,
+      initiatedByRole: null,
+      reason: null,
+      stripePaymentIntentId: 'pi_1',
+      stripeRefundId: 're_1',
+      failureCode: null,
+      failureMessage: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }
+  }
+
+  const serviceRefunded = (amountCents: number): AutoCancelRefundResult => ({
+    outcome: 'REFUNDED',
+    refund: makeRefund(amountCents),
+    bookingFullyRefunded: true,
+  })
+  const serviceNone: AutoCancelRefundResult = { outcome: 'NOT_ATTEMPTED' }
+  const serviceSkipped: AutoCancelRefundResult = {
+    outcome: 'SKIPPED',
+    reason: 'PAYMENT_NOT_CAPTURED',
+  }
+  const serviceFailed: AutoCancelRefundResult = {
+    outcome: 'FAILED',
+    refund: makeRefund(5000),
+    message: 'card_declined',
+  }
+
+  const depositNone: DepositCancelRefundResult = { outcome: 'NOT_ATTEMPTED' }
+  const depositRefunded = (
+    refundAmountCents: number,
+  ): DepositCancelRefundResult => ({
+    outcome: 'REFUNDED',
+    refundAmountCents,
+    feeRefunded: true,
+  })
+  const depositForfeited: DepositCancelRefundResult = { outcome: 'FORFEITED' }
+  const depositFailed: DepositCancelRefundResult = {
+    outcome: 'FAILED',
+    message: 'no such payment_intent',
+  }
+
+  it('REFUND_ISSUED when the service payment refunded — names the amount', () => {
+    const s = summarizeCancelRefund({
+      service: serviceRefunded(8000),
+      deposit: depositNone,
+    })
+    expect(s.status).toBe('REFUND_ISSUED')
+    expect(s.refundedAmountCents).toBe(8000)
+    expect(s.message).toContain('$80.00')
+    expect(s.message).toContain('on its way')
+  })
+
+  it('REFUND_ISSUED when the deposit refunded', () => {
+    const s = summarizeCancelRefund({
+      service: serviceNone,
+      deposit: depositRefunded(4000),
+    })
+    expect(s.status).toBe('REFUND_ISSUED')
+    expect(s.refundedAmountCents).toBe(4000)
+    expect(s.message).toContain('$40.00')
+  })
+
+  it('sums service + deposit when both refunded', () => {
+    const s = summarizeCancelRefund({
+      service: serviceRefunded(8000),
+      deposit: depositRefunded(4000),
+    })
+    expect(s.status).toBe('REFUND_ISSUED')
+    expect(s.refundedAmountCents).toBe(12000)
+    expect(s.message).toContain('$120.00')
+  })
+
+  it('FORFEITED when a client cancel <24h forfeits the deposit', () => {
+    const s = summarizeCancelRefund({
+      service: serviceNone,
+      deposit: depositForfeited,
+    })
+    expect(s.status).toBe('FORFEITED')
+    expect(s.refundedAmountCents).toBeUndefined()
+    expect(s.message).toContain('non-refundable')
+  })
+
+  it('PROCESSING — never dresses a FAILED refund up as "on its way"', () => {
+    expect(
+      summarizeCancelRefund({ service: serviceFailed, deposit: depositNone })
+        .status,
+    ).toBe('PROCESSING')
+    expect(
+      summarizeCancelRefund({ service: serviceNone, deposit: depositFailed })
+        .status,
+    ).toBe('PROCESSING')
+    const s = summarizeCancelRefund({
+      service: serviceFailed,
+      deposit: depositNone,
+    })
+    expect(s.message).not.toContain('on its way')
+    expect(s.message).toContain('finalizing')
+  })
+
+  it('a real refund + a failed one still surfaces the success + notes the rest', () => {
+    const s = summarizeCancelRefund({
+      service: serviceRefunded(8000),
+      deposit: depositFailed,
+    })
+    expect(s.status).toBe('REFUND_ISSUED')
+    expect(s.refundedAmountCents).toBe(8000)
+    expect(s.message).toContain('still being processed')
+  })
+
+  it('NONE when nothing was captured to refund and nothing was forfeited', () => {
+    const s = summarizeCancelRefund({
+      service: serviceSkipped,
+      deposit: depositNone,
+    })
+    expect(s.status).toBe('NONE')
+    expect(s.refundedAmountCents).toBeUndefined()
+    expect(s.message).toBe('Your booking is cancelled.')
   })
 })

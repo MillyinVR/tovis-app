@@ -68,6 +68,10 @@ const mocks = vi.hoisted(() => ({
 
   updateProBooking: vi.fn(),
 
+  applyAutoCancelRefund: vi.fn(),
+  applyDiscoveryDepositCancelRefund: vi.fn(),
+  summarizeCancelRefund: vi.fn(),
+
   beginRouteIdempotency: vi.fn(),
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
@@ -100,6 +104,12 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   updateProBooking: mocks.updateProBooking,
+}))
+
+vi.mock('@/lib/booking/cancelRefund', () => ({
+  applyAutoCancelRefund: mocks.applyAutoCancelRefund,
+  applyDiscoveryDepositCancelRefund: mocks.applyDiscoveryDepositCancelRefund,
+  summarizeCancelRefund: mocks.summarizeCancelRefund,
 }))
 
 vi.mock('@/lib/idempotency', () => ({
@@ -342,6 +352,15 @@ describe('PATCH /api/v1/pro/bookings/[id]', () => {
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
     mocks.updateProBooking.mockResolvedValue(defaultPatchResponse)
+
+    mocks.applyAutoCancelRefund.mockResolvedValue({ outcome: 'NOT_ATTEMPTED' })
+    mocks.applyDiscoveryDepositCancelRefund.mockResolvedValue({
+      outcome: 'NOT_ATTEMPTED',
+    })
+    mocks.summarizeCancelRefund.mockReturnValue({
+      status: 'NONE',
+      message: 'Your booking is cancelled.',
+    })
   })
 
   it('returns auth response when requirePro fails', async () => {
@@ -1024,6 +1043,83 @@ describe('PATCH /api/v1/pro/bookings/[id]', () => {
         code: 'TIME_BLOCKED',
       }),
     )
+  })
+
+  // M6: this general-update route is the path EVERY web pro cancel/deny takes,
+  // and it historically skipped both cancel-refund helpers — so a PAID-deposit
+  // booking's deposit+fee refund never ran. It must run them post-commit now.
+  describe('pro cancel → refund wiring (M6)', () => {
+    const cancelledResult = {
+      booking: { ...defaultPatchResponse.booking, status: BookingStatus.CANCELLED },
+      meta: { mutated: true, noOp: false },
+    }
+
+    it('runs both cancel-refund helpers (actorKind pro) and returns the refund summary', async () => {
+      mocks.updateProBooking.mockResolvedValueOnce(cancelledResult)
+      mocks.applyDiscoveryDepositCancelRefund.mockResolvedValueOnce({
+        outcome: 'REFUNDED',
+        refundAmountCents: 4000,
+        feeRefunded: true,
+      })
+      mocks.summarizeCancelRefund.mockReturnValueOnce({
+        status: 'REFUND_ISSUED',
+        refundedAmountCents: 4000,
+        message: 'Your booking is cancelled. A refund of $40.00 is on its way.',
+      })
+
+      await PATCH(
+        makeIdempotentRequest({ status: 'CANCELLED', notifyClient: true }),
+        makeCtx(),
+      )
+
+      expect(mocks.applyAutoCancelRefund).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingId: 'booking_1',
+          actorKind: 'pro',
+          cancelMutated: true,
+        }),
+      )
+      expect(mocks.applyDiscoveryDepositCancelRefund).toHaveBeenCalledWith(
+        expect.objectContaining({ actorKind: 'pro', cancelMutated: true }),
+      )
+      // The honest summary rides the response …
+      const okArg = mocks.jsonOk.mock.calls.at(-1)?.[0]
+      expect(okArg).toMatchObject({
+        refund: { status: 'REFUND_ISSUED', refundedAmountCents: 4000 },
+      })
+      // … and is cached on the idempotency record so a replay returns it too.
+      expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith(
+        expect.objectContaining({
+          responseBody: expect.objectContaining({
+            refund: expect.objectContaining({ status: 'REFUND_ISSUED' }),
+          }),
+        }),
+      )
+    })
+
+    it('does NOT run refund helpers for a non-cancel update', async () => {
+      mocks.updateProBooking.mockResolvedValueOnce(updatedPatchResponse) // ACCEPTED
+
+      await PATCH(
+        makeIdempotentRequest({ scheduledFor: '2026-03-17T13:30:00.000Z' }),
+        makeCtx(),
+      )
+
+      expect(mocks.applyAutoCancelRefund).not.toHaveBeenCalled()
+      expect(mocks.applyDiscoveryDepositCancelRefund).not.toHaveBeenCalled()
+    })
+
+    it('does NOT run refund helpers when the cancel was an idempotent no-op', async () => {
+      mocks.updateProBooking.mockResolvedValueOnce({
+        booking: { ...defaultPatchResponse.booking, status: BookingStatus.CANCELLED },
+        meta: { mutated: false, noOp: true },
+      })
+
+      await PATCH(makeIdempotentRequest({ status: 'CANCELLED' }), makeCtx())
+
+      expect(mocks.applyAutoCancelRefund).not.toHaveBeenCalled()
+      expect(mocks.applyDiscoveryDepositCancelRefund).not.toHaveBeenCalled()
+    })
   })
 })
 // The pro booking detail GET had no coverage before the no-show gate landed on
