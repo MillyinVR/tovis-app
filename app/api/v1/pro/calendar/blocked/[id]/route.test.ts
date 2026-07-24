@@ -276,6 +276,12 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
     const result = await PATCH(makePatchRequest({}), makeCtx())
 
     expect(mocks.calendarBlockUpdate).not.toHaveBeenCalled()
+
+    // A no-op patch succeeds but writes nothing, so it must NOT invalidate.
+    // The body is caller-controlled: bumping on a success that changed nothing
+    // would let anyone dump this pro's warm availability cache by PATCHing `{}`
+    // in a loop. Occupancy did not change, so the cache is still correct.
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
       status: 200,
