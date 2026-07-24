@@ -3140,6 +3140,13 @@
         "bufferMinutes": {
           "type": "number"
         },
+        "cancellationPolicy": {
+          "description": "The no-show / late-cancel fee policy the client AGREED to at booking (M15), formatted for display, or null if none applied. Sourced from the booking's own `cancellationPolicySnapshot` (what they agreed to — never the pro's possibly-since-edited live settings), so the detail always shows the honest, agreed terms. Populated only where the source query selects the snapshot.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "checkout": {
           "$ref": "#/definitions/ClientBookingCheckoutDTO"
         },
@@ -3387,6 +3394,7 @@
         "hasPendingRebookConfirmation",
         "rebookProposedFor",
         "mediaUseConsent",
+        "cancellationPolicy",
         "consultation",
         "paymentOptions"
       ],
@@ -8871,6 +8879,13 @@
           },
           "type": "array"
         },
+        "cancellationPolicy": {
+          "description": "The pro's no-show / late-cancel fee policy the client must agree to before booking (M15), formatted for display, or null when the pro charges no fees (or the feature flag is off). When non-null, the native confirm flow shows it and requires the agreement checkbox; acceptance is sent to finalize.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "locationType": {
           "$ref": "#/definitions/ServiceLocationType"
         },
@@ -8885,7 +8900,8 @@
         "offeringId",
         "locationType",
         "offering",
-        "addOns"
+        "addOns",
+        "cancellationPolicy"
       ],
       "type": "object"
     },

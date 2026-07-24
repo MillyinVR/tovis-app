@@ -184,6 +184,62 @@ describe('assessAndChargeNoShowFee gating', () => {
     expect(mocks.paymentIntentsCreate).toHaveBeenCalledTimes(1)
   })
 
+  it('charges from the agreed snapshot, not the pro\'s live settings (M15)', async () => {
+    // Pro's LIVE flat fee is $99, but the client agreed to a $25 snapshot at
+    // booking — charge the agreed $25.
+    const fix = bookingFixture({
+      cancellationPolicySnapshot: {
+        feeType: NoShowFeeType.FLAT,
+        feeFlatAmount: '25.00',
+        feePercent: null,
+        cancelWindowHours: 24,
+        chargeNoShow: true,
+        chargeLateCancel: true,
+      },
+    })
+    fix.professional.noShowSettings.feeFlatAmount = D('99')
+    mocks.bookingFindUnique.mockResolvedValue(fix)
+    mocks.paymentIntentsCreate.mockResolvedValue({ id: 'pi_snap', status: 'succeeded' })
+
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+
+    expect(out).toMatchObject({ status: NoShowFeeStatus.CHARGED, amount: '25.00' })
+    expect(mocks.paymentIntentsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 2500 }), // $25 agreed, NOT $99 live
+      expect.anything(),
+    )
+  })
+
+  it('a snapshot governs the window too — a wider live window can\'t re-open a late cancel', async () => {
+    // Agreed window 24h; pro later widened live to 72h. A cancel 48h out is inside
+    // the live 72h but outside the agreed 24h → not chargeable.
+    const fix = bookingFixture({
+      scheduledFor: new Date('2026-07-10T18:00:00.000Z'),
+      cancellationPolicySnapshot: {
+        feeType: NoShowFeeType.FLAT,
+        feeFlatAmount: '25.00',
+        feePercent: null,
+        cancelWindowHours: 24,
+        chargeNoShow: true,
+        chargeLateCancel: true,
+      },
+    })
+    fix.professional.noShowSettings.cancelWindowHours = 72
+    mocks.bookingFindUnique.mockResolvedValue(fix)
+
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.LATE_CANCEL,
+      priorStatus: BookingStatus.ACCEPTED,
+      now: new Date('2026-07-08T18:00:00.000Z'), // 48h before
+    })
+    expect(out).toEqual({ kind: 'NOT_CHARGEABLE', reason: 'outside_cancel_window' })
+    expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
   it('does not charge a late cancel outside the window', async () => {
     mocks.bookingFindUnique.mockResolvedValue(bookingFixture())
     const out = await assessAndChargeNoShowFee({

@@ -30,6 +30,12 @@ type Props = {
   addOns: AddOnDTO[]
   initialError?: string | null
   initialSelectedIds?: string[]
+  /**
+   * The pro's no-show / late-cancel fee policy (M15). Non-null only when the pro
+   * charges fees; when present the client must tick the agreement checkbox before
+   * booking, and acceptance is sent to finalize.
+   */
+  cancellationPolicy?: string | null
 }
 
 const MAX_ADD_ON_IDS = 50
@@ -147,6 +153,7 @@ export default function AddOnsClient({
   addOns,
   initialError,
   initialSelectedIds,
+  cancellationPolicy,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -170,6 +177,9 @@ export default function AddOnsClient({
   const [submitting, setSubmitting] = useState(false)
   const [touched, setTouched] = useState(false)
   const [holdSecondsLeft, setHoldSecondsLeft] = useState<number | null>(null)
+  // M15: when the pro charges no-show/late-cancel fees, the client must agree to
+  // the policy before booking. No policy → no gate.
+  const [policyAccepted, setPolicyAccepted] = useState(false)
 
   useEffect(() => {
     if (!holdId) {
@@ -366,6 +376,7 @@ export default function AddOnsClient({
           mediaId,
           lookPostId,
           addOnIds: selectedIds,
+          cancellationPolicyAccepted: policyAccepted,
         }),
       })
 
@@ -633,6 +644,21 @@ export default function AddOnsClient({
       <div className={`fixed bottom-0 left-0 right-0 ${zClass.sticky} border-t border-white/10 bg-bgPrimary/70 backdrop-blur`}>
         <div className="mx-auto max-w-180 px-4 py-3">
           <div className="tovis-glass-soft rounded-card border border-white/10 px-4 py-3">
+            {cancellationPolicy ? (
+              <label className="mb-3 flex items-start gap-2 rounded-card border border-white/10 bg-bgPrimary/35 px-3 py-2 text-left">
+                <input
+                  data-testid="booking-cancellation-policy-checkbox"
+                  type="checkbox"
+                  checked={policyAccepted}
+                  onChange={(e) => setPolicyAccepted(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                />
+                <span className="text-[12px] font-semibold text-textSecondary">
+                  {`${cancellationPolicy} I agree to this cancellation policy.`}
+                </span>
+              </label>
+            ) : null}
+
             <button
               data-testid="booking-add-ons-continue-button"
               type="button"
@@ -641,7 +667,8 @@ export default function AddOnsClient({
                 submitting ||
                 !holdId ||
                 !offeringId ||
-                (holdSecondsLeft != null && holdSecondsLeft <= 0)
+                (holdSecondsLeft != null && holdSecondsLeft <= 0) ||
+                (cancellationPolicy != null && !policyAccepted)
               }
               className="flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-accentPrimary text-[14px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-70"
             >

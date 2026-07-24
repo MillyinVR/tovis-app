@@ -17,6 +17,8 @@ type Props = {
   defaultAddressId: string | null
   isAuthed: boolean
   loginHref: string
+  /** Pro's no-show / late-cancel fee policy (M15); when set, agreement is required. */
+  cancellationPolicy?: string | null
 }
 
 function readBookingId(raw: unknown): string | null {
@@ -72,12 +74,19 @@ export default function ClaimClient(props: Props) {
   const [taken, setTaken] = useState(false)
   const [needsAddress, setNeedsAddress] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // M15: agreement to the pro's fee policy is required when one applies.
+  const [policyAccepted, setPolicyAccepted] = useState(false)
 
   async function claim(): Promise<void> {
     if (claiming) return
 
     if (!props.isAuthed) {
       window.location.href = props.loginHref
+      return
+    }
+
+    if (props.cancellationPolicy && !policyAccepted) {
+      setError('Please agree to the cancellation policy to book.')
       return
     }
 
@@ -134,6 +143,7 @@ export default function ClaimClient(props: Props) {
           source: 'REQUESTED',
           addOnIds: [],
           openingId: props.openingId,
+          cancellationPolicyAccepted: policyAccepted,
         }),
       })
       const finRaw: unknown = await finRes.json().catch(() => null)
@@ -194,10 +204,27 @@ export default function ClaimClient(props: Props) {
         </div>
       ) : null}
 
+      {props.cancellationPolicy ? (
+        <label className="mb-3 flex items-start gap-2 rounded-[14px] border border-textPrimary/10 bg-bgSurface px-4 py-3 text-left">
+          <input
+            data-testid="claim-cancellation-policy-checkbox"
+            type="checkbox"
+            checked={policyAccepted}
+            onChange={(e) => setPolicyAccepted(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0"
+          />
+          <span className="text-[12.5px] text-textSecondary">
+            {`${props.cancellationPolicy} I agree to this cancellation policy.`}
+          </span>
+        </label>
+      ) : null}
+
       <button
         type="button"
         onClick={() => void claim()}
-        disabled={claiming}
+        disabled={
+          claiming || (props.cancellationPolicy != null && !policyAccepted)
+        }
         className="flex h-[52px] w-full items-center justify-center rounded-[16px] bg-[image:var(--cta)] font-display text-[15px] font-bold text-onCta shadow-[0_8px_24px_rgb(var(--accent-primary)/0.28)] transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {claiming

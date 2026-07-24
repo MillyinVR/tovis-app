@@ -1363,6 +1363,14 @@ export default async function ClientBookingPage(props: {
                 discoveryFeeCents={raw.discoveryFeeAmount}
               />
 
+              {booking.cancellationPolicy ? (
+                <SectionCard title="Cancellation policy">
+                  <p className="text-[12px] font-semibold text-textSecondary">
+                    {booking.cancellationPolicy}
+                  </p>
+                </SectionCard>
+              ) : null}
+
               {showConsultationApproval ? (
                 <SectionCard
                   title={COPY.bookings.consultation.actionNeededTitle}

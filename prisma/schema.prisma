@@ -3313,6 +3313,16 @@ model Booking {
   noShowFeeRefundedCents         Int              @default(0)
   noShowFeeDisputedAt            DateTime?
 
+  // Cancellation-policy consent (M15). When a client finalizes a booking with a
+  // pro who charges no-show / late-cancel fees, they must agree to the policy
+  // first; we record WHEN they agreed and a SNAPSHOT of the exact terms shown.
+  // The no-show fee is charged FROM this snapshot (not the pro's live settings),
+  // so a pro editing their policy later can never charge more than was agreed.
+  // Both null when no chargeable policy applied (the common case). Shape of the
+  // snapshot: CancellationPolicySnapshot (lib/noShowProtection/policyDisclosure).
+  cancellationPolicyAcceptedAt DateTime?
+  cancellationPolicySnapshot   Json?
+
   // Optional client-supplied idempotency key for booking-creation dedupe.
   // Combined with clientId in @@unique below so identical retries return
   // the existing booking instead of creating a duplicate.

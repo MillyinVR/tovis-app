@@ -1346,3 +1346,66 @@ describe('M15 POLICY — a kept deposit suppresses the NO_SHOW fee', () => {
     expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.CHARGED)
   })
 })
+
+// ─── M15 — charge from the AGREED policy snapshot, not the pro's live settings ─
+//
+// A client agrees to a policy at booking; the pro can edit their live settings
+// afterward. The fee must be charged from the snapshot the client agreed to.
+// Driven vs real Postgres (the pro's live fee here is $25; the booking snapshot
+// says $10 → charge $10). Stripe boundary mocked (Connect limitation).
+
+describe('M15 — no-show fee charges from the agreed snapshot', () => {
+  it('charges the snapshot amount, not the pro’s (higher) live settings', async () => {
+    const booking = await db.booking.create({
+      data: {
+        clientId: fx.clientWithCardId,
+        professionalId: fx.professionalId,
+        serviceId: fx.serviceId,
+        scheduledFor: scheduledFor(-2),
+        status: BookingStatus.NO_SHOW,
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.locationId,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal('120.00'),
+        totalDurationMinutes: 60,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
+        // No deposit → the fee isn't suppressed; it charges from the snapshot.
+        depositStatus: BookingDepositStatus.NONE,
+        // Agreed policy: a $10 flat fee (the pro's LIVE fee is $25 — see seed).
+        cancellationPolicySnapshot: {
+          feeType: NoShowFeeType.FLAT,
+          feeFlatAmount: '10.00',
+          feePercent: null,
+          cancelWindowHours: 24,
+          chargeNoShow: true,
+          chargeLateCancel: true,
+        },
+      },
+      select: { id: true },
+    })
+    stripe.create.mockResolvedValue({ id: 'pi_snap_e2e', status: 'succeeded' })
+
+    const out = await assessAndChargeNoShowFee({
+      bookingId: booking.id,
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+
+    expect(out).toMatchObject({
+      kind: 'ATTEMPTED',
+      status: NoShowFeeStatus.CHARGED,
+      amount: '10.00', // agreed snapshot, NOT the pro's live $25
+    })
+    expect(stripe.create).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1000 }),
+      expect.anything(),
+    )
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+      select: { noShowFeeStatus: true, noShowFeeAmount: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.CHARGED)
+    expect(row.noShowFeeAmount?.toFixed(2)).toBe('10.00')
+  })
+})

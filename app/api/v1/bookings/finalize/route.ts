@@ -38,6 +38,12 @@ import {
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { resolveDiscoveryFinalize } from '@/lib/booking/resolveDiscoveryFinalize'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { getProNoShowSettings } from '@/lib/noShowProtection/settings'
+import {
+  buildCancellationPolicySnapshot,
+  type CancellationPolicySnapshot,
+} from '@/lib/noShowProtection/policyDisclosure'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { type UnknownRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -134,6 +140,8 @@ type ParsedFinalizeBody = {
   locationType: ServiceLocationType | null
   addOnIds: string[]
   source: BookingSource
+  /** The client ticked "I agree to the cancellation policy" at the confirm step. */
+  cancellationPolicyAccepted: boolean
 }
 
 type ValidatedFinalizeBody = {
@@ -247,6 +255,7 @@ function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
     locationType,
     addOnIds,
     source,
+    cancellationPolicyAccepted: body.cancellationPolicyAccepted === true,
   }
 }
 
@@ -690,6 +699,31 @@ export async function POST(request: Request) {
 
     const ownership = ownershipOrFail
 
+    // Cancellation-policy consent (M15). When the pro charges no-show/late-cancel
+    // fees, an INTERACTIVE client must have agreed to the policy at the confirm
+    // step; we record the acceptance + a snapshot of the exact terms, and the fee
+    // is later charged FROM that snapshot. The aftercare-token path has no
+    // interactive client (no checkbox), so it is not enforced and records no
+    // snapshot — such a booking's fee falls back to the pro's live settings. All
+    // inert unless ENABLE_NO_SHOW_PROTECTION is on.
+    let cancellationPolicySnapshot: CancellationPolicySnapshot | null = null
+    let cancellationPolicyAcceptedAt: Date | null = null
+    if (noShowProtectionEnabled()) {
+      const applicable = buildCancellationPolicySnapshot(
+        await getProNoShowSettings(offering.professionalId),
+      )
+      if (
+        applicable &&
+        ownership.idempotencyActor.kind === 'authenticated-client'
+      ) {
+        if (!parsedBody.cancellationPolicyAccepted) {
+          return bookingJsonFail('CANCELLATION_POLICY_NOT_ACCEPTED')
+        }
+        cancellationPolicySnapshot = applicable
+        cancellationPolicyAcceptedAt = new Date()
+      }
+    }
+
     const bookingEntryPoint = bookingEntryPointFromBookingSource(body.source)
 
     const rateLimit = await enforceRateLimit({
@@ -749,6 +783,8 @@ export async function POST(request: Request) {
           rebookOfBookingId: ownership.rebookOfBookingId,
           offering: toFinalizeOffering(offering),
           discovery,
+          cancellationPolicySnapshot,
+          cancellationPolicyAcceptedAt,
           fallbackTimeZone: FALLBACK_TIME_ZONE,
           requestId,
           idempotencyKey: idem.idempotencyKey,

@@ -118,6 +118,7 @@ import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
 import type { ClientActionResendMode } from '@/lib/clientActions/types'
+import type { CancellationPolicySnapshot } from '@/lib/noShowProtection/policyDisclosure'
 import {
   normalizeAddress,
   resolveHeldSalonAddressText,
@@ -498,6 +499,12 @@ type FinalizeBookingFromHoldArgs = {
     // Validated LookPost this booking started from (remix attribution), or null.
     sourceLookPostId?: string | null
   } | null
+  // Cancellation-policy consent (M15). Set only when an interactive client agreed
+  // to a chargeable no-show/late-cancel policy at the confirm step; recorded on
+  // the booking so the fee is later charged from the agreed snapshot. Both null
+  // when no policy applied or the path had no interactive client (aftercare token).
+  cancellationPolicySnapshot?: CancellationPolicySnapshot | null
+  cancellationPolicyAcceptedAt?: Date | null
   offering: {
     id: string
     professionalId: string
@@ -8871,6 +8878,8 @@ async function performLockedFinalizeBookingFromHold(args: {
   fallbackTimeZone: string
   offering: FinalizeBookingFromHoldArgs['offering']
   discovery: FinalizeBookingFromHoldArgs['discovery']
+  cancellationPolicySnapshot: CancellationPolicySnapshot | null
+  cancellationPolicyAcceptedAt: Date | null
   requestId: string | null
   idempotencyKey: string | null
 }): Promise<FinalizeBookingFromHoldResult> {
@@ -9355,6 +9364,12 @@ async function performLockedFinalizeBookingFromHold(args: {
         locationType: args.locationType,
         rebookOfBookingId: args.rebookOfBookingId,
         creationIdempotencyKey: args.idempotencyKey ?? null,
+        // Cancellation-policy consent (M15): the agreed terms snapshot + when the
+        // client agreed. Both null unless an interactive client accepted a
+        // chargeable no-show/late-cancel policy at the confirm step.
+        cancellationPolicySnapshot:
+          args.cancellationPolicySnapshot ?? Prisma.JsonNull,
+        cancellationPolicyAcceptedAt: args.cancellationPolicyAcceptedAt,
         subtotalSnapshot: subtotal,
         serviceSubtotalSnapshot: subtotal,
         productSubtotalSnapshot: zeroMoney(),
@@ -14880,6 +14895,8 @@ export async function finalizeBookingFromHold(
         fallbackTimeZone: args.fallbackTimeZone ?? 'UTC',
         offering: args.offering,
         discovery: args.discovery ?? null,
+        cancellationPolicySnapshot: args.cancellationPolicySnapshot ?? null,
+        cancellationPolicyAcceptedAt: args.cancellationPolicyAcceptedAt ?? null,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),
