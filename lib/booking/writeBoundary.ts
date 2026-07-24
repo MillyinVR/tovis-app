@@ -149,7 +149,10 @@ import {
   consultationExtensionWindow,
   resolveConsultationMaterialization,
 } from '@/lib/consultation/proposalSchedule'
-import { resolveBookingAddOns } from '@/lib/booking/addOnResolution'
+import {
+  resolveBookingAddOns,
+  type ResolvedBookingAddOn,
+} from '@/lib/booking/addOnResolution'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
 import { moneyToFixed2String } from '@/lib/money'
 import {
@@ -8586,6 +8589,35 @@ async function performLockedRejectConsultationDecision(
   }
 }
 
+/**
+ * The ADD_ON `bookingServiceItem` rows a freshly-resolved add-on selection
+ * persists. Shared by the client-finalize and pro-create paths, which both map
+ * the same `ResolvedBookingAddOn[]` (from `resolveBookingAddOns`) onto line items
+ * hanging off the base item: `offeringId` null, the OfferingAddOn link recorded in
+ * `notes` as `ADDON:<id>`, `sortOrder` after the base.
+ *
+ * NOT used by the aftercare-rebook path — that clones the source booking's
+ * already-materialized items (offeringId preserved, no ADDON note), a different
+ * shape (see `performLockedCreateRebookedBooking`).
+ */
+function buildResolvedAddOnServiceItemRows(args: {
+  bookingId: string
+  parentItemId: string
+  addOns: ResolvedBookingAddOn[]
+}): Prisma.BookingServiceItemCreateManyInput[] {
+  return args.addOns.map((addOn, index) => ({
+    bookingId: args.bookingId,
+    serviceId: addOn.serviceId,
+    offeringId: null,
+    itemType: BookingServiceItemType.ADD_ON,
+    parentItemId: args.parentItemId,
+    priceSnapshot: addOn.priceSnapshot,
+    durationMinutesSnapshot: addOn.durationMinutesSnapshot,
+    sortOrder: index + 1,
+    notes: `ADDON:${addOn.offeringAddOnId}`,
+  }))
+}
+
 async function performLockedFinalizeBookingFromHold(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -9219,17 +9251,11 @@ async function performLockedFinalizeBookingFromHold(args: {
 
   if (resolvedAddOns.length) {
     await args.tx.bookingServiceItem.createMany({
-      data: resolvedAddOns.map((row, index) => ({
+      data: buildResolvedAddOnServiceItemRows({
         bookingId: created.id,
-        serviceId: row.serviceId,
-        offeringId: null,
-        itemType: BookingServiceItemType.ADD_ON,
         parentItemId: baseItem.id,
-        priceSnapshot: row.priceSnapshot,
-        durationMinutesSnapshot: row.durationMinutesSnapshot ?? 0,
-        sortOrder: index + 1,
-        notes: `ADDON:${row.offeringAddOnId}`,
-      })),
+        addOns: resolvedAddOns,
+      }),
     })
   }
 
@@ -9792,17 +9818,11 @@ async function performLockedCreateProBooking(args: {
   // mirroring the client finalize path so both booking origins share one shape.
   if (resolvedAddOns.length) {
     await args.tx.bookingServiceItem.createMany({
-      data: resolvedAddOns.map((addOn, index) => ({
+      data: buildResolvedAddOnServiceItemRows({
         bookingId: booking.id,
-        serviceId: addOn.serviceId,
-        offeringId: null,
-        itemType: BookingServiceItemType.ADD_ON,
         parentItemId: baseServiceItem.id,
-        priceSnapshot: addOn.priceSnapshot,
-        durationMinutesSnapshot: addOn.durationMinutesSnapshot,
-        sortOrder: index + 1,
-        notes: `ADDON:${addOn.offeringAddOnId}`,
-      })),
+        addOns: resolvedAddOns,
+      }),
     })
   }
 
