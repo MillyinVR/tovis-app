@@ -439,6 +439,59 @@ export function captureAutoCancelRefundRetriesExhausted(input: {
   )
 }
 
+/**
+ * M14 — the deposit-success recovery sweep found a discovery deposit that Stripe
+ * confirms captured, but which we still hold `depositStatus=PENDING` past
+ * DEPOSIT_RECOVERY_STALE_HOURS (default 72h — beyond Stripe's ~3-day native
+ * retry window). The client paid; the live webhook AND Stripe's retries both
+ * failed to record it for that long, so the automatic healing pipeline
+ * demonstrably broke down — page even though the sweep auto-records it this run.
+ * `recovered` distinguishes the sweep healing it (still worth a heads-up: the
+ * pipeline had a sustained gap) from a candidate the sweep could NOT record
+ * (persistent apply failure — money captured, no local acknowledgement).
+ */
+export function captureLostDepositSuccessStale(input: {
+  bookingId: string
+  paymentIntentId: string
+  ageHours: number
+  recovered: boolean
+}): void {
+  Sentry.withScope((scope) => {
+    scope.setLevel('error')
+    scope.setTag('area', 'payments')
+    scope.setTag('payments.event', 'lost_deposit_success_stale')
+    scope.setTag('payments.deposit_recovery.recovered', String(input.recovered))
+    scope.setTag('booking.id', input.bookingId)
+
+    scope.setContext('lost_deposit_success_stale', {
+      bookingId: input.bookingId,
+      paymentIntentId: input.paymentIntentId,
+      ageHours: input.ageHours,
+      recovered: input.recovered,
+    })
+
+    Sentry.captureMessage(
+      `Discovery deposit on booking ${input.bookingId} was captured at Stripe but stayed PENDING for ${input.ageHours}h (past native retries) — ${
+        input.recovered ? 'recovered late by sweep' : 'could NOT be recorded'
+      }`,
+      'error',
+    )
+  })
+
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      app: 'tovis',
+      namespace: 'payments',
+      event: 'lost_deposit_success_stale',
+      bookingId: input.bookingId,
+      paymentIntentId: input.paymentIntentId,
+      ageHours: input.ageHours,
+      recovered: input.recovered,
+    }),
+  )
+}
+
 // Register the Sentry sink once at module load. The lifecycleContract module
 // keeps a registry of sinks and emits to all of them on drift.
 let driftSinkRegistered = false
