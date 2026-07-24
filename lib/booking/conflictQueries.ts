@@ -57,6 +57,15 @@ type BookingConflictCheckArgs = {
   requestedStart: Date
   requestedEnd: Date
   excludeBookingId?: string | null
+  /**
+   * How long a booking row with a non-positive `totalDurationMinutes` is taken
+   * to occupy. Must be the SAME value `loadBusyIntervalsForWindow` was given for
+   * the same request, or availability offers a slot this gate then refuses —
+   * the read side has always accepted a fallback here and this one used to be
+   * pinned to the 60-minute default. Pinned by the B1 parity grid in
+   * tests/integration/booking-overlap-concurrency.test.ts.
+   */
+  fallbackDurationMinutes?: number
   take?: number
 }
 
@@ -359,6 +368,7 @@ export async function hasBookingConflict(
     requestedStart,
     requestedEnd,
     excludeBookingId = null,
+    fallbackDurationMinutes = DEFAULT_DURATION_MINUTES,
     take = 2000,
   } = args
 
@@ -383,7 +393,7 @@ export async function hasBookingConflict(
   })
 
   return rows.some((row) => {
-    const interval = bookingToBusyInterval(row)
+    const interval = bookingToBusyInterval(row, fallbackDurationMinutes)
     return overlaps(interval.start, interval.end, requestedStart, requestedEnd)
   })
 }
@@ -773,6 +783,7 @@ export async function getTimeRangeConflict(
       requestedStart,
       requestedEnd,
       excludeBookingId,
+      fallbackDurationMinutes,
       take,
     }),
     hasHoldConflict({

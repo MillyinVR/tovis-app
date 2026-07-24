@@ -18,16 +18,32 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
+import {
+  computeDayBoundsUtc,
+  computeDaySlotsFast,
+  localSlotToUtcOrNull,
+} from '@/lib/availability/core/dayComputation'
+import { type YMD } from '@/lib/availability/core/summaryWindow'
 import { addMinutes } from '@/lib/booking/conflicts'
 import {
   findBookingAndHoldConflicts,
   getTimeRangeConflict,
+  loadBusyIntervalsForWindow,
+  type TimeRangeConflictCode,
 } from '@/lib/booking/conflictQueries'
 import {
   BOOKING_BLOCKING_STATUSES,
   BOOKING_OVERLAP_CONSTRAINT_NAME,
   HOLD_OVERLAP_CONSTRAINT_NAME,
+  MAX_BUFFER_MINUTES,
+  MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
+import {
+  checkSlotReadiness,
+  type SlotReadinessCode,
+} from '@/lib/booking/slotReadiness'
+import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
+import { utcDateToLocalParts } from '@/lib/time'
 import { createProBooking } from '@/lib/booking/writeBoundary'
 import { deleteExpiredHoldsForProfessional } from '@/lib/booking/holdCleanup'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
@@ -759,6 +775,228 @@ function expectDbHoldOverlapRejection(
   action: () => Promise<unknown>,
 ): Promise<void> {
   return expectDbConstraintRejection(HOLD_OVERLAP_CONSTRAINT_NAME, action)
+}
+
+// ─── B1: offered-vs-enforced slot parity ─────────────────────────────────────
+//
+// The F-series proved two writes can't take one slot. It did NOT prove that the
+// slots availability OFFERS are the slots the write path ACCEPTS. Those are two
+// different queries over three tables:
+//
+//   OFFER   loadBusyIntervalsForWindow (bookings + holds + blocks in a WINDOW)
+//           -> computeDaySlotsFast, which keeps a candidate start when
+//              checkSlotReadiness passes and no busy interval overlaps it.
+//   ENFORCE checkSlotReadiness + getTimeRangeConflict (hasCalendarBlockConflict
+//           / hasBookingConflict / hasHoldConflict for ONE requested range) —
+//           the gate inside evaluateHoldCreationDecision and
+//           evaluateFinalizeDecision.
+//
+// A disagreement is user-facing either way: a start availability offers but
+// hold/finalize refuses is a dead end mid-checkout; a start availability hides
+// but the write would have taken is capacity silently lost. The helpers below
+// mirror the /api/v1/availability/day route's inputs exactly (same padding, same
+// fallback duration, same buffer) and then walk the WHOLE step grid for the day,
+// so parity is asserted totally rather than at a handful of sampled times.
+const PARITY_TIME_ZONE = 'America/Los_Angeles'
+const PARITY_STEP_MINUTES = 15
+const PARITY_BUFFER_MINUTES = 15
+const PARITY_BASE_DURATION_MINUTES = 60
+const PARITY_MAX_DAYS_AHEAD = 365
+const PARITY_LEAD_MINUTES = 0
+
+/** The day route's occupancy-window padding (route-local there, mirrored here). */
+const PARITY_WINDOW_PADDING_MINUTES =
+  MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
+
+type ParityArgs = {
+  dateYMD: YMD
+  /** What the OFFER is computed for (drawer: the base service). */
+  offeredDurationMinutes: number
+  /** What the WRITE requests (finalize: base + add-ons). Defaults to the offer. */
+  enforcedDurationMinutes?: number
+  locationId: string
+}
+
+/**
+ * Some local day comfortably in the future, in the location's timezone.
+ *
+ * Deliberately NOT exact calendar-day arithmetic: `+N*24h` can land a day early
+ * or late across a DST transition, and here that genuinely does not matter —
+ * `workingHoursJson()` enables all seven days with identical hours, so every
+ * candidate day produces the same grid. (If a future scenario needs a SPECIFIC
+ * weekday, step calendar days instead; see the local-day rule. B6 owns the
+ * transition days themselves.)
+ */
+function parityDayYMD(daysAhead: number): YMD {
+  const parts = utcDateToLocalParts(
+    new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000),
+    PARITY_TIME_ZONE,
+  )
+
+  return { year: parts.year, month: parts.month, day: parts.day }
+}
+
+function parityWorkingWindow(dateYMD: YMD): {
+  startMinutes: number
+  endMinutes: number
+} {
+  const anchorUtc = localSlotToUtcOrNull({
+    ...dateYMD,
+    hour: 12,
+    minute: 0,
+    timeZone: PARITY_TIME_ZONE,
+  })
+
+  if (!anchorUtc) throw new Error('Could not anchor the parity day')
+
+  const window = getWorkingWindowForDay(
+    anchorUtc,
+    workingHoursJson(),
+    PARITY_TIME_ZONE,
+  )
+
+  if (!window.ok) throw new Error(`Working window not usable: ${window.reason}`)
+
+  return { startMinutes: window.startMinutes, endMinutes: window.endMinutes }
+}
+
+/** The OFFER side, wired exactly as app/api/v1/availability/day/route.ts wires it. */
+async function offeredSlotStarts(args: ParityArgs): Promise<Set<string>> {
+  if (!fixtures) throw new Error('Fixtures not initialized')
+
+  const bounds = computeDayBoundsUtc(args.dateYMD, PARITY_TIME_ZONE)
+  const window = parityWorkingWindow(args.dateYMD)
+
+  const busy = await loadBusyIntervalsForWindow({
+    tx: db,
+    professionalId: fixtures.professionalId,
+    locationId: args.locationId,
+    windowStartUtc: addMinutes(
+      bounds.dayStartUtc,
+      -PARITY_WINDOW_PADDING_MINUTES,
+    ),
+    windowEndUtc: addMinutes(
+      bounds.dayStartUtc,
+      window.endMinutes + PARITY_WINDOW_PADDING_MINUTES,
+    ),
+    nowUtc: new Date(),
+    fallbackDurationMinutes: args.offeredDurationMinutes,
+    defaultBufferMinutes: PARITY_BUFFER_MINUTES,
+  })
+
+  const result = await computeDaySlotsFast({
+    dateYMD: args.dateYMD,
+    durationMinutes: args.offeredDurationMinutes,
+    stepMinutes: PARITY_STEP_MINUTES,
+    timeZone: PARITY_TIME_ZONE,
+    workingHours: workingHoursJson(),
+    leadTimeMinutes: PARITY_LEAD_MINUTES,
+    locationBufferMinutes: PARITY_BUFFER_MINUTES,
+    maxAdvanceDays: PARITY_MAX_DAYS_AHEAD,
+    busy,
+  })
+
+  if (!result.ok) {
+    throw new Error(`Day computation refused the whole day: ${result.code}`)
+  }
+
+  return new Set(result.slots)
+}
+
+/**
+ * The ENFORCE side: the readiness + conflict pair every write gate runs
+ * (holdPolicy / finalizePolicy / reschedulePolicy / proSchedulingPolicy).
+ * Returns the refusal code, or null when the write would accept the start.
+ */
+async function enforcedRefusal(args: {
+  startUtc: Date
+  durationMinutes: number
+  locationId: string
+}): Promise<SlotReadinessCode | TimeRangeConflictCode | null> {
+  if (!fixtures) throw new Error('Fixtures not initialized')
+
+  const readiness = checkSlotReadiness({
+    startUtc: args.startUtc,
+    nowUtc: new Date(),
+    durationMinutes: args.durationMinutes,
+    bufferMinutes: PARITY_BUFFER_MINUTES,
+    workingHours: workingHoursJson(),
+    timeZone: PARITY_TIME_ZONE,
+    stepMinutes: PARITY_STEP_MINUTES,
+    advanceNoticeMinutes: PARITY_LEAD_MINUTES,
+    maxDaysAhead: PARITY_MAX_DAYS_AHEAD,
+    fallbackTimeZone: 'UTC',
+  })
+
+  if (!readiness.ok) return readiness.code
+
+  return getTimeRangeConflict({
+    tx: db,
+    professionalId: fixtures.professionalId,
+    locationId: args.locationId,
+    requestedStart: args.startUtc,
+    requestedEnd: readiness.endUtc,
+    defaultBufferMinutes: PARITY_BUFFER_MINUTES,
+    fallbackDurationMinutes: args.durationMinutes,
+    nowUtc: new Date(),
+  })
+}
+
+/**
+ * Every step-aligned start in the pro's working window — including the tail
+ * starts whose slot would overrun the window, because BOTH sides must refuse
+ * those too and that agreement is part of the invariant.
+ */
+function parityCandidateStarts(dateYMD: YMD): Date[] {
+  const window = parityWorkingWindow(dateYMD)
+  const starts: Date[] = []
+
+  for (
+    let minutes = window.startMinutes;
+    minutes <= window.endMinutes;
+    minutes += PARITY_STEP_MINUTES
+  ) {
+    const startUtc = localSlotToUtcOrNull({
+      ...dateYMD,
+      hour: Math.floor(minutes / 60),
+      minute: minutes % 60,
+      timeZone: PARITY_TIME_ZONE,
+    })
+
+    // A start that doesn't exist in this timezone (spring-forward) is not a
+    // candidate on either side; B6 owns the DST transition days.
+    if (startUtc) starts.push(startUtc)
+  }
+
+  return starts
+}
+
+/** `offered !== accepted` for each start on the grid, as readable lines. */
+async function parityMismatches(args: ParityArgs): Promise<string[]> {
+  const offered = await offeredSlotStarts(args)
+  const enforcedDuration =
+    args.enforcedDurationMinutes ?? args.offeredDurationMinutes
+
+  const mismatches: string[] = []
+
+  for (const startUtc of parityCandidateStarts(args.dateYMD)) {
+    const refusal = await enforcedRefusal({
+      startUtc,
+      durationMinutes: enforcedDuration,
+      locationId: args.locationId,
+    })
+
+    const isOffered = offered.has(startUtc.toISOString())
+    const isAccepted = refusal === null
+
+    if (isOffered !== isAccepted) {
+      mismatches.push(
+        `${startUtc.toISOString()} offered=${isOffered} write=${refusal ?? 'ACCEPTED'}`,
+      )
+    }
+  }
+
+  return mismatches
 }
 
 beforeAll(async () => {
@@ -1774,5 +2012,505 @@ describe('findBookingAndHoldConflicts against real Postgres', () => {
     })
 
     expect(conflicts.holds.map((c) => c.id)).toEqual([hold.id])
+  })
+})
+describe('B1 — offered slots vs the write path, against real Postgres', () => {
+  // 09:00–18:00 local, 15-minute grid, 60-minute service + 15-minute buffer:
+  // the last start whose slot fits the window is 16:45.
+  const OFFERED = PARITY_BASE_DURATION_MINUTES
+
+  // The parity helpers hand these values to BOTH sides, standing in for what the
+  // day route reads off the location. If seedFixtures ever changes them, the
+  // helpers would be mirroring a location that no longer exists and every
+  // assertion below would be comparing two fictions that happen to agree.
+  it('drives the same scheduling config the seeded location actually carries', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+
+    const location = await db.professionalLocation.findUniqueOrThrow({
+      where: { id: fixtures.salonLocationId },
+      select: {
+        timeZone: true,
+        stepMinutes: true,
+        bufferMinutes: true,
+        advanceNoticeMinutes: true,
+        maxDaysAhead: true,
+        workingHours: true,
+      },
+    })
+
+    expect(location.timeZone).toBe(PARITY_TIME_ZONE)
+    expect(location.stepMinutes).toBe(PARITY_STEP_MINUTES)
+    expect(location.bufferMinutes).toBe(PARITY_BUFFER_MINUTES)
+    expect(location.advanceNoticeMinutes).toBe(PARITY_LEAD_MINUTES)
+    expect(location.maxDaysAhead).toBe(PARITY_MAX_DAYS_AHEAD)
+    expect(location.workingHours).toEqual(workingHoursJson())
+
+    const offering = await db.professionalServiceOffering.findUniqueOrThrow({
+      where: { id: fixtures.offeringId },
+      select: { salonDurationMinutes: true },
+    })
+
+    expect(offering.salonDurationMinutes).toBe(PARITY_BASE_DURATION_MINUTES)
+  })
+
+  it('agrees on an empty day, start to finish of the grid', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+
+    await expect(
+      parityMismatches({
+        dateYMD: parityDayYMD(9),
+        offeredDurationMinutes: OFFERED,
+        locationId: fixtures.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  for (const status of BOOKING_BLOCKING_STATUSES) {
+    it(`agrees around a ${status} booking (the status set both sides read)`, async () => {
+      if (!fixtures) throw new Error('Fixtures not initialized')
+      const fx = fixtures
+
+      const dateYMD = parityDayYMD(9)
+      const starts = parityCandidateStarts(dateYMD)
+      const noon = starts[12]
+      if (!noon) throw new Error('Expected a midday candidate start')
+
+      await createDirectBooking({
+        clientId: fx.clients[0].clientId,
+        start: noon,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        status,
+      })
+
+      await expect(
+        parityMismatches({
+          dateYMD,
+          offeredDurationMinutes: OFFERED,
+          locationId: fx.salonLocationId,
+        }),
+      ).resolves.toEqual([])
+    })
+  }
+
+  for (const status of [BookingStatus.CANCELLED, BookingStatus.NO_SHOW]) {
+    it(`agrees that a ${status} booking releases its time on both sides`, async () => {
+      if (!fixtures) throw new Error('Fixtures not initialized')
+      const fx = fixtures
+
+      const dateYMD = parityDayYMD(9)
+      const starts = parityCandidateStarts(dateYMD)
+      const noon = starts[12]
+      if (!noon) throw new Error('Expected a midday candidate start')
+
+      await createDirectBooking({
+        clientId: fx.clients[0].clientId,
+        start: noon,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        status,
+      })
+
+      const offered = await offeredSlotStarts({
+        dateYMD,
+        offeredDurationMinutes: OFFERED,
+        locationId: fx.salonLocationId,
+      })
+
+      // Released time is genuinely free — assert that rather than only that the
+      // two sides agree, so a bug that hid the slot on BOTH sides can't pass.
+      expect(offered.has(noon.toISOString())).toBe(true)
+      await expect(
+        parityMismatches({
+          dateYMD,
+          offeredDurationMinutes: OFFERED,
+          locationId: fx.salonLocationId,
+        }),
+      ).resolves.toEqual([])
+    })
+  }
+
+  it('agrees around an allowsOverlap booking (still occupancy for both sides)', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const noon = starts[12]
+    if (!noon) throw new Error('Expected a midday candidate start')
+
+    await db.booking.create({
+      data: bookingData({
+        tenantId: fx.tenantId,
+        clientId: fx.clients[0].clientId,
+        professionalId: fx.professionalId,
+        serviceId: fx.serviceId,
+        offeringId: fx.offeringId,
+        start: noon,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        allowsOverlap: true,
+      }),
+      select: { id: true },
+    })
+
+    const offered = await offeredSlotStarts({
+      dateYMD,
+      offeredDurationMinutes: OFFERED,
+      locationId: fx.salonLocationId,
+    })
+
+    // The GIST index exempts the flagged row, but neither JS side filters on
+    // allowsOverlap: an authorized double-book still occupies the pro's time.
+    expect(offered.has(noon.toISOString())).toBe(false)
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: OFFERED,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('agrees around a booking whose buffer is longer than the service', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const noon = starts[12]
+    if (!noon) throw new Error('Expected a midday candidate start')
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: noon,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      durationMinutes: 15,
+      bufferMinutes: 120,
+    })
+
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: OFFERED,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('agrees around active, expired and legacy-snapshot holds', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const active = starts[4]
+    const expired = starts[16]
+    const legacy = starts[28]
+    if (!active || !expired || !legacy) {
+      throw new Error('Expected three candidate starts')
+    }
+
+    await createDirectHold({
+      clientId: fx.clients[0].clientId,
+      start: active,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    await createExpiredHold({
+      clientId: fx.clients[1].clientId,
+      start: expired,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    // No snapshots at all: both sides must fall back through the offering, and
+    // must fall back the SAME way (holdRecordToBusyInterval is shared).
+    await db.bookingHold.create({
+      data: {
+        offeringId: fx.offeringId,
+        professionalId: fx.professionalId,
+        clientId: fx.clients[1].clientId,
+        scheduledFor: legacy,
+        expiresAt: addMinutes(new Date(), 15),
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.salonLocationId,
+        locationTimeZone: PARITY_TIME_ZONE,
+        durationMinutesSnapshot: null,
+        bufferMinutesSnapshot: null,
+        endsAtSnapshot: null,
+      },
+      select: { id: true },
+    })
+
+    const offered = await offeredSlotStarts({
+      dateYMD,
+      offeredDurationMinutes: OFFERED,
+      locationId: fx.salonLocationId,
+    })
+
+    expect(offered.has(active.toISOString())).toBe(false)
+    expect(offered.has(expired.toISOString())).toBe(true)
+    expect(offered.has(legacy.toISOString())).toBe(false)
+
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: OFFERED,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('agrees around a hold whose endsAtSnapshot is shorter than its own snapshots', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const noon = starts[12]
+    if (!noon) throw new Error('Expected a midday candidate start')
+
+    // The row the DB EXCLUDE constraint treats as 75 minutes while its own
+    // endsAtSnapshot claims 5. Both sides floor to the constraint's range.
+    await db.bookingHold.create({
+      data: {
+        offeringId: fx.offeringId,
+        professionalId: fx.professionalId,
+        clientId: fx.clients[0].clientId,
+        scheduledFor: noon,
+        expiresAt: addMinutes(new Date(), 15),
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.salonLocationId,
+        locationTimeZone: PARITY_TIME_ZONE,
+        durationMinutesSnapshot: 60,
+        bufferMinutesSnapshot: 15,
+        endsAtSnapshot: addMinutes(noon, 5),
+      },
+      select: { id: true },
+    })
+
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: OFFERED,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('agrees on same-location, other-location and all-locations blocks', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const sameLocation = starts[4]
+    const otherLocation = starts[16]
+    const allLocations = starts[28]
+    if (!sameLocation || !otherLocation || !allLocations) {
+      throw new Error('Expected three candidate starts')
+    }
+
+    await db.calendarBlock.createMany({
+      data: [
+        {
+          professionalId: fx.professionalId,
+          locationId: fx.salonLocationId,
+          startsAt: sameLocation,
+          endsAt: addMinutes(sameLocation, 60),
+          note: 'same location',
+        },
+        {
+          professionalId: fx.professionalId,
+          locationId: fx.suiteLocationId,
+          startsAt: otherLocation,
+          endsAt: addMinutes(otherLocation, 60),
+          note: 'other location',
+        },
+        {
+          professionalId: fx.professionalId,
+          locationId: null,
+          startsAt: allLocations,
+          endsAt: addMinutes(allLocations, 60),
+          note: 'all locations',
+        },
+      ],
+    })
+
+    const offered = await offeredSlotStarts({
+      dateYMD,
+      offeredDurationMinutes: OFFERED,
+      locationId: fx.salonLocationId,
+    })
+
+    expect(offered.has(sameLocation.toISOString())).toBe(false)
+    // A block on the suite must not darken the salon's grid.
+    expect(offered.has(otherLocation.toISOString())).toBe(true)
+    // A null-location block is global — it darkens every location.
+    expect(offered.has(allLocations.toISOString())).toBe(false)
+
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: OFFERED,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('agrees when a booking sits at another location (bookings are pro-wide)', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const noon = starts[12]
+    if (!noon) throw new Error('Expected a midday candidate start')
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: noon,
+      locationId: fx.suiteLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    const offered = await offeredSlotStarts({
+      dateYMD,
+      offeredDurationMinutes: OFFERED,
+      locationId: fx.salonLocationId,
+    })
+
+    expect(offered.has(noon.toISOString())).toBe(false)
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: OFFERED,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('agrees for a 15-minute service, where the fallback duration differs most', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const noon = starts[12]
+    if (!noon) throw new Error('Expected a midday candidate start')
+
+    // The read side is handed the REQUESTED duration as its fallback while the
+    // write side's booking reader has no fallback parameter at all; a 15-minute
+    // request is where the two are furthest apart.
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: noon,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: 15,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('agrees around a booking whose stored duration is non-positive', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const noon = starts[12]
+    if (!noon) throw new Error('Expected a midday candidate start')
+
+    // `totalDurationMinutes` is a non-null Int with no positivity constraint, so
+    // this row shape is storable even though every live write path clamps to at
+    // least the location's step. It is the ONLY input that reaches
+    // `durationOrFallback`'s fallback branch, and therefore the only one that
+    // can tell the two sides apart: the read side is handed the requested
+    // duration as its fallback, and `hasBookingConflict` used to have no
+    // fallback parameter at all and always assumed 60 minutes. With a 15-minute
+    // request that is a 45-minute disagreement — three offered starts the write
+    // path refused with TIME_BOOKED.
+    await db.booking.create({
+      data: bookingData({
+        tenantId: fx.tenantId,
+        clientId: fx.clients[0].clientId,
+        professionalId: fx.professionalId,
+        serviceId: fx.serviceId,
+        offeringId: fx.offeringId,
+        start: noon,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 0,
+        bufferMinutes: 0,
+      }),
+      select: { id: true },
+    })
+
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: 15,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  // ⚠️ PINS A KNOWN OPEN DEFECT (B1-A in
+  // docs/design/booking-calendar-truth-audit-plan.md), not desired behaviour.
+  //
+  // The client flow picks add-ons AFTER the slot: the drawer asks
+  // /api/v1/availability/day with no `addOnIds` and POSTs /api/v1/holds, which
+  // has no `addOnIds` field at all — so the OFFER and the RESERVATION are both
+  // sized for the base service. /booking/add-ons then lets the client add
+  // duration, and finalize enforces base + add-ons. Everything above proves the
+  // two sides agree when they are asked about the SAME window; this proves they
+  // are not asked about the same window.
+  //
+  // When B1-A is fixed (the hold must reserve what finalize will take), this
+  // test should flip to `.toEqual([])`.
+  it('does NOT agree once add-ons extend the request past the offered window', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const noon = starts[12]
+    if (!noon) throw new Error('Expected a midday candidate start')
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: noon,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    const mismatches = await parityMismatches({
+      dateYMD,
+      offeredDurationMinutes: PARITY_BASE_DURATION_MINUTES,
+      enforcedDurationMinutes: PARITY_BASE_DURATION_MINUTES + 30,
+      locationId: fx.salonLocationId,
+    })
+
+    // Every mismatch is the same direction: offered, then refused. None is
+    // capacity the write would have taken and availability hid.
+    expect(mismatches.every((line) => line.includes('offered=true'))).toBe(true)
+
+    // Two distinct failure classes, and the second needs no other booking and no
+    // concurrency: the last starts of the working day stop fitting the moment
+    // any add-on is selected, so they are a dead end on EVERY day for any pro
+    // who offers add-ons.
+    expect(mismatches.filter((line) => line.endsWith('write=BOOKING'))).toHaveLength(2)
+    expect(
+      mismatches.filter((line) => line.endsWith('write=OUTSIDE_WORKING_HOURS')),
+    ).toHaveLength(2)
   })
 })
