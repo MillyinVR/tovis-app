@@ -13,6 +13,7 @@ import type { Prisma } from '@prisma/client'
 const mocks = vi.hoisted(() => ({
   applyStripeDisputeInTransaction: vi.fn(),
   applyStripeDepositDisputeInTransaction: vi.fn(),
+  applyStripeNoShowFeeDisputeInTransaction: vi.fn(),
   captureStripeDisputeAlert: vi.fn(),
 }))
 
@@ -21,9 +22,12 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   applyStripeDepositDisputeInTransaction: mocks.applyStripeDepositDisputeInTransaction,
   applyStripeDepositSucceededInTransaction: vi.fn(),
   applyStripeDisputeInTransaction: mocks.applyStripeDisputeInTransaction,
+  applyStripeNoShowFeeDisputeInTransaction:
+    mocks.applyStripeNoShowFeeDisputeInTransaction,
   applyStripePaymentFailedInTransaction: vi.fn(),
   applyStripePaymentSucceededInTransaction: vi.fn(),
   reconcileDepositChargeRefundInTransaction: vi.fn(),
+  reconcileNoShowFeeChargeRefundInTransaction: vi.fn(),
   DISCOVERY_DEPOSIT_CHECKOUT_KIND: 'DISCOVERY_DEPOSIT',
   NO_SHOW_FEE_CHARGE_KIND: 'NO_SHOW_FEE',
 }))
@@ -56,14 +60,17 @@ function dispute(overrides: Partial<Stripe.Dispute>): Stripe.Dispute {
 beforeEach(() => {
   mocks.applyStripeDisputeInTransaction.mockReset()
   mocks.applyStripeDepositDisputeInTransaction.mockReset()
+  mocks.applyStripeNoShowFeeDisputeInTransaction.mockReset()
   mocks.captureStripeDisputeAlert.mockReset()
   mocks.applyStripeDisputeInTransaction.mockResolvedValue({
     bookingId: 'booking_1',
     bookingCompleted: false,
     meta: { mutated: true },
   })
-  // Default: no deposit PI matches (the service path handles the common case).
+  // Default: neither the deposit PI nor the fee PI matches (the service path
+  // handles the common case).
   mocks.applyStripeDepositDisputeInTransaction.mockResolvedValue(null)
+  mocks.applyStripeNoShowFeeDisputeInTransaction.mockResolvedValue(null)
 })
 
 describe('resolveDisputeOutcome', () => {

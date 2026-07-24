@@ -2197,6 +2197,10 @@ enum NoShowFeeStatus {
   CHARGED // off-session PaymentIntent succeeded
   FAILED // Stripe declined / authentication required off-session
   WAIVED // pro/admin forgave the fee after the fact
+  // A CHARGED fee that was FULLY refunded on its own PaymentIntent (in-app or via
+  // the Stripe Dashboard). A sub-fee partial refund stays CHARGED and accumulates
+  // noShowFeeRefundedCents instead — mirrors BookingDepositStatus.REFUNDED.
+  REFUNDED
 }
 
 /// Per-pro (account-level) no-show / late-cancel fee policy (Phase 2 revenue
@@ -3292,6 +3296,18 @@ model Booking {
   noShowFeeChargedAt             DateTime?
   // Why the fee was assessed: a pro-marked no-show vs a late cancellation.
   noShowFeeReason                NoShowFeeReason?
+  // Refund / dispute reconciliation on the fee's OWN PaymentIntent (M15 GAP B),
+  // mirroring the deposit's depositRefundedCents / depositDisputedAt. The fee
+  // rides a separate charge, so a Stripe-side refund or chargeback never touches
+  // the final-bill or deposit fields — these are the fee PI's honesty fields.
+  //   - noShowFeeRefundedCents: Stripe's authoritative cumulative refund on the
+  //     fee charge (integer cents). A FULL refund also flips noShowFeeStatus to
+  //     REFUNDED; a sub-fee partial stays CHARGED + accumulates cents.
+  //   - noShowFeeDisputedAt: set while the fee charge is under (or lost) a Stripe
+  //     dispute; cleared if the dispute is WON. A disputed fee must never render
+  //     as money safely collected.
+  noShowFeeRefundedCents         Int              @default(0)
+  noShowFeeDisputedAt            DateTime?
 
   // Optional client-supplied idempotency key for booking-creation dedupe.
   // Combined with clientId in @@unique below so identical retries return

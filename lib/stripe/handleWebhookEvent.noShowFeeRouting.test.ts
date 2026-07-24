@@ -23,25 +23,38 @@ import { asTestTransactionClient } from '@/lib/typed/prismaTestClient'
 const mocks = vi.hoisted(() => ({
   applyStripePaymentSucceededInTransaction: vi.fn(),
   applyStripePaymentFailedInTransaction: vi.fn(),
+  applyStripeDisputeInTransaction: vi.fn(),
+  applyStripeDepositDisputeInTransaction: vi.fn(),
+  applyStripeNoShowFeeDisputeInTransaction: vi.fn(),
+  reconcileDepositChargeRefundInTransaction: vi.fn(),
+  reconcileNoShowFeeChargeRefundInTransaction: vi.fn(),
+  reconcileChargeRefundInTransaction: vi.fn(),
+  captureStripeDisputeAlert: vi.fn(),
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   applyStripeCheckoutSessionStatusInTransaction: vi.fn(),
-  applyStripeDepositDisputeInTransaction: vi.fn(),
+  applyStripeDepositDisputeInTransaction:
+    mocks.applyStripeDepositDisputeInTransaction,
   applyStripeDepositSucceededInTransaction: vi.fn(),
-  applyStripeDisputeInTransaction: vi.fn(),
+  applyStripeDisputeInTransaction: mocks.applyStripeDisputeInTransaction,
+  applyStripeNoShowFeeDisputeInTransaction:
+    mocks.applyStripeNoShowFeeDisputeInTransaction,
   applyStripePaymentFailedInTransaction:
     mocks.applyStripePaymentFailedInTransaction,
   applyStripePaymentSucceededInTransaction:
     mocks.applyStripePaymentSucceededInTransaction,
-  reconcileDepositChargeRefundInTransaction: vi.fn(),
+  reconcileDepositChargeRefundInTransaction:
+    mocks.reconcileDepositChargeRefundInTransaction,
+  reconcileNoShowFeeChargeRefundInTransaction:
+    mocks.reconcileNoShowFeeChargeRefundInTransaction,
   DISCOVERY_DEPOSIT_CHECKOUT_KIND: 'DISCOVERY_DEPOSIT',
   NO_SHOW_FEE_CHARGE_KIND: 'NO_SHOW_FEE',
 }))
 
 vi.mock('@/lib/booking/refunds', () => ({
-  reconcileChargeRefundInTransaction: vi.fn(),
-  mapStripeRefundToReconcileInput: vi.fn(),
+  reconcileChargeRefundInTransaction: mocks.reconcileChargeRefundInTransaction,
+  mapStripeRefundToReconcileInput: vi.fn((r: unknown) => r),
 }))
 
 vi.mock('@/lib/membership/syncSubscription', () => ({
@@ -49,7 +62,7 @@ vi.mock('@/lib/membership/syncSubscription', () => ({
 }))
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
-  captureStripeDisputeAlert: vi.fn(),
+  captureStripeDisputeAlert: mocks.captureStripeDisputeAlert,
 }))
 
 import { handleStripeEvent } from './handleWebhookEvent'
@@ -79,9 +92,40 @@ function paymentIntentEvent(args: {
   })
 }
 
+function chargeRefundedEvent(paymentIntentId: string): Stripe.Event {
+  return asTestStripeEvent({
+    id: 'evt_refund_1',
+    type: 'charge.refunded',
+    data: {
+      object: {
+        id: 'ch_1',
+        object: 'charge',
+        payment_intent: paymentIntentId,
+        amount: 2500,
+        amount_refunded: 2500,
+        refunds: { data: [] },
+      },
+    },
+  })
+}
+
+function disputeEvent(paymentIntentId: string): Stripe.Event {
+  return asTestStripeEvent({
+    id: 'evt_dispute_1',
+    type: 'charge.dispute.created',
+    data: {
+      object: {
+        id: 'dp_1',
+        object: 'dispute',
+        payment_intent: paymentIntentId,
+        status: 'warning_needs_response',
+      },
+    },
+  })
+}
+
 beforeEach(() => {
-  mocks.applyStripePaymentSucceededInTransaction.mockReset()
-  mocks.applyStripePaymentFailedInTransaction.mockReset()
+  Object.values(mocks).forEach((m) => m.mockReset())
   mocks.applyStripePaymentSucceededInTransaction.mockResolvedValue({
     bookingId: 'booking_1',
     bookingCompleted: false,
@@ -92,6 +136,17 @@ beforeEach(() => {
     bookingCompleted: false,
     meta: { mutated: true },
   })
+  // Default: no PI matches anything — each test opts a branch in.
+  mocks.reconcileDepositChargeRefundInTransaction.mockResolvedValue({
+    handled: false,
+  })
+  mocks.reconcileNoShowFeeChargeRefundInTransaction.mockResolvedValue({
+    handled: false,
+  })
+  mocks.reconcileChargeRefundInTransaction.mockResolvedValue({ handled: false })
+  mocks.applyStripeDisputeInTransaction.mockResolvedValue(null)
+  mocks.applyStripeDepositDisputeInTransaction.mockResolvedValue(null)
+  mocks.applyStripeNoShowFeeDisputeInTransaction.mockResolvedValue(null)
 })
 
 describe('handleStripeEvent — no-show fee PI never reaches the final-bill applier', () => {
@@ -151,6 +206,85 @@ describe('handleStripeEvent — no-show fee PI never reaches the final-bill appl
         bookingIdHint: 'booking_1',
         stripePaymentIntentId: 'pi_fee_1',
       }),
+    )
+  })
+})
+
+// M15 GAP B — a Stripe-side refund / dispute of the fee's OWN PaymentIntent must
+// reconcile the fee row, and must NOT fall through to the final-bill reconcile.
+describe('handleStripeEvent — fee-PI refund / dispute reconciles the fee, not the final bill', () => {
+  it('charge.refunded on the fee PI reconciles the fee and skips the final-bill reconcile', async () => {
+    mocks.reconcileNoShowFeeChargeRefundInTransaction.mockResolvedValue({
+      handled: true,
+    })
+
+    const result = await handleStripeEvent(tx, chargeRefundedEvent('pi_fee_1'))
+
+    expect(result.handled).toBe(true)
+    expect(result.message).toContain('no-show fee')
+    expect(
+      mocks.reconcileNoShowFeeChargeRefundInTransaction,
+    ).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        paymentIntentId: 'pi_fee_1',
+        amountRefundedCents: 2500,
+        chargeAmountCents: 2500,
+      }),
+    )
+    // The final-bill reconcile must NOT run once the fee branch handled it.
+    expect(mocks.reconcileChargeRefundInTransaction).not.toHaveBeenCalled()
+  })
+
+  it('ALLOW: charge.refunded on a NON-fee PI still reaches the final-bill reconcile', async () => {
+    mocks.reconcileChargeRefundInTransaction.mockResolvedValue({
+      handled: true,
+    })
+
+    const result = await handleStripeEvent(tx, chargeRefundedEvent('pi_service_1'))
+
+    expect(result.handled).toBe(true)
+    expect(result.message).toContain('reconciled')
+    expect(mocks.reconcileNoShowFeeChargeRefundInTransaction).toHaveBeenCalled()
+    // Fee reconcile returned handled:false (default), so the service reconcile ran.
+    expect(mocks.reconcileChargeRefundInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ paymentIntentId: 'pi_service_1' }),
+    )
+  })
+
+  it('charge.dispute on the fee PI freezes the fee and alerts with the NO_SHOW_FEE flavor', async () => {
+    mocks.applyStripeNoShowFeeDisputeInTransaction.mockResolvedValue({
+      bookingId: 'booking_1',
+    })
+
+    const result = await handleStripeEvent(tx, disputeEvent('pi_fee_1'))
+
+    expect(result.handled).toBe(true)
+    expect(result.message).toContain('no-show fee')
+    expect(mocks.applyStripeNoShowFeeDisputeInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ feePaymentIntentId: 'pi_fee_1', outcome: 'OPEN' }),
+    )
+    expect(mocks.captureStripeDisputeAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ flavor: 'NO_SHOW_FEE', bookingId: 'booking_1' }),
+    )
+  })
+
+  it('ALLOW: a dispute matching the SERVICE PI never reaches the fee dispute path', async () => {
+    mocks.applyStripeDisputeInTransaction.mockResolvedValue({
+      bookingId: 'booking_1',
+    })
+
+    const result = await handleStripeEvent(tx, disputeEvent('pi_service_1'))
+
+    expect(result.handled).toBe(true)
+    // The service branch handled it first — the fee dispute path must not run.
+    expect(
+      mocks.applyStripeNoShowFeeDisputeInTransaction,
+    ).not.toHaveBeenCalled()
+    expect(mocks.captureStripeDisputeAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ flavor: 'SERVICE' }),
     )
   })
 })

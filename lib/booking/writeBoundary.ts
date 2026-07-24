@@ -6149,6 +6149,150 @@ export async function waiveNoShowFee(args: {
   })
 }
 
+/**
+ * Reconcile a Stripe refund on the NO-SHOW / LATE-CANCEL FEE's own PaymentIntent
+ * (M15 GAP B). The fee rides a charge distinct from the final bill and the
+ * deposit, so a `charge.refunded` on the fee PI never matches
+ * reconcileChargeRefundInTransaction (final-bill PI) or
+ * reconcileDepositChargeRefundInTransaction (deposit PI) — and nothing else read
+ * `noShowFeeStripePaymentIntentId`, so before this a refunded fee stayed CHARGED
+ * forever. Mirrors the deposit reconcile: monotonic-max the cumulative refunded
+ * cents (an out-of-order webhook can't roll it back), flip noShowFeeStatus to
+ * REFUNDED only once the FULL fee charge is back (a sub-fee partial stays CHARGED
+ * and only accumulates cents), and emit a refund receipt on any rise (an in-app
+ * refund that already advanced the counter sees no rise and stays silent).
+ *
+ * Returns { handled: false } when no booking carries this fee PI (the caller then
+ * falls through to the final-bill reconcile), so the three PI kinds stay disjoint.
+ */
+export async function reconcileNoShowFeeChargeRefundInTransaction(
+  tx: Prisma.TransactionClient,
+  args: {
+    paymentIntentId: string
+    amountRefundedCents: number
+    chargeAmountCents: number
+    now?: Date
+  },
+): Promise<{ handled: boolean }> {
+  const booking = await tx.booking.findFirst({
+    where: { noShowFeeStripePaymentIntentId: args.paymentIntentId },
+    select: {
+      id: true,
+      noShowFeeStatus: true,
+      noShowFeeRefundedCents: true,
+    },
+  })
+
+  if (!booking) return { handled: false }
+
+  // Stripe's `amount_refunded` is the authoritative CUMULATIVE refund on the fee
+  // charge. Take a monotonic max so a stale (smaller) replay can't roll it back.
+  const prevRefundedCents = booking.noShowFeeRefundedCents
+  const nextRefundedCents = Math.max(prevRefundedCents, args.amountRefundedCents)
+
+  // The fee charge is a single destination charge — the whole charge IS the fee
+  // (unlike the deposit charge, which bundles the platform fee). So a full refund
+  // is simply the cumulative refund reaching the charge amount. Only flip a still
+  // -CHARGED fee: a WAIVED/SKIPPED/FAILED fee moved no money to refund, and an
+  // already-REFUNDED fee stays REFUNDED (idempotent).
+  const fullyRefunded =
+    args.chargeAmountCents > 0 && nextRefundedCents >= args.chargeAmountCents
+  const flipToRefunded =
+    fullyRefunded && booking.noShowFeeStatus === NoShowFeeStatus.CHARGED
+
+  await tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      noShowFeeRefundedCents: nextRefundedCents,
+      ...(flipToRefunded ? { noShowFeeStatus: NoShowFeeStatus.REFUNDED } : {}),
+    },
+    select: { id: true } satisfies Prisma.BookingSelect,
+  })
+
+  // Notify on any rise in the cumulative refunded amount (each partial included).
+  // The discriminator carries the new cumulative so a `charge.refunded` replay at
+  // the same total dedupes.
+  if (nextRefundedCents > prevRefundedCents) {
+    await emitPaymentRefundedNotifications({
+      tx,
+      bookingId: booking.id,
+      refundDiscriminator: `no-show-fee:${args.paymentIntentId}:${nextRefundedCents}`,
+      amountRefundedCents: nextRefundedCents - prevRefundedCents,
+    })
+  }
+
+  return { handled: true }
+}
+
+/**
+ * Apply a dispute (chargeback) on the NO-SHOW / LATE-CANCEL FEE's own
+ * PaymentIntent (M15 GAP B). Like the deposit dispute, the fee rides its own
+ * charge, so a fee-PI dispute never matches applyStripeDisputeInTransaction
+ * (final-bill PI) or applyStripeDepositDisputeInTransaction (deposit PI).
+ * Resolves the booking by `noShowFeeStripePaymentIntentId` and records the freeze
+ * on `noShowFeeDisputedAt`:
+ *   OPEN / LOST -> set (Stripe pulled or is pulling the fee) so the money trail
+ *     stops reading the fee as safely collected. Keeps the earliest dispute time;
+ *     LOST leaves the freeze forever (the funds are gone via the chargeback).
+ *   WON -> clear (the fee was restored).
+ *
+ * Returns the matched bookingId (even on an idempotent re-delivery) or null when
+ * no booking carries this fee PI. Field-level idempotency (set-if-unset /
+ * clear-if-set) plus the webhook route's event-id dedupe make replays safe.
+ */
+export async function applyStripeNoShowFeeDisputeInTransaction(
+  tx: Prisma.TransactionClient,
+  args: {
+    feePaymentIntentId: string
+    outcome: StripeDisputeOutcome
+    now?: Date
+  },
+): Promise<{ bookingId: string } | null> {
+  const feePaymentIntentId = args.feePaymentIntentId.trim()
+
+  if (!feePaymentIntentId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe no-show fee payment intent id is required.',
+    })
+  }
+
+  const booking = await tx.booking.findFirst({
+    where: { noShowFeeStripePaymentIntentId: feePaymentIntentId },
+    select: { id: true, professionalId: true },
+  })
+
+  if (!booking) return null
+
+  await lockProfessionalSchedule(tx, booking.professionalId)
+
+  const locked = await tx.booking.findFirst({
+    where: { noShowFeeStripePaymentIntentId: feePaymentIntentId },
+    select: { id: true, noShowFeeDisputedAt: true },
+  })
+
+  if (!locked) return null
+
+  if (args.outcome === 'WON') {
+    // Restore: only if we had frozen it. Never invent a clear.
+    if (locked.noShowFeeDisputedAt) {
+      await tx.booking.update({
+        where: { id: locked.id },
+        data: { noShowFeeDisputedAt: null },
+        select: { id: true } satisfies Prisma.BookingSelect,
+      })
+    }
+  } else if (!locked.noShowFeeDisputedAt) {
+    // OPEN / LOST: freeze once, keeping the earliest dispute timestamp.
+    await tx.booking.update({
+      where: { id: locked.id },
+      data: { noShowFeeDisputedAt: args.now ?? new Date() },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+  }
+
+  return { bookingId: locked.id }
+}
+
 async function performLockedStartBookingSession(args: {
   tx: Prisma.TransactionClient
   now: Date
