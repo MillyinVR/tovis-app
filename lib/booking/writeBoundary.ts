@@ -1549,12 +1549,9 @@ const PRO_CREATE_CLIENT_SELECT = {
   id: true,
 } satisfies Prisma.ClientProfileSelect
 
-const PRO_CREATE_CLIENT_ADDRESS_SELECT = {
-  id: true,
-  formattedAddress: true,
-  lat: true,
-  lng: true,
-} satisfies Prisma.ClientAddressSelect
+// Pro-create resolves the client's mobile service address through the shared
+// `loadClientServiceAddress` helper (same query the finalize/rebook paths use),
+// so there's no dedicated address-select constant here.
 
 const PRO_CREATE_OFFERING_SELECT = {
   id: true,
@@ -9362,13 +9359,10 @@ async function performLockedCreateProBooking(args: {
       select: PRO_CREATE_CLIENT_SELECT,
     }),
     args.locationType === ServiceLocationType.MOBILE && args.clientAddressId
-      ? args.tx.clientAddress.findFirst({
-          where: {
-            id: args.clientAddressId,
-            clientId: args.clientId,
-            kind: ClientAddressKind.SERVICE_ADDRESS,
-          },
-          select: PRO_CREATE_CLIENT_ADDRESS_SELECT,
+      ? loadClientServiceAddress({
+          tx: args.tx,
+          clientId: args.clientId,
+          clientAddressId: args.clientAddressId,
         })
       : Promise.resolve(null),
     args.tx.professionalServiceOffering.findFirst({
