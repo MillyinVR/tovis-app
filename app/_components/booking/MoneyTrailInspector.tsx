@@ -137,17 +137,25 @@ function buildEntries(trail: BookingMoneyTrail): TrailEntry[] {
 
   if (trail.deposit) {
     const d = trail.deposit
+    // A disputed deposit has had its funds pulled by Stripe even though
+    // depositStatus still reads PAID (the deposit rides its own PaymentIntent).
+    // It must read as money at risk, not money safely received — mirroring how
+    // the final-bill charge renders DISPUTED below.
+    const disputed = d.disputedAt != null
     // Money is only "in" once the deposit was actually captured (PAID, or PAID
-    // then partially/fully refunded). A PENDING deposit whose checkout was never
-    // completed has collected nothing — it must not render as green money-in.
+    // then partially/fully refunded) AND is not under dispute. A PENDING deposit
+    // whose checkout was never completed has collected nothing — it must not
+    // render as green money-in either.
     const captured =
-      d.status === BookingDepositStatus.PAID ||
-      d.status === BookingDepositStatus.REFUNDED
+      !disputed &&
+      (d.status === BookingDepositStatus.PAID ||
+        d.status === BookingDepositStatus.REFUNDED)
     entries.push({
       key: 'deposit',
       label: 'Deposit',
-      detail:
-        d.refundedCents > 0
+      detail: disputed
+        ? 'Payment disputed'
+        : d.refundedCents > 0
           ? `${money(d.refundedCents, currency)} refunded`
           : d.creditedAt
             ? 'Credited to the final total'
@@ -156,8 +164,8 @@ function buildEntries(trail: BookingMoneyTrail): TrailEntry[] {
               : null,
       amount: money(d.amountCents, currency),
       flow: captured ? 'in' : 'none',
-      tone: depositStatusTone(d.status),
-      status: d.status,
+      tone: disputed ? 'danger' : depositStatusTone(d.status),
+      status: disputed ? 'DISPUTED' : d.status,
       at: d.paidAt,
     })
   }
@@ -216,9 +224,17 @@ function buildEntries(trail: BookingMoneyTrail): TrailEntry[] {
     entries.push({
       key: `refund-${r.id}`,
       label: 'Refund',
+      // A FAILED refund's most important fact is WHY it failed — the money never
+      // reached the client and someone must act. Surface the Stripe failure
+      // message (falling back to the request reason, then a generic label) rather
+      // than the request reason alone, which reads as if the refund succeeded.
       detail:
-        r.reason ??
-        (r.trigger === 'AUTO_CANCELLATION' ? 'Automatic (cancellation)' : null),
+        r.status === BookingRefundStatus.FAILED
+          ? (r.failureMessage ?? r.reason ?? 'Refund failed')
+          : (r.reason ??
+            (r.trigger === 'AUTO_CANCELLATION'
+              ? 'Automatic (cancellation)'
+              : null)),
       amount: money(r.amountCents, r.currency.toLowerCase()),
       flow: 'out',
       tone: refundStatusTone(r.status),

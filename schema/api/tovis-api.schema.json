@@ -2902,6 +2902,10 @@
             "null"
           ]
         },
+        "depositDisputed": {
+          "description": "The discovery deposit charge is under (or lost) a Stripe dispute.",
+          "type": "boolean"
+        },
         "depositStatus": {
           "description": "Discovery deposit lifecycle (BookingDepositStatus): NONE · PENDING · PAID · REFUNDED · FAILED. A deposit is OWED-and-unpaid exactly when this is \"PENDING\" — that's the gate for a \"Pay deposit\" CTA. Populated only where the source query selects the deposit columns (the client bookings list route); null elsewhere.",
           "type": [
@@ -2926,6 +2930,18 @@
             "string",
             "null"
           ]
+        },
+        "paymentDisputed": {
+          "description": "Final-bill refund/dispute truth, so a card can't keep showing a plain \"paid\" after the money moved back or the charge was disputed (M11 display-truth). Computed server-side. `paymentCollectedAt`/`checkoutStatus` are monotonic and never reverse on a refund/dispute — these do. Populated only where the source query selects the stripe/dispute columns (the client bookings list route + the booking-detail loader); default (false / 0) elsewhere.",
+          "type": "boolean"
+        },
+        "paymentFullyRefunded": {
+          "description": "The whole captured final bill has been refunded — money is back with the client.",
+          "type": "boolean"
+        },
+        "paymentRefundedCents": {
+          "description": "Cumulative cents refunded against the final-bill charge (0 when none).",
+          "type": "number"
         },
         "productSubtotalSnapshot": {
           "type": [
@@ -2983,7 +2999,11 @@
         "paymentAuthorizedAt",
         "paymentCollectedAt",
         "depositStatus",
-        "depositAmount"
+        "depositAmount",
+        "paymentDisputed",
+        "paymentRefundedCents",
+        "paymentFullyRefunded",
+        "depositDisputed"
       ],
       "type": "object"
     },

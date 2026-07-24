@@ -84,6 +84,12 @@ export const clientBookingListSelect = {
   paymentCollectedAt: true,
   depositStatus: true,
   depositAmount: true,
+  // Refund/dispute truth so the client cards (web + iOS) can't show "paid" after
+  // the money moved back or the charge was disputed (M11 display-truth).
+  stripePaymentStatus: true,
+  stripeAmountTotal: true,
+  stripeAmountRefunded: true,
+  depositDisputedAt: true,
 
   // Client media-use consent (B3b) — lets the client see/toggle whether the pro
   // may feature this session's media publicly.

@@ -44,6 +44,12 @@ const bookingPageBookingSelect = {
   selectedPaymentMethod: true,
   paymentAuthorizedAt: true,
   paymentCollectedAt: true,
+  // Refund/dispute truth so the client cards can't show "paid" after the money
+  // moved back or the charge was disputed (M11 display-truth).
+  stripePaymentStatus: true,
+  stripeAmountTotal: true,
+  stripeAmountRefunded: true,
+  depositDisputedAt: true,
 
   totalDurationMinutes: true,
   bufferMinutes: true,

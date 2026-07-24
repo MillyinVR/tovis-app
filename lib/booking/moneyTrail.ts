@@ -62,6 +62,7 @@ export const MONEY_TRAIL_SELECT = {
   depositPaidAt: true,
   depositCreditedAt: true,
   depositRefundedCents: true,
+  depositDisputedAt: true,
 
   discoveryFeeAmount: true,
   discoveryFeeRefundedAt: true,
@@ -130,6 +131,14 @@ export type BookingMoneyTrail = {
     paidAt: string | null
     creditedAt: string | null
     refundedCents: number
+    /**
+     * Set when the deposit charge is under (or lost) a Stripe dispute — Stripe has
+     * pulled the funds even though `depositStatus` still reads PAID (the deposit
+     * rides its own PaymentIntent, so a dispute never touches `stripePaymentStatus`).
+     * Cleared if the dispute is WON. Display surfaces must not show a disputed
+     * deposit as money safely received. See M4 / `depositDisputedAt`.
+     */
+    disputedAt: string | null
   } | null
   discoveryFee: {
     amountCents: number
@@ -196,6 +205,7 @@ export function assembleMoneyTrail(row: MoneyTrailBookingRow): BookingMoneyTrail
           paidAt: toIso(row.depositPaidAt),
           creditedAt: toIso(row.depositCreditedAt),
           refundedCents: row.depositRefundedCents,
+          disputedAt: toIso(row.depositDisputedAt),
         }
 
   const discoveryFee =
