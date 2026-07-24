@@ -34,6 +34,7 @@ export type NotificationTemplateKey =
   | 'payment_confirmation_required'
   | 'payment_refunded'
   | 'no_show_fee_charged'
+  | 'no_show_deposit_kept'
   | 'deposit_reminder'
   | 'look_follower_new'
   | 'client_follow'
@@ -192,6 +193,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.NO_SHOW_FEE_CHARGED,
+  NotificationEventKey.NO_SHOW_DEPOSIT_KEPT,
   NotificationEventKey.DEPOSIT_REMINDER,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
   NotificationEventKey.CLIENT_FOLLOW,
@@ -697,6 +699,23 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  [NotificationEventKey.NO_SHOW_DEPOSIT_KEPT]: {
+    key: NotificationEventKey.NO_SHOW_DEPOSIT_KEPT,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    emailAlwaysOn: true,
+    templateKey: 'no_show_deposit_kept',
+    // Client-only: the disclosure goes to the client whose deposit was kept. This
+    // is the sibling of NO_SHOW_FEE_CHARGED — the other no-show money outcome (a
+    // kept deposit suppresses the fee), so it carries the same channel policy.
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // Tier B disclosure: in-app + email + push. No SMS.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.DEPOSIT_REMINDER]: {
     key: NotificationEventKey.DEPOSIT_REMINDER,
     defaultPriority: NotificationPriority.NORMAL,
@@ -1013,6 +1032,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.NO_SHOW_FEE_CHARGED,
+  NotificationEventKey.NO_SHOW_DEPOSIT_KEPT,
   NotificationEventKey.DEPOSIT_REMINDER,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,

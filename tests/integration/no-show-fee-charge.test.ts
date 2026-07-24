@@ -1292,6 +1292,18 @@ describe('M15 POLICY — a kept deposit suppresses the NO_SHOW fee', () => {
       select: { noShowFeeStatus: true },
     })
     expect(row.noShowFeeStatus).toBeNull()
+
+    // The client is told their deposit was kept — their only no-show money notice.
+    const notes = await db.clientNotification.findMany({
+      where: {
+        clientId: fx.clientWithCardId,
+        eventKey: NotificationEventKey.NO_SHOW_DEPOSIT_KEPT,
+      },
+    })
+    expect(notes).toHaveLength(1)
+    expect(notes[0]?.dedupeKey).toBe(`NO_SHOW_DEPOSIT_KEPT:${booking.id}`)
+    expect(notes[0]?.body).toContain('$20.00 deposit')
+    expect(notes[0]?.body).toContain('no-show')
   })
 
   it('with no kept deposit (PENDING), the no-show fee IS charged', async () => {
