@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import { bufferOrZero } from '@/lib/booking/conflicts'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
@@ -371,6 +372,11 @@ export async function POST(req: Request) {
         code: result.code,
       })
     }
+
+    // A new block OCCUPIES calendar time, so every cached availability surface
+    // is now offering a slot this pro no longer has. Bump AFTER the transaction
+    // commits — see the ordering note on `bumpScheduleVersion`.
+    await bumpScheduleVersion(professionalId)
 
     return jsonOk(
       {

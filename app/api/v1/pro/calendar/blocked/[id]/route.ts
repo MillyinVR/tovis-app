@@ -7,6 +7,7 @@ import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
+import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import { bufferOrZero } from '@/lib/booking/conflicts'
 import {
   assertNoCalendarBlockConflict,
@@ -55,6 +56,14 @@ type BlockUpdateTransactionSuccess = {
   ok: true
   status: number
   block: CalendarBlockRow
+  /**
+   * Whether the transaction actually wrote. A patch that names no field is a
+   * successful no-op, and a no-op must NOT invalidate cached availability:
+   * nothing about this pro's occupancy changed, and the request body is caller
+   * -controlled, so bumping here would let anyone dump a pro's warm cache by
+   * PATCHing an empty object in a loop.
+   */
+  changed: boolean
 }
 
 type BlockUpdateTransactionFailure = {
@@ -118,11 +127,13 @@ function blockUpdateFailure(args: {
 function blockUpdateSuccess(args: {
   status: number
   block: CalendarBlockRow
+  changed: boolean
 }): BlockUpdateTransactionSuccess {
   return {
     ok: true,
     status: args.status,
     block: args.block,
+    changed: args.changed,
   }
 }
 
@@ -377,6 +388,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           return blockUpdateSuccess({
             status: 200,
             block: existing,
+            changed: false,
           })
         }
 
@@ -503,6 +515,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         return blockUpdateSuccess({
           status: 200,
           block: updated,
+          changed: true,
         })
       },
     )
@@ -511,6 +524,14 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       return jsonFail(result.status, result.error, {
         code: result.code,
       })
+    }
+
+    // A moved or resized block frees time at one end and occupies it at the
+    // other, so cached availability is wrong in BOTH directions until this
+    // lands. Bump AFTER commit — see the ordering note on `bumpScheduleVersion`
+    // — and only when the transaction actually wrote (see `changed`).
+    if (result.changed) {
+      await bumpScheduleVersion(professionalId)
     }
 
     return jsonOk(
@@ -590,6 +611,12 @@ export async function DELETE(_req: Request, ctx: RouteContext) {
         code: result.code,
       })
     }
+
+    // Deleting a block RELEASES calendar time. Without this bump the freed
+    // slots stay hidden until the day cache's TTL expires — silent capacity
+    // loss rather than a dead end, but wrong just the same. Bump AFTER commit —
+    // see the ordering note on `bumpScheduleVersion`.
+    await bumpScheduleVersion(professionalId)
 
     return jsonOk(
       {

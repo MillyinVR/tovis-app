@@ -111,6 +111,24 @@ export async function getScheduleVersion(
   )
 }
 
+/**
+ * Invalidate every cached availability surface for this professional because
+ * their OCCUPANCY changed — a booking, hold or calendar block appeared, moved
+ * or went away.
+ *
+ * Occupancy belongs on this counter, not `scheduleConfigVersion`: the
+ * busy-intervals cache (`lib/availability/data/busyIntervals.ts`, 60s) is keyed
+ * on `scheduleVersion` ALONE, so bumping only the config counter leaves the
+ * busy set stale even though the day/bootstrap/alternates keys move. The day
+ * and bootstrap caches carry both counters, so bumping this one covers them
+ * too.
+ *
+ * ⚠️ Call this AFTER the transaction that made the change has COMMITTED, never
+ * from inside it. Redis is not transactional: bump first and a concurrent
+ * reader can miss on the new version, query the not-yet-committed database, and
+ * re-cache the OLD occupancy under the NEW version — which no later bump will
+ * correct, so the staleness outlives the write instead of ending with it.
+ */
 export async function bumpScheduleVersion(
   professionalId: string,
 ): Promise<number> {

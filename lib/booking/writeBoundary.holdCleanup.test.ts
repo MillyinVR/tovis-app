@@ -6,7 +6,7 @@ const NOW = new Date('2026-04-01T12:00:00.000Z')
 const mocks = vi.hoisted(() => ({
   bookingHoldFindMany: vi.fn(),
   bookingHoldDeleteMany: vi.fn(),
-  bumpScheduleConfigVersion: vi.fn(),
+  bumpScheduleVersion: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -19,8 +19,8 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/booking/cacheVersion', () => ({
-  bumpScheduleConfigVersion: mocks.bumpScheduleConfigVersion,
-  bumpScheduleVersion: vi.fn(),
+  bumpScheduleConfigVersion: vi.fn(),
+  bumpScheduleVersion: mocks.bumpScheduleVersion,
 }))
 
 import { cleanupAllExpiredHolds } from './writeBoundary'
@@ -29,8 +29,8 @@ describe('cleanupAllExpiredHolds', () => {
   beforeEach(() => {
     mocks.bookingHoldFindMany.mockReset()
     mocks.bookingHoldDeleteMany.mockReset()
-    mocks.bumpScheduleConfigVersion.mockReset()
-    mocks.bumpScheduleConfigVersion.mockResolvedValue(1)
+    mocks.bumpScheduleVersion.mockReset()
+    mocks.bumpScheduleVersion.mockResolvedValue(1)
   })
 
   it('deletes expired holds and bumps schedule version once per affected pro', async () => {
@@ -57,10 +57,14 @@ describe('cleanupAllExpiredHolds', () => {
       where: { expiresAt: { lte: NOW } },
     })
 
-    // Version bumped once per pro
-    expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledTimes(2)
-    expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_a')
-    expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_b')
+    // Version bumped once per pro — and it must be the OCCUPANCY counter, not
+    // scheduleConfigVersion. The busy-intervals cache is keyed on
+    // scheduleVersion alone, so bumping the config counter (as this sweep used
+    // to) left an expired hold serving as live for the rest of that entry's
+    // 60s TTL. `releaseHold` already used this counter for the same event.
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledTimes(2)
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_a')
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_b')
   })
 
   it('returns zero count and skips bumps when nothing expired', async () => {
@@ -71,7 +75,7 @@ describe('cleanupAllExpiredHolds', () => {
 
     expect(result.deletedCount).toBe(0)
     expect(result.affectedProfessionalIds).toEqual([])
-    expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
   })
 
   it('skips bumps when distinct query returns IDs but deleteMany finds nothing (race lost)', async () => {
@@ -86,7 +90,7 @@ describe('cleanupAllExpiredHolds', () => {
 
     expect(result.deletedCount).toBe(0)
     expect(result.affectedProfessionalIds).toEqual(['pro_a'])
-    expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
   })
 
   it('filters out null/empty professionalIds defensively', async () => {
@@ -101,6 +105,6 @@ describe('cleanupAllExpiredHolds', () => {
     const result = await cleanupAllExpiredHolds({ now: NOW })
 
     expect(result.affectedProfessionalIds).toEqual(['pro_a', 'pro_b'])
-    expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledTimes(2)
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledTimes(2)
   })
 })
