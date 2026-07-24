@@ -952,9 +952,16 @@ export default async function ClientBookingPage(props: {
     serviceSubtotalLabel ||
     COPY.common.notProvided
 
-  const checkoutStatusLabel = friendlyCheckoutStatus(
-    booking.checkout.checkoutStatus,
-  )
+  // A refunded/disputed final bill must not keep reading "Paid" — checkoutStatus
+  // is monotonic and never reverses on a refund/dispute, so consult the DB's
+  // refund/dispute truth first (M11 display-truth).
+  const checkoutStatusLabel = booking.checkout.paymentDisputed
+    ? 'Disputed'
+    : booking.checkout.paymentFullyRefunded
+      ? 'Refunded'
+      : booking.checkout.paymentRefundedCents > 0
+        ? 'Partially refunded'
+        : friendlyCheckoutStatus(booking.checkout.checkoutStatus)
   const selectedPaymentMethodLabel = friendlyPaymentMethod(
     booking.checkout.selectedPaymentMethod,
   )
@@ -1351,6 +1358,7 @@ export default async function ClientBookingPage(props: {
                 bookingId={booking.id}
                 bookingStatus={booking.status}
                 depositStatus={raw.depositStatus}
+                depositDisputed={raw.depositDisputedAt != null}
                 depositAmount={raw.depositAmount?.toString() ?? null}
                 discoveryFeeCents={raw.discoveryFeeAmount}
               />

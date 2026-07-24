@@ -2,6 +2,7 @@
 import {
   Prisma,
   AftercareRebookMode,
+  StripePaymentStatus,
   type BookingServiceItemType,
   type BookingDepositStatus,
   type BookingStatus,
@@ -81,6 +82,21 @@ export type ClientBookingCheckoutDTO = {
    * other checkout amounts. Null when no deposit applies.
    */
   depositAmount: string | null
+  /**
+   * Final-bill refund/dispute truth, so a card can't keep showing a plain "paid"
+   * after the money moved back or the charge was disputed (M11 display-truth).
+   * Computed server-side. `paymentCollectedAt`/`checkoutStatus` are monotonic and
+   * never reverse on a refund/dispute — these do. Populated only where the source
+   * query selects the stripe/dispute columns (the client bookings list route + the
+   * booking-detail loader); default (false / 0) elsewhere.
+   */
+  paymentDisputed: boolean
+  /** Cumulative cents refunded against the final-bill charge (0 when none). */
+  paymentRefundedCents: number
+  /** The whole captured final bill has been refunded — money is back with the client. */
+  paymentFullyRefunded: boolean
+  /** The discovery deposit charge is under (or lost) a Stripe dispute. */
+  depositDisputed: boolean
 }
 
 export type ClientBookingPaymentMethodDTO = {
@@ -418,11 +434,24 @@ type ClientBookingMediaConsentFields = {
   mediaUseConsentAt?: Date | null
 }
 
+// Final-bill refund/dispute + deposit-dispute columns live on the Booking row but
+// aren't part of the canonical ClientBookingRow select. Optional so existing
+// callers compile unchanged; the client booking-detail loader + the list route
+// select them so a refunded/disputed payment can't render as a clean "paid"
+// (M11 display-truth). Absent → the DTO's booleans default false / 0.
+type ClientBookingRefundDisputeFields = {
+  stripePaymentStatus?: StripePaymentStatus | null
+  stripeAmountTotal?: number | null
+  stripeAmountRefunded?: number | null
+  depositDisputedAt?: Date | null
+}
+
 export async function buildClientBookingDTO(input: {
   booking: ClientBookingRow &
     ClientBookingDepositFields &
     ClientBookingRebookFields &
-    ClientBookingMediaConsentFields
+    ClientBookingMediaConsentFields &
+    ClientBookingRefundDisputeFields
   unreadAftercare: boolean
   hasPendingConsultationApproval: boolean
   /**
@@ -588,6 +617,13 @@ export async function buildClientBookingDTO(input: {
         : null,
       depositStatus: b.depositStatus != null ? String(b.depositStatus) : null,
       depositAmount: decimalToString(b.depositAmount ?? null),
+      paymentDisputed:
+        b.stripePaymentStatus === StripePaymentStatus.DISPUTED,
+      paymentRefundedCents: b.stripeAmountRefunded ?? 0,
+      paymentFullyRefunded:
+        (b.stripeAmountTotal ?? 0) > 0 &&
+        (b.stripeAmountRefunded ?? 0) >= (b.stripeAmountTotal ?? 0),
+      depositDisputed: b.depositDisputedAt != null,
     },
 
     locationType: b.locationType != null ? String(b.locationType) : null,

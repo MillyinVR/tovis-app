@@ -14,6 +14,12 @@ type Props = {
   /** Booking status — the deposit card is only truthful for an active booking. */
   bookingStatus: string | null | undefined
   depositStatus: string | null | undefined
+  /**
+   * The deposit charge is under (or lost) a Stripe dispute. depositStatus stays
+   * PAID through a dispute, so without this the card would still say "Deposit
+   * paid ✓ — held and will be credited" while the bank has pulled the funds.
+   */
+  depositDisputed?: boolean
   /** Deposit dollars (Decimal serialized to string). */
   depositAmount: string | number | null | undefined
   /** One-time platform fee in CENTS. */
@@ -34,6 +40,7 @@ export default function ClientDepositCard({
   bookingId,
   bookingStatus,
   depositStatus,
+  depositDisputed,
   depositAmount,
   discoveryFeeCents,
 }: Props) {
@@ -105,6 +112,20 @@ export default function ClientDepositCard({
   }
 
   if (status === 'PAID') {
+    // A disputed deposit stays PAID locally while the bank pulls the funds — it
+    // must NOT read as money safely held (M11 display-truth).
+    if (depositDisputed) {
+      return (
+        <section className="rounded-card border border-toneDanger/30 bg-bgSecondary p-4">
+          <div className="text-[13px] font-black text-toneDanger">
+            Deposit disputed
+          </div>
+          <div className="mt-1 text-[12px] text-textSecondary">
+            {`Your ${depositLabel ?? 'deposit'} is under dispute with your bank and is on hold until it’s resolved.`}
+          </div>
+        </section>
+      )
+    }
     return (
       <section className="rounded-card border border-toneSuccess/30 bg-bgSecondary p-4">
         <div className="text-[13px] font-black text-textPrimary">Deposit paid ✓</div>

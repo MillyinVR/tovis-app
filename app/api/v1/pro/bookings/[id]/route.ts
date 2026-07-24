@@ -255,6 +255,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
         rebookOfBookingId: true,
         stripePaymentStatus: true,
         stripeAmountTotal: true,
+        // Stripe's authoritative cumulative refund total — lets the native
+        // Payment card show "Refunded"/"Partially refunded" instead of a green
+        // "Paid" once money has gone back (M11 display-truth).
+        stripeAmountRefunded: true,
         stripeCurrency: true,
         // Aftercare snapshot card.
         aftercareSummary: {
@@ -419,6 +423,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
           rebookOfBookingId: booking.rebookOfBookingId ?? null,
           stripePaymentStatus: booking.stripePaymentStatus ?? null,
           stripeAmountTotal: booking.stripeAmountTotal ?? null,
+          stripeAmountRefunded: booking.stripeAmountRefunded ?? 0,
           stripeCurrency: booking.stripeCurrency ?? null,
           // Aftercare snapshot (null until an aftercare summary exists).
           aftercareSummary: booking.aftercareSummary

@@ -6,7 +6,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from '../BookingActions'
 import MoneyTrailInspector from '@/app/_components/booking/MoneyTrailInspector'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
-import { moneyToString } from '@/lib/money'
+import { formatCents, moneyToString } from '@/lib/money'
 import {
   BookingCheckoutStatus,
   BookingSource,
@@ -294,7 +294,10 @@ export default async function ProBookingDetailPage(props: {
       })
     : null
 
-  // Payment block — derived from already-loaded booking fields only.
+  // Payment block — derived from already-loaded booking fields only. A payment
+  // that Stripe later DISPUTED or refunded must NOT read as a clean green "Paid":
+  // the badge shows the DB's opinion (dispute / refund), matching the money trail
+  // rendered just below. (M11 display-truth.)
   const isPaid =
     Boolean(booking.paymentCollectedAt) ||
     booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED
@@ -307,6 +310,71 @@ export default async function ProBookingDetailPage(props: {
   const collectedLabel = collectedAt
     ? formatAppointmentWhen(collectedAt, apptTz)
     : null
+
+  const capturedCents = booking.stripeAmountTotal ?? 0
+  const refundedCents = booking.stripeAmountRefunded ?? 0
+  const paymentDisputed =
+    booking.stripePaymentStatus === StripePaymentStatus.DISPUTED
+  const fullyRefunded =
+    isPaid && !paymentDisputed && capturedCents > 0 && refundedCents >= capturedCents
+  const partiallyRefunded =
+    isPaid && !paymentDisputed && refundedCents > 0 && refundedCents < capturedCents
+  const refundedLabel =
+    refundedCents > 0
+      ? formatCents(refundedCents, {
+          currency: booking.stripeCurrency ?? 'usd',
+          style: 'symbol',
+        })
+      : null
+
+  const capturedSubtitle = `$${total}${collectedLabel ? ` captured ${collectedLabel}` : ''}`
+  const paymentView: {
+    tone: 'success' | 'danger' | 'warn' | 'muted'
+    header: string
+    title: string
+    subtitle: string
+  } = paymentDisputed
+    ? {
+        tone: 'danger',
+        header: 'Under dispute — Stripe has held these funds.',
+        title: 'Payment disputed',
+        subtitle: capturedSubtitle,
+      }
+    : fullyRefunded
+      ? {
+          tone: 'muted',
+          header: 'Refunded to the client.',
+          title: 'Refunded',
+          subtitle: `${capturedSubtitle}${refundedLabel ? ` · ${refundedLabel} refunded` : ''}`,
+        }
+      : partiallyRefunded
+        ? {
+            tone: 'warn',
+            header: 'Partially refunded to the client.',
+            title: `Partially refunded${methodLabel ? ` · ${methodLabel}` : ''}`,
+            subtitle: `${capturedSubtitle}${refundedLabel ? ` · ${refundedLabel} refunded` : ''}`,
+          }
+        : isPaid
+          ? {
+              tone: 'success',
+              header: 'Collected and reconciled.',
+              title: `Paid${methodLabel ? ` · ${methodLabel}` : ''}`,
+              subtitle: capturedSubtitle,
+            }
+          : {
+              tone: 'warn',
+              header: awaitingPaymentConfirmation
+                ? COPY.proBookingCheckout.awaitingConfirmationBody
+                : 'Not collected yet.',
+              title: 'Awaiting payment',
+              subtitle: `$${total} due`,
+            }
+  const paymentTile = {
+    success: { box: 'border-accentPrimary/30 bg-accentPrimary/10', icon: 'text-accentPrimary' },
+    danger: { box: 'border-toneDanger/30 bg-toneDanger/10', icon: 'text-toneDanger' },
+    warn: { box: 'border-toneWarn/30 bg-toneWarn/10', icon: 'text-toneWarn' },
+    muted: { box: 'border-white/10 bg-bgPrimary', icon: 'text-textMuted' },
+  }[paymentView.tone]
   const servicesAmount = formatMoney(
     booking.serviceSubtotalSnapshot ?? booking.subtotalSnapshot,
   )
@@ -525,34 +593,22 @@ export default async function ProBookingDetailPage(props: {
             Payment
           </h2>
           <div className="mt-0.5 text-[12px] text-textMuted">
-            {isPaid
-              ? 'Collected and reconciled.'
-              : awaitingPaymentConfirmation
-                ? COPY.proBookingCheckout.awaitingConfirmationBody
-                : 'Not collected yet.'}
+            {paymentView.header}
           </div>
 
           <div
             className={[
               'mt-3 flex items-center gap-2.5 rounded-xl border px-3 py-2.5',
-              isPaid
-                ? 'border-accentPrimary/30 bg-accentPrimary/10'
-                : 'border-toneWarn/30 bg-toneWarn/10',
+              paymentTile.box,
             ].join(' ')}
           >
-            <CardIcon
-              className={isPaid ? 'text-accentPrimary' : 'text-toneWarn'}
-            />
+            <CardIcon className={paymentTile.icon} />
             <div className="min-w-0 flex-1">
               <div className="font-display text-[13px] font-bold text-textPrimary">
-                {isPaid
-                  ? `Paid${methodLabel ? ` · ${methodLabel}` : ''}`
-                  : 'Awaiting payment'}
+                {paymentView.title}
               </div>
               <div className="text-[11.5px] text-textMuted">
-                {isPaid
-                  ? `$${total}${collectedLabel ? ` captured ${collectedLabel}` : ''}`
-                  : `$${total} due`}
+                {paymentView.subtitle}
               </div>
             </div>
           </div>

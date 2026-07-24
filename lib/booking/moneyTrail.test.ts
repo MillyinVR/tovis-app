@@ -44,6 +44,7 @@ function makeRow(overrides?: Partial<MoneyTrailBookingRow>): MoneyTrailBookingRo
     depositPaidAt: null,
     depositCreditedAt: null,
     depositRefundedCents: 0,
+    depositDisputedAt: null,
 
     discoveryFeeAmount: null,
     discoveryFeeRefundedAt: null,
@@ -165,7 +166,20 @@ describe('assembleMoneyTrail', () => {
       paidAt: '2026-04-01T12:00:00.000Z',
       creditedAt: null,
       refundedCents: 0,
+      disputedAt: null,
     })
+  })
+
+  it('surfaces a deposit dispute timestamp (M11 display-truth)', () => {
+    const trail = assembleMoneyTrail(
+      makeRow({
+        depositStatus: BookingDepositStatus.PAID,
+        depositAmount: new Prisma.Decimal(25),
+        depositPaidAt: new Date('2026-04-01T12:00:00.000Z'),
+        depositDisputedAt: new Date('2026-04-05T09:00:00.000Z'),
+      }),
+    )
+    expect(trail.deposit?.disputedAt).toBe('2026-04-05T09:00:00.000Z')
   })
 
   it('surfaces the discovery fee and its refund state', () => {
