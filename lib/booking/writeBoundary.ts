@@ -191,6 +191,7 @@ import {
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { scheduleReviewRequestOnCompletion } from '@/lib/notifications/reviewRequests'
 import {
+  buildAuxRefundDiscriminator,
   emitPaymentActionRequiredNotifications,
   emitPaymentCollectedNotifications,
   emitPaymentRefundedNotifications,
@@ -6316,7 +6317,11 @@ export async function reconcileNoShowFeeChargeRefundInTransaction(
     await emitPaymentRefundedNotifications({
       tx,
       bookingId: booking.id,
-      refundDiscriminator: `no-show-fee:${args.paymentIntentId}:${nextRefundedCents}`,
+      refundDiscriminator: buildAuxRefundDiscriminator({
+        kind: 'no-show-fee',
+        paymentIntentId: args.paymentIntentId,
+        cumulativeRefundedCents: nextRefundedCents,
+      }),
       amountRefundedCents: nextRefundedCents - prevRefundedCents,
     })
   }
@@ -16981,7 +16986,11 @@ export async function reconcileDepositChargeRefundInTransaction(
     await emitPaymentRefundedNotifications({
       tx,
       bookingId: booking.id,
-      refundDiscriminator: `deposit:${args.paymentIntentId}:${nextRefundedCents}`,
+      refundDiscriminator: buildAuxRefundDiscriminator({
+        kind: 'deposit',
+        paymentIntentId: args.paymentIntentId,
+        cumulativeRefundedCents: nextRefundedCents,
+      }),
       amountRefundedCents: nextRefundedCents - prevRefundedCents,
     })
   }

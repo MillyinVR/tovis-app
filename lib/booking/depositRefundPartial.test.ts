@@ -93,7 +93,10 @@ vi.mock('@/lib/stripe/server', () => ({
 
 vi.mock('@sentry/nextjs', () => ({ captureException: mocks.captureException }))
 
-vi.mock('@/lib/notifications/paymentNotifications', () => ({
+// Only the EMITs are mocked; `...actual` keeps the real buildAuxRefundDiscriminator
+// so the discriminator this suite asserts on is the shared builder's real output.
+vi.mock('@/lib/notifications/paymentNotifications', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/notifications/paymentNotifications')>()),
   emitPaymentRefundedNotifications: mocks.emitPaymentRefunded,
   emitPaymentCollectedNotifications: vi.fn(),
   emitPaymentActionRequiredNotifications: vi.fn(),

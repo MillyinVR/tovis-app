@@ -37,7 +37,10 @@ import * as Sentry from '@sentry/nextjs'
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
 import { safeError } from '@/lib/security/logging'
-import { emitPaymentRefundedNotifications } from '@/lib/notifications/paymentNotifications'
+import {
+  buildAuxRefundDiscriminator,
+  emitPaymentRefundedNotifications,
+} from '@/lib/notifications/paymentNotifications'
 import { noShowFeeAmountToCents } from '@/lib/noShowProtection/fee'
 
 // Distinct from the schedule lock namespace (scheduleLock.ts = 41021) so refund
@@ -320,6 +323,59 @@ async function settleSucceededRefund(args: {
   })
 }
 
+/**
+ * Read a Stripe failure into the two columns every FAILED BookingRefund row
+ * carries. `failureCode` is Stripe's own code (falling back to its error type)
+ * and is null for a non-Stripe throw; `failureMessage` falls back to the caller's
+ * path-specific sentence when the thrown value isn't an Error at all. Every
+ * refund path needs exactly this pair, so it is read once here.
+ */
+function describeStripeRefundFailure(
+  error: unknown,
+  fallbackMessage: string,
+): { failureCode: string | null; failureMessage: string } {
+  return {
+    failureCode:
+      error instanceof Stripe.errors.StripeError ? error.code ?? error.type : null,
+    failureMessage: error instanceof Error ? error.message : fallbackMessage,
+  }
+}
+
+/**
+ * Emit the M6 refund receipt for a refund THIS process just completed, so the
+ * client hears about it at the moment the money moves rather than waiting on
+ * Stripe's `charge.refunded` webhook (which, because we already advanced the
+ * cumulative counter, will see no rise and stay silent — see
+ * buildAuxRefundDiscriminator).
+ *
+ * Best-effort by design: the refund has already succeeded at Stripe and in the
+ * DB, so a receipt failure must never unwind it or surface as a failed refund. It
+ * pages instead. `logLabel` keeps each caller's log identity distinct.
+ */
+async function emitRefundReceiptBestEffort(args: {
+  bookingId: string
+  refundDiscriminator: string
+  amountRefundedCents: number
+  logLabel: string
+}): Promise<void> {
+  try {
+    await prisma.$transaction((tx) =>
+      emitPaymentRefundedNotifications({
+        tx,
+        bookingId: args.bookingId,
+        refundDiscriminator: args.refundDiscriminator,
+        amountRefundedCents: args.amountRefundedCents,
+      }),
+    )
+  } catch (notifyError) {
+    console.error(`${args.logLabel}: refund receipt emit failed`, {
+      bookingId: args.bookingId,
+      error: safeError(notifyError),
+    })
+    Sentry.captureException(notifyError)
+  }
+}
+
 async function markFailedRefund(args: {
   refundId: string
   failureCode: string | null
@@ -384,10 +440,10 @@ export async function refundBookingPayment(
       { idempotencyKey: `tovis:refund:${refund.id}` },
     )
   } catch (error) {
-    const failureCode =
-      error instanceof Stripe.errors.StripeError ? error.code ?? error.type : null
-    const failureMessage =
-      error instanceof Error ? error.message : 'Unknown Stripe refund error.'
+    const { failureCode, failureMessage } = describeStripeRefundFailure(
+      error,
+      'Unknown Stripe refund error.',
+    )
 
     console.error('refundBookingPayment: Stripe refund failed', {
       bookingId: input.bookingId,
@@ -600,22 +656,16 @@ export async function refundDiscoveryDeposit(args: {
     // unwind a completed refund, with a discriminator that carries the post-refund
     // cumulative — identical to what the webhook would use — so any replay dedupes.
     const refundedCumulativeCents = claim.alreadyRefunded + args.refundAmountCents
-    try {
-      await prisma.$transaction((tx) =>
-        emitPaymentRefundedNotifications({
-          tx,
-          bookingId: args.bookingId,
-          refundDiscriminator: `deposit:${args.paymentIntentId}:${refundedCumulativeCents}`,
-          amountRefundedCents: args.refundAmountCents,
-        }),
-      )
-    } catch (notifyError) {
-      console.error('refundDiscoveryDeposit: refund receipt emit failed', {
-        bookingId: args.bookingId,
-        error: safeError(notifyError),
-      })
-      Sentry.captureException(notifyError)
-    }
+    await emitRefundReceiptBestEffort({
+      bookingId: args.bookingId,
+      refundDiscriminator: buildAuxRefundDiscriminator({
+        kind: 'deposit',
+        paymentIntentId: args.paymentIntentId,
+        cumulativeRefundedCents: refundedCumulativeCents,
+      }),
+      amountRefundedCents: args.refundAmountCents,
+      logLabel: 'refundDiscoveryDeposit',
+    })
 
     return {
       outcome: 'REFUNDED',
@@ -623,10 +673,10 @@ export async function refundDiscoveryDeposit(args: {
       feeRefunded: args.refundFee,
     }
   } catch (error) {
-    const failureCode =
-      error instanceof Stripe.errors.StripeError ? error.code ?? error.type : null
-    const failureMessage =
-      error instanceof Error ? error.message : 'Deposit refund failed.'
+    const { failureCode, failureMessage } = describeStripeRefundFailure(
+      error,
+      'Deposit refund failed.',
+    )
 
     // Release the reservation so the refund can be retried — roll back the
     // cents and the REFUNDED flip (if this call set it) — and record a durable
@@ -876,29 +926,23 @@ export async function refundNoShowFee(args: {
     // reconcileNoShowFeeChargeRefundInTransaction sees no cumulative rise and stays
     // silent — the client is notified exactly once. Mirrors refundDiscoveryDeposit.
     const refundedCumulativeCents = claim.alreadyRefunded + claim.refundAmountCents
-    try {
-      await prisma.$transaction((tx) =>
-        emitPaymentRefundedNotifications({
-          tx,
-          bookingId: args.bookingId,
-          refundDiscriminator: `no-show-fee:${claim.paymentIntentId}:${refundedCumulativeCents}`,
-          amountRefundedCents: claim.refundAmountCents,
-        }),
-      )
-    } catch (notifyError) {
-      console.error('refundNoShowFee: refund receipt emit failed', {
-        bookingId: args.bookingId,
-        error: safeError(notifyError),
-      })
-      Sentry.captureException(notifyError)
-    }
+    await emitRefundReceiptBestEffort({
+      bookingId: args.bookingId,
+      refundDiscriminator: buildAuxRefundDiscriminator({
+        kind: 'no-show-fee',
+        paymentIntentId: claim.paymentIntentId,
+        cumulativeRefundedCents: refundedCumulativeCents,
+      }),
+      amountRefundedCents: claim.refundAmountCents,
+      logLabel: 'refundNoShowFee',
+    })
 
     return { outcome: 'REFUNDED', refundAmountCents: claim.refundAmountCents }
   } catch (error) {
-    const failureCode =
-      error instanceof Stripe.errors.StripeError ? error.code ?? error.type : null
-    const failureMessage =
-      error instanceof Error ? error.message : 'No-show fee refund failed.'
+    const { failureCode, failureMessage } = describeStripeRefundFailure(
+      error,
+      'No-show fee refund failed.',
+    )
 
     // Release the reservation — restore CHARGED + decrement the cents this call
     // added — and record a durable FAILED row in the SAME transaction: the

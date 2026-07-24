@@ -188,13 +188,43 @@ export async function emitPaymentActionRequiredNotifications(args: {
 }
 
 /**
+ * Which auxiliary charge a refund receipt is for. The value IS the discriminator
+ * prefix on the wire, so the two kinds stay disjoint in the dedupe namespace.
+ */
+export type AuxRefundReceiptKind = 'deposit' | 'no-show-fee'
+
+/**
+ * The `refundDiscriminator` for a refund on an AUXILIARY PaymentIntent (the
+ * discovery deposit or the no-show / late-cancel fee).
+ *
+ * This string is a money-correctness contract between two independent paths that
+ * refund the same charge, and it MUST be built identically by both:
+ *   • the in-app refund (lib/booking/refunds.ts) advances the cumulative refunded
+ *     cents itself and emits the receipt with the POST-refund cumulative;
+ *   • the later `charge.refunded` webhook reconcile (writeBoundary) then sees no
+ *     rise in that counter and stays silent.
+ * Since the dedupeKey is `PAYMENT_REFUNDED:{bookingId}:{discriminator}`, the two
+ * sides agreeing byte-for-byte is what makes the client notified exactly ONCE.
+ * They used to build the template literal separately per path per kind (4 sites),
+ * where any drift in the prefix or field order would silently double-notify —
+ * hence one builder.
+ */
+export function buildAuxRefundDiscriminator(args: {
+  kind: AuxRefundReceiptKind
+  paymentIntentId: string
+  cumulativeRefundedCents: number
+}): string {
+  return `${args.kind}:${args.paymentIntentId}:${args.cumulativeRefundedCents}`
+}
+
+/**
  * PAYMENT_REFUNDED receipt — emitted from the refund reconcile paths. Tier B
  * (in-app + email for both client and pro; no SMS).
  *
  * `refundDiscriminator` is the Stripe refund id for final-bill refunds, or a
- * payment-intent-derived key for the (single, full) deposit refund — either way
- * it makes the dedupeKey stable so cumulative `charge.refunded` replays never
- * double-notify.
+ * payment-intent-derived key (buildAuxRefundDiscriminator) for a deposit or
+ * no-show-fee refund — either way it makes the dedupeKey stable so cumulative
+ * `charge.refunded` replays never double-notify.
  */
 export async function emitPaymentRefundedNotifications(args: {
   tx: Prisma.TransactionClient
