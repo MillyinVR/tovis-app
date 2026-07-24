@@ -13921,16 +13921,35 @@ export async function approveConsultationAndMaterializeBooking(args: {
   })
 }
 
-export async function approveConsultationByClientActionToken(
-  args: ApproveConsultationByClientActionTokenArgs,
-): Promise<ApproveConsultationMaterializationResult> {
-  // Resolve WITHOUT burning the link, then consume inside the transaction.
-  // These tokens are single-use, so consuming before the write meant any
-  // refusal below (TIME_BLOCKED on an extension, a stale proposal, the DB
-  // overlap backstop) left the client holding a dead magic link and a
-  // full-screen error with no retry. Rolling the consumption back with the
-  // failed write keeps a refusal recoverable — the client can re-open the same
-  // link once the pro clears whatever blocked it.
+/**
+ * The single-use client-action-token dance shared by the token-authenticated
+ * consultation approve and reject entry points. Resolve the token target WITHOUT
+ * burning it, take the client-owned booking lock, then CONSUME the token inside
+ * that transaction so a refusal below (a stale proposal, TIME_BLOCKED on an
+ * extension, the DB overlap backstop) rolls the consumption back with the failed
+ * write — leaving the magic link live so the client can re-open it once the pro
+ * clears whatever blocked it. Consuming before the write would strand them on a
+ * dead link (see [[single-use-token-consumed-before-tx]]).
+ *
+ * Only the terminal decision differs (approve → materialize, reject → record the
+ * decision), so it is passed as `perform`; the REMOTE_SECURE_LINK provenance
+ * assembled from the consumed token is identical across both and lives here.
+ */
+async function runConsultationActionTokenDecision<T>(args: {
+  rawToken: string
+  ipAddress?: string | null
+  userAgent?: string | null
+  requestId?: string | null
+  idempotencyKey?: string | null
+  perform: (ctx: {
+    tx: Prisma.TransactionClient
+    now: Date
+    consumed: Awaited<ReturnType<typeof consumeConsultationActionToken>>
+    provenance: ConsultationDecisionProvenance
+    requestId: string | null
+    idempotencyKey: string | null
+  }) => Promise<T>
+}): Promise<T> {
   const target = await resolveConsultationActionTokenTarget({
     rawToken: args.rawToken,
   })
@@ -13944,21 +13963,21 @@ export async function approveConsultationByClientActionToken(
         tx,
       })
 
-      return performLockedApproveConsultationMaterialization({
+      const provenance: ConsultationDecisionProvenance = {
+        method: 'REMOTE_SECURE_LINK',
+        recordedByUserId: null,
+        clientActionTokenId: consumed.id,
+        contactMethod: consumed.deliveryMethod,
+        destinationSnapshot: consumed.destinationSnapshot,
+        ipAddress: normalizeReason(args.ipAddress),
+        userAgent: normalizeReason(args.userAgent),
+      }
+
+      return args.perform({
         tx,
-        bookingId: consumed.bookingId,
-        clientId: consumed.clientId,
-        professionalId: consumed.professionalId,
         now,
-        provenance: {
-          method: 'REMOTE_SECURE_LINK',
-          recordedByUserId: null,
-          clientActionTokenId: consumed.id,
-          contactMethod: consumed.deliveryMethod,
-          destinationSnapshot: consumed.destinationSnapshot,
-          ipAddress: normalizeReason(args.ipAddress),
-          userAgent: normalizeReason(args.userAgent),
-        },
+        consumed,
+        provenance,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       })
@@ -13966,43 +13985,49 @@ export async function approveConsultationByClientActionToken(
   })
 }
 
-export async function rejectConsultationByClientActionToken(
-  args: RejectConsultationByClientActionTokenArgs,
-): Promise<RejectConsultationResult> {
-  // Same single-use contract as the approve path above: resolve first, consume
-  // inside the transaction so a refused decline doesn't burn the link.
-  const target = await resolveConsultationActionTokenTarget({
+export async function approveConsultationByClientActionToken(
+  args: ApproveConsultationByClientActionTokenArgs,
+): Promise<ApproveConsultationMaterializationResult> {
+  return runConsultationActionTokenDecision({
     rawToken: args.rawToken,
-  })
-
-  return withLockedClientOwnedBookingTransaction({
-    bookingId: target.bookingId,
-    clientId: target.clientId,
-    run: async ({ tx, now }) => {
-      const consumed = await consumeConsultationActionToken({
-        rawToken: args.rawToken,
-        tx,
-      })
-
-      return performLockedRejectConsultationDecision({
+    ipAddress: args.ipAddress,
+    userAgent: args.userAgent,
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    perform: ({ tx, now, consumed, provenance, requestId, idempotencyKey }) =>
+      performLockedApproveConsultationMaterialization({
         tx,
         bookingId: consumed.bookingId,
         clientId: consumed.clientId,
         professionalId: consumed.professionalId,
         now,
-        provenance: {
-          method: 'REMOTE_SECURE_LINK',
-          recordedByUserId: null,
-          clientActionTokenId: consumed.id,
-          contactMethod: consumed.deliveryMethod,
-          destinationSnapshot: consumed.destinationSnapshot,
-          ipAddress: normalizeReason(args.ipAddress),
-          userAgent: normalizeReason(args.userAgent),
-        },
-        requestId: args.requestId ?? null,
-        idempotencyKey: args.idempotencyKey ?? null,
-      })
-    },
+        provenance,
+        requestId,
+        idempotencyKey,
+      }),
+  })
+}
+
+export async function rejectConsultationByClientActionToken(
+  args: RejectConsultationByClientActionTokenArgs,
+): Promise<RejectConsultationResult> {
+  return runConsultationActionTokenDecision({
+    rawToken: args.rawToken,
+    ipAddress: args.ipAddress,
+    userAgent: args.userAgent,
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    perform: ({ tx, now, consumed, provenance, requestId, idempotencyKey }) =>
+      performLockedRejectConsultationDecision({
+        tx,
+        bookingId: consumed.bookingId,
+        clientId: consumed.clientId,
+        professionalId: consumed.professionalId,
+        now,
+        provenance,
+        requestId,
+        idempotencyKey,
+      }),
   })
 }
 
