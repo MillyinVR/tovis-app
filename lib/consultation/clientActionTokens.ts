@@ -9,6 +9,7 @@ import {
 import { sha256Hex, generateTokenHex } from '@/lib/auth/timingSafe'
 import { bookingError } from '@/lib/booking/errors'
 import { prisma } from '@/lib/prisma'
+import { toNullableJsonCreateInput } from '@/lib/typed/prismaJson'
 
 export const CONSULTATION_ACTION_TOKEN_EXPIRY_MS =
   1000 * 60 * 60 * 24 * 3 // 72 hours
@@ -23,14 +24,6 @@ function normalizeTrimmed(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
-}
-
-function toNullableJsonCreateInput(
-  value: Prisma.InputJsonValue | null | undefined,
-): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
-  if (value === undefined) return undefined
-  if (value === null) return Prisma.JsonNull
-  return value
 }
 
 function assertNonEmptyBookingId(bookingId: string): string {

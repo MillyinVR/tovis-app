@@ -6,6 +6,7 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { toNullableJsonCreateInput } from '@/lib/typed/prismaJson'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -25,14 +26,6 @@ function requireNonEmptyString(label: string, value: string): string {
     throw new Error(`${label} is required.`)
   }
   return normalized
-}
-
-function toNullableJsonCreateInput(
-  value: Prisma.InputJsonValue | null | undefined,
-): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
-  if (value === undefined) return undefined
-  if (value === null) return Prisma.JsonNull
-  return value
 }
 
 function resolveActedAt(actedAt?: Date | null): Date | undefined {

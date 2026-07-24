@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 /**
  * Runtime-validated boundary between app data and Prisma JSON columns.
@@ -24,6 +24,83 @@ export function toPrismaJson(value: unknown): Prisma.InputJsonValue {
   assertJsonValue(value, 'value', new Set())
 
   return value as Prisma.InputJsonValue
+}
+
+/**
+ * Write an OPTIONAL Prisma JSON column from a value already in Prisma's *input*
+ * shape. Three states, three different Prisma meanings:
+ *   `undefined` -> omit the field entirely (leave whatever is stored alone);
+ *   `null`      -> `Prisma.JsonNull` (Prisma represents JSON null with a sentinel,
+ *                  never with a bare `null`);
+ *   otherwise   -> the value, unchanged.
+ *
+ * This existed as five separate private copies (booking write boundary, closeout
+ * audit, aftercare access delivery, consultation confirmation proof, client action
+ * tokens) under two different signatures — see
+ * `toNullableJsonCreateInputFromJsonValue` below for the other one.
+ */
+export function toNullableJsonCreateInput(
+  value: Prisma.InputJsonValue | null | undefined,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return Prisma.JsonNull
+
+  return value
+}
+
+/**
+ * Rebuild a value that came OUT of Prisma (`Prisma.JsonValue`, the read type)
+ * into the input shape, dropping `undefined` object members. Distinct from
+ * `toPrismaJson` above, which VALIDATES arbitrary app data and throws on anything
+ * not JSON-safe: this one takes data Prisma already vouched for and only needs the
+ * read type converted to the write type, so it never throws (a non-object,
+ * non-primitive lands as `{}`).
+ *
+ * Keep the two apart deliberately — a caller reaching for the wrong one either
+ * loses the runtime validation it wanted or gains a throw it cannot handle.
+ */
+export function jsonValueToInputJson(value: Prisma.JsonValue): Prisma.InputJsonValue {
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => (item === null ? null : jsonValueToInputJson(item)))
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return {}
+  }
+
+  const out: Record<string, Prisma.InputJsonValue | null> = {}
+
+  for (const key of Object.keys(value)) {
+    const child = value[key]
+    if (child === undefined) continue
+
+    out[key] = child === null ? null : jsonValueToInputJson(child)
+  }
+
+  return out
+}
+
+/**
+ * `toNullableJsonCreateInput` for a value that came OUT of Prisma: same
+ * undefined/null/value contract, but the payload is rebuilt through
+ * `jsonValueToInputJson` because `Prisma.JsonValue` is not assignable to
+ * `Prisma.InputJsonValue`.
+ */
+export function toNullableJsonCreateInputFromJsonValue(
+  value: Prisma.JsonValue | null | undefined,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return Prisma.JsonNull
+
+  return jsonValueToInputJson(value)
 }
 
 function assertJsonValue(value: unknown, path: string, seen: Set<object>): void {
