@@ -10,6 +10,9 @@ description = "Synthetic test fixtures and local test artifacts"
 paths = [
   # Unit-test fixtures: fake JWTs, idempotency keys, synthetic tokens.
   '''.*\.test\.tsx?$''',
+  # Synthetic Stripe webhook payloads (M13 wire-shape tests). No real credentials —
+  # vendored test-mode event shapes; a real capture swapped in here stays test-mode.
+  '''^app/api/webhooks/stripe/__fixtures__/.*''',
   # Playwright local artifacts (historical commits; now gitignored).
   '''^test-results/.*''',
   '''^playwright/\.auth/.*''',
