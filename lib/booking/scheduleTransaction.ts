@@ -36,6 +36,39 @@ export async function withLockedProfessionalTransaction<T>(
   )
 }
 
+// Schedule-locked interactive transaction whose lock target isn't known until a
+// row is read INSIDE the transaction. The aftercare rebook paths resolve the
+// professional to lock from the AftercareSummary's booking, so they can't use
+// `withLockedProfessionalTransaction` (which takes the id up front).
+// `resolveProfessionalId` runs pre-lock to yield the id; the lock and `run`
+// follow — all in
+// ONE transaction under the shared schedule-tx budgets, so no caller hand-rolls
+// `prisma.$transaction` with its own drift-prone maxWait/timeout (the exact
+// footgun M10 had to reconcile by hand). Callers re-read + re-validate the row
+// under the lock inside `run`, mirroring `withLockedProfessionalTransaction`'s
+// pre-lock-read siblings (e.g. confirmClientWaitlistOffer).
+export async function withLockedProfessionalScheduleByLookup<T>(args: {
+  resolveProfessionalId: (tx: Prisma.TransactionClient) => Promise<string>
+  run: (ctx: LockedScheduleContext) => Promise<T>
+}): Promise<T> {
+  return prisma.$transaction(
+    async (tx) => {
+      const professionalId = await args.resolveProfessionalId(tx)
+
+      await lockProfessionalSchedule(tx, professionalId)
+
+      return args.run({
+        tx,
+        now: new Date(),
+      })
+    },
+    {
+      maxWait: SCHEDULE_TX_MAX_WAIT_MS,
+      timeout: SCHEDULE_TX_TIMEOUT_MS,
+    },
+  )
+}
+
 export async function lockClientOwnedBookingSchedule(args: {
   tx: Prisma.TransactionClient
   bookingId: string
