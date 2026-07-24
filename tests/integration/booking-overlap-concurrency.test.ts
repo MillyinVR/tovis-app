@@ -977,9 +977,24 @@ async function parityMismatches(args: ParityArgs): Promise<string[]> {
   const enforcedDuration =
     args.enforcedDurationMinutes ?? args.offeredDurationMinutes
 
+  const candidates = parityCandidateStarts(args.dateYMD)
+
+  // This walk only sees starts the grid regenerates. If computeDaySlotsFast ever
+  // offered a start off that grid — a different alignment, a sub-step time — the
+  // comparison below would silently skip it and every scenario would still pass.
+  // Fail loudly instead: the two candidate sets must be the same set.
+  const candidateIsos = new Set(candidates.map((start) => start.toISOString()))
+  const offGrid = [...offered].filter((iso) => !candidateIsos.has(iso))
+
+  if (offGrid.length) {
+    throw new Error(
+      `Offered starts outside the regenerated grid (the parity walk cannot see these): ${offGrid.join(', ')}`,
+    )
+  }
+
   const mismatches: string[] = []
 
-  for (const startUtc of parityCandidateStarts(args.dateYMD)) {
+  for (const startUtc of candidates) {
     const refusal = await enforcedRefusal({
       startUtc,
       durationMinutes: enforcedDuration,
