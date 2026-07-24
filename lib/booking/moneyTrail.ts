@@ -176,6 +176,7 @@ export type BookingMoneyTrail = {
     canRefund: boolean
     refundableRemainingCents: number
     canWaiveNoShowFee: boolean
+    canRefundNoShowFee: boolean
   }
 }
 
@@ -282,6 +283,16 @@ export function assembleMoneyTrail(row: MoneyTrailBookingRow): BookingMoneyTrail
   // nothing was ever owed; there is nothing to forgive.
   const canWaiveNoShowFee = row.noShowFeeStatus === NoShowFeeStatus.FAILED
 
+  // A CHARGED fee (on its own PaymentIntent) can be refunded in-app when there is
+  // still an unrefunded balance and it is not frozen by a Stripe dispute. A
+  // REFUNDED / WAIVED / SKIPPED / FAILED fee moved no refundable money; a disputed
+  // fee is frozen (the boundary refuses it), so never invite a refund it'd reject.
+  const noShowFeeCents = decimalToCents(row.noShowFeeAmount) ?? 0
+  const canRefundNoShowFee =
+    row.noShowFeeStatus === NoShowFeeStatus.CHARGED &&
+    row.noShowFeeDisputedAt == null &&
+    noShowFeeCents - row.noShowFeeRefundedCents > 0
+
   return {
     bookingId: row.id,
     currency,
@@ -313,6 +324,7 @@ export function assembleMoneyTrail(row: MoneyTrailBookingRow): BookingMoneyTrail
       canRefund,
       refundableRemainingCents,
       canWaiveNoShowFee,
+      canRefundNoShowFee,
     },
   }
 }

@@ -21,6 +21,7 @@ export const IDEMPOTENCY_ROUTES = {
   BOOKING_CANCEL: 'POST /api/v1/bookings/[id]/cancel',
   BOOKING_REFUND: 'POST /api/v1/bookings/[id]/refund',
   BOOKING_NO_SHOW_FEE_WAIVE: 'POST /api/v1/bookings/[id]/no-show-fee/waive',
+  BOOKING_NO_SHOW_FEE_REFUND: 'POST /api/v1/bookings/[id]/no-show-fee/refund',
   BOOKING_RESCHEDULE: 'POST /api/v1/bookings/[id]/reschedule',
 
   BOOKING_START_SESSION: 'POST /api/v1/pro/bookings/[id]/session/start',

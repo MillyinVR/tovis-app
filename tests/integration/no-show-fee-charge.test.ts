@@ -17,8 +17,19 @@
 // sides of it — the same limitation every prior money card hit.
 //
 // Run with `pnpm test:integration` (or the whole dir in CI via integration.yml).
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
+import {
+  BookingRefundStatus,
+  BookingRefundTrigger,
   BookingStatus,
   NotificationEventKey,
   NoShowFeeReason,
@@ -32,10 +43,19 @@ import {
 } from '@prisma/client'
 
 // Only Stripe's network boundary is mocked; prisma, the flag, the fee math and
-// the write boundary all run for real against the test database.
-const stripe = vi.hoisted(() => ({ create: vi.fn() }))
+// the write boundary all run for real against the test database. `refunds.create`
+// is the GAP A boundary — dev has no connected account, so a destination-charge
+// refund (reverse_transfer) can't be driven for real; the DB is the assertion
+// surface, same limitation every prior money card hit.
+const stripe = vi.hoisted(() => ({
+  create: vi.fn(),
+  refundsCreate: vi.fn(),
+}))
 vi.mock('@/lib/stripe/server', () => ({
-  getStripe: () => ({ paymentIntents: { create: stripe.create } }),
+  getStripe: () => ({
+    paymentIntents: { create: stripe.create },
+    refunds: { create: stripe.refundsCreate },
+  }),
 }))
 
 import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
@@ -44,6 +64,8 @@ import {
   recordNoShowFeeCharge,
   reconcileNoShowFeeChargeRefundInTransaction,
 } from '@/lib/booking/writeBoundary'
+import { refundNoShowFee } from '@/lib/booking/refunds'
+import { retryFailedAutoCancelRefunds } from '@/lib/booking/refundRetrySweep'
 import { handleStripeEvent } from '@/lib/stripe/handleWebhookEvent'
 import { asTestStripeEvent } from '@/lib/typed/stripeTestEvent'
 
@@ -723,5 +745,300 @@ describe('reconcile no-show fee PI refund / dispute', () => {
       select: { noShowFeeDisputedAt: true },
     })
     expect(row.noShowFeeDisputedAt).toBeInstanceOf(Date)
+  })
+})
+
+// M15 GAP A — the in-app WRITE side: a pro/admin refund of a CHARGED fee on its
+// OWN PaymentIntent. reverse_transfer can't be driven for real (no dev connected
+// account), so `refunds.create` is mocked; the DB (fee status, cents, the
+// BookingRefund ledger row, the client receipt) is the assertion surface.
+describe('refund a CHARGED no-show fee (M15 GAP A)', () => {
+  /** Seed a CHARGED $25 fee (its own PI) with an optional prior refunded balance. */
+  async function chargedFeeBooking(
+    feePi: string,
+    refundedCents = 0,
+  ): Promise<string> {
+    const bookingId = await createBooking({ clientId: fx.clientWithCardId })
+    await db.booking.update({
+      where: { id: bookingId },
+      data: {
+        noShowFeeStatus: NoShowFeeStatus.CHARGED,
+        noShowFeeReason: NoShowFeeReason.NO_SHOW,
+        noShowFeeAmount: new Prisma.Decimal('25.00'),
+        noShowFeeStripePaymentIntentId: feePi,
+        noShowFeeChargedAt: new Date(),
+        noShowFeeRefundedCents: refundedCents,
+      },
+    })
+    return bookingId
+  }
+
+  function refundReceiptCount(): Promise<number> {
+    return db.clientNotification.count({
+      where: {
+        clientId: fx.clientWithCardId,
+        eventKey: NotificationEventKey.PAYMENT_REFUNDED,
+      },
+    })
+  }
+
+  beforeEach(() => {
+    stripe.refundsCreate.mockReset()
+    stripe.refundsCreate.mockResolvedValue({ id: `rf_${tag}` })
+  })
+
+  it('a full refund flips CHARGED → REFUNDED, reverses the transfer, and notifies once', async () => {
+    const feePi = `pi_fee_ref_full_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    const result = await refundNoShowFee({ bookingId })
+    expect(result).toEqual({ outcome: 'REFUNDED', refundAmountCents: 2500 })
+
+    // Stripe was called on the fee PI, full remaining, with reverse_transfer.
+    expect(stripe.refundsCreate).toHaveBeenCalledTimes(1)
+    expect(stripe.refundsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_intent: feePi,
+        amount: 2500,
+        reverse_transfer: true,
+      }),
+      expect.objectContaining({
+        idempotencyKey: `tovis:no-show-fee-refund:${bookingId}:0`,
+      }),
+    )
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.REFUNDED)
+    expect(row.noShowFeeRefundedCents).toBe(2500)
+
+    // A durable SUCCEEDED ledger row on the FEE PI, and one refund receipt.
+    const refundRow = await db.bookingRefund.findFirstOrThrow({
+      where: { bookingId },
+      select: {
+        status: true,
+        amountCents: true,
+        stripePaymentIntentId: true,
+        trigger: true,
+        reverseTransfer: true,
+      },
+    })
+    expect(refundRow).toMatchObject({
+      status: BookingRefundStatus.SUCCEEDED,
+      amountCents: 2500,
+      stripePaymentIntentId: feePi,
+      reverseTransfer: true,
+    })
+    expect(await refundReceiptCount()).toBe(1)
+  })
+
+  it('refunds only the remaining balance after a Dashboard partial (GAP B reconciled)', async () => {
+    // A prior Dashboard partial ($10) left the fee CHARGED + noShowFeeRefundedCents=1000.
+    const feePi = `pi_fee_ref_partial_${tag}`
+    const bookingId = await chargedFeeBooking(feePi, 1000)
+
+    const result = await refundNoShowFee({ bookingId })
+    expect(result).toEqual({ outcome: 'REFUNDED', refundAmountCents: 1500 })
+
+    // Only the remaining 1500 is refunded; the key carries the pre-refund
+    // cumulative (1000) so it never collides with the partial's own refund.
+    expect(stripe.refundsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1500 }),
+      expect.objectContaining({
+        idempotencyKey: `tovis:no-show-fee-refund:${bookingId}:1000`,
+      }),
+    )
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.REFUNDED)
+    expect(row.noShowFeeRefundedCents).toBe(2500)
+  })
+
+  it('a late charge.refunded replay after an in-app refund changes nothing (no double-notify)', async () => {
+    const feePi = `pi_fee_ref_replay_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    await refundNoShowFee({ bookingId })
+    expect(await refundReceiptCount()).toBe(1)
+
+    // The fee's charge.refunded webhook lands later at the same cumulative (2500).
+    // GAP B's reconcile sees no rise → status stays REFUNDED, no second receipt.
+    const reconciled = await db.$transaction((tx) =>
+      reconcileNoShowFeeChargeRefundInTransaction(tx, {
+        paymentIntentId: feePi,
+        amountRefundedCents: 2500,
+        chargeAmountCents: 2500,
+      }),
+    )
+    expect(reconciled).toEqual({ handled: true })
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.REFUNDED)
+    expect(row.noShowFeeRefundedCents).toBe(2500)
+    expect(await refundReceiptCount()).toBe(1) // still exactly one
+  })
+
+  it('records the ledger row on the FEE PI only — never the service PI (M3 per-PI)', async () => {
+    const feePi = `pi_fee_ref_peri_${tag}`
+    const servicePi = `pi_service_ref_peri_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+    await db.booking.update({
+      where: { id: bookingId },
+      data: { stripePaymentIntentId: servicePi },
+    })
+
+    await refundNoShowFee({ bookingId })
+
+    const feeSum = await db.bookingRefund.aggregate({
+      where: {
+        bookingId,
+        stripePaymentIntentId: feePi,
+        status: BookingRefundStatus.SUCCEEDED,
+      },
+      _sum: { amountCents: true },
+    })
+    const serviceSum = await db.bookingRefund.aggregate({
+      where: {
+        bookingId,
+        stripePaymentIntentId: servicePi,
+        status: BookingRefundStatus.SUCCEEDED,
+      },
+      _sum: { amountCents: true },
+    })
+    expect(feeSum._sum.amountCents).toBe(2500)
+    expect(serviceSum._sum.amountCents).toBeNull() // fee refund never counts here
+  })
+
+  it('refuses a disputed fee (frozen), touching no card and no state', async () => {
+    const feePi = `pi_fee_ref_disputed_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+    await db.booking.update({
+      where: { id: bookingId },
+      data: { noShowFeeDisputedAt: new Date() },
+    })
+
+    const result = await refundNoShowFee({ bookingId })
+    expect(result).toEqual({
+      outcome: 'NOT_ATTEMPTED',
+      code: 'NO_SHOW_FEE_REFUND_FROZEN_DISPUTED',
+    })
+    expect(stripe.refundsCreate).not.toHaveBeenCalled()
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.CHARGED)
+    expect(row.noShowFeeRefundedCents).toBe(0)
+    expect(await db.bookingRefund.count({ where: { bookingId } })).toBe(0)
+  })
+
+  it('refuses a FAILED fee — a fee that never charged is waived, not refunded', async () => {
+    const bookingId = await createBooking({ clientId: fx.clientWithCardId })
+    await db.booking.update({
+      where: { id: bookingId },
+      data: {
+        noShowFeeStatus: NoShowFeeStatus.FAILED,
+        noShowFeeReason: NoShowFeeReason.NO_SHOW,
+        noShowFeeAmount: new Prisma.Decimal('25.00'),
+      },
+    })
+
+    const result = await refundNoShowFee({ bookingId })
+    expect(result).toEqual({
+      outcome: 'NOT_ATTEMPTED',
+      code: 'NO_SHOW_FEE_NOT_REFUNDABLE',
+    })
+    expect(stripe.refundsCreate).not.toHaveBeenCalled()
+  })
+
+  it('refuses an already-REFUNDED fee (idempotent — no double refund)', async () => {
+    const feePi = `pi_fee_ref_twice_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    const first = await refundNoShowFee({ bookingId })
+    expect(first.outcome).toBe('REFUNDED')
+
+    // A second refund on the now-REFUNDED fee is refused before any Stripe call.
+    const second = await refundNoShowFee({ bookingId })
+    expect(second).toEqual({
+      outcome: 'NOT_ATTEMPTED',
+      code: 'NO_SHOW_FEE_ALREADY_REFUNDED',
+    })
+    expect(stripe.refundsCreate).toHaveBeenCalledTimes(1) // never twice
+    expect(await refundReceiptCount()).toBe(1)
+  })
+
+  it('rolls the claim back when Stripe fails: CHARGED restored + a durable FAILED row, no receipt', async () => {
+    const feePi = `pi_fee_ref_fail_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    stripe.refundsCreate.mockRejectedValue(new Error('card_declined'))
+
+    const result = await refundNoShowFee({ bookingId })
+    expect(result.outcome).toBe('FAILED')
+
+    // The reservation is released — status back to CHARGED, cents back to 0.
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.CHARGED)
+    expect(row.noShowFeeRefundedCents).toBe(0)
+
+    // A durable FAILED ledger row on the fee PI (visible to the money trail),
+    // and NO refund receipt (money never moved).
+    const failedRow = await db.bookingRefund.findFirstOrThrow({
+      where: { bookingId },
+      select: { status: true, stripePaymentIntentId: true, failureMessage: true },
+    })
+    expect(failedRow.status).toBe(BookingRefundStatus.FAILED)
+    expect(failedRow.stripePaymentIntentId).toBe(feePi)
+    expect(await refundReceiptCount()).toBe(0)
+  })
+
+  it('the auto-cancel retry sweep never re-drives a DISCRETIONARY fee refund (M3)', async () => {
+    // A FAILED in-app fee refund is a DISCRETIONARY row on the fee PI. Seed the
+    // exact shape the auto-cancel retry sweep scans — a CANCELLED booking with a
+    // FAILED refund row on it — but with the DISCRETIONARY trigger. The sweep
+    // filters trigger=AUTO_CANCELLATION at the DB, so it never picks this up (and
+    // classifyFlavor would return null for a fee PI even if it did).
+    const feePi = `pi_fee_sweep_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+    await db.booking.update({
+      where: { id: bookingId },
+      data: { status: BookingStatus.CANCELLED },
+    })
+    await db.bookingRefund.create({
+      data: {
+        bookingId,
+        amountCents: 2500,
+        currency: 'usd',
+        status: BookingRefundStatus.FAILED,
+        trigger: BookingRefundTrigger.DISCRETIONARY,
+        reverseTransfer: true,
+        stripePaymentIntentId: feePi,
+      },
+    })
+
+    const result = await retryFailedAutoCancelRefunds()
+
+    // This booking's DISCRETIONARY fee row is invisible to the sweep, and its
+    // ledger row is left untouched (still FAILED — no retry attempt was made).
+    expect(result.results.some((r) => r.bookingId === bookingId)).toBe(false)
+    const rows = await db.bookingRefund.findMany({
+      where: { bookingId },
+      select: { status: true },
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.status).toBe(BookingRefundStatus.FAILED)
   })
 })

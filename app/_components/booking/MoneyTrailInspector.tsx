@@ -457,6 +457,58 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
     }
   }
 
+  async function refundNoShow() {
+    if (actionPending) return
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Refund this no-show fee to the client? This returns the full fee and cannot be undone.',
+      )
+    ) {
+      return
+    }
+
+    setActionError(null)
+    setActionPending(true)
+
+    try {
+      const key = buildClientIdempotencyKey({
+        scope: 'money-trail',
+        entityId: bookingId,
+        action: 'refund-no-show-fee',
+      })
+
+      const res = await fetch(
+        `/api/v1/bookings/${encodeURIComponent(bookingId)}/no-show-fee/refund`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...idempotencyHeaders(key),
+          },
+          body: '{}',
+        },
+      )
+      const data: unknown = await safeJson(res)
+
+      if (!res.ok) {
+        const root = isRecord(data) ? data : null
+        setActionError(
+          (root ? readString(root.error) : null) ??
+            `Refund failed (${res.status}).`,
+        )
+        return
+      }
+
+      setFlash('No-show fee refunded.')
+      await load()
+    } catch {
+      setActionError('Network error while refunding the fee.')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
   return (
     <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
       <div className="flex items-center justify-between gap-3">
@@ -566,7 +618,9 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
           ) : null}
 
           {/* actions */}
-          {trail.capabilities.canRefund || trail.capabilities.canWaiveNoShowFee ? (
+          {trail.capabilities.canRefund ||
+          trail.capabilities.canWaiveNoShowFee ||
+          trail.capabilities.canRefundNoShowFee ? (
             <div className="mt-3 border-t border-white/10 pt-3">
               {refundOpen ? (
                 <div className="grid gap-2 rounded-2xl border border-white/10 bg-bgPrimary p-3">
@@ -637,6 +691,16 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                       className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-white/20`}
                     >
                       {actionPending ? 'Waiving…' : 'Waive no-show fee'}
+                    </button>
+                  ) : null}
+                  {trail.capabilities.canRefundNoShowFee ? (
+                    <button
+                      type="button"
+                      onClick={refundNoShow}
+                      disabled={actionPending}
+                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-white/20`}
+                    >
+                      {actionPending ? 'Refunding…' : 'Refund no-show fee'}
                     </button>
                   ) : null}
                 </div>

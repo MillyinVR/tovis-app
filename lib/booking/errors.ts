@@ -72,6 +72,9 @@ export type BookingErrorCode =
   | "WAITLIST_OFFER_NOT_FOUND"
   | "WAITLIST_OFFER_NOT_PENDING"
   | "NO_SHOW_FEE_NOT_WAIVABLE"
+  | "NO_SHOW_FEE_NOT_REFUNDABLE"
+  | "NO_SHOW_FEE_ALREADY_REFUNDED"
+  | "NO_SHOW_FEE_REFUND_FROZEN_DISPUTED"
   | "STALE_VERSION"
   | "INTERNAL_ERROR";
 
@@ -689,6 +692,39 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "No-show fee is not in a waivable state.",
     userMessage: "This fee can't be waived — it was never charged, or was already collected.",
+  },
+
+  NO_SHOW_FEE_NOT_REFUNDABLE: {
+    // Only a successfully CHARGED fee (its own PaymentIntent) can be refunded.
+    // A FAILED fee is waived instead (no money moved); a SKIPPED / absent fee has
+    // nothing to give back.
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "No-show fee is not in a refundable state.",
+    userMessage: "This fee can't be refunded — it was never charged.",
+  },
+
+  NO_SHOW_FEE_ALREADY_REFUNDED: {
+    // The fee's own charge has already been fully returned (in-app or via the
+    // Stripe Dashboard) — there is nothing left to refund.
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "No-show fee is already fully refunded.",
+    userMessage: "This fee has already been refunded.",
+  },
+
+  NO_SHOW_FEE_REFUND_FROZEN_DISPUTED: {
+    // The fee charge is under (or lost) a Stripe dispute — Stripe has pulled the
+    // funds via the chargeback, so an in-app refund on top would double-return.
+    // Frozen until the dispute resolves (a WON dispute re-opens it).
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "No-show fee refund is frozen by an open payment dispute.",
+    userMessage:
+      "This fee has an open or lost payment dispute. Refunds are blocked until the dispute resolves.",
   },
 
   INTERNAL_ERROR: {
