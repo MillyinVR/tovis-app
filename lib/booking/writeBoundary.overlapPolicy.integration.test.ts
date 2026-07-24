@@ -435,6 +435,7 @@ describe('writeBoundary overlap policy integration', () => {
     await createHold({
       clientId: 'client_1',
       bookingEntryPoint: 'PRO_CREATED',
+      addOnIds: [],
       offering: {
         id: 'offering_1',
         professionalId: 'pro_1',

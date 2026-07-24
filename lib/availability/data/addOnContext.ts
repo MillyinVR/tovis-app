@@ -5,6 +5,10 @@ import { Prisma, ServiceLocationType } from '@prisma/client'
 import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
+import {
+  buildOfferingAddOnWhere,
+  resolveAddOnDurationMinutes,
+} from '@/lib/booking/addOnDuration'
 import { type BookingErrorCode } from '@/lib/booking/errors'
 import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
@@ -45,16 +49,11 @@ export async function resolveDurationWithAddOns(
   const client = args.client ?? prisma
 
   const addOnLinks = await client.offeringAddOn.findMany({
-    where: {
-      id: { in: args.addOnIds },
+    where: buildOfferingAddOnWhere({
+      addOnIds: args.addOnIds,
       offeringId: args.offeringId,
-      isActive: true,
-      OR: [{ locationType: null }, { locationType: args.locationType }],
-      addOnService: {
-        isActive: true,
-        isAddOnEligible: true,
-      },
-    },
+      locationType: args.locationType,
+    }),
     select: {
       id: true,
       addOnServiceId: true,
@@ -95,20 +94,29 @@ export async function resolveDurationWithAddOns(
     proAddOnOfferings.map((offering) => [offering.serviceId, offering]),
   )
 
-  const addOnDurationTotal = addOnLinks.reduce((sum, link) => {
-    const proOffering = proOfferingByServiceId.get(link.addOnServiceId) ?? null
+  // Same resolver, same refusal as the write path (`resolveBookingAddOns`): a
+  // link whose duration chain lands on a non-positive number is ADDONS_INVALID
+  // here too. Summing it as zero used to size the offered slot SHORTER than the
+  // window finalize would demand — the B1-A defect one layer down.
+  let addOnDurationTotal = 0
 
-    const rawDuration =
-      link.durationOverrideMinutes ??
-      (args.locationType === ServiceLocationType.MOBILE
-        ? proOffering?.mobileDurationMinutes
-        : proOffering?.salonDurationMinutes) ??
-      link.addOnService.defaultDurationMinutes ??
-      0
+  for (const link of addOnLinks) {
+    const minutes = resolveAddOnDurationMinutes({
+      durationOverrideMinutes: link.durationOverrideMinutes,
+      proOffering: proOfferingByServiceId.get(link.addOnServiceId) ?? null,
+      defaultDurationMinutes: link.addOnService.defaultDurationMinutes,
+      locationType: args.locationType,
+    })
 
-    const duration = Number(rawDuration || 0)
-    return sum + (Number.isFinite(duration) && duration > 0 ? duration : 0)
-  }, 0)
+    if (minutes == null) {
+      return {
+        ok: false,
+        code: 'ADDONS_INVALID',
+      }
+    }
+
+    addOnDurationTotal += minutes
+  }
 
   return {
     ok: true,

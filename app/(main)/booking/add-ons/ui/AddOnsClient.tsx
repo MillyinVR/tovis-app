@@ -1,7 +1,7 @@
 // app/(main)/booking/add-ons/ui/AddOnsClient.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { endAvailabilityMetric } from '../../AvailabilityDrawer/perf/availabilityPerf'
@@ -135,6 +135,54 @@ function getFinalizeErrorMessage(raw: unknown): string | null {
   return readString(raw.error)
 }
 
+/**
+ * Re-size the hold to `ids` so the reservation covers what finalize will take.
+ *
+ * Resolves to the server's refusal message when the widened window no longer
+ * fits (the slot's tail was taken, or the appointment would now run past the
+ * pro's day) and `null` on success — the caller un-ticks on a refusal, so the
+ * client learns HERE rather than at the end of checkout (B1-A).
+ */
+async function syncHoldAddOns(
+  holdId: string,
+  ids: string[],
+): Promise<string | null> {
+  const response = await fetch(`/api/v1/holds/${encodeURIComponent(holdId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ addOnIds: ids }),
+  })
+
+  if (response.ok) return null
+
+  const raw: unknown = await response.json().catch(() => null)
+
+  return getFinalizeErrorMessage(raw) ?? 'That time is no longer available.'
+}
+
+/**
+ * The refusal a client should read: the server's reason is about the WINDOW
+ * ("outside working hours", "that time is booked"), which is confusing next to
+ * an add-on they just ticked. Name the add-on that pushed it over, and what to
+ * do about it.
+ */
+function describeSyncFailure(args: {
+  serverMessage: string
+  addedIds: string[]
+  addOns: AddOnDTO[]
+}): string {
+  if (args.addedIds.length === 0) return args.serverMessage
+
+  const titles = args.addedIds
+    .map((id) => args.addOns.find((addOn) => addOn.id === id)?.title)
+    .filter((title): title is string => Boolean(title))
+
+  const subject =
+    titles.length === 1 ? `“${titles[0]}”` : 'That add-on'
+
+  return `${subject} doesn’t fit this appointment time — ${args.serverMessage} Pick an earlier time, or book without it.`
+}
+
 function getFinalizeBookingId(raw: unknown): string | null {
   if (!isRecord(raw)) return null
   if (raw.ok !== true) return null
@@ -250,18 +298,85 @@ export default function AddOnsClient({
   const [selected, setSelected] =
     useState<Record<string, boolean>>(initialSelectedMap)
 
+  // Adopt the URL / recommended defaults only until the selection has an owner.
+  // Once the client has touched it, or the server has answered about it, those
+  // defaults are stale: re-applying them would re-tick an add-on the hold was
+  // just refused for, and the sync below would ask again — forever.
   useEffect(() => {
+    if (touched || serverAnsweredRef.current) return
+
     setSelected((current) => {
       const currentKey = keyFromIds(selectedIdsFromMap(current))
       const nextKey = keyFromIds(selectedIdsFromMap(initialSelectedMap))
 
       return currentKey === nextKey ? current : initialSelectedMap
     })
-  }, [initialSelectedMap])
+  }, [initialSelectedMap, touched])
 
   const selectedIds = useMemo(() => selectedIdsFromMap(selected), [selected])
   const selectedKey = useMemo(() => keyFromIds(selectedIds), [selectedIds])
 
+  // What the HOLD currently reserves. The drawer creates it for the base
+  // service, so the starting point is an empty selection; every change from
+  // here is pushed to the server before it can be booked (B1-A). Recommended
+  // add-ons arrive pre-ticked, so this commonly fires once on mount.
+  const [syncedKey, setSyncedKey] = useState<string>('')
+  const [syncingHold, setSyncingHold] = useState(false)
+  const syncSequenceRef = useRef(0)
+  const serverAnsweredRef = useRef(false)
+
+  const syncedIds = useMemo(
+    () => (syncedKey ? syncedKey.split(',') : []),
+    [syncedKey],
+  )
+
+  useEffect(() => {
+    if (!holdId) return
+    if (selectedKey === syncedKey) return
+
+    const sequence = ++syncSequenceRef.current
+    const requestedIds = selectedIds
+    let cancelled = false
+
+    setSyncingHold(true)
+
+    void (async () => {
+      const failure = await syncHoldAddOns(holdId, requestedIds).catch(
+        () => 'Couldn’t update your hold. Check your connection and try again.',
+      )
+
+      // A newer toggle already went out; that response is the one that counts.
+      if (cancelled || sequence !== syncSequenceRef.current) return
+
+      serverAnsweredRef.current = true
+
+      if (failure) {
+        setError(
+          describeSyncFailure({
+            serverMessage: failure,
+            addedIds: requestedIds.filter((id) => !syncedIds.includes(id)),
+            addOns,
+          }),
+        )
+        // Snap back to what the hold actually reserves — the refused add-on was
+        // never held, so leaving it ticked would re-create the dead end.
+        setSelected(buildSelectedMapFromIds(addOns, syncedIds))
+      } else {
+        setSyncedKey(keyFromIds(requestedIds))
+        setError(null)
+      }
+
+      setSyncingHold(false)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [addOns, holdId, selectedIds, selectedKey, syncedIds, syncedKey])
+
+  // The URL carries what the hold actually RESERVES, never a selection the
+  // server has not accepted — otherwise a reload (or the login round-trip)
+  // would restore add-ons that were refused.
   useEffect(() => {
     if (!pathname) return
     if (!touched && !urlHasAddOnIds) return
@@ -270,12 +385,12 @@ export default function AddOnsClient({
       parseCommaIds(urlAddOnIdsRaw, MAX_ADD_ON_IDS),
     )
 
-    if (currentKey === selectedKey) return
+    if (currentKey === syncedKey) return
 
     const nextSearchParams = new URLSearchParams(searchString)
 
-    if (selectedIds.length > 0) {
-      nextSearchParams.set('addOnIds', selectedKey)
+    if (syncedIds.length > 0) {
+      nextSearchParams.set('addOnIds', syncedKey)
     } else {
       nextSearchParams.delete('addOnIds')
     }
@@ -289,8 +404,8 @@ export default function AddOnsClient({
     pathname,
     router,
     searchString,
-    selectedIds.length,
-    selectedKey,
+    syncedIds.length,
+    syncedKey,
     touched,
     urlAddOnIdsRaw,
     urlHasAddOnIds,
@@ -349,6 +464,13 @@ export default function AddOnsClient({
 
     if (holdSecondsLeft != null && holdSecondsLeft <= 0) {
       setError('That hold expired. Please go back and pick another time.')
+      return
+    }
+
+    // Never book a selection the hold has not been widened to cover — that is
+    // the exact gap B1-A closed.
+    if (syncingHold || selectedKey !== syncedKey) {
+      setError('Still updating your add-ons — one moment.')
       return
     }
 
@@ -665,6 +787,7 @@ export default function AddOnsClient({
               onClick={() => void finalize()}
               disabled={
                 submitting ||
+                syncingHold ||
                 !holdId ||
                 !offeringId ||
                 (holdSecondsLeft != null && holdSecondsLeft <= 0) ||
@@ -672,7 +795,11 @@ export default function AddOnsClient({
               }
               className="flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-accentPrimary text-[14px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-70"
             >
-              {submitting ? 'Booking…' : 'Complete booking'}
+              {submitting
+                ? 'Booking…'
+                : syncingHold
+                  ? 'Updating your hold…'
+                  : 'Complete booking'}
             </button>
 
             <button

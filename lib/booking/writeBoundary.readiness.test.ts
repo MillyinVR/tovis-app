@@ -89,6 +89,7 @@ describe('lib/booking/writeBoundary readiness gates', () => {
       createHold({
         clientId: 'client_1',
         bookingEntryPoint: 'BROAD_DISCOVERY',
+        addOnIds: [],
         offering: makeHoldOffering(),
         requestedStart: REQUESTED_START,
         requestedLocationId: 'loc_1',

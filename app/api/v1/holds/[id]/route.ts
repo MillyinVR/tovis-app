@@ -6,15 +6,21 @@ import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
+import { isRecord } from '@/lib/guards'
+import { hasDuplicateStrings, pickStringArray } from '@/lib/pick'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
-import { releaseHold } from '@/lib/booking/writeBoundary'
+import { releaseHold, updateHoldAddOns } from '@/lib/booking/writeBoundary'
 import type {
   BookingHoldDTO,
+  BookingHoldAddOnsUpdateResponseDTO,
   BookingHoldDeleteResponseDTO,
   BookingHoldGetResponseDTO,
 } from '@/lib/dto/holds'
 
 export const dynamic = 'force-dynamic'
+
+/** Same cap the create route and finalize apply to this field. */
+const MAX_HOLD_ADD_ON_IDS = 50
 
 const HOLD_ROUTE_SELECT = {
   id: true,
@@ -100,6 +106,79 @@ export async function GET(_req: Request, ctx: RouteContext) {
   } catch (error: unknown) {
     console.error('GET /api/v1/holds/[id] error', error)
     return jsonFail(500, 'Failed to load hold.')
+  }
+}
+
+/**
+ * PATCH /api/v1/holds/[id] — re-size this hold to a new add-on selection.
+ *
+ * The client picks add-ons after the time, so the hold starts base-sized; this
+ * is how it grows to cover what finalize will demand (B1-A). The boundary
+ * re-runs the finalize gate, so a refusal here is the SAME refusal the client
+ * would have hit at the end of checkout — surfaced now, while the add-on can
+ * still be un-ticked, and with the hold left at its previous size.
+ */
+export async function PATCH(req: Request, ctx: RouteContext) {
+  try {
+    const auth = await requireClient()
+    if (!auth.ok) return auth.res
+
+    const holdId = await getHoldId(ctx)
+
+    if (!holdId) {
+      const fail = getBookingFailPayload('HOLD_ID_REQUIRED')
+      return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+    }
+
+    let rawBody: unknown
+
+    try {
+      rawBody = await req.json()
+    } catch {
+      return jsonFail(400, 'Invalid JSON body.')
+    }
+
+    if (!isRecord(rawBody)) {
+      return jsonFail(400, 'Request body must be a JSON object.')
+    }
+
+    const addOnIds = pickStringArray(rawBody.addOnIds, MAX_HOLD_ADD_ON_IDS)
+
+    if (hasDuplicateStrings(addOnIds)) {
+      const fail = getBookingFailPayload('ADDONS_INVALID')
+      return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+    }
+
+    const result = await updateHoldAddOns({
+      holdId,
+      clientId: auth.clientId,
+      addOnIds,
+    })
+
+    return jsonOk(
+      {
+        hold: {
+          id: result.hold.id,
+          scheduledFor: result.hold.scheduledFor.toISOString(),
+          expiresAt: result.hold.expiresAt.toISOString(),
+          durationMinutes: result.hold.durationMinutes,
+          endsAt: result.hold.endsAt.toISOString(),
+        },
+        meta: result.meta,
+      } satisfies BookingHoldAddOnsUpdateResponseDTO,
+      200,
+    )
+  } catch (error: unknown) {
+    if (isBookingError(error)) {
+      const fail = getBookingFailPayload(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+      return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+    }
+
+    console.error('PATCH /api/v1/holds/[id] error', error)
+    return jsonFail(500, 'Failed to update hold.')
   }
 }
 

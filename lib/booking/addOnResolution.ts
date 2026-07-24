@@ -7,16 +7,20 @@
 // An add-on is an `OfferingAddOn` link (id) hanging off a base offering. Its
 // price/duration resolve, in order, from the link override → the pro's own
 // active offering for that add-on service (mode-specific) → the service's
-// catalog defaults. The availability endpoint folds the same durations into a
-// slot's length (see `resolveDurationWithAddOns`), so the reserved slot already
+// catalog defaults. Availability, the hold and finalize all fold the same
+// durations into their window via the SHARED `lib/booking/addOnDuration`
+// helpers (see `resolveDurationWithAddOns`), so the reserved slot already
 // accounts for these — this resolver produces the matching persisted rows.
 //
 // House rule: Prisma is the single source of truth for data shapes; this derives
 // straight from the `OfferingAddOn` link + its `addOnService`.
 import { Prisma, ServiceLocationType } from '@prisma/client'
 
+import {
+  buildOfferingAddOnWhere,
+  resolveAddOnDurationMinutes,
+} from '@/lib/booking/addOnDuration'
 import { bookingError } from '@/lib/booking/errors'
-import { normalizePositiveDurationMinutes } from '@/lib/booking/serviceItems'
 import { decimalFromUnknown } from '@/lib/booking/snapshots'
 import { prisma } from '@/lib/prisma'
 
@@ -55,16 +59,11 @@ export async function resolveBookingAddOns(
   const client = args.client ?? prisma
 
   const addOnLinks = await client.offeringAddOn.findMany({
-    where: {
-      id: { in: args.addOnIds },
+    where: buildOfferingAddOnWhere({
+      addOnIds: args.addOnIds,
       offeringId: args.offeringId,
-      isActive: true,
-      OR: [{ locationType: null }, { locationType: args.locationType }],
-      addOnService: {
-        isActive: true,
-        isAddOnEligible: true,
-      },
-    },
+      locationType: args.locationType,
+    }),
     select: {
       id: true,
       addOnServiceId: true,
@@ -114,14 +113,13 @@ export async function resolveBookingAddOns(
     const service = row.addOnService
     const proOffering = addOnOfferingByServiceId.get(service.id) ?? null
 
-    const durationRaw =
-      row.durationOverrideMinutes ??
-      (args.locationType === ServiceLocationType.MOBILE
-        ? proOffering?.mobileDurationMinutes
-        : proOffering?.salonDurationMinutes) ??
-      service.defaultDurationMinutes
+    const durationMinutesSnapshot = resolveAddOnDurationMinutes({
+      durationOverrideMinutes: row.durationOverrideMinutes,
+      proOffering,
+      defaultDurationMinutes: service.defaultDurationMinutes,
+      locationType: args.locationType,
+    })
 
-    const durationMinutesSnapshot = normalizePositiveDurationMinutes(durationRaw)
     if (durationMinutesSnapshot == null) {
       throw bookingError('ADDONS_INVALID')
     }

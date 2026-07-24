@@ -766,6 +766,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       createHold({
         clientId: 'client_1',
         bookingEntryPoint: 'PRO_CREATED',
+        addOnIds: [],
         offering: makeOffering(),
         requestedStart: REQUESTED_START,
         requestedLocationId: 'location_1',
@@ -818,6 +819,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       createHold({
         clientId: 'client_1',
         bookingEntryPoint: 'PRO_CREATED',
+        addOnIds: [],
         offering: makeOffering(),
         requestedStart: REQUESTED_START,
         requestedLocationId: 'location_1',
@@ -847,6 +849,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
       createHold({
         clientId: 'client_1',
         bookingEntryPoint: 'PRO_CREATED',
+        addOnIds: [],
         offering: makeOffering(),
         requestedStart: REQUESTED_START,
         requestedLocationId: 'location_1',

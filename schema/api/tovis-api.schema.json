@@ -1800,6 +1800,10 @@
             }
           ]
         },
+        "durationMinutes": {
+          "description": "Minutes actually RESERVED — base service + any `addOnIds` sent with the create — excluding the location's buffer. Finalize enforces the same arithmetic, so this is what the slot is being held for (B1-A).",
+          "type": "number"
+        },
         "expiresAt": {
           "type": "string"
         },
@@ -1830,7 +1834,8 @@
         "locationId",
         "locationTimeZone",
         "clientAddressId",
-        "clientAddressSnapshot"
+        "clientAddressSnapshot",
+        "durationMinutes"
       ],
       "type": "object"
     },

@@ -225,6 +225,7 @@ describe('POST /api/v1/holds', () => {
         locationTimeZone: 'America/Los_Angeles',
         clientAddressId: null,
         clientAddressSnapshot: null,
+        durationMinutes: 60,
       },
       meta: {
         mutated: true,
@@ -275,6 +276,7 @@ describe('POST /api/v1/holds', () => {
     expect(mocks.createHold).toHaveBeenCalledWith({
       clientId: 'client_1',
       bookingEntryPoint: 'BROAD_DISCOVERY',
+      addOnIds: [],
       offering: createHoldOffering,
       requestedStart: SLOT_START,
       requestedLocationId: 'loc_1',
@@ -297,6 +299,7 @@ describe('POST /api/v1/holds', () => {
         locationTimeZone: 'America/Los_Angeles',
         clientAddressId: null,
         clientAddressSnapshot: null,
+        durationMinutes: 60,
       },
       meta: {
         mutated: true,
