@@ -48,4 +48,11 @@ export type OfferingAddOnsResponseDTO = {
   locationType: ServiceLocationType
   offering: OfferingAddOnsOfferingDTO
   addOns: OfferingAddOnItemDTO[]
+  /**
+   * The pro's no-show / late-cancel fee policy the client must agree to before
+   * booking (M15), formatted for display, or null when the pro charges no fees
+   * (or the feature flag is off). When non-null, the native confirm flow shows it
+   * and requires the agreement checkbox; acceptance is sent to finalize.
+   */
+  cancellationPolicy: string | null
 }

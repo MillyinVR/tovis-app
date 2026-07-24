@@ -16,6 +16,10 @@ import {
 } from '@/lib/booking/timeZoneTruth'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import { isRecord } from '@/lib/guards'
+import {
+  parseCancellationPolicySnapshot,
+  formatCancellationPolicy,
+} from '@/lib/noShowProtection/policyDisclosure'
 
 export type ClientBookingItemDTO = {
   id: string
@@ -206,6 +210,15 @@ export type ClientBookingDTO = {
    * route); false elsewhere.
    */
   mediaUseConsent: boolean
+
+  /**
+   * The no-show / late-cancel fee policy the client AGREED to at booking (M15),
+   * formatted for display, or null if none applied. Sourced from the booking's
+   * own `cancellationPolicySnapshot` (what they agreed to — never the pro's
+   * possibly-since-edited live settings), so the detail always shows the honest,
+   * agreed terms. Populated only where the source query selects the snapshot.
+   */
+  cancellationPolicy: string | null
 
   consultation: ClientBookingConsultationDTO | null
 
@@ -434,6 +447,13 @@ type ClientBookingMediaConsentFields = {
   mediaUseConsentAt?: Date | null
 }
 
+// The agreed cancellation-policy snapshot lives on the Booking row (M15) but isn't
+// part of the canonical select. Optional so existing callers compile unchanged; the
+// booking-detail loader selects it so the client can see the terms they agreed to.
+type ClientBookingCancellationPolicyFields = {
+  cancellationPolicySnapshot?: unknown
+}
+
 // Final-bill refund/dispute + deposit-dispute columns live on the Booking row but
 // aren't part of the canonical ClientBookingRow select. Optional so existing
 // callers compile unchanged; the client booking-detail loader + the list route
@@ -451,6 +471,7 @@ export async function buildClientBookingDTO(input: {
     ClientBookingDepositFields &
     ClientBookingRebookFields &
     ClientBookingMediaConsentFields &
+    ClientBookingCancellationPolicyFields &
     ClientBookingRefundDisputeFields
   unreadAftercare: boolean
   hasPendingConsultationApproval: boolean
@@ -679,6 +700,12 @@ export async function buildClientBookingDTO(input: {
         : null,
 
     mediaUseConsent: b.mediaUseConsentAt != null,
+    cancellationPolicy: (() => {
+      const snapshot = parseCancellationPolicySnapshot(
+        b.cancellationPolicySnapshot,
+      )
+      return snapshot ? formatCancellationPolicy(snapshot) : null
+    })(),
 
     consultation,
 

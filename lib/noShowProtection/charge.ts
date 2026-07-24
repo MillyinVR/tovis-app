@@ -17,6 +17,8 @@ import {
   BookingStatus,
   NoShowFeeReason,
   NoShowFeeStatus,
+  NoShowFeeType,
+  Prisma,
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
@@ -27,6 +29,21 @@ import {
   isWithinCancelWindow,
   noShowFeeAmountToCents,
 } from '@/lib/noShowProtection/fee'
+import { parseCancellationPolicySnapshot } from '@/lib/noShowProtection/policyDisclosure'
+
+/**
+ * The resolved fee terms used for a charge — either the client's agreed snapshot
+ * or the pro's live settings (see assessAndChargeNoShowFee). A superset of
+ * NoShowFeePolicy (the fee-math input) plus the window + which events trigger.
+ */
+type NoShowFeePolicyTerms = {
+  feeType: NoShowFeeType
+  feeFlatAmount: Prisma.Decimal | null
+  feePercent: number | null
+  cancelWindowHours: number
+  chargeNoShow: boolean
+  chargeLateCancel: boolean
+}
 import {
   recordNoShowDepositKept,
   recordNoShowFeeCharge,
@@ -92,6 +109,7 @@ export async function assessAndChargeNoShowFee(args: {
       subtotalSnapshot: true,
       noShowFeeStatus: true,
       depositStatus: true,
+      cancellationPolicySnapshot: true,
       client: {
         select: {
           stripeCustomerId: true, // pii-plaintext-read-ok: opaque Stripe billing id
@@ -140,13 +158,45 @@ export async function assessAndChargeNoShowFee(args: {
     }
   }
 
-  const settings = booking.professional.noShowSettings
-  if (!settings || !settings.enabled) {
+  // Charge from the policy the client AGREED to at booking (the snapshot), so a
+  // pro editing their live settings afterward can never charge more than was
+  // disclosed (M15). A snapshot only exists once an interactive client accepted,
+  // so its presence means the terms are agreed. Bookings with no snapshot
+  // (aftercare-token / pro-created / pre-feature) fall back to the pro's live
+  // settings, which still require `enabled`.
+  const snapshot = parseCancellationPolicySnapshot(
+    booking.cancellationPolicySnapshot,
+  )
+  const liveSettings = booking.professional.noShowSettings
+  const policy: NoShowFeePolicyTerms | null = snapshot
+    ? {
+        feeType: snapshot.feeType,
+        feeFlatAmount:
+          snapshot.feeFlatAmount != null
+            ? new Prisma.Decimal(snapshot.feeFlatAmount)
+            : null,
+        feePercent: snapshot.feePercent,
+        cancelWindowHours: snapshot.cancelWindowHours,
+        chargeNoShow: snapshot.chargeNoShow,
+        chargeLateCancel: snapshot.chargeLateCancel,
+      }
+    : liveSettings?.enabled
+      ? {
+          feeType: liveSettings.feeType,
+          feeFlatAmount: liveSettings.feeFlatAmount,
+          feePercent: liveSettings.feePercent,
+          cancelWindowHours: liveSettings.cancelWindowHours,
+          chargeNoShow: liveSettings.chargeNoShow,
+          chargeLateCancel: liveSettings.chargeLateCancel,
+        }
+      : null
+
+  if (!policy) {
     return { kind: 'NOT_CHARGEABLE', reason: 'protection_off' }
   }
 
   if (args.reason === NoShowFeeReason.NO_SHOW) {
-    if (!settings.chargeNoShow) {
+    if (!policy.chargeNoShow) {
       return { kind: 'NOT_CHARGEABLE', reason: 'no_show_charging_off' }
     }
     // M15 POLICY analog (Tori 2026-07-24): a kept discovery deposit IS the
@@ -176,7 +226,7 @@ export async function assessAndChargeNoShowFee(args: {
   }
 
   if (args.reason === NoShowFeeReason.LATE_CANCEL) {
-    if (!settings.chargeLateCancel) {
+    if (!policy.chargeLateCancel) {
       return { kind: 'NOT_CHARGEABLE', reason: 'late_cancel_charging_off' }
     }
     // Only a confirmed booking carries a late-cancel fee — a client withdrawing
@@ -187,7 +237,7 @@ export async function assessAndChargeNoShowFee(args: {
     if (
       !isWithinCancelWindow({
         scheduledFor: booking.scheduledFor,
-        windowHours: settings.cancelWindowHours,
+        windowHours: policy.cancelWindowHours,
         now,
       })
     ) {
@@ -195,7 +245,7 @@ export async function assessAndChargeNoShowFee(args: {
     }
   }
 
-  const feeAmount = computeNoShowFeeAmount(settings, booking.subtotalSnapshot)
+  const feeAmount = computeNoShowFeeAmount(policy, booking.subtotalSnapshot)
   if (!feeAmount) return { kind: 'NOT_CHARGEABLE', reason: 'no_fee_owed' }
 
   const amountStr = feeAmount.toFixed(2)

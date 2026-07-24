@@ -3,6 +3,10 @@ import { headers } from 'next/headers'
 import AddOnsClient from './ui/AddOnsClient'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { prisma } from '@/lib/prisma'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { getProNoShowSettings } from '@/lib/noShowProtection/settings'
+import { cancellationPolicyDisclosure } from '@/lib/noShowProtection/policyDisclosure'
 // Shared wire DTO for GET /api/v1/offerings/add-ons — single source of truth for
 // the add-on shape (web + native). The `id` is the OfferingAddOn link id.
 import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
@@ -184,6 +188,22 @@ export default async function BookingAddOnsPage({
     else addOns = res.addOns
   }
 
+  // The pro's no-show / late-cancel fee policy the client must agree to before
+  // booking (M15). Non-null only when the pro charges fees and the flag is on;
+  // when present, AddOnsClient shows it + requires the agreement checkbox.
+  let cancellationPolicy: string | null = null
+  if (offeringId && noShowProtectionEnabled()) {
+    const offering = await prisma.professionalServiceOffering.findUnique({
+      where: { id: offeringId },
+      select: { professionalId: true },
+    })
+    if (offering) {
+      cancellationPolicy = cancellationPolicyDisclosure(
+        await getProNoShowSettings(offering.professionalId),
+      )
+    }
+  }
+
   // ✅ server-hydrate initial selection (prevents client flicker)
   const initialSelectedIds = (() => {
     if (!addOns.length) return []
@@ -209,6 +229,7 @@ export default async function BookingAddOnsPage({
       addOns={addOns}
       initialError={initialError}
       initialSelectedIds={initialSelectedIds}
+      cancellationPolicy={cancellationPolicy}
     />
   )
 }

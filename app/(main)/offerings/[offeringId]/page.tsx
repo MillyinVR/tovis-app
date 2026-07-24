@@ -7,6 +7,9 @@ import Link from 'next/link'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildLoginHref } from '@/lib/profiles/publicProfileFormatting'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { getProNoShowSettings } from '@/lib/noShowProtection/settings'
+import { cancellationPolicyDisclosure } from '@/lib/noShowProtection/policyDisclosure'
 
 import ClaimClient from './ClaimClient'
 import PresenceSignals from './PresenceSignals'
@@ -103,6 +106,11 @@ export default async function ClaimOpeningPage(props: PageProps) {
     openingId: resolvedOpeningId,
   } = detail
 
+  // Pro's fee policy the client must agree to before claiming (M15).
+  const cancellationPolicy = noShowProtectionEnabled()
+    ? cancellationPolicyDisclosure(await getProNoShowSettings(professionalId))
+    : null
+
   return (
     <Shell>
       <div className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-accentPrimary">
@@ -198,6 +206,7 @@ export default async function ClaimOpeningPage(props: PageProps) {
           defaultAddressId={defaultAddressId}
           isAuthed={Boolean(clientId)}
           loginHref={buildLoginHref(claimUrl)}
+          cancellationPolicy={cancellationPolicy}
         />
       </div>
     </Shell>

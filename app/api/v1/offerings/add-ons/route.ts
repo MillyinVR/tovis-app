@@ -8,6 +8,9 @@ import {
   pickModeDurationMinutes,
 } from '@/lib/booking/locationContext'
 import { DEFAULT_DURATION_MINUTES } from '@/lib/booking/constants'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { getProNoShowSettings } from '@/lib/noShowProtection/settings'
+import { cancellationPolicyDisclosure } from '@/lib/noShowProtection/policyDisclosure'
 import type {
   OfferingAddOnItemDTO,
   OfferingAddOnsResponseDTO,
@@ -181,6 +184,15 @@ export async function GET(req: Request) {
       ]
     })
 
+    // The pro's no-show / late-cancel fee policy the client must agree to before
+    // booking (M15). Non-null only when the pro charges fees; the native confirm
+    // flow shows it + requires agreement. Inert unless the flag is on.
+    const cancellationPolicy = noShowProtectionEnabled()
+      ? cancellationPolicyDisclosure(
+          await getProNoShowSettings(offering.professionalId),
+        )
+      : null
+
     return jsonOk({
       offeringId: offering.id,
       locationType,
@@ -200,6 +212,7 @@ export async function GET(req: Request) {
           : null,
       },
       addOns,
+      cancellationPolicy,
     } satisfies OfferingAddOnsResponseDTO)
   } catch (err: unknown) {
     console.error('GET /api/v1/offerings/add-ons error', err)

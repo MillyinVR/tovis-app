@@ -30,6 +30,10 @@ const bookingPageBookingSelect = {
   // the aftercare detail. buildClientBookingDTO reads this into mediaUseConsent.
   mediaUseConsentAt: true,
 
+  // The no-show/late-cancel fee terms the client agreed to at booking (M15) —
+  // buildClientBookingDTO formats this into `cancellationPolicy` for the detail.
+  cancellationPolicySnapshot: true,
+
   subtotalSnapshot: true,
   serviceSubtotalSnapshot: true,
   productSubtotalSnapshot: true,

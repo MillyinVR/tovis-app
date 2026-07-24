@@ -62,6 +62,7 @@ export type BookingErrorCode =
   | "BAD_LOCATION"
   | "BAD_LOCATION_MODE"
   | "DURATION_MISMATCH"
+  | "CANCELLATION_POLICY_NOT_ACCEPTED"
   | "AFTERCARE_TOKEN_MISSING"
   | "AFTERCARE_TOKEN_INVALID"
   | "AFTERCARE_NOT_COMPLETED"
@@ -605,6 +606,14 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Booking duration does not match the selected services.",
     userMessage: "Duration does not match the selected services.",
+  },
+  CANCELLATION_POLICY_NOT_ACCEPTED: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message:
+      "The client must agree to the pro's cancellation policy before booking.",
+    userMessage: "Please agree to the cancellation policy to book.",
   },
   AFTERCARE_TOKEN_MISSING: {
     httpStatus: 400,

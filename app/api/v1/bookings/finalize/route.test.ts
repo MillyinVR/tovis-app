@@ -58,7 +58,18 @@ const mocks = vi.hoisted(() => ({
   tokenActorRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
 
+  noShowProtectionEnabled: vi.fn(() => false),
+  getProNoShowSettings: vi.fn(),
+
   safeError: vi.fn(),
+}))
+
+vi.mock('@/lib/noShowProtection/flag', () => ({
+  noShowProtectionEnabled: mocks.noShowProtectionEnabled,
+}))
+
+vi.mock('@/lib/noShowProtection/settings', () => ({
+  getProNoShowSettings: mocks.getProNoShowSettings,
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -337,6 +348,10 @@ function makeExpectedFinalizeArgs(
       },
       discoveryFeeCents: 500,
     },
+    // M15: null unless no-show protection is on AND the pro charges fees (the
+    // suite runs with the flag off, so these stay null).
+    cancellationPolicySnapshot: null,
+    cancellationPolicyAcceptedAt: null,
     fallbackTimeZone: overrides.fallbackTimeZone ?? 'UTC',
     requestId: overrides.requestId ?? null,
     idempotencyKey: overrides.idempotencyKey ?? 'idem_finalize_1',
@@ -1418,6 +1433,106 @@ describe('POST /api/v1/bookings/finalize', () => {
     expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
       tokenId: 'token_row_1',
     })
+  })
+
+  it('refuses finalize when the pro charges fees and the client did not accept (M15)', async () => {
+    mocks.noShowProtectionEnabled.mockReturnValue(true)
+    mocks.getProNoShowSettings.mockResolvedValue({
+      enabled: true,
+      feeType: 'FLAT',
+      feeFlatAmount: '25.00',
+      feePercent: null,
+      cancelWindowHours: 24,
+      chargeNoShow: true,
+      chargeLateCancel: true,
+    })
+    const descriptor = getBookingErrorDescriptor('CANCELLATION_POLICY_NOT_ACCEPTED')
+
+    const result = await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+      }),
+    )
+
+    expect(result.status).toBe(descriptor.httpStatus)
+    expectBookingFailPayload(await result.json(), 'CANCELLATION_POLICY_NOT_ACCEPTED')
+    // Refused before the booking is created / idempotency starts.
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('records the agreed policy snapshot + acceptance when the client accepts (M15)', async () => {
+    expectIdempotencyStarted('idem_policy_1')
+    mocks.noShowProtectionEnabled.mockReturnValue(true)
+    mocks.getProNoShowSettings.mockResolvedValue({
+      enabled: true,
+      feeType: 'FLAT',
+      feeFlatAmount: '25.00',
+      feePercent: null,
+      cancelWindowHours: 24,
+      chargeNoShow: true,
+      chargeLateCancel: true,
+    })
+
+    await POST(
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+          source: 'REQUESTED',
+          cancellationPolicyAccepted: true,
+        },
+        'idem_policy_1',
+      ),
+    )
+
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cancellationPolicySnapshot: {
+          feeType: 'FLAT',
+          feeFlatAmount: '25.00',
+          feePercent: null,
+          cancelWindowHours: 24,
+          chargeNoShow: true,
+          chargeLateCancel: true,
+        },
+        cancellationPolicyAcceptedAt: expect.any(Date),
+      }),
+    )
+  })
+
+  it('does not require acceptance when the pro charges no fees (M15)', async () => {
+    mocks.noShowProtectionEnabled.mockReturnValue(true)
+    mocks.getProNoShowSettings.mockResolvedValue({
+      enabled: false,
+      feeType: 'FLAT',
+      feeFlatAmount: null,
+      feePercent: null,
+      cancelWindowHours: 24,
+      chargeNoShow: true,
+      chargeLateCancel: true,
+    })
+
+    await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+      }),
+    )
+
+    // No policy applies → booking proceeds with a null snapshot.
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cancellationPolicySnapshot: null,
+        cancellationPolicyAcceptedAt: null,
+      }),
+    )
   })
 
   it('creates the booking through the boundary, completes idempotency, and notifies the pro for standard requested flow', async () => {
