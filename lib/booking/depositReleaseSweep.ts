@@ -39,7 +39,7 @@ import {
 import { releaseUnpaidDepositBookingBySystem } from '@/lib/booking/writeBoundary'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
-import { safeLogMeta } from '@/lib/security/logging'
+import { logSweepObservation } from '@/lib/observability/sweepObservation'
 
 export const MAX_RELEASES_PER_RUN = 100
 
@@ -84,21 +84,6 @@ const CANDIDATE_SELECT = {
   status: true,
 } satisfies Prisma.BookingSelect
 
-function logObservation(payload: Record<string, unknown>): void {
-  const safe = safeLogMeta(payload)
-  console.warn(
-    JSON.stringify({
-      level: 'warn',
-      app: 'tovis',
-      namespace: 'booking',
-      event: 'deposit_unpaid_release',
-      ...(safe && typeof safe === 'object' && !Array.isArray(safe)
-        ? safe
-        : { payload: safe }),
-    }),
-  )
-}
-
 /**
  * Release abandoned unpaid-deposit holds older than the deadline. Never throws.
  */
@@ -135,7 +120,7 @@ export async function releaseAbandonedDepositBookings(opts?: {
     // Kill switch off — observe only. Surfaces how many holds WOULD be released
     // so the release can be enabled with confidence (matches stale-sessions'
     // observe-before-act rollout).
-    logObservation({
+    logSweepObservation('deposit_unpaid_release', {
       mode: 'observe_only',
       deadlineHours,
       candidatesScanned: batch.length,
@@ -161,7 +146,7 @@ export async function releaseAbandonedDepositBookings(opts?: {
       if (outcome.released) {
         tally.released += 1
         results.push({ bookingId: booking.id, outcome: 'released' })
-        logObservation({
+        logSweepObservation('deposit_unpaid_release', {
           mode: 'released',
           bookingId: booking.id,
           professionalId: booking.professionalId,
@@ -197,7 +182,7 @@ export async function releaseAbandonedDepositBookings(opts?: {
   }
 
   if (capped) {
-    logObservation({
+    logSweepObservation('deposit_unpaid_release', {
       mode: 'capped',
       cap: MAX_RELEASES_PER_RUN,
       candidatesScanned: candidates.length,

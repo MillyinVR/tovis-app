@@ -63,8 +63,9 @@ import {
   captureLostDepositSuccessStale,
 } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
-import { safeLogMeta } from '@/lib/security/logging'
+import { logSweepObservation } from '@/lib/observability/sweepObservation'
 import { getStripe } from '@/lib/stripe/server'
+import { stripeExpandedId } from '@/lib/stripe/expandable'
 
 export const MAX_RECOVERIES_PER_RUN = 100
 
@@ -123,34 +124,6 @@ const CANDIDATE_SELECT = {
 } satisfies Prisma.BookingSelect
 
 type DepositCandidate = Prisma.BookingGetPayload<{ select: typeof CANDIDATE_SELECT }>
-
-function logObservation(payload: Record<string, unknown>): void {
-  const safe = safeLogMeta(payload)
-  console.warn(
-    JSON.stringify({
-      level: 'warn',
-      app: 'tovis',
-      namespace: 'booking',
-      event: 'deposit_success_recovery',
-      ...(safe && typeof safe === 'object' && !Array.isArray(safe)
-        ? safe
-        : { payload: safe }),
-    }),
-  )
-}
-
-function getLatestChargeId(paymentIntent: Stripe.PaymentIntent): string | null {
-  const latestCharge = paymentIntent.latest_charge
-  if (typeof latestCharge === 'string') return latestCharge
-  if (
-    latestCharge &&
-    typeof latestCharge === 'object' &&
-    typeof latestCharge.id === 'string'
-  ) {
-    return latestCharge.id
-  }
-  return null
-}
 
 /**
  * Poll Stripe for one PENDING deposit and, if its PaymentIntent is captured,
@@ -214,7 +187,7 @@ async function recoverDeposit(args: {
       applyStripeDepositSucceededInTransaction(tx, {
         now,
         stripePaymentIntentId: paymentIntentId,
-        chargeId: getLatestChargeId(paymentIntent),
+        chargeId: stripeExpandedId(paymentIntent.latest_charge),
         bookingIdHint: candidate.id,
       }),
     )
@@ -311,7 +284,7 @@ export async function recoverAbandonedDepositSuccesses(opts?: {
     results.push({ bookingId: candidate.id, outcome })
 
     if (outcome === 'recovered' || outcome === 'recovered_on_cancelled') {
-      logObservation({
+      logSweepObservation('deposit_success_recovery', {
         mode: outcome,
         bookingId: candidate.id,
         professionalId: candidate.professionalId,
@@ -325,7 +298,7 @@ export async function recoverAbandonedDepositSuccesses(opts?: {
   }
 
   if (!enabled) {
-    logObservation({
+    logSweepObservation('deposit_success_recovery', {
       mode: 'observe_only',
       candidatesScanned: batch.length,
       wouldRecover: tally.would_recover,
@@ -335,7 +308,7 @@ export async function recoverAbandonedDepositSuccesses(opts?: {
   }
 
   if (capped) {
-    logObservation({
+    logSweepObservation('deposit_success_recovery', {
       mode: 'capped',
       cap: MAX_RECOVERIES_PER_RUN,
       candidatesScanned: candidates.length,
