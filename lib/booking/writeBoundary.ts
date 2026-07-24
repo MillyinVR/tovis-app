@@ -1862,6 +1862,7 @@ const BOOKING_CHECKOUT_SELECT = {
   totalAmount: true,
   checkoutStatus: true,
   selectedPaymentMethod: true,
+  stripePaymentStatus: true,
   paymentAuthorizedAt: true,
   paymentCollectedAt: true,
   aftercareSummary: {
@@ -12509,6 +12510,18 @@ async function performLockedUpdateBookingCheckout(args: {
 
   if (booking.status === BookingStatus.CANCELLED) {
     throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  // M9's double-collect refusal, mirrored here (§21.4 R2). No route passes
+  // markPaymentCollected into this path today, but the public wrapper forwards
+  // it — a future caller must not be able to stamp a manual collection over a
+  // live Stripe capture. Same distinct code as the pro close-out predicate;
+  // throws before any write.
+  if (
+    args.markPaymentCollected === true &&
+    booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED
+  ) {
+    throw bookingError('CHECKOUT_ALREADY_PAID_BY_STRIPE')
   }
 
   const nextTipAmount =

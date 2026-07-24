@@ -51,7 +51,22 @@ async function runJob(req: Request) {
     // Recover lost deposit successes FIRST — a deposit it marks PAID drops out of
     // the release sweep's PENDING candidate set below, so a client who actually
     // paid never has their slot freed in the same tick.
-    const recovery = await recoverAbandonedDepositSuccesses({ now })
+    //
+    // Isolated (§21.4 R5): the two sweeps are data-independent, but a top-level
+    // recovery throw (its candidate query) previously skipped the release sweep
+    // for the whole tick. Recovery failure now pages via Sentry and release still
+    // runs; the failure is surfaced in the response body.
+    let recovery: Awaited<ReturnType<typeof recoverAbandonedDepositSuccesses>> | null =
+      null
+    try {
+      recovery = await recoverAbandonedDepositSuccesses({ now })
+    } catch (recoveryError: unknown) {
+      captureBookingException({
+        error: recoveryError,
+        route: 'GET /api/internal/jobs/deposit-release',
+        event: 'DEPOSIT_RECOVERY_SWEEP_ERROR',
+      })
+    }
 
     const result = await releaseAbandonedDepositBookings({ now })
 
@@ -62,13 +77,15 @@ async function runJob(req: Request) {
       released: result.releasedCount,
       capped: result.capped,
       tally: result.tally,
-      recovery: {
-        enabled: recovery.enabled,
-        candidatesScanned: recovery.candidatesScanned,
-        recovered: recovery.recoveredCount,
-        capped: recovery.capped,
-        tally: recovery.tally,
-      },
+      recovery: recovery
+        ? {
+            enabled: recovery.enabled,
+            candidatesScanned: recovery.candidatesScanned,
+            recovered: recovery.recoveredCount,
+            capped: recovery.capped,
+            tally: recovery.tally,
+          }
+        : { failed: true },
       ranAt: new Date().toISOString(),
     })
   } catch (error: unknown) {

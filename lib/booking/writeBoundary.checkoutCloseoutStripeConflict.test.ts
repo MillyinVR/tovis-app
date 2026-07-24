@@ -50,6 +50,7 @@ vi.mock('@/lib/booking/scheduleTransaction', () => ({
 
 import {
   markProBookingCheckoutPaid,
+  updateBookingCheckout,
   waiveProBookingCheckout,
 } from './writeBoundary'
 
@@ -139,5 +140,67 @@ describe('manual close-out vs a Stripe-paid booking (M9)', () => {
 
     expect(result.meta.noOp).toBe(true)
     expect(mocks.bookingUpdate).not.toHaveBeenCalled()
+  })
+})
+
+// §21.4 R2 — the general checkout-update path forwards markPaymentCollected but
+// had NO Stripe-capture guard. No route passes it today; this pins the guard so
+// a future caller can't stamp a manual collection over a live Stripe capture.
+describe('updateBookingCheckout markPaymentCollected vs a Stripe-paid booking (R2)', () => {
+  it('refuses markPaymentCollected with CHECKOUT_ALREADY_PAID_BY_STRIPE once the card paid', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(bookingRow())
+
+    const err = await updateBookingCheckout({
+      bookingId: 'booking_1',
+      professionalId: PRO_ID,
+      markPaymentCollected: true,
+      requestId: null,
+      idempotencyKey: 'k4',
+    }).catch((e: unknown) => e)
+
+    expect(isBookingError(err)).toBe(true)
+    expect((err as { code: string }).code).toBe('CHECKOUT_ALREADY_PAID_BY_STRIPE')
+    // Refused before any write.
+    expect(mocks.bookingUpdate).not.toHaveBeenCalled()
+  })
+
+  it('does NOT fire without markPaymentCollected (a tip-only edit of a Stripe-paid booking)', async () => {
+    // The guard must key on markPaymentCollected, not on SUCCEEDED alone. The
+    // harness mocks only booking.findUnique, so the call fails later on the
+    // unmocked rollup read — the assertion is that whatever happens, it is NOT
+    // the new refusal.
+    mocks.bookingFindUnique.mockResolvedValue(bookingRow())
+
+    const err = await updateBookingCheckout({
+      bookingId: 'booking_1',
+      professionalId: PRO_ID,
+      tipAmount: '10.00',
+      requestId: null,
+      idempotencyKey: 'k5',
+    }).catch((e: unknown) => e)
+
+    expect(
+      isBookingError(err) && (err as { code: string }).code === 'CHECKOUT_ALREADY_PAID_BY_STRIPE',
+    ).toBe(false)
+  })
+
+  it('does NOT fire on markPaymentCollected when no Stripe capture exists', async () => {
+    // A cash collect on a booking with no card payment must pass the guard
+    // (and then fail here only on the unmocked rollup read).
+    mocks.bookingFindUnique.mockResolvedValue(
+      bookingRow({ stripePaymentStatus: StripePaymentStatus.NOT_STARTED }),
+    )
+
+    const err = await updateBookingCheckout({
+      bookingId: 'booking_1',
+      professionalId: PRO_ID,
+      markPaymentCollected: true,
+      requestId: null,
+      idempotencyKey: 'k6',
+    }).catch((e: unknown) => e)
+
+    expect(
+      isBookingError(err) && (err as { code: string }).code === 'CHECKOUT_ALREADY_PAID_BY_STRIPE',
+    ).toBe(false)
   })
 })
