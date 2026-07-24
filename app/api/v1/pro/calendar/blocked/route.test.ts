@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   bookingError: vi.fn(),
   isBookingError: vi.fn(),
   getBookingFailPayload: vi.fn(),
+
+  bumpScheduleVersion: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -49,6 +51,10 @@ vi.mock('@/lib/booking/errors', () => ({
   bookingError: mocks.bookingError,
   isBookingError: mocks.isBookingError,
   getBookingFailPayload: mocks.getBookingFailPayload,
+}))
+
+vi.mock('@/lib/booking/cacheVersion', () => ({
+  bumpScheduleVersion: mocks.bumpScheduleVersion,
 }))
 
 import { POST } from './route'
@@ -352,6 +358,11 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
     })
     expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
 
+    // Nothing was written, so nothing may be invalidated — a bump on a refused
+    // create would throw away every warm availability entry for this pro on
+    // input a client can trigger at will.
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
+
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
       'That time overlaps an existing block.',
@@ -534,6 +545,12 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
     })
 
     expect(mocks.logBookingConflict).not.toHaveBeenCalled()
+
+    // The block now occupies calendar time, so every cached availability
+    // surface must be invalidated — otherwise /availability/day keeps offering
+    // this slot until its TTL expires and the write path dead-ends the client
+    // on TIME_BLOCKED (driven and confirmed pre-fix, B2).
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_123')
 
     expect(result).toEqual({
       ok: true,

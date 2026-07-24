@@ -7,6 +7,7 @@ import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
+import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import { bufferOrZero } from '@/lib/booking/conflicts'
 import {
   assertNoCalendarBlockConflict,
@@ -513,6 +514,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       })
     }
 
+    // A moved or resized block frees time at one end and occupies it at the
+    // other, so cached availability is wrong in BOTH directions until this
+    // lands. Bump AFTER commit — see the ordering note on `bumpScheduleVersion`.
+    await bumpScheduleVersion(professionalId)
+
     return jsonOk(
       {
         block: toBlockDto(result.block),
@@ -590,6 +596,12 @@ export async function DELETE(_req: Request, ctx: RouteContext) {
         code: result.code,
       })
     }
+
+    // Deleting a block RELEASES calendar time. Without this bump the freed
+    // slots stay hidden until the day cache's TTL expires — silent capacity
+    // loss rather than a dead end, but wrong just the same. Bump AFTER commit —
+    // see the ordering note on `bumpScheduleVersion`.
+    await bumpScheduleVersion(professionalId)
 
     return jsonOk(
       {

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   cancelImportedBookingIfPristine: vi.fn(),
   createProBooking: vi.fn(),
   upsertProClient: vi.fn(),
+  bumpScheduleVersion: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -35,6 +36,10 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 vi.mock('@/lib/clients/upsertProClient', () => ({
   upsertProClient: mocks.upsertProClient,
+}))
+
+vi.mock('@/lib/booking/cacheVersion', () => ({
+  bumpScheduleVersion: mocks.bumpScheduleVersion,
 }))
 
 import {
@@ -174,6 +179,11 @@ describe('commitCalendarImport', () => {
     expect(mocks.createProBooking).not.toHaveBeenCalled()
     expect(mocks.blockCreate).toHaveBeenCalledTimes(1)
     expect(result.created.blocks).toBe(1)
+
+    // Imported bookings bump inside the write boundary, but imported BLOCKS are
+    // written here — a block-only import would otherwise leave availability
+    // offering the time the import just took.
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro-1')
   })
 
   it('seeds client history for a past event and does not create a booking', async () => {
@@ -207,6 +217,11 @@ describe('commitCalendarImport', () => {
     expect(mocks.blockCreate).not.toHaveBeenCalled()
     expect(result.created.blocks).toBe(0)
     expect(result.skipped).toBe(1)
+
+    // A re-run that wrote nothing must not invalidate: import is idempotent and
+    // pros re-sync on a timer, so bumping here would cold-start the cache on
+    // every no-op sync.
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
   })
 
   it('honors excludeUids', async () => {
@@ -242,12 +257,17 @@ describe('reconcileRemovedImportedEvents', () => {
       where: { professionalId: 'pro-1', note: { contains: '[import:gone-1]' } },
     })
     expect(result).toEqual({ cancelledBookings: 1, deletedBlocks: 1 })
+
+    // Deleting the held blocks RELEASES that time; a resync that only removed
+    // blocks would otherwise keep the freed slots hidden.
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro-1')
   })
 
   it('does nothing for an empty removed list', async () => {
     const result = await reconcileRemovedImportedEvents({ professionalId: 'pro-1', removedUids: [] })
     expect(mocks.cancelImportedBookingIfPristine).not.toHaveBeenCalled()
     expect(mocks.blockDeleteMany).not.toHaveBeenCalled()
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
     expect(result).toEqual({ cancelledBookings: 0, deletedBlocks: 0 })
   })
 })

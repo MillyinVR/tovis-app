@@ -2,8 +2,11 @@
 //
 // Cron: */5 * * * * (every 5 minutes)
 // Sweeps expired BookingHold rows so stale holds never permanently lock slots,
-// and bumps the scheduleConfigVersion for every affected professional so
-// cached availability surfaces re-render the freed slots immediately.
+// and bumps the scheduleVersion for every affected professional so cached
+// availability surfaces re-render the freed slots immediately. (It bumped
+// scheduleConfigVersion until B2, 2026-07-24 — that moved the day-cache key but
+// not the busy-intervals key underneath it, so the freed slots could stay dark
+// for the rest of that entry's 60s TTL.)
 //
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'

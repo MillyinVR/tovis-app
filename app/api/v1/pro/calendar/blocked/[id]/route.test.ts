@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   logBookingConflict: vi.fn(),
 
   withLockedProfessionalTransaction: vi.fn(),
+
+  bumpScheduleVersion: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -55,7 +57,11 @@ vi.mock('@/lib/booking/scheduleTransaction', () => ({
   withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
 }))
 
-import { PATCH } from './route'
+vi.mock('@/lib/booking/cacheVersion', () => ({
+  bumpScheduleVersion: mocks.bumpScheduleVersion,
+}))
+
+import { DELETE, PATCH } from './route'
 
 function makePatchRequest(body: unknown): Request {
   return new Request('http://localhost/api/v1/pro/calendar/blocked/block_1', {
@@ -331,6 +337,10 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
       uiAction: 'PICK_NEW_SLOT',
       message: 'Requested time is blocked.',
     })
+
+    // Refused, so nothing moved — invalidating here would dump this pro's warm
+    // availability cache on input the caller controls.
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
   })
 
   it('returns TIME_BOOKED and logs when the updated range overlaps a booking', async () => {
@@ -484,6 +494,10 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
 
     expect(mocks.logBookingConflict).not.toHaveBeenCalled()
 
+    // A moved block frees time at one end and occupies it at the other, so the
+    // cached slot grid is wrong in both directions until this bump lands.
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_123')
+
     expect(result).toEqual({
       ok: true,
       status: 200,
@@ -496,6 +510,83 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
           locationId: 'loc_1',
         },
       },
+    })
+  })
+})
+
+describe('DELETE /api/v1/pro/calendar/blocked/[id]', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+
+    mocks.requirePro.mockResolvedValue({
+      ok: true,
+      professionalId: 'pro_123',
+    })
+
+    mocks.jsonFail.mockImplementation(
+      (status: number, error: string, extra?: unknown) => ({
+        ok: false,
+        status,
+        error,
+        ...(extra && typeof extra === 'object' ? extra : {}),
+      }),
+    )
+
+    mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
+      ok: true,
+      status,
+      data,
+    }))
+
+    mocks.withLockedProfessionalTransaction.mockImplementation(
+      async (
+        professionalId: string,
+        run: (args: { tx: typeof tx }) => Promise<unknown>,
+      ) => run({ tx }),
+    )
+
+    mocks.calendarBlockFindFirst.mockResolvedValue(existingBlock)
+    mocks.calendarBlockDelete.mockResolvedValue(existingBlock)
+  })
+
+  function makeDeleteRequest(): Request {
+    return new Request('http://localhost/api/v1/pro/calendar/blocked/block_1', {
+      method: 'DELETE',
+    })
+  }
+
+  it('deletes the block and invalidates cached availability', async () => {
+    const result = await DELETE(makeDeleteRequest(), makeCtx())
+
+    expect(mocks.calendarBlockDelete).toHaveBeenCalledWith({
+      where: { id: 'block_1' },
+    })
+
+    // Deleting a block RELEASES time. Without the bump those slots stay hidden
+    // behind the cached grid until its TTL expires — capacity the pro has and
+    // cannot sell.
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_123')
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: { id: 'block_1' },
+    })
+  })
+
+  it('does not invalidate availability when the block does not exist', async () => {
+    mocks.calendarBlockFindFirst.mockResolvedValueOnce(null)
+
+    const result = await DELETE(makeDeleteRequest(), makeCtx('missing_block'))
+
+    expect(mocks.calendarBlockDelete).not.toHaveBeenCalled()
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: false,
+      status: 404,
+      error: 'Not found.',
+      code: 'BLOCK_NOT_FOUND',
     })
   })
 })

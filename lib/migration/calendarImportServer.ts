@@ -12,6 +12,7 @@
 
 import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 
+import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import {
   cancelImportedBookingIfPristine,
   createProBooking,
@@ -405,6 +406,14 @@ export async function commitCalendarImport(args: {
     }
   }
 
+  // Imported BOOKINGS bump inside the write boundary, but imported BLOCKS are
+  // written here, so a block-only import (every event unmapped or mobile-only)
+  // would leave cached availability offering time the import just took. One
+  // bump per run, after every write — not one per event.
+  if (created.blocks > 0) {
+    await bumpScheduleVersion(args.professionalId)
+  }
+
   return { created, skipped, failed }
 }
 
@@ -441,6 +450,13 @@ export async function reconcileRemovedImportedEvents(args: {
       },
     })
     deletedBlocks += deleted.count
+  }
+
+  // Deleting the held blocks RELEASES that time. `cancelImportedBookingIfPristine`
+  // bumps for the bookings it cancels, but a resync that only removed blocks
+  // would leave the freed slots hidden until the day cache expires.
+  if (deletedBlocks > 0) {
+    await bumpScheduleVersion(args.professionalId)
   }
 
   return { cancelledBookings, deletedBlocks }

@@ -17820,7 +17820,7 @@ export async function applyStripeCheckoutSessionStatus(
 
 /**
  * Deletes all expired BookingHold rows in a single sweep and bumps the
- * scheduleConfigVersion for every affected professional so cached availability
+ * scheduleVersion for every affected professional so cached availability
  * surfaces (`/api/v1/availability/*`, openings, search) re-render the freed slots.
  *
  * Used by the `/api/internal/jobs/hold-cleanup` cron. Routing the deleteMany
@@ -17828,8 +17828,19 @@ export async function applyStripeCheckoutSessionStatus(
  * (see `tools/check-booking-write-boundary.mjs`) and ensures the cache bump
  * happens transactionally with the delete from the caller's perspective.
  *
+ * This used to bump `scheduleConfigVersion`, which only half-invalidated (B2,
+ * 2026-07-24). The day/bootstrap/alternates keys carry both counters so they
+ * did move, but the busy-intervals cache underneath them is keyed on
+ * `scheduleVersion` ALONE — so a busy entry written moments before a hold
+ * expired kept serving that hold as live for the rest of its own 60s TTL, and
+ * the recomputed day response was built on top of it. `releaseHold`, the manual
+ * sibling of this sweep, already bumped `scheduleVersion`: one event, two
+ * spellings, and only one of them reached the layer that mattered. Bumping the
+ * occupancy counter covers both layers and stops needlessly evicting the 300s
+ * placement cache every five minutes.
+ *
  * The bump is best-effort: if Redis is unreachable, the underlying
- * `bumpScheduleConfigVersion` swallows the error and logs. The next sweep
+ * `bumpScheduleVersion` swallows the error and logs. The next sweep
  * (5 minutes later) catches up.
  */
 export async function cleanupAllExpiredHolds(args: {
@@ -17855,7 +17866,7 @@ export async function cleanupAllExpiredHolds(args: {
   if (deletedResult.count > 0 && affectedProfessionalIds.length > 0) {
     await Promise.all(
       affectedProfessionalIds.map((professionalId) =>
-        bumpScheduleConfigVersion(professionalId),
+        bumpScheduleVersion(professionalId),
       ),
     )
   }
