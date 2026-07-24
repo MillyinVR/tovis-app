@@ -6102,6 +6102,86 @@ export async function recordNoShowFeeCharge(args: {
   })
 }
 
+/**
+ * Tell the client their captured discovery deposit was kept because they were
+ * marked a no-show (M15 POLICY follow-up). In this case no separate no-show fee is
+ * charged — the kept deposit IS the penalty — so this is the client's only
+ * disclosure of the no-show money outcome (the sibling of NO_SHOW_FEE_CHARGED).
+ *
+ * Ownership-scoped to the professional. Emits nothing unless the booking is
+ * actually NO_SHOW with a PAID deposit (defensive — the caller only invokes this on
+ * the suppression branch). Idempotent via the notification dedupeKey, so a repeat
+ * assessment never double-notifies. Best-effort by contract: the caller wraps this
+ * so a notification failure can never disturb the committed no-show.
+ */
+export async function recordNoShowDepositKept(args: {
+  bookingId: string
+  professionalId: string
+}): Promise<void> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+
+  await withLockedProfessionalTransaction(args.professionalId, async ({ tx }) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        status: true,
+        depositStatus: true,
+        depositAmount: true,
+        scheduledFor: true,
+        locationTimeZone: true,
+        service: { select: { name: true } },
+        professional: {
+          select: { timeZone: true, ...professionalPublicDisplayNameSelect },
+        },
+      },
+    })
+
+    if (!booking || booking.professionalId !== args.professionalId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+
+    // Only a no-show that actually kept a captured deposit warrants the notice.
+    if (
+      booking.status !== BookingStatus.NO_SHOW ||
+      booking.depositStatus !== BookingDepositStatus.PAID
+    ) {
+      return
+    }
+
+    const depositLabel = booking.depositAmount
+      ? `$${booking.depositAmount.toFixed(2)} deposit`
+      : 'deposit'
+    const serviceLabel = booking.service?.name?.trim() || 'appointment'
+    const proName = formatProfessionalPublicDisplayName(booking.professional)
+    const when = booking.scheduledFor
+      ? ` on ${formatBookingDateLabel(
+          booking.scheduledFor,
+          resolveBookingDisplayTimeZone(booking),
+        )}`
+      : ''
+
+    await createUpdateClientNotification({
+      tx,
+      clientId: booking.clientId,
+      bookingId: booking.id,
+      eventKey: NotificationEventKey.NO_SHOW_DEPOSIT_KEPT,
+      title: 'Your deposit was kept',
+      body: `Your ${depositLabel} for your ${serviceLabel} with ${proName}${when} was kept because the appointment was marked as a no-show.`,
+      dedupeKey: `NO_SHOW_DEPOSIT_KEPT:${booking.id}`,
+      href: `/client/bookings/${booking.id}?step=overview`,
+      data: {
+        depositAmountCents: booking.depositAmount
+          ? Math.round(Number(booking.depositAmount) * 100)
+          : null,
+      },
+    })
+  })
+}
+
 export type WaiveNoShowFeeResult = {
   status: NoShowFeeStatus
   meta: { mutated: boolean; noOp: boolean }

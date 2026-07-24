@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   bookingFindUnique: vi.fn(),
   paymentIntentsCreate: vi.fn(),
   recordNoShowFeeCharge: vi.fn(),
+  recordNoShowDepositKept: vi.fn(),
   flagEnabled: vi.fn(),
 }))
 
@@ -27,6 +28,7 @@ vi.mock('@/lib/stripe/server', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   recordNoShowFeeCharge: mocks.recordNoShowFeeCharge,
+  recordNoShowDepositKept: mocks.recordNoShowDepositKept,
   NO_SHOW_FEE_CHARGE_KIND: 'NO_SHOW_FEE',
 }))
 
@@ -75,6 +77,9 @@ function bookingFixture(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.flagEnabled.mockReturnValue(true)
+  // Returns a promise so the best-effort `.catch(...)` chain in the suppression
+  // branch is valid.
+  mocks.recordNoShowDepositKept.mockResolvedValue(undefined)
 })
 
 describe('assessAndChargeNoShowFee gating', () => {
@@ -140,6 +145,11 @@ describe('assessAndChargeNoShowFee gating', () => {
     })
     expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
     expect(mocks.recordNoShowFeeCharge).not.toHaveBeenCalled()
+    // The client is told their deposit was kept (their only no-show money notice).
+    expect(mocks.recordNoShowDepositKept).toHaveBeenCalledWith({
+      bookingId: 'bk_1',
+      professionalId: 'pro_1',
+    })
   })
 
   it('still charges a no-show fee when no deposit was kept (PENDING/NONE)', async () => {

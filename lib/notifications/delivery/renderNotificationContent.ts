@@ -377,6 +377,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   payment_confirmation_required: 'Confirm payment',
   payment_refunded: 'View refund',
   no_show_fee_charged: 'View details',
+  no_show_deposit_kept: 'View details',
   deposit_reminder: 'Complete your deposit',
   look_follower_new: 'View your profile',
   client_follow: 'View activity',
@@ -484,6 +485,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   no_show_fee_charged: buildStandardTemplateRenderer(
     templateCtaLabels.no_show_fee_charged,
+  ),
+  no_show_deposit_kept: buildStandardTemplateRenderer(
+    templateCtaLabels.no_show_deposit_kept,
   ),
   look_follower_new: buildStandardTemplateRenderer(
     templateCtaLabels.look_follower_new,

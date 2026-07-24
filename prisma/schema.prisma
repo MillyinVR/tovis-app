@@ -600,6 +600,10 @@ enum NotificationEventKey {
   // A no-show / late-cancel fee was charged to the client's saved card (Phase 2
   // revenue protection). Client-facing receipt; inert unless the flag is on.
   NO_SHOW_FEE_CHARGED
+  // A no-show kept the client's captured discovery deposit (M15 POLICY): the kept
+  // deposit IS the penalty, so no separate no-show fee is charged. This is the
+  // client's disclosure of that outcome. Client-facing; inert unless the flag is on.
+  NO_SHOW_DEPOSIT_KEPT
   // A new-client discovery deposit is still unpaid and the booking's hold is
   // approaching its auto-release deadline (M5). Client-facing nudge to complete
   // the deposit checkout before the slot is freed. Respects quiet hours.

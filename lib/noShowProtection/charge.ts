@@ -28,6 +28,7 @@ import {
   noShowFeeAmountToCents,
 } from '@/lib/noShowProtection/fee'
 import {
+  recordNoShowDepositKept,
   recordNoShowFeeCharge,
   NO_SHOW_FEE_CHARGE_KIND,
 } from '@/lib/booking/writeBoundary'
@@ -158,6 +159,18 @@ export async function assessAndChargeNoShowFee(args: {
     // signal, which correctly still charges when a wide-window deposit is
     // REFUNDED or its refund FAILED — so this gate is NO_SHOW-only.)
     if (booking.depositStatus === BookingDepositStatus.PAID) {
+      // Disclose the kept deposit to the client — it's their only no-show money
+      // notice, since no fee is charged. Best-effort: a notification failure must
+      // never change the suppression outcome (the no-show already committed).
+      await recordNoShowDepositKept({
+        bookingId: booking.id,
+        professionalId: booking.professionalId,
+      }).catch((error: unknown) => {
+        console.error('assessAndChargeNoShowFee: deposit-kept notice failed', {
+          bookingId: booking.id,
+          message: error instanceof Error ? error.message : String(error),
+        })
+      })
       return { kind: 'NOT_CHARGEABLE', reason: 'deposit_kept_suppresses_fee' }
     }
   }
