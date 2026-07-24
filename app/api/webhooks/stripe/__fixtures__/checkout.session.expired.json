@@ -1,0 +1,88 @@
+{
+  "id": "evt_1PwireCheckoutExpired00000",
+  "object": "event",
+  "api_version": "2026-04-22.dahlia",
+  "created": 1795090000,
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": {
+    "id": null,
+    "idempotency_key": null
+  },
+  "type": "checkout.session.expired",
+  "data": {
+    "object": {
+      "id": "cs_test_wire_expired_1",
+      "object": "checkout.session",
+      "adaptive_pricing": null,
+      "after_expiration": null,
+      "allow_promotion_codes": null,
+      "amount_subtotal": 13500,
+      "amount_total": 13500,
+      "automatic_tax": {
+        "enabled": false,
+        "liability": null,
+        "status": null
+      },
+      "billing_address_collection": null,
+      "cancel_url": "https://app.tovis.example/booking/booking_wire_2",
+      "client_reference_id": "booking_wire_2",
+      "client_secret": null,
+      "consent": null,
+      "consent_collection": null,
+      "created": 1795003700,
+      "currency": "usd",
+      "currency_conversion": null,
+      "custom_fields": [],
+      "custom_text": {
+        "after_submit": null,
+        "shipping_address": null,
+        "submit": null,
+        "terms_of_service_acceptance": null
+      },
+      "customer": null,
+      "customer_creation": null,
+      "customer_details": null,
+      "customer_email": null,
+      "expires_at": 1795090000,
+      "invoice": null,
+      "invoice_creation": null,
+      "livemode": false,
+      "locale": null,
+      "metadata": {
+        "bookingId": "booking_wire_2",
+        "clientId": "client_wire_1",
+        "professionalId": "pro_wire_1"
+      },
+      "mode": "payment",
+      "payment_intent": null,
+      "payment_link": null,
+      "payment_method_collection": "always",
+      "payment_method_configuration_details": null,
+      "payment_method_options": {},
+      "payment_method_types": ["card"],
+      "payment_status": "unpaid",
+      "phone_number_collection": {
+        "enabled": false
+      },
+      "recovered_from": null,
+      "saved_payment_method_options": null,
+      "setup_intent": null,
+      "shipping_address_collection": null,
+      "shipping_cost": null,
+      "shipping_details": null,
+      "shipping_options": [],
+      "status": "expired",
+      "submit_type": null,
+      "subscription": null,
+      "success_url": "https://app.tovis.example/booking/booking_wire_2/paid",
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "ui_mode": "hosted",
+      "url": null
+    }
+  }
+}

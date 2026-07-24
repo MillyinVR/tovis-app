@@ -1,0 +1,72 @@
+{
+  "id": "evt_1PwireSucceeded00000000000",
+  "object": "event",
+  "api_version": "2026-04-22.dahlia",
+  "created": 1795000000,
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": {
+    "id": "req_wire_pi_succeeded",
+    "idempotency_key": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+  },
+  "type": "payment_intent.succeeded",
+  "data": {
+    "object": {
+      "id": "pi_wire_service_1",
+      "object": "payment_intent",
+      "amount": 13500,
+      "amount_capturable": 0,
+      "amount_details": {
+        "tip": {}
+      },
+      "amount_received": 13500,
+      "application": "ca_WirePlatform000000000000",
+      "application_fee_amount": 675,
+      "automatic_payment_methods": null,
+      "canceled_at": null,
+      "cancellation_reason": null,
+      "capture_method": "automatic",
+      "client_secret": "pi_wire_service_1_secret_wire",
+      "confirmation_method": "automatic",
+      "created": 1794999990,
+      "currency": "usd",
+      "customer": "cus_WireClient00000001",
+      "description": "Tovis booking booking_wire_1",
+      "invoice": null,
+      "last_payment_error": null,
+      "latest_charge": "ch_wire_service_1",
+      "livemode": false,
+      "metadata": {
+        "bookingId": "booking_wire_1",
+        "clientId": "client_wire_1",
+        "professionalId": "pro_wire_1"
+      },
+      "next_action": null,
+      "on_behalf_of": "acct_WirePro000000001",
+      "payment_method": "pm_wire_card_1",
+      "payment_method_configuration_details": null,
+      "payment_method_options": {
+        "card": {
+          "installments": null,
+          "mandate_options": null,
+          "network": null,
+          "request_three_d_secure": "automatic"
+        }
+      },
+      "payment_method_types": ["card"],
+      "processing": null,
+      "receipt_email": null,
+      "review": null,
+      "setup_future_usage": null,
+      "shipping": null,
+      "source": null,
+      "statement_descriptor": null,
+      "statement_descriptor_suffix": null,
+      "status": "succeeded",
+      "transfer_data": {
+        "destination": "acct_WirePro000000001"
+      },
+      "transfer_group": "booking_wire_1"
+    }
+  }
+}

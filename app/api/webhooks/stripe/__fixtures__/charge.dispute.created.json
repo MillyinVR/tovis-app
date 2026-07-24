@@ -1,0 +1,59 @@
+{
+  "id": "evt_1PwireDisputeCreated0000000",
+  "object": "event",
+  "api_version": "2026-04-22.dahlia",
+  "created": 1795002000,
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": {
+    "id": null,
+    "idempotency_key": null
+  },
+  "type": "charge.dispute.created",
+  "data": {
+    "object": {
+      "id": "dp_wire_service_1",
+      "object": "dispute",
+      "amount": 13500,
+      "balance_transactions": [
+        {
+          "id": "txn_wire_dispute_1",
+          "object": "balance_transaction",
+          "amount": -13500,
+          "currency": "usd",
+          "fee": 1500,
+          "net": -15000,
+          "reporting_category": "dispute",
+          "status": "available",
+          "type": "adjustment"
+        }
+      ],
+      "charge": "ch_wire_service_1",
+      "created": 1795001999,
+      "currency": "usd",
+      "evidence": {
+        "access_activity_log": null,
+        "billing_address": null,
+        "cancellation_policy": null,
+        "customer_email_address": "client@example.com",
+        "customer_name": "Wire Client",
+        "product_description": null,
+        "receipt": null,
+        "service_date": null,
+        "uncategorized_text": null
+      },
+      "evidence_details": {
+        "due_by": 1796000000,
+        "has_evidence": false,
+        "past_due": false,
+        "submission_count": 0
+      },
+      "is_charge_refundable": false,
+      "livemode": false,
+      "metadata": {},
+      "payment_intent": "pi_wire_service_1",
+      "reason": "fraudulent",
+      "status": "needs_response"
+    }
+  }
+}
