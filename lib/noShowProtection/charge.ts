@@ -22,7 +22,10 @@ import {
   isWithinCancelWindow,
   noShowFeeAmountToCents,
 } from '@/lib/noShowProtection/fee'
-import { recordNoShowFeeCharge } from '@/lib/booking/writeBoundary'
+import {
+  recordNoShowFeeCharge,
+  NO_SHOW_FEE_CHARGE_KIND,
+} from '@/lib/booking/writeBoundary'
 
 export type NoShowFeeOutcome =
   // Flag off, policy off/misconfigured, no card, pro not connected, out of
@@ -217,7 +220,10 @@ export async function assessAndChargeNoShowFee(args: {
           bookingId: booking.id,
           clientId: booking.clientId,
           professionalId: booking.professionalId,
-          kind: 'NO_SHOW_FEE',
+          // The webhook branches on this kind so the fee PI's success/failure
+          // event is not misrouted into the final-bill applier (it carries this
+          // booking's bookingId, which the webhook's hint-resolver matches first).
+          kind: NO_SHOW_FEE_CHARGE_KIND,
           reason: args.reason,
         },
       },
