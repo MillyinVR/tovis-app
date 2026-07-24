@@ -29,7 +29,12 @@ vi.mock('@sentry/nextjs', () => ({
 
 const mockEmitPaymentRefunded = vi.hoisted(() => vi.fn())
 
-vi.mock('@/lib/notifications/paymentNotifications', () => ({
+// Only the EMIT is mocked. `...actual` keeps the real buildAuxRefundDiscriminator
+// in play, so the discriminator assertions below pin the shared builder's actual
+// output — a stub would let exactly the drift this builder exists to prevent
+// through (the same reason M7 kept the real Stripe-refund mapper via importOriginal).
+vi.mock('@/lib/notifications/paymentNotifications', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/notifications/paymentNotifications')>()),
   emitPaymentRefundedNotifications: mockEmitPaymentRefunded,
 }))
 
