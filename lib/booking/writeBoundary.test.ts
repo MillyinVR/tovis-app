@@ -235,6 +235,8 @@ describe('lib/booking/writeBoundary', () => {
         status: BookingStatus.CANCELLED,
         sessionStep: SessionStep.NONE,
       },
+      // §18.4: the pre-transition status, read inside the locked tx.
+      priorStatus: BookingStatus.PENDING,
       meta: {
         mutated: true,
         noOp: false,
@@ -275,6 +277,8 @@ describe('lib/booking/writeBoundary', () => {
         status: BookingStatus.CANCELLED,
         sessionStep: SessionStep.NONE,
       },
+      // §18.4: an already-CANCELLED no-op reports CANCELLED as the prior status.
+      priorStatus: BookingStatus.CANCELLED,
       meta: {
         mutated: false,
         noOp: true,
