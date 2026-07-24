@@ -49,6 +49,7 @@ import {
 } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
+import { stripeExpandedId } from '@/lib/stripe/expandable'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -72,24 +73,6 @@ type RecoveryOutcome = {
     | 'stripe_lookup_failed'
     | 'apply_failed'
     | 'no_op_or_already_recovered'
-}
-
-function getStripePaymentIntentId(
-  session: Stripe.Checkout.Session,
-): string | null {
-  if (typeof session.payment_intent === 'string') {
-    return session.payment_intent
-  }
-
-  if (
-    session.payment_intent &&
-    typeof session.payment_intent === 'object' &&
-    typeof session.payment_intent.id === 'string'
-  ) {
-    return session.payment_intent.id
-  }
-
-  return null
 }
 
 function getStripePaymentIntent(
@@ -143,7 +126,7 @@ async function recoverBooking(args: {
   }
 
   const paymentIntent = getStripePaymentIntent(session)
-  const stripePaymentIntentId = getStripePaymentIntentId(session)
+  const stripePaymentIntentId = stripeExpandedId(session.payment_intent)
 
   if (!stripePaymentIntentId) {
     return {

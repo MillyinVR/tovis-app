@@ -34,6 +34,7 @@ import { tokenActorRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { getStripe } from '@/lib/stripe/server'
 import { parseTipAmount } from '@/lib/money'
+import { stripeExpandedId } from '@/lib/stripe/expandable'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -93,14 +94,6 @@ function buildStripeApiIdempotencyKey(args: {
   idempotencyKey: string
 }): string {
   return `tovis:public-stripe-session:${args.bookingId}:${args.idempotencyKey}`
-}
-
-function getSessionPaymentIntentId(
-  paymentIntent: string | { id?: string } | null | undefined,
-): string | null {
-  if (!paymentIntent) return null
-  if (typeof paymentIntent === 'string') return paymentIntent
-  return typeof paymentIntent.id === 'string' ? paymentIntent.id : null
 }
 
 function nullableString(value: unknown): string | null {
@@ -227,7 +220,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
           { idempotencyKey: stripeApiIdempotencyKey },
         )
 
-        const stripePaymentIntentId = getSessionPaymentIntentId(
+        const stripePaymentIntentId = stripeExpandedId(
           session.payment_intent,
         )
 

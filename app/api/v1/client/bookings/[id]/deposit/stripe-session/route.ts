@@ -30,6 +30,7 @@ import {
   buildCheckoutReturnUrl,
   isNativeCheckoutReturn,
 } from '@/lib/checkout/nativeReturn'
+import { stripeExpandedId } from '@/lib/stripe/expandable'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,14 +48,6 @@ function buildStripeApiIdempotencyKey(args: {
   idempotencyKey: string
 }): string {
   return `tovis:deposit-session:${args.bookingId}:${args.idempotencyKey}`
-}
-
-function getSessionPaymentIntentId(
-  paymentIntent: string | { id?: string } | null | undefined,
-): string | null {
-  if (!paymentIntent) return null
-  if (typeof paymentIntent === 'string') return paymentIntent
-  return typeof paymentIntent.id === 'string' ? paymentIntent.id : null
 }
 
 function nullableString(value: unknown): string | null {
@@ -180,7 +173,7 @@ export async function POST(req: NextRequest, props: RouteContext) {
         await recordDepositCheckoutAttached({
           bookingId: prepared.booking.id,
           clientId: auth.clientId,
-          stripePaymentIntentId: getSessionPaymentIntentId(session.payment_intent),
+          stripePaymentIntentId: stripeExpandedId(session.payment_intent),
         })
 
         const responseBody: JsonObjectPayload = {

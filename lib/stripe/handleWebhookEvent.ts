@@ -36,6 +36,7 @@ import {
 import type { LateCaptureRefundFlavor } from '@/lib/booking/cancelRefund'
 import { captureStripeDisputeAlert } from '@/lib/observability/bookingEvents'
 import { applyStripeSubscriptionInTransaction } from '@/lib/membership/syncSubscription'
+import { stripeExpandedId } from '@/lib/stripe/expandable'
 
 export type StripeWebhookResult = {
   handled: boolean
@@ -90,20 +91,6 @@ function getMetadataString(
 ): string | null {
   const value = metadata?.[key]
   return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function getSessionPaymentIntentId(
-  session: Stripe.Checkout.Session,
-): string | null {
-  if (typeof session.payment_intent === 'string') return session.payment_intent
-  if (
-    session.payment_intent &&
-    typeof session.payment_intent === 'object' &&
-    typeof session.payment_intent.id === 'string'
-  ) {
-    return session.payment_intent.id
-  }
-  return null
 }
 
 function isDiscoveryDepositMetadata(
@@ -188,7 +175,7 @@ async function handleCheckoutSession(
   if (isDiscoveryDepositMetadata(session.metadata)) {
     if (status === StripeCheckoutSessionStatus.COMPLETE) {
       return handleDepositPaid(tx, {
-        stripePaymentIntentId: getSessionPaymentIntentId(session),
+        stripePaymentIntentId: stripeExpandedId(session.payment_intent),
         chargeId: null,
         bookingIdHint,
         eventLabel,
@@ -216,7 +203,7 @@ async function handleCheckoutSession(
   const result = await applyStripeCheckoutSessionStatusInTransaction(tx, {
     bookingIdHint,
     stripeCheckoutSessionId,
-    stripePaymentIntentId: getSessionPaymentIntentId(session),
+    stripePaymentIntentId: stripeExpandedId(session.payment_intent),
     stripeAmountSubtotal:
       typeof session.amount_subtotal === 'number'
         ? session.amount_subtotal
@@ -240,17 +227,6 @@ async function handleCheckoutSession(
   }
 }
 
-function getPaymentIntentLatestChargeId(
-  paymentIntent: Stripe.PaymentIntent,
-): string | null {
-  const latestCharge = paymentIntent.latest_charge
-  if (typeof latestCharge === 'string') return latestCharge
-  if (latestCharge && typeof latestCharge === 'object' && typeof latestCharge.id === 'string') {
-    return latestCharge.id
-  }
-  return null
-}
-
 async function handlePaymentIntentSucceeded(
   tx: Prisma.TransactionClient,
   paymentIntent: Stripe.PaymentIntent,
@@ -272,7 +248,7 @@ async function handlePaymentIntentSucceeded(
   if (isDiscoveryDepositMetadata(paymentIntent.metadata)) {
     return handleDepositPaid(tx, {
       stripePaymentIntentId: paymentIntent.id,
-      chargeId: getPaymentIntentLatestChargeId(paymentIntent),
+      chargeId: stripeExpandedId(paymentIntent.latest_charge),
       bookingIdHint,
       eventLabel: 'payment_intent.succeeded',
     })
