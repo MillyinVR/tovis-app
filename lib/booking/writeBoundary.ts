@@ -17179,6 +17179,40 @@ async function performLockedApplyStripeCheckoutSessionStatus(args: {
   }
 }
 
+/**
+ * The find → lock → re-find-under-lock skeleton every final-bill Stripe webhook
+ * applier that runs inside a caller-provided transaction (`applyStripe*InTransaction`)
+ * repeats verbatim. The booking is resolved once to learn which professional to
+ * lock, then re-resolved AFTER the advisory lock so the applier operates on a row
+ * no concurrent writer can move underneath it — the same double-read guard
+ * `withLockedProfessionalScheduleByLookup` gives the transaction-OPENING callers
+ * (this variant locks inside a tx the caller already holds). Returns `null` — the
+ * webhook's "no matching booking, ack and move on" outcome — when either
+ * resolution misses.
+ *
+ * The per-event validation, the lookup keys (payment-intent id vs checkout-session
+ * id) and the terminal `performLocked*` call stay in each applier: those diverge
+ * by design (see the deposit appliers, which resolve by a different PI entirely).
+ */
+async function withStripeWebhookLockedBooking<
+  B extends { id: string; professionalId: string },
+  T,
+>(args: {
+  tx: Prisma.TransactionClient
+  lookup: (db: Prisma.TransactionClient) => Promise<B | null>
+  run: (lockedBooking: B) => Promise<T>
+}): Promise<T | null> {
+  const booking = await args.lookup(args.tx)
+  if (!booking) return null
+
+  await lockProfessionalSchedule(args.tx, booking.professionalId)
+
+  const lockedBooking = await args.lookup(args.tx)
+  if (!lockedBooking) return null
+
+  return args.run(lockedBooking)
+}
+
 export async function applyStripePaymentSucceededInTransaction(
   tx: Prisma.TransactionClient,
   args: ApplyStripePaymentSucceededArgs,
@@ -17192,32 +17226,24 @@ export async function applyStripePaymentSucceededInTransaction(
     })
   }
 
-  const booking = await findBookingForStripeWebhook({
-    db: tx,
-    bookingIdHint: args.bookingIdHint ?? null,
-    stripePaymentIntentId,
-  })
-
-  if (!booking) return null
-
-  await lockProfessionalSchedule(tx, booking.professionalId)
-
-  const lockedBooking = await findBookingForStripeWebhook({
-    db: tx,
-    bookingIdHint: args.bookingIdHint ?? null,
-    stripePaymentIntentId,
-  })
-
-  if (!lockedBooking) return null
-
-  return performLockedApplyStripePaymentSucceeded({
+  return withStripeWebhookLockedBooking({
     tx,
-    now: args.occurredAt ?? new Date(),
-    bookingId: lockedBooking.id,
-    stripePaymentIntentId,
-    stripeEventId,
-    amountReceivedCents: args.amountReceivedCents,
-    currency: args.currency,
+    lookup: (db) =>
+      findBookingForStripeWebhook({
+        db,
+        bookingIdHint: args.bookingIdHint ?? null,
+        stripePaymentIntentId,
+      }),
+    run: (lockedBooking) =>
+      performLockedApplyStripePaymentSucceeded({
+        tx,
+        now: args.occurredAt ?? new Date(),
+        bookingId: lockedBooking.id,
+        stripePaymentIntentId,
+        stripeEventId,
+        amountReceivedCents: args.amountReceivedCents,
+        currency: args.currency,
+      }),
   })
 }
 
@@ -17234,29 +17260,21 @@ export async function applyStripePaymentFailedInTransaction(
     })
   }
 
-  const booking = await findBookingForStripeWebhook({
-    db: tx,
-    bookingIdHint: args.bookingIdHint ?? null,
-    stripePaymentIntentId,
-  })
-
-  if (!booking) return null
-
-  await lockProfessionalSchedule(tx, booking.professionalId)
-
-  const lockedBooking = await findBookingForStripeWebhook({
-    db: tx,
-    bookingIdHint: args.bookingIdHint ?? null,
-    stripePaymentIntentId,
-  })
-
-  if (!lockedBooking) return null
-
-  return performLockedApplyStripePaymentFailed({
+  return withStripeWebhookLockedBooking({
     tx,
-    bookingId: lockedBooking.id,
-    stripePaymentIntentId,
-    stripeEventId,
+    lookup: (db) =>
+      findBookingForStripeWebhook({
+        db,
+        bookingIdHint: args.bookingIdHint ?? null,
+        stripePaymentIntentId,
+      }),
+    run: (lockedBooking) =>
+      performLockedApplyStripePaymentFailed({
+        tx,
+        bookingId: lockedBooking.id,
+        stripePaymentIntentId,
+        stripeEventId,
+      }),
   })
 }
 
@@ -17273,30 +17291,22 @@ export async function applyStripeDisputeInTransaction(
     })
   }
 
-  const booking = await findBookingForStripeWebhook({
-    db: tx,
-    bookingIdHint: args.bookingIdHint ?? null,
-    stripePaymentIntentId,
-  })
-
-  if (!booking) return null
-
-  await lockProfessionalSchedule(tx, booking.professionalId)
-
-  const lockedBooking = await findBookingForStripeWebhook({
-    db: tx,
-    bookingIdHint: args.bookingIdHint ?? null,
-    stripePaymentIntentId,
-  })
-
-  if (!lockedBooking) return null
-
-  return performLockedApplyStripeDispute({
+  return withStripeWebhookLockedBooking({
     tx,
-    bookingId: lockedBooking.id,
-    stripePaymentIntentId,
-    stripeEventId,
-    outcome: args.outcome,
+    lookup: (db) =>
+      findBookingForStripeWebhook({
+        db,
+        bookingIdHint: args.bookingIdHint ?? null,
+        stripePaymentIntentId,
+      }),
+    run: (lockedBooking) =>
+      performLockedApplyStripeDispute({
+        tx,
+        bookingId: lockedBooking.id,
+        stripePaymentIntentId,
+        stripeEventId,
+        outcome: args.outcome,
+      }),
   })
 }
 
@@ -17380,35 +17390,26 @@ export async function applyStripeCheckoutSessionStatusInTransaction(
     })
   }
 
-  const booking = await findBookingForStripeWebhook({
-    db: tx,
-    bookingIdHint: args.bookingIdHint ?? null,
-    stripeCheckoutSessionId,
-    stripePaymentIntentId: args.stripePaymentIntentId,
-  })
-
-  if (!booking) return null
-
-  await lockProfessionalSchedule(tx, booking.professionalId)
-
-  const lockedBooking = await findBookingForStripeWebhook({
-    db: tx,
-    bookingIdHint: args.bookingIdHint ?? null,
-    stripeCheckoutSessionId,
-    stripePaymentIntentId: args.stripePaymentIntentId,
-  })
-
-  if (!lockedBooking) return null
-
-  return performLockedApplyStripeCheckoutSessionStatus({
+  return withStripeWebhookLockedBooking({
     tx,
-    bookingId: lockedBooking.id,
-    stripeCheckoutSessionId,
-    stripePaymentIntentId: args.stripePaymentIntentId,
-    stripeAmountSubtotal: args.stripeAmountSubtotal,
-    stripeAmountTotal: args.stripeAmountTotal,
-    stripeCurrency: args.stripeCurrency,
-    status: args.status,
+    lookup: (db) =>
+      findBookingForStripeWebhook({
+        db,
+        bookingIdHint: args.bookingIdHint ?? null,
+        stripeCheckoutSessionId,
+        stripePaymentIntentId: args.stripePaymentIntentId,
+      }),
+    run: (lockedBooking) =>
+      performLockedApplyStripeCheckoutSessionStatus({
+        tx,
+        bookingId: lockedBooking.id,
+        stripeCheckoutSessionId,
+        stripePaymentIntentId: args.stripePaymentIntentId,
+        stripeAmountSubtotal: args.stripeAmountSubtotal,
+        stripeAmountTotal: args.stripeAmountTotal,
+        stripeCurrency: args.stripeCurrency,
+        status: args.status,
+      }),
   })
 }
 
