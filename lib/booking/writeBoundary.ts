@@ -73,9 +73,8 @@ import {
   type DepositSettings,
 } from '@/lib/booking/discoveryDepositPlan'
 import {
-  SCHEDULE_TX_MAX_WAIT_MS,
-  SCHEDULE_TX_TIMEOUT_MS,
   withLockedClientOwnedBookingTransaction,
+  withLockedProfessionalScheduleByLookup,
   withLockedProfessionalTransaction,
 } from '@/lib/booking/scheduleTransaction'
 import { bookingError, type BookingErrorCode } from '@/lib/booking/errors'
@@ -14777,80 +14776,70 @@ export async function createClientRebookedBookingFromAftercare(
   assertNonEmptyClientId(args.clientId)
   assertValidRequestedStart(args.scheduledFor)
 
-  return prisma.$transaction(async (tx) => {
-    const aftercareRef: AftercareRebookLockRecord | null =
-      await tx.aftercareSummary.findUnique({
-        where: { id: args.aftercareId },
-        select: AFTERCARE_REBOOK_LOCK_SELECT,
-      })
-
-    if (!args.aftercareClientActionTokenId.trim()) {
-      throw bookingError('FORBIDDEN', {
-        message: 'Aftercare client action token id is required for client rebook.',
-        userMessage: 'That aftercare link is invalid or expired.',
-      })
-    }
-    if (!aftercareRef || !aftercareRef.booking) {
+  // Re-run the ownership checks on a freshly-read aftercare ref. Shared by the
+  // pre-lock resolve and the post-lock re-read so the two can't drift; the token
+  // presence is enforced pre-lock only (it can't change under the lock).
+  const assertAftercareRefOwned = (
+    ref: AftercareRebookLockRecord | null,
+  ): NonNullable<AftercareRebookLockRecord['booking']> => {
+    if (!ref || !ref.booking) {
       throw bookingError('BOOKING_NOT_FOUND')
     }
-
-    if (
-      aftercareRef.bookingId !== args.bookingId ||
-      aftercareRef.booking.id !== args.bookingId
-    ) {
+    if (ref.bookingId !== args.bookingId || ref.booking.id !== args.bookingId) {
       throw bookingError('BOOKING_NOT_FOUND')
     }
-
-    if (aftercareRef.booking.clientId !== args.clientId) {
+    if (ref.booking.clientId !== args.clientId) {
       throw bookingError('BOOKING_NOT_FOUND')
     }
+    return ref.booking
+  }
 
-    await lockProfessionalSchedule(tx, aftercareRef.booking.professionalId)
-
-    const lockedAftercareRef: AftercareRebookLockRecord | null =
-      await tx.aftercareSummary.findUnique({
-        where: { id: args.aftercareId },
-        select: AFTERCARE_REBOOK_LOCK_SELECT,
-      })
-
-    if (!lockedAftercareRef || !lockedAftercareRef.booking) {
-      throw bookingError('BOOKING_NOT_FOUND')
-    }
-
-    if (
-      lockedAftercareRef.bookingId !== args.bookingId ||
-      lockedAftercareRef.booking.id !== args.bookingId
-    ) {
-      throw bookingError('BOOKING_NOT_FOUND')
-    }
-
-    if (lockedAftercareRef.booking.clientId !== args.clientId) {
-      throw bookingError('BOOKING_NOT_FOUND')
-    }
-
-    return performLockedCreateRebookedBooking({
-      tx,
-      now: new Date(),
-      bookingId: lockedAftercareRef.booking.id,
-      professionalId: lockedAftercareRef.booking.professionalId,
-      scheduledFor: args.scheduledFor,
-      initialStatus: BookingStatus.PENDING,
-      // The client picked this minute on the public aftercare link, so it is
-      // held to the pro's slot grid — the same rule the client's own hold /
-      // finalize flow enforces via checkSlotReadiness. Every slot the
-      // RebookCard offers comes from /availability/day, which generates its
-      // candidates from that same working-window step grid, so this refuses
-      // only a start no client UI could have produced.
-      startChosenBy: 'CLIENT',
-      clientId: args.clientId,
-      aftercareId: args.aftercareId,
-      aftercareClientActionTokenId: args.aftercareClientActionTokenId,
-      requestedLocationType: args.requestedLocationType ?? null,
-      requestedClientAddressId: args.requestedClientAddressId ?? null,
-      requestId: args.requestId ?? null,
-      idempotencyKey: args.idempotencyKey ?? null,
+  const readAftercareRef = (tx: Prisma.TransactionClient) =>
+    tx.aftercareSummary.findUnique({
+      where: { id: args.aftercareId },
+      select: AFTERCARE_REBOOK_LOCK_SELECT,
     })
-  }, { maxWait: SCHEDULE_TX_MAX_WAIT_MS, timeout: SCHEDULE_TX_TIMEOUT_MS })
+
+  return withLockedProfessionalScheduleByLookup({
+    resolveProfessionalId: async (tx) => {
+      const aftercareRef = await readAftercareRef(tx)
+
+      if (!args.aftercareClientActionTokenId.trim()) {
+        throw bookingError('FORBIDDEN', {
+          message: 'Aftercare client action token id is required for client rebook.',
+          userMessage: 'That aftercare link is invalid or expired.',
+        })
+      }
+
+      return assertAftercareRefOwned(aftercareRef).professionalId
+    },
+    run: async ({ tx, now }) => {
+      const booking = assertAftercareRefOwned(await readAftercareRef(tx))
+
+      return performLockedCreateRebookedBooking({
+        tx,
+        now,
+        bookingId: booking.id,
+        professionalId: booking.professionalId,
+        scheduledFor: args.scheduledFor,
+        initialStatus: BookingStatus.PENDING,
+        // The client picked this minute on the public aftercare link, so it is
+        // held to the pro's slot grid — the same rule the client's own hold /
+        // finalize flow enforces via checkSlotReadiness. Every slot the
+        // RebookCard offers comes from /availability/day, which generates its
+        // candidates from that same working-window step grid, so this refuses
+        // only a start no client UI could have produced.
+        startChosenBy: 'CLIENT',
+        clientId: args.clientId,
+        aftercareId: args.aftercareId,
+        aftercareClientActionTokenId: args.aftercareClientActionTokenId,
+        requestedLocationType: args.requestedLocationType ?? null,
+        requestedClientAddressId: args.requestedClientAddressId ?? null,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      })
+    },
+  })
 }
 
 const AFTERCARE_NEXT_APPOINTMENT_SELECT = {
@@ -14890,65 +14879,67 @@ export async function confirmClientAftercareNextAppointment(
   assertNonEmptyBookingId(args.bookingId)
   assertNonEmptyClientId(args.clientId)
 
-  return prisma.$transaction(async (tx) => {
-    const loadAftercare = (): Promise<AftercareNextAppointmentRecord | null> =>
-      tx.aftercareSummary.findUnique({
-        where: { bookingId: args.bookingId },
-        select: AFTERCARE_NEXT_APPOINTMENT_SELECT,
-      })
-
-    const assertConfirmable = (
-      record: AftercareNextAppointmentRecord | null,
-    ): { aftercareId: string; professionalId: string; scheduledFor: Date } => {
-      if (!record || !record.booking) {
-        throw bookingError('BOOKING_NOT_FOUND')
-      }
-      if (record.booking.id !== args.bookingId) {
-        throw bookingError('BOOKING_NOT_FOUND')
-      }
-      if (record.booking.clientId !== args.clientId) {
-        throw bookingError('BOOKING_NOT_FOUND')
-      }
-      if (
-        record.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT ||
-        !record.rebookedFor
-      ) {
-        throw bookingError('AFTERCARE_NOT_COMPLETED', {
-          message: 'No proposed next appointment to confirm.',
-          userMessage: 'There is no proposed next appointment to confirm.',
-        })
-      }
-      return {
-        aftercareId: record.id,
-        professionalId: record.booking.professionalId,
-        scheduledFor: record.rebookedFor,
-      }
-    }
-
-    const preLock = assertConfirmable(await loadAftercare())
-
-    await lockProfessionalSchedule(tx, preLock.professionalId)
-
-    const locked = assertConfirmable(await loadAftercare())
-
-    return performLockedCreateRebookedBooking({
-      tx,
-      now: new Date(),
-      bookingId: args.bookingId,
-      professionalId: locked.professionalId,
-      scheduledFor: locked.scheduledFor,
-      initialStatus: BookingStatus.ACCEPTED,
-      // The client is confirming the pro's proposed `rebookedFor`, not choosing
-      // a time — holding it to the grid would dead-end them on a minute only
-      // the pro can change.
-      startChosenBy: 'PRO',
-      clientId: args.clientId,
-      aftercareId: locked.aftercareId,
-      aftercareClientActionTokenId: null,
-      requestId: args.requestId ?? null,
-      idempotencyKey: args.idempotencyKey ?? null,
+  const loadAftercare = (
+    tx: Prisma.TransactionClient,
+  ): Promise<AftercareNextAppointmentRecord | null> =>
+    tx.aftercareSummary.findUnique({
+      where: { bookingId: args.bookingId },
+      select: AFTERCARE_NEXT_APPOINTMENT_SELECT,
     })
-  }, { maxWait: SCHEDULE_TX_MAX_WAIT_MS, timeout: SCHEDULE_TX_TIMEOUT_MS })
+
+  const assertConfirmable = (
+    record: AftercareNextAppointmentRecord | null,
+  ): { aftercareId: string; professionalId: string; scheduledFor: Date } => {
+    if (!record || !record.booking) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+    if (record.booking.id !== args.bookingId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+    if (record.booking.clientId !== args.clientId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+    if (
+      record.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT ||
+      !record.rebookedFor
+    ) {
+      throw bookingError('AFTERCARE_NOT_COMPLETED', {
+        message: 'No proposed next appointment to confirm.',
+        userMessage: 'There is no proposed next appointment to confirm.',
+      })
+    }
+    return {
+      aftercareId: record.id,
+      professionalId: record.booking.professionalId,
+      scheduledFor: record.rebookedFor,
+    }
+  }
+
+  return withLockedProfessionalScheduleByLookup({
+    resolveProfessionalId: async (tx) =>
+      assertConfirmable(await loadAftercare(tx)).professionalId,
+    run: async ({ tx, now }) => {
+      const locked = assertConfirmable(await loadAftercare(tx))
+
+      return performLockedCreateRebookedBooking({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        professionalId: locked.professionalId,
+        scheduledFor: locked.scheduledFor,
+        initialStatus: BookingStatus.ACCEPTED,
+        // The client is confirming the pro's proposed `rebookedFor`, not choosing
+        // a time — holding it to the grid would dead-end them on a minute only
+        // the pro can change.
+        startChosenBy: 'PRO',
+        clientId: args.clientId,
+        aftercareId: locked.aftercareId,
+        aftercareClientActionTokenId: null,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      })
+    },
+  })
 }
 
 type DeclineClientAftercareNextAppointmentArgs = {
