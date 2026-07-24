@@ -340,6 +340,23 @@ async function handlePaymentIntentFailed(
     }
   }
 
+  // Discovery deposit PI: a declined deposit card is the deposit Checkout's to
+  // retry — the deposit stays PENDING (M5's release sweep owns abandonment) and
+  // the booking's FINAL-BILL fields must never be touched. Without this branch
+  // (M16, plan §21.4 R1) the bookingId hint routed the failure into the
+  // final-bill applier, stamping provider/method + `stripePaymentIntentId=<the
+  // DEPOSIT PI>` + FAILED and emitting a spurious action-required notification —
+  // and the poisoned PI column then routed a later deposit dispute into the
+  // SERVICE dispute applier, bypassing M4's depositDisputedAt refund freeze.
+  // Mirrors the isDiscoveryDepositMetadata gate on the succeeded sibling above.
+  if (isDiscoveryDepositMetadata(paymentIntent.metadata)) {
+    return {
+      handled: true,
+      message:
+        'payment_intent.payment_failed discovery deposit — deposit checkout owns retries, booking payment untouched.',
+    }
+  }
+
     const result = await applyStripePaymentFailedInTransaction(tx, {
       bookingIdHint,
       stripePaymentIntentId: paymentIntent.id,
