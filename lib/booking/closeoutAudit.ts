@@ -2,6 +2,10 @@
 import { BookingCloseoutAuditAction, Prisma } from '@prisma/client'
 
 import { redactAuditPayload } from '@/lib/security/auditRedaction'
+import {
+  jsonValueToInputJson,
+  toNullableJsonCreateInputFromJsonValue,
+} from '@/lib/typed/prismaJson'
 
 type CreateBookingCloseoutAuditLogArgs = {
   tx: Prisma.TransactionClient
@@ -24,51 +28,13 @@ export function normalizeIdempotencyKey(value?: string | null): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => (item === null ? null : toInputJsonValue(item)))
-  }
-
-  if (value === null || typeof value !== 'object') {
-    return {}
-  }
-
-  const out: Record<string, Prisma.InputJsonValue | null> = {}
-
-  for (const key of Object.keys(value)) {
-    const child = value[key]
-    if (child === undefined) continue
-
-    out[key] = child === null ? null : toInputJsonValue(child)
-  }
-
-  return out
-}
-
-function toNullableJsonCreateInput(
-  value: Prisma.JsonValue | null | undefined,
-): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
-  if (value === undefined) return undefined
-  if (value === null) return Prisma.JsonNull
-
-  return toInputJsonValue(value)
-}
-
 function toRedactedJsonCreateInput(
   value: Prisma.JsonValue | null | undefined,
 ): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
   if (value === undefined) return undefined
   if (value === null) return Prisma.JsonNull
 
-  return toInputJsonValue(redactAuditPayload(value))
+  return jsonValueToInputJson(redactAuditPayload(value))
 }
 
 function sortAuditValue(value: unknown): unknown {

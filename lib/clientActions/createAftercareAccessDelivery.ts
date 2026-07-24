@@ -25,6 +25,7 @@ import type {
   ClientActionOrchestrationPlan,
   ClientActionResendMode,
 } from './types'
+import { toNullableJsonCreateInput } from '@/lib/typed/prismaJson'
 
 export type CreateAftercareAccessDeliveryArgs = {
   tx: Prisma.TransactionClient
@@ -58,15 +59,6 @@ function normalizeResendMode(
   value: ClientActionResendMode | null | undefined,
 ): ClientActionResendMode {
   return value ?? 'INITIAL_SEND'
-}
-
-function toNullableJsonCreateInput(
-  value: Prisma.InputJsonValue | null | undefined,
-): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
-  if (value === undefined) return undefined
-  if (value === null) return Prisma.JsonNull
-
-  return value
 }
 
 function buildAftercareTitle(): string {

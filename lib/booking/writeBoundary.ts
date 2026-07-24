@@ -246,6 +246,10 @@ import {
   buildAddressPrivacyWriteData,
   isAddressPrivacyEnvelopeV1 as isReusableAddressPrivacyEnvelope,
 } from '@/lib/security/addressEncryption'
+import {
+  jsonValueToInputJson,
+  toNullableJsonCreateInputFromJsonValue,
+} from '@/lib/typed/prismaJson'
 
 
 type MutationMeta = {
@@ -3801,42 +3805,6 @@ function buildHoldCreateFailure(
   throw bookingError(code, overrides)
 }
 
-function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => (item === null ? null : toInputJsonValue(item)))
-  }
-
-  if (value === null || typeof value !== 'object') {
-    return {}
-  }
-
-  const out: Record<string, Prisma.InputJsonValue | null> = {}
-
-  for (const key of Object.keys(value)) {
-    const child = value[key]
-    if (child === undefined) continue
-    out[key] = child === null ? null : toInputJsonValue(child)
-  }
-
-  return out
-}
-
-function toNullableJsonCreateInput(
-  value: Prisma.JsonValue | null | undefined,
-): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
-  if (value === undefined) return undefined
-  if (value === null) return Prisma.JsonNull
-  return toInputJsonValue(value)
-}
-
 type AddressSnapshotEncryptionInput = {
   formattedAddress: string | null
   lat: Prisma.Decimal | number | string | null | undefined
@@ -3878,7 +3846,7 @@ function toValidatedEncryptedAddressSnapshotInput(
 ): Prisma.InputJsonValue | null {
   if (!isReusableAddressPrivacyEnvelope(snapshot)) return null
 
-  return toInputJsonValue(snapshot)
+  return jsonValueToInputJson(snapshot)
 }
 
 function toValidatedLegacyAddressSnapshotInput(
@@ -3887,7 +3855,7 @@ function toValidatedLegacyAddressSnapshotInput(
   if (snapshot == null) return null
   if (isReusableAddressPrivacyEnvelope(snapshot)) return null
 
-  return toInputJsonValue(snapshot)
+  return jsonValueToInputJson(snapshot)
 }
 
 function buildEncryptedAddressSnapshotData(
@@ -3899,7 +3867,7 @@ function buildEncryptedAddressSnapshotData(
     return buildNullAddressSnapshotData(input)
   }
 
-  const legacySnapshot = toInputJsonValue({
+  const legacySnapshot = jsonValueToInputJson({
     formattedAddress,
   })
 
