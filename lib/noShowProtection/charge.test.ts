@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  BookingDepositStatus,
   BookingStatus,
   NoShowFeeReason,
   NoShowFeeStatus,
@@ -122,6 +123,55 @@ describe('assessAndChargeNoShowFee gating', () => {
       reason: NoShowFeeReason.NO_SHOW,
     })
     expect(out).toEqual({ kind: 'NOT_CHARGEABLE', reason: 'no_show_charging_off' })
+  })
+
+  it('suppresses a no-show fee when a discovery deposit was kept (PAID) — M15 POLICY analog', async () => {
+    // A kept deposit IS the no-show penalty; charging a fee too would double-hit.
+    mocks.bookingFindUnique.mockResolvedValue(
+      bookingFixture({ depositStatus: BookingDepositStatus.PAID }),
+    )
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toEqual({
+      kind: 'NOT_CHARGEABLE',
+      reason: 'deposit_kept_suppresses_fee',
+    })
+    expect(mocks.paymentIntentsCreate).not.toHaveBeenCalled()
+    expect(mocks.recordNoShowFeeCharge).not.toHaveBeenCalled()
+  })
+
+  it('still charges a no-show fee when no deposit was kept (PENDING/NONE)', async () => {
+    mocks.bookingFindUnique.mockResolvedValue(
+      bookingFixture({ depositStatus: BookingDepositStatus.PENDING }),
+    )
+    mocks.paymentIntentsCreate.mockResolvedValue({ id: 'pi_ns', status: 'succeeded' })
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toMatchObject({ kind: 'ATTEMPTED', status: NoShowFeeStatus.CHARGED })
+    expect(mocks.paymentIntentsCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT let a PAID deposit suppress a LATE_CANCEL fee (that gate lives in the cancel route)', async () => {
+    // The cancel route suppresses only a FORFEITED deposit and still charges when
+    // a wide-window deposit was REFUNDED (or its refund FAILED) — so charge.ts must
+    // not second-guess it by keying on depositStatus for LATE_CANCEL. The
+    // deposit-kept gate is NO_SHOW-only.
+    mocks.bookingFindUnique.mockResolvedValue(
+      bookingFixture({ depositStatus: BookingDepositStatus.PAID }),
+    )
+    mocks.paymentIntentsCreate.mockResolvedValue({ id: 'pi_lc', status: 'succeeded' })
+    const out = await assessAndChargeNoShowFee({
+      bookingId: 'bk_1',
+      reason: NoShowFeeReason.LATE_CANCEL,
+      priorStatus: BookingStatus.ACCEPTED,
+      now: new Date('2026-07-10T06:00:00.000Z'), // 12h before, inside 24h window
+    })
+    expect(out).toMatchObject({ kind: 'ATTEMPTED', status: NoShowFeeStatus.CHARGED })
+    expect(mocks.paymentIntentsCreate).toHaveBeenCalledTimes(1)
   })
 
   it('does not charge a late cancel outside the window', async () => {

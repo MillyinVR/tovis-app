@@ -1243,3 +1243,94 @@ describe('M15 POLICY — a forfeited deposit suppresses the late-cancel fee', ()
     expect(summary.message).toContain('late-cancellation fee')
   })
 })
+
+// ─── M15 POLICY analog — a kept deposit suppresses the NO_SHOW fee, driven ────
+//
+// The no-show follow-up (plan §24.7). Unlike the late-cancel path, marking a
+// no-show runs NO deposit-refund logic — a paid deposit just stays captured (PAID)
+// with the pro. So a no-show'd new-discovery client would be double-hit (deposit
+// kept + no-show fee). Tori's late-cancel call extended: a kept deposit IS the
+// no-show penalty, so it suppresses the fee. The gate lives in
+// assessAndChargeNoShowFee (NO_SHOW-scoped), driven here against real Postgres.
+
+describe('M15 POLICY — a kept deposit suppresses the NO_SHOW fee', () => {
+  it('a PAID discovery deposit suppresses the no-show fee → no charge, no row', async () => {
+    const booking = await db.booking.create({
+      data: {
+        clientId: fx.clientWithCardId,
+        professionalId: fx.professionalId,
+        serviceId: fx.serviceId,
+        scheduledFor: scheduledFor(-2), // a past appointment the client missed
+        status: BookingStatus.NO_SHOW,
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.locationId,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal('120.00'),
+        totalDurationMinutes: 60,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
+        // A captured discovery deposit the pro keeps on the no-show.
+        depositStatus: BookingDepositStatus.PAID,
+        depositStripePaymentIntentId: `pi_dep_${tag}_noshow`,
+        depositAmount: new Prisma.Decimal('20.00'),
+      },
+      select: { id: true },
+    })
+
+    const out = await assessAndChargeNoShowFee({
+      bookingId: booking.id,
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toEqual({
+      kind: 'NOT_CHARGEABLE',
+      reason: 'deposit_kept_suppresses_fee',
+    })
+    expect(stripe.create).not.toHaveBeenCalled()
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+      select: { noShowFeeStatus: true },
+    })
+    expect(row.noShowFeeStatus).toBeNull()
+  })
+
+  it('with no kept deposit (PENDING), the no-show fee IS charged', async () => {
+    const booking = await db.booking.create({
+      data: {
+        clientId: fx.clientWithCardId,
+        professionalId: fx.professionalId,
+        serviceId: fx.serviceId,
+        scheduledFor: scheduledFor(-2),
+        status: BookingStatus.NO_SHOW,
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.locationId,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal('120.00'),
+        totalDurationMinutes: 60,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
+        depositStatus: BookingDepositStatus.PENDING, // never paid → nothing kept
+        depositStripePaymentIntentId: `pi_dep_${tag}_noshow_pending`,
+        depositAmount: new Prisma.Decimal('20.00'),
+      },
+      select: { id: true },
+    })
+    stripe.create.mockResolvedValue({ id: 'pi_ns_pending', status: 'succeeded' })
+
+    const out = await assessAndChargeNoShowFee({
+      bookingId: booking.id,
+      reason: NoShowFeeReason.NO_SHOW,
+    })
+    expect(out).toMatchObject({
+      kind: 'ATTEMPTED',
+      status: NoShowFeeStatus.CHARGED,
+      amount: '25.00',
+    })
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+      select: { noShowFeeStatus: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.CHARGED)
+  })
+})

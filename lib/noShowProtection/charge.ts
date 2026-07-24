@@ -12,7 +12,12 @@
 // before any card is touched. Idempotent per booking via a stable Stripe
 // idempotency key and a CHARGED short-circuit.
 
-import { BookingStatus, NoShowFeeReason, NoShowFeeStatus } from '@prisma/client'
+import {
+  BookingDepositStatus,
+  BookingStatus,
+  NoShowFeeReason,
+  NoShowFeeStatus,
+} from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
@@ -85,6 +90,7 @@ export async function assessAndChargeNoShowFee(args: {
       scheduledFor: true,
       subtotalSnapshot: true,
       noShowFeeStatus: true,
+      depositStatus: true,
       client: {
         select: {
           stripeCustomerId: true, // pii-plaintext-read-ok: opaque Stripe billing id
@@ -138,8 +144,22 @@ export async function assessAndChargeNoShowFee(args: {
     return { kind: 'NOT_CHARGEABLE', reason: 'protection_off' }
   }
 
-  if (args.reason === NoShowFeeReason.NO_SHOW && !settings.chargeNoShow) {
-    return { kind: 'NOT_CHARGEABLE', reason: 'no_show_charging_off' }
+  if (args.reason === NoShowFeeReason.NO_SHOW) {
+    if (!settings.chargeNoShow) {
+      return { kind: 'NOT_CHARGEABLE', reason: 'no_show_charging_off' }
+    }
+    // M15 POLICY analog (Tori 2026-07-24): a kept discovery deposit IS the
+    // penalty for a no-show, so it SUPPRESSES the separate no-show fee — the
+    // same "the deposit is the penalty, don't double-charge" call made for a
+    // late-cancel forfeit (cancel route). The no-show transition never touches
+    // the deposit, so a PAID status here means the pro is keeping the captured
+    // deposit; charging a fee on top would double-penalise the client.
+    // (LATE_CANCEL is suppressed upstream in the cancel route via the FORFEITED
+    // signal, which correctly still charges when a wide-window deposit is
+    // REFUNDED or its refund FAILED — so this gate is NO_SHOW-only.)
+    if (booking.depositStatus === BookingDepositStatus.PAID) {
+      return { kind: 'NOT_CHARGEABLE', reason: 'deposit_kept_suppresses_fee' }
+    }
   }
 
   if (args.reason === NoShowFeeReason.LATE_CANCEL) {
