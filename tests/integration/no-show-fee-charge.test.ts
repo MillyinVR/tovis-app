@@ -39,7 +39,13 @@ vi.mock('@/lib/stripe/server', () => ({
 }))
 
 import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
-import { recordNoShowFeeCharge } from '@/lib/booking/writeBoundary'
+import {
+  applyStripeNoShowFeeDisputeInTransaction,
+  recordNoShowFeeCharge,
+  reconcileNoShowFeeChargeRefundInTransaction,
+} from '@/lib/booking/writeBoundary'
+import { handleStripeEvent } from '@/lib/stripe/handleWebhookEvent'
+import { asTestStripeEvent } from '@/lib/typed/stripeTestEvent'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -489,5 +495,233 @@ describe('assessAndChargeNoShowFee — late-cancel window + prior-status gate', 
       select: { noShowFeeStatus: true },
     })
     expect(row.noShowFeeStatus).toBeNull() // gate short-circuits before any write
+  })
+})
+
+// M15 GAP B — reconcile a Stripe-side refund / dispute of the fee's OWN
+// PaymentIntent against real Postgres. Drives the write-boundary reconcilers the
+// charge.refunded / charge.dispute webhook branches call. Stripe never has to be
+// hit: these functions take the amounts a webhook already carries.
+describe('reconcile no-show fee PI refund / dispute', () => {
+  /** Seed a CHARGED fee (its own PI) on a fresh booking; returns id + PI. */
+  async function chargedFeeBooking(feePi: string): Promise<string> {
+    const bookingId = await createBooking({ clientId: fx.clientWithCardId })
+    await db.booking.update({
+      where: { id: bookingId },
+      data: {
+        noShowFeeStatus: NoShowFeeStatus.CHARGED,
+        noShowFeeReason: NoShowFeeReason.NO_SHOW,
+        noShowFeeAmount: new Prisma.Decimal('25.00'),
+        noShowFeeStripePaymentIntentId: feePi,
+        noShowFeeChargedAt: new Date(),
+      },
+    })
+    return bookingId
+  }
+
+  function refundReceiptCount(): Promise<number> {
+    return db.clientNotification.count({
+      where: {
+        clientId: fx.clientWithCardId,
+        eventKey: NotificationEventKey.PAYMENT_REFUNDED,
+      },
+    })
+  }
+
+  it('a FULL refund flips CHARGED → REFUNDED, records cents, and notifies once', async () => {
+    const feePi = `pi_fee_full_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    const result = await db.$transaction((tx) =>
+      reconcileNoShowFeeChargeRefundInTransaction(tx, {
+        paymentIntentId: feePi,
+        amountRefundedCents: 2500,
+        chargeAmountCents: 2500,
+      }),
+    )
+    expect(result).toEqual({ handled: true })
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.REFUNDED)
+    expect(row.noShowFeeRefundedCents).toBe(2500)
+    expect(await refundReceiptCount()).toBe(1)
+  })
+
+  it('a PARTIAL refund stays CHARGED and only accumulates cents', async () => {
+    const feePi = `pi_fee_partial_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    await db.$transaction((tx) =>
+      reconcileNoShowFeeChargeRefundInTransaction(tx, {
+        paymentIntentId: feePi,
+        amountRefundedCents: 1000,
+        chargeAmountCents: 2500,
+      }),
+    )
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.CHARGED)
+    expect(row.noShowFeeRefundedCents).toBe(1000)
+    expect(await refundReceiptCount()).toBe(1)
+  })
+
+  it('a stale (smaller) replay never rolls the counter back or re-notifies', async () => {
+    const feePi = `pi_fee_replay_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    // Full refund first (cumulative 2500), then a stale replay reporting 1000.
+    for (const amt of [2500, 1000, 2500]) {
+      await db.$transaction((tx) =>
+        reconcileNoShowFeeChargeRefundInTransaction(tx, {
+          paymentIntentId: feePi,
+          amountRefundedCents: amt,
+          chargeAmountCents: 2500,
+        }),
+      )
+    }
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.REFUNDED)
+    expect(row.noShowFeeRefundedCents).toBe(2500) // monotonic max, never rolled back
+    expect(await refundReceiptCount()).toBe(1) // only the first rise notified
+  })
+
+  it('an unknown fee PI is a clean no-op (handled:false)', async () => {
+    const result = await db.$transaction((tx) =>
+      reconcileNoShowFeeChargeRefundInTransaction(tx, {
+        paymentIntentId: `pi_fee_absent_${tag}`,
+        amountRefundedCents: 2500,
+        chargeAmountCents: 2500,
+      }),
+    )
+    expect(result).toEqual({ handled: false })
+  })
+
+  it('a dispute freezes the fee (OPEN), keeps the earliest time, and clears on WON', async () => {
+    const feePi = `pi_fee_dispute_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    const open = await db.$transaction((tx) =>
+      applyStripeNoShowFeeDisputeInTransaction(tx, {
+        feePaymentIntentId: feePi,
+        outcome: 'OPEN',
+      }),
+    )
+    expect(open).toEqual({ bookingId })
+
+    const frozen = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeDisputedAt: true },
+    })
+    expect(frozen.noShowFeeDisputedAt).toBeInstanceOf(Date)
+    const firstDisputedAt = frozen.noShowFeeDisputedAt
+
+    // A second OPEN keeps the earliest timestamp (set-if-unset idempotency).
+    await db.$transaction((tx) =>
+      applyStripeNoShowFeeDisputeInTransaction(tx, {
+        feePaymentIntentId: feePi,
+        outcome: 'OPEN',
+      }),
+    )
+    const stillFrozen = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeDisputedAt: true },
+    })
+    expect(stillFrozen.noShowFeeDisputedAt).toEqual(firstDisputedAt)
+
+    // WON restores: the freeze clears.
+    await db.$transaction((tx) =>
+      applyStripeNoShowFeeDisputeInTransaction(tx, {
+        feePaymentIntentId: feePi,
+        outcome: 'WON',
+      }),
+    )
+    const restored = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeDisputedAt: true },
+    })
+    expect(restored.noShowFeeDisputedAt).toBeNull()
+  })
+
+  it('an unknown fee PI dispute is a clean no-op (null)', async () => {
+    const result = await db.$transaction((tx) =>
+      applyStripeNoShowFeeDisputeInTransaction(tx, {
+        feePaymentIntentId: `pi_fee_dispute_absent_${tag}`,
+        outcome: 'OPEN',
+      }),
+    )
+    expect(result).toBeNull()
+  })
+
+  // The full dispatch → reconcile → DB chain, driven through the real
+  // handleStripeEvent with NO mocks (only the Stripe HTTP signature, which the
+  // route owns, is out of scope). Proves the fee PI is resolved from a real event
+  // shape and never falls through to the final-bill applier.
+  it('drives a real charge.refunded webhook end-to-end onto the fee row', async () => {
+    const feePi = `pi_fee_e2e_refund_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    const event = asTestStripeEvent({
+      id: `evt_${tag}_refund`,
+      type: 'charge.refunded',
+      data: {
+        object: {
+          id: `ch_${tag}`,
+          object: 'charge',
+          payment_intent: feePi,
+          amount: 2500,
+          amount_refunded: 2500,
+          refunds: { data: [] },
+        },
+      },
+    })
+
+    const result = await db.$transaction((tx) => handleStripeEvent(tx, event))
+    expect(result.handled).toBe(true)
+    expect(result.message).toContain('no-show fee')
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeRefundedCents: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.REFUNDED)
+    expect(row.noShowFeeRefundedCents).toBe(2500)
+  })
+
+  it('drives a real charge.dispute.created webhook end-to-end onto the fee row', async () => {
+    const feePi = `pi_fee_e2e_dispute_${tag}`
+    const bookingId = await chargedFeeBooking(feePi)
+
+    const event = asTestStripeEvent({
+      id: `evt_${tag}_dispute`,
+      type: 'charge.dispute.created',
+      data: {
+        object: {
+          id: `dp_${tag}`,
+          object: 'dispute',
+          payment_intent: feePi,
+          status: 'warning_needs_response',
+        },
+      },
+    })
+
+    const result = await db.$transaction((tx) => handleStripeEvent(tx, event))
+    expect(result.handled).toBe(true)
+    expect(result.message).toContain('no-show fee')
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeDisputedAt: true },
+    })
+    expect(row.noShowFeeDisputedAt).toBeInstanceOf(Date)
   })
 })

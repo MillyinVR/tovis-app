@@ -72,6 +72,8 @@ export const MONEY_TRAIL_SELECT = {
   noShowFeeReason: true,
   noShowFeeAmount: true,
   noShowFeeChargedAt: true,
+  noShowFeeRefundedCents: true,
+  noShowFeeDisputedAt: true,
 
   refunds: {
     select: {
@@ -150,6 +152,18 @@ export type BookingMoneyTrail = {
     amountCents: number | null
     chargedAt: string | null
     markedAt: string | null
+    /**
+     * Stripe's cumulative refund on the fee's OWN PaymentIntent (integer cents).
+     * A FULL refund also flips `status` to REFUNDED; a sub-fee partial stays
+     * CHARGED and only accumulates here. See M15 GAP B.
+     */
+    refundedCents: number
+    /**
+     * Set while the fee charge is under (or lost) a Stripe dispute — the fee rides
+     * its own PI, so a chargeback never touches `stripePaymentStatus`. Cleared if
+     * the dispute is WON. A disputed fee must not read as money safely collected.
+     */
+    disputedAt: string | null
   } | null
   refunds: MoneyTrailRefund[]
   summary: {
@@ -225,6 +239,8 @@ export function assembleMoneyTrail(row: MoneyTrailBookingRow): BookingMoneyTrail
           amountCents: decimalToCents(row.noShowFeeAmount),
           chargedAt: toIso(row.noShowFeeChargedAt),
           markedAt: toIso(row.noShowMarkedAt),
+          refundedCents: row.noShowFeeRefundedCents,
+          disputedAt: toIso(row.noShowFeeDisputedAt),
         }
 
   const refunds: MoneyTrailRefund[] = row.refunds.map((r) => ({

@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   applyStripeCheckoutSessionStatusInTransaction: vi.fn(),
   applyStripeDepositSucceededInTransaction: vi.fn(),
   reconcileDepositChargeRefundInTransaction: vi.fn(),
+  reconcileNoShowFeeChargeRefundInTransaction: vi.fn(),
   reconcileChargeRefundInTransaction: vi.fn(),
 
   applyLateCaptureCancelRefund: vi.fn(),
@@ -75,6 +76,8 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
     mocks.applyStripeDepositSucceededInTransaction,
   reconcileDepositChargeRefundInTransaction:
     mocks.reconcileDepositChargeRefundInTransaction,
+  reconcileNoShowFeeChargeRefundInTransaction:
+    mocks.reconcileNoShowFeeChargeRefundInTransaction,
   DISCOVERY_DEPOSIT_CHECKOUT_KIND: 'DISCOVERY_DEPOSIT',
   NO_SHOW_FEE_CHARGE_KIND: 'NO_SHOW_FEE',
 }))
@@ -307,6 +310,10 @@ describe('POST /api/webhooks/stripe', () => {
     })
 
     mocks.reconcileDepositChargeRefundInTransaction.mockResolvedValue({
+      handled: false,
+    })
+
+    mocks.reconcileNoShowFeeChargeRefundInTransaction.mockResolvedValue({
       handled: false,
     })
 

@@ -124,6 +124,8 @@ function noShowStatusTone(status: NoShowFeeStatus): Tone {
     case NoShowFeeStatus.FAILED:
       return 'danger'
     case NoShowFeeStatus.WAIVED:
+    case NoShowFeeStatus.REFUNDED:
+      // Money that is no longer with the pro — neutral, never green money-in.
       return 'muted'
     default:
       return 'muted'
@@ -201,21 +203,32 @@ function buildEntries(trail: BookingMoneyTrail): TrailEntry[] {
 
   if (trail.noShowFee) {
     const n = trail.noShowFee
+    // A disputed fee has had its funds pulled by Stripe even though the fee still
+    // reads CHARGED (the fee rides its own PaymentIntent) — it must read as money
+    // at risk, not money safely collected, mirroring the deposit/final-bill rows.
+    const disputed = n.disputedAt != null
     entries.push({
       key: 'no-show-fee',
       label: `${noShowReasonLabel(n.reason)} fee`,
-      detail:
-        n.status === NoShowFeeStatus.FAILED
-          ? 'Charge failed — card declined'
-          : n.status === NoShowFeeStatus.WAIVED
-            ? 'Waived'
-            : n.status === NoShowFeeStatus.SKIPPED
-              ? 'Not charged'
-              : null,
+      detail: disputed
+        ? 'Payment disputed'
+        : n.status === NoShowFeeStatus.REFUNDED
+          ? 'Refunded'
+          : n.refundedCents > 0
+            ? `${money(n.refundedCents, currency)} refunded`
+            : n.status === NoShowFeeStatus.FAILED
+              ? 'Charge failed — card declined'
+              : n.status === NoShowFeeStatus.WAIVED
+                ? 'Waived'
+                : n.status === NoShowFeeStatus.SKIPPED
+                  ? 'Not charged'
+                  : null,
       amount: money(n.amountCents, currency),
-      flow: n.status === NoShowFeeStatus.CHARGED ? 'in' : 'none',
-      tone: noShowStatusTone(n.status),
-      status: n.status,
+      // Money is only "in" once the fee was actually CHARGED and is not under
+      // dispute (a refunded/disputed fee is no longer money the pro holds).
+      flow: !disputed && n.status === NoShowFeeStatus.CHARGED ? 'in' : 'none',
+      tone: disputed ? 'danger' : noShowStatusTone(n.status),
+      status: disputed ? 'DISPUTED' : n.status,
       at: n.chargedAt ?? n.markedAt,
     })
   }

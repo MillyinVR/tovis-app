@@ -185,11 +185,12 @@ export function captureOverlapBackstopFired(input: {
  * platform — so a human must see every one. Fired on dispute OPEN and LOST; a
  * won dispute (which restores the payment) does not alert.
  *
- * `flavor` distinguishes the two charges a booking can carry: the final-bill PI
- * (`SERVICE`, default) and the up-front discovery deposit's OWN PI (`DEPOSIT`).
- * A deposit dispute is a distinct money-path with its own freeze, so it carries
- * a distinct log identity (`stripe_deposit_dispute`) while the SERVICE identity
- * (`stripe_dispute`) stays unchanged for existing alerting.
+ * `flavor` distinguishes the charges a booking can carry: the final-bill PI
+ * (`SERVICE`, default), the up-front discovery deposit's OWN PI (`DEPOSIT`), and
+ * the no-show / late-cancel fee's OWN PI (`NO_SHOW_FEE`). Each is a distinct
+ * money-path with its own freeze, so each carries a distinct log identity
+ * (`stripe_deposit_dispute` / `stripe_no_show_fee_dispute`) while the SERVICE
+ * identity (`stripe_dispute`) stays unchanged for existing alerting.
  */
 export function captureStripeDisputeAlert(input: {
   bookingId: string
@@ -198,11 +199,20 @@ export function captureStripeDisputeAlert(input: {
   disputeStatus: string
   outcome: 'OPEN' | 'WON' | 'LOST'
   eventType: string
-  flavor: 'SERVICE' | 'DEPOSIT'
+  flavor: 'SERVICE' | 'DEPOSIT' | 'NO_SHOW_FEE'
 }): void {
   const logEvent =
-    input.flavor === 'DEPOSIT' ? 'stripe_deposit_dispute' : 'stripe_dispute'
-  const label = input.flavor === 'DEPOSIT' ? 'Stripe deposit dispute' : 'Stripe dispute'
+    input.flavor === 'DEPOSIT'
+      ? 'stripe_deposit_dispute'
+      : input.flavor === 'NO_SHOW_FEE'
+        ? 'stripe_no_show_fee_dispute'
+        : 'stripe_dispute'
+  const label =
+    input.flavor === 'DEPOSIT'
+      ? 'Stripe deposit dispute'
+      : input.flavor === 'NO_SHOW_FEE'
+        ? 'Stripe no-show fee dispute'
+        : 'Stripe dispute'
 
   Sentry.withScope((scope) => {
     scope.setLevel('error')

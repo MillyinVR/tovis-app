@@ -20,9 +20,11 @@ import {
   applyStripeDepositDisputeInTransaction,
   applyStripeDepositSucceededInTransaction,
   applyStripeDisputeInTransaction,
+  applyStripeNoShowFeeDisputeInTransaction,
   applyStripePaymentFailedInTransaction,
   applyStripePaymentSucceededInTransaction,
   reconcileDepositChargeRefundInTransaction,
+  reconcileNoShowFeeChargeRefundInTransaction,
   DISCOVERY_DEPOSIT_CHECKOUT_KIND,
   NO_SHOW_FEE_CHARGE_KIND,
   type StripeDisputeOutcome,
@@ -382,16 +384,33 @@ async function handleChargeRefunded(
     }
   }
 
+  const amountRefundedCents =
+    typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0
+  const chargeAmountCents = typeof charge.amount === 'number' ? charge.amount : 0
+
   // Deposit refunds ride a separate PaymentIntent — reconcile those first.
   const depositResult = await reconcileDepositChargeRefundInTransaction(tx, {
     paymentIntentId,
-    amountRefundedCents:
-      typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0,
-    chargeAmountCents: typeof charge.amount === 'number' ? charge.amount : 0,
+    amountRefundedCents,
+    chargeAmountCents,
   })
 
   if (depositResult.handled) {
     return { handled: true, message: 'charge.refunded reconciled deposit.' }
+  }
+
+  // The no-show / late-cancel fee also rides its OWN PaymentIntent (M15 GAP B).
+  // A fee-PI refund never matches the final-bill reconcile below (it resolves by
+  // stripePaymentIntentId), so try it here before falling through — the three PI
+  // kinds are disjoint, so at most one of these branches ever handles a charge.
+  const noShowFeeResult = await reconcileNoShowFeeChargeRefundInTransaction(tx, {
+    paymentIntentId,
+    amountRefundedCents,
+    chargeAmountCents,
+  })
+
+  if (noShowFeeResult.handled) {
+    return { handled: true, message: 'charge.refunded reconciled no-show fee.' }
   }
 
   // Shared mapper with the hourly reconciliation sweep (lib/booking/refunds) so
@@ -401,9 +420,8 @@ async function handleChargeRefunded(
 
   const result = await reconcileChargeRefundInTransaction(tx, {
     paymentIntentId,
-    amountRefundedCents:
-      typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0,
-    chargeAmountCents: typeof charge.amount === 'number' ? charge.amount : 0,
+    amountRefundedCents,
+    chargeAmountCents,
     refunds,
   })
 
@@ -506,6 +524,31 @@ export async function handleChargeDispute(
       })
     }
     return { handled: true, message: `${eventType} applied to deposit (${outcome}).` }
+  }
+
+  // The no-show / late-cancel fee rides its OWN PI too (M15 GAP B) — its own
+  // freeze on noShowFeeDisputedAt, distinct from the service/deposit freezes.
+  const noShowFeeResult = await applyStripeNoShowFeeDisputeInTransaction(tx, {
+    feePaymentIntentId: paymentIntentId,
+    outcome,
+  })
+
+  if (noShowFeeResult) {
+    if (alerting) {
+      captureStripeDisputeAlert({
+        bookingId: noShowFeeResult.bookingId,
+        paymentIntentId,
+        disputeId: dispute.id,
+        disputeStatus: dispute.status,
+        outcome,
+        eventType,
+        flavor: 'NO_SHOW_FEE',
+      })
+    }
+    return {
+      handled: true,
+      message: `${eventType} applied to no-show fee (${outcome}).`,
+    }
   }
 
   return { handled: false, message: `${eventType} booking not found.` }

@@ -54,6 +54,8 @@ function makeRow(overrides?: Partial<MoneyTrailBookingRow>): MoneyTrailBookingRo
     noShowFeeReason: null,
     noShowFeeAmount: null,
     noShowFeeChargedAt: null,
+    noShowFeeRefundedCents: 0,
+    noShowFeeDisputedAt: null,
 
     refunds: [],
   }
@@ -210,6 +212,8 @@ describe('assembleMoneyTrail', () => {
       amountCents: 3500,
       chargedAt: null,
       markedAt: '2026-04-12T18:30:00.000Z',
+      refundedCents: 0,
+      disputedAt: null,
     })
     expect(failed.capabilities.canWaiveNoShowFee).toBe(true)
 
@@ -217,12 +221,50 @@ describe('assembleMoneyTrail', () => {
       NoShowFeeStatus.CHARGED,
       NoShowFeeStatus.SKIPPED,
       NoShowFeeStatus.WAIVED,
+      NoShowFeeStatus.REFUNDED,
     ]) {
       const trail = assembleMoneyTrail(makeRow({ noShowFeeStatus: status }))
       expect(trail.capabilities.canWaiveNoShowFee).toBe(false)
     }
 
     expect(assembleMoneyTrail(makeRow()).noShowFee).toBeNull()
+  })
+
+  // M15 GAP B — the fee's refund / dispute honesty fields surface on the DTO so
+  // both money-display surfaces can read a reversed fee as no longer collected.
+  it('surfaces the no-show fee refund + dispute reconciliation fields', () => {
+    const refunded = assembleMoneyTrail(
+      makeRow({
+        noShowFeeStatus: NoShowFeeStatus.REFUNDED,
+        noShowFeeReason: NoShowFeeReason.LATE_CANCEL,
+        noShowFeeAmount: new Prisma.Decimal(25),
+        noShowFeeChargedAt: new Date('2026-04-12T18:30:00.000Z'),
+        noShowFeeRefundedCents: 2500,
+      }),
+    )
+    expect(refunded.noShowFee).toMatchObject({
+      status: NoShowFeeStatus.REFUNDED,
+      amountCents: 2500,
+      refundedCents: 2500,
+      disputedAt: null,
+    })
+    // A refunded fee is not waivable in-app (a CHARGED-then-refunded fee moved money).
+    expect(refunded.capabilities.canWaiveNoShowFee).toBe(false)
+
+    const disputed = assembleMoneyTrail(
+      makeRow({
+        noShowFeeStatus: NoShowFeeStatus.CHARGED,
+        noShowFeeReason: NoShowFeeReason.NO_SHOW,
+        noShowFeeAmount: new Prisma.Decimal(25),
+        noShowFeeChargedAt: new Date('2026-04-12T18:30:00.000Z'),
+        noShowFeeDisputedAt: new Date('2026-04-15T09:00:00.000Z'),
+      }),
+    )
+    expect(disputed.noShowFee).toMatchObject({
+      status: NoShowFeeStatus.CHARGED,
+      refundedCents: 0,
+      disputedAt: '2026-04-15T09:00:00.000Z',
+    })
   })
 
   it('defaults a missing currency to usd', () => {
