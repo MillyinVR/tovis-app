@@ -267,6 +267,60 @@ describe('assembleMoneyTrail', () => {
     })
   })
 
+  // M15 GAP A — an in-app fee refund is offered only for a CHARGED fee that still
+  // has an unrefunded balance and is not frozen by a dispute.
+  it('allows refunding a no-show fee only for a CHARGED, non-disputed fee with a balance', () => {
+    const chargeable = assembleMoneyTrail(
+      makeRow({
+        noShowFeeStatus: NoShowFeeStatus.CHARGED,
+        noShowFeeReason: NoShowFeeReason.NO_SHOW,
+        noShowFeeAmount: new Prisma.Decimal(25),
+        noShowFeeChargedAt: new Date('2026-04-12T18:30:00.000Z'),
+      }),
+    )
+    expect(chargeable.capabilities.canRefundNoShowFee).toBe(true)
+
+    // A disputed CHARGED fee is frozen — never invite a refund the boundary rejects.
+    const disputed = assembleMoneyTrail(
+      makeRow({
+        noShowFeeStatus: NoShowFeeStatus.CHARGED,
+        noShowFeeAmount: new Prisma.Decimal(25),
+        noShowFeeDisputedAt: new Date('2026-04-15T09:00:00.000Z'),
+      }),
+    )
+    expect(disputed.capabilities.canRefundNoShowFee).toBe(false)
+
+    // A CHARGED fee already fully returned (Dashboard partial reached the total but
+    // the status flip hasn't landed) has no remaining balance to refund.
+    const noBalance = assembleMoneyTrail(
+      makeRow({
+        noShowFeeStatus: NoShowFeeStatus.CHARGED,
+        noShowFeeAmount: new Prisma.Decimal(25),
+        noShowFeeRefundedCents: 2500,
+      }),
+    )
+    expect(noBalance.capabilities.canRefundNoShowFee).toBe(false)
+
+    // Every other status is non-refundable (REFUNDED / WAIVED / SKIPPED / FAILED / none).
+    for (const status of [
+      NoShowFeeStatus.REFUNDED,
+      NoShowFeeStatus.WAIVED,
+      NoShowFeeStatus.SKIPPED,
+      NoShowFeeStatus.FAILED,
+    ]) {
+      const trail = assembleMoneyTrail(
+        makeRow({
+          noShowFeeStatus: status,
+          noShowFeeAmount: new Prisma.Decimal(25),
+        }),
+      )
+      expect(trail.capabilities.canRefundNoShowFee).toBe(false)
+    }
+    expect(
+      assembleMoneyTrail(makeRow()).capabilities.canRefundNoShowFee,
+    ).toBe(false)
+  })
+
   it('defaults a missing currency to usd', () => {
     const trail = assembleMoneyTrail(makeRow({ stripeCurrency: null }))
     expect(trail.currency).toBe('usd')

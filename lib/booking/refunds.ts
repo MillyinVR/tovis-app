@@ -24,6 +24,7 @@ import {
   BookingDepositStatus,
   BookingRefundStatus,
   BookingRefundTrigger,
+  NoShowFeeStatus,
   PaymentProvider,
   Prisma,
   Role,
@@ -37,6 +38,7 @@ import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
 import { safeError } from '@/lib/security/logging'
 import { emitPaymentRefundedNotifications } from '@/lib/notifications/paymentNotifications'
+import { noShowFeeAmountToCents } from '@/lib/noShowProtection/fee'
 
 // Distinct from the schedule lock namespace (scheduleLock.ts = 41021) so refund
 // serialization never contends with booking-schedule locks.
@@ -683,6 +685,276 @@ export async function refundDiscoveryDeposit(args: {
       outcome: 'FAILED',
       message: failureMessage,
     }
+  }
+}
+
+export type NoShowFeeRefundCode =
+  | 'NO_SHOW_FEE_NOT_REFUNDABLE'
+  | 'NO_SHOW_FEE_ALREADY_REFUNDED'
+  | 'NO_SHOW_FEE_REFUND_FROZEN_DISPUTED'
+
+export type NoShowFeeRefundResult =
+  | { outcome: 'REFUNDED'; refundAmountCents: number }
+  | { outcome: 'NOT_ATTEMPTED'; code: NoShowFeeRefundCode }
+  | { outcome: 'FAILED'; message: string }
+
+/**
+ * Refund a CHARGED no-show / late-cancel fee on its OWN PaymentIntent (M15 GAP A).
+ * The fee rides a destination charge distinct from the final-bill PI and the
+ * deposit PI (lib/noShowProtection/charge.ts), so this is the WRITE mirror of the
+ * GAP B read/reconcile: it advances `noShowFeeRefundedCents` and flips the fee to
+ * REFUNDED, then reverses the charge on Stripe with `reverse_transfer:true` to
+ * claw the fee back off the pro (the fee charge carries no application fee, so
+ * `refund_application_fee` is never needed).
+ *
+ * Full-refund-only: a pro who charged a client in error returns the WHOLE
+ * remaining fee (one small charge — a partial split buys nothing here, and
+ * "give it all back" is the only discretionary remedy). Idempotent: claims the
+ * fee row (CHARGED -> REFUNDED) before calling Stripe under the per-booking refund
+ * lock, and a deterministic idempotency key carrying the pre-refund cumulative
+ * makes retries safe. Emits the refund receipt itself with GAP B's exact
+ * discriminator so the later `charge.refunded` webhook sees no cumulative rise and
+ * stays silent (never double-notifies) — mirrors refundDiscoveryDeposit.
+ *
+ * REFUSES (NOT_ATTEMPTED) when the fee never moved money (not CHARGED — a FAILED
+ * fee is waived, not refunded), is already fully refunded, or is frozen under a
+ * Stripe dispute (a chargeback already pulled the funds — our refund on top would
+ * double-return; mirrors the deposit dispute freeze).
+ */
+export async function refundNoShowFee(args: {
+  bookingId: string
+  actor?: RefundActor | null
+  reason?: string | null
+}): Promise<NoShowFeeRefundResult> {
+  // Reserve the refund atomically under the per-booking refund lock: read the fee
+  // state, then flip CHARGED -> REFUNDED and advance the cumulative refunded cents
+  // in the SAME transaction so a concurrent caller can't both claim the fee.
+  const claim = await prisma.$transaction(async (tx) => {
+    await lockBookingForRefund(tx, args.bookingId)
+
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: {
+        noShowFeeStatus: true,
+        noShowFeeAmount: true,
+        noShowFeeRefundedCents: true,
+        noShowFeeDisputedAt: true,
+        noShowFeeStripePaymentIntentId: true,
+      },
+    })
+
+    if (!booking) {
+      return { ok: false as const, code: 'NO_SHOW_FEE_NOT_REFUNDABLE' as const }
+    }
+
+    // Already fully refunded — in-app already, or reconciled from a Dashboard
+    // refund by GAP B (which flips the status to REFUNDED at full). Nothing left.
+    if (booking.noShowFeeStatus === NoShowFeeStatus.REFUNDED) {
+      return { ok: false as const, code: 'NO_SHOW_FEE_ALREADY_REFUNDED' as const }
+    }
+
+    // Only a CHARGED fee moved money to give back. SKIPPED never charged; a FAILED
+    // fee is forgiven via waiveNoShowFee (no money moved); WAIVED is settled. Guard
+    // the PI + amount too so we never call Stripe without a charge to reverse.
+    if (
+      booking.noShowFeeStatus !== NoShowFeeStatus.CHARGED ||
+      !booking.noShowFeeStripePaymentIntentId ||
+      !booking.noShowFeeAmount
+    ) {
+      return { ok: false as const, code: 'NO_SHOW_FEE_NOT_REFUNDABLE' as const }
+    }
+
+    // Frozen while the fee charge is under (or lost) a Stripe dispute: the
+    // chargeback already pulled the fee and reversed the transfer off the pro, so
+    // issuing our own refund would double-return the fee. A WON dispute clears
+    // noShowFeeDisputedAt (applyStripeNoShowFeeDisputeInTransaction), re-opening
+    // refunds; a LOST dispute keeps it frozen forever (the money is already gone).
+    // Mirrors refundDiscoveryDeposit's deposit freeze with a distinct log identity.
+    if (booking.noShowFeeDisputedAt) {
+      return {
+        ok: false as const,
+        code: 'NO_SHOW_FEE_REFUND_FROZEN_DISPUTED' as const,
+        disputed: true as const,
+      }
+    }
+
+    const feeCents = noShowFeeAmountToCents(booking.noShowFeeAmount)
+    const alreadyRefunded = booking.noShowFeeRefundedCents
+    const remaining = feeCents - alreadyRefunded
+
+    // Nothing left to give back (a Dashboard partial already brought it whole).
+    if (remaining <= 0) {
+      return { ok: false as const, code: 'NO_SHOW_FEE_ALREADY_REFUNDED' as const }
+    }
+
+    // Full-refund-only: return the entire remaining balance and flip to REFUNDED.
+    // The fee is a single destination charge, so the cumulative reaching the charge
+    // total IS a full refund — there is no deposit-portion split (unlike the
+    // deposit charge, which bundles the platform fee).
+    const nextRefunded = alreadyRefunded + remaining
+
+    await tx.booking.update({
+      where: { id: args.bookingId },
+      data: {
+        noShowFeeRefundedCents: nextRefunded,
+        noShowFeeStatus: NoShowFeeStatus.REFUNDED,
+      },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+
+    return {
+      ok: true as const,
+      paymentIntentId: booking.noShowFeeStripePaymentIntentId,
+      refundAmountCents: remaining,
+      alreadyRefunded,
+    }
+  })
+
+  if (!claim.ok) {
+    if (claim.code === 'NO_SHOW_FEE_REFUND_FROZEN_DISPUTED') {
+      // The freeze fired: a refund was requested against a fee whose charge is
+      // under (or lost) a Stripe dispute. Benign — the dispute already paged
+      // (captureStripeDisputeAlert) — but log it with a distinct identity so the
+      // refusal is visible and not mistaken for "nothing to refund".
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          app: 'tovis',
+          namespace: 'payments',
+          event: 'no_show_fee_refund_frozen_disputed',
+          bookingId: args.bookingId,
+        }),
+      )
+    }
+    return { outcome: 'NOT_ATTEMPTED', code: claim.code }
+  }
+
+  try {
+    const stripe = getStripe()
+    const stripeRefund = await stripe.refunds.create(
+      {
+        payment_intent: claim.paymentIntentId,
+        amount: claim.refundAmountCents,
+        reverse_transfer: true,
+        metadata: {
+          bookingId: args.bookingId,
+          kind: 'NO_SHOW_FEE_REFUND',
+          trigger: BookingRefundTrigger.DISCRETIONARY,
+        },
+      },
+      // Per-refund key (carries the pre-refund cumulative) so a retry of THIS
+      // refund stays idempotent; a second refund on a fully-refunded fee is
+      // refused at the claim above, so keys never collide across distinct refunds.
+      {
+        idempotencyKey: `tovis:no-show-fee-refund:${args.bookingId}:${claim.alreadyRefunded}`,
+      },
+    )
+
+    // Durable SUCCEEDED row on the FEE PI. M3's per-PI reservation math scopes
+    // every aggregate by stripePaymentIntentId, so this fee-PI row never shrinks
+    // the service or deposit refundable remainders.
+    await prisma.bookingRefund.create({
+      data: {
+        bookingId: args.bookingId,
+        amountCents: claim.refundAmountCents,
+        currency: 'usd',
+        status: BookingRefundStatus.SUCCEEDED,
+        trigger: BookingRefundTrigger.DISCRETIONARY,
+        reverseTransfer: true,
+        applicationFeeRefunded: false,
+        stripeRefundId: stripeRefund.id,
+        stripePaymentIntentId: claim.paymentIntentId,
+        initiatedByUserId: args.actor?.userId ?? null,
+        initiatedByRole: args.actor?.role ?? null,
+        reason: args.reason ?? null,
+      },
+    })
+
+    // Refund receipt (M6), best-effort so a receipt failure can never unwind a
+    // completed refund. GAP B's exact discriminator carries the post-refund
+    // cumulative, so when the fee `charge.refunded` webhook later lands,
+    // reconcileNoShowFeeChargeRefundInTransaction sees no cumulative rise and stays
+    // silent — the client is notified exactly once. Mirrors refundDiscoveryDeposit.
+    const refundedCumulativeCents = claim.alreadyRefunded + claim.refundAmountCents
+    try {
+      await prisma.$transaction((tx) =>
+        emitPaymentRefundedNotifications({
+          tx,
+          bookingId: args.bookingId,
+          refundDiscriminator: `no-show-fee:${claim.paymentIntentId}:${refundedCumulativeCents}`,
+          amountRefundedCents: claim.refundAmountCents,
+        }),
+      )
+    } catch (notifyError) {
+      console.error('refundNoShowFee: refund receipt emit failed', {
+        bookingId: args.bookingId,
+        error: safeError(notifyError),
+      })
+      Sentry.captureException(notifyError)
+    }
+
+    return { outcome: 'REFUNDED', refundAmountCents: claim.refundAmountCents }
+  } catch (error) {
+    const failureCode =
+      error instanceof Stripe.errors.StripeError ? error.code ?? error.type : null
+    const failureMessage =
+      error instanceof Error ? error.message : 'No-show fee refund failed.'
+
+    // Release the reservation — restore CHARGED + decrement the cents this call
+    // added — and record a durable FAILED row in the SAME transaction: the
+    // rollback alone leaves no trace, which would make a failed fee refund
+    // invisible in the money trail. Under the lock so a concurrent refund sees a
+    // consistent counter. No retry sweep re-drives this: the row is DISCRETIONARY
+    // (the sweep only retries AUTO_CANCELLATION) and the fee PI classifies to
+    // neither the service nor deposit flavor — a failed discretionary fee refund
+    // has a human owner.
+    try {
+      await prisma.$transaction(async (tx) => {
+        await lockBookingForRefund(tx, args.bookingId)
+        await tx.booking.update({
+          where: { id: args.bookingId },
+          data: {
+            noShowFeeRefundedCents: { decrement: claim.refundAmountCents },
+            noShowFeeStatus: NoShowFeeStatus.CHARGED,
+          },
+          select: { id: true } satisfies Prisma.BookingSelect,
+        })
+        await tx.bookingRefund.create({
+          data: {
+            bookingId: args.bookingId,
+            amountCents: claim.refundAmountCents,
+            currency: 'usd',
+            status: BookingRefundStatus.FAILED,
+            trigger: BookingRefundTrigger.DISCRETIONARY,
+            reverseTransfer: true,
+            applicationFeeRefunded: false,
+            initiatedByUserId: args.actor?.userId ?? null,
+            initiatedByRole: args.actor?.role ?? null,
+            reason: args.reason ?? null,
+            stripePaymentIntentId: claim.paymentIntentId,
+            failureCode,
+            failureMessage: failureMessage.slice(0, 500),
+          },
+        })
+      })
+    } catch (rollbackError) {
+      // Double fault: the rollback itself failed. noShowFeeRefundedCents is
+      // stranded claiming cents the client never received, and no FAILED row
+      // exists — a human must reconcile this booking.
+      console.error('refundNoShowFee: reservation rollback failed', {
+        bookingId: args.bookingId,
+        error: safeError(rollbackError),
+      })
+      Sentry.captureException(rollbackError)
+    }
+
+    console.error('refundNoShowFee: Stripe refund failed', {
+      bookingId: args.bookingId,
+      error: safeError(error),
+    })
+    Sentry.captureException(error)
+
+    return { outcome: 'FAILED', message: failureMessage }
   }
 }
 
