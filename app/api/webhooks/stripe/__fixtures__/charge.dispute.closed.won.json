@@ -1,0 +1,48 @@
+{
+  "id": "evt_1PwireDisputeClosedWon0000",
+  "object": "event",
+  "api_version": "2026-04-22.dahlia",
+  "created": 1795003000,
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": {
+    "id": null,
+    "idempotency_key": null
+  },
+  "type": "charge.dispute.closed",
+  "data": {
+    "object": {
+      "id": "dp_wire_service_1",
+      "object": "dispute",
+      "amount": 13500,
+      "balance_transactions": [
+        {
+          "id": "txn_wire_dispute_won_1",
+          "object": "balance_transaction",
+          "amount": 13500,
+          "currency": "usd",
+          "fee": 0,
+          "net": 13500,
+          "reporting_category": "dispute_reversal",
+          "status": "available",
+          "type": "adjustment"
+        }
+      ],
+      "charge": "ch_wire_service_1",
+      "created": 1795001999,
+      "currency": "usd",
+      "evidence_details": {
+        "due_by": 1796000000,
+        "has_evidence": true,
+        "past_due": false,
+        "submission_count": 1
+      },
+      "is_charge_refundable": false,
+      "livemode": false,
+      "metadata": {},
+      "payment_intent": "pi_wire_service_1",
+      "reason": "fraudulent",
+      "status": "won"
+    }
+  }
+}

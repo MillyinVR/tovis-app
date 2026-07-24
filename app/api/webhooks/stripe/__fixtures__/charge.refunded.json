@@ -1,0 +1,137 @@
+{
+  "id": "evt_1PwireRefunded000000000000",
+  "object": "event",
+  "api_version": "2026-04-22.dahlia",
+  "created": 1795001000,
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": {
+    "id": "req_wire_charge_refunded",
+    "idempotency_key": null
+  },
+  "type": "charge.refunded",
+  "data": {
+    "object": {
+      "id": "ch_wire_service_1",
+      "object": "charge",
+      "amount": 13500,
+      "amount_captured": 13500,
+      "amount_refunded": 13500,
+      "application": "ca_WirePlatform000000000000",
+      "application_fee": "fee_wire_1",
+      "application_fee_amount": 675,
+      "balance_transaction": "txn_wire_1",
+      "billing_details": {
+        "address": {
+          "city": null,
+          "country": "US",
+          "line1": null,
+          "line2": null,
+          "postal_code": "94103",
+          "state": null
+        },
+        "email": "client@example.com",
+        "name": "Wire Client",
+        "phone": null
+      },
+      "calculated_statement_descriptor": "TOVIS",
+      "captured": true,
+      "created": 1794999992,
+      "currency": "usd",
+      "customer": "cus_WireClient00000001",
+      "description": "Tovis booking booking_wire_1",
+      "destination": "acct_WirePro000000001",
+      "dispute": null,
+      "disputed": false,
+      "failure_balance_transaction": null,
+      "failure_code": null,
+      "failure_message": null,
+      "fraud_details": {},
+      "livemode": false,
+      "metadata": {
+        "bookingId": "booking_wire_1",
+        "clientId": "client_wire_1",
+        "professionalId": "pro_wire_1"
+      },
+      "on_behalf_of": "acct_WirePro000000001",
+      "outcome": {
+        "network_status": "approved_by_network",
+        "reason": null,
+        "risk_level": "normal",
+        "risk_score": 12,
+        "seller_message": "Payment complete.",
+        "type": "authorized"
+      },
+      "paid": true,
+      "payment_intent": "pi_wire_service_1",
+      "payment_method": "pm_wire_card_1",
+      "payment_method_details": {
+        "card": {
+          "brand": "visa",
+          "country": "US",
+          "exp_month": 12,
+          "exp_year": 2031,
+          "fingerprint": "WireFingerprint01",
+          "funding": "credit",
+          "last4": "4242",
+          "network": "visa",
+          "three_d_secure": null,
+          "wallet": null
+        },
+        "type": "card"
+      },
+      "receipt_email": null,
+      "receipt_number": null,
+      "receipt_url": "https://pay.stripe.com/receipts/wire/ch_wire_service_1",
+      "refunded": true,
+      "refunds": {
+        "object": "list",
+        "data": [
+          {
+            "id": "re_wire_service_1",
+            "object": "refund",
+            "amount": 13500,
+            "balance_transaction": "txn_wire_refund_1",
+            "charge": "ch_wire_service_1",
+            "created": 1795000999,
+            "currency": "usd",
+            "destination_details": {
+              "card": {
+                "reference_status": "pending",
+                "reference_type": "acquirer_reference_number",
+                "type": "refund"
+              },
+              "type": "card"
+            },
+            "metadata": {
+              "bookingId": "booking_wire_1",
+              "bookingRefundId": "bref_wire_1",
+              "trigger": "AUTO_CANCELLATION"
+            },
+            "payment_intent": "pi_wire_service_1",
+            "reason": null,
+            "receipt_number": null,
+            "source_transfer_reversal": null,
+            "status": "succeeded",
+            "transfer_reversal": "trr_wire_1"
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/charges/ch_wire_service_1/refunds"
+      },
+      "review": null,
+      "shipping": null,
+      "source_transfer": null,
+      "statement_descriptor": null,
+      "statement_descriptor_suffix": null,
+      "status": "succeeded",
+      "transfer": "tr_wire_1",
+      "transfer_data": {
+        "amount": null,
+        "destination": "acct_WirePro000000001"
+      },
+      "transfer_group": "booking_wire_1"
+    }
+  }
+}
