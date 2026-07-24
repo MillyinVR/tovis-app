@@ -25,6 +25,7 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   applyStripePaymentSucceededInTransaction: vi.fn(),
   reconcileDepositChargeRefundInTransaction: vi.fn(),
   DISCOVERY_DEPOSIT_CHECKOUT_KIND: 'DISCOVERY_DEPOSIT',
+  NO_SHOW_FEE_CHARGE_KIND: 'NO_SHOW_FEE',
 }))
 
 vi.mock('@/lib/booking/refunds', () => ({

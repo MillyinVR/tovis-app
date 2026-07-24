@@ -70,6 +70,7 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   reconcileDepositChargeRefundInTransaction:
     mocks.reconcileDepositChargeRefundInTransaction,
   DISCOVERY_DEPOSIT_CHECKOUT_KIND: 'DISCOVERY_DEPOSIT',
+  NO_SHOW_FEE_CHARGE_KIND: 'NO_SHOW_FEE',
 }))
 
 vi.mock('@/lib/membership/syncSubscription', () => ({

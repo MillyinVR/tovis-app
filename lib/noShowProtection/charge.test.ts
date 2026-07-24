@@ -26,6 +26,7 @@ vi.mock('@/lib/stripe/server', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   recordNoShowFeeCharge: mocks.recordNoShowFeeCharge,
+  NO_SHOW_FEE_CHARGE_KIND: 'NO_SHOW_FEE',
 }))
 
 vi.mock('@/lib/noShowProtection/flag', () => ({
@@ -197,6 +198,9 @@ describe('assessAndChargeNoShowFee charging', () => {
         off_session: true,
         confirm: true,
         transfer_data: { destination: 'acct_1' },
+        // The webhook guard branches on this kind — pin that the producer stamps
+        // it, so the fee PI is never misrouted into the final-bill applier.
+        metadata: expect.objectContaining({ kind: 'NO_SHOW_FEE', bookingId: 'bk_1' }),
       }),
       { idempotencyKey: 'tovis:no-show-fee:bk_1' },
     )

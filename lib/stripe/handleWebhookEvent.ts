@@ -24,6 +24,7 @@ import {
   applyStripePaymentSucceededInTransaction,
   reconcileDepositChargeRefundInTransaction,
   DISCOVERY_DEPOSIT_CHECKOUT_KIND,
+  NO_SHOW_FEE_CHARGE_KIND,
   type StripeDisputeOutcome,
 } from '@/lib/booking/writeBoundary'
 import {
@@ -107,6 +108,22 @@ function isDiscoveryDepositMetadata(
   metadata: Stripe.Metadata | null | undefined,
 ): boolean {
   return getMetadataString(metadata, 'kind') === DISCOVERY_DEPOSIT_CHECKOUT_KIND
+}
+
+/**
+ * A no-show / late-cancel fee PaymentIntent (lib/noShowProtection/charge.ts).
+ * Its success/outcome is recorded SYNCHRONOUSLY by the charge orchestrator; the
+ * booking's final-bill fields must never be touched by its webhook. Critical:
+ * the fee PI carries `metadata.bookingId`, and findBookingForStripeWebhook
+ * resolves that hint FIRST — so without this branch a fee `payment_intent.
+ * succeeded` would apply the fee amount as the booking's payment (marking a
+ * no-show booking PAID/COMPLETED, or auto-refunding a late-cancel fee via the
+ * M1 late-capture path on the CANCELLED booking).
+ */
+function isNoShowFeeMetadata(
+  metadata: Stripe.Metadata | null | undefined,
+): boolean {
+  return getMetadataString(metadata, 'kind') === NO_SHOW_FEE_CHARGE_KIND
 }
 
 async function handleDepositPaid(
@@ -239,6 +256,16 @@ async function handlePaymentIntentSucceeded(
 ): Promise<StripeWebhookResult> {
   const bookingIdHint = getMetadataString(paymentIntent.metadata, 'bookingId')
 
+  // No-show / late-cancel fee PI: recorded synchronously by the charge path.
+  // Its bookingId in metadata would otherwise route this into the final-bill
+  // applier and record the fee as the booking's payment — never do that.
+  if (isNoShowFeeMetadata(paymentIntent.metadata)) {
+    return {
+      handled: true,
+      message: 'payment_intent.succeeded no-show fee — recorded on charge, no booking payment applied.',
+    }
+  }
+
   // Discovery deposit PI: record the deposit, don't touch final-bill fields.
   if (isDiscoveryDepositMetadata(paymentIntent.metadata)) {
     return handleDepositPaid(tx, {
@@ -300,6 +327,16 @@ async function handlePaymentIntentFailed(
   stripeEventId: string,
 ): Promise<StripeWebhookResult>{
   const bookingIdHint = getMetadataString(paymentIntent.metadata, 'bookingId')
+
+  // No-show / late-cancel fee PI: a decline is recorded (FAILED) synchronously
+  // by the charge path. Its bookingId hint would otherwise mark the booking's
+  // FINAL-BILL payment FAILED — leave the booking's payment state untouched.
+  if (isNoShowFeeMetadata(paymentIntent.metadata)) {
+    return {
+      handled: true,
+      message: 'payment_intent.payment_failed no-show fee — recorded on charge, booking payment untouched.',
+    }
+  }
 
     const result = await applyStripePaymentFailedInTransaction(tx, {
       bookingIdHint,

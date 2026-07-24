@@ -16436,6 +16436,17 @@ export async function recordStripeCheckoutSessionAttached(
 
 export const DISCOVERY_DEPOSIT_CHECKOUT_KIND = 'DISCOVERY_DEPOSIT'
 
+/**
+ * `metadata.kind` stamped on a no-show / late-cancel fee PaymentIntent
+ * (lib/noShowProtection/charge.ts). Like the discovery-deposit kind, the Stripe
+ * webhook MUST branch on this so a fee PI's `payment_intent.succeeded/failed` —
+ * which carries this booking's `metadata.bookingId` — is NOT misrouted into the
+ * FINAL-BILL applier (`findBookingForStripeWebhook` resolves the hint first, so
+ * without this guard a $25 fee would record as the booking's payment). Single
+ * source of truth for the string shared by the producer + the webhook guard.
+ */
+export const NO_SHOW_FEE_CHARGE_KIND = 'NO_SHOW_FEE'
+
 type PrepareClientDepositCheckoutResult = {
   booking: { id: string; professionalId: string }
   stripe: {
