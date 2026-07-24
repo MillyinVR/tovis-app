@@ -283,6 +283,7 @@ export type CancelRefundOutcomeStatus =
   | 'REFUND_ISSUED' // at least one refund succeeded — refundedAmountCents is set
   | 'FORFEITED' // deposit forfeited per the <24h client policy; nothing refunded
   | 'PROCESSING' // a refund was attempted but not confirmed (FAILED → retry owns it)
+  | 'FEE_CHARGED' // no refund/forfeiture, but a late-cancel fee was charged (M15)
   | 'NONE' // nothing captured to refund, and nothing forfeited
 
 export type CancelRefundSummary = {
@@ -293,6 +294,14 @@ export type CancelRefundSummary = {
    * for idempotency storage and an absent-key optional for the iOS decoder.
    */
   refundedAmountCents?: number
+  /**
+   * Cents charged to the client as a late-cancellation fee on this cancel (M15
+   * POLICY). Only a CLIENT cancel inside the pro's window incurs one, and only
+   * when no discovery deposit was forfeited (a forfeited deposit IS the penalty
+   * — it suppresses the fee; Tori 2026-07-24). Omitted (not null) when no fee
+   * was charged, so the shape stays a valid Prisma JSON object.
+   */
+  lateCancelFeeChargedCents?: number
   /** Short, client-facing sentence describing the money outcome of the cancel. */
   message: string
 }
@@ -307,10 +316,25 @@ export type CancelRefundSummary = {
  * receipt). A FORFEITED deposit (only a client cancel <24h out reaches this) is
  * named plainly rather than left silent. NONE is the common established-client
  * case where nothing was captured up front.
+ *
+ * A CHARGED late-cancel fee (M15) is folded in the same honest spirit: it is
+ * money that LEFT the client's card, so it is never left silent. It can accompany
+ * a refund (a pro window wider than the 24h forfeit line lets a client be refunded
+ * their deposit yet still owe a late-cancel fee), so the fee sentence is appended
+ * to whatever the refund outcome is; when nothing was refunded or forfeited the
+ * status becomes FEE_CHARGED so downstream UIs (iOS gates its alert on
+ * status !== 'NONE') surface it instead of dismissing silently. A forfeited
+ * deposit suppresses the fee upstream, so the two never co-occur.
  */
 export function summarizeCancelRefund(args: {
   service: AutoCancelRefundResult
   deposit: DepositCancelRefundResult
+  /**
+   * Cents actually charged as a late-cancel fee on this cancel (client cancel
+   * inside the pro's window, only when no deposit was forfeited). 0/omitted for
+   * pro/admin cancels and whenever no fee was charged. (M15 POLICY)
+   */
+  lateCancelFeeChargedCents?: number
 }): CancelRefundSummary {
   const { service, deposit } = args
 
@@ -319,6 +343,13 @@ export function summarizeCancelRefund(args: {
   const depositRefundedCents =
     deposit.outcome === 'REFUNDED' ? deposit.refundAmountCents : 0
   const refundedCents = serviceRefundedCents + depositRefundedCents
+
+  const feeCents = Math.max(0, Math.round(args.lateCancelFeeChargedCents ?? 0))
+  const feeField = feeCents > 0 ? { lateCancelFeeChargedCents: feeCents } : {}
+  const feeSuffix =
+    feeCents > 0
+      ? ` A ${formatCents(feeCents)} late-cancellation fee was charged to your card.`
+      : ''
 
   const hasRefund = refundedCents > 0
   const hasFailure =
@@ -332,28 +363,44 @@ export function summarizeCancelRefund(args: {
     return {
       status: 'REFUND_ISSUED',
       refundedAmountCents: refundedCents,
+      ...feeField,
       // A mixed success+failure at cancel time is vanishingly rare (a booking
       // rarely has both a captured service payment AND a paid deposit settling
       // at once), but if it happens we do NOT hide the unfinished part.
-      message: hasFailure
-        ? `${base} Part of your refund is still being processed.`
-        : base,
+      message:
+        (hasFailure
+          ? `${base} Part of your refund is still being processed.`
+          : base) + feeSuffix,
     }
   }
 
   if (hasFailure) {
     return {
       status: 'PROCESSING',
+      ...feeField,
       message:
-        'Your booking is cancelled. We’re finalizing your refund — this can take a little longer than usual.',
+        'Your booking is cancelled. We’re finalizing your refund — this can take a little longer than usual.' +
+        feeSuffix,
     }
   }
 
   if (hasForfeiture) {
+    // A forfeited deposit suppresses the fee upstream, so feeSuffix is empty
+    // here in practice; appended defensively so a policy shift can't hide a fee.
     return {
       status: 'FORFEITED',
+      ...feeField,
       message:
-        'Your booking is cancelled. Because it was cancelled within 24 hours of the appointment, the deposit is non-refundable.',
+        'Your booking is cancelled. Because it was cancelled within 24 hours of the appointment, the deposit is non-refundable.' +
+        feeSuffix,
+    }
+  }
+
+  if (feeCents > 0) {
+    return {
+      status: 'FEE_CHARGED',
+      ...feeField,
+      message: `Your booking is cancelled.${feeSuffix}`,
     }
   }
 

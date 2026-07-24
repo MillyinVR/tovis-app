@@ -1,6 +1,6 @@
 // app/api/v1/bookings/[id]/cancel/route.test.ts
 
-import { BookingStatus, Role, SessionStep } from '@prisma/client'
+import { BookingStatus, NoShowFeeStatus, Role, SessionStep } from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { BookingError, getBookingErrorDescriptor } from '@/lib/booking/errors'
@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   applyAutoCancelRefund: vi.fn(),
   applyDiscoveryDepositCancelRefund: vi.fn(),
   summarizeCancelRefund: vi.fn(),
+  assessAndChargeNoShowFee: vi.fn(),
+  noShowProtectionEnabled: vi.fn(),
 
   withRouteIdempotency: vi.fn(),
   beginRouteIdempotency: vi.fn(),
@@ -64,6 +66,14 @@ vi.mock('@/lib/booking/cancelRefund', () => ({
   applyAutoCancelRefund: mocks.applyAutoCancelRefund,
   applyDiscoveryDepositCancelRefund: mocks.applyDiscoveryDepositCancelRefund,
   summarizeCancelRefund: mocks.summarizeCancelRefund,
+}))
+
+vi.mock('@/lib/noShowProtection/charge', () => ({
+  assessAndChargeNoShowFee: mocks.assessAndChargeNoShowFee,
+}))
+
+vi.mock('@/lib/noShowProtection/flag', () => ({
+  noShowProtectionEnabled: mocks.noShowProtectionEnabled,
 }))
 
 vi.mock('@/lib/rateLimit/enforce', () => ({
@@ -214,6 +224,9 @@ describe('app/api/v1/bookings/[id]/cancel/route.ts', () => {
         status: BookingStatus.CANCELLED,
         sessionStep: SessionStep.NONE,
       },
+      // §18.4: the pre-transition status now rides the cancel result (read under
+      // the lock), so the late-cancel fee gate no longer needs a separate read.
+      priorStatus: BookingStatus.ACCEPTED,
       meta: {
         mutated: true,
         noOp: false,
@@ -229,6 +242,13 @@ describe('app/api/v1/bookings/[id]/cancel/route.ts', () => {
     mocks.summarizeCancelRefund.mockReturnValue({
       status: 'NONE',
       message: 'Your booking is cancelled.',
+    })
+    // No-show protection defaults OFF (prod is dark): the late-cancel fee block is
+    // skipped, matching production. Suppression/fee-flow tests flip it on.
+    mocks.noShowProtectionEnabled.mockReturnValue(false)
+    mocks.assessAndChargeNoShowFee.mockResolvedValue({
+      kind: 'NOT_CHARGEABLE',
+      reason: 'flag_off',
     })
 
     setStartedIdempotencyDefault()
@@ -581,10 +601,11 @@ describe('app/api/v1/bookings/[id]/cancel/route.ts', () => {
 
     const result = await POST(makeRequest(), makeCtx('booking_1'))
 
-    // The summary is computed from BOTH helper outcomes …
+    // The summary is computed from BOTH helper outcomes (no fee while dark) …
     expect(mocks.summarizeCancelRefund).toHaveBeenCalledWith({
       service: serviceOutcome,
       deposit: depositOutcome,
+      lateCancelFeeChargedCents: 0,
     })
     // … and rides the response for the client UI to render honestly.
     expect(result).toMatchObject({
@@ -592,6 +613,87 @@ describe('app/api/v1/bookings/[id]/cancel/route.ts', () => {
         refund: { status: 'REFUND_ISSUED', refundedAmountCents: 4000 },
       },
     })
+  })
+
+  // ─── M15 POLICY: deposit-forfeit suppresses the late-cancel fee ─────────────
+
+  it('does NOT assess a late-cancel fee when the deposit was FORFEITED (Tori 2026-07-24)', async () => {
+    mocks.noShowProtectionEnabled.mockReturnValue(true)
+    mocks.applyDiscoveryDepositCancelRefund.mockResolvedValueOnce({
+      outcome: 'FORFEITED',
+    })
+
+    await POST(makeRequest(), makeCtx('booking_1'))
+
+    // A forfeited deposit IS the <24h penalty — the fee is suppressed, so the
+    // charge path is never even reached.
+    expect(mocks.assessAndChargeNoShowFee).not.toHaveBeenCalled()
+    expect(mocks.summarizeCancelRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ lateCancelFeeChargedCents: 0 }),
+    )
+  })
+
+  it('charges the late-cancel fee (no forfeiture) and folds it into the honest summary', async () => {
+    mocks.noShowProtectionEnabled.mockReturnValue(true)
+    mocks.applyDiscoveryDepositCancelRefund.mockResolvedValueOnce({
+      outcome: 'NOT_ATTEMPTED',
+    })
+    mocks.assessAndChargeNoShowFee.mockResolvedValueOnce({
+      kind: 'ATTEMPTED',
+      status: NoShowFeeStatus.CHARGED,
+      amount: '15.00',
+      stripePaymentIntentId: 'pi_fee_1',
+      alreadyCharged: false,
+    })
+
+    await POST(makeRequest(), makeCtx('booking_1'))
+
+    // §18.4: priorStatus comes from the cancel result (read under the lock), not
+    // a separate pre-read.
+    expect(mocks.assessAndChargeNoShowFee).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      reason: 'LATE_CANCEL',
+      priorStatus: BookingStatus.ACCEPTED,
+    })
+    // The freshly-charged fee is surfaced in the summary (cents = $15.00 → 1500).
+    expect(mocks.summarizeCancelRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ lateCancelFeeChargedCents: 1500 }),
+    )
+  })
+
+  it('a FAILED late-cancel fee moves no money → not surfaced in the summary', async () => {
+    mocks.noShowProtectionEnabled.mockReturnValue(true)
+    mocks.assessAndChargeNoShowFee.mockResolvedValueOnce({
+      kind: 'ATTEMPTED',
+      status: NoShowFeeStatus.FAILED,
+      amount: '15.00',
+      stripePaymentIntentId: 'pi_fee_1',
+      alreadyCharged: false,
+    })
+
+    await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.assessAndChargeNoShowFee).toHaveBeenCalled()
+    expect(mocks.summarizeCancelRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ lateCancelFeeChargedCents: 0 }),
+    )
+  })
+
+  it('never assesses a late-cancel fee for a pro cancel (only clients incur one)', async () => {
+    mocks.noShowProtectionEnabled.mockReturnValue(true)
+    mocks.requireUser.mockResolvedValueOnce({
+      ok: true,
+      user: {
+        id: 'user_2',
+        role: Role.PRO,
+        clientProfile: null,
+        professionalProfile: { id: 'pro_1' },
+      },
+    })
+
+    await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.assessAndChargeNoShowFee).not.toHaveBeenCalled()
   })
 
   it('calls cancelBooking with a pro actor for pro users', async () => {

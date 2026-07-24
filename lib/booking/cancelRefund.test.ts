@@ -703,4 +703,54 @@ describe('summarizeCancelRefund', () => {
     expect(s.refundedAmountCents).toBeUndefined()
     expect(s.message).toBe('Your booking is cancelled.')
   })
+
+  // ─── M15: late-cancel fee folded into the honest summary ───────────────────
+
+  it('FEE_CHARGED when a late-cancel fee was charged and nothing was refunded/forfeited', () => {
+    const s = summarizeCancelRefund({
+      service: serviceNone,
+      deposit: depositNone,
+      lateCancelFeeChargedCents: 1500,
+    })
+    // Must NOT be NONE — iOS gates its alert on status !== 'NONE', so a fee that
+    // fell through to NONE would be charged silently ([[green-tests-wrong-artifact]]).
+    expect(s.status).toBe('FEE_CHARGED')
+    expect(s.lateCancelFeeChargedCents).toBe(1500)
+    expect(s.refundedAmountCents).toBeUndefined()
+    expect(s.message).toContain('$15.00')
+    expect(s.message).toContain('late-cancellation fee')
+  })
+
+  it('a refund and a late-cancel fee co-exist (pro window wider than 24h) — both surfaced', () => {
+    const s = summarizeCancelRefund({
+      service: serviceNone,
+      deposit: depositRefunded(2000),
+      lateCancelFeeChargedCents: 1200,
+    })
+    expect(s.status).toBe('REFUND_ISSUED')
+    expect(s.refundedAmountCents).toBe(2000)
+    expect(s.lateCancelFeeChargedCents).toBe(1200)
+    expect(s.message).toContain('$20.00') // the refund
+    expect(s.message).toContain('$12.00') // the fee
+    expect(s.message).toContain('late-cancellation fee')
+  })
+
+  it('a zero/omitted fee never adds a fee field or sentence', () => {
+    const omitted = summarizeCancelRefund({
+      service: serviceNone,
+      deposit: depositNone,
+    })
+    expect(omitted.status).toBe('NONE')
+    expect(omitted.lateCancelFeeChargedCents).toBeUndefined()
+    expect(omitted.message).not.toContain('fee')
+
+    const zero = summarizeCancelRefund({
+      service: serviceNone,
+      deposit: depositNone,
+      lateCancelFeeChargedCents: 0,
+    })
+    expect(zero.status).toBe('NONE')
+    expect(zero.lateCancelFeeChargedCents).toBeUndefined()
+    expect(zero.message).not.toContain('fee')
+  })
 })

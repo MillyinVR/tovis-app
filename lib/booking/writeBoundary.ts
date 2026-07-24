@@ -397,6 +397,14 @@ type CancelBookingResult = {
     status: BookingStatus
     sessionStep: SessionStep
   }
+  /**
+   * The booking's status BEFORE this cancel transitioned it, read inside the
+   * locked transaction (§18.4). The late-cancel fee assessment keys on this —
+   * only a confirmed (ACCEPTED) booking incurs one — so returning it from inside
+   * the tx retires the caller's separate pre-cancel read (a read-then-write
+   * TOCTOU). On an idempotent no-op (already CANCELLED) this is CANCELLED.
+   */
+  priorStatus: BookingStatus
   meta: MutationMeta
 }
 
@@ -5806,6 +5814,7 @@ async function performLockedCancel(args: {
         status: booking.status,
         sessionStep: booking.sessionStep ?? SessionStep.NONE,
       },
+      priorStatus: booking.status,
       meta: buildMeta(false),
     }
   }
@@ -5877,6 +5886,9 @@ await maybeCreateBookingCancelledNotification({
       status: updated.status,
       sessionStep: updated.sessionStep ?? SessionStep.NONE,
     },
+    // The pre-transition status, read under the lock (§18.4) — the late-cancel
+    // fee gate needs the status this cancel is moving AWAY from, not the new one.
+    priorStatus: booking.status,
     meta: buildMeta(true),
   }
 }

@@ -28,6 +28,7 @@ import {
   vi,
 } from 'vitest'
 import {
+  BookingDepositStatus,
   BookingRefundStatus,
   BookingRefundTrigger,
   BookingStatus,
@@ -61,9 +62,15 @@ vi.mock('@/lib/stripe/server', () => ({
 import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
 import {
   applyStripeNoShowFeeDisputeInTransaction,
+  cancelBooking,
   recordNoShowFeeCharge,
   reconcileNoShowFeeChargeRefundInTransaction,
 } from '@/lib/booking/writeBoundary'
+import {
+  applyAutoCancelRefund,
+  applyDiscoveryDepositCancelRefund,
+  summarizeCancelRefund,
+} from '@/lib/booking/cancelRefund'
 import { refundNoShowFee } from '@/lib/booking/refunds'
 import { retryFailedAutoCancelRefunds } from '@/lib/booking/refundRetrySweep'
 import { handleStripeEvent } from '@/lib/stripe/handleWebhookEvent'
@@ -1040,5 +1047,199 @@ describe('refund a CHARGED no-show fee (M15 GAP A)', () => {
     })
     expect(rows).toHaveLength(1)
     expect(rows[0]?.status).toBe(BookingRefundStatus.FAILED)
+  })
+})
+
+// ─── M15 POLICY — deposit-forfeit suppresses the late-cancel fee, driven ──────
+//
+// Tori's call (2026-07-24): a forfeited discovery deposit IS the <24h cancellation
+// penalty, so it suppresses the separate late-cancel fee — a client is never
+// double-penalised for one cancel. The suppression + honest summary live in the
+// client cancel ROUTE; those are exhaustively unit-tested. Here we drive the two
+// REAL inputs the route consumes against real Postgres — the pre-transition status
+// (§18.4, read inside cancelBooking's tx) and the FORFEITED signal from
+// applyDiscoveryDepositCancelRefund — plus the not-suppressed fee charge itself,
+// so both sides of the route's `!depositForfeited` gate are proven on real data.
+// The real-Stripe charge leg still can't be driven (no dev connected account);
+// the PaymentIntent boundary is mocked and the DB is the assertion surface.
+
+/** A client cancel actor for the given seeded client id. */
+function clientActor(clientId: string) {
+  return { kind: 'client' as const, clientId }
+}
+
+describe('M15 §18.4 — cancelBooking returns the pre-transition status from its tx', () => {
+  it('an ACCEPTED booking reports priorStatus ACCEPTED (the fee gate reads this)', async () => {
+    const bookingId = await createBooking({
+      clientId: fx.clientWithCardId,
+      status: BookingStatus.ACCEPTED,
+      when: scheduledFor(12),
+    })
+
+    const res = await cancelBooking({
+      bookingId,
+      actor: clientActor(fx.clientWithCardId),
+    })
+
+    expect(res.priorStatus).toBe(BookingStatus.ACCEPTED)
+    expect(res.meta.mutated).toBe(true)
+    expect(res.booking.status).toBe(BookingStatus.CANCELLED)
+  })
+
+  it('a PENDING booking reports priorStatus PENDING → the fee is never assessed (under-charge safe)', async () => {
+    const bookingId = await createBooking({
+      clientId: fx.clientWithCardId,
+      status: BookingStatus.PENDING,
+      when: scheduledFor(12),
+    })
+
+    const res = await cancelBooking({
+      bookingId,
+      actor: clientActor(fx.clientWithCardId),
+    })
+    expect(res.priorStatus).toBe(BookingStatus.PENDING)
+
+    // The route would call assess with this priorStatus; a non-confirmed booking
+    // is never billed — proven end-to-end (no Stripe call, no fee row).
+    const out = await assessAndChargeNoShowFee({
+      bookingId,
+      reason: NoShowFeeReason.LATE_CANCEL,
+      priorStatus: res.priorStatus,
+    })
+    expect(out).toMatchObject({ kind: 'NOT_CHARGEABLE', reason: 'not_confirmed' })
+    expect(stripe.create).not.toHaveBeenCalled()
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true },
+    })
+    expect(row.noShowFeeStatus).toBeNull()
+  })
+})
+
+describe('M15 POLICY — a forfeited deposit suppresses the late-cancel fee', () => {
+  it('client <24h cancel of a PAID-deposit booking → FORFEITED, and no fee is charged', async () => {
+    const booking = await db.booking.create({
+      data: {
+        clientId: fx.clientWithCardId,
+        professionalId: fx.professionalId,
+        serviceId: fx.serviceId,
+        scheduledFor: scheduledFor(12), // <24h → forfeit window
+        status: BookingStatus.ACCEPTED,
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.locationId,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal('120.00'),
+        totalDurationMinutes: 60,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
+        // A paid discovery deposit riding its own PI.
+        depositStatus: BookingDepositStatus.PAID,
+        depositStripePaymentIntentId: `pi_dep_${tag}_forfeit`,
+        depositAmount: new Prisma.Decimal('20.00'),
+        discoveryFeeAmount: 500,
+      },
+      select: { id: true },
+    })
+
+    const res = await cancelBooking({
+      bookingId: booking.id,
+      actor: clientActor(fx.clientWithCardId),
+    })
+    expect(res.priorStatus).toBe(BookingStatus.ACCEPTED)
+
+    // The deposit is FORFEITED (client <24h) — the exact signal the route's
+    // suppression gate reads. The forfeit path returns before any Stripe refund.
+    const deposit = await applyDiscoveryDepositCancelRefund({
+      bookingId: booking.id,
+      actorKind: 'client',
+      actorUserId: null,
+      cancelMutated: res.meta.mutated,
+    })
+    expect(deposit.outcome).toBe('FORFEITED')
+    expect(stripe.refundsCreate).not.toHaveBeenCalled()
+
+    // Route logic: `!depositForfeited` is false → assess is never called → no fee.
+    const depositForfeited = deposit.outcome === 'FORFEITED'
+    expect(depositForfeited).toBe(true)
+    expect(stripe.create).not.toHaveBeenCalled()
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+      select: { noShowFeeStatus: true },
+    })
+    expect(row.noShowFeeStatus).toBeNull()
+
+    // And the honest summary names the forfeit, no fee (M6/M15).
+    const summary = summarizeCancelRefund({
+      service: { outcome: 'NOT_ATTEMPTED' },
+      deposit,
+      lateCancelFeeChargedCents: 0,
+    })
+    expect(summary.status).toBe('FORFEITED')
+    expect(summary.lateCancelFeeChargedCents).toBeUndefined()
+  })
+
+  it('client <24h cancel with NO deposit → the fee IS charged and folds into the summary', async () => {
+    const bookingId = await createBooking({
+      clientId: fx.clientWithCardId,
+      status: BookingStatus.ACCEPTED,
+      when: scheduledFor(12),
+    })
+    stripe.create.mockResolvedValue({ id: 'pi_late_fee', status: 'succeeded' })
+
+    const res = await cancelBooking({
+      bookingId,
+      actor: clientActor(fx.clientWithCardId),
+    })
+
+    // No deposit → nothing forfeited → the route does NOT suppress the fee.
+    const deposit = await applyDiscoveryDepositCancelRefund({
+      bookingId,
+      actorKind: 'client',
+      actorUserId: null,
+      cancelMutated: res.meta.mutated,
+    })
+    expect(deposit.outcome).toBe('NOT_ATTEMPTED')
+
+    const service = await applyAutoCancelRefund({
+      bookingId,
+      actorKind: 'client',
+      actorUserId: null,
+      cancelMutated: res.meta.mutated,
+    })
+
+    const fee = await assessAndChargeNoShowFee({
+      bookingId,
+      reason: NoShowFeeReason.LATE_CANCEL,
+      priorStatus: res.priorStatus,
+    })
+    expect(fee).toMatchObject({
+      kind: 'ATTEMPTED',
+      status: NoShowFeeStatus.CHARGED,
+      amount: '25.00',
+    })
+
+    const row = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { noShowFeeStatus: true, noShowFeeAmount: true },
+    })
+    expect(row.noShowFeeStatus).toBe(NoShowFeeStatus.CHARGED)
+    expect(row.noShowFeeAmount?.toFixed(2)).toBe('25.00')
+
+    // The route's summary construction, with the freshly-charged fee folded in.
+    const feeCents =
+      fee.kind === 'ATTEMPTED' && fee.status === NoShowFeeStatus.CHARGED
+        ? Math.round(Number(fee.amount) * 100)
+        : 0
+    const summary = summarizeCancelRefund({
+      service,
+      deposit,
+      lateCancelFeeChargedCents: feeCents,
+    })
+    expect(summary.status).toBe('FEE_CHARGED')
+    expect(summary.lateCancelFeeChargedCents).toBe(2500)
+    expect(summary.message).toContain('$25.00')
+    expect(summary.message).toContain('late-cancellation fee')
   })
 })
