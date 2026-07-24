@@ -6330,15 +6330,10 @@ export async function reconcileNoShowFeeChargeRefundInTransaction(
  * charge, so a fee-PI dispute never matches applyStripeDisputeInTransaction
  * (final-bill PI) or applyStripeDepositDisputeInTransaction (deposit PI).
  * Resolves the booking by `noShowFeeStripePaymentIntentId` and records the freeze
- * on `noShowFeeDisputedAt`:
- *   OPEN / LOST -> set (Stripe pulled or is pulling the fee) so the money trail
- *     stops reading the fee as safely collected. Keeps the earliest dispute time;
- *     LOST leaves the freeze forever (the funds are gone via the chargeback).
- *   WON -> clear (the fee was restored).
- *
- * Returns the matched bookingId (even on an idempotent re-delivery) or null when
- * no booking carries this fee PI. Field-level idempotency (set-if-unset /
- * clear-if-set) plus the webhook route's event-id dedupe make replays safe.
+ * on `noShowFeeDisputedAt`, which stops the money trail reading the fee as safely
+ * collected and makes refundNoShowFee refuse to double-return it. Freeze
+ * semantics + replay safety: see applyStripeAuxDisputeFreezeInTransaction (the
+ * deposit dispute is its other caller — one rule, two PI fields).
  */
 export async function applyStripeNoShowFeeDisputeInTransaction(
   tx: Prisma.TransactionClient,
@@ -6348,49 +6343,12 @@ export async function applyStripeNoShowFeeDisputeInTransaction(
     now?: Date
   },
 ): Promise<{ bookingId: string } | null> {
-  const feePaymentIntentId = args.feePaymentIntentId.trim()
-
-  if (!feePaymentIntentId) {
-    throw bookingError('FORBIDDEN', {
-      message: 'Stripe no-show fee payment intent id is required.',
-    })
-  }
-
-  const booking = await tx.booking.findFirst({
-    where: { noShowFeeStripePaymentIntentId: feePaymentIntentId },
-    select: { id: true, professionalId: true },
+  return applyStripeAuxDisputeFreezeInTransaction(tx, {
+    kind: 'NO_SHOW_FEE',
+    paymentIntentId: args.feePaymentIntentId,
+    outcome: args.outcome,
+    now: args.now,
   })
-
-  if (!booking) return null
-
-  await lockProfessionalSchedule(tx, booking.professionalId)
-
-  const locked = await tx.booking.findFirst({
-    where: { noShowFeeStripePaymentIntentId: feePaymentIntentId },
-    select: { id: true, noShowFeeDisputedAt: true },
-  })
-
-  if (!locked) return null
-
-  if (args.outcome === 'WON') {
-    // Restore: only if we had frozen it. Never invent a clear.
-    if (locked.noShowFeeDisputedAt) {
-      await tx.booking.update({
-        where: { id: locked.id },
-        data: { noShowFeeDisputedAt: null },
-        select: { id: true } satisfies Prisma.BookingSelect,
-      })
-    }
-  } else if (!locked.noShowFeeDisputedAt) {
-    // OPEN / LOST: freeze once, keeping the earliest dispute timestamp.
-    await tx.booking.update({
-      where: { id: locked.id },
-      data: { noShowFeeDisputedAt: args.now ?? new Date() },
-      select: { id: true } satisfies Prisma.BookingSelect,
-    })
-  }
-
-  return { bookingId: locked.id }
 }
 
 async function performLockedStartBookingSession(args: {
@@ -17633,21 +17591,101 @@ export async function applyStripeDisputeInTransaction(
 }
 
 /**
+ * Which auxiliary (non-final-bill) charge a dispute landed on. Each rides its own
+ * PaymentIntent and carries its own freeze column; the freeze RULE is identical,
+ * so it lives once in applyStripeAuxDisputeFreezeInTransaction below.
+ */
+type AuxDisputeChargeKind = 'DEPOSIT' | 'NO_SHOW_FEE'
+
+const AUX_DISPUTE_ID_REQUIRED_MESSAGE: Record<AuxDisputeChargeKind, string> = {
+  DEPOSIT: 'Stripe deposit payment intent id is required.',
+  NO_SHOW_FEE: 'Stripe no-show fee payment intent id is required.',
+}
+
+/**
+ * Record a dispute (chargeback) freeze on an AUXILIARY charge — the discovery
+ * deposit or the no-show / late-cancel fee. Both ride their own PaymentIntent
+ * (separate from the final bill, so neither matches
+ * applyStripeDisputeInTransaction), and both answer the same question with the
+ * same rule, only on a different PI field + freeze column:
+ *   OPEN / LOST -> set the freeze (Stripe pulled or is pulling the funds and
+ *     reversed the transfer off the pro) so the refund paths refuse to
+ *     double-return the money. Keeps the EARLIEST dispute time; LOST leaves the
+ *     freeze in place forever (the funds are gone via the chargeback).
+ *   WON -> clear it (the money was restored) so refunds may resume.
+ *
+ * Field-level idempotency — freeze only if unset, clear only if set — plus the
+ * webhook route's event-id dedupe make replays safe without a per-charge
+ * last-event column. Returns the matched bookingId (even on a no-op re-delivery)
+ * or null when no booking carries that PI, so the three PI kinds stay disjoint.
+ */
+async function applyStripeAuxDisputeFreezeInTransaction(
+  tx: Prisma.TransactionClient,
+  args: {
+    kind: AuxDisputeChargeKind
+    paymentIntentId: string
+    outcome: StripeDisputeOutcome
+    now?: Date
+  },
+): Promise<{ bookingId: string } | null> {
+  const paymentIntentId = args.paymentIntentId.trim()
+
+  if (!paymentIntentId) {
+    throw bookingError('FORBIDDEN', {
+      message: AUX_DISPUTE_ID_REQUIRED_MESSAGE[args.kind],
+    })
+  }
+
+  const where: Prisma.BookingWhereInput =
+    args.kind === 'DEPOSIT'
+      ? { depositStripePaymentIntentId: paymentIntentId }
+      : { noShowFeeStripePaymentIntentId: paymentIntentId }
+
+  return withStripeWebhookLockedBooking({
+    tx,
+    lookup: (db) =>
+      db.booking.findFirst({
+        where,
+        select: {
+          id: true,
+          professionalId: true,
+          depositDisputedAt: true,
+          noShowFeeDisputedAt: true,
+        },
+      }),
+    run: async (locked) => {
+      const frozenAt =
+        args.kind === 'DEPOSIT' ? locked.depositDisputedAt : locked.noShowFeeDisputedAt
+      const shouldWrite = args.outcome === 'WON' ? frozenAt !== null : frozenAt === null
+
+      if (shouldWrite) {
+        const nextFreezeAt = args.outcome === 'WON' ? null : args.now ?? new Date()
+        const data: Prisma.BookingUpdateInput =
+          args.kind === 'DEPOSIT'
+            ? { depositDisputedAt: nextFreezeAt }
+            : { noShowFeeDisputedAt: nextFreezeAt }
+
+        await tx.booking.update({
+          where: { id: locked.id },
+          data,
+          select: { id: true } satisfies Prisma.BookingSelect,
+        })
+      }
+
+      return { bookingId: locked.id }
+    },
+  })
+}
+
+/**
  * Apply a dispute (chargeback) on the DISCOVERY DEPOSIT PaymentIntent. The
  * deposit rides its own charge/PI, separate from the final bill, so a deposit
  * dispute never matches applyStripeDisputeInTransaction (which resolves by the
  * final-bill `stripePaymentIntentId`). Resolves the booking by
- * `depositStripePaymentIntentId` and records the freeze on `depositDisputedAt`:
- *   OPEN / LOST -> set (Stripe pulled or is pulling the deposit funds) so
- *     refundDiscoveryDeposit + the M3 retry sweep refuse to double-return them.
- *     Keeps the earliest dispute time; LOST leaves the freeze in place forever
- *     (the funds are gone via the chargeback, nothing to refund).
- *   WON -> clear (the deposit was restored) so refunds may resume.
- *
- * Returns the matched bookingId (even on a no-op idempotent re-delivery) or null
- * when no booking carries this deposit PI. Field-level idempotency (set-if-unset
- * / clear-if-set) plus the webhook route's event-id dedupe make replays safe
- * without a deposit-specific last-event column.
+ * `depositStripePaymentIntentId` and records the freeze on `depositDisputedAt`,
+ * which is what makes refundDiscoveryDeposit + the M3 retry sweep refuse to
+ * double-return deposit funds Stripe already pulled. Freeze semantics + replay
+ * safety: see applyStripeAuxDisputeFreezeInTransaction.
  */
 export async function applyStripeDepositDisputeInTransaction(
   tx: Prisma.TransactionClient,
@@ -17657,47 +17695,12 @@ export async function applyStripeDepositDisputeInTransaction(
     now?: Date
   },
 ): Promise<{ bookingId: string } | null> {
-  const depositPaymentIntentId = args.depositPaymentIntentId.trim()
-
-  if (!depositPaymentIntentId) {
-    throw bookingError('FORBIDDEN', {
-      message: 'Stripe deposit payment intent id is required.',
-    })
-  }
-
-  const booking = await tx.booking.findFirst({
-    where: { depositStripePaymentIntentId: depositPaymentIntentId },
-    select: { id: true, professionalId: true },
+  return applyStripeAuxDisputeFreezeInTransaction(tx, {
+    kind: 'DEPOSIT',
+    paymentIntentId: args.depositPaymentIntentId,
+    outcome: args.outcome,
+    now: args.now,
   })
-
-  if (!booking) return null
-
-  await lockProfessionalSchedule(tx, booking.professionalId)
-
-  const locked = await tx.booking.findFirst({
-    where: { depositStripePaymentIntentId: depositPaymentIntentId },
-    select: { id: true, depositDisputedAt: true },
-  })
-
-  if (!locked) return null
-
-  if (args.outcome === 'WON') {
-    // Restore: only if we had frozen it. Never invent a clear.
-    if (locked.depositDisputedAt) {
-      await tx.booking.update({
-        where: { id: locked.id },
-        data: { depositDisputedAt: null },
-      })
-    }
-  } else if (!locked.depositDisputedAt) {
-    // OPEN / LOST: freeze once, keeping the earliest dispute timestamp.
-    await tx.booking.update({
-      where: { id: locked.id },
-      data: { depositDisputedAt: args.now ?? new Date() },
-    })
-  }
-
-  return { bookingId: locked.id }
 }
 
 export async function applyStripeCheckoutSessionStatusInTransaction(
