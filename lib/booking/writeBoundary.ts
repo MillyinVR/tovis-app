@@ -1291,6 +1291,35 @@ type StartBookingRecord = Prisma.BookingGetPayload<{
   select: typeof START_BOOKING_SELECT
 }>
 
+// The booking's session-lifecycle state, read back after a session write
+// (start / finish / transition). Shared by every `performLocked*Session*`
+// path so the projection can't drift between them.
+const BOOKING_SESSION_STATE_SELECT = {
+  id: true,
+  status: true,
+  startedAt: true,
+  finishedAt: true,
+  sessionStep: true,
+} satisfies Prisma.BookingSelect
+
+// The full checkout money snapshot read back after a checkout write, and the
+// exact shape `maybeCompleteBookingCloseout` consumes. Shared by the pro and
+// client checkout-update paths, which both feed it.
+const BOOKING_CHECKOUT_MONEY_SELECT = {
+  id: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  subtotalSnapshot: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalAmount: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+} satisfies Prisma.BookingSelect
+
 const HOLD_OWNERSHIP_SELECT = {
   id: true,
   clientId: true,
@@ -6198,13 +6227,7 @@ async function performLockedStartBookingSession(args: {
         sessionStep: SessionStep.CONSULTATION,
         status: BookingStatus.IN_PROGRESS,
       },
-      select: {
-        id: true,
-        status: true,
-        startedAt: true,
-        finishedAt: true,
-        sessionStep: true,
-      } satisfies Prisma.BookingSelect,
+      select: BOOKING_SESSION_STATE_SELECT,
     })
 
     await createBookingCloseoutAuditLog({
@@ -6310,13 +6333,7 @@ async function performLockedStartBookingSession(args: {
       sessionStep: SessionStep.CONSULTATION,
       status: BookingStatus.IN_PROGRESS,
     },
-    select: {
-      id: true,
-      status: true,
-      startedAt: true,
-      finishedAt: true,
-      sessionStep: true,
-    } satisfies Prisma.BookingSelect,
+    select: BOOKING_SESSION_STATE_SELECT,
   })
 
   await createBookingCloseoutAuditLog({
@@ -6460,13 +6477,7 @@ recordStepTransition({
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: { sessionStep: SessionStep.FINISH_REVIEW },
-    select: {
-      id: true,
-      status: true,
-      startedAt: true,
-      finishedAt: true,
-      sessionStep: true,
-    } satisfies Prisma.BookingSelect,
+    select: BOOKING_SESSION_STATE_SELECT,
   })
 
   const oldSessionState = buildSessionAuditSnapshot({
@@ -6963,13 +6974,7 @@ async function performLockedTransitionSessionStep(args: {
       const forced = await args.tx.booking.update({
         where: { id: booking.id },
         data: { sessionStep: SessionStep.CONSULTATION },
-        select: {
-          id: true,
-          status: true,
-          startedAt: true,
-          finishedAt: true,
-          sessionStep: true,
-        } satisfies Prisma.BookingSelect,
+        select: BOOKING_SESSION_STATE_SELECT,
       })
 
       if (from !== (forced.sessionStep ?? SessionStep.NONE)) {
@@ -7059,13 +7064,7 @@ async function performLockedTransitionSessionStep(args: {
     const forced = await args.tx.booking.update({
       where: { id: booking.id },
       data: { sessionStep: SessionStep.CONSULTATION },
-      select: {
-        id: true,
-        status: true,
-        startedAt: true,
-        finishedAt: true,
-        sessionStep: true,
-      } satisfies Prisma.BookingSelect,
+      select: BOOKING_SESSION_STATE_SELECT,
     })
 
     if (from !== (forced.sessionStep ?? SessionStep.NONE)) {
@@ -12461,20 +12460,7 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
           }
         : {}),
     },
-    select: {
-      id: true,
-      checkoutStatus: true,
-      selectedPaymentMethod: true,
-      serviceSubtotalSnapshot: true,
-      productSubtotalSnapshot: true,
-      subtotalSnapshot: true,
-      tipAmount: true,
-      taxAmount: true,
-      discountAmount: true,
-      totalAmount: true,
-      paymentAuthorizedAt: true,
-      paymentCollectedAt: true,
-    } satisfies Prisma.BookingSelect,
+    select: BOOKING_CHECKOUT_MONEY_SELECT,
   })
 
   await maybeCompleteBookingCloseout({
@@ -13265,20 +13251,7 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
           }
         : {}),
     },
-    select: {
-      id: true,
-      checkoutStatus: true,
-      selectedPaymentMethod: true,
-      serviceSubtotalSnapshot: true,
-      productSubtotalSnapshot: true,
-      subtotalSnapshot: true,
-      tipAmount: true,
-      taxAmount: true,
-      discountAmount: true,
-      totalAmount: true,
-      paymentAuthorizedAt: true,
-      paymentCollectedAt: true,
-    } satisfies Prisma.BookingSelect,
+    select: BOOKING_CHECKOUT_MONEY_SELECT,
   })
 
   await maybeCompleteBookingCloseout({
