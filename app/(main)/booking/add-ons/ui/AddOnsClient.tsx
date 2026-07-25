@@ -135,14 +135,6 @@ function getFinalizeErrorMessage(raw: unknown): string | null {
   return readString(raw.error)
 }
 
-/**
- * Re-size the hold to `ids` so the reservation covers what finalize will take.
- *
- * Resolves to the server's refusal message when the widened window no longer
- * fits (the slot's tail was taken, or the appointment would now run past the
- * pro's day) and `null` on success — the caller un-ticks on a refusal, so the
- * client learns HERE rather than at the end of checkout (B1-A).
- */
 type SyncFailure = {
   message: string
   /**
@@ -153,6 +145,14 @@ type SyncFailure = {
   aboutTheWindow: boolean
 }
 
+/**
+ * Re-size the hold to `ids` so the reservation covers what finalize will take.
+ *
+ * Resolves to the server's refusal when the widened window no longer fits (the
+ * slot's tail was taken, or the appointment would now run past the pro's day)
+ * and `null` on success — the caller un-ticks on a refusal, so the client
+ * learns HERE rather than at the end of checkout (B1-A).
+ */
 async function syncHoldAddOns(
   holdId: string,
   ids: string[],
