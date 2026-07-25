@@ -663,6 +663,15 @@ describe('GET /api/v1/availability/day parity regressions', () => {
   })
 })
 
+// ⚠️ These cases mock `computeDaySlotsFast`, so they pin what the ROUTE does
+// with a grid — that it passes the engine's DST-filtered slots through, keeps
+// the location timezone, and answers 200 on a transition day. They cannot
+// prove the engine's DST arithmetic, and must not be read as if they did: each
+// mocked grid below was checked against the real engine's output for that date
+// (the fall-back one is it exactly, the spring one an early slice of it) so no
+// case here asserts a grid the engine would never produce. The arithmetic is
+// pinned in
+// `lib/availability/core/dayComputation.test.ts` (B6).
 describe('GET /api/v1/availability/day DST behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -730,7 +739,7 @@ describe('GET /api/v1/availability/day DST behavior', () => {
     expect(localTimes).not.toContain('03:30')
   })
 
-  it('fall back: returns valid slots across the repeated 01:00 local hour window', async () => {
+  it('fall back: passes through a grid whose repeated 01:00 hour was dropped', async () => {
     mocks.loadAvailabilityOfferingContext.mockResolvedValueOnce(
       makeBaseContext({
         locationId: 'dst-salon-1',
@@ -741,15 +750,16 @@ describe('GET /api/v1/availability/day DST behavior', () => {
       }),
     )
 
+    // The engine drops both halves of the repeated 01:00 hour (05:00Z/05:30Z =
+    // 01:00/01:30 EDT and 06:00Z/06:30Z = 01:00/01:30 EST), because an
+    // ambiguous wall time names no instant. What survives is 00:xx and 02:xx.
     mocks.computeDaySlotsFast.mockResolvedValueOnce({
       ok: true,
       dayStartUtc: new Date('2027-11-07T04:00:00.000Z'),
       dayEndExclusiveUtc: new Date('2027-11-08T05:00:00.000Z'),
       slots: [
-        '2027-11-07T05:00:00.000Z',
-        '2027-11-07T05:30:00.000Z',
-        '2027-11-07T06:00:00.000Z',
-        '2027-11-07T06:30:00.000Z',
+        '2027-11-07T04:00:00.000Z',
+        '2027-11-07T04:30:00.000Z',
         '2027-11-07T07:00:00.000Z',
         '2027-11-07T07:30:00.000Z',
       ],
@@ -772,21 +782,21 @@ describe('GET /api/v1/availability/day DST behavior', () => {
     const slots = body.slots as string[]
     const localTimes = slots.map((iso) => localHmInTz(iso, 'America/New_York'))
 
-    const oneAmSlots = slots.filter(
-      (iso) => localHmInTz(iso, 'America/New_York') === '01:00',
-    )
-    const oneThirtySlots = slots.filter(
-      (iso) => localHmInTz(iso, 'America/New_York') === '01:30',
-    )
+    expect(localTimes).not.toContain('01:00')
+    expect(localTimes).not.toContain('01:30')
 
-    expect(oneAmSlots.length).toBeGreaterThanOrEqual(1)
-    expect(oneThirtySlots.length).toBeGreaterThanOrEqual(1)
-
-    expect(new Set(oneAmSlots).size).toBe(oneAmSlots.length)
-    expect(new Set(oneThirtySlots).size).toBe(oneThirtySlots.length)
-
+    expect(localTimes).toContain('00:00')
     expect(localTimes).toContain('02:00')
     expect(localTimes).toContain('02:30')
+
+    // Whatever the engine returns reaches the wire unchanged and de-duplicated.
+    expect(new Set(slots).size).toBe(slots.length)
+    expect(slots).toEqual([
+      '2027-11-07T04:00:00.000Z',
+      '2027-11-07T04:30:00.000Z',
+      '2027-11-07T07:00:00.000Z',
+      '2027-11-07T07:30:00.000Z',
+    ])
   })
 
   it('near midnight: returned slots stay on the requested local date', async () => {

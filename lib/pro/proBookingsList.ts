@@ -22,7 +22,7 @@ import {
   isValidIanaTimeZone,
   getZonedParts,
   sanitizeTimeZone,
-  zonedTimeToUtc,
+  startOfLocalDayUtc,
 } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
@@ -224,23 +224,17 @@ export function computeTodayTomorrowBoundsUtc(
   const tz = sanitizeTimeZone(scheduleTz, DEFAULT_TIME_ZONE)
   const parts = getZonedParts(nowUtc, tz)
 
-  const startOfTodayUtc = zonedTimeToUtc({
+  const startOfTodayUtc = startOfLocalDayUtc({
     year: parts.year,
     month: parts.month,
     day: parts.day,
-    hour: 0,
-    minute: 0,
-    second: 0,
     timeZone: tz,
   })
 
-  const startOfTomorrowUtc = zonedTimeToUtc({
+  const startOfTomorrowUtc = startOfLocalDayUtc({
     year: parts.year,
     month: parts.month,
     day: parts.day + 1,
-    hour: 0,
-    minute: 0,
-    second: 0,
     timeZone: tz,
   })
 

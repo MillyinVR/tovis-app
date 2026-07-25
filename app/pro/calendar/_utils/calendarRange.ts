@@ -19,6 +19,7 @@ import {
   getZonedParts,
   sanitizeTimeZone,
   startOfDayUtcInTimeZone,
+  startOfLocalDayUtc,
   weekdayInTimeZone,
   zonedTimeToUtc,
 } from '@/lib/timeZone'
@@ -64,13 +65,10 @@ function weekStartOffsetFromSundayIndex(sundayStartIndex: number): number {
 }
 
 function localMidnightUtc(parts: LocalDateParts, timeZone: string): Date {
-  return zonedTimeToUtc({
+  return startOfLocalDayUtc({
     year: parts.year,
     month: parts.month,
     day: parts.day,
-    hour: 0,
-    minute: 0,
-    second: 0,
     timeZone,
   })
 }

@@ -231,6 +231,73 @@ export function zonedTimeToUtc(args: {
 }
 
 /**
+ * The FIRST UTC instant of a local calendar day — the single home for the
+ * "when does this day begin" primitive.
+ *
+ * Almost everywhere this is just local midnight, and the fast path below
+ * returns exactly that. But five IANA zones move their clocks AT midnight
+ * (`America/Havana`, `America/Santiago`, `Atlantic/Azores`, `Africa/Cairo`,
+ * `Asia/Beirut`), so on their transition days "00:00" is the very wall time
+ * that does not exist, or that happens twice:
+ *
+ * - spring: the day genuinely begins at 01:00, and `zonedTimeToUtc`'s
+ *   fixed-point refinement oscillates across the gap — it used to settle an
+ *   hour EARLY, i.e. on 23:00 of the PREVIOUS local day;
+ * - autumn: midnight happens twice and the day begins at the first one.
+ *
+ * So the fast path is verified rather than trusted: the answer must land on
+ * the requested day and one second earlier must not. When it doesn't, binary
+ * search the boundary — `ymdInTimeZone` is monotonic in the instant, so the
+ * first instant whose local date is the target one is exactly the day start.
+ * That holds for gaps, overlaps and offsets of any size, and consecutive days
+ * tile with neither a hole nor an overlap.
+ */
+export function startOfLocalDayUtc(args: {
+  year: number
+  month: number
+  day: number
+  timeZone: string
+}): Date {
+  const tz = sanitizeTimeZone(args.timeZone, DEFAULT_TIME_ZONE)
+  // Callers legitimately pass `day + 1` for "tomorrow", so normalize the parts
+  // before they become the target string this compares against.
+  const { year, month, day } = addDaysToYMD(args.year, args.month, args.day, 0)
+  const target = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+
+  const isDayStart = (instant: Date) =>
+    ymdInTimeZone(instant, tz) === target &&
+    ymdInTimeZone(new Date(instant.getTime() - 1_000), tz) < target
+
+  const candidate = zonedTimeToUtc({
+    year,
+    month,
+    day,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    timeZone: tz,
+  })
+
+  if (isDayStart(candidate)) return candidate
+
+  // Offsets span UTC-12..UTC+14, so the boundary is inside ±18h of the naive
+  // instant with room to spare: `lo` is always before the day, `hi` inside it.
+  // Searched in whole seconds — every real zone offset is a whole number of
+  // minutes, and integer halving of a shrinking range always terminates.
+  const naiveSeconds = Math.floor(Date.UTC(year, month - 1, day, 0, 0, 0) / 1_000)
+  let lo = naiveSeconds - 18 * 60 * 60
+  let hi = naiveSeconds + 18 * 60 * 60
+
+  while (hi - lo > 1) {
+    const mid = lo + Math.floor((hi - lo) / 2)
+    if (ymdInTimeZone(new Date(mid * 1_000), tz) < target) lo = mid
+    else hi = mid
+  }
+
+  return new Date(hi * 1_000)
+}
+
+/**
  * Start of day in `timeZone`, returned as UTC instant.
  *
  * `dayOffset` moves whole LOCAL days — `1` is the next local midnight, not
@@ -248,7 +315,7 @@ export function startOfDayUtcInTimeZone(
   const { year, month, day } = dayOffset
     ? addDaysToYMD(p.year, p.month, p.day, dayOffset)
     : p
-  return zonedTimeToUtc({ year, month, day, hour: 0, minute: 0, second: 0, timeZone: tz })
+  return startOfLocalDayUtc({ year, month, day, timeZone: tz })
 }
 
 /**
