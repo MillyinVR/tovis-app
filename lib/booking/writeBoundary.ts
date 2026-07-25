@@ -16415,6 +16415,114 @@ export async function declineClientWaitlistOffer(
   })
 }
 
+type CancelClientWaitlistEntryArgs = {
+  entryId: string
+  clientId: string
+}
+
+type CancelClientWaitlistEntryResult = {
+  /** False when the entry was already CANCELLED — a replay, not a no-op error. */
+  cancelled: boolean
+  /** PENDING offers withdrawn, each of which handed a reserved slot back. */
+  releasedOffers: number
+}
+
+/**
+ * Client leaves a pro's waitlist (B4).
+ *
+ * The status flip is the small half. The load-bearing half is that leaving must
+ * also withdraw whatever the pro promised in the meantime: a PENDING
+ * `WaitlistOffer` reserves a real slot with a `BookingHold` (F14), and a
+ * reservation cannot outlive the entry it was made for. This is the ONLY site
+ * that cancels an entry, so it is the only site that can know it.
+ *
+ * Before this existed the route flipped the status and stopped, which broke
+ * three ways at once — all of them latent only because no shipped UI called the
+ * endpoint ([[fixing-a-dead-path-activates-latent-bugs]]):
+ *   1. the slot stayed dark for up to `WAITLIST_OFFER_TTL_MINUTES`;
+ *   2. nobody could see why — both pro readers filter entries to
+ *      ACTIVE/NOTIFIED, so a CANCELLED entry's reservation is invisible to the
+ *      one person whose calendar it occupies ([[reserving-a-slot-needs-a-surface]]);
+ *   3. the departed client could still confirm the offer, and the confirm
+ *      flipped their own CANCELLED entry to BOOKED.
+ *
+ * Runs under the professional's schedule lock and reuses
+ * `releasePendingWaitlistOffersForEntry` — the same cancel-and-release pair the
+ * re-offer path uses to supersede — so "this offer is over" means the same two
+ * writes wherever it happens.
+ */
+export async function cancelClientWaitlistEntry(
+  args: CancelClientWaitlistEntryArgs,
+): Promise<CancelClientWaitlistEntryResult> {
+  assertNonEmptyClientId(args.clientId)
+  if (!args.entryId.trim()) {
+    throw bookingError('WAITLIST_ENTRY_NOT_FOUND')
+  }
+
+  // Pre-lock read to resolve whose schedule to lock. Ownership and status are
+  // re-checked under the lock below; this one only picks the lock and fails
+  // fast, matching the confirm/decline pair.
+  const pre = await prisma.waitlistEntry.findUnique({
+    where: { id: args.entryId },
+    select: { id: true, clientId: true, professionalId: true },
+  })
+  if (!pre || pre.clientId !== args.clientId) {
+    throw bookingError('WAITLIST_ENTRY_NOT_FOUND')
+  }
+
+  const result = await withLockedProfessionalTransaction(
+    pre.professionalId,
+    async ({ tx, now }) => {
+      const entry = await tx.waitlistEntry.findUnique({
+        where: { id: args.entryId },
+        select: { id: true, clientId: true, status: true },
+      })
+      if (!entry || entry.clientId !== args.clientId) {
+        throw bookingError('WAITLIST_ENTRY_NOT_FOUND')
+      }
+
+      // Distinct from NOT_FOUND: the entry exists and became an appointment, so
+      // leaving is refused rather than silently swallowed — there is a booking
+      // to cancel instead. Reachable as a race (the client confirms an offer in
+      // another tab between the pre-read and this lock), which is exactly why
+      // the check is re-run here ([[one-code-two-meanings-add-a-code]]).
+      if (entry.status === WaitlistStatus.BOOKED) {
+        throw bookingError('WAITLIST_ENTRY_ALREADY_BOOKED')
+      }
+
+      // Already gone. Idempotent rather than an error: leaving twice is a
+      // double-tap, and there is nothing left to release.
+      if (entry.status === WaitlistStatus.CANCELLED) {
+        return { cancelled: false, releasedOffers: 0 }
+      }
+
+      const { cancelled } = await releasePendingWaitlistOffersForEntry({
+        tx,
+        waitlistEntryId: entry.id,
+        now,
+      })
+
+      await tx.waitlistEntry.update({
+        where: { id: entry.id },
+        data: { status: WaitlistStatus.CANCELLED },
+        select: { id: true },
+      })
+
+      return { cancelled: true, releasedOffers: cancelled }
+    },
+  )
+
+  // After commit, and only when a reservation actually went back on the market.
+  // An entry with no live offer frees no time, so bumping there would evict the
+  // cache on caller-controlled input: "succeeded" is not "changed" (B2,
+  // [[cache-is-a-third-query]]).
+  if (result.releasedOffers > 0) {
+    await bumpProfessionalScheduleVersion(pre.professionalId)
+  }
+
+  return result
+}
+
 type SetClientBookingMediaUseConsentArgs = {
   bookingId: string
   clientId: string
