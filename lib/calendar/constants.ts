@@ -83,6 +83,12 @@ export const DEFAULT_HOLD_CLIENT_NAME = 'Held'
 export const OVERLAP_FALLBACK_NAME = 'another appointment'
 export const OVERLAP_HOLD_NAME = 'a booking in progress'
 
+// How far around a proposed start the passive overlap check fetches calendar
+// events — covers the longest possible appointment (MAX_SLOT_DURATION 12h +
+// buffer) on either side. Shared by the new-booking form and the aftercare
+// rebook picker.
+export const OVERLAP_CONFLICT_FETCH_WINDOW_MS = 24 * 60 * 60 * 1000
+
 // ─── Stats constants ──────────────────────────────────────────────────────────
 
 export const CALENDAR_BLOCKED_HOURS_ROUNDING_FACTOR = 2

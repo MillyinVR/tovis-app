@@ -83,7 +83,7 @@ describe('RebookSlotPicker', () => {
     expect(url).toContain('date=2026-07-01')
 
     // The available time renders as a button; picking it emits the full slot.
-    const slotButton = await screen.findByRole('button')
+    const slotButton = await screen.findByRole('button', { name: '5:00 PM' })
     fireEvent.click(slotButton)
 
     expect(onChange).toHaveBeenCalledWith({
@@ -130,7 +130,7 @@ describe('RebookSlotPicker', () => {
 
     // …and the emitted slot carries the same address, so the saved proposal
     // can never disagree with the availability it came from.
-    const slotButton = await screen.findByRole('button')
+    const slotButton = await screen.findByRole('button', { name: '5:00 PM' })
     fireEvent.click(slotButton)
 
     expect(onChange).toHaveBeenCalledWith({
@@ -159,5 +159,123 @@ describe('RebookSlotPicker', () => {
     fireEvent.change(dayInput, { target: { value: '2026-07-01' } })
 
     expect(await screen.findByText(/no open times/i)).toBeInTheDocument()
+  })
+
+  it('names the off day and points at Custom time when the empty day is outside working hours', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, { ok: true, slots: [], durationMinutes: 60 }),
+    )
+
+    const { container } = render(
+      <RebookSlotPicker
+        {...BASE_PROPS}
+        // 2026-07-01 is a Wednesday (weekday index 3).
+        offWeekdays={new Set([3])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    const dayInput = container.querySelector(
+      'input[type="date"]',
+    ) as HTMLInputElement
+    fireEvent.change(dayInput, { target: { value: '2026-07-01' } })
+
+    expect(
+      await screen.findByText(
+        /outside your working hours — switch to Custom time/i,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('emits a custom slot composed from the picked day + typed time, sized by the offering duration', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/availability/day')) {
+        return jsonResponse(200, { ok: true, slots: [], durationMinutes: 90 })
+      }
+      return jsonResponse(200, { events: [] })
+    })
+
+    const onChange = vi.fn()
+    const { container } = render(
+      <RebookSlotPicker {...BASE_PROPS} onChange={onChange} />,
+    )
+
+    const dayInput = container.querySelector(
+      'input[type="date"]',
+    ) as HTMLInputElement
+    fireEvent.change(dayInput, { target: { value: '2026-07-01' } })
+
+    // Wait for the availability fetch so durationMinutes (90) is in state.
+    expect(await screen.findByText(/no open times/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Custom time' }))
+
+    const timeInput = container.querySelector(
+      'input[type="time"]',
+    ) as HTMLInputElement
+    fireEvent.change(timeInput, { target: { value: '07:30' } })
+
+    // The emitted slot is the wall time in the location zone (UTC here) with
+    // the offering's real width — not a slot the public grid offered.
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith({
+        offeringId: 'off_1',
+        locationId: 'loc_1',
+        locationType: 'SALON',
+        clientAddressId: null,
+        startsAt: '2026-07-01T07:30:00.000Z',
+        endsAt: '2026-07-01T09:00:00.000Z',
+      } satisfies SelectedRebookSlot)
+    })
+  })
+
+  it('warns (but still allows) when the custom time overlaps an existing commitment', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/availability/day')) {
+        return jsonResponse(200, { ok: true, slots: [], durationMinutes: 60 })
+      }
+      if (url.includes('/api/v1/pro/calendar')) {
+        return jsonResponse(200, {
+          events: [
+            {
+              id: 'booking_9',
+              kind: 'BOOKING',
+              startsAt: '2026-07-01T07:00:00.000Z',
+              endsAt: '2026-07-01T08:00:00.000Z',
+              clientName: 'Ana',
+            },
+          ],
+        })
+      }
+      return jsonResponse(200, { ok: true })
+    })
+
+    const onChange = vi.fn()
+    const { container } = render(
+      <RebookSlotPicker {...BASE_PROPS} onChange={onChange} />,
+    )
+
+    const dayInput = container.querySelector(
+      'input[type="date"]',
+    ) as HTMLInputElement
+    fireEvent.change(dayInput, { target: { value: '2026-07-01' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Custom time' }))
+
+    const timeInput = container.querySelector(
+      'input[type="time"]',
+    ) as HTMLInputElement
+    fireEvent.change(timeInput, { target: { value: '07:30' } })
+
+    // The overlap note names the colliding client but the pick still stands.
+    expect(await screen.findByText(/This overlaps Ana/i)).toBeInTheDocument()
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ startsAt: '2026-07-01T07:30:00.000Z' }),
+    )
   })
 })

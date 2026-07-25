@@ -30,10 +30,12 @@ import {
 } from '@/lib/clientAddresses/placesAutocomplete'
 import { moneyToString } from '@/lib/money'
 import {
+  OVERLAP_CONFLICT_FETCH_WINDOW_MS,
   OVERLAP_FALLBACK_NAME,
   OVERLAP_HOLD_NAME,
 } from '@/lib/calendar/constants'
 import {
+  formatOverlapNames,
   normalizeCalendarOverlapEvents,
   overlappingClientNamesForRange,
 } from '@/lib/calendar/overlap'
@@ -45,6 +47,7 @@ import {
 } from '@/lib/time'
 
 import OpenSlotPicker from './OpenSlotPicker'
+import BookingOverridePromptCard from '@/app/pro/_components/BookingOverridePromptCard'
 
 type ServiceLocationType = 'SALON' | 'MOBILE'
 type ProfessionalLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
@@ -427,22 +430,10 @@ function normalizeServiceAddresses(data: unknown): ClientServiceAddressOption[] 
 
 // A generous window around the proposed start to fetch candidate bookings; the
 // precise half-open `hasOverlap` check does the real filtering. ±1 day comfortably
-// covers the longest possible appointment (MAX_SLOT_DURATION 12h + buffer).
-const CONFLICT_FETCH_WINDOW_MS = 24 * 60 * 60 * 1000
 // The overlap-warning phrases are shared with the calendar confirm modal so one
 // collision cannot be described two ways, and the wire→overlap-check normalizer
 // now lives in lib/calendar/overlap.ts so it is unit-testable
 // (B-D8, consolidated in B5).
-
-// "Sam" / "Sam and Alex" / "Sam, Alex, and 1 other" — a plain-English join for
-// the overlap note.
-function formatOverlapNames(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? ''
-  if (names.length === 2) return `${names[0]} and ${names[1]}`
-
-  const head = names.slice(0, -1).join(', ')
-  return `${head}, and ${names[names.length - 1]}`
-}
 
 const SUMMARY_MONTHS = [
   'Jan',
@@ -1139,8 +1130,12 @@ export default function NewBookingForm({
     const endISO = new Date(
       startMs + proposedDurationMinutes * 60_000,
     ).toISOString()
-    const fromISO = new Date(startMs - CONFLICT_FETCH_WINDOW_MS).toISOString()
-    const toISO = new Date(startMs + CONFLICT_FETCH_WINDOW_MS).toISOString()
+    const fromISO = new Date(
+      startMs - OVERLAP_CONFLICT_FETCH_WINDOW_MS,
+    ).toISOString()
+    const toISO = new Date(
+      startMs + OVERLAP_CONFLICT_FETCH_WINDOW_MS,
+    ).toISOString()
 
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
@@ -2273,47 +2268,18 @@ export default function NewBookingForm({
           </FormCard>
 
       {overridePrompt ? (
-        <div className="grid gap-3 rounded-card border border-toneWarn/25 bg-toneWarn/10 p-3">
-          <div className="grid gap-1">
-            <div className="text-[12px] font-black uppercase tracking-wide text-toneWarn">
-              Booking rule override
-            </div>
-            <div className="text-[12px] text-textSecondary">
-              {overridePrompt.question} The override is recorded on the booking.
-            </div>
-          </div>
-
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              checked={overrideAuthorized}
-              disabled={loading}
-              onChange={(e) =>
-                toggleOverrideAuthorized(overridePrompt.flag, e.target.checked)
-              }
-              className="mt-0.5 h-4 w-4 rounded border-white/10 bg-bgPrimary"
-            />
-            <span className="text-[12px] font-black text-textPrimary">
-              Book anyway — I’m overriding one of my booking rules
-            </span>
-          </label>
-
-          <div className="grid gap-2">
-            <label htmlFor="overrideReason" className={helper}>
-              Reason (optional — shared with your client)
-            </label>
-            <textarea
-              id="overrideReason"
-              value={overrideReason}
-              disabled={loading}
-              onChange={(e) => setOverrideReason(e.target.value)}
-              rows={2}
-              maxLength={280}
-              placeholder={overridePrompt.reasonPlaceholder}
-              className={`${field} min-h-16 resize-y`}
-            />
-          </div>
-        </div>
+        <BookingOverridePromptCard
+          prompt={overridePrompt}
+          authorized={overrideAuthorized}
+          disabled={loading}
+          reason={overrideReason}
+          onToggleAuthorized={(next) =>
+            toggleOverrideAuthorized(overridePrompt.flag, next)
+          }
+          onReasonChange={setOverrideReason}
+          helperClassName={helper}
+          fieldClassName={field}
+        />
       ) : null}
 
       {error ? (

@@ -27,6 +27,14 @@ import AvailabilityCalendarPopup from './AvailabilityCalendarPopup'
 import RebookSlotPicker, {
   type SelectedRebookSlot,
 } from './RebookSlotPicker'
+import BookingOverridePromptCard from '@/app/pro/_components/BookingOverridePromptCard'
+import {
+  mergeBookingOverrideFlags,
+  readBookingOverridePrompt,
+  type BookingOverrideFlag,
+  type BookingOverridePrompt,
+} from '@/lib/booking/overridePrompts'
+import { disabledWeekdayIndexes } from '@/lib/scheduling/workingHours'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
@@ -361,6 +369,22 @@ export default function AftercareForm({
     'windowStart' | 'windowEnd' | null
   >(null)
 
+  // Scheduling-override confirm loop for the booked next appointment,
+  // mirroring the new-booking form: a gated refusal (outside working hours /
+  // short notice / far future) surfaces as a soft confirmation instead of a
+  // dead-end, and the checked flag authorizes the retry.
+  const [overridePrompt, setOverridePrompt] =
+    useState<BookingOverridePrompt | null>(null)
+  const [authorizedOverrideFlags, setAuthorizedOverrideFlags] = useState<
+    BookingOverrideFlag[]
+  >([])
+  const [overrideReason, setOverrideReason] = useState('')
+
+  // The pro's weekly schedule for the rebook location — off days shade the
+  // calendar popups and drive the picker's "outside your working hours"
+  // guidance. Best-effort: null leaves the popups unshaded.
+  const [rebookWorkingHours, setRebookWorkingHours] = useState<unknown>(null)
+
   const [createRebookReminder, setCreateRebookReminder] = useState(false)
   const [rebookDaysBefore, setRebookDaysBefore] = useState('2')
 
@@ -546,6 +570,52 @@ export default function AftercareForm({
 
     return () => controller.abort()
   }, [rebookLocationType, rebookClientProfileId, readOnly])
+
+  // The rebook location's weekly schedule, for off-day shading. Best-effort:
+  // any failure just leaves the calendar popups unshaded.
+  useEffect(() => {
+    if (readOnly) return
+
+    const controller = new AbortController()
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ locationType: rebookLocationType })
+        if (rebookLocationId) params.set('locationId', rebookLocationId)
+        const res = await fetch(
+          `/api/v1/pro/working-hours?${params.toString()}`,
+          { cache: 'no-store', signal: controller.signal },
+        )
+        const data = await safeJson(res)
+        if (!res.ok || !isRecord(data)) return
+        setRebookWorkingHours(data.workingHours ?? null)
+      } catch {
+        // Aborted or network error — shading is optional.
+      }
+    })()
+
+    return () => controller.abort()
+  }, [rebookLocationType, rebookLocationId, readOnly])
+
+  const offWeekdays = useMemo(
+    () => disabledWeekdayIndexes(rebookWorkingHours),
+    [rebookWorkingHours],
+  )
+
+  // A different slot (or mode) is a different scheduling question — drop the
+  // pending override confirmation so a stale authorization can't carry over.
+  useEffect(() => {
+    setOverridePrompt(null)
+    setAuthorizedOverrideFlags([])
+    setOverrideReason('')
+  }, [rebookSlot?.startsAt, rebookSlot?.endsAt, rebookMode])
+
+  function toggleOverrideAuthorized(flag: BookingOverrideFlag, next: boolean) {
+    setAuthorizedOverrideFlags((current) => {
+      if (next) return mergeBookingOverrideFlags(current, flag)
+      return current.filter((value) => value !== flag)
+    })
+  }
 
   function onPickMobileAddress(nextId: string) {
     markDirty()
@@ -816,6 +886,12 @@ export default function AftercareForm({
         rebookMode === 'RECOMMENDED_WINDOW' ? windowStartISO : null,
       rebookWindowEnd:
         rebookMode === 'RECOMMENDED_WINDOW' ? windowEndISO : null,
+      allowOutsideWorkingHours: authorizedOverrideFlags.includes(
+        'allowOutsideWorkingHours',
+      ),
+      allowShortNotice: authorizedOverrideFlags.includes('allowShortNotice'),
+      allowFarFuture: authorizedOverrideFlags.includes('allowFarFuture'),
+      overrideReason: overrideReason.trim() || null,
       createRebookReminder:
         rebookMode === 'BOOKED_NEXT_APPOINTMENT' && !!rebookISO
           ? createRebookReminder
@@ -859,6 +935,13 @@ export default function AftercareForm({
         rebookDate.getTime() <= now
       ) {
         return 'The next appointment must be in the future.'
+      }
+
+      if (
+        overridePrompt &&
+        !authorizedOverrideFlags.includes(overridePrompt.flag)
+      ) {
+        return 'Confirm the booking rule override to book this time, or pick another.'
       }
     }
 
@@ -957,6 +1040,24 @@ export default function AftercareForm({
 
       const data = await safeJson(res)
       if (!res.ok) {
+        // An override-gated scheduling refusal (outside working hours / short
+        // notice / far future) becomes a soft confirmation instead of an
+        // error: the pro checks "book anyway" and saves again. Intent picks
+        // the dialog copy — an existing booked next appointment is being
+        // rescheduled, a fresh one created.
+        const prompt = readBookingOverridePrompt(
+          data,
+          existingRebookedBookingId && !existingRebookDeclinedAt
+            ? 'edit'
+            : 'create',
+        )
+
+        if (prompt && !authorizedOverrideFlags.includes(prompt.flag)) {
+          setOverridePrompt(prompt)
+          setError(null)
+          return
+        }
+
         const nextError = errorFromResponse(res, data)
         setError(nextError)
 
@@ -1339,15 +1440,37 @@ export default function AftercareForm({
                       value={rebookSlot}
                       disabled={disabled}
                       onChange={onPickRebookSlot}
+                      offWeekdays={offWeekdays}
                     />
                   </>
                 )}
                 <div className="mt-2 text-xs font-semibold text-textSecondary">
-                  Pick a real open time from your schedule. Saving books it on
-                  your calendar right away and notifies the client — nothing
-                  for them to confirm. Changing the time reschedules the
-                  appointment; switching to another option cancels it.
+                  Pick an open time, or use “Custom time” to book any time on
+                  your authority — even a day your public calendar shows as
+                  off. Saving books it on your calendar right away and
+                  notifies the client — nothing for them to confirm. Changing
+                  the time reschedules the appointment; switching to another
+                  option cancels it.
                 </div>
+
+                {overridePrompt ? (
+                  <div className="mt-3">
+                    <BookingOverridePromptCard
+                      prompt={overridePrompt}
+                      authorized={authorizedOverrideFlags.includes(
+                        overridePrompt.flag,
+                      )}
+                      disabled={disabled}
+                      reason={overrideReason}
+                      onToggleAuthorized={(next) =>
+                        toggleOverrideAuthorized(overridePrompt.flag, next)
+                      }
+                      onReasonChange={setOverrideReason}
+                      helperClassName={subtleTextClass()}
+                      fieldClassName={inputClass(Boolean(disabled))}
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -1672,6 +1795,7 @@ export default function AftercareForm({
             if (pickerTarget === 'windowStart') applyWindowStart(ymd)
             else pickWindowEnd(ymd)
           }}
+          offWeekdays={offWeekdays}
         />
       ) : null}
     </div>

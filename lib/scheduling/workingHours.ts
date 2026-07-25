@@ -116,6 +116,29 @@ export function minutesToHHMM(minutes: number): string | null {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 }
 
+/**
+ * Weekday indexes (0=Sun … 6=Sat, matching WEEKDAY_KEYS order) whose day is
+ * explicitly disabled (`enabled: false`) in the weekly schedule. Display-only —
+ * a pro-facing calendar shades these as "off days" the pro may still book with
+ * an explicit override. Missing/misconfigured days are NOT included: only a
+ * deliberate "off" reads as off (the server refuses those cases outright).
+ */
+export function disabledWeekdayIndexes(
+  workingHours: unknown,
+): ReadonlySet<number> {
+  const off = new Set<number>()
+  if (!isRecord(workingHours)) return off
+
+  WEEKDAY_KEYS.forEach((key, index) => {
+    const day = workingHours[key]
+    if (isRecord(day) && day.enabled === false) {
+      off.add(index)
+    }
+  })
+
+  return off
+}
+
 function weekdayKeyForDate(day: Date, timeZone: string): WeekdayKey | null {
   const tz = sanitizeTimeZone(timeZone, 'UTC')
 

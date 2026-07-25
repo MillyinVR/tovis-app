@@ -201,6 +201,18 @@ export function overlappingClientNamesForRange(
   return names
 }
 
+/**
+ * "Sam" / "Sam and Alex" / "Sam, Alex, and Riley" — a plain-English join for
+ * the overlap warning notes (new-booking form + aftercare rebook picker).
+ */
+export function formatOverlapNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? ''
+  if (names.length === 2) return `${names[0]} and ${names[1]}`
+
+  const head = names.slice(0, -1).join(', ')
+  return `${head}, and ${names[names.length - 1]}`
+}
+
 export function overlapMinutesForRange<TEvent extends OverlapRangeInput>(
   args: OverlapMinutesForRangeArgs<TEvent>,
 ): number {
