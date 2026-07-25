@@ -180,6 +180,48 @@ export function normalizeDraftServiceItems(
   return normalized
 }
 
+/**
+ * Rebuild the service-item draft from the pro's checked service ids.
+ *
+ * The picker owns only ids, so every toggle re-derives the whole draft from
+ * the sellable catalog. Anything the catalog can't rebuild falls back to the
+ * item already on the booking — the save replaces the entire set, so dropping
+ * one here would delete a service the pro never asked to remove.
+ */
+export function draftItemsFromServiceIds(args: {
+  serviceIds: string[]
+  services: ServiceOption[]
+  existingItems: BookingServiceItem[]
+  stepMinutes: number
+}): BookingServiceItem[] {
+  const items: BookingServiceItem[] = []
+
+  for (const [index, serviceId] of args.serviceIds.entries()) {
+    const option = args.services.find((service) => service.id === serviceId)
+
+    const draftItem = option
+      ? buildDraftItemFromServiceOption(option, index, args.stepMinutes)
+      : null
+
+    if (draftItem) {
+      items.push(draftItem)
+      continue
+    }
+
+    // The catalog can't rebuild this one — its offering went inactive, or it
+    // isn't offered at this booking's location type. Keep the booked item.
+    const existing = args.existingItems.find(
+      (item) => item.serviceId === serviceId,
+    )
+
+    if (existing) {
+      items.push({ ...existing, sortOrder: index })
+    }
+  }
+
+  return normalizeDraftServiceItems(items)
+}
+
 // ── Comparison ─────────────────────────────────────────────────────
 
 export function sameServiceItems(

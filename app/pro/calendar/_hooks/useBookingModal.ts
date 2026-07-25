@@ -32,7 +32,7 @@ import {
 } from '../_utils/parsers'
 
 import {
-  buildDraftItemFromServiceOption,
+  draftItemsFromServiceIds,
   normalizeDraftServiceItems,
   sameServiceItems,
   serviceItemsLabel,
@@ -229,31 +229,6 @@ function uniqueServiceIds(serviceIds: string[]) {
   }
 
   return ids
-}
-
-function draftItemsFromServiceIds(args: {
-  serviceIds: string[]
-  services: ServiceOption[]
-  stepMinutes: number
-}) {
-  const items: BookingServiceItem[] = []
-
-  for (const [index, serviceId] of args.serviceIds.entries()) {
-    const option = args.services.find((service) => service.id === serviceId)
-    if (!option) continue
-
-    const draftItem = buildDraftItemFromServiceOption(
-      option,
-      index,
-      args.stepMinutes,
-    )
-
-    if (draftItem) {
-      items.push(draftItem)
-    }
-  }
-
-  return normalizeDraftServiceItems(items)
 }
 
 function dateAndTimeParts(args: {
@@ -555,10 +530,11 @@ export function useBookingModal(deps: BookingModalDeps) {
         ? openBookingStepMinutes
         : activeStepMinutes
 
-      setServiceItemsDraft(
+      setServiceItemsDraft((current) =>
         draftItemsFromServiceIds({
           serviceIds,
           services,
+          existingItems: current,
           stepMinutes,
         }),
       )

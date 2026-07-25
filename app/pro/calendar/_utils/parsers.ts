@@ -604,17 +604,28 @@ export function parseServiceOptions(value: unknown): ServiceOption[] {
     const name = nullableText(row.name)
     if (!id || !name) continue
 
+    // `GET /api/v1/pro/services` carries price + duration NESTED under
+    // `selectedMode` — the mode it resolved for the requested `locationType`
+    // — not at the top level (see app/api/v1/pro/services/route.ts, and the
+    // iOS decoder TovisKit `ProSellableService`). Read the nested mode first
+    // and only then fall back to a flat field, so a row that never resolved a
+    // mode stays duration-less rather than borrowing the wrong mode's number.
+    const selectedMode = isRecord(row.selectedMode) ? row.selectedMode : null
+
+    const rawDuration = selectedMode?.durationMinutes ?? row.durationMinutes
+    const rawPrice = selectedMode?.priceStartingAt ?? row.priceStartingAt
+
     const durationMinutes =
-      row.durationMinutes === null
+      rawDuration === null || rawDuration === undefined
         ? null
-        : finiteNumberOrNull(row.durationMinutes)
+        : finiteNumberOrNull(rawDuration)
 
     const offeringId = optionalText(row.offeringId)
 
     const priceStartingAt =
-      row.priceStartingAt === null
+      rawPrice === null || rawPrice === undefined
         ? null
-        : nullableText(row.priceStartingAt)
+        : nullableText(rawPrice)
 
     options.push({
       id,
