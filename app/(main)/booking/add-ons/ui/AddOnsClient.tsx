@@ -177,10 +177,11 @@ function describeSyncFailure(args: {
     .map((id) => args.addOns.find((addOn) => addOn.id === id)?.title)
     .filter((title): title is string => Boolean(title))
 
-  const subject =
-    titles.length === 1 ? `“${titles[0]}”` : 'That add-on'
+  if (titles.length === 1) {
+    return `“${titles[0]}” doesn’t fit this appointment time — ${args.serverMessage} Pick an earlier time, or book without it.`
+  }
 
-  return `${subject} doesn’t fit this appointment time — ${args.serverMessage} Pick an earlier time, or book without it.`
+  return `Those add-ons don’t fit this appointment time — ${args.serverMessage} Pick an earlier time, or book without them.`
 }
 
 function getFinalizeBookingId(raw: unknown): string | null {
@@ -298,6 +299,10 @@ export default function AddOnsClient({
   const [selected, setSelected] =
     useState<Record<string, boolean>>(initialSelectedMap)
 
+  // Set once the hold sync below has produced an answer, success or refusal.
+  // Declared here because the adopt effect immediately below reads it.
+  const serverAnsweredRef = useRef(false)
+
   // Adopt the URL / recommended defaults only until the selection has an owner.
   // Once the client has touched it, or the server has answered about it, those
   // defaults are stale: re-applying them would re-tick an add-on the hold was
@@ -323,7 +328,6 @@ export default function AddOnsClient({
   const [syncedKey, setSyncedKey] = useState<string>('')
   const [syncingHold, setSyncingHold] = useState(false)
   const syncSequenceRef = useRef(0)
-  const serverAnsweredRef = useRef(false)
 
   const syncedIds = useMemo(
     () => (syncedKey ? syncedKey.split(',') : []),
