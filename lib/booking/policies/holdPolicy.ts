@@ -63,6 +63,12 @@ export type EvaluateHoldCreationDecisionArgs = {
   maxDaysAhead: number
   salonLocationAddress: string | null
   clientServiceAddress: string | null
+  /**
+   * The booking this hold is being placed to MOVE. Excluded from the conflict
+   * check, because the reschedule commit excludes it too (B3-B). Null for an
+   * ordinary hold, which has no booking to be confused with.
+   */
+  excludeBookingId?: string | null
 }
 
 function decisionFail(
@@ -217,6 +223,11 @@ export async function evaluateHoldCreationDecision(
     defaultBufferMinutes: args.bufferMinutes,
     fallbackDurationMinutes: args.durationMinutes,
     nowUtc: args.now,
+    // A reschedule's own booking is not an obstacle to itself. The commit
+    // (`evaluateRescheduleDecision`) already excludes it, so without this the
+    // hold refuses TIME_BOOKED for a slot the reschedule would accept — a
+    // 3pm–5pm appointment could not be moved to 4pm (B3-B).
+    excludeBookingId: args.excludeBookingId ?? null,
   })
 
   if (conflict === 'BLOCKED') {

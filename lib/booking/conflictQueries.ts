@@ -105,6 +105,14 @@ type BusyIntervalWindowArgs = {
   fallbackDurationMinutes?: number
   defaultBufferMinutes: number
   take?: number
+  /**
+   * Drop ONE booking from the busy set — the booking a reschedule is moving.
+   * The reschedule commit already excludes it (`evaluateRescheduleDecision`
+   * passes `excludeBookingId`), so an offer that counts it as busy hides times
+   * the commit would accept: a 3pm–5pm appointment could not be moved to 4pm
+   * (B3-B). Holds and calendar blocks are unaffected.
+   */
+  excludeBookingId?: string | null
 }
 
 export type TimeRangeConflictCode = 'BLOCKED' | 'BOOKING' | 'HOLD'
@@ -662,6 +670,7 @@ export async function loadBusyIntervalsForWindow(
     fallbackDurationMinutes = DEFAULT_DURATION_MINUTES,
     defaultBufferMinutes,
     take = 5000,
+    excludeBookingId = null,
   } = args
 
   assertValidRange(windowStartUtc, windowEndUtc)
@@ -675,6 +684,7 @@ export async function loadBusyIntervalsForWindow(
       where: {
         professionalId,
         scheduledFor: { gte: queryStartUtc, lt: windowEndUtc },
+        ...(excludeBookingId ? { id: { not: excludeBookingId } } : {}),
         ...buildBlockingBookingStatusWhere(),
       },
       select: {

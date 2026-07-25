@@ -669,6 +669,7 @@ export async function GET(req: Request) {
           scheduleVersion,
           scheduleConfigVersion,
           addOnIds,
+          excludeBookingId: reschedule?.bookingId ?? null,
           viewerLat,
           viewerLng,
           radiusMiles,
@@ -707,6 +708,9 @@ export async function GET(req: Request) {
           windowEndUtc,
           nowUtc,
           fallbackDurationMinutes: durationMinutes,
+      // The booking being moved is not an obstacle to itself — the reschedule
+      // commit excludes it, so the day scroller must too (B3-B).
+      excludeBookingId: reschedule?.bookingId ?? null,
           locationBufferMinutes,
           scheduleVersion,
           cache: { enabled: !debug },
