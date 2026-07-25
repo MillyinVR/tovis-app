@@ -277,6 +277,7 @@ describe('POST /api/v1/holds', () => {
       clientId: 'client_1',
       bookingEntryPoint: 'BROAD_DISCOVERY',
       addOnIds: [],
+      rescheduleBookingId: null,
       offering: createHoldOffering,
       requestedStart: SLOT_START,
       requestedLocationId: 'loc_1',
@@ -793,5 +794,49 @@ describe('POST /api/v1/holds', () => {
       uiAction: descriptor.uiAction,
       message: descriptor.message,
     })
+  })
+  it('passes rescheduleBookingId through to the boundary', async () => {
+    const response = await POST(
+      makeRequest({
+        ...makeValidSalonBody(),
+        rescheduleBookingId: 'booking_9',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({ rescheduleBookingId: 'booking_9' }),
+    )
+  })
+
+  it('refuses add-ons alongside a reschedule BEFORE reaching the boundary', async () => {
+    const descriptor = getBookingErrorDescriptor('ADDONS_INVALID')
+
+    const response = await POST(
+      makeRequest({
+        ...makeValidSalonBody(),
+        rescheduleBookingId: 'booking_9',
+        addOnIds: ['addon_1'],
+      }),
+    )
+
+    expect(response.status).toBe(descriptor.httpStatus)
+    // The width a reschedule reserves comes from the booking, so a request
+    // carrying both is ambiguous — refused at the edge, never half-applied.
+    expect(mocks.createHold).not.toHaveBeenCalled()
+  })
+
+  it('treats a blank rescheduleBookingId as absent', async () => {
+    const response = await POST(
+      makeRequest({
+        ...makeValidSalonBody(),
+        rescheduleBookingId: '   ',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({ rescheduleBookingId: null }),
+    )
   })
 })

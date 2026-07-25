@@ -433,6 +433,13 @@ type CreateHoldArgs = {
   // will demand (B1-A). Empty when the surface picks add-ons AFTER the time
   // (the web drawer) — that flow widens the hold later via updateHoldAddOns.
   addOnIds: string[]
+  // Set when this hold is being placed to MOVE an existing booking. The
+  // reservation is then sized from that booking's committed
+  // `totalDurationMinutes` rather than from the offering, because that is what
+  // `rescheduleBookingFromHold` will take (B3). Mutually exclusive with
+  // `addOnIds`: a reschedule keeps the booking's original add-ons, which are
+  // already inside its committed width.
+  rescheduleBookingId?: string | null
   offering: {
     id: string
     professionalId: string
@@ -7609,6 +7616,130 @@ async function performLockedUploadProBookingMedia(args: {
   }
 }
 /**
+ * The exact fields a reschedule's committed width is derived from. Kept as a
+ * structural type rather than a Prisma payload so both callers can select only
+ * what they need: the commit site already holds the full booking row, the hold
+ * site reads five columns.
+ */
+type RescheduleTargetRecord = {
+  status: BookingStatus
+  startedAt: Date | null
+  finishedAt: Date | null
+  offeringId: string | null
+  totalDurationMinutes: number | null
+}
+
+/**
+ * THE width a reschedule will COMMIT for a booking, plus the guards that decide
+ * whether it may be rescheduled at all.
+ *
+ * B3: the hold placed for a reschedule used to be sized from the OFFERING while
+ * this is what `performLockedRescheduleBookingFromHold` takes — two numbers
+ * nothing kept equal, so the reservation was routinely narrower than the commit
+ * (on production, 7 of 11 live bookings, no add-ons involved). Both the promise
+ * site and the commit site now call this one function, so a hold cannot promise
+ * a width the reschedule will not honour, and the refusals are identical on
+ * both ends ([[promise-site-runs-the-commit-site-gate]]).
+ *
+ * Throws the booking error the commit would throw; ownership is the caller's to
+ * check first, because the two sites reach the booking differently. Returns the
+ * offering id alongside the width so the commit site does not need a second,
+ * unreachable null-check to narrow it.
+ */
+function resolveRescheduleCommitDurationMinutes(
+  booking: RescheduleTargetRecord,
+): { totalDurationMinutes: number; offeringId: string } {
+  if (
+    booking.status === BookingStatus.COMPLETED ||
+    booking.status === BookingStatus.CANCELLED
+  ) {
+    throw bookingError('BOOKING_NOT_RESCHEDULABLE')
+  }
+
+  if (booking.startedAt || booking.finishedAt) {
+    throw bookingError('BOOKING_ALREADY_STARTED')
+  }
+
+  const offeringId = booking.offeringId
+  if (!offeringId) {
+    throw bookingError('BOOKING_MISSING_OFFERING')
+  }
+
+  const rawDuration = Number(booking.totalDurationMinutes ?? 0)
+  if (
+    !Number.isFinite(rawDuration) ||
+    rawDuration < 15 ||
+    rawDuration > MAX_SLOT_DURATION_MINUTES
+  ) {
+    throw bookingError('INVALID_DURATION')
+  }
+
+  return {
+    totalDurationMinutes: clampInt(
+      Math.trunc(rawDuration),
+      15,
+      MAX_SLOT_DURATION_MINUTES,
+    ),
+    offeringId,
+  }
+}
+
+const RESCHEDULE_HOLD_TARGET_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  startedAt: true,
+  finishedAt: true,
+  offeringId: true,
+  totalDurationMinutes: true,
+} satisfies Prisma.BookingSelect
+
+/**
+ * The minutes a hold placed FOR A RESCHEDULE must reserve. Reads the booking
+ * under the professional's schedule lock and runs the commit gate's own guard,
+ * so what the hold promises is exactly what `rescheduleBookingFromHold` will
+ * take.
+ *
+ * A booking that is missing and a booking owned by someone else return the SAME
+ * `BOOKING_NOT_FOUND`, matching `lockClientOwnedBookingSchedule` — a client must
+ * not learn that another client's booking exists from the shape of a refusal.
+ */
+async function resolveRescheduleHoldDurationMinutes(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  clientId: string
+  offeringId: string
+  professionalId: string
+}): Promise<number> {
+  const booking = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: RESCHEDULE_HOLD_TARGET_SELECT,
+  })
+
+  if (!booking || booking.clientId !== args.clientId) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  // The commit re-checks this pair through `validateHoldForClientMutation`;
+  // checking it here too means a mismatched hold is refused while the client can
+  // still pick again, and — more importantly — that the width being reserved
+  // belongs to THIS offering rather than some other booking of theirs.
+  if (
+    booking.professionalId !== args.professionalId ||
+    booking.offeringId !== args.offeringId
+  ) {
+    throw bookingError('HOLD_MISMATCH', {
+      message: 'Hold does not match the booking being rescheduled.',
+      userMessage:
+        'That time no longer matches this booking. Please pick a new slot.',
+    })
+  }
+
+  return resolveRescheduleCommitDurationMinutes(booking).totalDurationMinutes
+}
+
+/**
  * The minutes a hold must RESERVE for a selection of add-ons: the same
  * `base + add-ons` arithmetic finalize commits to, resolved inside the caller's
  * transaction so the numbers cannot drift between the two.
@@ -7650,6 +7781,7 @@ async function performLockedCreateHold(args: {
   clientId: string
   bookingEntryPoint: ProBookingEntryPoint
   addOnIds: string[]
+  rescheduleBookingId: string | null
   offering: CreateHoldArgs['offering']
   requestedStart: Date
   requestedLocationId: string | null
@@ -7662,12 +7794,25 @@ async function performLockedCreateHold(args: {
     clientId,
     bookingEntryPoint,
     addOnIds,
+    rescheduleBookingId,
     offering,
     requestedStart,
     requestedLocationId,
     locationType,
     clientAddressId,
   } = args
+
+  // A reschedule keeps the booking's original add-ons — they are already inside
+  // the committed width this hold will be sized to. Accepting both would mean
+  // silently ignoring one of them, and the one ignored decides how much time is
+  // reserved, so refuse instead of picking a winner.
+  if (rescheduleBookingId && addOnIds.length > 0) {
+    throw bookingError('ADDONS_INVALID', {
+      message: 'Add-ons cannot be changed while rescheduling a booking.',
+      userMessage:
+        'Add-ons can’t be changed while moving this appointment. Pick a new time first.',
+    })
+  }
 
   await assertProfessionalIsBookingReady({
     tx,
@@ -7766,19 +7911,30 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
 
   const locationContext = validatedContextResult.context
 
-  // Reserve base + add-ons, not the base service (B1-A). Finalize enforces
-  // `base + add-ons`, so a base-sized hold promises a window narrower than the
-  // one the commit will demand — the client is then refused at the END of
-  // checkout for a slot they were offered. Resolved through the same helper the
-  // availability route and finalize use, inside this transaction.
-  const durationMinutes = await resolveHoldDurationWithAddOns({
-    tx,
-    professionalId: offering.professionalId,
-    offeringId: offering.id,
-    addOnIds,
-    locationType,
-    baseDurationMinutes: validatedContextResult.durationMinutes,
-  })
+  // Reserve what the COMMIT will take, not what the offering currently says.
+  //
+  // Two different commits, so two different widths (B1-A + B3):
+  //  - finalize takes `base + add-ons` → size from the selection;
+  //  - reschedule takes the BOOKING's committed `totalDurationMinutes`, which
+  //    drifts from the offering's base whenever the pro edits a duration.
+  // Both are resolved through the very helper the commit site runs, inside this
+  // transaction, so neither can drift from what it promised.
+  const durationMinutes = rescheduleBookingId
+    ? await resolveRescheduleHoldDurationMinutes({
+        tx,
+        bookingId: rescheduleBookingId,
+        clientId,
+        offeringId: offering.id,
+        professionalId: offering.professionalId,
+      })
+    : await resolveHoldDurationWithAddOns({
+        tx,
+        professionalId: offering.professionalId,
+        offeringId: offering.id,
+        addOnIds,
+        locationType,
+        baseDurationMinutes: validatedContextResult.durationMinutes,
+      })
 
   locationContextOrNull = locationContext
   durationMinutesOrNull = durationMinutes
@@ -8280,44 +8436,19 @@ async function performLockedRescheduleBookingFromHold(args: {
     throw bookingError('BOOKING_NOT_FOUND')
   }
 
-  if (
-    booking.status === BookingStatus.COMPLETED ||
-    booking.status === BookingStatus.CANCELLED
-  ) {
-    throw bookingError('BOOKING_NOT_RESCHEDULABLE')
-  }
-
-  if (booking.startedAt || booking.finishedAt) {
-    throw bookingError('BOOKING_ALREADY_STARTED')
-  }
-
-  if (!booking.offeringId) {
-    throw bookingError('BOOKING_MISSING_OFFERING')
-  }
+  // The same guard the HOLD ran when it sized this reservation, so the width
+  // reserved and the width committed cannot disagree (B3).
+  const { totalDurationMinutes, offeringId: bookingOfferingId } =
+    resolveRescheduleCommitDurationMinutes(booking)
 
   const bookingOffering = await args.tx.professionalServiceOffering.findUnique({
-    where: { id: booking.offeringId },
+    where: { id: bookingOfferingId },
     select: RESCHEDULE_BOOKING_OFFERING_SELECT,
   })
 
   if (!bookingOffering) {
     throw bookingError('OFFERING_NOT_FOUND')
   }
-
-  const rawDuration = Number(booking.totalDurationMinutes ?? 0)
-  if (
-    !Number.isFinite(rawDuration) ||
-    rawDuration < 15 ||
-    rawDuration > MAX_SLOT_DURATION_MINUTES
-  ) {
-    throw bookingError('INVALID_DURATION')
-  }
-
-  const totalDurationMinutes = clampInt(
-    Math.trunc(rawDuration),
-    15,
-    MAX_SLOT_DURATION_MINUTES,
-  )
 
   const hold = await args.tx.bookingHold.findUnique({
     where: { id: args.holdId },
@@ -8330,7 +8461,7 @@ async function performLockedRescheduleBookingFromHold(args: {
     clientId: args.clientId,
     now: args.now,
     expectedProfessionalId: booking.professionalId,
-    expectedOfferingId: booking.offeringId,
+    expectedOfferingId: bookingOfferingId,
     expectedLocationType: args.requestedLocationType,
   })
 
@@ -14725,6 +14856,7 @@ export async function createHold(
         clientId: args.clientId,
         bookingEntryPoint: args.bookingEntryPoint,
         addOnIds: args.addOnIds,
+        rescheduleBookingId: args.rescheduleBookingId ?? null,
         offering: args.offering,
         requestedStart: args.requestedStart,
         requestedLocationId: args.requestedLocationId,

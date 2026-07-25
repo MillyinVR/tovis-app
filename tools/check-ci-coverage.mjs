@@ -52,6 +52,9 @@ const MANUAL_ONLY = {
   'test:integration:booking-overlap':
     'Focused local subset of the integration suite, which CI runs in full.',
 
+  'check:dev-db-drift':
+    'Diagnostic, not a guard. The dev DB is `prisma db push`-managed by design, so drift from the merged migrations is EXPECTED there; this reports it and prints the ALTERs. It also refuses any non-local host, so there is nothing for CI to point it at.',
+
   // --- curated aliases over suites CI already runs -------------------------
   'test:privacy':
     'Alias for the two privacy subsets below; both are plain vitest files already covered by `pnpm test`.',

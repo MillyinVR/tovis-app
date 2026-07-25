@@ -34,6 +34,16 @@ export type DrawerContext = {
    */
   initialStartDate?: string | null
 
+  /**
+   * Set when the drawer is picking a new time for an EXISTING booking. The hold
+   * it places is then sized from that booking's committed duration rather than
+   * the offering's current base, because that is what the reschedule will take
+   * (B3). Without it the reservation is routinely narrower than the commit —
+   * the tail is takeable mid-checkout, and the last starts of the day are
+   * offered then refused at the confirm.
+   */
+  rescheduleBookingId?: string | null
+
   // optional viewer location (for "other pros near you")
   viewerLat?: number | null
   viewerLng?: number | null

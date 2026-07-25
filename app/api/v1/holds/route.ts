@@ -62,6 +62,7 @@ type ParsedHoldRequest = {
   requestedStart: Date
   entryPointSource: BookingEntryPointSource | null
   addOnIds: string[]
+  rescheduleBookingId: string | null
 }
 
 type HeaderCarrier = {
@@ -167,6 +168,7 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
   const scheduledForRaw = pickString(rawBody.scheduledFor)
   const entryPointSource = pickEntryPointSource(rawBody)
   const addOnIds = pickStringArray(rawBody.addOnIds, MAX_HOLD_ADD_ON_IDS)
+  const rescheduleBookingId = pickString(rawBody.rescheduleBookingId)
 
   if (!offeringId) {
     return bookingJsonFail('OFFERING_ID_REQUIRED')
@@ -174,6 +176,17 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
 
   if (hasDuplicateStrings(addOnIds)) {
     return bookingJsonFail('ADDONS_INVALID')
+  }
+
+  // A reschedule reserves the booking's committed width, which already includes
+  // its original add-ons (B3). Refused here as well as at the boundary so the
+  // contract is visible on the wire, not only in the write path.
+  if (rescheduleBookingId && addOnIds.length > 0) {
+    return bookingJsonFail('ADDONS_INVALID', {
+      message: 'Add-ons cannot be changed while rescheduling a booking.',
+      userMessage:
+        'Add-ons can’t be changed while moving this appointment. Pick a new time first.',
+    })
   }
 
   if (!scheduledForRaw) {
@@ -210,6 +223,7 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
     requestedStart,
     entryPointSource,
     addOnIds,
+    rescheduleBookingId,
   }
 }
 
@@ -327,6 +341,7 @@ export async function POST(req: NextRequest) {
       clientId: auth.clientId,
       bookingEntryPoint,
       addOnIds: parsed.addOnIds,
+      rescheduleBookingId: parsed.rescheduleBookingId,
       offering: toCreateHoldOffering(offering),
       requestedStart: parsed.requestedStart,
       requestedLocationId: parsed.requestedLocationId,
