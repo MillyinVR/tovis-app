@@ -58,7 +58,7 @@ type ManagementModalCopy = {
   blockTimeAction: string
   blockFullDayAction: string
 
-  reviewRescheduleAction: string
+  reviewEditAction: string
   openAction: string
   messageAction: string
   offerTimeAction: string
@@ -155,7 +155,7 @@ const DEFAULT_COPY: ManagementModalCopy = {
   blockTimeAction: '+ Block time',
   blockFullDayAction: 'Block full day',
 
-  reviewRescheduleAction: 'Review / Reschedule',
+  reviewEditAction: 'Review / Edit',
   openAction: 'Open',
   messageAction: 'Message',
   offerTimeAction: 'Offer a time',
@@ -862,7 +862,7 @@ function ManagementEventRow(props: ManagementEventRowProps) {
                 }}
               >
                 {activeKey === 'pendingRequests' && !isBlock
-                  ? copy.reviewRescheduleAction
+                  ? copy.reviewEditAction
                   : copy.openAction}
               </ActionButton>
 
