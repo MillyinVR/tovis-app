@@ -829,6 +829,12 @@
   background: rgb(var(--color-acid));
 }
 
+.brand-pro-calendar-legend-dot[data-tone="held"] {
+  background: rgb(var(--tone-pending) / 0.55);
+  outline: 1px dashed rgb(var(--tone-pending));
+  outline-offset: 1px;
+}
+
 .brand-pro-calendar-legend-dot[data-tone="blocked"],
 .brand-pro-calendar-legend-dot[data-tone="muted"] {
   background: rgb(var(--text-muted));
@@ -996,6 +1002,29 @@
   box-shadow: none;
 }
 
+/* A client's live checkout reservation (B5).
+   Hatched, so it reads as "not a real appointment" the way blocked time does,
+   but in the pending tone with a DASHED ring so it reads as provisional and
+   in-flight rather than as the pro's own break — it clears itself within
+   HOLD_MINUTES and cannot be opened, dragged or resized.
+   `background-color` + `background-image` deliberately, NOT the `background`
+   shorthand: the shorthand resets background-image and would drop the hatch.
+   Tokens only — no raw hex, no Tailwind color classes — so it follows
+   [data-mode] in both light and dark. */
+.brand-pro-calendar-page [data-calendar-event-kind="HOLD"],
+.brand-pro-calendar-page [data-calendar-event-tone="held"] {
+  background-color: rgb(var(--bg-secondary) / 0.98);
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      rgb(var(--tone-pending) / 0.16) 0 5px,
+      transparent 5px 12px
+    );
+  outline: 1px dashed rgb(var(--tone-pending) / 0.55);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+
 
 .brand-pro-calendar-event-accent[data-tone="pending"] {
   background: rgb(var(--tone-pending));
@@ -1015,6 +1044,10 @@
 
 .brand-pro-calendar-event-accent[data-tone="blocked"] {
   background: rgb(var(--text-muted));
+}
+
+.brand-pro-calendar-event-accent[data-tone="held"] {
+  background: rgb(var(--tone-pending));
 }
 
 /* ──────────────────────────────────────────────────────────────────
@@ -1382,6 +1415,10 @@
 
 .brand-pro-calendar-month-dot[data-tone="waitlist"] {
   background: rgb(var(--color-acid));
+}
+
+.brand-pro-calendar-month-dot[data-tone="held"] {
+  background: rgb(var(--tone-pending) / 0.55);
 }
 
 .brand-pro-calendar-month-dot[data-tone="blocked"] {

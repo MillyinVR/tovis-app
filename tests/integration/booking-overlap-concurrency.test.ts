@@ -42,6 +42,7 @@ import {
   checkSlotReadiness,
   type SlotReadinessCode,
 } from '@/lib/booking/slotReadiness'
+import { decideBookingOverlapPermission } from '@/lib/booking/overlapPolicy'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import { utcDateToLocalParts } from '@/lib/time'
 import { createProBooking } from '@/lib/booking/writeBoundary'
@@ -1987,6 +1988,118 @@ describe('findBookingAndHoldConflicts against real Postgres', () => {
         },
       }),
     ).resolves.toBe(2)
+  })
+
+  // B5 — the pro path treats a client's LIVE HOLD as an authorized overlap.
+  //
+  // The sibling test above pins the same behaviour over a BOOKING, which is the
+  // intended one: the pro can see that booking on their calendar and chooses to
+  // stack on it. Over a HOLD the pro could see NOTHING — not on the calendar,
+  // not in either overlap warning — so the "authorization" was fictional and
+  // the client mid-checkout was refused at their own confirm.
+  //
+  // Tori's call (2026-07-25) is to keep ALLOWING it and make it visible, so this
+  // test pins the write behaviour deliberately: if it ever starts refusing, that
+  // is a product change, not a bug fix. What B5 changed is that the pro is now
+  // told — see the route + overlap-warning suites.
+  //
+  // ⚠️ Note what this does NOT go through: the existing
+  // "blocks booking creation when an active hold already occupies..." case uses
+  // `createLockedBooking`, a hand-rolled helper that calls getTimeRangeConflict
+  // directly and never reaches decideBookingOverlapPermission. Its name reads
+  // like it covers this; it does not. [[a-suites-name-is-not-its-coverage]]
+  it('a pro walk-in over a live client hold is authorized, and the client is then refused', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    await db.professionalProfile.update({
+      where: { id: fx.professionalId },
+      data: { mobileBasePostalCode: '92101', mobileRadiusMiles: 25 },
+    })
+
+    const holdStart = futureUtc(7, 18)
+
+    const holdId = await createLockedHold({
+      clientId: fx.clients[0].clientId,
+      start: holdStart,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    const result = await createProBooking({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      clientId: fx.clients[1].clientId,
+      offeringId: fx.offeringId,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: addMinutes(holdStart, 30),
+      clientAddressId: null,
+      internalNotes: null,
+      overrideReason: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    })
+
+    const created = await db.booking.findUnique({
+      where: { id: result.booking.id },
+      select: { allowsOverlap: true, status: true },
+    })
+
+    // Created, not refused — and flagged so the DB EXCLUDE constraint is
+    // deliberately disarmed for this row.
+    expect(created?.status).toBe(BookingStatus.ACCEPTED)
+    expect(created?.allowsOverlap).toBe(true)
+
+    // The client's hold SURVIVES the pro's booking: two live reservations now
+    // sit on the same minutes. Nothing releases it, so it lingers until its own
+    // expiry or the */5 cleanup sweep.
+    await expect(
+      db.bookingHold.count({
+        where: { id: holdId, expiresAt: { gt: new Date() } },
+      }),
+    ).resolves.toBe(1)
+
+    // ...and this is what the client meets at CONFIRM. Exactly the pair
+    // finalize runs: find conflicts excluding the client's OWN hold, then ask
+    // the overlap policy as a CLIENT actor.
+    const clientEnd = addMinutes(holdStart, 60 + 15)
+    const clientConflicts = await findBookingAndHoldConflicts({
+      tx: db,
+      professionalId: fx.professionalId,
+      startsAt: holdStart,
+      endsAt: clientEnd,
+      excludeHoldId: holdId,
+      now: new Date(),
+    })
+
+    expect(clientConflicts.all.map((conflict) => conflict.kind)).toEqual([
+      'BOOKING',
+    ])
+
+    const clientDecision = decideBookingOverlapPermission({
+      actor: {
+        kind: 'CLIENT',
+        userId: fx.clients[0].clientId,
+        clientId: fx.clients[0].clientId,
+      },
+      source: { kind: 'DIRECT_PROFILE' },
+      requestedWindow: {
+        professionalId: fx.professionalId,
+        startsAt: holdStart,
+        endsAt: clientEnd,
+      },
+      conflicts: clientConflicts.all,
+    })
+
+    // The client held this slot and is now turned away from it.
+    expect(clientDecision.ok).toBe(false)
+    if (!clientDecision.ok) {
+      expect(clientDecision.code).toBe('CLIENT_OVERLAP_NOT_ALLOWED')
+    }
   })
 
   it('reserves at least the DB EXCLUDE range for a hold whose snapshots are null', async () => {

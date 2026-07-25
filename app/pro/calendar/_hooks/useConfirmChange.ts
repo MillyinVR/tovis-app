@@ -39,6 +39,10 @@ import {
 } from '@/lib/timeZone'
 
 import { errorMessageFromUnknown, safeJson } from '@/lib/http'
+import {
+  OVERLAP_FALLBACK_NAME,
+  OVERLAP_HOLD_NAME,
+} from '@/lib/calendar/constants'
 import { hasOverlap } from '@/lib/calendar/overlap'
 import {
   buildClientIdempotencyKey,
@@ -456,6 +460,11 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     const end = new Date(start.getTime() + durationMinutes * 60_000)
 
     for (const candidate of eventsRef.current) {
+      // Blocks are the pro's own time and stay skipped. HOLDS are NOT skipped:
+      // a live client checkout is exactly the collision this note exists to
+      // surface, and before B5 it could not appear here at all — the feed sent
+      // no hold events, so this loop was structurally blind to them while the
+      // server happily authorized the overlap. [[reserving-a-slot-needs-a-surface]]
       if (candidate.kind === 'BLOCK') continue
       if (candidate.id === pendingChange.eventId) continue
 
@@ -465,7 +474,11 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
           { startsAt: candidate.startsAt, endsAt: candidate.endsAt },
         )
       ) {
-        return candidate.clientName?.trim() || 'another appointment'
+        // A hold never names the client behind it, so it gets its own phrase
+        // rather than leaking the fixed 'Held' label into the sentence (B5).
+        if (candidate.kind === 'HOLD') return OVERLAP_HOLD_NAME
+
+        return candidate.clientName?.trim() || OVERLAP_FALLBACK_NAME
       }
     }
 

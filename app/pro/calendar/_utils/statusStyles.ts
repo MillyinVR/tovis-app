@@ -36,6 +36,10 @@ export type StatusTone =
   | 'danger'
   | 'blocked'
   | 'waitlist'
+  // A client's live checkout reservation (B5). Its own tone so brand CSS can
+  // render it as clearly provisional — it is not a booking and not the pro's
+  // own blocked time.
+  | 'held'
   | 'scheduled'
 
 export type CalendarStatusMeta = {
@@ -47,6 +51,7 @@ export type CalendarStatusMeta = {
   isCompleted: boolean
   isDanger: boolean
   isWaitlist: boolean
+  isHeld: boolean
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -62,6 +67,7 @@ const DANGER_STATUSES = new Set<string>([
   'NO_SHOW',
 ])
 const WAITLIST_STATUSES = new Set<string>(['WAITLIST'])
+const HELD_STATUSES = new Set<string>(['HELD'])
 
 const STATUS_LABELS: Record<string, string> = {
   ACCEPTED: 'Accepted',
@@ -74,6 +80,7 @@ const STATUS_LABELS: Record<string, string> = {
   RESCHEDULE_REQUESTED: 'Reschedule requested',
   WAITLIST: 'Waitlist',
   BLOCKED: 'Blocked',
+  HELD: 'Held',
 }
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
@@ -109,6 +116,10 @@ function statusToneForNormalizedStatus(args: {
 
   if (WAITLIST_STATUSES.has(normalizedStatus)) {
     return 'waitlist'
+  }
+
+  if (HELD_STATUSES.has(normalizedStatus)) {
+    return 'held'
   }
 
   if (PENDING_STATUSES.has(normalizedStatus)) {
@@ -149,6 +160,7 @@ export function calendarStatusMeta(event: CalendarEventLike): CalendarStatusMeta
     isCompleted: tone === 'completed',
     isDanger: tone === 'danger',
     isWaitlist: tone === 'waitlist',
+    isHeld: tone === 'held',
   }
 }
 

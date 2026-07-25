@@ -1,5 +1,7 @@
 // lib/calendar/overlap.ts
 
+import { isRecord } from '@/lib/guards'
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type OverlapRangeInput = {
@@ -118,13 +120,65 @@ export type IdentifiedNamedRange = IdentifiedOverlapRange & {
 }
 
 /**
+ * Reads a `/api/v1/pro/calendar` response down to what the overlap warnings
+ * need.
+ *
+ * BLOCK-kind events (the pro's own blocked time) are dropped, so the note only
+ * warns about collisions with someone else's time. HOLD-kind events are KEPT
+ * (B5): a live client checkout is exactly the collision the pro cannot see any
+ * other way, and before B5 the feed carried no hold events at all — so this
+ * warning was structurally silent on them while the write path authorized the
+ * overlap and the client was refused at their own confirm.
+ * [[reserving-a-slot-needs-a-surface]]
+ *
+ * A hold is anonymous, so it contributes `holdName` rather than the fixed
+ * 'Held' label its payload carries for the calendar card.
+ */
+export function normalizeCalendarOverlapEvents(args: {
+  data: unknown
+  holdName: string
+}): IdentifiedNamedRange[] {
+  const { data, holdName } = args
+
+  if (!isRecord(data)) return []
+
+  const raw = data.events
+  if (!Array.isArray(raw)) return []
+
+  const out: IdentifiedNamedRange[] = []
+
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    if (item.kind === 'BLOCK') continue
+
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const startsAt = typeof item.startsAt === 'string' ? item.startsAt : ''
+    const endsAt = typeof item.endsAt === 'string' ? item.endsAt : ''
+    if (!id || !startsAt || !endsAt) continue
+
+    if (item.kind === 'HOLD') {
+      out.push({ id, startsAt, endsAt, clientName: holdName })
+      continue
+    }
+
+    const clientName =
+      typeof item.clientName === 'string' && item.clientName.trim()
+        ? item.clientName.trim()
+        : null
+
+    out.push({ id, startsAt, endsAt, clientName })
+  }
+
+  return out
+}
+
+/**
  * The client names of the events whose time ranges overlap `range` — the pro
  * new-booking form's passive double-book heads-up (mirror of the calendar
  * confirm modal's `pendingOverlapName`). Half-open (via `hasOverlap`), so a
  * back-to-back booking that merely touches does NOT warn. Order-preserving and
  * de-duplicated by name; an event without a client name falls back to
- * `fallbackName`. Callers filter out BLOCK-kind events first so this only
- * surfaces client-vs-client collisions, never the pro's own blocked time.
+ * `fallbackName`. Callers filter kinds via `normalizeCalendarOverlapEvents`.
  */
 export function overlappingClientNamesForRange(
   range: OverlapRangeInput,

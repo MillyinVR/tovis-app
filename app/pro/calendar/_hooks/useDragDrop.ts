@@ -20,6 +20,7 @@ import {
   computeDurationMinutesFromIso,
   extractBlockId,
   isBlockedEvent,
+  isHoldEvent,
   normalizeStepMinutes,
   roundDurationMinutes,
   snapMinutes,
@@ -80,6 +81,9 @@ function eventEntityType(event: CalendarEvent): EntityType {
 }
 
 function eventApiId(event: CalendarEvent): string | null {
+  // A hold is read-only occupancy — see DayColumn's twin (B-D7) (B5).
+  if (isHoldEvent(event)) return null
+
   return isBlockedEvent(event) ? extractBlockId(event) : event.id
 }
 

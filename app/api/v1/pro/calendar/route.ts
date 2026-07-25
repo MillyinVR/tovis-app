@@ -17,6 +17,7 @@ import {
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes } from '@/lib/booking/conflicts'
+import { holdRecordToBusyInterval } from '@/lib/booking/conflictQueries'
 import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import {
@@ -41,6 +42,8 @@ import {
   DEFAULT_BOOKING_CLIENT_NAME,
   DEFAULT_BOOKING_SERVICE_NAME,
   DEFAULT_CALENDAR_RANGE_DAYS,
+  DEFAULT_HOLD_CLIENT_NAME,
+  DEFAULT_HOLD_TITLE,
   MAX_CALENDAR_EVENTS_PER_RANGE,
   MAX_CALENDAR_LOCATIONS_PER_PRO,
   MAX_CALENDAR_RANGE_DAYS,
@@ -157,7 +160,34 @@ type BlockEvent = {
   }
 }
 
-type CalendarEvent = BookingEvent | BlockEvent
+// A client's LIVE checkout reservation, shown so the pro's day tells the truth
+// about what their time is doing. Before B5 the feed rendered BOOKING + BLOCK
+// only, so a hold was invisible on the calendar AND in both overlap-warning
+// surfaces that read this array — while the write path happily authorized a
+// pro booking straight over it. [[reserving-a-slot-needs-a-surface]]
+//
+// Deliberately ANONYMOUS (Tori's call, 2026-07-25): no clientName, no
+// clientProfileId, no service name. A hold means somebody is mid-checkout this
+// minute; the pro needs to know the slot is spoken for, not who is hesitating
+// over it. It carries no `blockId`/`waitlistEntryId` because nothing acts on
+// it — it is a read-only occupancy segment that expires on its own.
+type HoldEvent = {
+  id: string
+  holdId: string
+  kind: 'HOLD'
+  startsAt: string
+  endsAt: string
+  title: string
+  clientName: string
+  status: 'HELD'
+  locationType: ServiceLocationType | null
+  locationId: string | null
+  durationMinutes: number
+  localDateKey: string
+  expiresAt: string
+}
+
+type CalendarEvent = BookingEvent | BlockEvent | HoldEvent
 
 type CalendarStats = {
   todaysBookings: number
@@ -276,6 +306,33 @@ const calendarBlockSelect = {
   locationId: true,
 } satisfies Prisma.CalendarBlockSelect
 
+// Exactly the columns `holdRecordToBusyInterval` reads, plus what the segment
+// needs to render. Selecting the SAME columns the conflict gate reads is the
+// point of this card: the segment the pro sees is the window the write path
+// actually reserves, not a second opinion about it.
+// ⚠️ NO client columns — the segment is anonymous by design (see HoldEvent).
+const calendarHoldSelect = {
+  id: true,
+  scheduledFor: true,
+  expiresAt: true,
+  locationId: true,
+  locationType: true,
+  endsAtSnapshot: true,
+  durationMinutesSnapshot: true,
+  bufferMinutesSnapshot: true,
+  offering: {
+    select: {
+      salonDurationMinutes: true,
+      mobileDurationMinutes: true,
+    },
+  },
+  location: {
+    select: {
+      bufferMinutes: true,
+    },
+  },
+} satisfies Prisma.BookingHoldSelect
+
 type ProfessionalProfileRow = Prisma.ProfessionalProfileGetPayload<{
   select: typeof professionalProfileSelect
 }>
@@ -290,6 +347,10 @@ type BookingRow = Prisma.BookingGetPayload<{
 
 type CalendarBlockRow = Prisma.CalendarBlockGetPayload<{
   select: typeof calendarBlockSelect
+}>
+
+type CalendarHoldRow = Prisma.BookingHoldGetPayload<{
+  select: typeof calendarHoldSelect
 }>
 
 // ─── Date / number helpers ────────────────────────────────────────────────────
@@ -777,6 +838,54 @@ function toWaitlistEvent(args: {
   }
 }
 
+/**
+ * A live hold → the anonymous occupancy segment the pro sees.
+ *
+ * The window comes from `holdRecordToBusyInterval` — the SAME builder the
+ * availability reads and the write-boundary overlap gate use — so the segment
+ * cannot disagree with what the slot actually reserves. Re-deriving it here
+ * from `scheduledFor + durationMinutesSnapshot` would be a fourth opinion on a
+ * question that already has one answer ([[drifted-duplicate-is-a-bug-report]]).
+ */
+function toHoldEvent(
+  hold: CalendarHoldRow,
+  viewportTimeZone: string,
+): HoldEvent | null {
+  const interval = holdRecordToBusyInterval({
+    hold,
+    defaultBufferMinutes: bufferOrZero(hold.location?.bufferMinutes),
+    fallbackDurationMinutes: DEFAULT_DURATION_MINUTES,
+  })
+
+  const start = interval.start
+  const end = interval.end
+
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    return null
+  }
+
+  if (end.getTime() <= start.getTime()) return null
+
+  return {
+    id: `hold:${hold.id}`,
+    holdId: hold.id,
+    kind: 'HOLD',
+    startsAt: start.toISOString(),
+    endsAt: end.toISOString(),
+    title: DEFAULT_HOLD_TITLE,
+    clientName: DEFAULT_HOLD_CLIENT_NAME,
+    status: 'HELD',
+    locationType: hold.locationType,
+    locationId: hold.locationId ?? null,
+    durationMinutes: Math.max(
+      0,
+      Math.round((end.getTime() - start.getTime()) / 60_000),
+    ),
+    localDateKey: utcDateToLocalYmd(start, viewportTimeZone),
+    expiresAt: hold.expiresAt.toISOString(),
+  }
+}
+
 function toBlockEvent(
   block: CalendarBlockRow,
   viewportTimeZone: string,
@@ -952,7 +1061,7 @@ export async function GET(req: Request) {
     // link to the pro-only client chart without leaking ids for anyone else.
     const visibleClientIds = await getVisibleClientIdSetForPro(professionalId)
 
-    const [bookings, blocks] = await Promise.all([
+    const [bookings, blocks, holds] = await Promise.all([
       prisma.booking.findMany({
         where: {
           professionalId,
@@ -988,6 +1097,35 @@ export async function GET(req: Request) {
         },
         take: MAX_CALENDAR_EVENTS_PER_RANGE
       }),
+      // Live holds only. An EXPIRED hold reserves nothing — the conflict gate
+      // already ignores it (`expiresAt: { gt: now }`) and the */5 cleanup cron
+      // sweeps it — so rendering one would put a segment on the calendar over
+      // time that is genuinely free.
+      //
+      // Location-scoped to match the BOOKING query above rather than the BLOCK
+      // query's `OR [selected, null]`: a hold always carries the location it
+      // was taken at, and the pro's grid is a per-location view.
+      //
+      // The window filter is `scheduledFor`-based like the booking query. A
+      // hold's rendered end can extend past `scheduledFor` by its snapshot
+      // duration + buffer, which is the same tail the booking query has and is
+      // bounded by the same MAX_SLOT_DURATION_MINUTES.
+      prisma.bookingHold.findMany({
+        where: {
+          professionalId,
+          locationId: selectedLocation.id,
+          expiresAt: { gt: now },
+          scheduledFor: {
+            gte: from,
+            lt: effectiveToExclusive,
+          },
+        },
+        select: calendarHoldSelect,
+        orderBy: {
+          scheduledFor: 'asc',
+        },
+        take: MAX_CALENDAR_EVENTS_PER_RANGE
+      }),
     ])
 
     const bookingEvents = bookings
@@ -1005,7 +1143,15 @@ export async function GET(req: Request) {
       .map((block) => toBlockEvent(block, viewportTimeZone))
       .filter((event): event is BlockEvent => event !== null)
 
-    const events = sortCalendarEvents([...bookingEvents, ...blockEvents])
+    const holdEvents = holds
+      .map((hold) => toHoldEvent(hold, viewportTimeZone))
+      .filter((event): event is HoldEvent => event !== null)
+
+    const events = sortCalendarEvents([
+      ...bookingEvents,
+      ...blockEvents,
+      ...holdEvents,
+    ])
 
     const viewportTodayKey = utcDateToLocalYmd(now, viewportTimeZone)
     const viewportTodayStart = startOfDayUtcInTimeZone(now, viewportTimeZone)

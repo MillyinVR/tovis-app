@@ -69,6 +69,20 @@ export const DEFAULT_BLOCK_CLIENT_NAME = 'Personal'
 export const DEFAULT_BOOKING_CLIENT_NAME = 'Client'
 export const DEFAULT_BOOKING_SERVICE_NAME = 'Appointment'
 
+// A live client checkout reservation, rendered on the pro's calendar so their
+// day's occupancy is the truth. Deliberately ANONYMOUS — a hold means someone
+// is mid-checkout right now, and the pro needs to know the time is spoken for
+// without being told who is hesitating over it (B5, Tori's call 2026-07-25).
+export const DEFAULT_HOLD_TITLE = 'Booking in progress'
+export const DEFAULT_HOLD_CLIENT_NAME = 'Held'
+
+// The phrase the two pro-facing overlap warnings drop into "This overlaps ___".
+// Both the new-booking form and the calendar's confirm modal read these, so the
+// same collision cannot be described two different ways (they used to keep
+// their own copies of the fallback — see the dup register, B-D8).
+export const OVERLAP_FALLBACK_NAME = 'another appointment'
+export const OVERLAP_HOLD_NAME = 'a booking in progress'
+
 // ─── Stats constants ──────────────────────────────────────────────────────────
 
 export const CALENDAR_BLOCKED_HOURS_ROUNDING_FACTOR = 2

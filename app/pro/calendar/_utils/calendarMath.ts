@@ -186,6 +186,28 @@ export function isBlockedEvent(event: CalendarEvent): boolean {
 }
 
 /**
+ * A client's live checkout reservation (B5).
+ *
+ * Read-only occupancy: a hold is somebody else's in-flight booking, so the pro
+ * can SEE it but cannot open, drag, resize or delete it — there is no pro-facing
+ * endpoint that takes a hold id, and it clears itself within `HOLD_MINUTES`.
+ * Callers turn this into a null api id, which is what actually disables the
+ * drag/resize affordances.
+ *
+ * Mirrors `isBlockedEvent`'s shape (discriminant first, then the defensive
+ * fallbacks) so the two read the same way.
+ */
+export function isHoldEvent(event: CalendarEvent): boolean {
+  if (event.kind === 'HOLD') return true
+
+  const status = String(event.status || '').trim().toUpperCase()
+
+  if (status === 'HELD') return true
+
+  return eventIdText(event).startsWith('hold:')
+}
+
+/**
  * Only BLOCK events have blockId.
  * Fallback parses legacy ids shaped like "block:xyz".
  */
