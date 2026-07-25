@@ -112,6 +112,7 @@ export function defaultProCalendarCopy(
     denyRequest: 'Deny request',
     viewAllRequests: 'View all requests',
     messageClient: 'Message',
+    editBooking: 'Edit booking',
     reschedule: 'Reschedule',
     checkIn: 'Check in',
     save: 'Save',

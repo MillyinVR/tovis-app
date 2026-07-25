@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
   serviceItemsTotalDuration: vi.fn(),
   serviceItemsLabel: vi.fn(),
-  buildDraftItemFromServiceOption: vi.fn(),
+  draftItemsFromServiceIds: vi.fn(),
   normalizeDraftServiceItems: vi.fn(),
   sameServiceItems: vi.fn(),
 
@@ -38,7 +38,7 @@ vi.mock('../_utils/calendarMath', () => ({
 vi.mock('../_utils/serviceItems', () => ({
   serviceItemsTotalDuration: mocks.serviceItemsTotalDuration,
   serviceItemsLabel: mocks.serviceItemsLabel,
-  buildDraftItemFromServiceOption: mocks.buildDraftItemFromServiceOption,
+  draftItemsFromServiceIds: mocks.draftItemsFromServiceIds,
   normalizeDraftServiceItems: mocks.normalizeDraftServiceItems,
   sameServiceItems: mocks.sameServiceItems,
 }))

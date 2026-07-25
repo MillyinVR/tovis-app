@@ -103,6 +103,9 @@ export type BrandProCalendarActionsCopy = {
   denyRequest: string
   viewAllRequests: string
   messageClient: string
+  /** Opens the full booking editor — time, services and notification. */
+  editBooking: string
+  /** Time-only affordances (the grid's drag/resize handles). */
   reschedule: string
   checkIn: string
   save: string

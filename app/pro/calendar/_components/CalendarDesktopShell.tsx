@@ -591,7 +591,7 @@ function CalendarDesktopDetailPanel(props: CalendarDesktopDetailPanelProps) {
           className="brand-pro-calendar-desktop-detail-action brand-focus"
           onClick={() => onOpenFullDetails(event.id)}
         >
-          {copy.actions.reschedule}
+          {copy.actions.editBooking}
         </button>
 
         <button
