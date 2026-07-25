@@ -7924,6 +7924,9 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
     maxDaysAhead: locationContext.maxDaysAhead,
     salonLocationAddress,
     clientServiceAddress,
+    // A reschedule may legitimately overlap the slot it is vacating — the
+    // commit already allows it, so the reservation must too (B3-B).
+    excludeBookingId: rescheduleBookingId,
   })
 
 afterHoldPolicyMs = Date.now()

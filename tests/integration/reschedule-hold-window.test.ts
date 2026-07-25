@@ -962,3 +962,140 @@ describe('the reschedule OFFER is sized from the booking too (real DB)', () => {
     ).not.toBe(buildDayCacheKey({ ...common, durationMinutes: BOOKED_MINUTES }))
   })
 })
+
+// ─── B3-B ────────────────────────────────────────────────────────────────────
+// "3pm–5pm, move it to start at 4pm." Tori's call, 2026-07-25: allow it.
+//
+// The reschedule COMMIT always allowed it — `evaluateRescheduleDecision` passes
+// `excludeBookingId`, because a booking is not an obstacle to itself. The two
+// promise sites did not: `/availability/day` counted the booking in its busy set
+// and `evaluateHoldCreationDecision` ran its conflict query with no exclusion.
+// So the overlapping start was hidden from the grid and refused at the hold, and
+// the only reschedule a client could make was into a completely free window.
+//
+// Nothing was ever offered-then-refused by this — the two promise sites agreed
+// with each other, just not with the commit — which is why B3-A left it. What it
+// cost was reach: on the booking's own day a wide booking could leave NO
+// offerable start at all.
+
+describe('a reschedule may overlap the slot it is vacating (real DB)', () => {
+  // 15:00 local, 90 minutes committed → the booking occupies 15:00–16:30.
+  const bookingStart = () => futureLocal(5, 15)
+  /** 16:00 — inside the booking's own window, and the case Tori named. */
+  const overlappingStart = () => futureLocal(5, 16)
+
+  afterEach(() => {
+    authState.current = null
+  })
+
+  it('offers a start inside the booking’s own window', async () => {
+    const bookingId = await seedBooking({ start: bookingStart() })
+    const date = ymdOf(bookingStart())
+
+    // The public grid cannot offer it: for everyone else that time IS busy.
+    const publicAnswer = await askDay({ date })
+    expect(publicAnswer.slots.map(localMinutes)).not.toContain(16 * 60)
+
+    // The client moving THIS booking is offered it.
+    authState.current = fx.clientId
+    const answer = await askDay({ date, rescheduleBookingId: bookingId })
+
+    expect(answer.ok).toBe(true)
+    expect(answer.slots.map(localMinutes)).toContain(16 * 60)
+  })
+
+  it('holds it, and the reschedule commits it', async () => {
+    const bookingId = await seedBooking({ start: bookingStart() })
+
+    const created = await hold({
+      start: overlappingStart(),
+      rescheduleBookingId: bookingId,
+    })
+
+    const row = await readHold(created.hold.id)
+    expect(row.durationMinutesSnapshot).toBe(BOOKED_MINUTES)
+    expect(row.scheduledFor.getTime()).toBe(overlappingStart().getTime())
+
+    await rescheduleBookingFromHold({
+      bookingId,
+      clientId: fx.clientId,
+      holdId: created.hold.id,
+      requestedLocationType: ServiceLocationType.SALON,
+    })
+
+    const moved = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { scheduledFor: true, totalDurationMinutes: true },
+    })
+
+    expect(moved.scheduledFor.getTime()).toBe(overlappingStart().getTime())
+    expect(moved.totalDurationMinutes).toBe(BOOKED_MINUTES)
+  })
+
+  it('still refuses a time taken by a DIFFERENT booking', async () => {
+    const mine = await seedBooking({ start: bookingStart() })
+    // A rival booking immediately after mine ends (16:30 + 90 = 18:00).
+    await seedBooking({
+      start: futureLocal(5, 16, 30),
+      clientId: fx.rivalClientId,
+    })
+
+    // Excluding MY booking must not excuse anyone else's.
+    const code = await refusalCode(() =>
+      hold({ start: futureLocal(5, 16, 30), rescheduleBookingId: mine }),
+    )
+    expect(code).toBe('TIME_BOOKED')
+
+    authState.current = fx.clientId
+    const answer = await askDay({
+      date: ymdOf(bookingStart()),
+      rescheduleBookingId: mine,
+    })
+    expect(answer.slots.map(localMinutes)).not.toContain(16 * 60 + 30)
+  })
+
+  it('excludes nothing for an ordinary hold', async () => {
+    const bookingId = await seedBooking({ start: bookingStart() })
+
+    // Same client, same time, but NOT moving that booking — the booking is a
+    // plain obstacle again.
+    const code = await refusalCode(() => hold({ start: overlappingStart() }))
+    expect(code).toBe('TIME_BOOKED')
+    expect(bookingId).toBeTruthy()
+  })
+
+  it('keeps the booking-excluded answer out of the public cache entry', () => {
+    const common = {
+      professionalId: fx.professionalId,
+      serviceId: fx.serviceId,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      dateStr: '2026-09-01',
+      timeZone: ZONE,
+      stepMinutes: 15,
+      leadTimeMinutes: 0,
+      locationBufferMinutes: 0,
+      scheduleVersion: 1,
+      scheduleConfigVersion: 1,
+      addOnIds: [],
+      durationMinutes: BOOKED_MINUTES,
+      clientAddressId: null,
+    }
+
+    // B3-A could share the public entry because the answer was a pure function
+    // of the WIDTH. It no longer is — a busy set with a hole in it is a
+    // different answer — so the exclusion has to be in the key.
+    const publicKey = buildDayCacheKey(common)
+    const rescheduleKey = buildDayCacheKey({
+      ...common,
+      excludeBookingId: 'booking_1',
+    })
+
+    expect(rescheduleKey).not.toBe(publicKey)
+    // …and a request that does NOT exclude anything still hashes exactly as it
+    // did before this field existed, so no public entry is orphaned on deploy.
+    expect(buildDayCacheKey({ ...common, excludeBookingId: null })).toBe(
+      publicKey,
+    )
+  })
+})

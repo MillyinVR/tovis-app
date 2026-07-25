@@ -30,6 +30,7 @@ type BusyIntervalsCacheKeyArgs = {
   locationBufferMinutes: number
   fallbackDurationMinutes: number
   scheduleVersion: number
+  excludeBookingId?: string | null
 }
 
 type SummaryCacheKeyArgs = {
@@ -50,6 +51,7 @@ type SummaryCacheKeyArgs = {
   scheduleVersion: number
   scheduleConfigVersion: number
   addOnIds: string[]
+  excludeBookingId?: string | null
   viewerLat: number | null
   viewerLng: number | null
   radiusMiles: number
@@ -71,6 +73,7 @@ type DayCacheKeyArgs = {
   addOnIds: string[]
   durationMinutes: number
   clientAddressId: string | null
+  excludeBookingId?: string | null
 }
 
 type OtherProsCacheKeyArgs = {
@@ -160,6 +163,10 @@ export function buildBusyIntervalsCacheKey(
     String(args.locationBufferMinutes ?? ''),
     String(args.fallbackDurationMinutes ?? ''),
     String(args.scheduleVersion),
+    // Appended only when set, so every public key keeps its exact shape. A busy
+    // set with one booking removed is a DIFFERENT answer and must not be served
+    // to anyone else (B3-B).
+    ...(args.excludeBookingId ? [`x=${args.excludeBookingId}`] : []),
   ].join(':')
 }
 
@@ -184,6 +191,9 @@ export function buildSummaryCacheKey(args: SummaryCacheKeyArgs): string {
     String(args.scheduleConfigVersion),
     stableHash({
       addOnIds: args.addOnIds,
+      // `JSON.stringify` drops an undefined value, so a request without a
+      // reschedule hashes exactly as it did before this field existed.
+      excludeBookingId: args.excludeBookingId ?? undefined,
       viewerLat: roundCoordForCache(args.viewerLat),
       viewerLng: roundCoordForCache(args.viewerLng),
       radiusMiles: args.radiusMiles,
@@ -212,6 +222,8 @@ export function buildDayCacheKey(args: DayCacheKeyArgs): string {
     stableHash({
       addOnIds: args.addOnIds,
       durationMinutes: args.durationMinutes,
+      // See the summary key: undefined is dropped, so public keys are unchanged.
+      excludeBookingId: args.excludeBookingId ?? undefined,
       clientAddressId: mobileClientAddressKey(
         args.locationType,
         args.clientAddressId,

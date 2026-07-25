@@ -26,6 +26,12 @@ export type LoadBusyIntervalsArgs = {
   fallbackDurationMinutes: number
   locationBufferMinutes: number
   scheduleVersion: number
+  /**
+   * The booking a reschedule is moving, dropped from the busy set so the offer
+   * matches what the commit will accept (B3-B). Part of the cache key, since a
+   * busy set with a hole in it is a different answer.
+   */
+  excludeBookingId?: string | null
   cache?: { enabled: boolean }
   client?: AvailabilityDbClient
 }
@@ -40,6 +46,7 @@ function queryBusyIntervals(args: LoadBusyIntervalsArgs): Promise<BusyInterval[]
     nowUtc: args.nowUtc,
     fallbackDurationMinutes: args.fallbackDurationMinutes,
     defaultBufferMinutes: args.locationBufferMinutes,
+    excludeBookingId: args.excludeBookingId ?? null,
   })
 }
 
@@ -87,6 +94,7 @@ export async function loadBusyIntervals(
     locationBufferMinutes: args.locationBufferMinutes,
     fallbackDurationMinutes: args.fallbackDurationMinutes,
     scheduleVersion: args.scheduleVersion,
+    excludeBookingId: args.excludeBookingId ?? null,
   })
 
   const hit = await cacheGetJson<unknown>(key)

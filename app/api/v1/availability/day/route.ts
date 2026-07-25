@@ -324,6 +324,7 @@ export async function GET(req: Request) {
           addOnIds,
           durationMinutes,
           clientAddressId: resolvedClientAddressId,
+          excludeBookingId: reschedule?.bookingId ?? null,
         })
 
     type DaySuccessPayload = {
@@ -399,6 +400,10 @@ export async function GET(req: Request) {
         fallbackDurationMinutes: durationMinutes,
         locationBufferMinutes,
         scheduleVersion,
+        // The booking being moved is not an obstacle to itself: the reschedule
+        // commit excludes it, so the offer must too or a 3pm–5pm appointment
+        // cannot be nudged to 4pm (B3-B).
+        excludeBookingId: reschedule?.bookingId ?? null,
         cache: { enabled: !debug },
         client: prismaRead,
       })
