@@ -795,6 +795,7 @@ describe('POST /api/v1/holds', () => {
       message: descriptor.message,
     })
   })
+
   it('passes rescheduleBookingId through to the boundary', async () => {
     const response = await POST(
       makeRequest({
