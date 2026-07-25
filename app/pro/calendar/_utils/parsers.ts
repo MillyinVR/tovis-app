@@ -17,6 +17,7 @@ import type {
   CalendarResponseLocation,
   CalendarServiceItem,
   CalendarStats,
+  HoldCalendarEvent,
   ManagementLists,
   ServiceLocationType,
   ServiceOption,
@@ -25,6 +26,10 @@ import type {
   WorkingHoursJson,
 } from '../_types'
 
+import {
+  DEFAULT_HOLD_CLIENT_NAME,
+  DEFAULT_HOLD_TITLE,
+} from '@/lib/calendar/constants'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage } from '@/lib/http'
 import { pickBool, pickNumber, pickString } from '@/lib/pick'
@@ -495,6 +500,50 @@ function parseBlockEvent(
   return event
 }
 
+function parseHoldEvent(
+  value: Record<string, unknown>,
+): HoldCalendarEvent | null {
+  const id = nullableText(value.id)
+  const startsAt = validIsoString(value.startsAt)
+  const endsAt = validIsoString(value.endsAt)
+
+  if (!id || !startsAt || !endsAt) return null
+
+  // Same shape as the block parser's: prefer the explicit field, fall back to
+  // the prefixed row id ([[calendar-block-event-id-prefix]]).
+  const derivedHoldId = id.startsWith('hold:') ? id.slice('hold:'.length) : null
+
+  const holdId = nullableText(value.holdId) ?? derivedHoldId
+  if (!holdId) return null
+
+  // A hold with no expiry is not a live reservation we can reason about, and
+  // rendering one would leave a segment on the calendar that never clears.
+  const expiresAt = validIsoString(value.expiresAt)
+  if (!expiresAt) return null
+
+  const localDateKey = optionalText(value.localDateKey)
+  const durationMinutes = positiveNumberOrUndefined(value.durationMinutes)
+
+  const event: HoldCalendarEvent = {
+    kind: 'HOLD',
+    id,
+    holdId,
+    startsAt,
+    endsAt,
+    expiresAt,
+    title: nullableText(value.title) ?? DEFAULT_HOLD_TITLE,
+    clientName: nullableText(value.clientName) ?? DEFAULT_HOLD_CLIENT_NAME,
+    status: 'HELD',
+    locationId:
+      value.locationId === null ? null : nullableText(value.locationId),
+    locationType: normalizeServiceLocationType(value.locationType),
+    ...(localDateKey ? { localDateKey } : {}),
+    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+  }
+
+  return event
+}
+
 export function parseCalendarEvent(value: unknown): CalendarEvent | null {
   if (!isRecord(value)) return null
 
@@ -506,6 +555,10 @@ export function parseCalendarEvent(value: unknown): CalendarEvent | null {
 
   if (kind === 'BLOCK') {
     return parseBlockEvent(value)
+  }
+
+  if (kind === 'HOLD') {
+    return parseHoldEvent(value)
   }
 
   return null

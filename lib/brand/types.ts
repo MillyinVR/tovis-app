@@ -15,6 +15,8 @@ export type BrandCalendarStatusKey =
   | 'waitlist'
   | 'blocked'
   | 'cancelled'
+  // A client's live checkout reservation on the pro's calendar (B5).
+  | 'held'
 
 export type BrandCalendarViewLabels = Record<BrandCalendarViewKey, string>
 
@@ -176,6 +178,7 @@ export type BrandProCalendarLegendCopy = {
   completed: string
   waitlist: string
   blocked: string
+  held: string
 }
 
 export type BrandProCalendarEmptyStateCopy = {

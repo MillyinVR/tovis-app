@@ -55,7 +55,11 @@ export type BookingCalendarStatus =
   | (string & Record<never, never>)
 
 export type BlockCalendarStatus = 'BLOCKED'
-export type CalendarStatus = BookingCalendarStatus | BlockCalendarStatus
+export type HoldCalendarStatus = 'HELD'
+export type CalendarStatus =
+  | BookingCalendarStatus
+  | BlockCalendarStatus
+  | HoldCalendarStatus
 
 export type WorkingHoursDay = {
   enabled: boolean
@@ -233,7 +237,34 @@ export type BlockCalendarEvent = CalendarEventBase & {
   viewLocalDateKey?: never
 }
 
-export type CalendarEvent = BookingCalendarEvent | BlockCalendarEvent
+/**
+ * A client's live checkout reservation (B5). Read-only occupancy: it cannot be
+ * opened, dragged, resized or edited — it expires on its own within
+ * `HOLD_MINUTES`. Deliberately anonymous, so it carries no `clientProfileId`
+ * and its `clientName` is a fixed label rather than a person.
+ */
+export type HoldCalendarEvent = CalendarEventBase & {
+  kind: 'HOLD'
+  holdId: string
+  status: HoldCalendarStatus
+  locationType: ServiceLocationType | null
+  localDateKey?: string
+
+  /** When the reservation lapses on its own. */
+  expiresAt: string
+
+  details?: never
+  note?: never
+  blockId?: never
+  timeZone?: never
+  timeZoneSource?: never
+  viewLocalDateKey?: never
+}
+
+export type CalendarEvent =
+  | BookingCalendarEvent
+  | BlockCalendarEvent
+  | HoldCalendarEvent
 
 export type PendingResizeChange = {
   kind: 'resize'

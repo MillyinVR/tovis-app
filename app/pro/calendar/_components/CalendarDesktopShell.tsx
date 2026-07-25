@@ -65,6 +65,7 @@ type CalendarLegendTone =
   | 'completed'
   | 'waitlist'
   | 'blocked'
+  | 'held'
 
 type PageHeroProps = {
   modeLabel: string
@@ -657,6 +658,7 @@ function StatusLegend(props: StatusLegendProps) {
         <LegendRow tone="completed" label={copy.completed} />
         <LegendRow tone="waitlist" label={copy.waitlist} />
         <LegendRow tone="blocked" label={copy.blocked} dashed />
+        <LegendRow tone="held" label={copy.held} dashed />
       </div>
     </div>
   )
@@ -773,6 +775,9 @@ function eventDisplayTitle(
     return event.note?.trim() || event.title || copy.legend.blocked
   }
 
+  // Anonymous by design (B5) — never fall through to clientName here.
+  if (event.kind === 'HOLD') return copy.legend.held
+
   return event.clientName.trim() || copy.bookingModal.clientFallback
 }
 
@@ -784,6 +789,9 @@ function eventServiceLabel(
     return event.title.trim() || copy.legend.blocked
   }
 
+  // A hold has no service to name — it is occupancy, not an appointment (B5).
+  if (event.kind === 'HOLD') return copy.statusLabels.held
+
   return event.details.serviceName.trim() || event.title || copy.labels.service
 }
 
@@ -792,6 +800,7 @@ function eventStatusLabel(
   copy: BrandProCalendarCopy,
 ): string {
   if (event.kind === 'BLOCK') return copy.statusLabels.blocked
+  if (event.kind === 'HOLD') return copy.statusLabels.held
 
   if (event.status === 'PENDING') return copy.statusLabels.pending
   if (event.status === 'COMPLETED') return copy.statusLabels.completed

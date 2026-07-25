@@ -84,7 +84,9 @@ function serviceItemCountLabel(args: {
 }): string | null {
   const { event, copy } = args
 
-  if (event.kind === 'BLOCK') return null
+  // Neither a block nor a hold carries services — a hold is deliberately
+  // anonymous, so it has no service to count (B5).
+  if (event.kind === 'BLOCK' || event.kind === 'HOLD') return null
 
   const serviceCount = event.details.serviceItems.length
 
@@ -101,6 +103,7 @@ function eventStatusLabel(
   copy: BrandProCalendarCopy,
 ): string {
   if (event.kind === 'BLOCK') return copy.statusLabels.blocked
+  if (event.kind === 'HOLD') return copy.statusLabels.held
 
   if (event.status === 'PENDING') return copy.statusLabels.pending
   if (event.status === 'COMPLETED') return copy.statusLabels.completed
@@ -126,6 +129,19 @@ function buildEventCardCopy(args: {
       primary: note || copy.editBlockModal.title,
       secondary: note ? copy.legend.blocked : '',
       eyebrow: copy.legend.blocked,
+      status: statusLabel,
+    }
+  }
+
+  // A hold names nobody and nothing — it says only "this time is spoken for".
+  // Reading `event.clientName` here would still be safe (it holds the fixed
+  // 'Held' label), but going through brand copy keeps the surface white-label
+  // and keeps the anonymity a property of the CARD, not of the payload.
+  if (event.kind === 'HOLD') {
+    return {
+      primary: copy.legend.held,
+      secondary: '',
+      eyebrow: copy.statusLabels.held,
       status: statusLabel,
     }
   }
@@ -285,6 +301,7 @@ export function EventCard(props: EventCardProps) {
   } = props
 
   const isBlocked = ev.kind === 'BLOCK'
+  const isHold = ev.kind === 'HOLD'
   const statusMeta = calendarStatusMeta({ status: ev.status, isBlocked })
 
   const displayCopy = buildEventCardCopy({
@@ -308,8 +325,10 @@ export function EventCard(props: EventCardProps) {
       data-calendar-event-micro={micro ? 'true' : 'false'}
       data-calendar-event-blocked={isBlocked ? 'true' : 'false'}
       data-calendar-event-conflict={conflict ? 'true' : 'false'}
-      role="button"
-      tabIndex={0}
+      // A hold does nothing when activated, so it must not advertise itself as
+      // a button or take focus — that would be an accessibility lie (B5).
+      role={isHold ? undefined : 'button'}
+      tabIndex={isHold ? -1 : 0}
       aria-label={accessibleLabel}
       draggable={canDragOrResize}
       onDragStart={(dragEvent) => {
@@ -334,10 +353,15 @@ export function EventCard(props: EventCardProps) {
       }}
       onClick={() => {
         if (suppressClickRef.current) return
+        // A hold is read-only occupancy: there is nothing to open, and every
+        // downstream detail surface assumes a booking or a block (B5).
+        if (isHold) return
 
         onClickEvent(ev.id)
       }}
       onKeyDown={(keyboardEvent) => {
+        if (isHold) return
+
         openOnKeyboard({
           event: keyboardEvent,
           eventId: ev.id,

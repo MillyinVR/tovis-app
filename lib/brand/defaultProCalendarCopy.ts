@@ -21,6 +21,7 @@ export function defaultProCalendarCopy(
     waitlist: 'Waitlist',
     blocked: 'Blocked',
     cancelled: 'Cancelled',
+    held: 'Held',
   },
 
   pageHero: {
@@ -184,6 +185,9 @@ export function defaultProCalendarCopy(
     completed: 'Completed',
     waitlist: 'Waitlist hold',
     blocked: 'Blocked / break',
+    // Anonymous on purpose — a hold means someone is mid-checkout right now,
+    // and the pro is told the time is spoken for, not who is hesitating (B5).
+    held: 'Booking in progress',
   },
 
   emptyState: {

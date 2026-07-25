@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     professionalLocationFindMany: vi.fn(),
     bookingFindMany: vi.fn(),
     calendarBlockFindMany: vi.fn(),
+    bookingHoldFindMany: vi.fn(),
     waitlistEntryFindMany: vi.fn(),
     waitlistOfferFindMany: vi.fn(),
     professionalServiceOfferingFindMany: vi.fn(),
@@ -27,6 +28,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     calendarBlock: {
       findMany: mocks.calendarBlockFindMany,
+    },
+    bookingHold: {
+      findMany: mocks.bookingHoldFindMany,
     },
     waitlistEntry: {
       findMany: mocks.waitlistEntryFindMany,
@@ -197,6 +201,7 @@ describe('GET /api/v1/pro/calendar', () => {
 
     mocks.bookingFindMany.mockResolvedValue([salonBooking, mobileBooking])
 
+    mocks.bookingHoldFindMany.mockResolvedValue([])
     mocks.waitlistEntryFindMany.mockResolvedValue([])
     mocks.waitlistOfferFindMany.mockResolvedValue([])
     mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
@@ -559,5 +564,122 @@ describe('GET /api/v1/pro/calendar', () => {
     expect(body.management.waitlistToday[0].preferenceLabel).toBe('Jan 1')
     // No active offering was stubbed → no bookable slot to offer.
     expect(body.management.waitlistToday[0].offerHref).toBeNull()
+  })
+
+  // ─── B5: a client's live hold must be visible occupancy ────────────────────
+  //
+  // Before B5 the feed carried BOOKING + BLOCK only, so a hold was invisible on
+  // the calendar AND in both pro-facing overlap warnings that read this array,
+  // while the write path authorized a pro booking straight over it and the
+  // client was refused at their own confirm.
+  describe('live client holds (B5)', () => {
+    const holdRow = {
+      id: 'hold-1',
+      scheduledFor: new Date('2030-01-15T18:00:00.000Z'),
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+      locationId: 'salon-1',
+      locationType: 'SALON',
+      endsAtSnapshot: new Date('2030-01-15T19:15:00.000Z'),
+      durationMinutesSnapshot: 60,
+      bufferMinutesSnapshot: 15,
+      offering: { salonDurationMinutes: 60, mobileDurationMinutes: null },
+      location: { bufferMinutes: 15 },
+    }
+
+    async function loadEvents() {
+      const response = await GET(
+        new Request('https://example.test/api/v1/pro/calendar'),
+      )
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      return body.events as Array<Record<string, unknown>>
+    }
+
+    it('renders a live hold as a HOLD event', async () => {
+      mocks.bookingHoldFindMany.mockResolvedValue([holdRow])
+
+      const holds = (await loadEvents()).filter(
+        (event) => event.kind === 'HOLD',
+      )
+
+      expect(holds).toHaveLength(1)
+      expect(holds[0]?.id).toBe('hold:hold-1')
+      expect(holds[0]?.holdId).toBe('hold-1')
+      expect(holds[0]?.status).toBe('HELD')
+      expect(holds[0]?.startsAt).toBe('2030-01-15T18:00:00.000Z')
+      // The window is the one holdRecordToBusyInterval reserves — service +
+      // buffer — not the bare scheduledFor instant.
+      expect(holds[0]?.endsAt).toBe('2030-01-15T19:15:00.000Z')
+      expect(holds[0]?.durationMinutes).toBe(75)
+    })
+
+    // The whole point of the anonymity decision: the pro learns the time is
+    // spoken for, never who is mid-checkout.
+    it('never leaks who is holding the slot', async () => {
+      mocks.bookingHoldFindMany.mockResolvedValue([holdRow])
+
+      const hold = (await loadEvents()).find((event) => event.kind === 'HOLD')
+
+      expect(hold).toBeDefined()
+      expect(hold?.clientName).toBe('Held')
+      expect(hold).not.toHaveProperty('clientProfileId')
+      expect(JSON.stringify(hold)).not.toContain('client-')
+    })
+
+    // An expired hold reserves nothing, so a segment over it would claim time
+    // that is genuinely free.
+    it('asks the database for live holds only', async () => {
+      mocks.bookingHoldFindMany.mockResolvedValue([])
+
+      await loadEvents()
+
+      const where = mocks.bookingHoldFindMany.mock.calls[0]?.[0]?.where
+
+      expect(where?.professionalId).toBe('pro-1')
+      expect(where?.locationId).toBe('salon-1')
+      expect(where?.expiresAt?.gt).toBeInstanceOf(Date)
+    })
+
+    it('drops a hold whose reserved window is degenerate', async () => {
+      mocks.bookingHoldFindMany.mockResolvedValue([
+        {
+          ...holdRow,
+          endsAtSnapshot: null,
+          durationMinutesSnapshot: 0,
+          bufferMinutesSnapshot: 0,
+          offering: null,
+          location: { bufferMinutes: 0 },
+        },
+      ])
+
+      const events = await loadEvents()
+      const holds = events.filter((event) => event.kind === 'HOLD')
+
+      // Either it resolves to a real reserved window or it is dropped — what it
+      // must never do is render a zero/negative-length segment.
+      for (const hold of holds) {
+        expect(
+          new Date(String(hold.endsAt)).getTime(),
+        ).toBeGreaterThan(new Date(String(hold.startsAt)).getTime())
+      }
+    })
+
+    // Holds are occupancy, not appointments: they must not inflate any tile.
+    it('does not count a hold in the booking or blocked stats', async () => {
+      mocks.bookingHoldFindMany.mockResolvedValue([])
+      const before = await GET(
+        new Request('https://example.test/api/v1/pro/calendar'),
+      ).then((res) => res.json())
+
+      mocks.bookingHoldFindMany.mockResolvedValue([holdRow])
+      const after = await GET(
+        new Request('https://example.test/api/v1/pro/calendar'),
+      ).then((res) => res.json())
+
+      expect(after.stats).toEqual(before.stats)
+      expect(after.management.pendingRequests).toEqual(
+        before.management.pendingRequests,
+      )
+    })
   })
 })

@@ -22,6 +22,7 @@ import {
   extractBlockId,
   getWorkingWindowForDay,
   isBlockedEvent,
+  isHoldEvent,
   roundDurationMinutes,
   snapMinutes,
 } from '../../_utils/calendarMath'
@@ -270,6 +271,10 @@ function getEventDurationMinutes(
 }
 
 function eventApiId(event: CalendarEvent): string | null {
+  // A hold is read-only occupancy — no pro-facing endpoint takes a hold id, so
+  // it must never become a draggable/resizable api id (B5).
+  if (isHoldEvent(event)) return null
+
   if (isBlockedEvent(event)) return extractBlockId(event)
 
   return event.id
@@ -515,6 +520,12 @@ export function DayColumn(props: DayColumnProps) {
   // Passive double-book signal: which bookings overlap another booking today
   // (blocks excluded — the pro's own time isn't a client conflict). The server
   // still allows the overlap; this only surfaces it.
+  //
+  // HOLDS are deliberately INCLUDED (B5): `eventEntityType` classifies anything
+  // that isn't blocked time as 'booking', and a live client checkout is exactly
+  // the kind of collision this ring exists to mark — it is somebody else's time,
+  // not the pro's own. (It can never route a drag: `eventApiId` is null for a
+  // hold, so entityType is only ever read here for it.)
   const conflictIds = useMemo(
     () =>
       overlappingEventIds(

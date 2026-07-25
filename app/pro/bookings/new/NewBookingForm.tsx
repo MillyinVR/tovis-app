@@ -29,7 +29,14 @@ import {
   type PlacePrediction,
 } from '@/lib/clientAddresses/placesAutocomplete'
 import { moneyToString } from '@/lib/money'
-import { overlappingClientNamesForRange } from '@/lib/calendar/overlap'
+import {
+  OVERLAP_FALLBACK_NAME,
+  OVERLAP_HOLD_NAME,
+} from '@/lib/calendar/constants'
+import {
+  normalizeCalendarOverlapEvents,
+  overlappingClientNamesForRange,
+} from '@/lib/calendar/overlap'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import {
   datetimeLocalToUtcIsoStrict,
@@ -422,46 +429,10 @@ function normalizeServiceAddresses(data: unknown): ClientServiceAddressOption[] 
 // precise half-open `hasOverlap` check does the real filtering. ±1 day comfortably
 // covers the longest possible appointment (MAX_SLOT_DURATION 12h + buffer).
 const CONFLICT_FETCH_WINDOW_MS = 24 * 60 * 60 * 1000
-// Matches the calendar confirm modal's fallback for a nameless overlapping event.
-const OVERLAP_FALLBACK_NAME = 'another appointment'
-
-type CalendarOverlapEvent = {
-  id: string
-  startsAt: string
-  endsAt: string
-  clientName: string | null
-}
-
-// Reads the /api/v1/pro/calendar `events` array down to what the overlap check
-// needs. BLOCK-kind events (the pro's own blocked time) are dropped so the note
-// only ever warns about client-vs-client collisions, mirroring the confirm modal.
-function normalizeCalendarOverlapEvents(data: unknown): CalendarOverlapEvent[] {
-  if (!isRecord(data)) return []
-
-  const raw = data.events
-  if (!Array.isArray(raw)) return []
-
-  const out: CalendarOverlapEvent[] = []
-
-  for (const item of raw) {
-    if (!isRecord(item)) continue
-    if (item.kind === 'BLOCK') continue
-
-    const id = typeof item.id === 'string' ? item.id.trim() : ''
-    const startsAt = typeof item.startsAt === 'string' ? item.startsAt : ''
-    const endsAt = typeof item.endsAt === 'string' ? item.endsAt : ''
-    if (!id || !startsAt || !endsAt) continue
-
-    const clientName =
-      typeof item.clientName === 'string' && item.clientName.trim()
-        ? item.clientName.trim()
-        : null
-
-    out.push({ id, startsAt, endsAt, clientName })
-  }
-
-  return out
-}
+// The overlap-warning phrases are shared with the calendar confirm modal so one
+// collision cannot be described two ways, and the wire→overlap-check normalizer
+// now lives in lib/calendar/overlap.ts so it is unit-testable
+// (B-D8, consolidated in B5).
 
 // "Sam" / "Sam and Alex" / "Sam, Alex, and 1 other" — a plain-English join for
 // the overlap note.
@@ -1198,7 +1169,10 @@ export default function NewBookingForm({
         setOverlapNames(
           overlappingClientNamesForRange(
             { startsAt: proposedStartISO, endsAt: endISO },
-            normalizeCalendarOverlapEvents(data),
+            normalizeCalendarOverlapEvents({
+              data,
+              holdName: OVERLAP_HOLD_NAME,
+            }),
             OVERLAP_FALLBACK_NAME,
           ),
         )
