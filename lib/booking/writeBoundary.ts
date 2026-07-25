@@ -932,6 +932,21 @@ type PerformLockedCreateRebookedBookingArgs = {
    * before the source session completes — relaxes the completed-source gate.
    */
   gate?: 'PRO_AFTERCARE_SAVE'
+  /**
+   * Explicit scheduling overrides from the PRO authoring the rebook (the
+   * aftercare save), mirroring POST /api/v1/pro/bookings. Requires
+   * `actorUserId` — each applied override is permission-checked and written to
+   * BookingOverrideAuditLog. Ignored (and unnecessary) on the client-confirm
+   * paths: a client can never exercise an override, but a client confirming a
+   * pro-CHOSEN start is provenance-allowed past the pro's own self-rules
+   * (working hours / notice / max-days) — refusing would dead-end them on a
+   * time only the pro can change, exactly like the step grid above.
+   */
+  actorUserId?: string | null
+  allowOutsideWorkingHours?: boolean
+  allowShortNotice?: boolean
+  allowFarFuture?: boolean
+  overrideReason?: string | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -959,6 +974,19 @@ type UpsertBookingAftercareArgs = {
     startsAt: Date
     endsAt: Date
   } | null
+  /**
+   * Explicit scheduling overrides for the BOOKED_NEXT_APPOINTMENT slot,
+   * mirroring POST /api/v1/pro/bookings: the pro may deliberately book their
+   * client's next appointment outside their public working hours (an off day,
+   * before opening), on short notice, or past their booking horizon. Applied
+   * overrides are permission-checked against `actorUserId` and written to
+   * BookingOverrideAuditLog. They cover both the create and the time-only
+   * reschedule of the mirrored booking.
+   */
+  allowOutsideWorkingHours: boolean
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  overrideReason: string | null
   createRebookReminder: boolean
   rebookReminderDaysBefore: number
   createProductReminder: boolean
@@ -10805,6 +10833,16 @@ assertCanCreateRebookFromSourceBooking({
         : null,
   })
 
+  // A client confirming a pro-CHOSEN start (legacy stored proposal, or a
+  // re-confirm after their own cancel) inherits the pro's authority over the
+  // pro's self-rules — working hours, advance notice, max-days-ahead. The pro
+  // consented to this exact minute at proposal time (and, in the booked-at-save
+  // model, was override-gated + audited there); the client can neither answer
+  // nor decline an override prompt, so refusing here would dead-end them.
+  // Conflicts are NOT relaxed: the overlap policy below still runs as CLIENT.
+  const clientConfirmingProChosenStart =
+    args.clientId != null && args.startChosenBy === 'PRO'
+
   const schedulingDecision = await enforceProCreateScheduling({
     tx: args.tx,
     now: args.now,
@@ -10816,9 +10854,13 @@ assertCanCreateRebookFromSourceBooking({
     stepMinutes: locationContext.stepMinutes,
     advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
     maxDaysAhead: locationContext.maxDaysAhead,
-    allowShortNotice: false,
-    allowFarFuture: false,
-    allowOutsideWorkingHours: false,
+    allowShortNotice:
+      (args.allowShortNotice ?? false) || clientConfirmingProChosenStart,
+    allowFarFuture:
+      (args.allowFarFuture ?? false) || clientConfirmingProChosenStart,
+    allowOutsideWorkingHours:
+      (args.allowOutsideWorkingHours ?? false) ||
+      clientConfirmingProChosenStart,
     enforceStepGrid: args.startChosenBy === 'CLIENT',
     action: 'BOOKING_CREATE',
     // enforceBookingOverlapPolicy runs immediately below and owns the
@@ -10830,6 +10872,21 @@ assertCanCreateRebookFromSourceBooking({
     offeringId: primary.offeringId,
     clientId: source.clientId,
   })
+
+  // Permission-check only the PRO's explicit overrides. The provenance allow
+  // above is not an override the client is exercising — overrideAuthorization
+  // hard-refuses CLIENT actors, and the pro's consent was given (and audited)
+  // when they chose the time.
+  if (
+    !clientConfirmingProChosenStart &&
+    schedulingDecision.appliedOverrides.length > 0
+  ) {
+    await assertCanUseBookingOverrides({
+      actorUserId: args.actorUserId ?? '',
+      professionalId: source.professionalId,
+      appliedOverrides: schedulingDecision.appliedOverrides,
+    })
+  }
 
   const overlapDecision = await enforceBookingOverlapPolicy({
     tx: args.tx,
@@ -11155,6 +11212,28 @@ assertCanCreateRebookFromSourceBooking({
       createdBookingScheduledFor: normalizeDateCmp(createdBooking.scheduledFor),
     },
   })
+
+  if (
+    !clientConfirmingProChosenStart &&
+    schedulingDecision.appliedOverrides.length > 0
+  ) {
+    await createBookingOverrideAuditLogs({
+      tx: args.tx,
+      bookingId: createdBooking.id,
+      professionalId: source.professionalId,
+      actorUserId: args.actorUserId ?? '',
+      action: 'CREATE',
+      route: 'lib/booking/writeBoundary.ts:performLockedCreateRebookedBooking',
+      reason: normalizeReason(args.overrideReason ?? null),
+      appliedOverrides: schedulingDecision.appliedOverrides,
+      bookingScheduledForBefore: null,
+      bookingScheduledForAfter: requestedStart,
+      advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
+      maxDaysAhead: locationContext.maxDaysAhead,
+      workingHours: locationContext.workingHours,
+      timeZone: locationContext.timeZone,
+    })
+  }
 
   await syncBookingAppointmentReminders({
     tx: args.tx,
@@ -11941,6 +12020,11 @@ async function performLockedUpsertBookingAftercare(args: {
     startsAt: Date
     endsAt: Date
   } | null
+  /** See {@link UpsertBookingAftercareArgs} — the same explicit overrides. */
+  allowOutsideWorkingHours: boolean
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  overrideReason: string | null
   createRebookReminder: boolean
   rebookReminderDaysBefore: number
   createProductReminder: boolean
@@ -12438,9 +12522,9 @@ if (validRebookSlot) {
       bookingId: priorRebookedBooking.id,
       nextStatus: null,
       notifyClient: true,
-      allowOutsideWorkingHours: false,
-      allowShortNotice: false,
-      allowFarFuture: false,
+      allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+      allowShortNotice: args.allowShortNotice,
+      allowFarFuture: args.allowFarFuture,
       nextStart: validRebookSlot.startsAt,
       nextBuffer: null,
       nextDuration: null,
@@ -12449,7 +12533,7 @@ if (validRebookSlot) {
       hasDuration: false,
       hasServiceItems: false,
       actorUserId: args.actorUserId,
-      overrideReason: null,
+      overrideReason: args.overrideReason,
       requestId: args.requestId ?? null,
     })
   } else {
@@ -12484,6 +12568,11 @@ if (validRebookSlot) {
       requestedLocationType: validRebookSlot.locationType,
       requestedClientAddressId: slotClientAddressId,
       gate: 'PRO_AFTERCARE_SAVE',
+      actorUserId: args.actorUserId,
+      allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+      allowShortNotice: args.allowShortNotice,
+      allowFarFuture: args.allowFarFuture,
+      overrideReason: args.overrideReason,
       requestId: args.requestId ?? null,
       idempotencyKey: args.idempotencyKey ?? null,
     })
@@ -14767,6 +14856,10 @@ export async function upsertBookingAftercare(
         rebookWindowStart: args.rebookWindowStart,
         rebookWindowEnd: args.rebookWindowEnd,
         rebookSlot: args.rebookSlot,
+        allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+        allowShortNotice: args.allowShortNotice,
+        allowFarFuture: args.allowFarFuture,
+        overrideReason: args.overrideReason,
         createRebookReminder: args.createRebookReminder,
         rebookReminderDaysBefore: args.rebookReminderDaysBefore,
         createProductReminder: args.createProductReminder,

@@ -121,6 +121,15 @@ type ParsedPostBody = {
   sendToClient: boolean
   recommendedProducts: NormalizedRecommendedProduct[]
   normalizedRebook: NormalizedRebook
+  // Explicit scheduling overrides for the BOOKED_NEXT_APPOINTMENT slot,
+  // mirroring POST /api/v1/pro/bookings — the pro may deliberately book the
+  // next appointment outside their public working hours (an off day), on
+  // short notice, or past their booking horizon. Enforced + audited in the
+  // write boundary.
+  allowOutsideWorkingHours: boolean
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  overrideReason: string | null
   createRebookReminder: boolean
   rebookReminderDaysBefore: number
   createProductReminder: boolean
@@ -767,6 +776,10 @@ function parsePostBody(
       sendToClient: toBool(rawBody.sendToClient),
       recommendedProducts: productsParsed.value,
       normalizedRebook: normalizedRebook.value,
+      allowOutsideWorkingHours: toBool(rawBody.allowOutsideWorkingHours),
+      allowShortNotice: toBool(rawBody.allowShortNotice),
+      allowFarFuture: toBool(rawBody.allowFarFuture),
+      overrideReason: trimmedString(rawBody.overrideReason),
       createRebookReminder: toBool(rawBody.createRebookReminder),
       rebookReminderDaysBefore: clamp(
         toInt(rawBody.rebookReminderDaysBefore, 2),
@@ -810,6 +823,10 @@ function buildIdempotencyRequestBody(args: {
     rebookWindowStart: rebook.rebookWindowStart,
     rebookWindowEnd: rebook.rebookWindowEnd,
     rebookSlot: rebook.rebookSlot,
+    allowOutsideWorkingHours: args.parsedBody.allowOutsideWorkingHours,
+    allowShortNotice: args.parsedBody.allowShortNotice,
+    allowFarFuture: args.parsedBody.allowFarFuture,
+    overrideReason: args.parsedBody.overrideReason,
     createRebookReminder: args.parsedBody.createRebookReminder,
     rebookReminderDaysBefore: args.parsedBody.rebookReminderDaysBefore,
     createProductReminder: args.parsedBody.createProductReminder,
@@ -1030,6 +1047,10 @@ export async function POST(req: Request, ctx: RouteContext) {
           rebookWindowStart: parsedBody.value.normalizedRebook.rebookWindowStart,
           rebookWindowEnd: parsedBody.value.normalizedRebook.rebookWindowEnd,
           rebookSlot: parsedBody.value.normalizedRebook.rebookSlot,
+          allowOutsideWorkingHours: parsedBody.value.allowOutsideWorkingHours,
+          allowShortNotice: parsedBody.value.allowShortNotice,
+          allowFarFuture: parsedBody.value.allowFarFuture,
+          overrideReason: parsedBody.value.overrideReason,
           createRebookReminder: parsedBody.value.createRebookReminder,
           rebookReminderDaysBefore: parsedBody.value.rebookReminderDaysBefore,
           createProductReminder: parsedBody.value.createProductReminder,

@@ -71,6 +71,43 @@ describe('AvailabilityCalendarPopup', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('shades off days but leaves them selectable', async () => {
+    const fetchMock = vi.fn((_input: RequestInfo | URL) =>
+      Promise.resolve(jsonResponse({ ok: true, tz: 'UTC', days: {} })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const onPick = vi.fn()
+
+    render(
+      <AvailabilityCalendarPopup
+        open
+        tz="UTC"
+        anchorYmd="2099-09-15"
+        onClose={vi.fn()}
+        onPick={onPick}
+        // Saturdays off. 2099-09-05 / 12 / 19 / 26 are the month's Saturdays.
+        offWeekdays={new Set([6])}
+      />,
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+
+    const saturday = screen.getByText('19').closest('button')
+    expect(saturday).toHaveAttribute(
+      'title',
+      'Off day — you can still book it',
+    )
+    expect(saturday).toBeEnabled()
+
+    // The legend explains the shading.
+    expect(screen.getByText('Off day')).toBeInTheDocument()
+
+    // Picking the off day still works — booking it is the pro's call.
+    fireEvent.click(screen.getByText('19'))
+    expect(onPick).toHaveBeenCalledWith('2099-09-19')
+  })
+
   it('renders nothing when closed', () => {
     const { container } = render(
       <AvailabilityCalendarPopup

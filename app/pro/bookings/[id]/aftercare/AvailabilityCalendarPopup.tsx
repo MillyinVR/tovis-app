@@ -26,6 +26,13 @@ type Props = {
   /** Month/day to open on. Defaults to minYmd or today. */
   anchorYmd?: string
   title?: string
+  /**
+   * Weekday indexes (0=Sun … 6=Sat) the pro's weekly schedule marks disabled.
+   * Shaded as "off days" but still selectable — a pro may deliberately book a
+   * client on a day their public calendar shows as off (the save asks them to
+   * confirm the working-hours override).
+   */
+  offWeekdays?: ReadonlySet<number> | null
 }
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
@@ -80,6 +87,7 @@ export default function AvailabilityCalendarPopup({
   minYmd,
   anchorYmd,
   title = 'Pick a date',
+  offWeekdays,
 }: Props) {
   const todayYmd = useMemo(() => todayYmdInTimeZone(tz), [tz])
   const earliest = minYmd && minYmd > todayYmd ? minYmd : todayYmd
@@ -158,13 +166,17 @@ export default function AvailabilityCalendarPopup({
   if (!open) return null
 
   const p = ymdParts(viewMonth)
-  const cells: Array<{ ymd: string; day: number } | null> = []
+  const cells: Array<{ ymd: string; day: number; weekday: number } | null> = []
   if (p) {
     const lead = weekdayOfFirst(p.y, p.m)
     for (let i = 0; i < lead; i += 1) cells.push(null)
     const total = daysInMonth(p.y, p.m)
     for (let d = 1; d <= total; d += 1) {
-      cells.push({ ymd: `${pad2(p.y).padStart(4, '0')}-${pad2(p.m)}-${pad2(d)}`, day: d })
+      cells.push({
+        ymd: `${pad2(p.y).padStart(4, '0')}-${pad2(p.m)}-${pad2(d)}`,
+        day: d,
+        weekday: (lead + d - 1) % 7,
+      })
     }
   }
 
@@ -239,6 +251,7 @@ export default function AvailabilityCalendarPopup({
             const info = busy[cell.ymd]
             const isPast = compareYmd(cell.ymd, earliest) < 0
             const isBlocked = Boolean(info?.blocked)
+            const isOffDay = Boolean(offWeekdays?.has(cell.weekday))
             const bookings = info?.bookings ?? 0
             const disabled = isPast
 
@@ -255,8 +268,12 @@ export default function AvailabilityCalendarPopup({
                   isBlocked
                     ? 'Time blocked'
                     : bookings > 0
-                      ? `${bookings} booking${bookings === 1 ? '' : 's'}`
-                      : 'Open'
+                      ? `${bookings} booking${bookings === 1 ? '' : 's'}${
+                          isOffDay ? ' · off day' : ''
+                        }`
+                      : isOffDay
+                        ? 'Off day — you can still book it'
+                        : 'Open'
                 }
                 className={[
                   'relative flex aspect-square flex-col items-center justify-center rounded-card border text-xs font-black transition',
@@ -266,7 +283,9 @@ export default function AvailabilityCalendarPopup({
                       ? 'border-microAccent/40 bg-microAccent/10 text-textPrimary hover:bg-microAccent/20'
                       : bookings > 0
                         ? 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass'
-                        : 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
+                        : isOffDay
+                          ? 'border-dashed border-white/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass hover:text-textPrimary'
+                          : 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
                 ].join(' ')}
               >
                 <span>{cell.day}</span>
@@ -283,7 +302,7 @@ export default function AvailabilityCalendarPopup({
           })}
         </div>
 
-        <div className="mt-3 flex items-center justify-between text-[10px] font-semibold text-textSecondary">
+        <div className="mt-3 flex items-center justify-between gap-2 text-[10px] font-semibold text-textSecondary">
           <span className="flex items-center gap-1">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-accentPrimary" />
             Booked
@@ -292,6 +311,12 @@ export default function AvailabilityCalendarPopup({
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-microAccent" />
             Blocked
           </span>
+          {offWeekdays && offWeekdays.size > 0 ? (
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-1.5 rounded-full border border-dashed border-textSecondary" />
+              Off day
+            </span>
+          ) : null}
           <span>{loading ? 'Loading…' : `Times in ${tz}`}</span>
         </div>
       </div>

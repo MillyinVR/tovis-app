@@ -74,29 +74,73 @@ function renderForm(props?: Partial<React.ComponentProps<typeof AftercareForm>>)
   )
 }
 
+type RouteResponse = { status: number; ok: boolean; json: () => Promise<unknown> }
+
+function jsonResponse(body: unknown, status = 200): RouteResponse {
+  return { status, ok: status < 400, json: async () => body }
+}
+
+// URL-routed fetch: the form makes background requests on mount (working hours
+// for off-day shading; saved addresses for MOBILE), so positional
+// `mockResolvedValueOnce` queues would misroute. Handlers match by substring;
+// unmatched URLs get a benign empty 200 the effects treat as "no data".
+function routeFetch(
+  routes: Array<
+    [
+      match: string,
+      handler: (url: string, init?: RequestInit) => RouteResponse,
+    ]
+  >,
+) {
+  mocks.fetch.mockImplementation(async (input: unknown, init?: unknown) => {
+    const url = String(input)
+    for (const [match, handler] of routes) {
+      if (url.includes(match)) return handler(url, init as RequestInit)
+    }
+    return jsonResponse({ ok: true })
+  })
+}
+
+function fetchCallUrl(match: string): string | null {
+  const call = mocks.fetch.mock.calls.find((c) => String(c[0]).includes(match))
+  return call ? String(call[0]) : null
+}
+
+function fetchCallInit(match: string): RequestInit | undefined {
+  const call = mocks.fetch.mock.calls.find((c) => String(c[0]).includes(match))
+  return call?.[1] as RequestInit | undefined
+}
+
+function aftercareSaveBody(args?: {
+  completionBlockers?: unknown[]
+  bookingFinished?: boolean
+  clientNotified?: boolean
+  redirectTo?: string | null
+}) {
+  return {
+    aftercare: {
+      id: 'aftercare_1',
+      draftSavedAt: null,
+      sentToClientAt: '2026-04-12T20:00:00.000Z',
+      lastEditedAt: '2026-04-12T20:00:00.000Z',
+      version: 2,
+    },
+    clientNotified: args?.clientNotified ?? true,
+    bookingFinished: args?.bookingFinished ?? false,
+    completionBlockers: args?.completionBlockers ?? [],
+    redirectTo: args?.redirectTo ?? null,
+  }
+}
+
 function mockAftercareResponse(args?: {
   completionBlockers?: unknown[]
   bookingFinished?: boolean
   clientNotified?: boolean
   redirectTo?: string | null
 }) {
-  mocks.fetch.mockResolvedValueOnce({
-    status: 200,
-    ok: true,
-    json: async () => ({
-      aftercare: {
-        id: 'aftercare_1',
-        draftSavedAt: null,
-        sentToClientAt: '2026-04-12T20:00:00.000Z',
-        lastEditedAt: '2026-04-12T20:00:00.000Z',
-        version: 2,
-      },
-      clientNotified: args?.clientNotified ?? true,
-      bookingFinished: args?.bookingFinished ?? false,
-      completionBlockers: args?.completionBlockers ?? [],
-      redirectTo: args?.redirectTo ?? null,
-    }),
-  })
+  routeFetch([
+    ['/aftercare', () => jsonResponse(aftercareSaveBody(args))],
+  ])
 }
 
 async function clickSendToClient() {
@@ -192,23 +236,25 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
   })
 
   it('saves draft without showing closeout blocker messaging', async () => {
-    mocks.fetch.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      json: async () => ({
-        aftercare: {
-          id: 'aftercare_1',
-          draftSavedAt: '2026-04-12T20:00:00.000Z',
-          sentToClientAt: null,
-          lastEditedAt: '2026-04-12T20:00:00.000Z',
-          version: 2,
-        },
-        clientNotified: false,
-        bookingFinished: false,
-        completionBlockers: ['AFTERCARE_NOT_SENT'],
-        redirectTo: null,
-      }),
-    })
+    routeFetch([
+      [
+        '/aftercare',
+        () =>
+          jsonResponse({
+            aftercare: {
+              id: 'aftercare_1',
+              draftSavedAt: '2026-04-12T20:00:00.000Z',
+              sentToClientAt: null,
+              lastEditedAt: '2026-04-12T20:00:00.000Z',
+              version: 2,
+            },
+            clientNotified: false,
+            bookingFinished: false,
+            completionBlockers: ['AFTERCARE_NOT_SENT'],
+            redirectTo: null,
+          }),
+      ],
+    ])
 
     renderForm()
 
@@ -229,36 +275,48 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
   })
 
   it('lets the pro pick which client service address a mobile next appointment is at', async () => {
-    // Mount (MOBILE): the form loads the client's saved service addresses.
-    mocks.fetch.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      json: async () => ({
-        ok: true,
-        clientId: 'client_1',
-        addresses: [
-          {
-            id: 'addr_1',
-            label: 'Home',
-            formattedAddress: '1 Main St, Los Angeles, CA',
-            isDefault: true,
-          },
-          {
-            id: 'addr_2',
-            label: 'Work',
-            formattedAddress: '2 Office Way, Los Angeles, CA',
-            isDefault: false,
-          },
-        ],
-      }),
-    })
+    routeFetch([
+      // Mount (MOBILE): the form loads the client's saved service addresses.
+      [
+        '/service-addresses',
+        () =>
+          jsonResponse({
+            ok: true,
+            clientId: 'client_1',
+            addresses: [
+              {
+                id: 'addr_1',
+                label: 'Home',
+                formattedAddress: '1 Main St, Los Angeles, CA',
+                isDefault: true,
+              },
+              {
+                id: 'addr_2',
+                label: 'Work',
+                formattedAddress: '2 Office Way, Los Angeles, CA',
+                isDefault: false,
+              },
+            ],
+          }),
+      ],
+      [
+        '/api/v1/availability/day',
+        () =>
+          jsonResponse({
+            ok: true,
+            slots: ['2026-09-01T17:00:00.000Z'],
+            durationMinutes: 90,
+          }),
+      ],
+      ['/aftercare', () => jsonResponse(aftercareSaveBody())],
+    ])
 
     renderForm({
       rebookLocationType: 'MOBILE',
       rebookClientAddressId: 'addr_1',
     })
 
-    expect(String(mocks.fetch.mock.calls[0]?.[0])).toBe(
+    expect(fetchCallUrl('/service-addresses')).toBe(
       '/api/v1/pro/clients/client_1/service-addresses',
     )
 
@@ -278,24 +336,14 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
 
     fireEvent.change(select, { target: { value: 'addr_2' } })
 
-    // Picking a day queries availability FOR THE CHOSEN ADDRESS…
-    mocks.fetch.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      json: async () => ({
-        ok: true,
-        slots: ['2026-09-01T17:00:00.000Z'],
-        durationMinutes: 90,
-      }),
-    })
-
     const dayInput = document.querySelector(
       'input[type="date"]',
     ) as HTMLInputElement
     fireEvent.change(dayInput, { target: { value: '2026-09-01' } })
 
+    // Picking a day queries availability FOR THE CHOSEN ADDRESS…
     await waitFor(() => {
-      expect(String(mocks.fetch.mock.calls[1]?.[0])).toContain(
+      expect(fetchCallUrl('/api/v1/availability/day')).toContain(
         'clientAddressId=addr_2',
       )
     })
@@ -303,21 +351,102 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     fireEvent.click(await screen.findByRole('button', { name: '10:00 AM' }))
 
     // …and the saved proposal carries that same address.
-    mockAftercareResponse()
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /save draft/i }))
     })
 
-    const saveCall = mocks.fetch.mock.calls[2]
-    expect(String(saveCall?.[0])).toContain(
+    expect(fetchCallUrl('/api/v1/pro/bookings/booking_1/aftercare')).toContain(
       '/api/v1/pro/bookings/booking_1/aftercare',
     )
-    const body = JSON.parse(String((saveCall?.[1] as RequestInit).body))
+    const body = JSON.parse(
+      String(
+        fetchCallInit('/api/v1/pro/bookings/booking_1/aftercare')?.body,
+      ),
+    )
     expect(body.rebookSlot).toMatchObject({
       locationType: 'MOBILE',
       clientAddressId: 'addr_2',
       startsAt: '2026-09-01T17:00:00.000Z',
     })
+  })
+
+  it('turns an OUTSIDE_WORKING_HOURS refusal into a confirm card and retries with the flag', async () => {
+    // First save refuses with the gated code; after the pro confirms, the
+    // retry carries allowOutsideWorkingHours and succeeds.
+    let saveAttempts = 0
+    const saveBodies: Array<Record<string, unknown>> = []
+    routeFetch([
+      [
+        '/api/v1/availability/day',
+        () =>
+          jsonResponse({
+            ok: true,
+            slots: ['2026-09-01T17:00:00.000Z'],
+            durationMinutes: 60,
+          }),
+      ],
+      [
+        '/api/v1/pro/bookings/booking_1/aftercare',
+        (_url, init) => {
+          saveAttempts += 1
+          saveBodies.push(
+            JSON.parse(String(init?.body)) as Record<string, unknown>,
+          )
+          if (saveAttempts === 1) {
+            return jsonResponse(
+              {
+                error: 'That time is outside working hours.',
+                code: 'OUTSIDE_WORKING_HOURS',
+              },
+              422,
+            )
+          }
+          return jsonResponse(aftercareSaveBody())
+        },
+      ],
+    ])
+
+    renderForm()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next booking date' }))
+
+    const dayInput = document.querySelector(
+      'input[type="date"]',
+    ) as HTMLInputElement
+    fireEvent.change(dayInput, { target: { value: '2026-09-01' } })
+    fireEvent.click(await screen.findByRole('button', { name: '10:00 AM' }))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save draft/i }))
+    })
+
+    // The refusal surfaced as the soft confirm card, not a dead-end error.
+    expect(
+      await screen.findByText(/Booking rule override/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/outside your working hours\. Book it anyway\?/i),
+    ).toBeInTheDocument()
+    expect(saveBodies[0]?.allowOutsideWorkingHours).toBe(false)
+
+    // Saving again without confirming is blocked client-side.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save draft/i }))
+    })
+    expect(saveAttempts).toBe(1)
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /Book anyway/i }),
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save draft/i }))
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/Aftercare draft saved\./i)).toBeInTheDocument()
+    })
+    expect(saveBodies[1]?.allowOutsideWorkingHours).toBe(true)
   })
 
   it('uses date-only window inputs and auto-advances the end past the start', () => {

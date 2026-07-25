@@ -443,6 +443,10 @@ function makeExpectedIdempotencyRequestBody(overrides?: {
   rebookedFor?: string | null
   rebookWindowStart?: string | null
   rebookWindowEnd?: string | null
+  allowOutsideWorkingHours?: boolean
+  allowShortNotice?: boolean
+  allowFarFuture?: boolean
+  overrideReason?: string | null
   createRebookReminder?: boolean
   rebookReminderDaysBefore?: number
   createProductReminder?: boolean
@@ -480,6 +484,22 @@ function makeExpectedIdempotencyRequestBody(overrides?: {
         : '2026-05-15T18:00:00.000Z',
     rebookSlot:
       overrides && 'rebookSlot' in overrides ? overrides.rebookSlot : null,
+    allowOutsideWorkingHours:
+      overrides && 'allowOutsideWorkingHours' in overrides
+        ? overrides.allowOutsideWorkingHours
+        : false,
+    allowShortNotice:
+      overrides && 'allowShortNotice' in overrides
+        ? overrides.allowShortNotice
+        : false,
+    allowFarFuture:
+      overrides && 'allowFarFuture' in overrides
+        ? overrides.allowFarFuture
+        : false,
+    overrideReason:
+      overrides && 'overrideReason' in overrides
+        ? overrides.overrideReason
+        : null,
     createRebookReminder:
       overrides && 'createRebookReminder' in overrides
         ? overrides.createRebookReminder
@@ -1352,6 +1372,10 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
       rebookWindowStart: new Date('2026-05-01T18:00:00.000Z'),
       rebookWindowEnd: new Date('2026-05-15T18:00:00.000Z'),
       rebookSlot: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      overrideReason: null,
       createRebookReminder: true,
       rebookReminderDaysBefore: 30,
       createProductReminder: true,
@@ -1624,6 +1648,10 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
       rebookMode: AftercareRebookMode.NONE,
       rebookWindowStart: null,
       rebookWindowEnd: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      overrideReason: null,
       createRebookReminder: false,
       rebookReminderDaysBefore: 2,
       createProductReminder: false,
@@ -1736,6 +1764,51 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
     })
   })
 
+  it('POST parses the scheduling-override flags and threads them to the boundary', async () => {
+    expectIdempotencyStarted('idem_override_flags_1')
+
+    mocks.upsertBookingAftercare.mockResolvedValueOnce(
+      makeUpsertResult({
+        rebookMode: AftercareRebookMode.NONE,
+        rebookWindowStart: null,
+        rebookWindowEnd: null,
+        sentToClientAt: null,
+        aftercareAccessDelivery: makeAftercareAccessDeliverySummary({
+          attempted: false,
+          queued: false,
+          href: null,
+        }),
+        clientNotified: false,
+        bookingFinished: false,
+        booking: null,
+      }),
+    )
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_override_flags_1',
+        body: {
+          rebookMode: AftercareRebookMode.NONE,
+          allowOutsideWorkingHours: true,
+          allowShortNotice: true,
+          allowFarFuture: true,
+          overrideReason: '  Saturday regular — I take her off-book.  ',
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(200)
+    expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowOutsideWorkingHours: true,
+        allowShortNotice: true,
+        allowFarFuture: true,
+        overrideReason: 'Saturday regular — I take her off-book.',
+      }),
+    )
+  })
+
   it('POST returns null clientTimeZoneReceived when the submitted time zone is invalid', async () => {
     expectIdempotencyStarted('idem_bad_timezone_1')
 
@@ -1777,6 +1850,10 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
       rebookWindowStart: null,
       rebookWindowEnd: null,
       rebookSlot: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      overrideReason: null,
       createRebookReminder: false,
       rebookReminderDaysBefore: 2,
       createProductReminder: false,
