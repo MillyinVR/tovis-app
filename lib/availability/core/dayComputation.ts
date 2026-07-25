@@ -25,19 +25,6 @@ import { type YMD, ymdToString } from '@/lib/availability/core/summaryWindow'
 
 const MAX_LEAD_MINUTES = 30 * 24 * 60
 
-const AMBIGUOUS_LOCAL_TIME_PROBE_MINUTES = [
-  -180,
-  -120,
-  -90,
-  -60,
-  -30,
-  30,
-  60,
-  90,
-  120,
-  180,
-] as const
-
 export type DayComputationResult =
   | {
       ok: true
@@ -62,7 +49,7 @@ type LocalWallTime = {
   minute: number
 }
 
-type LocalMinuteCandidateCache = Map<number, Date[]>
+type LocalMinuteStartCache = Map<number, Date | null>
 
 type BusyConflictScanResult = {
   hasConflict: boolean
@@ -96,6 +83,19 @@ function buildLocalDateTimeString(args: {
   return `${args.year}-${month}-${day}T${hour}:${minute}:00`
 }
 
+/**
+ * The UTC instant for a local wall time, or `null` when that wall time is not a
+ * bookable one in this timezone.
+ *
+ * `null` covers BOTH DST cases, and deliberately so:
+ * - the spring-forward gap, where the wall time does not exist at all;
+ * - the fall-back overlap, where it happens twice and "1:30 AM" does not name
+ *   an instant. An ambiguous start is never offered, the same rule the
+ *   pro-side wall-clock pickers apply when they refuse one with
+ *   `WALL_TIME_ERROR_MESSAGE.DST_INVALID` (block create/edit, booking
+ *   reschedule). Dropping it keeps the OFFER a subset of what the write
+ *   accepts, so it can never become a dead-end start.
+ */
 export function localSlotToUtcOrNull(args: {
   year: number
   month: number
@@ -174,22 +174,6 @@ function formatSkippedWallTime(minuteOffset: number): string {
   return `${dayOffset > 0 ? `+${dayOffset}d ` : ''}${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
-function matchesLocalWallTime(
-  utc: Date,
-  target: LocalWallTime,
-  timeZone: string,
-): boolean {
-  const parts = utcDateToLocalParts(utc, timeZone)
-
-  return (
-    parts.year === target.year &&
-    parts.month === target.month &&
-    parts.day === target.day &&
-    parts.hour === target.hour &&
-    parts.minute === target.minute
-  )
-}
-
 function uniqueSortedDates(values: Date[]): Date[] {
   const seen = new Set<number>()
   const unique: Date[] = []
@@ -207,17 +191,32 @@ function uniqueSortedDates(values: Date[]): Date[] {
   return unique
 }
 
-function buildUtcCandidatesForLocalMinute(args: {
+/**
+ * One local wall time in, at most one UTC start out.
+ *
+ * This used to also probe ±30…180 minutes around the resolved instant and keep
+ * every probe that landed on the SAME wall clock, to offer both halves of the
+ * fall-back hour. That could never fire: a probe can only match when the wall
+ * time is ambiguous, and `localSlotToUtcOrNull` already returns `null` for an
+ * ambiguous wall time, so the loop was unreachable behind its own guard. B6
+ * drove all 418 IANA zones across their 2026–2030 transitions — 42,966 wall
+ * times, 37,010 of them resolved, and the probes matched exactly 0 times.
+ */
+function resolveUtcStartForLocalMinute(args: {
+  cache: LocalMinuteStartCache
   dateYMD: YMD
   minuteOffset: number
   timeZone: string
-}): Date[] {
+}): Date | null {
+  const cached = args.cache.get(args.minuteOffset)
+  if (cached !== undefined) return cached
+
   const target = localWallTimeForMinuteOffset({
     dateYMD: args.dateYMD,
     minuteOffset: args.minuteOffset,
   })
 
-  const primary = localSlotToUtcOrNull({
+  const startUtc = localSlotToUtcOrNull({
     year: target.year,
     month: target.month,
     day: target.day,
@@ -226,40 +225,8 @@ function buildUtcCandidatesForLocalMinute(args: {
     timeZone: args.timeZone,
   })
 
-  if (!primary) {
-    return []
-  }
-
-  const candidates: Date[] = [primary]
-
-  for (const delta of AMBIGUOUS_LOCAL_TIME_PROBE_MINUTES) {
-    const probe = normalizeToMinute(addMinutes(primary, delta))
-
-    if (matchesLocalWallTime(probe, target, args.timeZone)) {
-      candidates.push(probe)
-    }
-  }
-
-  return uniqueSortedDates(candidates)
-}
-
-function getCachedUtcCandidatesForLocalMinute(args: {
-  cache: LocalMinuteCandidateCache
-  dateYMD: YMD
-  minuteOffset: number
-  timeZone: string
-}): Date[] {
-  const cached = args.cache.get(args.minuteOffset)
-  if (cached) return cached
-
-  const computed = buildUtcCandidatesForLocalMinute({
-    dateYMD: args.dateYMD,
-    minuteOffset: args.minuteOffset,
-    timeZone: args.timeZone,
-  })
-
-  args.cache.set(args.minuteOffset, computed)
-  return computed
+  args.cache.set(args.minuteOffset, startUtc)
+  return startUtc
 }
 
 function buildRelevantBusyIntervals(args: {
@@ -295,7 +262,7 @@ function buildSortedCandidateSlotStarts(args: {
   durationMinutes: number
   bufferMinutes: number
   stepMinutes: number
-  cache: LocalMinuteCandidateCache
+  cache: LocalMinuteStartCache
   debug: boolean
   skippedDstWallTimes: string[]
 }): Date[] {
@@ -306,21 +273,21 @@ function buildSortedCandidateSlotStarts(args: {
     minute + args.durationMinutes + args.bufferMinutes <= args.windowEndMinutes;
     minute += args.stepMinutes
   ) {
-    const slotStartUtcCandidates = getCachedUtcCandidatesForLocalMinute({
+    const slotStartUtc = resolveUtcStartForLocalMinute({
       cache: args.cache,
       dateYMD: args.dateYMD,
       minuteOffset: minute,
       timeZone: args.timeZone,
     })
 
-    if (slotStartUtcCandidates.length === 0) {
+    if (!slotStartUtc) {
       if (args.debug) {
         args.skippedDstWallTimes.push(formatSkippedWallTime(minute))
       }
       continue
     }
 
-    rawCandidates.push(...slotStartUtcCandidates)
+    rawCandidates.push(slotStartUtc)
   }
 
   return uniqueSortedDates(rawCandidates)
@@ -464,7 +431,7 @@ export async function computeDaySlotsFast(args: {
   )
 
   const skippedDstWallTimes: string[] = []
-  const candidateCache: LocalMinuteCandidateCache = new Map()
+  const candidateCache: LocalMinuteStartCache = new Map()
 
   const relevantBusy = buildRelevantBusyIntervals({
     busy,

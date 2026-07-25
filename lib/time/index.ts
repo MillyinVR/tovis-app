@@ -49,6 +49,7 @@ export {
   timeZoneOffsetMinutes,
   zonedTimeToUtc,
   startOfDayUtcInTimeZone,
+  startOfLocalDayUtc,
   ymdInTimeZone,
   minutesSinceMidnightInTimeZone,
   daySerialInTimeZone,

@@ -40,7 +40,7 @@ import {
   DEFAULT_TIME_ZONE,
   getZonedParts,
   sanitizeTimeZone,
-  zonedTimeToUtc,
+  startOfLocalDayUtc,
 } from '@/lib/time'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import type { ProAvailabilitySignal } from '@/lib/looks/personalizedRanking'
@@ -148,12 +148,10 @@ export function computeProAvailabilitySummary(args: {
 
   for (let dayIndex = 0; dayIndex < PRO_AVAILABILITY_STAT.horizonDays; dayIndex += 1) {
     const ymd = addCalendarDays(startParts, dayIndex)
-    const dayStartUtc = zonedTimeToUtc({
+    const dayStartUtc = startOfLocalDayUtc({
       year: ymd.year,
       month: ymd.month,
       day: ymd.day,
-      hour: 0,
-      minute: 0,
       timeZone: tz,
     })
 

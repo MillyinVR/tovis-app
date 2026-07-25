@@ -8,6 +8,8 @@ import {
   pickTimeZoneOrNull,
   sanitizeTimeZone,
   startOfDayUtcInTimeZone,
+  startOfLocalDayUtc,
+  ymdInTimeZone,
 } from './timeZone'
 
 describe('isValidIanaTimeZone', () => {
@@ -147,6 +149,63 @@ describe('startOfDayUtcInTimeZone dayOffset', () => {
   })
 })
 
+// Five IANA zones move their clocks AT local midnight, so "00:00" is the very
+// wall time that does not exist (spring) or happens twice (autumn) — the case
+// every other zone is spared because it transitions at 01:00/02:00/03:00.
+// B6 drove all 418 zones; these are the only ones, and the dates are their real
+// 2026 transitions.
+describe('startOfDayUtcInTimeZone — zones whose DST transition is AT midnight', () => {
+  const MIDNIGHT_TRANSITION_CASES = [
+    // [zone, local day, expected first instant of that local day]
+    ['America/Havana', '2026-03-08', '2026-03-08T05:00:00.000Z'],
+    ['America/Havana', '2026-11-01', '2026-11-01T04:00:00.000Z'],
+    ['America/Santiago', '2026-09-06', '2026-09-06T04:00:00.000Z'],
+    ['Atlantic/Azores', '2026-03-29', '2026-03-29T01:00:00.000Z'],
+    ['Africa/Cairo', '2026-04-24', '2026-04-23T22:00:00.000Z'],
+    ['Asia/Beirut', '2026-03-29', '2026-03-28T22:00:00.000Z'],
+  ] as const
+
+  it.each(MIDNIGHT_TRANSITION_CASES)(
+    'lands on the first instant of the requested local day (%s %s)',
+    (zone, day, expected) => {
+      const [year, month, dayOfMonth] = day.split('-').map(Number)
+      const noonAnchor = new Date(
+        Date.UTC(year ?? 0, (month ?? 1) - 1, dayOfMonth ?? 1, 12),
+      )
+
+      const start = startOfDayUtcInTimeZone(noonAnchor, zone)
+
+      // The day it lands on is the day that was asked for — before B6 the
+      // fixed-point refinement oscillated across the gap and settled an hour
+      // early, i.e. at 23:00 on the PREVIOUS local day.
+      expect(ymdInTimeZone(start, zone)).toBe(day)
+      expect(start.toISOString()).toBe(expected)
+
+      // And it is the FIRST such instant: one second earlier is the day before.
+      expect(ymdInTimeZone(new Date(start.getTime() - 1000), zone)).not.toBe(
+        day,
+      )
+    },
+  )
+
+  it('tiles: each local day ends exactly where the next one begins', () => {
+    for (const [zone, day] of MIDNIGHT_TRANSITION_CASES) {
+      const [year, month, dayOfMonth] = day.split('-').map(Number)
+      const noonAnchor = new Date(
+        Date.UTC(year ?? 0, (month ?? 1) - 1, dayOfMonth ?? 1, 12),
+      )
+
+      const start = startOfDayUtcInTimeZone(noonAnchor, zone)
+      const next = startOfDayUtcInTimeZone(noonAnchor, zone, 1)
+      const hours = (next.getTime() - start.getTime()) / 3_600_000
+
+      expect(hours).toBeGreaterThanOrEqual(23)
+      expect(hours).toBeLessThanOrEqual(25)
+      expect(hours % 1).toBe(0)
+    }
+  })
+})
+
 describe('daySerialInTimeZone', () => {
   it('counts whole local days between two instants', () => {
     const tz = 'America/New_York'
@@ -169,5 +228,32 @@ describe('daySerialInTimeZone', () => {
     expect(daySerialInTimeZone(at, 'UTC')).toBe(
       daySerialInTimeZone(at, 'America/New_York') + 1,
     )
+  })
+})
+
+describe('startOfLocalDayUtc', () => {
+  // `computeTodayTomorrowBoundsUtc` asks for "tomorrow" as `day + 1` without
+  // normalizing first, so the primitive has to handle a day that runs off the
+  // end of its month or year — its target-date comparison is a STRING, and an
+  // unnormalized "2026-01-32" matches nothing.
+  it.each([
+    [{ year: 2026, month: 1, day: 32 }, '2026-02-01T05:00:00.000Z'],
+    [{ year: 2026, month: 12, day: 32 }, '2027-01-01T05:00:00.000Z'],
+    [{ year: 2026, month: 2, day: 29 }, '2026-03-01T05:00:00.000Z'],
+  ])('normalizes an overflowing day (%o)', (parts, expected) => {
+    expect(
+      startOfLocalDayUtc({ ...parts, timeZone: 'America/New_York' }).toISOString(),
+    ).toBe(expected)
+  })
+
+  it('falls back to UTC for an invalid timezone rather than throwing', () => {
+    expect(
+      startOfLocalDayUtc({
+        year: 2026,
+        month: 6,
+        day: 10,
+        timeZone: 'Not/AZone',
+      }).toISOString(),
+    ).toBe('2026-06-10T00:00:00.000Z')
   })
 })

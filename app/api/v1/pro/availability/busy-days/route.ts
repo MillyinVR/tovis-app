@@ -18,7 +18,7 @@ import { prisma } from '@/lib/prisma'
 import {
   isValidIanaTimeZone,
   sanitizeTimeZone,
-  zonedTimeToUtc,
+  startOfLocalDayUtc,
 } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
@@ -115,21 +115,17 @@ export async function GET(req: Request) {
     }
 
     // UTC window covering [from 00:00 local, (to+1) 00:00 local).
-    const fromUtc = zonedTimeToUtc({
+    const fromUtc = startOfLocalDayUtc({
       year: fromParts.year,
       month: fromParts.month,
       day: fromParts.day,
-      hour: 0,
-      minute: 0,
       timeZone: tz,
     })
     const toExclusiveParts = addDaysUtc(toPartsClamped, 1)
-    const toUtcExclusive = zonedTimeToUtc({
+    const toUtcExclusive = startOfLocalDayUtc({
       year: toExclusiveParts.year,
       month: toExclusiveParts.month,
       day: toExclusiveParts.day,
-      hour: 0,
-      minute: 0,
       timeZone: tz,
     })
 

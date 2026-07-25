@@ -48,11 +48,11 @@ import {
 } from '@/lib/idempotency/client'
 
 import {
-  combineDateAndTimeInput,
-  dateTimeLocalToUtcIso,
   utcIsoToDateInputValue,
   utcIsoToTimeInputValue,
 } from '@/lib/bookingDateTimeClient'
+
+import { partsToUtcIsoStrict, WALL_TIME_ERROR_MESSAGE } from '@/lib/time'
 
 import { isRecord } from '@/lib/guards'
 import { errorMessageFromUnknown, isAbortError, safeJson } from '@/lib/http'
@@ -643,11 +643,27 @@ export function useBookingModal(deps: BookingModalDeps) {
         time: reschedTime,
       })
 
-      const localDateTime = combineDateAndTimeInput(reschedDate, reschedTime)
-      const nextStartIso = dateTimeLocalToUtcIso(
-        localDateTime,
-        activeSchedulingContext.timeZone,
-      )
+      // A wall time the pro typed, so a DST gap/overlap has to be REPORTED, not
+      // silently shifted. The throwing converter did refuse it, but its message
+      // is an internal one ("Local wall time does not exist or is ambiguous in
+      // timezone …") and reached the pro verbatim; the block modals next door
+      // already had the shared copy for exactly this. (B6)
+      const startResult = partsToUtcIsoStrict({
+        year: dateParts.yyyy,
+        month: dateParts.mm,
+        day: dateParts.dd,
+        hour: timeParts.hh,
+        minute: timeParts.mi,
+        timeZone: activeSchedulingContext.timeZone,
+      })
+
+      if (!startResult.ok) {
+        // `finally` below clears the saving flag.
+        setBookingError(WALL_TIME_ERROR_MESSAGE[startResult.reason])
+        return
+      }
+
+      const nextStartIso = startResult.iso
 
       const effectiveDuration =
         hasDraftServiceItemsChanges && serviceItemsDraft.length > 0

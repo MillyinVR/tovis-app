@@ -230,6 +230,76 @@ describe('useBookingModal', () => {
     expect(forceProFooterRefresh).toHaveBeenCalled()
   })
 
+  // B6: a wall time the pro typed that a DST transition erased. The converter
+  // always refused it, but by throwing — so the pro read an internal string
+  // ("Local wall time does not exist or is ambiguous in timezone …") and no
+  // PATCH was attempted either way.
+  it('refuses a reschedule into the DST gap with the shared copy, not an internal error', async () => {
+    const booking = makeBooking({
+      scheduledFor: '2027-03-10T17:30:00.000Z',
+      timeZone: 'America/Los_Angeles',
+    })
+
+    mocks.parseBookingDetails.mockReturnValue(booking)
+    mocks.safeJson
+      .mockResolvedValueOnce({ booking })
+      .mockResolvedValueOnce({ services: [] })
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ booking }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ services: [] }),
+      })
+
+    const { result } = renderHook(() =>
+      useBookingModal({
+        eventsRef: { current: [] },
+        activeStepMinutes: 15,
+        activeLocationType: 'SALON',
+        timeZone: 'America/Los_Angeles',
+        resolveLocationStepMinutes: () => 15,
+        resolveBookingSchedulingContext: () => ({
+          timeZone: 'America/Los_Angeles',
+          workingHours: null,
+          stepMinutes: 15,
+        }),
+        reloadCalendar: vi.fn(async () => {}),
+        forceProFooterRefresh: vi.fn(),
+        locations: [],
+      }),
+    )
+
+    await act(async () => {
+      await result.current.openBooking('booking_1')
+    })
+
+    await act(async () => {
+      // 02:30 does not exist on the spring-forward day in Los Angeles.
+      result.current.setReschedDate('2027-03-14')
+      result.current.setReschedTime('02:30')
+    })
+
+    await act(async () => {
+      await result.current.submitChanges()
+    })
+
+    expect(result.current.bookingError).toBe(
+      "That time doesn't exist on this day due to daylight saving time. Please pick another time.",
+    )
+    expect(result.current.savingReschedule).toBe(false)
+
+    const patchCall = fetchMock.mock.calls.find(
+      (call) => call[1]?.method === 'PATCH',
+    )
+    expect(patchCall).toBeUndefined()
+  })
+
   it('uses resolved scheduling timezone for submit even when viewer timezone differs', async () => {
     const booking = makeBooking({
       scheduledFor: '2026-06-01T03:30:00.000Z',

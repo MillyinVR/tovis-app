@@ -1,5 +1,10 @@
 // lib/booking/dateTime.ts
-import { getZonedParts, isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
+import {
+  getZonedParts,
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+  startOfLocalDayUtc,
+} from '@/lib/timeZone'
 
 type DateParts = {
   year: number
@@ -300,39 +305,32 @@ export function zonedPartsToUtcStrict(parts: {
 /**
  * Convert a local calendar date in the provided timezone into UTC start/end bounds.
  *
- * start = local YYYY-MM-DD 00:00:00
- * end   = next local day 00:00:00
+ * start = first instant of local YYYY-MM-DD
+ * end   = first instant of the next local day
  *
  * Use end as exclusive: [start, end)
+ *
+ * Both bounds go through `startOfLocalDayUtc`, NOT the strict wall-time
+ * converter above. A day boundary is not a time a human picked, so it must
+ * never be refused: five IANA zones move their clocks at local midnight, and
+ * asking the strict converter for "00:00" on their transition day threw
+ * "does not exist or is ambiguous" — which the three availability routes turn
+ * into a 500 for that day AND the day before it, whose end bound is the same
+ * midnight. `startOfLocalDayUtc` answers 01:00 (spring) or the first of the two
+ * midnights (autumn), so consecutive days still tile exactly.
  */
 export function getUtcBoundsForLocalDate(
   ymd: string,
   timeZone: string
 ): { startUtc: Date; endUtc: Date } {
-  parseYmd(ymd)
-  const nextYmd = addDaysToYmd(ymd, 1)
+  const tz = assertValidTimeZone(timeZone)
+  const start = parseYmd(ymd)
+  const next = parseYmd(addDaysToYmd(ymd, 1))
 
-  const startUtc = localPartsToUtcDate(
-    {
-      ...parseYmd(ymd),
-      hour: 0,
-      minute: 0,
-      second: 0,
-    },
-    timeZone
-  )
-
-  const endUtc = localPartsToUtcDate(
-    {
-      ...parseYmd(nextYmd),
-      hour: 0,
-      minute: 0,
-      second: 0,
-    },
-    timeZone
-  )
-
-  return { startUtc, endUtc }
+  return {
+    startUtc: startOfLocalDayUtc({ ...start, timeZone: tz }),
+    endUtc: startOfLocalDayUtc({ ...next, timeZone: tz }),
+  }
 }
 
 /**
