@@ -8,6 +8,7 @@ import {
   pickTimeZoneOrNull,
   sanitizeTimeZone,
   startOfDayUtcInTimeZone,
+  startOfLocalDayUtc,
   ymdInTimeZone,
 } from './timeZone'
 
@@ -227,5 +228,32 @@ describe('daySerialInTimeZone', () => {
     expect(daySerialInTimeZone(at, 'UTC')).toBe(
       daySerialInTimeZone(at, 'America/New_York') + 1,
     )
+  })
+})
+
+describe('startOfLocalDayUtc', () => {
+  // `computeTodayTomorrowBoundsUtc` asks for "tomorrow" as `day + 1` without
+  // normalizing first, so the primitive has to handle a day that runs off the
+  // end of its month or year — its target-date comparison is a STRING, and an
+  // unnormalized "2026-01-32" matches nothing.
+  it.each([
+    [{ year: 2026, month: 1, day: 32 }, '2026-02-01T05:00:00.000Z'],
+    [{ year: 2026, month: 12, day: 32 }, '2027-01-01T05:00:00.000Z'],
+    [{ year: 2026, month: 2, day: 29 }, '2026-03-01T05:00:00.000Z'],
+  ])('normalizes an overflowing day (%o)', (parts, expected) => {
+    expect(
+      startOfLocalDayUtc({ ...parts, timeZone: 'America/New_York' }).toISOString(),
+    ).toBe(expected)
+  })
+
+  it('falls back to UTC for an invalid timezone rather than throwing', () => {
+    expect(
+      startOfLocalDayUtc({
+        year: 2026,
+        month: 6,
+        day: 10,
+        timeZone: 'Not/AZone',
+      }).toISOString(),
+    ).toBe('2026-06-10T00:00:00.000Z')
   })
 })

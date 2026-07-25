@@ -259,8 +259,12 @@ export function startOfLocalDayUtc(args: {
   timeZone: string
 }): Date {
   const tz = sanitizeTimeZone(args.timeZone, DEFAULT_TIME_ZONE)
-  // Callers legitimately pass `day + 1` for "tomorrow", so normalize the parts
-  // before they become the target string this compares against.
+  // Callers legitimately pass `day + 1` for "tomorrow" (see
+  // `computeTodayTomorrowBoundsUtc`). The binary search below still answers such
+  // an input correctly — "2026-01-32" sorts between "2026-01-31" and
+  // "2026-02-01", so the boundary it finds is the right one — but the fast path
+  // can never match a target date that does not exist, so every overflowed call
+  // would take the slow route. Normalize first and they take the fast one.
   const { year, month, day } = addDaysToYMD(args.year, args.month, args.day, 0)
   const target = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 
