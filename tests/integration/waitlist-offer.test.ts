@@ -788,6 +788,7 @@ describe('waitlist offer → client confirm (real DB)', () => {
       createHold({
         clientId: fx.rivalClientId,
         bookingEntryPoint: 'DIRECT_PROFILE',
+        addOnIds: [],
         offering: holdOffering(),
         requestedStart: start,
         requestedLocationId: fx.salonLocationId,
@@ -819,6 +820,7 @@ describe('waitlist offer → client confirm (real DB)', () => {
     const own = await createHold({
       clientId: fx.clientId,
       bookingEntryPoint: 'DIRECT_PROFILE',
+      addOnIds: [],
       offering: holdOffering(),
       requestedStart: elsewhere,
       requestedLocationId: fx.salonLocationId,

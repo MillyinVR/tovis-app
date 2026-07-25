@@ -154,6 +154,7 @@ import {
   resolveBookingAddOns,
   type ResolvedBookingAddOn,
 } from '@/lib/booking/addOnResolution'
+import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { getProCreatedBookingStatus } from '@/lib/booking/statusRules'
 import { moneyToFixed2String } from '@/lib/money'
 import {
@@ -427,6 +428,11 @@ type ReleaseHoldResult = {
 type CreateHoldArgs = {
   clientId: string
   bookingEntryPoint: ProBookingEntryPoint
+  // OfferingAddOn link ids the client has already chosen. The reservation is
+  // sized `base + add-ons` from these, so the hold covers exactly what finalize
+  // will demand (B1-A). Empty when the surface picks add-ons AFTER the time
+  // (the web drawer) — that flow widens the hold later via updateHoldAddOns.
+  addOnIds: string[]
   offering: {
     id: string
     professionalId: string
@@ -454,6 +460,26 @@ type CreateHoldResult = {
     locationTimeZone: string | null
     clientAddressId: string | null
     clientAddressSnapshot: Prisma.JsonValue | null
+    /** Minutes reserved, base + add-ons (excludes the buffer). */
+    durationMinutes: number
+  }
+  meta: MutationMeta
+}
+
+type UpdateHoldAddOnsArgs = {
+  holdId: string
+  clientId: string
+  addOnIds: string[]
+}
+
+type UpdateHoldAddOnsResult = {
+  hold: {
+    id: string
+    scheduledFor: Date
+    /** Unchanged by this call — re-sizing a hold must not restart its clock. */
+    expiresAt: Date
+    durationMinutes: number
+    endsAt: Date
   }
   meta: MutationMeta
 }
@@ -1374,11 +1400,43 @@ const CREATE_HOLD_SELECT = {
   locationTimeZone: true,
   clientAddressId: true,
   clientAddressSnapshot: true,
+  durationMinutesSnapshot: true,
 } satisfies Prisma.BookingHoldSelect
 
 type CreateHoldRecord = Prisma.BookingHoldGetPayload<{
   select: typeof CREATE_HOLD_SELECT
 }>
+
+const UPDATE_HOLD_ADDONS_SELECT = {
+  id: true,
+  offeringId: true,
+  professionalId: true,
+  scheduledFor: true,
+  expiresAt: true,
+  locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  durationMinutesSnapshot: true,
+  bufferMinutesSnapshot: true,
+  endsAtSnapshot: true,
+} satisfies Prisma.BookingHoldSelect
+
+const UPDATE_HOLD_ADDONS_OFFERING_SELECT = {
+  id: true,
+  isActive: true,
+  professionalId: true,
+  offersInSalon: true,
+  offersMobile: true,
+  salonDurationMinutes: true,
+  mobileDurationMinutes: true,
+  salonPriceStartingAt: true,
+  mobilePriceStartingAt: true,
+  professional: {
+    select: {
+      timeZone: true,
+    },
+  },
+} satisfies Prisma.ProfessionalServiceOfferingSelect
 
 const APPROVE_CONSULTATION_BOOKING_SELECT = {
   id: true,
@@ -7550,11 +7608,48 @@ async function performLockedUploadProBookingMedia(args: {
     meta: buildMeta(true),
   }
 }
+/**
+ * The minutes a hold must RESERVE for a selection of add-ons: the same
+ * `base + add-ons` arithmetic finalize commits to, resolved inside the caller's
+ * transaction so the numbers cannot drift between the two.
+ *
+ * Throws `ADDONS_INVALID` on a selection finalize would also refuse, so an
+ * unbookable combination is rejected while the client can still change it
+ * rather than at the end of checkout.
+ */
+async function resolveHoldDurationWithAddOns(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  offeringId: string
+  addOnIds: string[]
+  locationType: ServiceLocationType
+  baseDurationMinutes: number
+}): Promise<number> {
+  const resolved = await resolveDurationWithAddOns({
+    professionalId: args.professionalId,
+    offeringId: args.offeringId,
+    addOnIds: args.addOnIds,
+    locationType: args.locationType,
+    baseDurationMinutes: args.baseDurationMinutes,
+    client: args.tx,
+  })
+
+  if (!resolved.ok) {
+    throw bookingError(resolved.code, {
+      message: 'One or more add-ons are invalid for this offering.',
+      userMessage: 'One or more add-ons are no longer available.',
+    })
+  }
+
+  return resolved.durationMinutes
+}
+
 async function performLockedCreateHold(args: {
   tx: Prisma.TransactionClient
   now: Date
   clientId: string
   bookingEntryPoint: ProBookingEntryPoint
+  addOnIds: string[]
   offering: CreateHoldArgs['offering']
   requestedStart: Date
   requestedLocationId: string | null
@@ -7566,6 +7661,7 @@ async function performLockedCreateHold(args: {
     now,
     clientId,
     bookingEntryPoint,
+    addOnIds,
     offering,
     requestedStart,
     requestedLocationId,
@@ -7669,7 +7765,20 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
   }
 
   const locationContext = validatedContextResult.context
-  const durationMinutes = validatedContextResult.durationMinutes
+
+  // Reserve base + add-ons, not the base service (B1-A). Finalize enforces
+  // `base + add-ons`, so a base-sized hold promises a window narrower than the
+  // one the commit will demand — the client is then refused at the END of
+  // checkout for a slot they were offered. Resolved through the same helper the
+  // availability route and finalize use, inside this transaction.
+  const durationMinutes = await resolveHoldDurationWithAddOns({
+    tx,
+    professionalId: offering.professionalId,
+    offeringId: offering.id,
+    addOnIds,
+    locationType,
+    baseDurationMinutes: validatedContextResult.durationMinutes,
+  })
 
   locationContextOrNull = locationContext
   durationMinutesOrNull = durationMinutes
@@ -7873,6 +7982,7 @@ afterHoldPolicyMs = Date.now()
         locationTimeZone: hold.locationTimeZone,
         clientAddressId: hold.clientAddressId,
         clientAddressSnapshot: hold.clientAddressSnapshot,
+        durationMinutes: hold.durationMinutesSnapshot ?? durationMinutes,
       },
       meta: buildMeta(true),
     }
@@ -7961,6 +8071,191 @@ afterHoldPolicyMs = Date.now()
 
     throw error
   }
+}
+
+async function performLockedUpdateHoldAddOns(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  hold: HoldOwnershipRecord
+  addOnIds: string[]
+}): Promise<{ professionalId: string; value: UpdateHoldAddOnsResult }> {
+  const { tx, now, addOnIds } = args
+
+  // A waitlist offer's reservation (F14) belongs to the PRO who chose that time,
+  // not to the client — the same reasoning releaseHold refuses on.
+  if (args.hold.waitlistOfferId) {
+    throw bookingError('HOLD_FORBIDDEN', {
+      message: 'Hold belongs to a waitlist offer.',
+      userMessage: 'This reserved time cannot be changed here.',
+    })
+  }
+
+  const hold = await tx.bookingHold.findUnique({
+    where: { id: args.hold.id },
+    select: UPDATE_HOLD_ADDONS_SELECT,
+  })
+
+  if (!hold) {
+    throw bookingError('HOLD_NOT_FOUND')
+  }
+
+  if (hold.expiresAt.getTime() <= now.getTime()) {
+    throw bookingError('HOLD_EXPIRED')
+  }
+
+  const offering = await tx.professionalServiceOffering.findUnique({
+    where: { id: hold.offeringId },
+    select: UPDATE_HOLD_ADDONS_OFFERING_SELECT,
+  })
+
+  if (!offering || !offering.isActive) {
+    throw bookingError('OFFERING_NOT_FOUND')
+  }
+
+  // Resolved exactly as finalize resolves it, from the HELD placement — same
+  // location, same timezone, same buffers — so the window measured here is the
+  // window finalize will measure.
+  const validatedContextResult = await resolveValidatedBookingContext({
+    tx,
+    professionalId: hold.professionalId,
+    requestedLocationId: hold.locationId,
+    locationType: hold.locationType,
+    holdLocationTimeZone: hold.locationTimeZone,
+    professionalTimeZone: offering.professional?.timeZone ?? null,
+    fallbackTimeZone: 'UTC',
+    requireValidTimeZone: true,
+    allowFallback: false,
+    requireCoordinates: false,
+    offering: {
+      offersInSalon: offering.offersInSalon,
+      offersMobile: offering.offersMobile,
+      salonDurationMinutes: offering.salonDurationMinutes,
+      mobileDurationMinutes: offering.mobileDurationMinutes,
+      salonPriceStartingAt: offering.salonPriceStartingAt,
+      mobilePriceStartingAt: offering.mobilePriceStartingAt,
+    },
+  })
+
+  if (!validatedContextResult.ok) {
+    mapSchedulingReadinessFailure(validatedContextResult.error)
+  }
+
+  const locationContext = validatedContextResult.context
+
+  const durationMinutes = await resolveHoldDurationWithAddOns({
+    tx,
+    professionalId: hold.professionalId,
+    offeringId: hold.offeringId,
+    addOnIds,
+    locationType: hold.locationType,
+    baseDurationMinutes: validatedContextResult.durationMinutes,
+  })
+
+  const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
+
+  const buildResult = (endsAt: Date, mutated: boolean) => ({
+    professionalId: hold.professionalId,
+    value: {
+      hold: {
+        id: hold.id,
+        scheduledFor: hold.scheduledFor,
+        expiresAt: hold.expiresAt,
+        durationMinutes,
+        endsAt,
+      },
+      meta: buildMeta(mutated),
+    },
+  })
+
+  // Already the right size: nothing to widen, nothing to re-check. Returning
+  // early keeps a repeated sync (a re-mounted page, a retried request) from
+  // re-running the gate against a schedule that may have moved on.
+  const storedEndsAt = hold.endsAtSnapshot
+
+  if (
+    hold.durationMinutesSnapshot === durationMinutes &&
+    hold.bufferMinutesSnapshot === locationContext.bufferMinutes &&
+    storedEndsAt != null &&
+    Number.isFinite(storedEndsAt.getTime())
+  ) {
+    return buildResult(storedEndsAt, false)
+  }
+
+  // The EXCLUDE constraint covers expired rows too (it cannot read now()), so a
+  // stale expired hold could refuse a widen that is genuinely free. Sweep first,
+  // exactly as hold creation does under this same lock.
+  await deleteExpiredHoldsForProfessional({
+    tx,
+    professionalId: hold.professionalId,
+    now,
+  })
+
+  const decision = await evaluateFinalizeDecision({
+    tx,
+    now,
+    professionalId: hold.professionalId,
+    holdId: hold.id,
+    requestedStart,
+    durationMinutes,
+    bufferMinutes: locationContext.bufferMinutes,
+    locationId: locationContext.locationId,
+    locationType: hold.locationType,
+    workingHours: locationContext.workingHours,
+    timeZone: locationContext.timeZone,
+    stepMinutes: locationContext.stepMinutes,
+    advanceNoticeMinutes: locationContext.advanceNoticeMinutes,
+    maxDaysAhead: locationContext.maxDaysAhead,
+    fallbackTimeZone: 'UTC',
+  })
+
+  if (!decision.ok) {
+    if (decision.logHint) {
+      logFinalizePolicyFailure({
+        professionalId: hold.professionalId,
+        locationId: locationContext.locationId,
+        locationType: hold.locationType,
+        holdId: hold.id,
+        logHint: decision.logHint,
+      })
+    }
+
+    throw bookingError(decision.code, {
+      message: decision.message,
+      userMessage: decision.userMessage,
+    })
+  }
+
+  const requestedEnd = decision.value.requestedEnd
+
+  try {
+    await tx.bookingHold.update({
+      where: { id: hold.id },
+      data: {
+        durationMinutesSnapshot: durationMinutes,
+        bufferMinutesSnapshot: locationContext.bufferMinutes,
+        endsAtSnapshot: requestedEnd,
+      },
+      select: { id: true } satisfies Prisma.BookingHoldSelect,
+    })
+  } catch (error: unknown) {
+    // The GIST backstop refusing what the commit gate just allowed is a gate or
+    // lock regression, not an ordinary race — page it like the create path does.
+    if (isExclusionConstraintError(error, HOLD_OVERLAP_CONSTRAINT_NAME)) {
+      captureOverlapBackstopFired({
+        action: 'HOLD_ADDONS_UPDATE',
+        professionalId: hold.professionalId,
+        requestedStart,
+        requestedEnd,
+        constraint: HOLD_OVERLAP_CONSTRAINT_NAME,
+      })
+
+      throw bookingError('TIME_HELD')
+    }
+
+    throw error
+  }
+
+  return buildResult(requestedEnd, true)
 }
 
 async function performLockedRescheduleBookingFromHold(args: {
@@ -14429,6 +14724,7 @@ export async function createHold(
         now,
         clientId: args.clientId,
         bookingEntryPoint: args.bookingEntryPoint,
+        addOnIds: args.addOnIds,
         offering: args.offering,
         requestedStart: args.requestedStart,
         requestedLocationId: args.requestedLocationId,
@@ -14436,6 +14732,63 @@ export async function createHold(
         clientAddressId: args.clientAddressId,
       }),
   )
+}
+
+/**
+ * Re-size an existing hold to a new add-on selection (B1-A).
+ *
+ * The web flow picks add-ons AFTER the time, so the hold is created base-sized
+ * and this widens it the moment the selection is known. It re-runs the COMMIT
+ * gate — `evaluateFinalizeDecision`, the very function finalize calls, with this
+ * hold excluded from its own conflict check — rather than a parallel copy of it,
+ * so what this call accepts is exactly what finalize will accept
+ * (promise-site runs the commit-site gate). A refusal leaves the hold at its
+ * previous size: the transaction rolls back, and the client keeps the slot they
+ * had at the width they had it.
+ *
+ * `expiresAt` is deliberately NOT extended. Re-sizing is not re-holding, and a
+ * client toggling add-ons must not be able to keep a slot indefinitely.
+ *
+ * ⚠️ This is the first path that MUTATES a live hold's reserved range. The
+ * `BookingHold_no_active_professional_overlap` EXCLUDE constraint's migration
+ * comment reasons from "a hold's scheduled range is immutable after insert";
+ * that is no longer true. The constraint itself still holds the line (Postgres
+ * re-checks EXCLUDE on UPDATE), but because it covers expired rows too, expired
+ * holds are swept first — exactly as hold creation does — so a stale row cannot
+ * spuriously refuse a widen.
+ */
+export async function updateHoldAddOns(
+  args: UpdateHoldAddOnsArgs,
+): Promise<UpdateHoldAddOnsResult> {
+  assertNonEmptyHoldId(args.holdId)
+  assertNonEmptyClientId(args.clientId)
+
+  const result = await withLockedClientOwnedHoldTransaction({
+    holdId: args.holdId,
+    clientId: args.clientId,
+    run: async ({ tx, now, hold }) =>
+      performLockedUpdateHoldAddOns({
+        tx,
+        now,
+        hold,
+        addOnIds: args.addOnIds,
+      }),
+  })
+
+  // Bumped AFTER the transaction commits: the version is a cache-invalidation
+  // signal, and Redis is not transactional, so bumping mid-transaction lets a
+  // concurrent reader miss on the new version, read the not-yet-committed row
+  // and re-cache the OLD occupancy under the NEW version (B2-A).
+  //
+  // Gated on `mutated`: a re-sync that changes nothing (a reloaded add-ons page,
+  // a retried request) must not evict this pro's availability cache, or a client
+  // could dump it at will by re-sending the selection it already has. Succeeding
+  // is not the same as changing something ([[cache-is-a-third-query]], B2).
+  if (result.value.meta.mutated) {
+    await bumpProfessionalScheduleVersion(result.professionalId)
+  }
+
+  return result.value
 }
 
 export async function updateBookingLastMinuteDiscount(

@@ -2479,20 +2479,47 @@ describe('B1 — offered slots vs the write path, against real Postgres', () => 
     ).resolves.toEqual([])
   })
 
-  // ⚠️ PINS A KNOWN OPEN DEFECT (B1-A in
-  // docs/design/booking-calendar-truth-audit-plan.md), not desired behaviour.
+  // The add-on window, after B1-A.
   //
-  // The client flow picks add-ons AFTER the slot: the drawer asks
-  // /api/v1/availability/day with no `addOnIds` and POSTs /api/v1/holds, which
-  // has no `addOnIds` field at all — so the OFFER and the RESERVATION are both
-  // sized for the base service. /booking/add-ons then lets the client add
-  // duration, and finalize enforces base + add-ons. Everything above proves the
-  // two sides agree when they are asked about the SAME window; this proves they
-  // are not asked about the same window.
+  // Asking the OFFER for the base service and the WRITE for base + add-ons is a
+  // comparison of two different questions, and it mismatches by arithmetic — no
+  // fix to the queries can make those two agree, which is why B1-A was never a
+  // parity bug. It was a *window* bug: three windows (offer / reserve / commit)
+  // where only two were the same size. Fix (a) makes the RESERVE match the
+  // COMMIT (see `holds`/`updateHoldAddOns` and the add-on hold suite), and any
+  // surface that knows the add-ons before the time — iOS, and any future
+  // reordered web flow — asks the offer with them too.
   //
-  // When B1-A is fixed (the hold must reserve what finalize will take), this
-  // test should flip to `.toEqual([])`.
-  it('does NOT agree once add-ons extend the request past the offered window', async () => {
+  // These two cases pin both halves of that: asked WITH the add-ons the sides
+  // agree exactly, and asked WITHOUT them the difference is the known,
+  // one-directional cost of picking the time first.
+  it('agrees on every start when the offer is asked WITH the add-ons', async () => {
+    if (!fixtures) throw new Error('Fixtures not initialized')
+    const fx = fixtures
+
+    const dateYMD = parityDayYMD(9)
+    const starts = parityCandidateStarts(dateYMD)
+    const noon = starts[12]
+    if (!noon) throw new Error('Expected a midday candidate start')
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: noon,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+    })
+
+    await expect(
+      parityMismatches({
+        dateYMD,
+        offeredDurationMinutes: PARITY_BASE_DURATION_MINUTES + 30,
+        enforcedDurationMinutes: PARITY_BASE_DURATION_MINUTES + 30,
+        locationId: fx.salonLocationId,
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('offers strictly more than a base-sized question can commit with add-ons', async () => {
     if (!fixtures) throw new Error('Fixtures not initialized')
     const fx = fixtures
 
@@ -2515,14 +2542,13 @@ describe('B1 — offered slots vs the write path, against real Postgres', () => 
       locationId: fx.salonLocationId,
     })
 
-    // Every mismatch is the same direction: offered, then refused. None is
-    // capacity the write would have taken and availability hid.
+    // One direction only: a base-sized offer can be too generous, never too
+    // stingy. The opposite direction would be silent capacity loss.
     expect(mismatches.every((line) => line.includes('offered=true'))).toBe(true)
 
-    // Two distinct failure classes, and the second needs no other booking and no
-    // concurrency: the last starts of the working day stop fitting the moment
-    // any add-on is selected, so they are a dead end on EVERY day for any pro
-    // who offers add-ons.
+    // The two classes B1-A found. Both are now caught the moment the add-on is
+    // ticked — the hold is widened through the finalize gate and a refusal
+    // un-ticks it — instead of at the end of checkout as a generic toast.
     expect(mismatches.filter((line) => line.endsWith('write=BOOKING'))).toHaveLength(2)
     expect(
       mismatches.filter((line) => line.endsWith('write=OUTSIDE_WORKING_HOURS')),

@@ -317,6 +317,7 @@ function makeCreateHoldArgs() {
   return {
     clientId: CLIENT_ID,
     bookingEntryPoint: 'BROAD_DISCOVERY' as const,
+    addOnIds: [],
     offering: makeMobileOffering(),
     requestedStart: REQUESTED_START,
     requestedLocationId: LOCATION_ID,
@@ -461,6 +462,8 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
         clientAddressSnapshot: {
           formattedAddress: '456 Client Home, San Diego, CA 92101',
         },
+        // No add-ons selected, so the reservation is the base service (B1-A).
+        durationMinutes: 90,
       },
       meta: {
         mutated: true,

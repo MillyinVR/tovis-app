@@ -37,6 +37,22 @@ export type BookingHoldCreateDTO = {
   locationTimeZone: string | null
   clientAddressId: string | null
   clientAddressSnapshot: Prisma.JsonValue | null
+  /**
+   * Minutes actually RESERVED — base service + any `addOnIds` sent with the
+   * create — excluding the location's buffer. Finalize enforces the same
+   * arithmetic, so this is what the slot is being held for (B1-A).
+   */
+  durationMinutes: number
+}
+
+// PATCH /api/v1/holds/[id] — re-size a live hold to a new add-on selection.
+// `expiresAt` is echoed unchanged: re-sizing never restarts the hold's clock.
+export type BookingHoldAddOnsUpdateDTO = {
+  id: string
+  scheduledFor: string // ISO-8601
+  expiresAt: string // ISO-8601
+  durationMinutes: number
+  endsAt: string // ISO-8601 — reserved end, buffer included
 }
 
 // Shared create/release mutation metadata.
@@ -57,5 +73,10 @@ export type BookingHoldCreateResponseDTO = {
 export type BookingHoldDeleteResponseDTO = {
   deleted: boolean
   holdId: string
+  meta: MutationMetaDTO
+}
+
+export type BookingHoldAddOnsUpdateResponseDTO = {
+  hold: BookingHoldAddOnsUpdateDTO
   meta: MutationMetaDTO
 }

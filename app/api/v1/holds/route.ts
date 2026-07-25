@@ -5,6 +5,7 @@ import { Prisma, ServiceLocationType } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
+import { hasDuplicateStrings, pickStringArray } from '@/lib/pick'
 import { isRecord } from '@/lib/guards'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { clientRateLimitKey } from '@/lib/rateLimit/identity'
@@ -27,6 +28,10 @@ import {
 } from '@/lib/pro/readiness/bookingEntryPoint'
 
 export const dynamic = 'force-dynamic'
+
+// Mirrors finalize's cap on the same field: the hold reserves what finalize
+// will take, so both ends must accept the same selection size.
+const MAX_HOLD_ADD_ON_IDS = 50
 
 const HOLD_CREATE_OFFERING_SELECT = {
   id: true,
@@ -56,6 +61,7 @@ type ParsedHoldRequest = {
   locationType: ServiceLocationType
   requestedStart: Date
   entryPointSource: BookingEntryPointSource | null
+  addOnIds: string[]
 }
 
 type HeaderCarrier = {
@@ -160,9 +166,14 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
   const locationType = normalizeLocationType(rawBody.locationType)
   const scheduledForRaw = pickString(rawBody.scheduledFor)
   const entryPointSource = pickEntryPointSource(rawBody)
+  const addOnIds = pickStringArray(rawBody.addOnIds, MAX_HOLD_ADD_ON_IDS)
 
   if (!offeringId) {
     return bookingJsonFail('OFFERING_ID_REQUIRED')
+  }
+
+  if (hasDuplicateStrings(addOnIds)) {
+    return bookingJsonFail('ADDONS_INVALID')
   }
 
   if (!scheduledForRaw) {
@@ -198,6 +209,7 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
     locationType,
     requestedStart,
     entryPointSource,
+    addOnIds,
   }
 }
 
@@ -314,6 +326,7 @@ export async function POST(req: NextRequest) {
     const result = await createHold({
       clientId: auth.clientId,
       bookingEntryPoint,
+      addOnIds: parsed.addOnIds,
       offering: toCreateHoldOffering(offering),
       requestedStart: parsed.requestedStart,
       requestedLocationId: parsed.requestedLocationId,
@@ -335,6 +348,7 @@ export async function POST(req: NextRequest) {
             locationTimeZone: result.hold.locationTimeZone,
             clientAddressId: result.hold.clientAddressId,
             clientAddressSnapshot: result.hold.clientAddressSnapshot,
+            durationMinutes: result.hold.durationMinutes,
           },
           meta: result.meta,
         } satisfies BookingHoldCreateResponseDTO,

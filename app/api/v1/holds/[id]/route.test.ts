@@ -11,6 +11,21 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
   bookingHoldFindUnique: vi.fn(),
   releaseHold: vi.fn(),
+  updateHoldAddOns: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  clientRateLimitKey: () => 'client_1',
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -30,9 +45,17 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   releaseHold: mocks.releaseHold,
+  updateHoldAddOns: mocks.updateHoldAddOns,
 }))
 
-import { GET, DELETE } from './route'
+import { GET, DELETE, PATCH } from './route'
+
+function patchRequest(body: unknown): Request {
+  return new Request('http://localhost', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
 
 function makeCtx(id: string): { params: Promise<{ id: string }> } {
   return {
@@ -47,7 +70,10 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
+      user: { id: 'usr_1' },
     })
+
+    mocks.enforceRateLimit.mockResolvedValue({ allowed: true })
 
     mocks.jsonFail.mockImplementation(
       (status: number, error: string, extra?: unknown) => ({
@@ -81,6 +107,20 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
 
     mocks.releaseHold.mockResolvedValue({
       holdId: 'hold_1',
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
+
+    mocks.updateHoldAddOns.mockResolvedValue({
+      hold: {
+        id: 'hold_1',
+        scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+        expiresAt: new Date('2099-03-11T19:45:00.000Z'),
+        durationMinutes: 90,
+        endsAt: new Date('2026-03-11T21:00:00.000Z'),
+      },
       meta: {
         mutated: true,
         noOp: false,
@@ -478,6 +518,145 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
         status: 500,
         error: 'Failed to release hold.',
       })
+    })
+  })
+
+  describe('PATCH', () => {
+    it('forwards the parsed selection and serializes the re-sized hold', async () => {
+      const result = await PATCH(
+        patchRequest({ addOnIds: ['addon_1', 'addon_2'] }),
+        makeCtx('hold_1'),
+      )
+
+      expect(mocks.updateHoldAddOns).toHaveBeenCalledWith({
+        holdId: 'hold_1',
+        clientId: 'client_1',
+        addOnIds: ['addon_1', 'addon_2'],
+      })
+
+      expect(result).toEqual({
+        ok: true,
+        status: 200,
+        data: {
+          hold: {
+            id: 'hold_1',
+            scheduledFor: '2026-03-11T19:30:00.000Z',
+            expiresAt: '2099-03-11T19:45:00.000Z',
+            durationMinutes: 90,
+            endsAt: '2026-03-11T21:00:00.000Z',
+          },
+          meta: { mutated: true, noOp: false },
+        },
+      })
+    })
+
+    it('treats a missing addOnIds as clearing the selection', async () => {
+      await PATCH(patchRequest({}), makeCtx('hold_1'))
+
+      expect(mocks.updateHoldAddOns).toHaveBeenCalledWith({
+        holdId: 'hold_1',
+        clientId: 'client_1',
+        addOnIds: [],
+      })
+    })
+
+    it('refuses a duplicated add-on id without touching the boundary', async () => {
+      const descriptor = getBookingErrorDescriptor('ADDONS_INVALID')
+
+      const result = await PATCH(
+        patchRequest({ addOnIds: ['addon_1', 'addon_1'] }),
+        makeCtx('hold_1'),
+      )
+
+      expect(mocks.updateHoldAddOns).not.toHaveBeenCalled()
+      expect(result).toEqual({
+        ok: false,
+        status: descriptor.httpStatus,
+        error: descriptor.userMessage,
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
+      })
+    })
+
+    it('returns auth response when client auth fails', async () => {
+      const authRes = { ok: false, status: 401, error: 'Unauthorized' }
+      mocks.requireClient.mockResolvedValueOnce({ ok: false, res: authRes })
+
+      const result = await PATCH(patchRequest({ addOnIds: [] }), makeCtx('hold_1'))
+
+      expect(result).toBe(authRes)
+      expect(mocks.updateHoldAddOns).not.toHaveBeenCalled()
+    })
+
+    it('rejects a non-JSON body', async () => {
+      const result = await PATCH(
+        new Request('http://localhost', { method: 'PATCH', body: 'not json' }),
+        makeCtx('hold_1'),
+      )
+
+      expect(mocks.updateHoldAddOns).not.toHaveBeenCalled()
+      expect(result).toEqual({
+        ok: false,
+        status: 400,
+        error: 'Invalid JSON body.',
+      })
+    })
+
+    it('surfaces a boundary refusal with its own booking code', async () => {
+      const descriptor = getBookingErrorDescriptor('TIME_BOOKED')
+      mocks.updateHoldAddOns.mockRejectedValueOnce(
+        new BookingError('TIME_BOOKED'),
+      )
+
+      const result = await PATCH(
+        patchRequest({ addOnIds: ['addon_1'] }),
+        makeCtx('hold_1'),
+      )
+
+      expect(result).toEqual({
+        ok: false,
+        status: descriptor.httpStatus,
+        error: descriptor.userMessage,
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
+      })
+    })
+
+    it('returns 500 when the boundary throws a non-booking error', async () => {
+      mocks.updateHoldAddOns.mockRejectedValueOnce(new Error('db blew up'))
+
+      const result = await PATCH(
+        patchRequest({ addOnIds: ['addon_1'] }),
+        makeCtx('hold_1'),
+      )
+
+      expect(result).toEqual({
+        ok: false,
+        status: 500,
+        error: 'Failed to update hold.',
+      })
+    })
+    it('refuses over the rate limit without touching the boundary', async () => {
+      const limited = { ok: false, status: 429, error: 'Too many requests.' }
+      mocks.enforceRateLimit.mockResolvedValueOnce({
+        allowed: false,
+        bucket: 'holds:update',
+      })
+      mocks.rateLimitExceededResponse.mockReturnValueOnce(limited)
+
+      const result = await PATCH(
+        patchRequest({ addOnIds: ['addon_1'] }),
+        makeCtx('hold_1'),
+      )
+
+      // Each re-size takes the professional's schedule lock, so the ceiling has
+      // to apply BEFORE the boundary, not after it.
+      expect(mocks.updateHoldAddOns).not.toHaveBeenCalled()
+      expect(result).toBe(limited)
     })
   })
 })
