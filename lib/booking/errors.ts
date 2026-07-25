@@ -71,6 +71,7 @@ export type BookingErrorCode =
   | "AFTERCARE_OFFERING_MISMATCH"
   | "AFTERCARE_DELIVERY_FAILED"
   | "WAITLIST_ENTRY_NOT_FOUND"
+  | "WAITLIST_ENTRY_ALREADY_BOOKED"
   | "WAITLIST_OFFER_NOT_FOUND"
   | "WAITLIST_OFFER_NOT_PENDING"
   | "NO_SHOW_FEE_NOT_WAIVABLE"
@@ -691,6 +692,17 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Waitlist entry not found or not active.",
     userMessage: "That waitlist request is no longer available.",
+  },
+  WAITLIST_ENTRY_ALREADY_BOOKED: {
+    // Distinct from WAITLIST_ENTRY_NOT_FOUND: the entry exists and became an
+    // appointment, so "leave the waitlist" is refused rather than swallowed —
+    // the client has a booking to cancel instead.
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Waitlist entry is already booked.",
+    userMessage:
+      "This waitlist request is already booked. Cancel the appointment instead.",
   },
   WAITLIST_OFFER_NOT_FOUND: {
     httpStatus: 404,

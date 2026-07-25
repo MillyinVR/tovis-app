@@ -16,6 +16,7 @@ import {
 } from '@prisma/client'
 
 import {
+  cancelClientWaitlistEntry,
   confirmClientWaitlistOffer,
   createHold,
   createWaitlistOffer,
@@ -1300,6 +1301,163 @@ describe('waitlist offer → client confirm (real DB)', () => {
             workingHours: (original.workingHours ?? {}) as Prisma.InputJsonValue,
           },
         })
+      }
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // B4 — leaving the waitlist withdraws what the pro promised.
+  //
+  // A PENDING offer reserves a real slot (F14), and cancelling the entry is the
+  // only event in the system that can orphan one: decline, supersede and
+  // confirm each release the hold in their own transaction, and expiry kills
+  // offer and hold at the same instant by construction. The entry-cancel path
+  // did neither — it flipped the status and stopped.
+  // ---------------------------------------------------------------------------
+  describe('leaving the waitlist (B4)', () => {
+    it('withdraws the PENDING offer, releases its reservation, and frees the slot', async () => {
+      const entryId = await createEntry()
+      const start = futureLocal(36, 13, 0)
+
+      // The slot is genuinely bookable first, or "it came back" proves nothing.
+      expect(await availabilityOffers(start)).toBe(true)
+
+      const { offer } = await createWaitlistOffer({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        waitlistEntryId: entryId,
+        scheduledFor: start,
+        endsAt: new Date(start.getTime() + 60 * 60_000),
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      })
+
+      expect(await holdForOffer(offer.id)).not.toBeNull()
+      expect(await availabilityOffers(start)).toBe(false)
+
+      const result = await cancelClientWaitlistEntry({
+        entryId,
+        clientId: fx.clientId,
+      })
+      expect(result).toEqual({ cancelled: true, releasedOffers: 1 })
+
+      const offerRow = await db.waitlistOffer.findUnique({
+        where: { id: offer.id },
+      })
+      expect(offerRow?.status).toBe(WaitlistOfferStatus.CANCELLED)
+      expect(offerRow?.respondedAt).not.toBeNull()
+
+      const entry = await db.waitlistEntry.findUnique({ where: { id: entryId } })
+      expect(entry?.status).toBe(WaitlistStatus.CANCELLED)
+
+      // The two halves that have to happen together: the offer stops being
+      // live AND the time goes back on the market, in the same breath.
+      expect(await holdForOffer(offer.id)).toBeNull()
+      expect(await availabilityOffers(start)).toBe(true)
+    })
+
+    it('leaves the departed client unable to confirm the withdrawn offer', async () => {
+      const entryId = await createEntry()
+      const start = futureLocal(37, 13, 0)
+
+      const { offer } = await createWaitlistOffer({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        waitlistEntryId: entryId,
+        scheduledFor: start,
+        endsAt: new Date(start.getTime() + 60 * 60_000),
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      })
+
+      await cancelClientWaitlistEntry({ entryId, clientId: fx.clientId })
+
+      // The confirm reads the OFFER, never the entry — so before the withdraw
+      // this booked a real appointment and resurrected the CANCELLED entry to
+      // BOOKED. The status the withdraw writes is what stops it.
+      await expect(
+        confirmClientWaitlistOffer({ offerId: offer.id, clientId: fx.clientId }),
+      ).rejects.toMatchObject({ code: 'WAITLIST_OFFER_NOT_PENDING' })
+
+      const entry = await db.waitlistEntry.findUnique({ where: { id: entryId } })
+      expect(entry?.status).toBe(WaitlistStatus.CANCELLED)
+
+      const booked = await db.booking.count({
+        where: { professionalId: fx.professionalId, scheduledFor: start },
+      })
+      expect(booked).toBe(0)
+    })
+
+    it('cancels an entry that has no live offer, releasing nothing', async () => {
+      const entryId = await createEntry()
+
+      expect(
+        await cancelClientWaitlistEntry({ entryId, clientId: fx.clientId }),
+      ).toEqual({ cancelled: true, releasedOffers: 0 })
+
+      const entry = await db.waitlistEntry.findUnique({ where: { id: entryId } })
+      expect(entry?.status).toBe(WaitlistStatus.CANCELLED)
+    })
+
+    it('is idempotent on a second leave, and uniform not-found for a stranger', async () => {
+      const entryId = await createEntry()
+
+      await cancelClientWaitlistEntry({ entryId, clientId: fx.clientId })
+
+      // A double-tap releases nothing and is not an error.
+      expect(
+        await cancelClientWaitlistEntry({ entryId, clientId: fx.clientId }),
+      ).toEqual({ cancelled: false, releasedOffers: 0 })
+
+      // Someone else's entry is indistinguishable from a missing one.
+      await expect(
+        cancelClientWaitlistEntry({ entryId, clientId: fx.rivalClientId }),
+      ).rejects.toMatchObject({ code: 'WAITLIST_ENTRY_NOT_FOUND' })
+    })
+
+    it('refuses to leave an entry that already became a booking', async () => {
+      const entryId = await createEntry()
+      const start = futureLocal(38, 13, 0)
+
+      const { offer } = await createWaitlistOffer({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        waitlistEntryId: entryId,
+        scheduledFor: start,
+        endsAt: new Date(start.getTime() + 60 * 60_000),
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      })
+
+      const confirmed = await confirmClientWaitlistOffer({
+        offerId: offer.id,
+        clientId: fx.clientId,
+      })
+
+      try {
+        // The entry is BOOKED now. Leaving would silently drop the client's
+        // link to a live appointment, so it refuses with its own code rather
+        // than the uniform not-found.
+        await expect(
+          cancelClientWaitlistEntry({ entryId, clientId: fx.clientId }),
+        ).rejects.toMatchObject({ code: 'WAITLIST_ENTRY_ALREADY_BOOKED' })
+
+        const entry = await db.waitlistEntry.findUnique({
+          where: { id: entryId },
+        })
+        expect(entry?.status).toBe(WaitlistStatus.BOOKED)
+      } finally {
+        await db.bookingServiceItem.deleteMany({
+          where: { bookingId: confirmed.booking.id },
+        })
+        await db.waitlistOffer.update({
+          where: { id: offer.id },
+          data: { bookingId: null },
+        })
+        await db.booking.delete({ where: { id: confirmed.booking.id } })
       }
     })
   })

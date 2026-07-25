@@ -1,6 +1,9 @@
 // app/api/v1/waitlist/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickInt, pickString, requireClient } from '@/app/api/_utils'
+import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
+import { cancelClientWaitlistEntry } from '@/lib/booking/writeBoundary'
+import { isBookingError } from '@/lib/booking/errors'
 import { resolveMessageThread } from '@/lib/messagesResolve'
 import {
   MessageThreadContextType,
@@ -428,14 +431,18 @@ export async function DELETE(req: Request) {
       return jsonFail(409, 'This waitlist entry is already booked.')
     }
 
-    await prisma.waitlistEntry.update({
-      where: { id },
-      data: { status: WaitlistStatus.CANCELLED },
-      select: { id: true },
-    })
+    // Through the write boundary, not a bare status update: leaving the
+    // waitlist has to withdraw any outstanding offer and hand back the slot it
+    // reserved, under the pro's schedule lock (B4). The checks above are a
+    // fail-fast; the boundary re-runs them under that lock.
+    await cancelClientWaitlistEntry({ entryId: id, clientId: auth.clientId })
 
     return jsonOk({}, 200)
   } catch (e) {
+    // A status the pre-read missed (the client confirmed an offer in another
+    // tab) surfaces as the boundary's own code rather than a 500.
+    if (isBookingError(e)) return bookingErrorJsonFail(e)
+
     console.error('DELETE /api/v1/waitlist error', e)
     return jsonFail(500, 'Failed to remove waitlist.')
   }
