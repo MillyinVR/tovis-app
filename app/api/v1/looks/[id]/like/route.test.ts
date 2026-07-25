@@ -74,6 +74,8 @@ const mocks = vi.hoisted(() => {
   const enqueueRecomputeLookCounts = vi.fn()
   const notifyLookLiked = vi.fn()
   const kickNotificationDrain = vi.fn()
+  const enforceRateLimit = vi.fn()
+  const rateLimitIdentity = vi.fn()
 
   return {
     jsonOk,
@@ -88,6 +90,8 @@ const mocks = vi.hoisted(() => {
     enqueueRecomputeLookCounts,
     notifyLookLiked,
     kickNotificationDrain,
+    enforceRateLimit,
+    rateLimitIdentity,
   }
 })
 
@@ -100,6 +104,10 @@ vi.mock('@/app/api/_utils', () => ({
     return trimmed.length > 0 ? trimmed : null
   },
   requireUser: mocks.requireUser,
+  // Mocked, never driven: `.env.test.local` shares prod's Upstash instance, so
+  // a unit test must not put real state in a real rate-limit bucket.
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -263,6 +271,48 @@ describe('app/api/v1/looks/[id]/like/route.ts', () => {
     mocks.recomputeLookPostLikeCount.mockResolvedValue(7)
     mocks.enqueueRecomputeLookCounts.mockResolvedValue(makeQueuedJob())
     mocks.notifyLookLiked.mockResolvedValue(undefined)
+    mocks.rateLimitIdentity.mockResolvedValue({ kind: 'user', id: 'user_1' })
+    mocks.enforceRateLimit.mockResolvedValue(null)
+  })
+
+  describe('rate limiting (looks:like)', () => {
+    // The bucket has existed in policies.ts since the canonical-limiter
+    // refactor with ZERO call sites — these pin that it is actually enforced.
+    it('refuses a like over the ceiling before touching the look or notifying', async () => {
+      const limited = new Response('{}', { status: 429 })
+      mocks.enforceRateLimit.mockResolvedValueOnce(limited)
+
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+
+      expect(res).toBe(limited)
+      expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+        bucket: 'looks:like',
+        identity: { kind: 'user', id: 'user_1' },
+      })
+      expect(mocks.rateLimitIdentity).toHaveBeenCalledWith('user_1')
+
+      expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      // The reason this bucket matters: the notify + drain kick are what an
+      // unlike/relike loop was re-firing at the look owner without bound.
+      expect(mocks.notifyLookLiked).not.toHaveBeenCalled()
+      expect(mocks.kickNotificationDrain).not.toHaveBeenCalled()
+    })
+
+    it('refuses the UNLIKE half from the same bucket, so a toggle cannot dodge it', async () => {
+      const limited = new Response('{}', { status: 429 })
+      mocks.enforceRateLimit.mockResolvedValueOnce(limited)
+
+      const res = await DELETE(makeRequest('DELETE'), makeCtx('look_1'))
+
+      expect(res).toBe(limited)
+      expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+        bucket: 'looks:like',
+        identity: { kind: 'user', id: 'user_1' },
+      })
+      expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    })
   })
 
   describe('POST', () => {

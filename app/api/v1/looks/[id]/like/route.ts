@@ -2,7 +2,14 @@
 import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, pickString, requireUser } from '@/app/api/_utils'
+import {
+  enforceRateLimit,
+  jsonFail,
+  jsonOk,
+  pickString,
+  rateLimitIdentity,
+  requireUser,
+} from '@/app/api/_utils'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -25,6 +32,16 @@ export async function POST(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
+
+    // Liking is a toggle, and every POST re-fires notifyLookLiked +
+    // notifyLookMilestones + kickNotificationDrain below. Unlike/relike
+    // therefore re-notifies the look's owner without bound, so BOTH halves of
+    // the toggle spend from one bucket (a cycle costs two tokens, not one).
+    const limited = await enforceRateLimit({
+      bucket: 'looks:like',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
 
     const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)
@@ -158,6 +175,14 @@ export async function DELETE(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
+
+    // Same bucket as POST — see the comment there: the abuse shape is the
+    // toggle, so the unlike half has to spend from it too.
+    const limited = await enforceRateLimit({
+      bucket: 'looks:like',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
 
     const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)

@@ -2,7 +2,14 @@
 import { Prisma, ModerationStatus } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, pickString, requireUser } from '@/app/api/_utils'
+import {
+  enforceRateLimit,
+  jsonFail,
+  jsonOk,
+  pickString,
+  rateLimitIdentity,
+  requireUser,
+} from '@/app/api/_utils'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -22,6 +29,15 @@ type CommentLikeContext = RouteContext<{ id: string; commentId: string }>
 async function resolveTarget(ctx: CommentLikeContext) {
   const auth = await requireUser()
   if (!auth.ok) return { ok: false as const, res: auth.res }
+
+  // Enforced here rather than in each handler: POST and DELETE both funnel
+  // through this resolver, and the abuse shape is the toggle across the two
+  // (same reasoning as the look-like route, which shares this bucket).
+  const limited = await enforceRateLimit({
+    bucket: 'looks:like',
+    identity: await rateLimitIdentity(auth.user.id),
+  })
+  if (limited) return { ok: false as const, res: limited }
 
   const { id: rawId, commentId: rawCommentId } = await resolveRouteParams(ctx)
   const lookPostId = pickString(rawId)
