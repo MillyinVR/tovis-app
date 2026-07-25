@@ -10,6 +10,10 @@
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
+import type {
+  ProAvailabilityBusyDaysOk,
+  ProBusyDayDTO,
+} from '@/lib/dto/proAvailability'
 import { prisma } from '@/lib/prisma'
 import {
   isValidIanaTimeZone,
@@ -22,7 +26,9 @@ export const dynamic = 'force-dynamic'
 const MAX_RANGE_DAYS = 62
 const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/
 
-type DayBusy = { bookings: number; blocked: boolean }
+// The wire shape is the DTO, so native decode models are generated from the
+// same declaration the route is checked against (`satisfies` below).
+type DayBusy = ProBusyDayDTO
 
 function parseYmd(value: string | null): {
   year: number
@@ -179,7 +185,16 @@ export async function GET(req: Request) {
       }
     }
 
-    return jsonOk({ tz, from: fromYmd, to: toYmd, days }, 200)
+    return jsonOk(
+      {
+        ok: true,
+        tz,
+        from: fromYmd,
+        to: toYmd,
+        days,
+      } satisfies ProAvailabilityBusyDaysOk,
+      200,
+    )
   } catch (error: unknown) {
     console.error('GET /api/v1/pro/availability/busy-days error', error)
     return jsonFail(500, 'Internal server error')

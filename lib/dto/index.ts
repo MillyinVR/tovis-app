@@ -326,6 +326,12 @@ export type {
   AvailabilityOtherProsOk,
 } from '@/lib/dto/availability'
 
+// ── Pro occupancy overlay (GET /api/v1/pro/availability/busy-days) ───────────
+export type {
+  ProBusyDayDTO,
+  ProAvailabilityBusyDaysOk,
+} from '@/lib/dto/proAvailability'
+
 // ── Offering add-ons (GET /api/v1/offerings/add-ons) ─────────────────────────
 export type {
   OfferingAddOnItemDTO,

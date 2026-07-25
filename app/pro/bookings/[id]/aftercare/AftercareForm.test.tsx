@@ -449,6 +449,35 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     expect(saveBodies[1]?.allowOutsideWorkingHours).toBe(true)
   })
 
+  it('floors the BOOKED day at TODAY while the recommended window still starts tomorrow', () => {
+    // 2026-09-01T18:00Z = 11:00 in America/Los_Angeles, so "today" in the
+    // form's zone is unambiguously 2026-09-01.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-01T18:00:00.000Z'))
+
+    try {
+      const { container } = renderForm()
+
+      // BOOKED: the pro books this on their own authority, so same-day is
+      // theirs to choose — the server's now+1min floor (and the override
+      // confirm for short notice) is what actually guards it.
+      fireEvent.click(screen.getByRole('button', { name: 'Next booking date' }))
+      const bookedDay = container.querySelector(
+        'input[type="date"]',
+      ) as HTMLInputElement
+      expect(bookedDay.min).toBe('2026-09-01')
+
+      // WINDOW: a client-facing recommendation, still floored at tomorrow.
+      fireEvent.click(screen.getByRole('button', { name: 'Booking window' }))
+      const windowInputs = Array.from(
+        container.querySelectorAll('input[type="date"]'),
+      ) as HTMLInputElement[]
+      expect(windowInputs[0]?.min).toBe('2026-09-02')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('uses date-only window inputs and auto-advances the end past the start', () => {
     const { container } = renderForm()
 
