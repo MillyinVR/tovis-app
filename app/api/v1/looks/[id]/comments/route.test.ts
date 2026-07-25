@@ -89,8 +89,12 @@ const mocks = vi.hoisted(() => {
   const mapLooksCommentToDto = vi.fn()
   const notifyLookCommentCreated = vi.fn()
   const kickNotificationDrain = vi.fn()
+  const enforceRateLimit = vi.fn()
+  const rateLimitIdentity = vi.fn()
 
   return {
+    enforceRateLimit,
+    rateLimitIdentity,
     jsonOk,
     jsonFail,
     tx,
@@ -123,6 +127,10 @@ vi.mock('@/app/api/_utils', () => ({
     return trimmed.length > 0 ? trimmed : null
   },
   requireUser: mocks.requireUser,
+  // Mocked, never driven: `.env.test.local` shares prod's Upstash instance, so
+  // a unit test must not put real state in a real rate-limit bucket.
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -316,6 +324,45 @@ describe('app/api/v1/looks/[id]/comments/route.ts', () => {
       (row: { id: string; body: string }) => makeCommentDto(row.id, row.body),
     )
     mocks.notifyLookCommentCreated.mockResolvedValue(undefined)
+    mocks.rateLimitIdentity.mockResolvedValue({ kind: 'user', id: 'user_1' })
+    mocks.enforceRateLimit.mockResolvedValue(null)
+  })
+
+  it('POST refuses over the looks:comment ceiling before creating or notifying', async () => {
+    // `looks:comment` (12/60s) sat in policies.ts with ZERO call sites; this
+    // pins that the declared ceiling is now actually enforced.
+    const limited = new Response('{}', { status: 429 })
+    mocks.enforceRateLimit.mockResolvedValueOnce(limited)
+
+    const res = await POST(
+      new Request('http://localhost/api/v1/looks/look_1/comments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'Sharp work' }),
+      }),
+      makeCtx('look_1'),
+    )
+
+    expect(res).toBe(limited)
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'looks:comment',
+      identity: { kind: 'user', id: 'user_1' },
+    })
+    expect(mocks.rateLimitIdentity).toHaveBeenCalledWith('user_1')
+
+    expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+    expect(mocks.tx.lookComment.create).not.toHaveBeenCalled()
+    expect(mocks.notifyLookCommentCreated).not.toHaveBeenCalled()
+    expect(mocks.kickNotificationDrain).not.toHaveBeenCalled()
+  })
+
+  it('GET is NOT rate limited by the comment bucket — reading a thread is not posting to it', async () => {
+    await GET(
+      new Request('http://localhost/api/v1/looks/look_1/comments'),
+      makeCtx('look_1'),
+    )
+
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
   })
 
   it('GET lists approved comments by canonical lookPostId and returns the canonical id in the contract', async () => {

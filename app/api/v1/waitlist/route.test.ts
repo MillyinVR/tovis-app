@@ -11,12 +11,18 @@ const mocks = vi.hoisted(() => ({
   participantUpdate: vi.fn(),
   transaction: vi.fn(),
   resolveMessageThread: vi.fn(),
+  waitlistFindUnique: vi.fn(),
+  cancelClientWaitlistEntry: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  clientRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     waitlistEntry: {
       findFirst: mocks.waitlistFindFirst,
+      findUnique: mocks.waitlistFindUnique,
       create: mocks.waitlistCreate,
     },
     service: {
@@ -52,7 +58,48 @@ vi.mock('@/lib/messagesResolve', () => ({
   resolveMessageThread: mocks.resolveMessageThread,
 }))
 
-import { POST } from './route'
+vi.mock('@/lib/booking/writeBoundary', () => ({
+  cancelClientWaitlistEntry: mocks.cancelClientWaitlistEntry,
+}))
+
+// The limiter is mocked, never driven: `.env.test.local` points at the SAME
+// Upstash instance as prod, so a test must not touch real Redis state.
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  clientRateLimitKey: mocks.clientRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
+}))
+
+import { DELETE, PATCH, POST } from './route'
+
+const ALLOWED = {
+  allowed: true,
+  bucket: 'waitlist:write',
+  key: 'user:user-1|client:client-1|ip:unknown-ip',
+  limit: 20,
+  remaining: 19,
+  resetAt: new Date('2030-01-15T10:01:00.000Z'),
+  retryAfterSeconds: 60,
+  source: 'redis',
+} as const
+
+const BLOCKED = {
+  allowed: false,
+  bucket: 'waitlist:write',
+  key: 'user:user-1|client:client-1|ip:unknown-ip',
+  limit: 20,
+  remaining: 0,
+  resetAt: new Date('2030-01-15T10:01:00.000Z'),
+  retryAfterSeconds: 60,
+  source: 'redis',
+  reason: 'rate_limited',
+} as const
 
 function postRequest(body: Record<string, unknown>): Request {
   return new Request('https://example.test/api/v1/waitlist', {
@@ -100,6 +147,10 @@ describe('POST /api/v1/waitlist', () => {
         messageThread: { update: mocks.messageThreadUpdate },
         messageThreadParticipant: { update: mocks.participantUpdate },
       }),
+    )
+    mocks.enforceRateLimit.mockResolvedValue(ALLOWED)
+    mocks.clientRateLimitKey.mockReturnValue(
+      'user:user-1|client:client-1|ip:unknown-ip',
     )
   })
 
@@ -151,6 +202,83 @@ describe('POST /api/v1/waitlist', () => {
     expect(res.status).toBe(201)
     expect(body.entry.id).toBe('wl-1')
     expect(mocks.messageCreate).not.toHaveBeenCalled()
+  })
+
+  it('refuses over the waitlist:write ceiling BEFORE any DB read, keyed per client', async () => {
+    const limitedResponse = new Response(
+      JSON.stringify({ ok: false, code: 'RATE_LIMITED' }),
+      { status: 429 },
+    )
+    mocks.enforceRateLimit.mockResolvedValueOnce(BLOCKED)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const res = await POST(
+      postRequest({
+        professionalId: 'pro-1',
+        serviceId: 'svc-1',
+        preferenceType: 'ANY_TIME',
+      }),
+    )
+
+    expect(res).toBe(limitedResponse)
+    expect(res.status).toBe(429)
+
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client-1',
+      userId: 'user-1',
+      request: expect.any(Request),
+    })
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'waitlist:write',
+      key: 'user:user-1|client:client-1|ip:unknown-ip',
+    })
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(BLOCKED)
+
+    // The point of enforcing before the duplicate check: the 409 path is itself
+    // two unrated queries, so a refused join must not reach the DB at all.
+    expect(mocks.waitlistFindFirst).not.toHaveBeenCalled()
+    expect(mocks.waitlistCreate).not.toHaveBeenCalled()
+    expect(mocks.resolveMessageThread).not.toHaveBeenCalled()
+  })
+
+  it('spends from the SAME bucket on PATCH and DELETE, so a join/leave cycle cannot dodge it', async () => {
+    // PATCH — refused before the entry lookup.
+    const patchLimited = new Response('{}', { status: 429 })
+    mocks.enforceRateLimit.mockResolvedValueOnce(BLOCKED)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(patchLimited)
+
+    const patchRes = await PATCH(
+      new Request('https://example.test/api/v1/waitlist', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: 'wl-1', preferenceType: 'ANY_TIME' }),
+      }),
+    )
+
+    expect(patchRes).toBe(patchLimited)
+    expect(mocks.waitlistFindUnique).not.toHaveBeenCalled()
+
+    // DELETE — refused before the entry lookup and before the write boundary,
+    // which is what takes the professional's schedule lock (B4).
+    const deleteLimited = new Response('{}', { status: 429 })
+    mocks.enforceRateLimit.mockResolvedValueOnce(BLOCKED)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(deleteLimited)
+
+    const deleteRes = await DELETE(
+      new Request('https://example.test/api/v1/waitlist?id=wl-1', {
+        method: 'DELETE',
+      }),
+    )
+
+    expect(deleteRes).toBe(deleteLimited)
+    expect(mocks.waitlistFindUnique).not.toHaveBeenCalled()
+    expect(mocks.cancelClientWaitlistEntry).not.toHaveBeenCalled()
+
+    // All three methods name one bucket — that is what makes a lap of the
+    // join→leave cycle cost two tokens instead of one from each of two buckets.
+    for (const call of mocks.enforceRateLimit.mock.calls) {
+      expect(call[0].bucket).toBe('waitlist:write')
+    }
   })
 
   it('rejects a duplicate active waitlist request (409) and does not seed a thread', async () => {

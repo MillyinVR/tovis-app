@@ -64,6 +64,8 @@ const mocks = vi.hoisted(() => {
     canViewLookPost: vi.fn(),
     canCommentOnLookPost: vi.fn(),
     recomputeLookCommentLikeCount: vi.fn(),
+    enforceRateLimit: vi.fn(),
+    rateLimitIdentity: vi.fn(),
   }
 })
 
@@ -76,6 +78,10 @@ vi.mock('@/app/api/_utils', () => ({
     return trimmed.length > 0 ? trimmed : null
   },
   requireUser: mocks.requireUser,
+  // Mocked, never driven: `.env.test.local` shares prod's Upstash instance, so
+  // a unit test must not put real state in a real rate-limit bucket.
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
 }))
 
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }))
@@ -159,6 +165,34 @@ describe('app/api/v1/looks/[id]/comments/[commentId]/like/route.ts', () => {
     mocks.canCommentOnLookPost.mockReturnValue(true)
     mocks.prisma.lookComment.findFirst.mockResolvedValue({ id: 'comment_1' })
     mocks.recomputeLookCommentLikeCount.mockResolvedValue(1)
+    mocks.rateLimitIdentity.mockResolvedValue({ kind: 'user', id: 'user_1' })
+    mocks.enforceRateLimit.mockResolvedValue(null)
+  })
+
+  it('refuses over the shared looks:like ceiling, on BOTH halves of the toggle', async () => {
+    // Enforced once in the shared resolveTarget(), so this pins that both
+    // handlers inherit it rather than only the one that was tested.
+    for (const [method, handler] of [
+      ['POST', POST],
+      ['DELETE', DELETE],
+    ] as const) {
+      const limited = new Response('{}', { status: 429 })
+      mocks.enforceRateLimit.mockResolvedValueOnce(limited)
+
+      const res = await handler(req(method), makeCtx('look_1', 'comment_1'))
+
+      expect(res).toBe(limited)
+      expect(mocks.prisma.lookComment.findFirst).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    }
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(2)
+    for (const call of mocks.enforceRateLimit.mock.calls) {
+      expect(call[0]).toEqual({
+        bucket: 'looks:like',
+        identity: { kind: 'user', id: 'user_1' },
+      })
+    }
   })
 
   it('POST creates a like, recomputes the count, and returns liked: true', async () => {

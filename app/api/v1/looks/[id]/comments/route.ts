@@ -1,10 +1,12 @@
 // app/api/v1/looks/[id]/comments/route.ts
 import { prisma } from '@/lib/prisma'
 import {
+  enforceRateLimit,
   jsonFail,
   jsonOk,
   pickInt,
   pickString,
+  rateLimitIdentity,
   requireUser,
 } from '@/app/api/_utils'
 import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
@@ -131,6 +133,16 @@ export async function POST(req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
+
+    // A comment is unbounded user-generated content that notifies the look's
+    // owner (and, on a reply, the parent author) and kicks the notification
+    // drain. Unlike a like it has no unique constraint to fall back on, so the
+    // bucket is the only ceiling on how much one account can post.
+    const limited = await enforceRateLimit({
+      bucket: 'looks:comment',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
 
     const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)

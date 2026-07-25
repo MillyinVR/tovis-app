@@ -9,6 +9,7 @@ export type RateLimitBucket =
   | 'bookings:reschedule'
   | 'looks:like'
   | 'looks:comment'
+  | 'waitlist:write'
   | 'consultation:decision'
   | 'consultation:decision:token'
   | 'account-invite:mint'
@@ -109,6 +110,27 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 12,
     windowSeconds: 60,
     prefix: 'rl:looks:comment',
+    mode: 'redis-only',
+  },
+  // Join / edit-preferences / leave on `/api/v1/waitlist`, all three on ONE
+  // bucket and keyed per CLIENT (not per client+pro), which is the deliberate
+  // half of this policy:
+  //
+  //  - The join is already deduped per (client, pro, service) for a live entry,
+  //    so the unbounded shape is the CYCLE — leave flips the entry to CANCELLED,
+  //    which the dup check does not match, so join→leave→join mints a fresh
+  //    WaitlistEntry plus a fresh MessageThread and seed Message in the pro's
+  //    inbox every lap. A shared bucket makes a lap cost two tokens, so it
+  //    bounds the cycle rather than each half of it.
+  //  - Per client+pro would bound that cycle against ONE pro while still
+  //    allowing the same client to run it against every pro on the platform.
+  //    Per-client bounds total fan-out, and costs a legitimate user nothing: a
+  //    join is a form submission, so 20/min is far above human use while a
+  //    script drops from unlimited to 20.
+  'waitlist:write': {
+    limit: 20,
+    windowSeconds: 60,
+    prefix: 'rl:waitlist:write',
     mode: 'redis-only',
   },
   'consultation:decision': {

@@ -4,6 +4,9 @@ import { jsonFail, jsonOk, pickInt, pickString, requireClient } from '@/app/api/
 import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import { cancelClientWaitlistEntry } from '@/lib/booking/writeBoundary'
 import { isBookingError } from '@/lib/booking/errors'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { clientRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { resolveMessageThread } from '@/lib/messagesResolve'
 import {
   MessageThreadContextType,
@@ -247,10 +250,40 @@ async function validateMediaBelongsToPro(args: {
   return { ok: true }
 }
 
+/**
+ * One ceiling for join / edit / leave — see the `waitlist:write` comment in
+ * `lib/rateLimit/policies.ts` for why the three share a bucket and why the key
+ * is per-client. Enforced immediately after auth on every method, before any
+ * DB read: the join's own duplicate check is itself two unrated queries.
+ */
+async function enforceWaitlistWriteLimit(args: {
+  req: Request
+  clientId: string
+  userId: string
+}): Promise<Response | null> {
+  const decision = await enforceRateLimit({
+    bucket: 'waitlist:write',
+    key: clientRateLimitKey({
+      clientId: args.clientId,
+      userId: args.userId,
+      request: args.req,
+    }),
+  })
+
+  return decision.allowed ? null : rateLimitExceededResponse(decision)
+}
+
 export async function POST(req: Request) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
+    const limited = await enforceWaitlistWriteLimit({
+      req,
+      clientId: auth.clientId,
+      userId: auth.user.id,
+    })
+    if (limited) return limited
 
     const body: unknown = await req.json().catch(() => ({}))
     if (!isObject(body)) return jsonFail(400, 'Invalid body.')
@@ -335,6 +368,13 @@ export async function PATCH(req: Request) {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
+    const limited = await enforceWaitlistWriteLimit({
+      req,
+      clientId: auth.clientId,
+      userId: auth.user.id,
+    })
+    if (limited) return limited
+
     const body: unknown = await req.json().catch(() => ({}))
     if (!isObject(body)) return jsonFail(400, 'Invalid body.')
 
@@ -413,6 +453,13 @@ export async function DELETE(req: Request) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
+    const limited = await enforceWaitlistWriteLimit({
+      req,
+      clientId: auth.clientId,
+      userId: auth.user.id,
+    })
+    if (limited) return limited
 
     const { searchParams } = new URL(req.url)
     const id = pickString(searchParams.get('id'))
