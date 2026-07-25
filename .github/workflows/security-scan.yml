@@ -56,6 +56,17 @@ jobs:
           fi
           exit $rc
 
+      # One advisory is ignored via `pnpm.auditConfig.ignoreGhsas` in
+      # package.json — GHSA-mh99-v99m-4gvg (brace-expansion DoS, "<=5.0.7").
+      # That range covers the whole 1.x line, and the only path to it is
+      # dev-only tooling: eslint 9 and its plugins still depend on
+      # minimatch@3, which pins brace-expansion@^1.1.x. It cannot be fixed
+      # with an override: brace-expansion 5.x's CJS entry exports an OBJECT
+      # ({ expand, EXPANSION_MAX, ... }), while minimatch@3 does
+      # `require('brace-expansion')(pattern)` — forcing the bump makes eslint
+      # throw "expand is not a function". Nothing here ships to production
+      # (`--prod` above still gates that). Drop the ignore once eslint stops
+      # depending on minimatch@3.
       - name: Audit all dependencies (high+)
         run: |
           set +e
