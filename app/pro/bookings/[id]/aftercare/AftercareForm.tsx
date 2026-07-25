@@ -1436,7 +1436,17 @@ export default function AftercareForm({
                         selectedAddressId ?? rebookClientAddressId
                       }
                       timeZone={tz}
-                      minYmd={tomorrowYmd}
+                      // TODAY, not tomorrow: this slot is booked on the pro's
+                      // own authority the moment they save, so a same-day
+                      // rebook ("come back at 6 tonight") is theirs to make —
+                      // iOS has always allowed it. The real floors stay where
+                      // they belong: the future-instant check below, the
+                      // server's now+1min, and the advance-notice rule, which
+                      // a same-day pick can now trip and the override-confirm
+                      // card resolves. The recommended WINDOW keeps its
+                      // tomorrow floor — that one is a client-facing
+                      // recommendation, not a booking.
+                      minYmd={todayYmd}
                       value={rebookSlot}
                       disabled={disabled}
                       onChange={onPickRebookSlot}

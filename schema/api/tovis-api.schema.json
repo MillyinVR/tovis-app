@@ -9358,6 +9358,39 @@
       ],
       "type": "object"
     },
+    "ProAvailabilityBusyDaysOk": {
+      "properties": {
+        "days": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ProBusyDayDTO"
+          },
+          "type": "object"
+        },
+        "from": {
+          "description": "Echoed range, \"YYYY-MM-DD\" inclusive — `to` may be clamped by the server.",
+          "type": "string"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "to": {
+          "type": "string"
+        },
+        "tz": {
+          "description": "The IANA zone the day buckets were computed in.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "tz",
+        "from",
+        "to",
+        "days"
+      ],
+      "type": "object"
+    },
     "ProBookingMediaCreateResponseDTO": {
       "properties": {
         "advancedTo": {
@@ -9729,6 +9762,24 @@
         "createdAt",
         "updatedAt",
         "service"
+      ],
+      "type": "object"
+    },
+    "ProBusyDayDTO": {
+      "description": "One calendar day's commitments in the requested timezone.",
+      "properties": {
+        "blocked": {
+          "description": "Whether a calendar block touches that local day.",
+          "type": "boolean"
+        },
+        "bookings": {
+          "description": "Occupying bookings (BOOKING_BLOCKING_STATUSES) starting that local day.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "bookings",
+        "blocked"
       ],
       "type": "object"
     },

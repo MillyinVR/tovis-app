@@ -22,6 +22,12 @@
 // Fixture shape mirrors rebook-token-step-grid.test.ts; the location's
 // schedule disables Saturday so "an off day" is a real weekday-keyed refusal,
 // not a synthetic hours window.
+//
+// The final describe covers the SAME-DAY floor (2026-07-25 follow-up): the web
+// rebook picker used to start at tomorrow, iOS at today. Dropping web's floor
+// to today makes ADVANCE_NOTICE_REQUIRED reachable from that picker, so these
+// pin that the boundary gates it and that the pro's own confirm clears it —
+// the same override triple, a different rule.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -578,5 +584,103 @@ describe('aftercare rebook vs working hours — pro authority', () => {
       (error: unknown) =>
         isBookingError(error) && error.code === 'OUTSIDE_WORKING_HOURS',
     )
+  })
+})
+
+describe('aftercare rebook, same day — the advance-notice window', () => {
+  // A 4h notice window with a start 30 minutes out: inside it whatever the
+  // wall clock says, so this never depends on when the suite runs. The
+  // advance-notice check also runs BEFORE the working-hours guard
+  // (proSchedulingPolicy), so the refusal below is unambiguous even on the
+  // fixture's closed Saturday.
+  const ADVANCE_NOTICE_MINUTES = 240
+
+  function shortNoticeStart(): Date {
+    const start = new Date(Date.now() + 30 * 60_000)
+    // The boundary normalizes a requested start to the minute, so build it
+    // that way or the stored instant can never equal the requested one.
+    start.setUTCSeconds(0, 0)
+    return start
+  }
+
+  beforeAll(async () => {
+    await db.professionalLocation.update({
+      where: { id: locationId },
+      data: { advanceNoticeMinutes: ADVANCE_NOTICE_MINUTES },
+    })
+  }, 120_000)
+
+  afterAll(async () => {
+    await db.professionalLocation.update({
+      where: { id: locationId },
+      data: { advanceNoticeMinutes: 0 },
+    })
+  }, 120_000)
+
+  it('refuses a start inside the notice window with ADVANCE_NOTICE_REQUIRED, not a dead end', async () => {
+    const soon = shortNoticeStart()
+
+    await expect(
+      upsertBookingAftercare({
+        ...(await baseSaveArgs()),
+        rebookedFor: soon,
+        rebookSlot: slotAt(soon),
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        isBookingError(error) && error.code === 'ADVANCE_NOTICE_REQUIRED',
+    )
+
+    // The code is one the client maps to a confirm prompt (allowShortNotice),
+    // and the refusal rolled the save back whole.
+    const summary = await db.aftercareSummary.findUnique({
+      where: { id: saveAftercareId },
+      select: { rebookMode: true, rebookedBookingId: true },
+    })
+    expect(summary?.rebookMode).toBe(AftercareRebookMode.NONE)
+    expect(summary?.rebookedBookingId).toBeNull()
+  })
+
+  it('books the same-day slot with allowShortNotice, self-authorized, and audits ADVANCE_NOTICE', async () => {
+    const soon = shortNoticeStart()
+
+    const result = await upsertBookingAftercare({
+      ...(await baseSaveArgs()),
+      rebookedFor: soon,
+      rebookSlot: slotAt(soon),
+      allowShortNotice: true,
+      // Belt, not the subject: 30 minutes from "now" can land on the fixture's
+      // closed Saturday or after 18:00 depending on when CI runs, and the
+      // working-hours guard would then refuse for an unrelated reason. It only
+      // becomes an APPLIED override (and an audit row) when it actually fires.
+      allowOutsideWorkingHours: true,
+      overrideReason: 'Squeezing her in tonight.',
+    })
+
+    const bookedId = result.aftercare.rebookedBookingId
+    expect(bookedId).toBeTruthy()
+
+    const booked = await db.booking.findUnique({
+      where: { id: bookedId ?? '' },
+      select: { status: true, scheduledFor: true },
+    })
+    expect(booked?.status).toBe(BookingStatus.ACCEPTED)
+    expect(booked?.scheduledFor.getTime()).toBe(soon.getTime())
+
+    // ADVANCE_NOTICE is a rule a pro may override on their OWN calendar with no
+    // BookingOverridePermission grant (unlike MAX_DAYS_AHEAD above) — the save
+    // going through IS that proof. It is still recorded and attributed.
+    const audits = await db.bookingOverrideAuditLog.findMany({
+      where: { professionalId },
+      select: { rule: true, actorUserId: true, reason: true, bookingId: true },
+    })
+    const rules = audits.map((row) => row.rule)
+    expect(rules).toContain('ADVANCE_NOTICE')
+    expect(rules.every((rule) => rule === 'ADVANCE_NOTICE' || rule === 'WORKING_HOURS')).toBe(true)
+    expect(audits.find((row) => row.rule === 'ADVANCE_NOTICE')).toMatchObject({
+      actorUserId: proUserId,
+      reason: 'Squeezing her in tonight.',
+      bookingId: bookedId,
+    })
   })
 })
