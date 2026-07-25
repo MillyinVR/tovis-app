@@ -52,6 +52,7 @@ export type BookingErrorCode =
   | "BOOKING_NOT_RESCHEDULABLE"
   | "BOOKING_ALREADY_STARTED"
   | "BOOKING_MISSING_OFFERING"
+  | "RESCHEDULE_BOOKING_MISMATCH"
   | "HOLD_TIME_INVALID"
   | "BOOKING_CANNOT_EDIT_CANCELLED"
   | "BOOKING_CANNOT_EDIT_COMPLETED"
@@ -496,6 +497,21 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Booking has already started.",
     userMessage: "This booking has started and cannot be rescheduled.",
+  },
+  // Distinct from HOLD_MISMATCH on purpose: that one means "the hold you are
+  // presenting no longer matches", and this one fires on the OFFER, where no
+  // hold exists yet — the availability request names a different offering or
+  // professional than the booking it claims to be moving. Sharing a code would
+  // make the two indistinguishable in logs ([[one-code-two-meanings-add-a-code]]).
+  // Unreachable from our own surfaces, which always ask about the booking's own
+  // offering; a hand-built request or a client regression is what gets here.
+  RESCHEDULE_BOOKING_MISMATCH: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Booking does not match the requested availability.",
+    userMessage:
+      "This appointment can’t be moved from here. Open it from your bookings and try again.",
   },
   BOOKING_MISSING_OFFERING: {
     httpStatus: 409,

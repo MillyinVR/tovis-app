@@ -20,6 +20,13 @@ export type ParsedAvailabilityRequest = {
   requestedSummaryDaysRaw: string | null
 
   addOnIds: string[]
+  /**
+   * Present when the caller is MOVING an existing booking. The offer is then
+   * sized from that booking's committed width rather than the offering's base
+   * (B3-A) — which is per-client data, so the routes that honour it
+   * authenticate and check ownership first.
+   */
+  rescheduleBookingId: string | null
   debug: boolean
   includeOtherPros: boolean
 
@@ -65,6 +72,10 @@ export function parseAvailabilityRequest(
 
   const addOnIds = parseCommaIds(searchParams.get('addOnIds')).sort()
 
+  const rescheduleBookingId = pickString(
+    searchParams.get('rescheduleBookingId'),
+  )
+
   const debug = pickString(searchParams.get('debug')) === '1'
   const includeOtherPros =
     pickString(searchParams.get('includeOtherPros')) !== '0'
@@ -105,6 +116,7 @@ export function parseAvailabilityRequest(
     requestedSummaryDaysRaw,
 
     addOnIds,
+    rescheduleBookingId,
     debug,
     includeOtherPros,
 

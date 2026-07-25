@@ -727,17 +727,29 @@ export default function AvailabilityDrawer(props: {
       }
     }
 
+    // On a RESCHEDULE the grid is sized from the booking's committed width, not
+    // the offering's base — the two drift whenever a pro edits a duration, and
+    // showing "120min" over a 180-minute booking made the corrected grid look
+    // wrong (B3-A). `summary.durationMinutes` is what the server actually sized
+    // the offer with, so the label and the slots cannot disagree.
+    //
+    // Only on a reschedule: for a new booking the offering value is already
+    // right AND it tracks the location toggle instantly, whereas `summary` is
+    // one fetch behind a SALON↔MOBILE flip.
+    const serverDuration = rescheduleBookingId ? summary.durationMinutes : null
+
     const duration =
-      activeLocationType === 'MOBILE'
+      serverDuration ??
+      (activeLocationType === 'MOBILE'
         ? offering.mobileDurationMinutes
-        : offering.salonDurationMinutes
+        : offering.salonDurationMinutes)
 
     if (typeof duration === 'number' && duration > 0) {
       parts.push(`${duration}min`)
     }
 
     return parts.length ? parts.join(' · ') : null
-  }, [summary, offering, activeLocationType])
+  }, [summary, offering, activeLocationType, rescheduleBookingId])
 
   const resolvedOfferingId = useMemo(() => {
     if (summary?.offering?.id) return summary.offering.id
@@ -774,6 +786,7 @@ export default function AvailabilityDrawer(props: {
     activeLocationType,
     effectiveServiceId,
     selectedClientAddressId,
+    rescheduleBookingId,
     debug,
     holding,
     retryKey: slotRetryKey,

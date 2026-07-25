@@ -32,6 +32,13 @@ export type AvailabilityPrefetchArgs = {
   mediaId?: string | null
   clientAddressId?: string | null
   viewer?: ViewerContext | null
+  /**
+   * Set when the drawer is MOVING a booking: the server sizes the window from
+   * that booking's committed width instead of the offering's base (B3-A). It is
+   * part of the cache key because this cache is MODULE-scoped — a
+   * reschedule-sized window must never be handed to a plain booking flow.
+   */
+  rescheduleBookingId?: string | null
   startDate?: string | null
   days?: number
   includeOtherPros?: boolean
@@ -82,8 +89,14 @@ function buildBaseQueryKey(args: {
   locationId: string
   mediaId: string
   clientAddressId: string
+  rescheduleBookingId: string
   viewer: ViewerContext | null
 }): string {
+  // Emitted only when present, so every existing key keeps its exact shape.
+  const rescheduleKey = args.rescheduleBookingId
+    ? `reschedule=${args.rescheduleBookingId}`
+    : ''
+
   const viewerKey = args.viewer
     ? `viewer=${args.viewer.lat.toFixed(3)},${args.viewer.lng.toFixed(3)},${
         args.viewer.radiusMiles ?? ''
@@ -97,6 +110,7 @@ function buildBaseQueryKey(args: {
     `locId=${args.locationId || 'AUTO'}`,
     `media=${args.mediaId}`,
     `clientAddress=${args.clientAddressId}`,
+    rescheduleKey,
     viewerKey,
   ]
     .filter(Boolean)
@@ -171,6 +185,7 @@ export function buildAvailabilitySummaryPrefetchKey(args: {
   locationId?: string | null
   mediaId?: string | null
   clientAddressId?: string | null
+  rescheduleBookingId?: string | null
   viewer?: ViewerContext | null
   startDate?: string | null
   days?: number
@@ -183,6 +198,7 @@ export function buildAvailabilitySummaryPrefetchKey(args: {
     locationId: normalizeTrimmed(args.locationId),
     mediaId: normalizeTrimmed(args.mediaId),
     clientAddressId: normalizeTrimmed(args.clientAddressId),
+    rescheduleBookingId: normalizeTrimmed(args.rescheduleBookingId),
     viewer: args.viewer ?? null,
   })
 
@@ -202,6 +218,7 @@ export async function fetchAvailabilitySummaryWindow(
   const locationId = normalizeTrimmed(args.locationId)
   const mediaId = normalizeTrimmed(args.mediaId)
   const clientAddressId = normalizeTrimmed(args.clientAddressId)
+  const rescheduleBookingId = normalizeTrimmed(args.rescheduleBookingId)
   const locationType = args.locationType ?? null
   const viewer = args.viewer ?? null
   const days = args.days ?? INITIAL_WINDOW_DAYS
@@ -227,6 +244,7 @@ export async function fetchAvailabilitySummaryWindow(
     locationId,
     mediaId,
     clientAddressId,
+    rescheduleBookingId,
     viewer,
   })
 
@@ -266,6 +284,10 @@ export async function fetchAvailabilitySummaryWindow(
 
     if (locationType === 'MOBILE' && clientAddressId) {
       qs.set('clientAddressId', clientAddressId)
+    }
+
+    if (rescheduleBookingId) {
+      qs.set('rescheduleBookingId', rescheduleBookingId)
     }
 
     if (viewer) {
@@ -380,6 +402,8 @@ export function buildAvailabilityPrefetchArgsFromContext(args: {
     locationId: normalizeTrimmed(args.locationId) || null,
     mediaId: normalizeTrimmed(args.context.mediaId),
     clientAddressId: clientAddressId || null,
+    rescheduleBookingId:
+      normalizeTrimmed(args.context.rescheduleBookingId) || null,
     viewer: normalizeViewer(args.context),
     includeOtherPros: Boolean(args.includeOtherPros),
     days: args.days ?? INITIAL_WINDOW_DAYS,
