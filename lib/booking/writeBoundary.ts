@@ -7619,7 +7619,7 @@ async function performLockedUploadProBookingMedia(args: {
  * The exact fields a reschedule's committed width is derived from. Kept as a
  * structural type rather than a Prisma payload so both callers can select only
  * what they need: the commit site already holds the full booking row, the hold
- * site reads five columns.
+ * site reads only the seven columns below.
  */
 type RescheduleTargetRecord = {
   status: BookingStatus
@@ -7642,7 +7642,12 @@ type RescheduleTargetRecord = {
  * both ends ([[promise-site-runs-the-commit-site-gate]]).
  *
  * Throws the booking error the commit would throw; ownership is the caller's to
- * check first, because the two sites reach the booking differently. Returns the
+ * check first, because the two sites reach the booking differently. Note this
+ * moves the duration check AHEAD of the commit site's offering lookup: a booking
+ * that is both corrupt-duration and missing its offering row now reports
+ * `INVALID_DURATION` rather than `OFFERING_NOT_FOUND`. Both are 4xx refusals,
+ * and validating the booking's own fields before a foreign lookup is the better
+ * order. Returns the
  * offering id alongside the width so the commit site does not need a second,
  * unreachable null-check to narrow it.
  */
@@ -7685,7 +7690,6 @@ function resolveRescheduleCommitDurationMinutes(
 }
 
 const RESCHEDULE_HOLD_TARGET_SELECT = {
-  id: true,
   clientId: true,
   professionalId: true,
   status: true,
