@@ -1381,6 +1381,7 @@ const HOLD_OWNERSHIP_SELECT = {
   clientId: true,
   professionalId: true,
   waitlistOfferId: true,
+  rescheduleBookingId: true,
 } satisfies Prisma.BookingHoldSelect
 
 type HoldOwnershipRecord = Prisma.BookingHoldGetPayload<{
@@ -8076,6 +8077,10 @@ afterHoldPolicyMs = Date.now()
     offeringId: offering.id,
     professionalId: offering.professionalId,
     clientId,
+    // Marks this reservation as sized from a BOOKING rather than the offering,
+    // so the add-on re-size path refuses it instead of recomputing it back down
+    // to the offering's width (B3).
+    rescheduleBookingId,
     scheduledFor: requestedStart,
     endsAtSnapshot: requestedEnd,
     durationMinutesSnapshot: durationMinutes,
@@ -8247,6 +8252,20 @@ async function performLockedUpdateHoldAddOns(args: {
     throw bookingError('HOLD_FORBIDDEN', {
       message: 'Hold belongs to a waitlist offer.',
       userMessage: 'This reserved time cannot be changed here.',
+    })
+  }
+
+  // A reschedule's reservation is sized from the BOOKING's committed width; this
+  // path recomputes width from the OFFERING plus the posted selection, which
+  // would narrow it straight back to the under-reservation B3 fixed. `addOnIds:
+  // []` is a request the add-ons page already sends on every load, so this is
+  // reachable by accident, not only by a crafted call — refuse rather than
+  // silently shrink what the reschedule is going to commit.
+  if (args.hold.rescheduleBookingId) {
+    throw bookingError('HOLD_FORBIDDEN', {
+      message: 'Hold reserves an existing booking’s duration.',
+      userMessage:
+        'Add-ons can’t be changed while moving this appointment. Pick a new time first.',
     })
   }
 

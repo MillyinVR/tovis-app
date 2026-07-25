@@ -42,7 +42,11 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
-import { createHold, rescheduleBookingFromHold } from '@/lib/booking/writeBoundary'
+import {
+  createHold,
+  rescheduleBookingFromHold,
+  updateHoldAddOns,
+} from '@/lib/booking/writeBoundary'
 import { isBookingError } from '@/lib/booking/errors'
 import { minutesSinceMidnightInTimeZone } from '@/lib/time'
 
@@ -536,5 +540,40 @@ describe('the reschedule-sized hold runs the commit gate’s own guards', () => 
     const created = await hold({ start: target })
 
     expect(created.hold.durationMinutes).toBe(OFFERING_BASE_MINUTES)
+  })
+})
+
+describe('a reschedule hold cannot be re-sized back down by the add-on path', () => {
+  // PATCH /api/v1/holds/[id] recomputes a hold's width from the OFFERING plus
+  // the posted add-ons. A reschedule hold is deliberately wider than that, so
+  // without a guard the very endpoint B1-A added would narrow it straight back
+  // to the defect this card fixed — and `addOnIds: []` is a request the client
+  // already sends on every add-ons page load. The waitlist reservation is
+  // refused here for the same shape of reason (it belongs to the pro), via a
+  // persisted discriminator; a reschedule hold needs its own.
+  it('refuses the add-on re-size instead of shrinking the reservation', async () => {
+    const original = futureLocal(45, 10)
+    const target = futureLocal(46, 12)
+    const bookingId = await seedBooking({ start: original })
+
+    const created = await hold({ start: target, rescheduleBookingId: bookingId })
+    expect(created.hold.durationMinutes).toBe(BOOKED_MINUTES)
+
+    expect(
+      await refusalCode(() =>
+        updateHoldAddOns({
+          holdId: created.hold.id,
+          clientId: fx.clientId,
+          addOnIds: [],
+        }),
+      ),
+    ).toBe('HOLD_FORBIDDEN')
+
+    // Untouched: still reserving what the reschedule will take.
+    const after = await readHold(created.hold.id)
+    expect(after.durationMinutesSnapshot).toBe(BOOKED_MINUTES)
+    expect(after.endsAtSnapshot?.getTime()).toBe(
+      target.getTime() + BOOKED_MINUTES * 60_000,
+    )
   })
 })
