@@ -14779,7 +14779,14 @@ export async function updateHoldAddOns(
   // signal, and Redis is not transactional, so bumping mid-transaction lets a
   // concurrent reader miss on the new version, read the not-yet-committed row
   // and re-cache the OLD occupancy under the NEW version (B2-A).
-  await bumpProfessionalScheduleVersion(result.professionalId)
+  //
+  // Gated on `mutated`: a re-sync that changes nothing (a reloaded add-ons page,
+  // a retried request) must not evict this pro's availability cache, or a client
+  // could dump it at will by re-sending the selection it already has. Succeeding
+  // is not the same as changing something ([[cache-is-a-third-query]], B2).
+  if (result.value.meta.mutated) {
+    await bumpProfessionalScheduleVersion(result.professionalId)
+  }
 
   return result.value
 }

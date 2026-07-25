@@ -46,6 +46,22 @@ vi.hoisted(() => {
   process.env.PII_AEAD_KEYS_JSON ||= JSON.stringify({ 'address-aead-v1': key32 })
 })
 
+// The schedule-version counter lives in Redis, which this suite neither has nor
+// should touch (`.env.test.local` points at the shared instance). The BUMP is
+// still the thing under test — whether a re-size invalidates the availability
+// cache and a no-op leaves it alone — so spy on the call rather than the
+// counter. Reading the counter back would also have asserted nothing: the
+// helper swallows a Redis failure and returns 0, so `0 === 0` passes for both
+// branches.
+const cacheVersion = vi.hoisted(() => ({
+  bumpScheduleVersion: vi.fn(async () => 1),
+}))
+
+vi.mock('@/lib/booking/cacheVersion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/booking/cacheVersion')>()),
+  bumpScheduleVersion: cacheVersion.bumpScheduleVersion,
+}))
+
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
   throw new Error('Missing DATABASE_URL. Run with: pnpm test:integration')
@@ -596,10 +612,11 @@ describe('updateHoldAddOns re-sizes a live hold (real DB)', () => {
     expect(after.durationMinutesSnapshot).toBe(BASE_DURATION_MINUTES)
   })
 
-  it('is a no-op when the size already matches', async () => {
+  it('is a no-op when the size already matches, and does NOT dump the cache', async () => {
     const start = futureLocal(16, 12)
 
     const created = await hold({ start, addOnIds: [fx.addOnId] })
+    cacheVersion.bumpScheduleVersion.mockClear()
 
     const again = await updateHoldAddOns({
       holdId: created.hold.id,
@@ -611,6 +628,48 @@ describe('updateHoldAddOns re-sizes a live hold (real DB)', () => {
     expect(again.hold.durationMinutes).toBe(
       BASE_DURATION_MINUTES + ADD_ON_MINUTES,
     )
+
+    // The selection is caller-controlled and re-sent on every page load, so a
+    // no-op that still bumped would let a client evict this pro's availability
+    // cache at will. Succeeding is not the same as changing something.
+    expect(cacheVersion.bumpScheduleVersion).not.toHaveBeenCalled()
+  })
+
+  it('bumps the schedule version when it DOES re-size', async () => {
+    const start = futureLocal(19, 12)
+
+    const created = await hold({ start, addOnIds: [] })
+    cacheVersion.bumpScheduleVersion.mockClear()
+
+    await updateHoldAddOns({
+      holdId: created.hold.id,
+      clientId: fx.clientId,
+      addOnIds: [fx.addOnId],
+    })
+
+    // A re-sized hold occupies a different window; a reader still serving the
+    // old version would offer the tail this hold now reserves.
+    expect(cacheVersion.bumpScheduleVersion).toHaveBeenCalledWith(
+      fx.professionalId,
+    )
+  })
+
+  it('does not bump when the re-size is REFUSED', async () => {
+    const lastStart = futureLocal(20, 17)
+
+    const created = await hold({ start: lastStart, addOnIds: [] })
+    cacheVersion.bumpScheduleVersion.mockClear()
+
+    await refusalCode(() =>
+      updateHoldAddOns({
+        holdId: created.hold.id,
+        clientId: fx.clientId,
+        addOnIds: [fx.addOnId],
+      }),
+    )
+
+    // Nothing changed, so nothing to invalidate.
+    expect(cacheVersion.bumpScheduleVersion).not.toHaveBeenCalled()
   })
 
   it('refuses another client’s hold', async () => {
