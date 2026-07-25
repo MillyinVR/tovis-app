@@ -3401,6 +3401,10 @@ model Booking {
   referralTrigger Referral? @relation("ReferralTriggerBooking")
   referralReward  Referral? @relation("ReferralRewardBooking")
 
+  // Live holds placed to move THIS booking to a new time (B3). Short-lived;
+  // cascades so a deleted booking cannot leave a reservation behind.
+  rescheduleHolds BookingHold[] @relation("BookingHoldRescheduleTarget")
+
   @@unique([professionalId, scheduledFor])
   @@unique([clientId, creationIdempotencyKey])
   @@index([professionalId, scheduledFor])
@@ -3644,6 +3648,16 @@ model BookingHold {
   waitlistOfferId String?        @unique
   waitlistOffer   WaitlistOffer? @relation(fields: [waitlistOfferId], references: [id], onDelete: Cascade)
 
+  // Set when this hold was placed to MOVE an existing booking (B3). Two jobs:
+  // the reservation is sized from that booking's committed
+  // `totalDurationMinutes` rather than the offering's current base, and the
+  // add-on re-size path (PATCH /holds/[id]) refuses the hold outright — that
+  // endpoint recomputes width from the OFFERING, which would narrow a
+  // reschedule hold straight back to the gap this column exists to close.
+  // Same discriminator role `waitlistOfferId` plays for a pro's offer.
+  rescheduleBookingId String?
+  rescheduleBooking   Booking? @relation("BookingHoldRescheduleTarget", fields: [rescheduleBookingId], references: [id], onDelete: Cascade)
+
   // Server-validated at hold creation (looks-feed lookPost ownership / discovery
   // attribution / NFC / relationship). Copied to Booking.discoveryProvenance at
   // finalize so the platform-fee decision never trusts client input.
@@ -3655,6 +3669,7 @@ model BookingHold {
   @@index([professionalId, expiresAt])
   @@index([professionalId, scheduledFor, expiresAt])
   @@index([offeringId, scheduledFor])
+  @@index([rescheduleBookingId])
   @@index([clientId, expiresAt])
   @@index([clientAddressId])
   @@index([locationAddressSnapshotKeyVersion])

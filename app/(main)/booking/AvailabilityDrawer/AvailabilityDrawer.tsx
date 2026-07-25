@@ -697,6 +697,9 @@ export default function AvailabilityDrawer(props: {
   const showLocalHint = viewerTz !== appointmentTz
   const effectiveServiceId =
     summary?.request.serviceId ?? context.serviceId ?? null
+  // Present only when this drawer is moving an existing booking; the hold it
+  // places is then sized from that booking rather than the offering (B3).
+  const rescheduleBookingId = asTrimmedString(context.rescheduleBookingId)
   const bookingSource = useMemo(() => resolveBookingSource(context), [context])
 
   const canWaitlist = Boolean(
@@ -1437,6 +1440,9 @@ export default function AvailabilityDrawer(props: {
           scheduledFor: slotISO,
           locationType: activeLocationType,
           ...(locationId ? { locationId } : {}),
+          // Reschedule: reserve the BOOKING's committed width, not the
+          // offering's current base (B3). Omitted for an ordinary booking.
+          ...(rescheduleBookingId ? { rescheduleBookingId } : {}),
           clientAddressId:
             activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
         }),

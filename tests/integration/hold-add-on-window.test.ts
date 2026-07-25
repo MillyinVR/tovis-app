@@ -30,6 +30,7 @@ import {
 
 import {
   createHold,
+  createProBooking,
   finalizeBookingFromHold,
   updateHoldAddOns,
 } from '@/lib/booking/writeBoundary'
@@ -736,5 +737,210 @@ describe('updateHoldAddOns re-sizes a live hold (real DB)', () => {
     expect(booking?.totalDurationMinutes).toBe(
       BASE_DURATION_MINUTES + ADD_ON_MINUTES,
     )
+  })
+})
+
+// ── B3 fold-in: the re-size INTERLEAVE, which B1-A shipped but never drove ──
+//
+// B1-A made a live hold's reserved range mutable, and recorded in §7.8 that the
+// concurrency was reasoned about rather than driven. These are that drive.
+//
+// The card asks for "two clients widening into the same tail at once". That
+// shape is not constructible, and finding out why is part of the answer: two
+// live holds for one professional cannot overlap (the GIST EXCLUDE forbids it),
+// and a widen only ever extends a hold's END — so of any two holds, only the
+// earlier one can grow toward the other. Contention over one region always has
+// exactly one widener. The races that ARE real are driven instead:
+//
+//   1. a widen vs a rival HOLD landing on the tail,
+//   2. a widen vs a BOOKING landing on the tail,
+//   3. two concurrent widens of the SAME hold (a double-tapped add-on toggle,
+//      or two devices on one account — the realistic "two at once").
+//
+// In every case the professional's schedule lock serializes the two, so the
+// assertion is on the invariant rather than on who wins: exactly one claims the
+// tail, the loser is refused cleanly, and — the case B1-A flagged explicitly —
+// a widen that LOSES leaves its hold alive at its OLD width rather than
+// dropping it.
+describe('re-sizing a live hold under concurrency (real DB)', () => {
+  /** The settled outcomes, split into fulfilled/rejected. */
+  function split(results: PromiseSettledResult<unknown>[]) {
+    return {
+      fulfilled: results.filter((r) => r.status === 'fulfilled'),
+      rejected: results.filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      ),
+    }
+  }
+
+  /** The booking code the single loser was refused with. */
+  function soleRejectionCode(rejected: PromiseRejectedResult[]): string {
+    const first = rejected[0]
+    if (!first) throw new Error('Expected exactly one rejection, got none')
+    const error: unknown = first.reason
+    if (isBookingError(error)) return error.code
+    throw error
+  }
+
+  it('a widen and a rival hold cannot both take the tail', async () => {
+    const start = futureLocal(21, 12)
+    const tail = new Date(start.getTime() + BASE_DURATION_MINUTES * 60_000)
+
+    const created = await hold({ start, addOnIds: [] })
+
+    const results = await Promise.allSettled([
+      updateHoldAddOns({
+        holdId: created.hold.id,
+        clientId: fx.clientId,
+        addOnIds: [fx.addOnId],
+      }),
+      hold({ start: tail, addOnIds: [], clientId: fx.rivalClientId }),
+    ])
+
+    const { fulfilled, rejected } = split(results)
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect(soleRejectionCode(rejected)).toBe('TIME_HELD')
+
+    // Which side wins is decided by lock arrival order and is NOT pinned here:
+    // both orderings are legal, so the assertions are on the invariant. (Today
+    // the widen reaches the lock first in this pairing and wins; the opposite
+    // ordering is exercised for real by the booking race below.)
+    const widenWon = results[0].status === 'fulfilled'
+    const after = await readHold(created.hold.id)
+
+    if (widenWon) {
+      expect(after.durationMinutesSnapshot).toBe(
+        BASE_DURATION_MINUTES + ADD_ON_MINUTES,
+      )
+    } else {
+      // The loser was the WIDEN. Its transaction rolled back, and a rollback
+      // must leave the client holding what they already had — not nothing.
+      expect(after.durationMinutesSnapshot).toBe(BASE_DURATION_MINUTES)
+      expect(after.endsAtSnapshot?.getTime()).toBe(
+        start.getTime() + BASE_DURATION_MINUTES * 60_000,
+      )
+    }
+
+    // Whoever won, the two reservations never coexist over the same minutes.
+    const holds = await db.bookingHold.findMany({
+      where: { professionalId: fx.professionalId },
+      select: { scheduledFor: true, endsAtSnapshot: true },
+      orderBy: { scheduledFor: 'asc' },
+    })
+    for (let i = 1; i < holds.length; i += 1) {
+      const previous = holds[i - 1]
+      const current = holds[i]
+      if (!previous || !current) throw new Error('Unexpected sparse hold list')
+      expect(
+        (previous.endsAtSnapshot?.getTime() ?? 0) <=
+          current.scheduledFor.getTime(),
+      ).toBe(true)
+    }
+  })
+
+  it('a widen and a booking cannot both take the tail', async () => {
+    const start = futureLocal(22, 12)
+    const tail = new Date(start.getTime() + BASE_DURATION_MINUTES * 60_000)
+
+    const created = await hold({ start, addOnIds: [] })
+    const beforeWiden = await readHold(created.hold.id)
+
+    const results = await Promise.allSettled([
+      updateHoldAddOns({
+        holdId: created.hold.id,
+        clientId: fx.clientId,
+        addOnIds: [fx.addOnId],
+      }),
+      createProBooking({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        overrideReason: null,
+        clientId: fx.rivalClientId,
+        offeringId: fx.offeringId,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        scheduledFor: tail,
+        clientAddressId: null,
+        internalNotes: null,
+        requestedBufferMinutes: null,
+        requestedTotalDurationMinutes: null,
+        allowOutsideWorkingHours: false,
+        allowShortNotice: false,
+        allowFarFuture: false,
+      }),
+    ])
+
+    const { fulfilled, rejected } = split(results)
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+
+    const widenWon = results[0].status === 'fulfilled'
+    const after = await readHold(created.hold.id)
+
+    if (widenWon) {
+      // The pro's walk-in is refused because the widened hold now covers it.
+      expect(soleRejectionCode(rejected)).toBe('TIME_HELD')
+      expect(after.durationMinutesSnapshot).toBe(
+        BASE_DURATION_MINUTES + ADD_ON_MINUTES,
+      )
+      await expect(
+        db.booking.count({ where: { professionalId: fx.professionalId } }),
+      ).resolves.toBe(0)
+    } else {
+      // ⚠️ THE case B1-A called out: the loser is the WIDEN, refused by a
+      // booking that reached the lock first. Its transaction rolls back, and
+      // the rollback must leave the hold ALIVE at its old width — losing the
+      // add-on must never cost the client the slot itself. This is the branch
+      // this pairing takes today, so the rollback is genuinely driven and not
+      // merely reasoned about (B1-A §7.8).
+      expect(soleRejectionCode(rejected)).toBe('TIME_BOOKED')
+      expect(after.durationMinutesSnapshot).toBe(BASE_DURATION_MINUTES)
+      expect(after.endsAtSnapshot?.getTime()).toBe(
+        start.getTime() + BASE_DURATION_MINUTES * 60_000,
+      )
+      expect(after.expiresAt.getTime()).toBe(beforeWiden.expiresAt.getTime())
+      await expect(
+        db.booking.count({ where: { professionalId: fx.professionalId } }),
+      ).resolves.toBe(1)
+    }
+  })
+
+  it('two concurrent widens of the SAME hold converge, and neither corrupts it', async () => {
+    const start = futureLocal(23, 12)
+
+    const created = await hold({ start, addOnIds: [] })
+
+    // The realistic shape: one client, one hold, the add-on tapped twice before
+    // the first PATCH returns.
+    const results = await Promise.allSettled([
+      updateHoldAddOns({
+        holdId: created.hold.id,
+        clientId: fx.clientId,
+        addOnIds: [fx.addOnId],
+      }),
+      updateHoldAddOns({
+        holdId: created.hold.id,
+        clientId: fx.clientId,
+        addOnIds: [fx.addOnId],
+      }),
+    ])
+
+    // Both are the same request, so both must succeed — the second is a no-op
+    // rather than a self-collision against the hold it is re-sizing.
+    const { fulfilled } = split(results)
+    expect(fulfilled).toHaveLength(2)
+
+    const after = await readHold(created.hold.id)
+    expect(after.durationMinutesSnapshot).toBe(
+      BASE_DURATION_MINUTES + ADD_ON_MINUTES,
+    )
+    expect(after.endsAtSnapshot?.getTime()).toBe(
+      start.getTime() + (BASE_DURATION_MINUTES + ADD_ON_MINUTES) * 60_000,
+    )
+
+    await expect(
+      db.bookingHold.count({ where: { professionalId: fx.professionalId } }),
+    ).resolves.toBe(1)
   })
 })

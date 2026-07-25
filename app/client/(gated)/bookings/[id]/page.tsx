@@ -1416,6 +1416,11 @@ export default async function ClientBookingPage(props: {
                   offeringId: null,
                   source: safeSource,
                   mediaId: null,
+                  // This drawer only ever picks a new time for THIS booking, so
+                  // the hold must reserve the width the reschedule will commit
+                  // (`booking.totalDurationMinutes`), not the offering's current
+                  // base — they drift whenever a duration is edited (B3).
+                  rescheduleBookingId: booking.id,
                 }}
               />
             </div>
