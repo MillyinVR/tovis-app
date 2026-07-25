@@ -12,6 +12,20 @@ const mocks = vi.hoisted(() => ({
   bookingHoldFindUnique: vi.fn(),
   releaseHold: vi.fn(),
   updateHoldAddOns: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  clientRateLimitKey: () => 'client_1',
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -56,7 +70,10 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
+      user: { id: 'usr_1' },
     })
+
+    mocks.enforceRateLimit.mockResolvedValue({ allowed: true })
 
     mocks.jsonFail.mockImplementation(
       (status: number, error: string, extra?: unknown) => ({
@@ -622,6 +639,24 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
         status: 500,
         error: 'Failed to update hold.',
       })
+    })
+    it('refuses over the rate limit without touching the boundary', async () => {
+      const limited = { ok: false, status: 429, error: 'Too many requests.' }
+      mocks.enforceRateLimit.mockResolvedValueOnce({
+        allowed: false,
+        bucket: 'holds:update',
+      })
+      mocks.rateLimitExceededResponse.mockReturnValueOnce(limited)
+
+      const result = await PATCH(
+        patchRequest({ addOnIds: ['addon_1'] }),
+        makeCtx('hold_1'),
+      )
+
+      // Each re-size takes the professional's schedule lock, so the ceiling has
+      // to apply BEFORE the boundary, not after it.
+      expect(mocks.updateHoldAddOns).not.toHaveBeenCalled()
+      expect(result).toBe(limited)
     })
   })
 })

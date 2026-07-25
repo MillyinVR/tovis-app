@@ -2,6 +2,7 @@
 
 export type RateLimitBucket =
   | 'holds:create'
+  | 'holds:update'
   | 'bookings:finalize'
   | 'bookings:cancel'
   | 'bookings:refund'
@@ -61,6 +62,17 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 12,
     windowSeconds: 60,
     prefix: 'rl:holds:create',
+    mode: 'redis-only',
+  },
+  // Re-sizing a hold to a new add-on selection fires once per toggle, so this
+  // is sized for a human ticking boxes rather than for the once-per-booking
+  // shape of holds:create. It still needs a ceiling: the route takes the pro's
+  // schedule lock, and a client with one live hold could otherwise hammer it
+  // for the hold's whole lifetime.
+  'holds:update': {
+    limit: 40,
+    windowSeconds: 60,
+    prefix: 'rl:holds:update',
     mode: 'redis-only',
   },
   'bookings:finalize': {

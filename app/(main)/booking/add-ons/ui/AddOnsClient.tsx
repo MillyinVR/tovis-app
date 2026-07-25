@@ -143,10 +143,20 @@ function getFinalizeErrorMessage(raw: unknown): string | null {
  * pro's day) and `null` on success — the caller un-ticks on a refusal, so the
  * client learns HERE rather than at the end of checkout (B1-A).
  */
+type SyncFailure = {
+  message: string
+  /**
+   * True when the server refused the WINDOW (it no longer fits). False for a
+   * refusal that says nothing about the add-on — a rate limit, a network blip —
+   * where blaming the add-on would be a lie.
+   */
+  aboutTheWindow: boolean
+}
+
 async function syncHoldAddOns(
   holdId: string,
   ids: string[],
-): Promise<string | null> {
+): Promise<SyncFailure | null> {
   const response = await fetch(`/api/v1/holds/${encodeURIComponent(holdId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -156,8 +166,10 @@ async function syncHoldAddOns(
   if (response.ok) return null
 
   const raw: unknown = await response.json().catch(() => null)
+  const message =
+    getFinalizeErrorMessage(raw) ?? 'That time is no longer available.'
 
-  return getFinalizeErrorMessage(raw) ?? 'That time is no longer available.'
+  return { message, aboutTheWindow: response.status !== 429 }
 }
 
 /**
@@ -167,21 +179,24 @@ async function syncHoldAddOns(
  * do about it.
  */
 function describeSyncFailure(args: {
-  serverMessage: string
+  failure: SyncFailure
   addedIds: string[]
   addOns: AddOnDTO[]
 }): string {
-  if (args.addedIds.length === 0) return args.serverMessage
+  const { message } = args.failure
+
+  if (!args.failure.aboutTheWindow) return message
+  if (args.addedIds.length === 0) return message
 
   const titles = args.addedIds
     .map((id) => args.addOns.find((addOn) => addOn.id === id)?.title)
     .filter((title): title is string => Boolean(title))
 
   if (titles.length === 1) {
-    return `“${titles[0]}” doesn’t fit this appointment time — ${args.serverMessage} Pick an earlier time, or book without it.`
+    return `“${titles[0]}” doesn’t fit this appointment time — ${message} Pick an earlier time, or book without it.`
   }
 
-  return `Those add-ons don’t fit this appointment time — ${args.serverMessage} Pick an earlier time, or book without them.`
+  return `Those add-ons don’t fit this appointment time — ${message} Pick an earlier time, or book without them.`
 }
 
 function getFinalizeBookingId(raw: unknown): string | null {
@@ -346,7 +361,11 @@ export default function AddOnsClient({
 
     void (async () => {
       const failure = await syncHoldAddOns(holdId, requestedIds).catch(
-        () => 'Couldn’t update your hold. Check your connection and try again.',
+        (): SyncFailure => ({
+          message:
+            'Couldn’t update your hold. Check your connection and try again.',
+          aboutTheWindow: false,
+        }),
       )
 
       // A newer toggle already went out; that response is the one that counts.
@@ -357,7 +376,7 @@ export default function AddOnsClient({
       if (failure) {
         setError(
           describeSyncFailure({
-            serverMessage: failure,
+            failure,
             addedIds: requestedIds.filter((id) => !syncedIds.includes(id)),
             addOns,
           }),

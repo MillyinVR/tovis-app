@@ -7,6 +7,9 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { isRecord } from '@/lib/guards'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { clientRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { hasDuplicateStrings, pickStringArray } from '@/lib/pick'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { releaseHold, updateHoldAddOns } from '@/lib/booking/writeBoundary'
@@ -128,6 +131,21 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     if (!holdId) {
       const fail = getBookingFailPayload('HOLD_ID_REQUIRED')
       return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+    }
+
+    // Fires once per add-on toggle, and each call takes the professional's
+    // schedule lock — so it gets its own ceiling, like its create sibling.
+    const rateLimit = await enforceRateLimit({
+      bucket: 'holds:update',
+      key: clientRateLimitKey({
+        clientId: auth.clientId,
+        userId: auth.user.id,
+        request: req,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
     }
 
     let rawBody: unknown
