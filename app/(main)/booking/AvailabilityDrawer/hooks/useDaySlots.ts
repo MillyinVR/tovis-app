@@ -31,6 +31,12 @@ type DaySlotRequest = {
   locationId: string
   clientAddressId: string | null
   serviceId: string
+  /**
+   * Set when this drawer is MOVING a booking. The server then sizes the grid
+   * from that booking's committed width instead of the offering's base, so the
+   * starts on screen are the ones the reschedule will actually accept (B3-A).
+   */
+  rescheduleBookingId: string | null
   debug: boolean
 }
 
@@ -65,6 +71,14 @@ function getActiveClientAddressId(
   return locationType === 'MOBILE' ? selectedClientAddressId : null
 }
 
+/**
+ * How many `|`-separated segments `buildDaySlotCacheKey` emits. The invalidator
+ * parses keys positionally and SKIPS anything of another length, so a segment
+ * added to the builder without changing this number silently turns every
+ * invalidation into a no-op — stale slots, no error, nothing red.
+ */
+const DAY_SLOT_CACHE_KEY_PART_COUNT = 7
+
 function buildDaySlotCacheKey(args: {
   proId: string
   ymd: string
@@ -72,6 +86,7 @@ function buildDaySlotCacheKey(args: {
   locationId: string
   serviceId: string
   clientAddressId: string | null
+  rescheduleBookingId: string | null
 }): string {
   return [
     args.proId,
@@ -80,6 +95,11 @@ function buildDaySlotCacheKey(args: {
     args.locationType,
     args.locationId,
     args.clientAddressId ?? 'none',
+    // Reschedule-sized slots are a DIFFERENT answer to the same day, so they
+    // must not be served to a plain booking flow (or vice versa) if this ref
+    // ever outlives a context change. The server key already separates them by
+    // width; this keeps the client's copy honest too.
+    args.rescheduleBookingId ?? 'none',
   ].join('|')
 }
 
@@ -90,6 +110,7 @@ function buildDaySlotRequest(args: {
   locationId: string | null
   selectedClientAddressId: string | null
   serviceId: string | null
+  rescheduleBookingId: string | null
   debug: boolean
 }): DaySlotRequest | null {
   if (!args.proId || !args.ymd || !args.locationId || !args.serviceId) {
@@ -106,6 +127,7 @@ function buildDaySlotRequest(args: {
       args.selectedClientAddressId,
     ),
     serviceId: args.serviceId,
+    rescheduleBookingId: args.rescheduleBookingId,
     debug: args.debug,
   }
 }
@@ -153,7 +175,7 @@ function invalidateMatchingDaySlotCacheEntries(args: {
 
   for (const key of Object.keys(args.cache)) {
     const parts = key.split('|')
-    if (parts.length !== 6) continue
+    if (parts.length !== DAY_SLOT_CACHE_KEY_PART_COUNT) continue
 
     const [, serviceId, ymd, locationType, , clientAddressId] = parts
 
@@ -240,6 +262,7 @@ async function fetchDaySlotsDetailed(
     serviceId: params.serviceId,
     clientAddressId:
       params.locationType === 'MOBILE' ? params.clientAddressId : null,
+    rescheduleBookingId: params.rescheduleBookingId,
   })
 
   const allowCacheRead = params.useCacheForRead !== false && !params.forceRefresh
@@ -265,6 +288,10 @@ async function fetchDaySlotsDetailed(
 
   if (params.locationType === 'MOBILE' && params.clientAddressId) {
     qs.set('clientAddressId', params.clientAddressId)
+  }
+
+  if (params.rescheduleBookingId) {
+    qs.set('rescheduleBookingId', params.rescheduleBookingId)
   }
 
   if (params.debug) {
@@ -330,6 +357,7 @@ export function useDaySlots(args: {
   activeLocationType: ServiceLocationType
   effectiveServiceId: string | null
   selectedClientAddressId: string | null
+  rescheduleBookingId: string | null
   debug: boolean
   holding: boolean
   retryKey: number
@@ -342,6 +370,7 @@ export function useDaySlots(args: {
     activeLocationType,
     effectiveServiceId,
     selectedClientAddressId,
+    rescheduleBookingId,
     debug,
     holding,
     retryKey,
@@ -369,6 +398,7 @@ export function useDaySlots(args: {
         locationId: primaryLocationId,
         selectedClientAddressId,
         serviceId: effectiveServiceId,
+        rescheduleBookingId,
         debug,
       }),
     [
@@ -378,6 +408,7 @@ export function useDaySlots(args: {
       primaryLocationId,
       selectedClientAddressId,
       effectiveServiceId,
+      rescheduleBookingId,
       debug,
     ],
   )
@@ -544,6 +575,7 @@ export function useDaySlots(args: {
       locationId: nextDayRequest.locationId,
       serviceId: nextDayRequest.serviceId,
       clientAddressId: nextDayRequest.clientAddressId,
+      rescheduleBookingId: nextDayRequest.rescheduleBookingId,
     })
 
     if (getFreshDaySlotCacheValue(daySlotCacheRef.current, cacheKey)) {

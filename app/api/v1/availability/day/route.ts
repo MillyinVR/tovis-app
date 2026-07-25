@@ -4,9 +4,12 @@ import { createHash } from 'node:crypto'
 
 import { ServiceLocationType } from '@prisma/client'
 
-import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import type { AvailabilityDayOk, AvailabilityOffering } from '@/app/(main)/booking/AvailabilityDrawer/types'
-import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
+import {
+  resolveAvailabilityDurationMinutes,
+  type RescheduleAvailabilityContext,
+} from '@/lib/availability/data/durationContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import { buildDayCacheKey } from '@/lib/availability/data/cache'
 import {
@@ -133,6 +136,7 @@ export async function GET(req: Request) {
       requestedLocationId,
       dateStr,
       addOnIds,
+      rescheduleBookingId,
       debug,
       stepRaw,
       leadRaw,
@@ -140,6 +144,21 @@ export async function GET(req: Request) {
 
     if (!professionalId || !serviceId) {
       return jsonFail(400, 'Missing professionalId or serviceId.')
+    }
+
+    // A reschedule is offered its BOOKING's committed width, which is that
+    // client's data — so this branch, and only this branch, authenticates.
+    // Without `rescheduleBookingId` the route keeps its public shape and reads
+    // no session at all (B3-A). Resolved before any query so an anonymous
+    // caller cannot spend the day computation on a booking id.
+    let reschedule: RescheduleAvailabilityContext | null = null
+    if (rescheduleBookingId) {
+      const auth = await requireClient()
+      if (!auth.ok) return auth.res
+      reschedule = {
+        bookingId: rescheduleBookingId,
+        clientId: auth.clientId,
+      }
     }
 
     if (!dateStr) {
@@ -233,22 +252,33 @@ export async function GET(req: Request) {
       )
     }
 
-    const addOnResult = await resolveDurationWithAddOns({
+    const durationResult = await resolveAvailabilityDurationMinutes({
       professionalId,
       offeringId: offeringDbId,
       addOnIds,
       locationType: effectiveLocationType,
       baseDurationMinutes,
+      reschedule,
       client: prismaRead,
     })
 
-    if (!addOnResult.ok) {
-      return bookingJsonFail(addOnResult.code, {
-        userMessage: 'One or more add-ons are invalid for this offering.',
+    if (!durationResult.ok) {
+      return bookingJsonFail(durationResult.code, {
+        ...(durationResult.userMessage
+          ? { userMessage: durationResult.userMessage }
+          : {}),
       })
     }
 
-    const durationMinutes = addOnResult.durationMinutes
+    // From here the answer is a pure function of this width — which is exactly
+    // why the reschedule variant can keep sharing the public cache. The key
+    // already hashes `durationMinutes` (`buildDayCacheKey`), the payload carries
+    // no booking id, and two callers who resolve to the same width are owed the
+    // same slots. So no per-client key, no cache split, and cardinality stays
+    // bounded by the width's own clamp rather than by how many bookings exist
+    // ([[cache-is-a-third-query]] — the booking is an INPUT to the width, never
+    // part of the answer).
+    const durationMinutes = durationResult.durationMinutes
 
     const request = buildDayRequestPayload({
       professionalId,

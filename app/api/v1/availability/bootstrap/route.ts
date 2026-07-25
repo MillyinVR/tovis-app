@@ -4,10 +4,13 @@ import { createHash } from 'node:crypto'
 
 import { ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 
-import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import type { AvailabilityBootstrapOk } from '@/app/(main)/booking/AvailabilityDrawer/types'
 import { toRecord } from '@/lib/typed'
-import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
+import {
+  resolveAvailabilityDurationMinutes,
+  type RescheduleAvailabilityContext,
+} from '@/lib/availability/data/durationContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import { buildSummaryCacheKey } from '@/lib/availability/data/cache'
 import {
@@ -468,6 +471,7 @@ export async function GET(req: Request) {
       startDateStr,
       requestedSummaryDaysRaw,
       addOnIds,
+      rescheduleBookingId,
       debug,
       includeOtherPros,
       stepRaw,
@@ -486,6 +490,21 @@ export async function GET(req: Request) {
         400,
         'Bootstrap route does not accept date. Use /api/v1/availability/day for a specific day.',
       )
+    }
+
+    // Bootstrap decides which DAYS the scroller marks as bookable and computes
+    // the opening day's slots, so it has to be sized like `/day` or the two
+    // disagree: a day the wider booking cannot fit anywhere would still be
+    // offered, and tapping it would show an empty grid (B3-A). Authenticated
+    // only on this branch, exactly as `/day` is.
+    let reschedule: RescheduleAvailabilityContext | null = null
+    if (rescheduleBookingId) {
+      const auth = await requireClient()
+      if (!auth.ok) return auth.res
+      reschedule = {
+        bookingId: rescheduleBookingId,
+        clientId: auth.clientId,
+      }
     }
 
     markTimer(timers, 'versions:start')
@@ -603,22 +622,28 @@ export async function GET(req: Request) {
       : null
 
     markTimer(timers, 'addons:start')
-    const addOnResult = await resolveDurationWithAddOns({
+    const durationResult = await resolveAvailabilityDurationMinutes({
       professionalId,
       offeringId: offeringDbId,
       addOnIds,
       locationType: effectiveLocationType,
       baseDurationMinutes,
+      reschedule,
       client: prismaRead,
     })
 
-    if (!addOnResult.ok) {
-      return bookingJsonFail(addOnResult.code, {
-        userMessage: 'One or more add-ons are invalid for this offering.',
+    if (!durationResult.ok) {
+      return bookingJsonFail(durationResult.code, {
+        ...(durationResult.userMessage
+          ? { userMessage: durationResult.userMessage }
+          : {}),
       })
     }
 
-    const durationMinutes = addOnResult.durationMinutes
+    // Shares the public summary cache for the same reason `/day` does: the key
+    // hashes the resolved width and the payload holds no booking id, so the
+    // answer two callers of equal width are owed is identical.
+    const durationMinutes = durationResult.durationMinutes
     markTimer(timers, 'addons:end')
 
     const tenantContext = await resolveTenantContextForRequest(req)

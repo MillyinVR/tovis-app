@@ -31,6 +31,7 @@ type HookProps = {
   activeLocationType: ServiceLocationType
   effectiveServiceId: string | null
   selectedClientAddressId: string | null
+  rescheduleBookingId: string | null
   debug: boolean
   holding: boolean
   retryKey: number
@@ -140,6 +141,7 @@ function makeHookProps(overrides: Partial<HookProps> = {}): HookProps {
     activeLocationType: 'SALON',
     effectiveServiceId: 'service_1',
     selectedClientAddressId: null,
+    rescheduleBookingId: null,
     debug: false,
     holding: false,
     retryKey: 0,
@@ -305,6 +307,65 @@ describe('useDaySlots', () => {
     })
 
     expect(mocks.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('asks for the booking-sized grid when the drawer is moving a booking', async () => {
+    mocks.fetch.mockResolvedValue(makeResponse(makeDayResponse([SLOT_DAY_2_A])))
+
+    const props = makeHookProps({
+      summary: makeSummary({
+        availableDays: [{ date: DAY_2, slotCount: 1 }],
+        selectedDay: null,
+      }),
+      selectedDayYMD: DAY_2,
+      rescheduleBookingId: 'booking_42',
+    })
+
+    const { result } = renderHook((next: HookProps) => useDaySlots(next), {
+      initialProps: props,
+    })
+
+    await waitFor(() => {
+      expect(result.current.loadingPrimarySlots).toBe(false)
+    })
+
+    // B3-A: without this the server sizes the grid from the offering's base and
+    // offers starts the reschedule then refuses at the pick.
+    const url = String(mocks.fetch.mock.calls[0]?.[0] ?? '')
+    expect(url).toContain('rescheduleBookingId=booking_42')
+  })
+
+  it('does not let a reschedule-sized day answer serve a plain booking flow', async () => {
+    mocks.fetch.mockResolvedValue(makeResponse(makeDayResponse([SLOT_DAY_2_A])))
+
+    const base = makeHookProps({
+      summary: makeSummary({
+        availableDays: [{ date: DAY_2, slotCount: 1 }],
+        selectedDay: null,
+      }),
+      selectedDayYMD: DAY_2,
+      rescheduleBookingId: 'booking_42',
+    })
+
+    const { rerender } = renderHook((next: HookProps) => useDaySlots(next), {
+      initialProps: base,
+    })
+
+    await waitFor(() => {
+      expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    })
+
+    // Same pro, same service, same day — but a different WIDTH, so it must be
+    // re-fetched rather than read out of the cache the reschedule filled.
+    rerender({ ...base, rescheduleBookingId: null })
+
+    await waitFor(() => {
+      expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    })
+
+    expect(String(mocks.fetch.mock.calls[1]?.[0] ?? '')).not.toContain(
+      'rescheduleBookingId',
+    )
   })
 
   it('fetches day slots when bootstrap selectedDay is stale', async () => {
