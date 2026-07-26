@@ -22,7 +22,6 @@ import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
-import { resolveApptTimeZoneFromValues } from '@/lib/booking/timeZoneTruth'
 import {
   cancelImportedBookingIfPristine,
   createProBooking,
@@ -30,7 +29,9 @@ import {
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
-import { DEFAULT_TIME_ZONE } from '@/lib/time'
+// Through the barrel, per the house rule — `@/lib/time` re-exports the timezone
+// -truth resolver as well as the low-level math.
+import { DEFAULT_TIME_ZONE, resolveApptTimeZoneFromValues } from '@/lib/time'
 
 import {
   resolveCalendarEventWindow,
