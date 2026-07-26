@@ -5,6 +5,12 @@
 // Re-fetches every connected calendar feed and re-runs the import (idempotent on
 // event UID), so a migrating pro's new appointments flow in during the
 // transition. Inert until a pro connects a feed subscription.
+//
+// Behind ENABLE_PRO_MIGRATION like every other surface of this flow. It was the
+// one that wasn't: with the flag off no pro can create a subscription, so the job
+// was inert *in practice* — but "no rows yet" is not a gate, and a subscription
+// left behind by a flag that was once on would keep writing bookings and blocks
+// from a remote URL after the flow was switched back off.
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import {
@@ -12,6 +18,7 @@ import {
   isAuthorizedJobRequest,
 } from '@/app/api/_utils/auth/internalJob'
 import { runCalendarResync } from '@/lib/migration/calendarResync'
+import { isProMigrationEnabled } from '@/lib/migration/featureFlag'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -28,6 +35,11 @@ async function runJob(req: Request) {
 
   if (!isAuthorizedJobRequest(req)) {
     return jsonFail(401, 'Unauthorized')
+  }
+
+  // After the secret check, so an unauthorized caller cannot probe the flag.
+  if (!isProMigrationEnabled()) {
+    return jsonOk({ skipped: 'PRO_MIGRATION_DISABLED' })
   }
 
   const summary = await runCalendarResync({ now: new Date() })
