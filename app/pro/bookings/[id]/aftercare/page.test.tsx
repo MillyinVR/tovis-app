@@ -145,6 +145,7 @@ vi.mock('./ClientProfilePanel', () => ({
 }))
 
 import ProAftercarePage from './page'
+import { AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS } from '@/lib/aftercare/aftercareEditWindow'
 
 function makeRedirectError(href: string) {
   return Object.assign(new Error(`redirect:${href}`), {
@@ -305,9 +306,20 @@ async function renderPage(args?: {
   })
 }
 
+// A completed booking's aftercare is editable for a bounded window, so the page
+// now reads the clock. Pin it (Date only — real timers stay intact) rather than
+// letting these assertions change meaning as wall time passes.
+const TEST_NOW = new Date('2026-04-15T12:00:00.000Z')
+
+function daysBefore(days: number): Date {
+  return new Date(TEST_NOW.getTime() - days * 24 * 60 * 60 * 1000)
+}
+
 describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(TEST_NOW)
 
     mocks.redirect.mockImplementation((href: string) => {
       throw makeRedirectError(href)
@@ -398,25 +410,63 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     })
   })
 
-  it('renders completed bookings as a locked, read-only aftercare summary', async () => {
+  it('keeps a recently completed booking editable and names the correction deadline', async () => {
     const page = await renderPage({
       booking: makeBooking({
         status: BookingStatus.COMPLETED,
         sessionStep: SessionStep.DONE,
-        finishedAt: new Date('2026-04-12T21:00:00.000Z'),
+        finishedAt: daysBefore(3),
       }),
     })
 
     const markup = renderMarkup(page)
 
-    // Does not redirect — it serves the finished aftercare instead.
+    // Does not redirect — it serves the finished aftercare, still writable.
+    expect(mocks.redirect).not.toHaveBeenCalled()
+    expect(markup).toContain('This booking is completed.')
+    expect(markup).toContain('data-read-only="false"')
+    expect(markup).toContain('you can still correct this')
+    // finishedAt 2026-04-12T12:00Z + 30d = 2026-05-12T12:00Z, rendered in the
+    // appointment's zone (America/Los_Angeles → May 12, 5:00 AM).
+    expect(markup).toContain('May 12')
+  })
+
+  it('renders a completed booking as read-only once the correction window has closed', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: daysBefore(
+          AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS + 1,
+        ),
+      }),
+    })
+
+    const markup = renderMarkup(page)
+
     expect(mocks.redirect).not.toHaveBeenCalled()
     expect(markup).toContain('This booking is completed.')
     expect(markup).toContain('data-read-only="true"')
+    expect(markup).toContain('read-only')
     // Next-step links on the read-only banner.
     expect(markup).toContain('/pro/calendar')
     expect(markup).toContain('/pro/bookings')
     expect(markup).toContain('/pro/aftercare')
+  })
+
+  it('does not bounce a completed booking to the session hub over its session step', async () => {
+    // Session-step routing governs a LIVE session only; a completed booking has
+    // left the flow, so whatever step it carries must not strand its aftercare.
+    const page = await renderPage({
+      booking: makeBooking({
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.SERVICE_IN_PROGRESS,
+        finishedAt: daysBefore(1),
+      }),
+    })
+
+    expect(mocks.redirect).not.toHaveBeenCalled()
+    expect(renderMarkup(page)).toContain('data-read-only="false"')
   })
 
   it('redirects back to session hub when session step is not allowed here', async () => {

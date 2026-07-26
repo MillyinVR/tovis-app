@@ -1,6 +1,6 @@
 // app/api/v1/pro/bookings/[id]/aftercare/route.test.ts
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AftercareRebookMode,
   BookingStatus,
@@ -121,6 +121,7 @@ vi.mock('@/lib/security/logging', () => ({
 }))
 
 import { GET, POST } from './route'
+import { AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS } from '@/lib/aftercare/aftercareEditWindow'
 
 function makeJsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -644,9 +645,26 @@ function makeExpectedPostResponse(overrides?: {
   }
 }
 
+// GET now reports the post-completion aftercare edit window, which is a
+// function of the clock. Pin it (Date only — real timers stay intact) three
+// days after the fixtures' finishedAt so the window is deterministically OPEN,
+// instead of the assertions quietly changing meaning as wall time passes.
+const TEST_NOW = new Date('2026-04-15T12:00:00.000Z')
+
+// The GET fixtures finish at 2026-04-12T20:00Z, so the window shuts 30 days
+// later and TEST_NOW sits comfortably inside it.
+const EXPECTED_EDIT_WINDOW = {
+  editable: true,
+  isPostCompletion: true,
+  closesAt: '2026-05-12T20:00:00.000Z',
+  windowDays: AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS,
+}
+
 describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(TEST_NOW)
 
     mocks.requirePro.mockResolvedValue({
       ok: true,
@@ -790,6 +808,10 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
     mocks.upsertBookingAftercare.mockResolvedValue(makeUpsertResult())
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('GET returns auth response when requirePro fails', async () => {
     const authRes = makeJsonResponse(401, {
       ok: false,
@@ -881,6 +903,7 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         scheduledFor: '2026-04-12T18:00:00.000Z',
         finishedAt: '2026-04-12T20:00:00.000Z',
         locationTimeZone: 'America/Los_Angeles',
+        aftercareEditWindow: EXPECTED_EDIT_WINDOW,
         rebookSuggestion: null,
         aftercareSummary: null,
         media: {
@@ -969,6 +992,7 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         scheduledFor: '2026-04-12T18:00:00.000Z',
         finishedAt: '2026-04-12T20:00:00.000Z',
         locationTimeZone: 'America/Los_Angeles',
+        aftercareEditWindow: EXPECTED_EDIT_WINDOW,
         rebookSuggestion: null,
         aftercareSummary: {
           id: 'aftercare_1',
@@ -978,6 +1002,7 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
           rebookWindowStart: '2026-05-01T18:00:00.000Z',
           rebookWindowEnd: '2026-05-15T18:00:00.000Z',
           rebookDeclinedAt: null,
+          rebookRescheduledSinceSaved: false,
           rebookSlot: null,
           draftSavedAt: '2026-04-12T20:05:00.000Z',
           sentToClientAt: '2026-04-12T20:10:00.000Z',
@@ -1054,6 +1079,7 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         scheduledFor: '2026-04-12T18:00:00.000Z',
         finishedAt: '2026-04-12T20:00:00.000Z',
         locationTimeZone: 'America/Los_Angeles',
+        aftercareEditWindow: EXPECTED_EDIT_WINDOW,
         rebookSuggestion: null,
         aftercareSummary: {
           id: 'aftercare_1',
@@ -1063,6 +1089,7 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
           rebookWindowStart: null,
           rebookWindowEnd: null,
           rebookDeclinedAt: null,
+          rebookRescheduledSinceSaved: false,
           rebookSlot: null,
           draftSavedAt: '2026-04-12T20:05:00.000Z',
           sentToClientAt: null,
@@ -1084,6 +1111,107 @@ describe('app/api/v1/pro/bookings/[id]/aftercare/route.ts', () => {
         },
       },
     })
+  })
+
+  it('GET reports the aftercare edit window as closed once it has elapsed', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      ...makeGetBooking(),
+      finishedAt: new Date(
+        TEST_NOW.getTime() -
+          (AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS + 1) *
+            24 *
+            60 *
+            60 *
+            1000,
+      ),
+    })
+
+    const result = await GET(new Request('http://localhost/test'), makeCtx())
+    const body = await result.json()
+
+    expect(body.booking.aftercareEditWindow).toMatchObject({
+      editable: false,
+      isPostCompletion: true,
+      windowDays: AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS,
+    })
+  })
+
+  it('GET reports no deadline while the booking is still live', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      ...makeGetBooking(),
+      status: BookingStatus.IN_PROGRESS,
+      finishedAt: null,
+    })
+
+    const result = await GET(new Request('http://localhost/test'), makeCtx())
+    const body = await result.json()
+
+    expect(body.booking.aftercareEditWindow).toEqual({
+      editable: true,
+      isPostCompletion: false,
+      closesAt: null,
+      windowDays: AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS,
+    })
+  })
+
+  it('GET re-points a booked rebook slot at the appointment as it stands now', async () => {
+    // The pro booked 1 Sep; the client has since moved it to 8 Sep. Serving the
+    // frozen 1 Sep snapshot would make the next save look like a deliberate
+    // time change and reschedule the client back.
+    const savedStart = new Date('2026-09-01T17:00:00.000Z')
+    const savedEnd = new Date('2026-09-01T18:30:00.000Z')
+    const movedStart = new Date('2026-09-08T20:00:00.000Z')
+
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      ...makeGetBooking({
+        aftercareSummary: {
+          id: 'aftercare_1',
+          notes: 'Use a sulfate-free shampoo.',
+          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+          rebookedFor: savedStart,
+          rebookWindowStart: null,
+          rebookWindowEnd: null,
+          rebookedBookingId: 'booking_next',
+          rebookedBooking: {
+            id: 'booking_next',
+            status: BookingStatus.ACCEPTED,
+            scheduledFor: movedStart,
+            locationType: 'SALON',
+            locationId: 'loc_1',
+            clientAddressId: null,
+          },
+          rebookSlot: {
+            id: 'slot_1',
+            offeringId: 'offering_1',
+            locationId: 'loc_1',
+            locationType: 'SALON',
+            clientAddressId: null,
+            startsAt: savedStart,
+            endsAt: savedEnd,
+          },
+          draftSavedAt: null,
+          sentToClientAt: new Date('2026-04-12T20:10:00.000Z'),
+          lastEditedAt: new Date('2026-04-12T20:08:00.000Z'),
+          version: 3,
+          recommendedProducts: [],
+        },
+      }),
+    })
+
+    const result = await GET(new Request('http://localhost/test'), makeCtx())
+    const body = await result.json()
+
+    expect(body.booking.aftercareSummary.rebookedFor).toBe(
+      movedStart.toISOString(),
+    )
+    expect(body.booking.aftercareSummary.rebookSlot).toMatchObject({
+      id: 'slot_1',
+      offeringId: 'offering_1',
+      startsAt: movedStart.toISOString(),
+      // The picked 90-minute width rides along with the new start.
+      endsAt: new Date('2026-09-08T21:30:00.000Z').toISOString(),
+    })
+    expect(body.booking.aftercareSummary.rebookRescheduledSinceSaved).toBe(true)
   })
 
   it('POST returns auth response when requirePro fails', async () => {

@@ -32,6 +32,11 @@ import {
   normalizeSeedParam,
 } from '@/lib/aftercare/featuredPairParams'
 import { resolveFeaturedPairSeed } from '@/lib/aftercare/featuredPairSeed'
+import {
+  AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS,
+  resolveAftercareEditWindow,
+} from '@/lib/aftercare/aftercareEditWindow'
+import { resolveAftercareRebookSeed } from '@/lib/aftercare/aftercareRebookSeed'
 
 export const dynamic = 'force-dynamic'
 
@@ -620,6 +625,19 @@ export default async function ProAftercarePage({
           rebookedBookingId: true,
           featuredBeforeAssetId: true,
           featuredAfterAssetId: true,
+          // The live appointment the BOOKED plan created. The editor seeds from
+          // THIS, not the frozen slot below — see lib/aftercare/
+          // aftercareRebookSeed.ts for why a stale seed moves a real booking.
+          rebookedBooking: {
+            select: {
+              id: true,
+              status: true,
+              scheduledFor: true,
+              locationType: true,
+              locationId: true,
+              clientAddressId: true,
+            },
+          },
           rebookSlot: {
             select: {
               offeringId: true,
@@ -681,20 +699,31 @@ export default async function ProAftercarePage({
 
   const isCancelled = booking.status === BookingStatus.CANCELLED
 
-  // A completed booking has no live session to act on, but the pro still wants
-  // to *review* the aftercare they just finished. Serve it as a locked,
-  // read-only summary instead of bouncing back to the session hub. We key on
-  // status === COMPLETED (not finishedAt) to match the write boundary exactly:
-  // a live session can carry a finishedAt while still being IN_PROGRESS, and
-  // its aftercare must stay editable.
-  const readOnly = booking.status === BookingStatus.COMPLETED
+  // A completed booking has no live session to act on, but its aftercare stays
+  // editable for a bounded correction window and only then locks to a read-only
+  // record. Resolved from the same function the write boundary refuses on, so
+  // the page can never offer an edit the save will reject. We key on
+  // status === COMPLETED (not finishedAt) to match that boundary exactly: a
+  // live session can carry a finishedAt while still being IN_PROGRESS, and its
+  // aftercare must stay editable with no deadline at all.
+  const editWindow = resolveAftercareEditWindow({
+    status: booking.status,
+    finishedAt: booking.finishedAt,
+    scheduledFor: booking.scheduledFor,
+    now: new Date(),
+  })
+
+  const readOnly = !editWindow.editable
 
   // Nothing to view for cancelled or never-started bookings.
   if (isCancelled || !booking.startedAt) {
     redirect(sessionHubHref(bookingId))
   }
 
-  if (!readOnly) {
+  // Session-step routing only governs a LIVE session. A completed booking has
+  // left the session flow entirely, so it reaches its aftercare regardless of
+  // the step it happens to carry — including while it is still editable.
+  if (!editWindow.isPostCompletion) {
     const step = booking.sessionStep ?? SessionStep.NONE
     const allowedHere =
       step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
@@ -713,6 +742,16 @@ export default async function ProAftercarePage({
 
   const timeZone = timeZoneResult.ok ? timeZoneResult.timeZone : 'UTC'
   const aftercare = booking.aftercareSummary
+
+  // Seed the booked-next-appointment plan from the appointment as it stands
+  // now, not from the snapshot frozen at the last save. Without this an
+  // untouched form round-trips a stale startsAt and the save reschedules the
+  // client's appointment back to it.
+  const rebookSeed = resolveAftercareRebookSeed({
+    rebookedFor: aftercare?.rebookedFor,
+    slot: aftercare?.rebookSlot,
+    rebookedBooking: aftercare?.rebookedBooking,
+  })
 
   // Auto-suggested recommended-window rebook dates for a fresh wrap-up. Only
   // offered when no aftercare has been saved yet, so a pro's saved choice (even
@@ -833,6 +872,8 @@ export default async function ProAftercarePage({
     isFinalized: hasFinalizedAftercare,
   })
 
+  const editWindowClosesLabel = toDisplayDateTime(editWindow.closesAt, timeZone)
+
   return (
     <PageShell>
       <Header
@@ -850,15 +891,40 @@ export default async function ProAftercarePage({
           </div>
         ) : null}
 
-        {readOnly ? (
-          <Card tone="success">
+        {editWindow.isPostCompletion ? (
+          <Card tone={readOnly ? 'success' : undefined} accent={!readOnly}>
             <div className="brand-pro-session-section-title">
               This booking is completed.
             </div>
             <div className="brand-pro-session-card-body mt-1">
-              You’re viewing the finished aftercare. It’s read-only now that the
-              session is closed out.
+              {readOnly ? (
+                <>
+                  You’re viewing the finished aftercare. Corrections closed{' '}
+                  {AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS} days after the
+                  session, so it’s read-only now.
+                </>
+              ) : editWindowClosesLabel ? (
+                <>
+                  The session is closed out, but you can still correct this
+                  aftercare until {editWindowClosesLabel}. Saving a change the
+                  client has already seen updates what their aftercare link
+                  shows.
+                </>
+              ) : (
+                <>
+                  The session is closed out, but you can still correct this
+                  aftercare. Saving a change the client has already seen updates
+                  what their aftercare link shows.
+                </>
+              )}
             </div>
+            {rebookSeed.rescheduledSinceSaved ? (
+              <div className="brand-pro-session-card-body mt-2">
+                Heads up: the next appointment has been rescheduled since you
+                wrote this, so the date below is the one on the calendar now —
+                not the one you originally saved.
+              </div>
+            ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
               <Link
                 href="/pro/calendar"
@@ -891,7 +957,7 @@ export default async function ProAftercarePage({
           </Card>
         ) : null}
 
-        <div className={readOnly ? 'mt-4' : undefined}>
+        <div className={editWindow.isPostCompletion ? 'mt-4' : undefined}>
           <SummaryCard
             publicAccess={publicAccess}
             hasDraft={hasAftercareDraft}
@@ -929,7 +995,7 @@ export default async function ProAftercarePage({
             rebookClientProfileId={booking.clientId}
             existingNotes={aftercare?.notes ?? ''}
             existingRebookMode={aftercare?.rebookMode ?? AftercareRebookMode.NONE}
-            existingRebookedFor={dateToIso(aftercare?.rebookedFor)}
+            existingRebookedFor={dateToIso(rebookSeed.rebookedFor)}
             existingRebookWindowStart={dateToIso(
               aftercare?.rebookWindowStart,
             )}
@@ -939,14 +1005,14 @@ export default async function ProAftercarePage({
             suggestedRebookWindowStart={rebookSuggestion?.windowStartIso ?? null}
             suggestedRebookWindowEnd={rebookSuggestion?.windowEndIso ?? null}
             existingRebookSlot={
-              aftercare?.rebookSlot
+              rebookSeed.slot
                 ? {
-                    offeringId: aftercare.rebookSlot.offeringId,
-                    locationId: aftercare.rebookSlot.locationId,
-                    locationType: aftercare.rebookSlot.locationType,
-                    clientAddressId: aftercare.rebookSlot.clientAddressId,
-                    startsAt: aftercare.rebookSlot.startsAt.toISOString(),
-                    endsAt: aftercare.rebookSlot.endsAt.toISOString(),
+                    offeringId: rebookSeed.slot.offeringId,
+                    locationId: rebookSeed.slot.locationId,
+                    locationType: rebookSeed.slot.locationType,
+                    clientAddressId: rebookSeed.slot.clientAddressId,
+                    startsAt: rebookSeed.slot.startsAt.toISOString(),
+                    endsAt: rebookSeed.slot.endsAt.toISOString(),
                   }
                 : null
             }

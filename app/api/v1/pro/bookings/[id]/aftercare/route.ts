@@ -27,6 +27,11 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
+import {
+  AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS,
+  resolveAftercareEditWindow,
+} from '@/lib/aftercare/aftercareEditWindow'
+import { resolveAftercareRebookSeed } from '@/lib/aftercare/aftercareRebookSeed'
 import { computeSuggestedRebookWindow } from '@/app/pro/bookings/[id]/aftercare/aftercareDates'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -177,6 +182,20 @@ const GET_BOOKING_SELECT = {
       sentToClientAt: true,
       lastEditedAt: true,
       version: true,
+      // The live appointment the BOOKED plan created. The authoring surface
+      // must seed from THIS rather than the frozen slot below, or an untouched
+      // save drags a since-rescheduled appointment back to the old time — see
+      // lib/aftercare/aftercareRebookSeed.ts.
+      rebookedBooking: {
+        select: {
+          id: true,
+          status: true,
+          scheduledFor: true,
+          locationType: true,
+          locationId: true,
+          clientAddressId: true,
+        },
+      },
       rebookSlot: {
         select: {
           id: true,
@@ -666,29 +685,42 @@ function mapRecommendedProduct(product: GetRecommendedProductRecord) {
 function mapAftercareSummaryForGet(
   aftercare: NonNullable<GetBookingRecord['aftercareSummary']>,
 ) {
+  // Reconcile the saved plan with the appointment as it stands now, so native
+  // authors against the same truth the web editor shows and an untouched save
+  // can't reschedule the client backwards.
+  const rebookSeed = resolveAftercareRebookSeed({
+    rebookedFor: aftercare.rebookedFor,
+    slot: aftercare.rebookSlot,
+    rebookedBooking: aftercare.rebookedBooking,
+  })
+
   return {
     id: aftercare.id,
     notes: aftercare.notes,
     rebookMode: aftercare.rebookMode,
-    rebookedFor: toIsoOrNull(aftercare.rebookedFor),
+    rebookedFor: toIsoOrNull(rebookSeed.rebookedFor),
     rebookWindowStart: toIsoOrNull(aftercare.rebookWindowStart),
     rebookWindowEnd: toIsoOrNull(aftercare.rebookWindowEnd),
     rebookDeclinedAt: toIsoOrNull(aftercare.rebookDeclinedAt),
     // BOOKED mode books immediately at save; this is the created appointment.
     rebookedBookingId: aftercare.rebookedBookingId,
+    // True when that appointment moved after this aftercare was last saved, so
+    // the editor can explain why the date differs from the one the pro wrote.
+    rebookRescheduledSinceSaved: rebookSeed.rescheduledSinceSaved,
     featuredBeforeAssetId: aftercare.featuredBeforeAssetId,
     featuredAfterAssetId: aftercare.featuredAfterAssetId,
-    rebookSlot: aftercare.rebookSlot
-      ? {
-          id: aftercare.rebookSlot.id,
-          offeringId: aftercare.rebookSlot.offeringId,
-          locationId: aftercare.rebookSlot.locationId,
-          locationType: aftercare.rebookSlot.locationType,
-          clientAddressId: aftercare.rebookSlot.clientAddressId,
-          startsAt: aftercare.rebookSlot.startsAt.toISOString(),
-          endsAt: aftercare.rebookSlot.endsAt.toISOString(),
-        }
-      : null,
+    rebookSlot:
+      aftercare.rebookSlot && rebookSeed.slot
+        ? {
+            id: aftercare.rebookSlot.id,
+            offeringId: rebookSeed.slot.offeringId,
+            locationId: rebookSeed.slot.locationId,
+            locationType: rebookSeed.slot.locationType,
+            clientAddressId: rebookSeed.slot.clientAddressId,
+            startsAt: rebookSeed.slot.startsAt.toISOString(),
+            endsAt: rebookSeed.slot.endsAt.toISOString(),
+          }
+        : null,
     draftSavedAt: toIsoOrNull(aftercare.draftSavedAt),
     sentToClientAt: toIsoOrNull(aftercare.sentToClientAt),
     lastEditedAt: toIsoOrNull(aftercare.lastEditedAt),
@@ -926,6 +958,16 @@ export async function GET(_req: Request, ctx: RouteContext) {
           timeZone: booking.locationTimeZone ?? 'UTC',
         })
 
+    // A completed booking's aftercare stays editable for a bounded correction
+    // window. Resolved from the same function the write boundary refuses on, so
+    // native locks its editor at exactly the moment a save would start failing.
+    const editWindow = resolveAftercareEditWindow({
+      status: booking.status,
+      finishedAt: booking.finishedAt,
+      scheduledFor: booking.scheduledFor,
+      now: new Date(),
+    })
+
     return jsonOk(
       {
         booking: {
@@ -935,6 +977,12 @@ export async function GET(_req: Request, ctx: RouteContext) {
           scheduledFor: booking.scheduledFor.toISOString(),
           finishedAt: toIsoOrNull(booking.finishedAt),
           locationTimeZone: booking.locationTimeZone,
+          aftercareEditWindow: {
+            editable: editWindow.editable,
+            isPostCompletion: editWindow.isPostCompletion,
+            closesAt: toIsoOrNull(editWindow.closesAt),
+            windowDays: AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS,
+          },
           rebookSuggestion: rebookSuggestion
             ? {
                 windowStart: rebookSuggestion.windowStartIso,
