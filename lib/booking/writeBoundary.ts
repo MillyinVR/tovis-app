@@ -239,6 +239,11 @@ import {
   isCheckoutCloseoutComplete,
   isCloseoutPaymentAndAftercareComplete,
 } from '@/lib/booking/closeoutState'
+import {
+  AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS,
+  resolveAftercareEditWindow,
+} from '@/lib/aftercare/aftercareEditWindow'
+import { isActiveAftercareRebookedBooking } from '@/lib/aftercare/aftercareRebookSeed'
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
@@ -12208,15 +12213,28 @@ if (args.rebookSlot) {
     })
   }
 
-  // Once the booking is COMPLETED its aftercare is read-only. We key on status
-  // (not finishedAt) on purpose: a live session can carry a finishedAt while
-  // still being IN_PROGRESS, and that send is exactly what triggers closeout —
-  // completion is the *result* of this write, never a precondition here.
-  if (booking.status === BookingStatus.COMPLETED) {
+  // A COMPLETED booking's aftercare stays editable for a bounded correction
+  // window, then locks for good — see lib/aftercare/aftercareEditWindow.ts for
+  // why the old lock-on-completion behavior was the wrong shape. We still key
+  // on status (not finishedAt) to decide whether a window applies at all: a
+  // live session can carry a finishedAt while still being IN_PROGRESS, and that
+  // send is exactly what triggers closeout — completion is the *result* of this
+  // write, never a precondition here.
+  //
+  // Re-completion is a natural no-op below: `canCompleteBookingCloseout` refuses
+  // an already-COMPLETED booking, so an in-window save updates the aftercare
+  // without touching status, sessionStep or finishedAt.
+  const editWindow = resolveAftercareEditWindow({
+    status: booking.status,
+    finishedAt: booking.finishedAt,
+    scheduledFor: booking.scheduledFor,
+    now,
+  })
+
+  if (!editWindow.editable) {
     throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
-      message: 'This booking is completed; aftercare is read-only.',
-      userMessage:
-        'This booking is completed. Its aftercare can no longer be edited.',
+      message: `Aftercare edit window closed for completed booking ${booking.id}.`,
+      userMessage: `This booking finished more than ${AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS} days ago. Its aftercare can no longer be edited.`,
     })
   }
 
@@ -12380,9 +12398,9 @@ if (
     bookingFinished: false,
     completionBlockers: [],
     booking:
-      // A COMPLETED booking can never reach here (it throws above), so a
-      // present finishedAt is the only remaining "session already finished"
-      // signal worth surfacing on this no-op return.
+      // `finishedAt` is the "session already finished" signal worth surfacing
+      // on this no-op return — it covers both a live session that has been
+      // finished and an in-window edit of an already-COMPLETED booking.
       booking.finishedAt
         ? {
             status: booking.status,
@@ -12515,12 +12533,15 @@ if (validRebookSlot) {
 // the client has nothing to confirm). Create when missing, reschedule when
 // only the time changed, recreate when the placement (location type / mobile
 // address) changed, cancel when the pro withdraws the booked plan.
-const priorRebookedBooking =
-  booking.aftercareSummary?.rebookedBooking &&
-  booking.aftercareSummary.rebookedBooking.status !== BookingStatus.CANCELLED &&
-  booking.aftercareSummary.rebookedBooking.status !== BookingStatus.NO_SHOW
-    ? booking.aftercareSummary.rebookedBooking
-    : null
+//
+// "Which appointment counts" is shared with the authoring surfaces' seed
+// (lib/aftercare/aftercareRebookSeed.ts): if the two ever disagreed, the editor
+// would show one appointment and this sync would act on another.
+const priorRebookedBooking = isActiveAftercareRebookedBooking(
+  booking.aftercareSummary?.rebookedBooking,
+)
+  ? booking.aftercareSummary?.rebookedBooking ?? null
+  : null
 
 let syncedRebookedBookingId: string | null = priorRebookedBooking?.id ?? null
 

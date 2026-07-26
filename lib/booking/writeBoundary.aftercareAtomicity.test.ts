@@ -11,6 +11,10 @@ import {
 
 const TEST_NOW = new Date('2026-04-12T18:00:00.000Z')
 
+function daysBefore(base: Date, days: number): Date {
+  return new Date(base.getTime() - days * 24 * 60 * 60 * 1000)
+}
+
 const mocks = vi.hoisted(() => ({
   prismaTransaction: vi.fn(),
 
@@ -66,6 +70,7 @@ vi.mock('@/lib/notifications/clientNotifications', () => ({
 }))
 
 import { upsertBookingAftercare } from './writeBoundary'
+import { AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS } from '@/lib/aftercare/aftercareEditWindow'
 
 const tx = {
   booking: {
@@ -380,12 +385,15 @@ describe('lib/booking/writeBoundary aftercare atomicity', () => {
     })
   })
 
-  it('rejects aftercare edits once the booking is completed (read-only)', async () => {
+  it('rejects aftercare edits once the completed booking’s correction window has closed', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce({
       ...makeAftercareEligibleBooking(),
       status: BookingStatus.COMPLETED,
       sessionStep: SessionStep.DONE,
-      finishedAt: TEST_NOW,
+      finishedAt: daysBefore(
+        TEST_NOW,
+        AFTERCARE_POST_COMPLETION_EDIT_WINDOW_DAYS + 1,
+      ),
       checkoutStatus: BookingCheckoutStatus.PAID,
       paymentCollectedAt: TEST_NOW,
     })
@@ -423,5 +431,77 @@ describe('lib/booking/writeBoundary aftercare atomicity', () => {
     expect(mocks.txAftercareSummaryUpdate).not.toHaveBeenCalled()
     expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
+
+  it('accepts a correction to a completed booking inside the window without re-completing it', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce({
+      ...makeAftercareEligibleBooking(),
+      status: BookingStatus.COMPLETED,
+      sessionStep: SessionStep.DONE,
+      finishedAt: daysBefore(TEST_NOW, 3),
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      paymentCollectedAt: TEST_NOW,
+      aftercareSummary: {
+        ...makeDraftAftercare(),
+        sentToClientAt: TEST_NOW,
+        draftSavedAt: null,
+        rebookDeclinedAt: null,
+        rebookedBookingId: null,
+        rebookedBooking: null,
+        rebookSlot: null,
+        featuredBeforeAssetId: null,
+        featuredAfterAssetId: null,
+        notes: 'Original notes.',
+        recommendedProducts: [],
+      },
+    })
+
+    mocks.txAftercareSummaryUpsert.mockResolvedValueOnce({
+      ...makeDraftAftercare(),
+      version: 2,
+      sentToClientAt: TEST_NOW,
+      featuredBeforeAssetId: null,
+      featuredAfterAssetId: null,
+    })
+
+    mocks.txMediaAssetCount.mockResolvedValue(0)
+    mocks.txReminderDeleteMany.mockResolvedValue({ count: 0 })
+    mocks.txProductRecommendationDeleteMany.mockResolvedValue({ count: 0 })
+
+    const result = await upsertBookingAftercare({
+      bookingId: 'booking_1',
+      professionalId: 'pro_1',
+      actorUserId: 'user_pro_1',
+      notes: 'Corrected notes, three days later.',
+      rebookMode: AftercareRebookMode.NONE,
+      rebookedFor: null,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      rebookSlot: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      overrideReason: null,
+      createRebookReminder: false,
+      rebookReminderDaysBefore: 7,
+      createProductReminder: false,
+      productReminderDaysAfter: 14,
+      recommendedProducts: [],
+      sendToClient: false,
+      version: 1,
+      requestId: 'req_aftercare_post_completion_edit',
+      idempotencyKey: 'idem_aftercare_post_completion_edit',
+    })
+
+    // The correction lands...
+    expect(mocks.txAftercareSummaryUpsert).toHaveBeenCalledTimes(1)
+    expect(
+      mocks.txAftercareSummaryUpsert.mock.calls[0]?.[0]?.update?.notes,
+    ).toBe('Corrected notes, three days later.')
+
+    // ...and completion is NOT re-run: an already-COMPLETED booking is not a
+    // closeout candidate, so status / sessionStep / finishedAt stay untouched.
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+    expect(result.bookingFinished).toBe(false)
   })
 })
