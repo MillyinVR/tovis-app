@@ -46,6 +46,10 @@ const mocks = vi.hoisted(() => {
       findMany: vi.fn(),
       update: vi.fn(),
     },
+    // B8's stranded-booking scan reads bookings through the same client.
+    booking: {
+      findMany: vi.fn(),
+    },
     $transaction: vi.fn(),
   }
 
@@ -123,6 +127,7 @@ describe('app/api/v1/pro/working-hours/route.ts', () => {
     mocks.enforceRateLimit.mockResolvedValue(null)
     mocks.bumpScheduleConfigVersion.mockResolvedValue(undefined)
     mocks.refreshProfessional.mockResolvedValue(undefined)
+    mocks.prisma.booking.findMany.mockResolvedValue([])
   })
 
   describe('GET', () => {
@@ -311,6 +316,7 @@ describe('app/api/v1/pro/working-hours/route.ts', () => {
           id: true,
           type: true,
           isPrimary: true,
+          timeZone: true,
           workingHours: true,
         },
       })
@@ -390,6 +396,140 @@ describe('app/api/v1/pro/working-hours/route.ts', () => {
         updatedCount: 1,
         updatedLocationIds: ['loc_salon_2'],
       })
+    })
+
+    // B8 (Tori, 2026-07-25): warn-and-list, never refuse. The three shapes the
+    // wire can carry — omitted (nothing changed), a report, and null (the scan
+    // itself failed) — mean three different things and must stay distinguishable.
+    it('omits strandedBookings and never scans when the hours did not change', async () => {
+      const workingHours = defaultWorkingHours()
+
+      mocks.prisma.professionalLocation.findFirst.mockResolvedValue({
+        id: 'loc_salon_2',
+        type: ProfessionalLocationType.SALON,
+        isPrimary: false,
+        timeZone: 'America/Los_Angeles',
+        workingHours,
+      })
+
+      mocks.prisma.professionalLocation.update.mockResolvedValue({
+        id: 'loc_salon_2',
+      })
+
+      const res = await POST(
+        makeRequest(
+          'POST',
+          '/api/v1/pro/working-hours?locationType=SALON&locationId=loc_salon_2',
+          { workingHours },
+        ),
+      )
+
+      expect(res.status).toBe(200)
+
+      const body = await readJson<Record<string, unknown>>(res)
+
+      expect(body).not.toHaveProperty('strandedBookings')
+      expect(mocks.prisma.booking.findMany).not.toHaveBeenCalled()
+    })
+
+    it('reports the bookings the narrowed hours strand', async () => {
+      const before = defaultWorkingHours()
+      const narrowed = {
+        ...defaultWorkingHours(),
+        wed: { enabled: false, start: '09:00', end: '17:00' },
+      }
+
+      mocks.prisma.professionalLocation.findFirst.mockResolvedValue({
+        id: 'loc_salon_2',
+        type: ProfessionalLocationType.SALON,
+        isPrimary: false,
+        timeZone: 'America/Los_Angeles',
+        workingHours: before,
+      })
+
+      mocks.prisma.professionalLocation.update.mockResolvedValue({
+        id: 'loc_salon_2',
+      })
+
+      // Wed 2026-08-05, 10:00 America/Los_Angeles.
+      mocks.prisma.booking.findMany.mockResolvedValue([
+        {
+          id: 'bk_1',
+          scheduledFor: new Date('2026-08-05T17:00:00.000Z'),
+          totalDurationMinutes: 60,
+          locationId: 'loc_salon_2',
+          service: { name: 'Balayage' },
+          client: {
+            firstName: 'Jordan',
+            lastName: 'Reyes',
+            user: { email: 'jordan@example.com' },
+          },
+        },
+      ])
+
+      const res = await POST(
+        makeRequest(
+          'POST',
+          '/api/v1/pro/working-hours?locationType=SALON&locationId=loc_salon_2',
+          { workingHours: narrowed },
+        ),
+      )
+
+      expect(res.status).toBe(200)
+
+      const body = await readJson<{
+        strandedBookings: {
+          total: number
+          items: Array<Record<string, unknown>>
+        }
+      }>(res)
+
+      expect(body.strandedBookings.total).toBe(1)
+      expect(body.strandedBookings.items).toEqual([
+        {
+          id: 'bk_1',
+          scheduledFor: '2026-08-05T17:00:00.000Z',
+          durationMinutes: 60,
+          locationId: 'loc_salon_2',
+          timeZone: 'America/Los_Angeles',
+          clientName: 'Jordan Reyes',
+          serviceName: 'Balayage',
+        },
+      ])
+    })
+
+    it('still saves, with strandedBookings null, when the scan throws', async () => {
+      const narrowed = {
+        ...defaultWorkingHours(),
+        wed: { enabled: false, start: '09:00', end: '17:00' },
+      }
+
+      mocks.prisma.professionalLocation.findFirst.mockResolvedValue({
+        id: 'loc_salon_2',
+        type: ProfessionalLocationType.SALON,
+        isPrimary: false,
+        timeZone: 'America/Los_Angeles',
+        workingHours: defaultWorkingHours(),
+      })
+
+      mocks.prisma.professionalLocation.update.mockResolvedValue({
+        id: 'loc_salon_2',
+      })
+
+      mocks.prisma.booking.findMany.mockRejectedValue(new Error('db down'))
+
+      const res = await POST(
+        makeRequest(
+          'POST',
+          '/api/v1/pro/working-hours?locationType=SALON&locationId=loc_salon_2',
+          { workingHours: narrowed },
+        ),
+      )
+
+      expect(res.status).toBe(200)
+
+      const body = await readJson<{ strandedBookings: unknown }>(res)
+      expect(body.strandedBookings).toBeNull()
     })
 
     it('returns 404 when the targeted location is not owned or not bookable', async () => {
@@ -825,7 +965,20 @@ describe('app/api/v1/pro/working-hours/route.ts', () => {
         'No bookable locations were updated. Check your location types and isBookable flags.',
       )
 
-      expect(txFindMany).not.toHaveBeenCalled()
+      // The pre-write read (which hours are we about to overwrite?) runs before
+      // `updateMany`, so it DOES fire; the read that builds the response must
+      // not — nothing was written.
+      expect(txFindMany).toHaveBeenCalledTimes(1)
+      expect(txFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: { id: true, timeZone: true, workingHours: true },
+        }),
+      )
+      expect(txFindMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+        }),
+      )
       expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
       expect(mocks.refreshProfessional).not.toHaveBeenCalled()
     })

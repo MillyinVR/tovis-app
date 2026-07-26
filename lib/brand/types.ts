@@ -310,6 +310,24 @@ export type BrandWorkingHoursStatusCopy = {
   validationEndAfterStart: string
 }
 
+/**
+ * The heads-up shown after a save that narrows the week over bookings that
+ * already exist there (B8). The save always succeeds — this only tells the pro
+ * what is now outside their published hours, and nothing is cancelled or moved.
+ */
+export type BrandWorkingHoursStrandedCopy = {
+  /** `{count}` is substituted; `titleOne` is the singular form. */
+  title: string
+  titleOne: string
+  description: string
+  /** Shown when more are stranded than the list renders; `{count}` substituted. */
+  more: string
+  viewCalendar: string
+  /** Per-row actions: open that booking for rescheduling, or message the client. */
+  reschedule: string
+  message: string
+}
+
 export type BrandWorkingHoursCopy = {
   /**
    * Brand-owned working-hours / edit-schedule copy.
@@ -335,6 +353,7 @@ export type BrandWorkingHoursCopy = {
 
   actions: BrandWorkingHoursActionsCopy
   status: BrandWorkingHoursStatusCopy
+  stranded: BrandWorkingHoursStrandedCopy
 }
 
 export type BrandProCalendarCopy = {

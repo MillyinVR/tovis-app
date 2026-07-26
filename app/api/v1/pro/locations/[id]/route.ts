@@ -32,7 +32,9 @@ import {
 import {
   normalizeWorkingHours,
   toInputJsonValue,
+  workingHoursEqual,
 } from '@/lib/scheduling/workingHoursValidation'
+import { reportStrandedBookings } from '@/lib/scheduling/strandedBookings'
 
 export const dynamic = 'force-dynamic'
 
@@ -341,8 +343,34 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     await bumpScheduleConfigVersion(professionalId)
     await refreshLocation(locationId, 'location.update')
 
+    // B8: this route is a SECOND hours writer (and the only timezone writer) —
+    // no shipped client sends either field today, but both strand existing
+    // bookings exactly as the working-hours screen does, and a latent path is
+    // where the next UI lands ([[fixing-a-dead-path-activates-latent-bugs]]).
+    // Same rule as `POST /pro/working-hours`: report, never refuse, and only
+    // when something actually moved — an unrelated PATCH (a rename, an address)
+    // must not pay for a booking scan.
+    const scheduleChanged =
+      (workingHoursIn !== undefined &&
+        !workingHoursEqual(existing.workingHours, workingHoursIn)) ||
+      (timeZoneIn !== undefined && timeZoneIn !== (existing.timeZone ?? null))
+
+    const strandedBookings = await reportStrandedBookings({
+      professionalId,
+      changedLocations: scheduleChanged
+        ? [
+            {
+              id: locationId,
+              timeZone: nextTimeZone,
+              workingHours: nextWorkingHours,
+            },
+          ]
+        : [],
+    })
+
     return jsonOk({
       location: mapProfessionalLocation(result),
+      ...(strandedBookings !== undefined ? { strandedBookings } : {}),
     })
   } catch (error) {
     console.error('PATCH /api/v1/pro/locations/[id] error', error)

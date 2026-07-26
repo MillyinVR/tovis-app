@@ -300,6 +300,17 @@ export function defaultProCalendarCopy(
       failedSave: 'Could not save working hours. Try again.',
       validationEndAfterStart: 'End time must be after start time.',
     },
+
+    stranded: {
+      title: '{count} bookings now fall outside these hours',
+      titleOne: '1 booking now falls outside these hours',
+      description:
+        'They are unchanged and still on your calendar — nothing was cancelled or moved.',
+      more: '+{count} more',
+      viewCalendar: 'View calendar',
+      reschedule: 'Reschedule',
+      message: 'Message',
+    },
   },
   
   blockTimeModal: {

@@ -26,6 +26,8 @@ type WorkingHoursTabsProps = {
   activeEditorType?: LocationType
   onChangeEditorType?: (next: LocationType) => void
   onSavedAny?: () => void
+  /** B8: open a stranded booking in the calendar's booking modal. */
+  onRescheduleBooking?: (bookingId: string) => void
 }
 
 type LocationTab = {
@@ -179,6 +181,7 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
     activeEditorType,
     onChangeEditorType,
     onSavedAny,
+    onRescheduleBooking,
   } = props
 
   const tabs = useMemo(() => locationTabs(copy), [copy])
@@ -324,6 +327,7 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
           onSaved={() => {
             onSavedAny?.()
           }}
+          onRescheduleBooking={onRescheduleBooking}
         />
       </div>
     </section>

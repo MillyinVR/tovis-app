@@ -371,6 +371,13 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
           onClose={() => {
             cal.setShowHoursForm(false)
           }}
+          // B8: the stranded-bookings warning offers to move the booking. The
+          // editor and the booking modal cannot usefully be open at once, so
+          // close the overlay first.
+          onRescheduleBooking={(bookingId) => {
+            cal.setShowHoursForm(false)
+            cal.openBookingOrBlock(bookingId)
+          }}
         />
       </section>
     </section>
