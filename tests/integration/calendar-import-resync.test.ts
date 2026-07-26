@@ -477,6 +477,11 @@ beforeEach(() => {
   cacheVersion.bumpScheduleVersion.mockClear()
 })
 
+// The cases in this block run in ORDER and share state ON PURPOSE: they model one
+// feed's life across successive hourly resyncs, and the reconcile can only be
+// exercised by a run that follows a run (it diffs against the `lastSyncedUids`
+// the previous one stored). Splitting them into independent fixtures would test
+// the same write four times and the reconcile not at all.
 describe('B9 — a real .ics feed through the resync, against real Postgres', () => {
   it('materializes the feed: local-day block, real booking, honest notes', async () => {
     serveFeed(fixtureIcs())
