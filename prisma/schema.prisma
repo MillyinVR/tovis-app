@@ -5240,12 +5240,20 @@ model CalendarBlock {
   endsAt   DateTime
   note     String?
 
+  // The source calendar event (iCalendar UID) this block was imported from, for
+  // the Stage-3 calendar import + its resync. Unique per pro, so re-walking the
+  // same feed dedupes on a real constraint instead of a `contains` match against
+  // `note` — which the pro can edit, orphaning the block from its source event.
+  // Null for every block a pro created by hand.
+  importedEventUid String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   professionalProfile ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
   location            ProfessionalLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
+  @@unique([professionalId, importedEventUid])
   @@index([locationId])
   @@index([professionalId, startsAt])
   @@index([professionalId, endsAt])
