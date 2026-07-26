@@ -210,7 +210,16 @@ export type ProReminderSettingsUpdate = {
 
 export class ProReminderSettingsValidationError extends Error {}
 
-function normalizeUpdate(update: ProReminderSettingsUpdate): {
+/**
+ * Validate + canonicalize a cadence patch, or throw
+ * `ProReminderSettingsValidationError`. Exported so a caller can reject a bad
+ * payload BEFORE it opens a transaction — `applyProReminderCadence` takes the
+ * pro's schedule lock, and an invalid save should never acquire it just to roll
+ * back. Pure, so the write path below re-running it costs nothing.
+ */
+export function normalizeProReminderSettingsUpdate(
+  update: ProReminderSettingsUpdate,
+): {
   enabled: boolean
   offsetMinutes: number[]
 } {
@@ -259,7 +268,7 @@ export async function updateProReminderSettings(args: {
   update: ProReminderSettingsUpdate
   db?: DbClient
 }): Promise<ProReminderSettingsDTO> {
-  const data = normalizeUpdate(args.update)
+  const data = normalizeProReminderSettingsUpdate(args.update)
 
   const row = await getDb(args.db).proReminderSettings.upsert({
     where: { professionalId: args.professionalId },

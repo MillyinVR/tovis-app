@@ -30,6 +30,7 @@ import {
 
 import { cancelBooking } from '@/lib/booking/writeBoundary'
 import { applyProReminderCadence } from '@/lib/reminderSettings/applyReminderCadence'
+import { ProReminderSettingsValidationError } from '@/lib/reminderSettings/settings'
 
 // The write boundary snapshots addresses through the PII envelope; the locked
 // transaction this suite drives shares that code path.
@@ -382,6 +383,26 @@ describe('saving a reminder cadence re-plans existing bookings (real DB)', () =>
     expect(await pendingReminders(alreadyHappened)).toHaveLength(0)
     expect(await pendingReminders(pending)).toHaveLength(0)
     expect(await pendingReminders(finished)).toHaveLength(0)
+  })
+
+  it('rejects an invalid cadence without touching a single reminder', async () => {
+    const bookingId = await seedBooking({ scheduledFor: future(10, 17) })
+    await saveCadence([ONE_DAY])
+    const before = await pendingReminders(bookingId)
+    expect(before).toHaveLength(1)
+
+    // 7 minutes is below the 1-hour floor. The validation runs BEFORE the
+    // schedule lock is taken, so a bad payload can never queue the pro's
+    // booking writes behind a transaction that only rolls back.
+    await expect(saveCadence([7])).rejects.toBeInstanceOf(
+      ProReminderSettingsValidationError,
+    )
+
+    const after = await pendingReminders(bookingId)
+    expect(after.map((row) => row.dedupeKey)).toEqual(
+      before.map((row) => row.dedupeKey),
+    )
+    expect(after[0]?.runAt.getTime()).toBe(before[0]?.runAt.getTime())
   })
 
   it('does not resurrect the reminders a cancel already took away', async () => {

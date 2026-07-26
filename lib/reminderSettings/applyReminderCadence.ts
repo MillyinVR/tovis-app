@@ -18,6 +18,7 @@
 import { syncUpcomingBookingRemindersForProfessional } from '@/lib/notifications/appointmentReminders'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
 import {
+  normalizeProReminderSettingsUpdate,
   updateProReminderSettings,
   type ProReminderSettingsUpdate,
 } from '@/lib/reminderSettings/settings'
@@ -42,6 +43,11 @@ export async function applyProReminderCadence(args: {
   professionalId: string
   update: ProReminderSettingsUpdate
 }): Promise<ApplyProReminderCadenceResult> {
+  // Reject a bad payload BEFORE taking the schedule lock: an invalid save must
+  // not make the pro's booking writes queue behind a transaction that only ever
+  // rolls back. The write below re-runs this — it is pure.
+  normalizeProReminderSettingsUpdate(args.update)
+
   return withLockedProfessionalTransaction(
     args.professionalId,
     async ({ tx, now }) => {
