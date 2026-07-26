@@ -34,6 +34,7 @@ import {
 import { pickString } from '@/lib/pick'
 import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
 import { isBookingError } from '@/lib/booking/errors'
+import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { orderMediaByFeatured } from '@/lib/media/bookingBeforeAfter'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
@@ -167,11 +168,10 @@ function statusLabel(value: BookingStatus | string | null | undefined): string {
   const normalized =
     typeof value === 'string' ? value.trim().toUpperCase() : ''
 
-  if (normalized === 'PENDING') return 'Pending'
-  if (normalized === 'ACCEPTED') return 'Accepted'
-  if (normalized === 'COMPLETED') return 'Completed'
-  if (normalized === 'CANCELLED') return 'Cancelled'
-  return normalized || 'Unknown'
+  // Was a fourth hand-written map with no IN_PROGRESS / NO_SHOW arm, so the
+  // token page showed the raw enum for both (B10).
+  if (!normalized) return 'Unknown'
+  return labelForBookingStatus(normalized)
 }
 
 function SectionCard(props: {

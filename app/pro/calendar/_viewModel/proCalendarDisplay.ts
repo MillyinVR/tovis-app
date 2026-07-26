@@ -195,6 +195,42 @@ export function isBookingCalendarEvent(
   return event.kind === 'BOOKING'
 }
 
+/**
+ * The status word on a calendar event chip.
+ *
+ * ONE home (B10): this was copied verbatim into `EventCard` and
+ * `CalendarDesktopShell`, and both copies ended `return copy.statusLabels
+ * .accepted` — so every state without an explicit arm was labelled "Accepted".
+ * The feed emits everything except CANCELLED, which means a session the pro had
+ * already STARTED and a client marked NO_SHOW both read as accepted on the
+ * pro's own calendar.
+ */
+export function eventStatusLabel(
+  event: CalendarEvent,
+  copy: BrandProCalendarCopy,
+): string {
+  if (event.kind === 'BLOCK') return copy.statusLabels.blocked
+  if (event.kind === 'HOLD') return copy.statusLabels.held
+
+  switch (event.status) {
+    case 'PENDING':
+      return copy.statusLabels.pending
+    case 'IN_PROGRESS':
+      return copy.statusLabels.inProgress
+    case 'COMPLETED':
+      return copy.statusLabels.completed
+    case 'NO_SHOW':
+      return copy.statusLabels.noShow
+    case 'WAITLIST':
+      return copy.statusLabels.waitlist
+    case 'CANCELLED':
+    case 'DECLINED':
+      return copy.statusLabels.cancelled
+    default:
+      return copy.statusLabels.accepted
+  }
+}
+
 export function bookingActionId(
   event: CalendarEvent | undefined,
 ): string | null {

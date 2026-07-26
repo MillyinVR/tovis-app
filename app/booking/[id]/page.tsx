@@ -14,6 +14,7 @@ import {
 import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/time'
 import { isRecord } from '@/lib/guards'
+import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
 export const dynamic = 'force-dynamic'
 
@@ -129,12 +130,14 @@ function friendlySource(v: unknown) {
 
 function friendlyStatus(v: unknown) {
   const s = upper(v)
+  if (!s) return 'Unknown'
+  // This page's own map had no IN_PROGRESS or NO_SHOW arm and fell through to
+  // `return s`, printing the DB enum on a page a client can open from a link
+  // (B10). PENDING keeps the longer wording — this is a confirmation page and
+  // the extra clause is the whole point of it.
   if (s === 'PENDING') return 'Requested (waiting for confirmation)'
-  if (s === 'ACCEPTED') return 'Confirmed'
-  if (s === 'CANCELLED') return 'Cancelled'
-  if (s === 'COMPLETED') return 'Completed'
   if (s === 'WAITLIST') return 'Waitlist'
-  return s || 'Unknown'
+  return labelForBookingStatus(s)
 }
 
 function isAddOnItem(item: Pick<ServiceItemRow, 'notes' | 'sortOrder'>) {

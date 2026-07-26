@@ -115,6 +115,10 @@ export const COPY = {
           title: 'Confirmed',
           body: 'You’re booked.',
         },
+        inProgress: {
+          title: 'In progress',
+          body: 'Your appointment is under way. Your pro will wrap up and send your aftercare here.',
+        },
         completed: {
           title: 'Completed',
           body: 'All done. Leave a review if you haven’t already.',
@@ -122,6 +126,12 @@ export const COPY = {
         cancelled: {
           title: 'Cancelled',
           body: 'This booking is cancelled. If you still want the service, book a new time.',
+        },
+        // TERMINAL — never word this as "we're still tracking it" (B10): the
+        // appointment is over and nothing further will move on this booking.
+        noShow: {
+          title: 'Marked as a no-show',
+          body: 'Your pro marked this appointment as missed. If that’s wrong, message them — otherwise book a new time when you’re ready.',
         },
         fallback: {
           title: 'Booking status',

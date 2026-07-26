@@ -25,6 +25,7 @@ import { anchorNoonInTimeZone } from '../_utils/date'
 
 import {
   bookingActionId,
+  eventStatusLabel,
   firstPendingBooking,
   isBookingCalendarEvent,
 } from '../_viewModel/proCalendarDisplay'
@@ -800,23 +801,6 @@ function eventServiceLabel(
   if (event.kind === 'HOLD') return copy.statusLabels.held
 
   return event.details.serviceName.trim() || event.title || copy.labels.service
-}
-
-function eventStatusLabel(
-  event: CalendarEvent,
-  copy: BrandProCalendarCopy,
-): string {
-  if (event.kind === 'BLOCK') return copy.statusLabels.blocked
-  if (event.kind === 'HOLD') return copy.statusLabels.held
-
-  if (event.status === 'PENDING') return copy.statusLabels.pending
-  if (event.status === 'COMPLETED') return copy.statusLabels.completed
-  if (event.status === 'WAITLIST') return copy.statusLabels.waitlist
-  if (event.status === 'CANCELLED' || event.status === 'DECLINED') {
-    return copy.statusLabels.cancelled
-  }
-
-  return copy.statusLabels.accepted
 }
 
 function eventInitials(event: CalendarEvent): string {

@@ -14,9 +14,14 @@ export function defaultProCalendarCopy(
     month: 'This month.',
   },
 
+  // The six booking states read exactly as they do everywhere else in the
+  // product (lib/booking/statusLabel) — a brand may reword them, but the
+  // default must not be a seventh spelling.
   statusLabels: {
-    accepted: 'Accepted',
+    accepted: 'Confirmed',
     pending: 'Pending',
+    inProgress: 'In progress',
+    noShow: 'No-show',
     completed: 'Completed',
     waitlist: 'Waitlist',
     blocked: 'Blocked',
@@ -179,15 +184,20 @@ export function defaultProCalendarCopy(
     dismissLabel: 'Hide pending requests bar',
   },
 
+  // The legend is the key to the chips beside it, so it uses the chips' words —
+  // it read "Accepted" while the chip it explains now reads "Confirmed" (B10).
   legend: {
-    accepted: 'Accepted',
+    accepted: 'Confirmed',
     pending: 'Pending request',
     completed: 'Completed',
     waitlist: 'Waitlist hold',
     blocked: 'Blocked / break',
     // Anonymous on purpose — a hold means someone is mid-checkout right now,
     // and the pro is told the time is spoken for, not who is hesitating (B5).
-    held: 'Booking in progress',
+    // Reworded from "Booking in progress": once IN_PROGRESS got a chip of its
+    // own, that phrase named a *live session* on one row and a *hold* on this
+    // one. "Checkout" keeps B5's anonymity and says which of the two it is.
+    held: 'Checkout in progress',
   },
 
   emptyState: {

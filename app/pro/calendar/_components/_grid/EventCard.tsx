@@ -12,6 +12,7 @@ import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType } from '../../_types'
 
 import { calendarStatusMeta } from '../../_utils/statusStyles'
+import { eventStatusLabel } from '../../_viewModel/proCalendarDisplay'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,23 +97,6 @@ function serviceItemCountLabel(args: {
     serviceCount === 1 ? copy.labels.service : copy.labels.services
 
   return `${serviceCount} ${label.toLowerCase()}`
-}
-
-function eventStatusLabel(
-  event: CalendarEvent,
-  copy: BrandProCalendarCopy,
-): string {
-  if (event.kind === 'BLOCK') return copy.statusLabels.blocked
-  if (event.kind === 'HOLD') return copy.statusLabels.held
-
-  if (event.status === 'PENDING') return copy.statusLabels.pending
-  if (event.status === 'COMPLETED') return copy.statusLabels.completed
-  if (event.status === 'WAITLIST') return copy.statusLabels.waitlist
-  if (event.status === 'CANCELLED' || event.status === 'DECLINED') {
-    return copy.statusLabels.cancelled
-  }
-
-  return copy.statusLabels.accepted
 }
 
 function buildEventCardCopy(args: {
