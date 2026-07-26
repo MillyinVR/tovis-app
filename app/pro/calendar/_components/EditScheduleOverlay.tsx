@@ -29,6 +29,8 @@ type EditScheduleOverlayProps = {
   activeEditorType?: LocationType
   onChangeEditorType?: (next: LocationType) => void
   onSavedAny?: () => void
+  /** B8: open a stranded booking in the calendar's booking modal. */
+  onRescheduleBooking?: (bookingId: string) => void
 
   onClose: () => void
 }
@@ -73,6 +75,7 @@ export function EditScheduleOverlay(props: EditScheduleOverlayProps) {
     activeEditorType,
     onChangeEditorType,
     onSavedAny,
+    onRescheduleBooking,
     onClose,
   } = props
 
@@ -171,6 +174,7 @@ export function EditScheduleOverlay(props: EditScheduleOverlayProps) {
             activeEditorType={activeEditorType}
             onChangeEditorType={onChangeEditorType}
             onSavedAny={onSavedAny}
+            onRescheduleBooking={onRescheduleBooking}
           />
         </div>
       </section>

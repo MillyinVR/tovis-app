@@ -7,25 +7,27 @@ import {
   defaultWorkingHours,
   normalizeWorkingHours,
   toInputJsonValue,
+  workingHoursEqual,
   type WorkingHoursObj,
 } from '@/lib/scheduling/workingHoursValidation'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+// B8 (Tori, 2026-07-25): a save that narrows hours never touches the bookings
+// it strands — but the pro must be TOLD. Reported only when the hours actually
+// changed, and best-effort, so a failed scan can never turn a committed save
+// into a 500.
+import { reportStrandedBookings } from '@/lib/scheduling/strandedBookings'
+import type {
+  ProWorkingHoursOk,
+  ProWorkingHoursSaveOk,
+} from '@/lib/dto/proWorkingHours'
 
 export const dynamic = 'force-dynamic'
 
 type LocationMode = 'SALON' | 'MOBILE'
 
-type GetResponse = {
-  ok: true
-  locationType: LocationMode
-  locationId: string | null
-  location: { id: string; type: ProfessionalLocationType; isPrimary: boolean } | null
-  workingHours: WorkingHoursObj
-  usedDefault: boolean
-  missingLocation: boolean
-}
+type GetResponse = ProWorkingHoursOk
 
 type PostBody = {
   workingHours?: unknown
@@ -61,10 +63,12 @@ async function findOwnedBookableLocation(args: {
       id: true,
       type: true,
       isPrimary: true,
+      timeZone: true,
       workingHours: true,
     },
   })
 }
+
 
 function typesForMode(mode: LocationMode): ProfessionalLocationType[] {
   return mode === 'MOBILE'
@@ -255,6 +259,8 @@ export async function POST(req: Request) {
         return jsonFail(400, 'locationType does not match that location.')
       }
 
+      const hoursChanged = !workingHoursEqual(loc.workingHours, normalized)
+
       await prisma.professionalLocation.update({
         where: {
           id: loc.id,
@@ -270,22 +276,30 @@ export async function POST(req: Request) {
       await bumpScheduleConfigVersion(professionalId)
       await refreshProfessional(professionalId, 'workingHours.update')
 
-      return jsonOk(
-        {
-          locationType: locationMode,
-          locationId: loc.id,
-          location: {
-            id: loc.id,
-            type: loc.type,
-            isPrimary: loc.isPrimary,
-          },
-          workingHours: normalized,
-          usedDefault: false,
-          updatedCount: 1,
-          updatedLocationIds: [loc.id],
+      const strandedBookings = await reportStrandedBookings({
+        professionalId,
+        changedLocations: hoursChanged
+          ? [{ id: loc.id, timeZone: loc.timeZone, workingHours: normalized }]
+          : [],
+      })
+
+      const payload: ProWorkingHoursSaveOk = {
+        ok: true,
+        locationType: locationMode,
+        locationId: loc.id,
+        location: {
+          id: loc.id,
+          type: loc.type,
+          isPrimary: loc.isPrimary,
         },
-        200,
-      )
+        workingHours: normalized,
+        usedDefault: false,
+        updatedCount: 1,
+        updatedLocationIds: [loc.id],
+        ...(strandedBookings !== undefined ? { strandedBookings } : {}),
+      }
+
+      return jsonOk(payload, 200)
     }
 
     if (!mode) {
@@ -307,6 +321,22 @@ export async function POST(req: Request) {
     const types = typesForMode(mode)
 
     const result = await prisma.$transaction(async (tx) => {
+      // Read the hours we are about to overwrite, inside the transaction, so the
+      // "did anything change" answer belongs to the same write. Only the
+      // locations whose week actually moved get scanned for stranded bookings.
+      const before = await tx.professionalLocation.findMany({
+        where: {
+          professionalId,
+          isBookable: true,
+          type: { in: types },
+        },
+        select: {
+          id: true,
+          timeZone: true,
+          workingHours: true,
+        },
+      })
+
       const updated = await tx.professionalLocation.updateMany({
         where: {
           professionalId,
@@ -341,6 +371,13 @@ export async function POST(req: Request) {
         ok: true as const,
         updatedCount: updated.count,
         updatedLocations,
+        changedLocations: before
+          .filter((loc) => !workingHoursEqual(loc.workingHours, normalized))
+          .map((loc) => ({
+            id: loc.id,
+            timeZone: loc.timeZone,
+            workingHours: normalized,
+          })),
       }
     })
 
@@ -358,24 +395,30 @@ export async function POST(req: Request) {
 
     const representative = result.updatedLocations[0] ?? null
 
-    return jsonOk(
-      {
-        locationType: mode,
-        locationId: representative?.id ?? null,
-        location: representative
-          ? {
-              id: representative.id,
-              type: representative.type,
-              isPrimary: representative.isPrimary,
-            }
-          : null,
-        workingHours: normalized,
-        usedDefault: false,
-        updatedCount: result.updatedCount,
-        updatedLocationIds: result.updatedLocations.map((location) => location.id),
-      },
-      200,
-    )
+    const strandedBookings = await reportStrandedBookings({
+      professionalId,
+      changedLocations: result.changedLocations,
+    })
+
+    const payload: ProWorkingHoursSaveOk = {
+      ok: true,
+      locationType: mode,
+      locationId: representative?.id ?? null,
+      location: representative
+        ? {
+            id: representative.id,
+            type: representative.type,
+            isPrimary: representative.isPrimary,
+          }
+        : null,
+      workingHours: normalized,
+      usedDefault: false,
+      updatedCount: result.updatedCount,
+      updatedLocationIds: result.updatedLocations.map((location) => location.id),
+      ...(strandedBookings !== undefined ? { strandedBookings } : {}),
+    }
+
+    return jsonOk(payload, 200)
   } catch (e) {
     console.error('POST /api/v1/pro/working-hours error:', e)
     return jsonFail(500, 'Failed to save working hours.')

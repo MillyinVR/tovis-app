@@ -11261,6 +11261,67 @@
       ],
       "type": "object"
     },
+    "ProStrandedBookingDTO": {
+      "description": "One booking that no longer fits the hours the pro just saved.\n\nReported, never acted on: B8's ruling (Tori, 2026-07-25) is warn-and-list — the save always succeeds and the bookings are left exactly as they are.",
+      "properties": {
+        "clientName": {
+          "type": "string"
+        },
+        "durationMinutes": {
+          "description": "The appointment itself, buffer excluded.",
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "scheduledFor": {
+          "description": "ISO-8601 UTC instant. Render it in `timeZone`.",
+          "type": "string"
+        },
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZone": {
+          "description": "IANA zone of that booking's location, for rendering `scheduledFor`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "scheduledFor",
+        "durationMinutes",
+        "locationId",
+        "timeZone",
+        "clientName",
+        "serviceName"
+      ],
+      "type": "object"
+    },
+    "ProStrandedBookingsDTO": {
+      "description": "The bookings the just-saved hours strand.\n\n`total` counts them all; `items` is capped (soonest first). The whole field is OMITTED when the save changed no hours, and is `null` when the scan itself failed — a warning we could not compute must not read as \"nothing is wrong\".",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ProStrandedBookingDTO"
+          },
+          "type": "array"
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "total",
+        "items"
+      ],
+      "type": "object"
+    },
     "ProVisibilityActionDTO": {
       "description": "Where the pro goes to pull this lever.",
       "properties": {
@@ -11403,6 +11464,148 @@
         "UNKNOWN"
       ],
       "type": "string"
+    },
+    "ProWorkingHoursLocationDTO": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "isPrimary": {
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/definitions/ProfessionalLocationType"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "isPrimary"
+      ],
+      "type": "object"
+    },
+    "ProWorkingHoursOk": {
+      "description": "GET /api/v1/pro/working-hours success response.",
+      "properties": {
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProWorkingHoursLocationDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationType": {
+          "enum": [
+            "SALON",
+            "MOBILE"
+          ],
+          "type": "string"
+        },
+        "missingLocation": {
+          "description": "True when no bookable location of that mode exists yet.",
+          "type": "boolean"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "usedDefault": {
+          "description": "True when the pro has never saved hours and these are the defaults.",
+          "type": "boolean"
+        },
+        "workingHours": {
+          "$ref": "#/definitions/WorkingHoursObj"
+        }
+      },
+      "required": [
+        "ok",
+        "locationType",
+        "locationId",
+        "location",
+        "workingHours",
+        "usedDefault",
+        "missingLocation"
+      ],
+      "type": "object"
+    },
+    "ProWorkingHoursSaveOk": {
+      "description": "POST /api/v1/pro/working-hours success response.",
+      "properties": {
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProWorkingHoursLocationDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationType": {
+          "enum": [
+            "SALON",
+            "MOBILE"
+          ],
+          "type": "string"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "strandedBookings": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProStrandedBookingsDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent when the hours did not change; null when the scan failed."
+        },
+        "updatedCount": {
+          "description": "How many locations this save wrote to.",
+          "type": "number"
+        },
+        "updatedLocationIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "usedDefault": {
+          "type": "boolean"
+        },
+        "workingHours": {
+          "$ref": "#/definitions/WorkingHoursObj"
+        }
+      },
+      "required": [
+        "ok",
+        "locationType",
+        "locationId",
+        "location",
+        "workingHours",
+        "usedDefault",
+        "updatedCount",
+        "updatedLocationIds"
+      ],
+      "type": "object"
     },
     "ProfessionType": {
       "$ref": "#/definitions/%24Enums.ProfessionType"
@@ -12607,6 +12810,67 @@
     },
     "VerificationStatus": {
       "$ref": "#/definitions/%24Enums.VerificationStatus"
+    },
+    "WorkingHoursDay": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "end": {
+          "type": "string"
+        },
+        "start": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "WorkingHoursObj": {
+      "anyOf": [
+        {
+          "properties": {
+            "fri": {
+              "$ref": "#/definitions/WorkingHoursDay"
+            },
+            "mon": {
+              "$ref": "#/definitions/WorkingHoursDay"
+            },
+            "sat": {
+              "$ref": "#/definitions/WorkingHoursDay"
+            },
+            "sun": {
+              "$ref": "#/definitions/WorkingHoursDay"
+            },
+            "thu": {
+              "$ref": "#/definitions/WorkingHoursDay"
+            },
+            "tue": {
+              "$ref": "#/definitions/WorkingHoursDay"
+            },
+            "wed": {
+              "$ref": "#/definitions/WorkingHoursDay"
+            }
+          },
+          "required": [
+            "fri",
+            "mon",
+            "sat",
+            "sun",
+            "thu",
+            "tue",
+            "wed"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "WorkspaceSwitchResponseDTO": {
       "properties": {

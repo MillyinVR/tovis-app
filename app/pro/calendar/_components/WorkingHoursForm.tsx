@@ -1,13 +1,15 @@
 // app/pro/calendar/_components/WorkingHoursForm.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 import type {
   BrandWorkingHoursCopy,
   BrandWorkingHoursDayKey,
+  BrandWorkingHoursStrandedCopy,
 } from '@/lib/brand/types'
 
 import {
@@ -16,6 +18,9 @@ import {
   safeJson,
 } from '@/lib/http'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
+import { formatSlotFullLabel } from '@/lib/time'
+import { isRecord } from '@/lib/guards'
+import type { ProStrandedBookingDTO } from '@/lib/dto/proWorkingHours'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +55,14 @@ type WorkingHoursFormProps = {
   onSaved?: (hours: ApiWorkingHours) => void
   locationType?: LocationType
   locationId?: string | null
+  /**
+   * Open the calendar's booking modal for a booking this save stranded, so the
+   * pro can move it without hunting for it. The calendar page owns that modal
+   * (`openBookingOrBlock`); it also closes this overlay, since the two cannot
+   * be usefully open at once. Omitted, the notice lists without a
+   * reschedule action.
+   */
+  onRescheduleBooking?: (bookingId: string) => void
 }
 
 type DayDefinition = {
@@ -57,6 +70,58 @@ type DayDefinition = {
   brandKey: BrandWorkingHoursDayKey
   label: string
   fullLabel: string
+}
+
+/**
+ * B8 — what the save reports back about the bookings it just put outside the
+ * pro's published hours. The save SUCCEEDS regardless (Tori, 2026-07-25):
+ * nothing here refuses, cancels or moves anything.
+ *
+ * Parsed defensively because the field is three-valued on the wire: absent
+ * (nothing changed), `null` (the server could not tell), or a report. Only the
+ * last one renders — a warning we could not compute must not become a
+ * reassuring "0".
+ */
+type StrandedBookingsState = {
+  total: number
+  items: ProStrandedBookingDTO[]
+}
+
+function parseStrandedBookings(data: unknown): StrandedBookingsState | null {
+  if (!isRecord(data)) return null
+
+  const raw = data.strandedBookings
+  if (!isRecord(raw)) return null
+
+  const total = typeof raw.total === 'number' ? raw.total : 0
+  if (total <= 0) return null
+
+  const items: ProStrandedBookingDTO[] = []
+
+  if (Array.isArray(raw.items)) {
+    for (const item of raw.items) {
+      if (!isRecord(item)) continue
+
+      const id = typeof item.id === 'string' ? item.id : ''
+      const scheduledFor =
+        typeof item.scheduledFor === 'string' ? item.scheduledFor : ''
+      if (!id || !scheduledFor) continue
+
+      items.push({
+        id,
+        scheduledFor,
+        durationMinutes:
+          typeof item.durationMinutes === 'number' ? item.durationMinutes : 0,
+        locationId: typeof item.locationId === 'string' ? item.locationId : '',
+        timeZone: typeof item.timeZone === 'string' ? item.timeZone : 'UTC',
+        clientName: typeof item.clientName === 'string' ? item.clientName : '',
+        serviceName:
+          typeof item.serviceName === 'string' ? item.serviceName : null,
+      })
+    }
+  }
+
+  return { total, items }
 }
 
 type DayDefinitionSeed = {
@@ -513,6 +578,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
     copy,
     initialHours,
     onSaved,
+    onRescheduleBooking,
     locationType = 'SALON',
     locationId = null,
   } = props
@@ -526,6 +592,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [stranded, setStranded] = useState<StrandedBookingsState | null>(null)
 
   const daysOn = enabledDayCount(state)
 
@@ -615,6 +682,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
 
     setMessage(null)
     setError(null)
+    setStranded(null)
 
     const validationError = validateState({
       state,
@@ -660,6 +728,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
       }
 
       setMessage(copy.actions.saved)
+      setStranded(parseStrandedBookings(data))
       onSaved?.(payload)
       router.refresh()
     } catch (caught) {
@@ -763,6 +832,14 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
 
         {message ? <InlineState tone="success">{message}</InlineState> : null}
         {error ? <InlineState tone="danger">{error}</InlineState> : null}
+
+        {stranded ? (
+          <StrandedBookingsNotice
+            copy={copy.stranded}
+            stranded={stranded}
+            onRescheduleBooking={onRescheduleBooking}
+          />
+        ) : null}
       </footer>
     </form>
   )
@@ -938,6 +1015,100 @@ function StateCard(props: StateCardProps) {
     >
       {children}
     </div>
+  )
+}
+
+/**
+ * The bookings this save just put outside the pro's published hours.
+ *
+ * Informational only — it appears BESIDE the "Saved" confirmation, never
+ * instead of it. Each row is rendered in its own booking's location timezone,
+ * which is the zone the pro will meet that client in.
+ */
+function StrandedBookingsNotice(props: {
+  copy: BrandWorkingHoursStrandedCopy
+  stranded: StrandedBookingsState
+  onRescheduleBooking?: (bookingId: string) => void
+}) {
+  const { copy, stranded, onRescheduleBooking } = props
+  const ref = useRef<HTMLElement | null>(null)
+
+  // The editor is a scrolling overlay and this lands BELOW the save button, so
+  // on a full week the whole warning sits under the fold — driven, not guessed:
+  // the first build rendered correctly and was invisible to the pro who had
+  // just clicked Save.
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [stranded])
+
+  const title =
+    stranded.total === 1
+      ? copy.titleOne
+      : copy.title.replace('{count}', String(stranded.total))
+
+  const hiddenCount = stranded.total - stranded.items.length
+
+  return (
+    <section
+      ref={ref}
+      className="brand-pro-calendar-working-stranded"
+      data-working-hours-stranded="true"
+      data-stranded-total={stranded.total}
+    >
+      <p className="brand-pro-calendar-working-stranded-title">{title}</p>
+
+      <ul className="brand-pro-calendar-working-stranded-list">
+        {stranded.items.map((booking) => (
+          <li key={booking.id}>
+            <span className="brand-pro-calendar-working-stranded-when">
+              {formatSlotFullLabel(booking.scheduledFor, booking.timeZone)}
+            </span>
+            <span className="brand-pro-calendar-working-stranded-who">
+              {booking.serviceName
+                ? `${booking.clientName} · ${booking.serviceName}`
+                : booking.clientName}
+            </span>
+
+            <span className="brand-pro-calendar-working-stranded-actions">
+              {onRescheduleBooking ? (
+                <button
+                  type="button"
+                  onClick={() => onRescheduleBooking(booking.id)}
+                  className="brand-pro-calendar-working-stranded-action brand-focus"
+                  data-stranded-action="reschedule"
+                >
+                  {copy.reschedule}
+                </button>
+              ) : null}
+
+              {/* Anchored to the BOOKING, which the row already carries — the
+                  same context iOS's `openBookingThread` resolves, so both
+                  platforms land in one thread and no client id has to ride on
+                  this wire. */}
+              <Link
+                href={`/messages/start?contextType=BOOKING&contextId=${encodeURIComponent(
+                  booking.id,
+                )}`}
+                className="brand-pro-calendar-working-stranded-action brand-focus"
+                data-stranded-action="message"
+              >
+                {copy.message}
+              </Link>
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {hiddenCount > 0 ? (
+        <p className="brand-pro-calendar-working-stranded-more">
+          {copy.more.replace('{count}', String(hiddenCount))}
+        </p>
+      ) : null}
+
+      <p className="brand-pro-calendar-working-stranded-description">
+        {copy.description}
+      </p>
+    </section>
   )
 }
 

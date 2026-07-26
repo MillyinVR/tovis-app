@@ -5084,6 +5084,85 @@
   color: rgb(var(--tone-danger));
 }
 
+/* B8 — bookings the just-saved hours put outside the pro's published week.
+   Warn tone, not danger: the save succeeded and nothing is broken. */
+.brand-pro-calendar-working-stranded {
+  width: 100%;
+  border: 1px solid rgb(var(--tone-warn) / 0.35);
+  border-radius: 12px;
+  background: rgb(var(--tone-warn) / 0.08);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.brand-pro-calendar-working-stranded-title {
+  color: rgb(var(--tone-warn));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.brand-pro-calendar-working-stranded-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.brand-pro-calendar-working-stranded-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: rgb(var(--text-primary));
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.brand-pro-calendar-working-stranded-who {
+  color: rgb(var(--text-secondary));
+  font-weight: 600;
+}
+
+.brand-pro-calendar-working-stranded-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.brand-pro-calendar-working-stranded-action {
+  border: 1px solid rgb(var(--tone-warn) / 0.4);
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(var(--tone-warn));
+  padding: 3px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brand-pro-calendar-working-stranded-action:hover {
+  background: rgb(var(--tone-warn) / 0.12);
+}
+
+.brand-pro-calendar-working-stranded-more,
+.brand-pro-calendar-working-stranded-description {
+  color: rgb(var(--text-secondary));
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 .brand-pro-calendar-working-state {
   border: 1px solid rgb(var(--surface-glass) / 0.12);
   border-radius: 16px;

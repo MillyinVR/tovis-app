@@ -332,6 +332,15 @@ export type {
   ProAvailabilityBusyDaysOk,
 } from '@/lib/dto/proAvailability'
 
+// ── Pro working hours (GET/POST /api/v1/pro/working-hours) ───────────────────
+export type {
+  ProStrandedBookingDTO,
+  ProStrandedBookingsDTO,
+  ProWorkingHoursLocationDTO,
+  ProWorkingHoursOk,
+  ProWorkingHoursSaveOk,
+} from '@/lib/dto/proWorkingHours'
+
 // ── Offering add-ons (GET /api/v1/offerings/add-ons) ─────────────────────────
 export type {
   OfferingAddOnItemDTO,

@@ -138,6 +138,30 @@ export function looksLikeWorkingHours(value: unknown): value is WorkingHoursObj 
   return normalizeWorkingHours(value) !== null
 }
 
+/**
+ * Did this save actually CHANGE the hours?
+ *
+ * Both operands are normalized first, so an unparseable / absent stored value
+ * compares as different from any real week — a location that has never had
+ * hours is genuinely being changed the first time one is saved.
+ *
+ * Callers use this to avoid doing work on a no-op save ("succeeded" is not
+ * "changed" — the same trap B2 and B4 each hit with a cache bump).
+ */
+export function workingHoursEqual(a: unknown, b: unknown): boolean {
+  const left = normalizeWorkingHours(a)
+  const right = normalizeWorkingHours(b)
+
+  if (!left || !right) return false
+
+  return DAYS.every(
+    (day) =>
+      left[day].enabled === right[day].enabled &&
+      left[day].start === right[day].start &&
+      left[day].end === right[day].end,
+  )
+}
+
 export function safeHoursFromDb(value: unknown): WorkingHoursObj {
   return normalizeWorkingHours(value) ?? defaultWorkingHours()
 }
