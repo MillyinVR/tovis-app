@@ -466,6 +466,118 @@ describe('lib/booking/writeBoundary.updateProBooking', () => {
     })
   })
 
+  // B7: the reminder body names every service on the booking, so swapping an
+  // add-on for another of the same length changes what the client is told —
+  // even though the start, the duration, the primary service and the primary
+  // offering are all identical. Without a resync the stored reminder keeps the
+  // old label.
+  it('syncs appointment reminders when a non-primary service item is swapped at equal duration', async () => {
+    mocks.txBookingFindFirst.mockResolvedValue(buildExistingAcceptedBooking())
+
+    mocks.txBookingServiceItemFindMany.mockResolvedValue([
+      {
+        id: 'booking_item_old',
+        bookingId: 'booking_1',
+        serviceId: 'svc_old',
+        offeringId: 'off_old',
+        itemType: 'BASE',
+        parentItemId: null,
+        priceSnapshot: new Prisma.Decimal('100.00'),
+        durationMinutesSnapshot: 60,
+        sortOrder: 0,
+      },
+      {
+        id: 'booking_item_addon_a',
+        bookingId: 'booking_1',
+        serviceId: 'svc_addon_a',
+        offeringId: 'off_addon_a',
+        itemType: 'ADD_ON',
+        parentItemId: 'booking_item_old',
+        priceSnapshot: new Prisma.Decimal('20.00'),
+        durationMinutesSnapshot: 30,
+        sortOrder: 1,
+      },
+    ])
+
+    mocks.txServiceFindMany.mockResolvedValue([
+      buildService('svc_old', 'Old Service'),
+      buildService('svc_addon_b', 'Scalp Treatment'),
+    ])
+
+    mocks.txProfessionalServiceOfferingFindMany.mockResolvedValue([
+      buildOffering({
+        id: 'off_old',
+        serviceId: 'svc_old',
+        serviceName: 'Old Service',
+        price: '100.00',
+        durationMinutes: 60,
+      }),
+      buildOffering({
+        id: 'off_addon_b',
+        serviceId: 'svc_addon_b',
+        serviceName: 'Scalp Treatment',
+        price: '20.00',
+        durationMinutes: 30,
+      }),
+    ])
+
+    mocks.buildNormalizedBookingItemsFromRequestedOfferings.mockReturnValue([
+      {
+        serviceId: 'svc_old',
+        offeringId: 'off_old',
+        itemType: BookingServiceItemType.BASE,
+        durationMinutesSnapshot: 60,
+        priceSnapshot: new Prisma.Decimal('100.00'),
+      },
+      {
+        serviceId: 'svc_addon_b',
+        offeringId: 'off_addon_b',
+        itemType: BookingServiceItemType.ADD_ON,
+        durationMinutesSnapshot: 30,
+        priceSnapshot: new Prisma.Decimal('20.00'),
+      },
+    ])
+
+    // Same primary, same primary offering, same total duration as the booking
+    // already has — only the add-on identity moved.
+    mocks.computeBookingItemLikeTotals.mockReturnValue({
+      primaryServiceId: 'svc_old',
+      primaryOfferingId: 'off_old',
+      computedDurationMinutes: 90,
+      computedSubtotal: new Prisma.Decimal('120.00'),
+    })
+
+    await updateProBooking({
+      professionalId: 'pro_1',
+      actorUserId: 'user_1',
+      overrideReason: null,
+      bookingId: 'booking_1',
+      nextStatus: null,
+      notifyClient: false,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+      nextStart: null,
+      nextBuffer: null,
+      nextDuration: null,
+      parsedRequestedItems: [
+        { serviceId: 'svc_old', offeringId: 'off_old', sortOrder: 0 },
+        { serviceId: 'svc_addon_b', offeringId: 'off_addon_b', sortOrder: 1 },
+      ],
+      hasBuffer: false,
+      hasDuration: false,
+      hasServiceItems: true,
+    })
+
+    expect(mocks.syncBookingAppointmentReminders).toHaveBeenCalledWith({
+      tx,
+      bookingId: 'booking_1',
+    })
+
+    // Occupancy is untouched, so nothing invalidates the availability cache.
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
+  })
+
   it('does not sync appointment reminders when accepted booking changes do not affect reminder state', async () => {
     mocks.txBookingFindFirst.mockResolvedValue(buildExistingAcceptedBooking())
 

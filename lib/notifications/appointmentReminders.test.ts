@@ -9,6 +9,7 @@ const TEST_NOW = new Date('2026-03-18T16:00:00.000Z')
 
 const mocks = vi.hoisted(() => ({
   txBookingFindUnique: vi.fn(),
+  txBookingFindMany: vi.fn(),
   txScheduledClientNotificationFindUnique: vi.fn(),
   txScheduledClientNotificationUpdateMany: vi.fn(),
 
@@ -33,14 +34,18 @@ import {
   cancelBookingAppointmentReminders,
   cancelDueAppointmentReminder,
   computeAppointmentReminderRunAt,
+  MAX_CADENCE_RESYNC_BOOKINGS,
   parseAppointmentReminderPayload,
+  rescheduleDueAppointmentReminder,
   syncBookingAppointmentReminders,
+  syncUpcomingBookingRemindersForProfessional,
   validateDueAppointmentReminder,
 } from './appointmentReminders'
 
 type TxMock = {
   booking: {
     findUnique: typeof mocks.txBookingFindUnique
+    findMany: typeof mocks.txBookingFindMany
   }
   scheduledClientNotification: {
     findUnique: typeof mocks.txScheduledClientNotificationFindUnique
@@ -51,6 +56,7 @@ type TxMock = {
 const txMock: TxMock = {
   booking: {
     findUnique: mocks.txBookingFindUnique,
+    findMany: mocks.txBookingFindMany,
   },
   scheduledClientNotification: {
     findUnique: mocks.txScheduledClientNotificationFindUnique,
@@ -1036,6 +1042,310 @@ describe('lib/notifications/appointmentReminders', () => {
         reason:
           'Scheduled reminder dedupeKey does not match canonical reminder state.',
       })
+    })
+
+    // B7: the drain is the last thing that looks at a reminder before it goes
+    // out. It re-derives the canonical plan anyway, so drift is a reason to
+    // CORRECT the row, not to cancel it — a cancel is terminal and nothing in
+    // the system re-plans a cancelled row.
+    it('returns RESCHEDULE (not CANCEL) when the booking moved later and the canonical reminder is still ahead', async () => {
+      const movedTo = new Date('2026-04-04T16:00:00.000Z')
+      const booking = makeBooking({
+        id: 'booking_1',
+        clientId: 'client_1',
+        scheduledFor: movedTo,
+        locationTimeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+      })
+
+      // The row still carries the plan for the ORIGINAL 2026-03-28 appointment.
+      const stalePayload = makeReminderPayload({
+        bookingId: 'booking_1',
+        offsetMinutes: 10080,
+        scheduledFor: new Date('2026-03-28T16:00:00.000Z'),
+        timeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+      })
+
+      mocks.txScheduledClientNotificationFindUnique.mockResolvedValueOnce(
+        makeDueRow({
+          id: 'row_moved_later',
+          runAt: new Date('2026-03-21T16:00:00.000Z'),
+          data: stalePayload,
+        }),
+      )
+      mocks.txBookingFindUnique.mockResolvedValueOnce(booking)
+
+      const result = await validateDueAppointmentReminder({
+        tx,
+        scheduledClientNotificationId: 'row_moved_later',
+        now: new Date('2026-03-21T16:00:01.000Z'),
+      })
+
+      expect(result).toEqual({
+        action: 'RESCHEDULE',
+        rowId: 'row_moved_later',
+        // One week before the NEW appointment, same local wall clock.
+        runAt: new Date('2026-03-28T16:00:00.000Z'),
+        data: makeReminderPayload({
+          bookingId: 'booking_1',
+          offsetMinutes: 10080,
+          scheduledFor: movedTo,
+          timeZone: 'America/Los_Angeles',
+          serviceName: 'Silk Press',
+        }),
+        reason:
+          'Scheduled reminder runAt no longer matches canonical reminder state.',
+      })
+    })
+
+    it('sends with refreshed content when the stored service label drifted', async () => {
+      const scheduledFor = new Date('2026-03-28T16:00:00.000Z')
+      const booking = makeBooking({
+        id: 'booking_1',
+        clientId: 'client_1',
+        scheduledFor,
+        locationTimeZone: 'America/Los_Angeles',
+        // Renamed since the row was written.
+        serviceName: 'Silk Press & Trim',
+      })
+
+      mocks.txScheduledClientNotificationFindUnique.mockResolvedValueOnce(
+        makeDueRow({
+          id: 'row_stale_label',
+          runAt: new Date('2026-03-21T16:00:00.000Z'),
+          data: makeReminderPayload({
+            bookingId: 'booking_1',
+            offsetMinutes: 10080,
+            scheduledFor,
+            timeZone: 'America/Los_Angeles',
+            serviceName: 'Silk Press',
+          }),
+        }),
+      )
+      mocks.txBookingFindUnique.mockResolvedValueOnce(booking)
+
+      const result = await validateDueAppointmentReminder({
+        tx,
+        scheduledClientNotificationId: 'row_stale_label',
+        now: new Date('2026-03-21T16:00:01.000Z'),
+      })
+
+      expect(result).toMatchObject({
+        action: 'PROCESS',
+        rowId: 'row_stale_label',
+      })
+      expect(
+        result.action === 'PROCESS' ? result.notification.body : null,
+      ).toContain('Silk Press & Trim')
+    })
+
+    it('sends late (rather than cancelling) when the booking moved earlier and the canonical reminder has passed', async () => {
+      const movedTo = new Date('2026-03-24T16:00:00.000Z')
+      const booking = makeBooking({
+        id: 'booking_1',
+        clientId: 'client_1',
+        scheduledFor: movedTo,
+        locationTimeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+      })
+
+      mocks.txScheduledClientNotificationFindUnique.mockResolvedValueOnce(
+        makeDueRow({
+          id: 'row_moved_earlier',
+          runAt: new Date('2026-03-21T16:00:00.000Z'),
+          data: makeReminderPayload({
+            bookingId: 'booking_1',
+            offsetMinutes: 10080,
+            scheduledFor: new Date('2026-03-28T16:00:00.000Z'),
+            timeZone: 'America/Los_Angeles',
+            serviceName: 'Silk Press',
+          }),
+        }),
+      )
+      mocks.txBookingFindUnique.mockResolvedValueOnce(booking)
+
+      // Canonical runAt for the moved booking (2026-03-17) is already behind us,
+      // but the appointment itself is still ahead — send it.
+      const result = await validateDueAppointmentReminder({
+        tx,
+        scheduledClientNotificationId: 'row_moved_earlier',
+        now: new Date('2026-03-24T15:00:00.000Z'),
+      })
+
+      expect(result).toEqual({
+        action: 'PROCESS',
+        rowId: 'row_moved_earlier',
+        clientId: 'client_1',
+        bookingId: 'booking_1',
+        dedupeKey: 'CLIENT_REMINDER:M10080:booking_1',
+        href: '/client/bookings/booking_1?step=overview',
+        notification: buildAppointmentReminderContent(
+          makeReminderPayload({
+            bookingId: 'booking_1',
+            offsetMinutes: 10080,
+            scheduledFor: movedTo,
+            timeZone: 'America/Los_Angeles',
+            serviceName: 'Silk Press',
+          }),
+        ),
+      })
+    })
+
+    // Nothing has drifted here — the row is exactly canonical — the drain is
+    // simply reaching it after the appointment (a long-stalled or repeatedly
+    // failing row). Without the floor this sends "your appointment is in one
+    // week" about an appointment that already happened.
+    it('returns CANCEL when the appointment itself has already started, even with a canonical row', async () => {
+      const scheduledFor = new Date('2026-03-20T16:00:00.000Z')
+      const booking = makeBooking({
+        id: 'booking_1',
+        clientId: 'client_1',
+        // Still ACCEPTED (the pro never started it) but already in the past.
+        scheduledFor,
+        locationTimeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+      })
+
+      mocks.txScheduledClientNotificationFindUnique.mockResolvedValueOnce(
+        makeDueRow({
+          id: 'row_past_appointment',
+          // Exactly what the planner would compute for this booking.
+          runAt: new Date('2026-03-13T16:00:00.000Z'),
+          data: makeReminderPayload({
+            bookingId: 'booking_1',
+            offsetMinutes: 10080,
+            scheduledFor,
+            timeZone: 'America/Los_Angeles',
+            serviceName: 'Silk Press',
+          }),
+        }),
+      )
+      mocks.txBookingFindUnique.mockResolvedValueOnce(booking)
+
+      const result = await validateDueAppointmentReminder({
+        tx,
+        scheduledClientNotificationId: 'row_past_appointment',
+        now: new Date('2026-03-21T16:00:01.000Z'),
+      })
+
+      expect(result).toEqual({
+        action: 'CANCEL',
+        reason: 'Linked appointment has already started.',
+      })
+    })
+  })
+
+  describe('rescheduleDueAppointmentReminder', () => {
+    it('re-arms only still-pending rows, with the canonical runAt and payload', async () => {
+      const runAt = new Date('2026-03-28T16:00:00.000Z')
+      const data = makeReminderPayload({
+        bookingId: 'booking_1',
+        offsetMinutes: 10080,
+        scheduledFor: new Date('2026-04-04T16:00:00.000Z'),
+        timeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+      })
+
+      mocks.txScheduledClientNotificationUpdateMany.mockResolvedValueOnce({
+        count: 1,
+      })
+
+      await rescheduleDueAppointmentReminder({
+        tx,
+        scheduledClientNotificationId: 'row_1',
+        runAt,
+        data,
+      })
+
+      expect(mocks.txScheduledClientNotificationUpdateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'row_1',
+          cancelledAt: null,
+          processedAt: null,
+        },
+        data: {
+          runAt,
+          data: { ...data },
+          failedAt: null,
+          lastError: null,
+        },
+      })
+    })
+  })
+
+  describe('syncUpcomingBookingRemindersForProfessional', () => {
+    it('re-plans every upcoming booking against the CURRENT cadence, reading it once', async () => {
+      mocks.resolveEnabledReminderOffsetMinutes.mockResolvedValue([1440])
+      mocks.txBookingFindMany.mockResolvedValueOnce([
+        { id: 'booking_a' },
+        { id: 'booking_b' },
+      ])
+
+      queueBookingForSync(makeBooking({ id: 'booking_a' }))
+      queueBookingForSync(makeBooking({ id: 'booking_b' }))
+
+      const result = await syncUpcomingBookingRemindersForProfessional({
+        tx,
+        professionalId: 'pro_1',
+        now: TEST_NOW,
+      })
+
+      expect(result).toEqual({ syncedCount: 2, hitCap: false })
+
+      expect(mocks.txBookingFindMany).toHaveBeenCalledWith({
+        where: {
+          professionalId: 'pro_1',
+          status: { in: [BookingStatus.ACCEPTED] },
+          finishedAt: null,
+          scheduledFor: { gt: TEST_NOW },
+        },
+        orderBy: { scheduledFor: 'asc' },
+        take: MAX_CADENCE_RESYNC_BOOKINGS + 1,
+        select: { id: true },
+      })
+
+      // One cadence read for the whole batch, not one per booking.
+      expect(mocks.resolveEnabledReminderOffsetMinutes).toHaveBeenCalledTimes(1)
+
+      expect(mocks.scheduleClientNotification).toHaveBeenCalledTimes(2)
+      expect(
+        mocks.scheduleClientNotification.mock.calls.map(
+          (call) => (call[0] as { bookingId: string }).bookingId,
+        ),
+      ).toEqual(['booking_a', 'booking_b'])
+    })
+
+    it('reports hitting the cap instead of silently truncating', async () => {
+      mocks.resolveEnabledReminderOffsetMinutes.mockResolvedValue([])
+      mocks.txBookingFindMany.mockResolvedValueOnce(
+        Array.from({ length: MAX_CADENCE_RESYNC_BOOKINGS + 1 }, (_, index) => ({
+          id: `booking_${index}`,
+        })),
+      )
+
+      for (let index = 0; index < MAX_CADENCE_RESYNC_BOOKINGS; index += 1) {
+        queueBookingForSync(makeBooking({ id: `booking_${index}` }))
+      }
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const result = await syncUpcomingBookingRemindersForProfessional({
+        tx,
+        professionalId: 'pro_1',
+        now: TEST_NOW,
+      })
+
+      expect(result).toEqual({
+        syncedCount: MAX_CADENCE_RESYNC_BOOKINGS,
+        hitCap: true,
+      })
+      expect(warn).toHaveBeenCalledWith(
+        'appointmentReminders: cadence resync hit its booking cap',
+        expect.objectContaining({ professionalId: 'pro_1' }),
+      )
+
+      warn.mockRestore()
     })
   })
 

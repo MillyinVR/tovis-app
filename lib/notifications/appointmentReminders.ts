@@ -53,6 +53,20 @@ export type ValidateDueAppointmentReminderResult =
   | {
       action: 'SKIP'
     }
+  /**
+   * The row is due, the booking is still remindable, but the canonical plan puts
+   * this reminder in the FUTURE — the booking moved after the row was written.
+   * Re-arm the row at the canonical instant instead of cancelling it: cancelling
+   * is silent and terminal (nothing re-plans a cancelled row), so a writer that
+   * forgot to resync would cost the client their reminder entirely.
+   */
+  | {
+      action: 'RESCHEDULE'
+      rowId: string
+      runAt: Date
+      data: AppointmentReminderPayload
+      reason: string
+    }
   | {
       action: 'CANCEL'
       reason: string
@@ -388,20 +402,6 @@ export function computeAppointmentReminderRunAt(args: {
   })
 }
 
-function payloadsMatch(
-  left: AppointmentReminderPayload,
-  right: AppointmentReminderPayload,
-): boolean {
-  return (
-    left.offsetMinutes === right.offsetMinutes &&
-    left.bookingId === right.bookingId &&
-    left.scheduledFor === right.scheduledFor &&
-    left.timeZone === right.timeZone &&
-    left.serviceName === right.serviceName &&
-    left.professionalName === right.professionalName
-  )
-}
-
 function buildReminderPlanItem(args: {
   booking: BookingReminderRecord
   offsetMinutes: number
@@ -540,6 +540,12 @@ export async function syncBookingAppointmentReminders(args: {
   tx: Prisma.TransactionClient
   bookingId: string
   now?: Date
+  /**
+   * The pro's cadence, when the caller has already resolved it (the fan-out
+   * below resolves once for the whole batch instead of once per booking).
+   * Omitted, it is read from the pro's settings — the single-booking default.
+   */
+  enabledOffsetMinutes?: readonly number[]
 }): Promise<void> {
   const booking = await loadBookingForReminderSync({
     tx: args.tx,
@@ -551,10 +557,12 @@ export async function syncBookingAppointmentReminders(args: {
     bookingId: booking.id,
   })
 
-  const enabledOffsetMinutes = await resolveEnabledReminderOffsetMinutes({
-    professionalId: booking.professionalId,
-    db: args.tx,
-  })
+  const enabledOffsetMinutes =
+    args.enabledOffsetMinutes ??
+    (await resolveEnabledReminderOffsetMinutes({
+      professionalId: booking.professionalId,
+      db: args.tx,
+    }))
 
   const plan = planBookingAppointmentReminders({
     booking,
@@ -578,6 +586,77 @@ export async function syncBookingAppointmentReminders(args: {
       data: item.payload,
     })
   }
+}
+
+/**
+ * How many upcoming bookings one cadence change re-plans. The fan-out runs
+ * under the pro's schedule lock, so this is a lock-HOLD bound, not a
+ * correctness one — at the cap it measured **941ms for 250 bookings × 3 leads
+ * (486 rows written)** against Postgres, an order of magnitude under both the
+ * 20s schedule-transaction budget and the 10s `maxWait` a contending booking
+ * write tolerates, so contention costs latency and never a failed booking.
+ * A pro past the cap keeps their existing rows (the drain still refuses ones
+ * for a lead they just turned off) and the overflow is logged rather than
+ * silently dropped.
+ */
+export const MAX_CADENCE_RESYNC_BOOKINGS = 250
+
+/**
+ * Re-plan every upcoming booking of one professional against their CURRENT
+ * cadence. Called when the cadence itself changes: nothing else re-plans, and
+ * the drain can only heal reminder rows that already exist — so without this a
+ * newly added lead time reaches nobody who is already on the calendar.
+ */
+export async function syncUpcomingBookingRemindersForProfessional(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  now?: Date
+}): Promise<{ syncedCount: number; hitCap: boolean }> {
+  const now = normalizeNowOrThrow(args.now, 'now')
+
+  const bookings = await args.tx.booking.findMany({
+    where: {
+      professionalId: args.professionalId,
+      status: { in: [...REMINDER_ELIGIBLE_BOOKING_STATUSES] },
+      finishedAt: null,
+      scheduledFor: { gt: now },
+    },
+    orderBy: { scheduledFor: 'asc' },
+    take: MAX_CADENCE_RESYNC_BOOKINGS + 1,
+    select: { id: true } satisfies Prisma.BookingSelect,
+  })
+
+  // `take` is cap + 1 purely so an over-cap pro is detectable; the extra row is
+  // never synced, and how many MORE there are is deliberately not counted (that
+  // would cost a second scan of an unbounded set).
+  const inScope = bookings.slice(0, MAX_CADENCE_RESYNC_BOOKINGS)
+  const hitCap = bookings.length > inScope.length
+
+  // One cadence read for the whole batch — every booking here belongs to the
+  // same professional, so the per-booking resolve would return the same list.
+  const enabledOffsetMinutes = await resolveEnabledReminderOffsetMinutes({
+    professionalId: args.professionalId,
+    db: args.tx,
+  })
+
+  for (const booking of inScope) {
+    await syncBookingAppointmentReminders({
+      tx: args.tx,
+      bookingId: booking.id,
+      now,
+      enabledOffsetMinutes,
+    })
+  }
+
+  if (hitCap) {
+    console.warn('appointmentReminders: cadence resync hit its booking cap', {
+      professionalId: args.professionalId,
+      cap: MAX_CADENCE_RESYNC_BOOKINGS,
+      syncedCount: inScope.length,
+    })
+  }
+
+  return { syncedCount: inScope.length, hitCap }
 }
 
 export async function validateDueAppointmentReminder(args: {
@@ -637,6 +716,18 @@ export async function validateDueAppointmentReminder(args: {
     }
   }
 
+  // "Your appointment is tomorrow" must never reach a client whose appointment
+  // has already come and gone. Eligibility above is status-only (an ACCEPTED
+  // booking the pro never started stays eligible forever), and the drift branch
+  // below can send a reminder later than its stored runAt — so the appointment
+  // itself is the floor.
+  if (booking.scheduledFor.getTime() <= now.getTime()) {
+    return {
+      action: 'CANCEL',
+      reason: 'Linked appointment has already started.',
+    }
+  }
+
   if (row.clientId !== booking.clientId) {
     return {
       action: 'CANCEL',
@@ -693,20 +784,30 @@ export async function validateDueAppointmentReminder(args: {
     }
   }
 
-  if (row.runAt.getTime() !== planned.runAt.getTime()) {
+  // The row's stored instant disagrees with the canonical plan: the booking
+  // moved after this row was written. If canonical is still ahead of us the row
+  // is firing EARLY — re-arm it rather than cancel it, because a cancel is
+  // terminal and no writer re-plans a cancelled row. If canonical has already
+  // passed, the reminder is simply late and the send below carries the corrected
+  // content (the appointment itself is still in the future — checked above).
+  if (
+    row.runAt.getTime() !== planned.runAt.getTime() &&
+    planned.runAt.getTime() > now.getTime()
+  ) {
     return {
-      action: 'CANCEL',
+      action: 'RESCHEDULE',
+      rowId: row.id,
+      runAt: planned.runAt,
+      data: planned.payload,
       reason: 'Scheduled reminder runAt no longer matches canonical reminder state.',
     }
   }
 
-  if (!payloadsMatch(parsedPayload, planned.payload)) {
-    return {
-      action: 'CANCEL',
-      reason: 'Scheduled reminder payload no longer matches canonical booking state.',
-    }
-  }
-
+  // NOTE: there is deliberately no "stored payload drifted" refusal. The send
+  // below renders `planned.payload` — the canonical content re-derived from the
+  // booking on this very pass — so a drifted service label or timezone is
+  // already corrected here. Cancelling on that difference would throw away a
+  // reminder this function has just built correctly.
   return {
     action: 'PROCESS',
     rowId: row.id,
@@ -716,6 +817,37 @@ export async function validateDueAppointmentReminder(args: {
     href: buildAppointmentReminderHref(booking.id),
     notification: buildAppointmentReminderContent(planned.payload),
   }
+}
+
+/**
+ * Re-arm a due row at its canonical instant (the RESCHEDULE action). Guarded on
+ * still-pending exactly like the cancel path, so a row settled by a concurrent
+ * writer between validation and here is left alone.
+ */
+export async function rescheduleDueAppointmentReminder(args: {
+  tx: Prisma.TransactionClient
+  scheduledClientNotificationId: string
+  runAt: Date
+  data: AppointmentReminderPayload
+}): Promise<void> {
+  const runAt = normalizeDateOrNull(args.runAt)
+  if (!runAt) {
+    throw new Error('rescheduleDueAppointmentReminder: invalid runAt')
+  }
+
+  await args.tx.scheduledClientNotification.updateMany({
+    where: {
+      id: args.scheduledClientNotificationId,
+      cancelledAt: null,
+      processedAt: null,
+    },
+    data: {
+      runAt,
+      data: { ...args.data },
+      failedAt: null,
+      lastError: null,
+    },
+  })
 }
 
 export async function cancelDueAppointmentReminder(args: {

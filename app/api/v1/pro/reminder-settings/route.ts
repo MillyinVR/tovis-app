@@ -9,10 +9,10 @@ import { isRecord } from '@/lib/guards'
 import {
   getProReminderSettings,
   parseReminderLeadsToOffsetMinutes,
-  updateProReminderSettings,
   ProReminderSettingsValidationError,
   REMINDER_PRESETS,
 } from '@/lib/reminderSettings/settings'
+import { applyProReminderCadence } from '@/lib/reminderSettings/applyReminderCadence'
 import type { ProReminderSettingsResponseDTO } from '@/lib/dto/reminderSettings'
 
 export const dynamic = 'force-dynamic'
@@ -42,7 +42,11 @@ export async function PUT(req: Request) {
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
 
-    const settings = await updateProReminderSettings({
+    // Saves the cadence AND re-plans the bookings already on the calendar. The
+    // settings card promises to "automatically remind clients before their
+    // appointment" and names only "already in the past" as an exclusion — a
+    // cadence that reached future bookings alone would not be that.
+    const { settings } = await applyProReminderCadence({
       professionalId: auth.professionalId,
       update: {
         enabled: body.enabled === true,

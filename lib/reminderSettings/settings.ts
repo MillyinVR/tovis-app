@@ -210,7 +210,16 @@ export type ProReminderSettingsUpdate = {
 
 export class ProReminderSettingsValidationError extends Error {}
 
-function normalizeUpdate(update: ProReminderSettingsUpdate): {
+/**
+ * Validate + canonicalize a cadence patch, or throw
+ * `ProReminderSettingsValidationError`. Exported so a caller can reject a bad
+ * payload BEFORE it opens a transaction — `applyProReminderCadence` takes the
+ * pro's schedule lock, and an invalid save should never acquire it just to roll
+ * back. Pure, so the write path below re-running it costs nothing.
+ */
+export function normalizeProReminderSettingsUpdate(
+  update: ProReminderSettingsUpdate,
+): {
   enabled: boolean
   offsetMinutes: number[]
 } {
@@ -246,14 +255,22 @@ function normalizeUpdate(update: ProReminderSettingsUpdate): {
   }
 }
 
-/** Create-or-update a pro's cadence and return the persisted DTO. */
+/**
+ * Create-or-update a pro's cadence and return the persisted DTO.
+ *
+ * `db` lets a caller run the write inside its own transaction — the cadence
+ * change and the re-plan of the pro's upcoming bookings must commit together
+ * (see `applyProReminderCadence`), or a failed re-plan would leave the settings
+ * surface claiming a lead time that reaches nobody.
+ */
 export async function updateProReminderSettings(args: {
   professionalId: string
   update: ProReminderSettingsUpdate
+  db?: DbClient
 }): Promise<ProReminderSettingsDTO> {
-  const data = normalizeUpdate(args.update)
+  const data = normalizeProReminderSettingsUpdate(args.update)
 
-  const row = await prisma.proReminderSettings.upsert({
+  const row = await getDb(args.db).proReminderSettings.upsert({
     where: { professionalId: args.professionalId },
     create: { professionalId: args.professionalId, ...data },
     update: data,

@@ -11684,8 +11684,35 @@ if (args.notifyClient) {
     finalBuffer !== existingBufferMinutes ||
     finalDuration !== existingDurationMinutes
 
+  // The reminder payload renders the booking's WHOLE service line-up
+  // (formatBookingServicesLabel over its serviceItems), not just the primary —
+  // so swapping one add-on for another of the same length changes what the
+  // reminder says while leaving the start, the duration and the primary service
+  // untouched. Compare the line-up itself rather than trusting
+  // `hasServiceItems`: the editor re-submits the unchanged list on every save,
+  // and resyncing on a no-op would cancel and re-create identical rows for
+  // nothing (B2's "succeeded is not changed").
+  const existingServiceLineup = normalizedServiceItems
+    ? await args.tx.bookingServiceItem.findMany({
+        where: { bookingId: existing.id },
+        orderBy: { sortOrder: 'asc' },
+        select: { serviceId: true, itemType: true },
+      })
+    : null
+
+  const serviceLineupChanged =
+    normalizedServiceItems != null &&
+    existingServiceLineup != null &&
+    (existingServiceLineup.length !== normalizedServiceItems.length ||
+      existingServiceLineup.some(
+        (item, index) =>
+          item.serviceId !== normalizedServiceItems[index]?.serviceId ||
+          item.itemType !== normalizedServiceItems[index]?.itemType,
+      ))
+
   const reminderStateChanged =
     occupancyChanged ||
+    serviceLineupChanged ||
     primaryServiceId !== existing.serviceId ||
     primaryOfferingId !== existing.offeringId
 
