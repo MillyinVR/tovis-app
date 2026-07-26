@@ -429,6 +429,19 @@ describe('B8 — which bookings a narrowed week strands', () => {
     expect(capped.items[0]?.id).toBe(uncapped.items[0]?.id)
   })
 
+  it('reports NOTHING when the resolved week is unparseable', async () => {
+    // Reachable through the location PATCH's timezone-only branch, which
+    // resolves the week from the stored row. `ensureWithinWorkingHours` answers
+    // MISSING for a malformed week, so without this guard the pro would be told
+    // every future booking had just been stranded. "We cannot tell" is silence.
+    const report = await scan({ mon: { enabled: 'yes' } })
+
+    expect(report).toEqual({ total: 0, items: [] })
+
+    const stillWorks = await scan(SATURDAY_OFF)
+    expect(stillWorks.total).toBe(1)
+  })
+
   it('treats a save that changes nothing as a no-op', () => {
     expect(workingHoursEqual(OPEN_ALL_WEEK, week())).toBe(true)
     expect(workingHoursEqual(OPEN_ALL_WEEK, SATURDAY_OFF)).toBe(false)

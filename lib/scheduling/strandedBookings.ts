@@ -32,6 +32,7 @@ import { Prisma, type BookingStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 import { ensureWithinWorkingHours } from '@/lib/booking/workingHoursGuard'
+import { normalizeWorkingHours } from '@/lib/scheduling/workingHoursValidation'
 import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
 import { addMinutes } from '@/lib/booking/conflicts'
 import type { ProStrandedBookingsDTO } from '@/lib/dto/proWorkingHours'
@@ -112,7 +113,20 @@ export async function findBookingsOutsideWorkingHours(
   if (locations.length === 0) return EMPTY_STRANDED_BOOKING_REPORT
 
   const db = args.db ?? prisma
-  const byLocationId = new Map(locations.map((l) => [l.id, l]))
+
+  // A location whose resolved week is not a valid working-hours object tells us
+  // nothing about whether its bookings fit — `ensureWithinWorkingHours` would
+  // answer MISSING for every one of them and the pro would be told their
+  // calendar was just stranded. Reachable via a timezone-only PATCH over a
+  // malformed stored week. "We cannot tell" is silence, not an alarm — the same
+  // rule the `null` report state follows.
+  const byLocationId = new Map(
+    locations
+      .filter((l) => normalizeWorkingHours(l.workingHours) !== null)
+      .map((l) => [l.id, l]),
+  )
+
+  if (byLocationId.size === 0) return EMPTY_STRANDED_BOOKING_REPORT
 
   const horizon = new Date(
     now.getTime() + STRANDED_BOOKING_LOOKAHEAD_DAYS * MS_PER_DAY,
