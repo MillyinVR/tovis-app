@@ -246,14 +246,22 @@ function normalizeUpdate(update: ProReminderSettingsUpdate): {
   }
 }
 
-/** Create-or-update a pro's cadence and return the persisted DTO. */
+/**
+ * Create-or-update a pro's cadence and return the persisted DTO.
+ *
+ * `db` lets a caller run the write inside its own transaction — the cadence
+ * change and the re-plan of the pro's upcoming bookings must commit together
+ * (see `applyProReminderCadence`), or a failed re-plan would leave the settings
+ * surface claiming a lead time that reaches nobody.
+ */
 export async function updateProReminderSettings(args: {
   professionalId: string
   update: ProReminderSettingsUpdate
+  db?: DbClient
 }): Promise<ProReminderSettingsDTO> {
   const data = normalizeUpdate(args.update)
 
-  const row = await prisma.proReminderSettings.upsert({
+  const row = await getDb(args.db).proReminderSettings.upsert({
     where: { professionalId: args.professionalId },
     create: { professionalId: args.professionalId, ...data },
     update: data,

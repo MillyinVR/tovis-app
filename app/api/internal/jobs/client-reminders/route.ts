@@ -3,6 +3,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import {
   cancelDueAppointmentReminder,
+  rescheduleDueAppointmentReminder,
   validateDueAppointmentReminder,
 } from '@/lib/notifications/appointmentReminders'
 import { validateDueReviewRequest } from '@/lib/notifications/reviewRequests'
@@ -55,6 +56,12 @@ type ProcessReminderResult =
   | {
       id: string
       status: 'cancelled'
+      reason: string
+    }
+  | {
+      id: string
+      status: 'rescheduled'
+      runAt: string
       reason: string
     }
   | {
@@ -168,6 +175,25 @@ async function processReminder(args: {
         return {
           id: args.rowId,
           status: 'cancelled',
+          reason: validation.reason,
+        }
+      }
+
+      // Only the appointment-reminder validator can return this: the booking
+      // moved and the row is now firing early, so re-arm it at the canonical
+      // instant instead of cancelling a reminder nothing would ever re-plan.
+      if (validation.action === 'RESCHEDULE') {
+        await rescheduleDueAppointmentReminder({
+          tx,
+          scheduledClientNotificationId: validation.rowId,
+          runAt: validation.runAt,
+          data: validation.data,
+        })
+
+        return {
+          id: validation.rowId,
+          status: 'rescheduled',
+          runAt: validation.runAt.toISOString(),
           reason: validation.reason,
         }
       }
@@ -297,6 +323,11 @@ async function runJob(req: Request) {
       row.status === 'cancelled',
   )
 
+  const rescheduled = results.filter(
+    (row): row is Extract<ProcessReminderResult, { status: 'rescheduled' }> =>
+      row.status === 'rescheduled',
+  )
+
   const failed = results.filter(
     (row): row is Extract<ProcessReminderResult, { status: 'failed' }> =>
       row.status === 'failed',
@@ -307,9 +338,15 @@ async function runJob(req: Request) {
     processedCount,
     skippedCount,
     cancelledCount: cancelled.length,
+    rescheduledCount: rescheduled.length,
     failedCount: failed.length,
     cancelled: cancelled.map((row) => ({
       id: row.id,
+      reason: row.reason,
+    })),
+    rescheduled: rescheduled.map((row) => ({
+      id: row.id,
+      runAt: row.runAt,
       reason: row.reason,
     })),
     failed: failed.map((row) => ({

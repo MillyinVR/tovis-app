@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
   validateDueAppointmentReminder: vi.fn(),
   cancelDueAppointmentReminder: vi.fn(),
+  rescheduleDueAppointmentReminder: vi.fn(),
   validateDueReviewRequest: vi.fn(),
   upsertClientNotification: vi.fn(),
 
@@ -40,6 +41,7 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/notifications/appointmentReminders', () => ({
   validateDueAppointmentReminder: mocks.validateDueAppointmentReminder,
   cancelDueAppointmentReminder: mocks.cancelDueAppointmentReminder,
+  rescheduleDueAppointmentReminder: mocks.rescheduleDueAppointmentReminder,
 }))
 
 vi.mock('@/lib/notifications/reviewRequests', () => ({
@@ -246,8 +248,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 0,
       skippedCount: 0,
       cancelledCount: 0,
+      rescheduledCount: 0,
       failedCount: 0,
       cancelled: [],
+      rescheduled: [],
       failed: [],
     })
   })
@@ -282,8 +286,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 0,
       skippedCount: 0,
       cancelledCount: 0,
+      rescheduledCount: 0,
       failedCount: 0,
       cancelled: [],
+      rescheduled: [],
       failed: [],
     })
   })
@@ -343,8 +349,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 1,
       skippedCount: 0,
       cancelledCount: 0,
+      rescheduledCount: 0,
       failedCount: 0,
       cancelled: [],
+      rescheduled: [],
       failed: [],
     })
   })
@@ -401,8 +409,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 1,
       skippedCount: 0,
       cancelledCount: 0,
+      rescheduledCount: 0,
       failedCount: 0,
       cancelled: [],
+      rescheduled: [],
       failed: [],
     })
   })
@@ -432,8 +442,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 0,
       skippedCount: 1,
       cancelledCount: 0,
+      rescheduledCount: 0,
       failedCount: 0,
       cancelled: [],
+      rescheduled: [],
       failed: [],
     })
   })
@@ -470,11 +482,78 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 0,
       skippedCount: 0,
       cancelledCount: 1,
+      rescheduledCount: 0,
       failedCount: 0,
       cancelled: [
         {
           id: 'reminder_cancel_1',
           reason: 'BOOKING_CANCELLED',
+        },
+      ],
+    rescheduled: [],
+      failed: [],
+    })
+  })
+
+  it('re-arms a due reminder when validation returns RESCHEDULE', async () => {
+    const canonicalRunAt = new Date('2026-04-20T18:30:00.000Z')
+
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      {
+        id: 'reminder_moved_1',
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+      },
+    ])
+
+    mocks.validateDueAppointmentReminder.mockResolvedValueOnce({
+      action: 'RESCHEDULE',
+      rowId: 'reminder_moved_1',
+      runAt: canonicalRunAt,
+      data: {
+        offsetMinutes: 1440,
+        bookingId: 'booking_1',
+        scheduledFor: '2026-04-21T18:30:00.000Z',
+        timeZone: 'America/Los_Angeles',
+        serviceName: 'Silk Press',
+        professionalName: null,
+      },
+      reason:
+        'Scheduled reminder runAt no longer matches canonical reminder state.',
+    })
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.rescheduleDueAppointmentReminder).toHaveBeenCalledWith({
+      tx: expect.any(Object),
+      scheduledClientNotificationId: 'reminder_moved_1',
+      runAt: canonicalRunAt,
+      data: expect.objectContaining({ bookingId: 'booking_1' }),
+    })
+
+    // Re-arming must not send anything, and must not cancel the row either.
+    expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
+    expect(mocks.cancelDueAppointmentReminder).not.toHaveBeenCalled()
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      scannedCount: 1,
+      processedCount: 0,
+      skippedCount: 0,
+      cancelledCount: 0,
+      rescheduledCount: 1,
+      failedCount: 0,
+      cancelled: [],
+      rescheduled: [
+        {
+          id: 'reminder_moved_1',
+          runAt: canonicalRunAt.toISOString(),
+          reason:
+            'Scheduled reminder runAt no longer matches canonical reminder state.',
         },
       ],
       failed: [],
@@ -511,8 +590,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 0,
       skippedCount: 1,
       cancelledCount: 0,
+      rescheduledCount: 0,
       failedCount: 0,
       cancelled: [],
+      rescheduled: [],
       failed: [],
     })
   })
@@ -551,8 +632,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 0,
       skippedCount: 0,
       cancelledCount: 0,
+      rescheduledCount: 0,
       failedCount: 1,
       cancelled: [],
+      rescheduled: [],
       failed: [
         {
           id: 'reminder_failed_1',
@@ -588,8 +671,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       processedCount: 0,
       skippedCount: 1,
       cancelledCount: 0,
+      rescheduledCount: 0,
       failedCount: 0,
       cancelled: [],
+      rescheduled: [],
       failed: [],
     })
   })
