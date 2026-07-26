@@ -24,6 +24,8 @@
  * - blocked patterns
  */
 
+import { BOOKING_STATUS_LABELS } from '@/lib/booking/statusLabel'
+
 export type CalendarEventLike = {
   status?: string | null
   isBlocked?: boolean
@@ -69,14 +71,16 @@ const DANGER_STATUSES = new Set<string>([
 const WAITLIST_STATUSES = new Set<string>(['WAITLIST'])
 const HELD_STATUSES = new Set<string>(['HELD'])
 
+// The six BookingStatus words come from the canonical table so the calendar
+// cannot word a state differently from the rest of the product — it used to say
+// "Accepted" where the client's card said "Confirmed", and "No show" where the
+// shared helper said "No-show" (B10). The remaining keys are calendar-only
+// pseudo-statuses (block / hold / waitlist rows and legacy wire spellings) that
+// have no BookingStatus of their own.
 const STATUS_LABELS: Record<string, string> = {
-  ACCEPTED: 'Accepted',
-  CONFIRMED: 'Accepted',
-  PENDING: 'Pending',
-  COMPLETED: 'Completed',
-  CANCELLED: 'Cancelled',
+  ...BOOKING_STATUS_LABELS,
+  CONFIRMED: BOOKING_STATUS_LABELS.ACCEPTED,
   DECLINED: 'Declined',
-  NO_SHOW: 'No show',
   RESCHEDULE_REQUESTED: 'Reschedule requested',
   WAITLIST: 'Waitlist',
   BLOCKED: 'Blocked',

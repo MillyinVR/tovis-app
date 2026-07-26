@@ -358,7 +358,7 @@ describe('app/pro/bookings/page.tsx', () => {
 
     expect(hasText(page, 'All')).toBe(true)
     expect(hasText(page, 'Pending')).toBe(true)
-    expect(hasText(page, 'Accepted')).toBe(true)
+    expect(hasText(page, 'Confirmed')).toBe(true)
     expect(hasText(page, 'Active')).toBe(true)
     expect(hasText(page, 'Completed')).toBe(true)
     expect(hasText(page, 'Cancelled')).toBe(true)
@@ -541,7 +541,7 @@ describe('app/pro/bookings/page.tsx', () => {
     })
 
     expect(hasText(page, 'Bookings')).toBe(true)
-    expect(hasText(page, 'Accepted')).toBe(true)
+    expect(hasText(page, 'Confirmed')).toBe(true)
 
     const todayQuery = mocks.bookingFindMany.mock.calls[1]?.[0]
     expect(todayQuery.where.status).toEqual({

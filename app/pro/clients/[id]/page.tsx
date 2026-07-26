@@ -21,6 +21,10 @@ import {
 } from '@/lib/clients/relationshipIntelligence'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { readEncryptedNoteOrFallback } from '@/lib/security/notesPrivacy'
+import {
+  badgeToneForBookingStatus,
+  labelForBookingStatus,
+} from '@/lib/booking/statusLabel'
 import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
 import {
   isClientTechnicalRecordEnabled,
@@ -345,28 +349,28 @@ function buildProToClientMessageHref(args: {
   )}&clientId=${encodeURIComponent(clientId)}`
 }
 
-function statusBadgeTone(status: string): BadgeTone {
-  switch (status) {
-    case 'COMPLETED':
-      return 'success'
-    case 'CANCELLED':
-      return 'danger'
-    case 'ACCEPTED':
-      return 'accent'
-    default:
-      return 'neutral'
-  }
-}
-
 function allergyTone(severity: unknown): BadgeTone {
   const value = safeUpper(severity)
   return value === 'CRITICAL' || value === 'HIGH' ? 'danger' : 'warn'
 }
 
+/**
+ * A booking's state in the client's visit history.
+ *
+ * Found by `check:booking-status-labels`, not by hand (B10): this rendered the
+ * RAW ENUM — "ACCEPTED", and for the two states its own tone map had never
+ * heard of, "IN_PROGRESS" and "NO_SHOW" in a neutral grey chip.
+ */
 function StatusPill({ status }: { status: unknown }) {
-  const normalizedStatus = safeUpper(status) || 'UNKNOWN'
+  const normalizedStatus = safeUpper(status)
 
-  return <Badge tone={statusBadgeTone(normalizedStatus)}>{normalizedStatus}</Badge>
+  if (!normalizedStatus) return <Badge tone="neutral">Unknown</Badge>
+
+  return (
+    <Badge tone={badgeToneForBookingStatus(normalizedStatus)}>
+      {labelForBookingStatus(normalizedStatus)}
+    </Badge>
+  )
 }
 
 function SectionCard({

@@ -218,13 +218,16 @@ function StatCard({
 }
 
 function FilterPills({ active }: { active: StatusFilter }) {
+  // Each filter is named after the status pill it selects, so the tab and the
+  // rows under it can't use different words for the same state (B10). "Active"
+  // stays as the IN_PROGRESS tab: it reads as a filter, not a status.
   const pills: Array<{ key: StatusFilter; label: string }> = [
     { key: 'ALL', label: 'All' },
-    { key: 'PENDING', label: 'Pending' },
-    { key: 'ACCEPTED', label: 'Accepted' },
+    { key: 'PENDING', label: labelForBookingStatus(BookingStatus.PENDING) },
+    { key: 'ACCEPTED', label: labelForBookingStatus(BookingStatus.ACCEPTED) },
     { key: 'IN_PROGRESS', label: 'Active' },
-    { key: 'COMPLETED', label: 'Completed' },
-    { key: 'CANCELLED', label: 'Cancelled' },
+    { key: 'COMPLETED', label: labelForBookingStatus(BookingStatus.COMPLETED) },
+    { key: 'CANCELLED', label: labelForBookingStatus(BookingStatus.CANCELLED) },
   ]
 
   return (

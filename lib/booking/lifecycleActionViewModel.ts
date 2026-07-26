@@ -19,6 +19,7 @@
 import { BookingStatus, SessionStep } from '@prisma/client'
 
 import { isTerminalBookingStatus } from '@/lib/booking/lifecycleContract'
+import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -116,13 +117,14 @@ function displayLabelFor(
   status: BookingStatus,
   sessionStep: SessionStep,
 ): string {
-  if (status === BookingStatus.PENDING) return 'Pending'
-  if (status === BookingStatus.ACCEPTED) return 'Confirmed'
-  if (status === BookingStatus.COMPLETED) return 'Completed'
-  if (status === BookingStatus.CANCELLED) return 'Cancelled'
-  // Without this arm NO_SHOW fell through to the IN_PROGRESS switch below and
-  // a no-showed booking read "In progress" on both booking cards.
-  if (status === BookingStatus.NO_SHOW) return 'No-show'
+  // Every state except IN_PROGRESS reads exactly what the rest of the product
+  // reads — this used to be a second hand-written table, and it was the one
+  // that said "Confirmed" while the shared helper said "Accepted" (B10).
+  // Without the NO_SHOW arm the enum fell through to the IN_PROGRESS switch
+  // below and a no-showed booking read "In progress" on both booking cards.
+  if (status !== BookingStatus.IN_PROGRESS) {
+    return labelForBookingStatus(status)
+  }
 
   // IN_PROGRESS — surface the session step so the user knows where they are.
   switch (sessionStep) {

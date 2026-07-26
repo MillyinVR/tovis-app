@@ -31,6 +31,11 @@ import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ReviewSection from './ReviewSection'
 import { loadClientBookingPage } from './_data/loadClientBookingPage'
 import { buildBookingViewModel } from './_view/buildBookingViewModel'
+import {
+  clientStatusMessage,
+  clientStatusPillLabel,
+  clientStatusPillVariant,
+} from './_view/statusPresentation'
 import ClientCheckoutCard from './ClientCheckoutCard'
 import ClientDepositCard from './ClientDepositCard'
 
@@ -209,63 +214,6 @@ function friendlyCollectionTiming(value: unknown): string | null {
     .split('_')
     .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
     .join(' ')
-}
-
-function statusPillVariant(
-  statusRaw: unknown,
-): Exclude<StatusVariant, 'neutral'> {
-  const normalized = upper(statusRaw)
-  if (normalized === 'CANCELLED') return 'danger'
-  if (normalized === 'COMPLETED') return 'success'
-  if (normalized === 'PENDING') return 'warn'
-  return 'info'
-}
-
-function statusMessage(statusRaw: unknown): {
-  title: string
-  body: string
-  variant: StatusVariant
-} {
-  const normalized = upper(statusRaw)
-  const messages = COPY.bookings.status.messages
-
-  if (normalized === 'PENDING') {
-    return {
-      title: messages.pending.title,
-      body: messages.pending.body,
-      variant: 'warn',
-    }
-  }
-
-  if (normalized === 'ACCEPTED') {
-    return {
-      title: messages.accepted.title,
-      body: messages.accepted.body,
-      variant: 'info',
-    }
-  }
-
-  if (normalized === 'COMPLETED') {
-    return {
-      title: messages.completed.title,
-      body: messages.completed.body,
-      variant: 'success',
-    }
-  }
-
-  if (normalized === 'CANCELLED') {
-    return {
-      title: messages.cancelled.title,
-      body: messages.cancelled.body,
-      variant: 'danger',
-    }
-  }
-
-  return {
-    title: messages.fallback.title,
-    body: messages.fallback.body,
-    variant: 'neutral',
-  }
 }
 
 function pillClassByVariant(
@@ -904,9 +852,13 @@ export default async function ClientBookingPage(props: {
     ? formatWhenInTimeZone(scheduled, appointmentTimeZone)
     : COPY.common.unknownTime
 
-  const statusVariant = statusPillVariant(booking.status)
-  const statusInfo = statusMessage(booking.status)
+  const statusVariant = clientStatusPillVariant(booking.status)
+  const statusInfo = clientStatusMessage(booking.status)
   const statusUpper = upper(booking.status)
+  // The client's own booking page used to print the DB enum in all three of the
+  // places below — "ACCEPTED", and for the two newest states "IN_PROGRESS" and
+  // "NO_SHOW". One canonical label now, same word as every other surface (B10).
+  const statusPillLabel = clientStatusPillLabel(booking.status)
 
   // Show the media-use consent toggle once the session has happened — i.e. there
   // are (or will be) before/after photos to share: completed, finished, or any
@@ -1194,9 +1146,7 @@ export default async function ClientBookingPage(props: {
                 pillClassByVariant(statusVariant),
               )}
             >
-              {String(
-                booking.status || COPY.bookings.status.pillUnknown,
-              ).toUpperCase()}
+              {statusPillLabel}
             </span>
 
             <Link
@@ -1443,7 +1393,7 @@ export default async function ClientBookingPage(props: {
 
                 <div className="brand-client-aftercare-pro-row">
                   <ClientAftercarePill tone="success">
-                    {String(booking.status || COPY.bookings.status.pillUnknown).toUpperCase()}
+                    {statusPillLabel}
                   </ClientAftercarePill>
 
                   <span className="brand-pro-session-muted text-[11px] font-bold">
@@ -1482,12 +1432,7 @@ export default async function ClientBookingPage(props: {
                             <SummaryRow label="Provider" value={professionalLabel} />
                             <SummaryRow label="Booking" value={whenLabel} />
                             <SummaryRow label="Time zone" value={friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone} />
-                            <SummaryRow
-                              label="Status"
-                              value={String(
-                                booking.status || COPY.bookings.status.pillUnknown,
-                              ).toUpperCase()}
-                            />
+                            <SummaryRow label="Status" value={statusPillLabel} />
                             {locationLine ? (
                               <SummaryRow label="Location" value={locationLine} />
                             ) : null}

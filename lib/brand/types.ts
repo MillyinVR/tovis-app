@@ -11,6 +11,12 @@ export type BrandCalendarViewKey = 'day' | 'week' | 'month'
 export type BrandCalendarStatusKey =
   | 'accepted'
   | 'pending'
+  // A session the pro has already started, and a client who never turned up.
+  // Both reach the calendar feed (it filters only CANCELLED), and without a key
+  // of their own both fell through to `accepted` — so the pro's calendar called
+  // a live session and a no-show "Accepted" (B10).
+  | 'inProgress'
+  | 'noShow'
   | 'completed'
   | 'waitlist'
   | 'blocked'

@@ -45,6 +45,10 @@ export type BookingCalendarStatus =
   | 'PENDING'
   | 'ACCEPTED'
   | 'CONFIRMED'
+  // A session the pro has already started. The feed filters only CANCELLED, so
+  // this has always reached the grid — it just had no name in this union, and
+  // no arm in either event-label resolver, so it rendered as "Accepted" (B10).
+  | 'IN_PROGRESS'
   | 'COMPLETED'
   | 'CANCELLED'
   | 'DECLINED'

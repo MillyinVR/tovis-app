@@ -371,7 +371,7 @@ describe('app/pro/bookings/[id]/page.tsx', () => {
   describe('status chip uses the canonical tone + label map', () => {
     const CASES: ReadonlyArray<[BookingStatus, string, string]> = [
       [BookingStatus.PENDING, 'Pending', 'pending'],
-      [BookingStatus.ACCEPTED, 'Accepted', 'accent'],
+      [BookingStatus.ACCEPTED, 'Confirmed', 'accent'],
       [BookingStatus.IN_PROGRESS, 'In progress', 'accent'],
       [BookingStatus.COMPLETED, 'Completed', 'success'],
       [BookingStatus.CANCELLED, 'Cancelled', 'danger'],
