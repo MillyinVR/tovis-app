@@ -421,28 +421,21 @@ describe('useAvailability', () => {
     expect(second.result.current.data).toEqual(freshSummary)
   })
 
-  it('renders cached primary data first and loads other pros in the background', async () => {
+  it('renders cached primary data first and refreshes other pros from the rail endpoint', async () => {
     const primaryOnlySummary = makeSummary({
       otherPros: [],
     })
 
-    const fullSummary = makeSummary({
-      availabilityVersion: 'av_v2',
-      generatedAt: '2026-03-10T12:01:00.000Z',
-      otherPros: [
-        {
-          id: 'pro_2',
-          businessName: 'Nearby Pro',
-          avatarUrl: null,
-          location: 'Los Angeles',
-          offeringId: 'offering_1',
-          isCreator: false,
-          timeZone: 'America/Los_Angeles',
-          locationId: 'loc_2',
-          distanceMiles: 1.2,
-        },
-      ],
-    })
+    const railRow = {
+      id: 'pro_2',
+      businessName: 'Nearby Pro',
+      avatarUrl: null,
+      location: 'Los Angeles',
+      offeringId: 'offering_1',
+      timeZone: 'America/Los_Angeles',
+      locationId: 'loc_2',
+      distanceMiles: 1.2,
+    }
 
     mocks.fetch.mockResolvedValueOnce(makeResponse(primaryOnlySummary))
 
@@ -473,8 +466,8 @@ describe('useAvailability', () => {
 
     seed.unmount()
 
-    const fullFetchGate = deferred<Response>()
-    mocks.fetch.mockReturnValueOnce(fullFetchGate.promise)
+    const railFetchGate = deferred<Response>()
+    mocks.fetch.mockReturnValueOnce(railFetchGate.promise)
 
     const second = renderHook(
       (props: HookProps) =>
@@ -500,8 +493,21 @@ describe('useAvailability', () => {
 
     expect(mocks.fetch).toHaveBeenCalledTimes(2)
 
+    /**
+     * The rail refresh goes to the endpoint built for it. Before this wiring it
+     * refetched the whole bootstrap window — every day's slots recomputed to
+     * update one list — so the URL is the assertion that matters here.
+     */
+    const railUrl = String(mocks.fetch.mock.calls[1]?.[0] ?? '')
+    expect(railUrl).toContain('/api/v1/availability/other-pros')
+    expect(railUrl).not.toContain('/api/v1/availability/bootstrap')
+    expect(railUrl).not.toContain('days=')
+    expect(railUrl).not.toContain('includeOtherPros=')
+
     await act(async () => {
-      fullFetchGate.resolve(makeResponse(fullSummary))
+      railFetchGate.resolve(
+        makeResponse({ ok: true, mode: 'OTHER_PROS', otherPros: [railRow] }),
+      )
       await flushMicrotasks(5)
     })
 
@@ -509,7 +515,24 @@ describe('useAvailability', () => {
       expect(second.result.current.refreshing).toBe(false)
     })
 
-    expect(second.result.current.data).toEqual(fullSummary)
+    const merged = second.result.current.data
+    expect(merged?.otherPros).toHaveLength(1)
+    expect(merged?.otherPros[0]?.id).toBe('pro_2')
+    expect(merged?.otherPros[0]?.locationId).toBe('loc_2')
+
+    /**
+     * ONLY the rows move. `other-pros` versions itself in a separate namespace
+     * (`other-pros:<sha>` of the request args) and resolves its timezone through
+     * a placement fork, so stamping its payload over the bootstrap response
+     * would corrupt exactly the fields day-slot invalidation keys on.
+     */
+    expect(merged?.availabilityVersion).toBe(
+      primaryOnlySummary.availabilityVersion,
+    )
+    expect(merged?.generatedAt).toBe(primaryOnlySummary.generatedAt)
+    expect(merged ? { ...merged, otherPros: [] } : null).toEqual(
+      primaryOnlySummary,
+    )
   })
 
   it('dedupes concurrent in-flight primary requests for the same key', async () => {

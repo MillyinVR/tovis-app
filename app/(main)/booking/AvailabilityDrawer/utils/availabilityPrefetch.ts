@@ -1,11 +1,15 @@
 // app/(main)/booking/AvailabilityDrawer/utils/availabilityPrefetch.ts
 import type {
   AvailabilityBootstrapResponse,
+  AvailabilityOtherPro,
   DrawerContext,
   ServiceLocationType,
 } from '../types'
 
-import { parseAvailabilityBootstrapResponse } from '../contract'
+import {
+  parseAvailabilityBootstrapResponse,
+  parseAvailabilityOtherProsResponse,
+} from '../contract'
 import { safeJson } from './safeJson'
 import { INITIAL_WINDOW_DAYS } from './availabilityWindow'
 import { BookingApiRequestError, parseBookingApiError } from './bookingError'
@@ -50,6 +54,7 @@ const MAX_CACHE_ENTRIES = 200
 
 const bootstrapWindowCache = new Map<string, CacheEntry>()
 const inFlightByKey = new Map<string, Promise<BootstrapOk>>()
+const inFlightOtherProsByKey = new Map<string, Promise<AvailabilityOtherPro[]>>()
 
 function normalizeTrimmed(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -369,6 +374,130 @@ export async function prefetchAvailabilitySummary(
     await fetchAvailabilitySummaryWindow(args)
   } catch {
     // fail-open on background prefetch
+  }
+}
+
+export type AvailabilityOtherProsFetchArgs = {
+  professionalId: string
+  serviceId: string
+  locationType: ServiceLocationType | null
+  locationId?: string | null
+  clientAddressId?: string | null
+  viewer?: ViewerContext | null
+  signal?: AbortSignal
+}
+
+/**
+ * GET /api/v1/availability/other-pros — refresh ONLY the nearby-pros rail.
+ *
+ * The rail used to be refreshed by refetching the entire bootstrap window with
+ * `includeOtherPros=1`, i.e. recomputing every day's slots in order to update
+ * one list. This endpoint exists for exactly this job and is version-keyed +
+ * cached server-side for 120s.
+ *
+ * Returns the ROWS only. The route's `availabilityVersion` is a different
+ * namespace from the bootstrap window's and its top-level `timeZone` comes from
+ * a placement fork — see `parseAvailabilityOtherProsResponse`. Nothing else on
+ * that payload is safe to merge into a bootstrap response.
+ *
+ * NOT client-cached: the bootstrap window cache is keyed on a window this
+ * response does not describe, and the rail is only ever fetched as a refresh.
+ * Concurrent callers still share one request.
+ */
+export async function fetchAvailabilityOtherPros(
+  args: AvailabilityOtherProsFetchArgs,
+): Promise<AvailabilityOtherPro[]> {
+  const professionalId = normalizeTrimmed(args.professionalId)
+  const serviceId = normalizeTrimmed(args.serviceId)
+  const locationId = normalizeTrimmed(args.locationId)
+  const clientAddressId = normalizeTrimmed(args.clientAddressId)
+  const locationType = args.locationType ?? null
+  const viewer = args.viewer ?? null
+
+  if (!professionalId) {
+    throw new Error('Missing professionalId.')
+  }
+
+  if (!serviceId) {
+    throw new Error('Missing serviceId.')
+  }
+
+  if (locationType === 'MOBILE' && !clientAddressId) {
+    throw new Error('Mobile availability requires clientAddressId.')
+  }
+
+  const qs = new URLSearchParams()
+  qs.set('professionalId', professionalId)
+  qs.set('serviceId', serviceId)
+
+  if (locationType) {
+    qs.set('locationType', locationType)
+  }
+
+  if (locationId) {
+    qs.set('locationId', locationId)
+  }
+
+  if (locationType === 'MOBILE' && clientAddressId) {
+    qs.set('clientAddressId', clientAddressId)
+  }
+
+  if (viewer) {
+    qs.set('viewerLat', String(viewer.lat))
+    qs.set('viewerLng', String(viewer.lng))
+
+    if (viewer.radiusMiles != null) {
+      qs.set('radiusMiles', String(viewer.radiusMiles))
+    }
+
+    if (viewer.placeId) {
+      qs.set('viewerPlaceId', viewer.placeId)
+    }
+  }
+
+  const requestKey = qs.toString()
+
+  let promise = inFlightOtherProsByKey.get(requestKey)
+  if (!promise) {
+    promise = (async (): Promise<AvailabilityOtherPro[]> => {
+      const res = await fetch(`/api/v1/availability/other-pros?${requestKey}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: args.signal,
+      })
+
+      const raw = await safeJson(res)
+
+      if (res.status === 401) {
+        throw new Error('Unauthorized.')
+      }
+
+      if (!res.ok) {
+        const apiError = parseBookingApiError(raw)
+        throw new BookingApiRequestError(
+          apiError?.message ?? `Availability request failed (${res.status}).`,
+          apiError?.code ?? null,
+        )
+      }
+
+      const parsed = parseAvailabilityOtherProsResponse(raw)
+      if (!parsed) {
+        throw new Error('Availability endpoint returned unexpected response.')
+      }
+
+      return parsed.otherPros
+    })()
+
+    inFlightOtherProsByKey.set(requestKey, promise)
+  }
+
+  try {
+    return await promise
+  } finally {
+    const currentPromise = inFlightOtherProsByKey.get(requestKey)
+    if (currentPromise === promise) {
+      inFlightOtherProsByKey.delete(requestKey)
+    }
   }
 }
 
