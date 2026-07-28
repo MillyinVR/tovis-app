@@ -15528,6 +15528,19 @@ export async function updateProBooking(
   )
 }
 
+/**
+ * ⚠️ NO production caller since B11 retired `POST /api/v1/pro/bookings/[id]/rebook`
+ * (2026-07-28). Deliberately KEPT, not dead weight:
+ *
+ * `tests/integration/rebook-token-step-grid.test.ts` (F4's step-grid rule) and
+ * `writeBoundary.overlapPolicy.test.ts` both drive real booking-write behaviour
+ * through this entry point, and it is a thin wrapper over
+ * `performLockedCreateRebookedBookingFromCompletedBooking`, which the aftercare
+ * rebook path does use. Retiring it means re-pointing those two suites first —
+ * a separate decision, not a side effect of deleting the route.
+ *
+ * Do not re-flag it as an orphan without reading those suites.
+ */
 export async function createRebookedBookingFromCompletedBooking(
   args: CreateRebookedBookingFromCompletedBookingArgs,
 ): Promise<CreateRebookedBookingFromCompletedBookingResult> {
