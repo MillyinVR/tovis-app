@@ -12,7 +12,8 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
-import { CompletePaymentCard } from '@/app/client/_public/CompletePaymentCard'
+import ClientCheckoutCard from '@/app/client/(gated)/bookings/[id]/ClientCheckoutCard'
+import { COPY } from '@/lib/copy'
 import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
 import {
   RebookCard,
@@ -571,6 +572,15 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
                 : 'This booking is paid in full. Thank you!'}
             </div>
           </section>
+        ) : checkoutAvailability.status === 'AWAITING_CONFIRMATION' ? (
+          <section className="rounded-card border border-accentPrimary/30 bg-accentPrimary/10 p-5">
+            <div className="text-[14px] font-black text-textPrimary">
+              {COPY.bookings.checkout.awaitingConfirmationTitle}
+            </div>
+            <div className="mt-1 text-sm text-textSecondary">
+              {COPY.bookings.checkout.awaitingConfirmationBody}
+            </div>
+          </section>
         ) : checkoutAvailability.status === 'PAYABLE' ? (
           <>
             {checkoutParam === 'cancelled' ? (
@@ -579,11 +589,55 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
                 whenever you’re ready.
               </section>
             ) : null}
-            <CompletePaymentCard
-              token={routeToken}
-              amountCents={checkoutAvailability.amountCents ?? 0}
-              currency={checkoutAvailability.currency ?? 'usd'}
-            />
+            {/* The same checkout card the gated booking page renders, pointed at
+                the token-authenticated routes. An unclaimed client gets the pro's
+                real accepted methods — Venmo/Zelle/PayPal/cash and, when the pro
+                has a chargeable Stripe account, card — instead of the old
+                Stripe-only card that simply vanished for every pro without
+                Stripe. No account required. */}
+            <section className="rounded-card border border-white/10 bg-bgSecondary p-5">
+              <div className="text-[14px] font-black text-textPrimary">
+                Complete your payment
+              </div>
+              <div className="mt-1 text-sm text-textSecondary">
+                Pay {professionalLabel} directly — no account required.
+              </div>
+
+              <div className="mt-4">
+                <ClientCheckoutCard
+                  bookingId={booking.id}
+                  endpoints={{
+                    checkoutUrl: `/api/v1/client/rebook/${encodeURIComponent(routeToken)}/checkout/manual`,
+                    stripeSessionUrl: `/api/v1/client/rebook/${encodeURIComponent(routeToken)}/checkout`,
+                    idempotencyScope: 'public-aftercare-checkout',
+                    stripeIdempotencyScope: 'public-rebook',
+                    idempotencyEntityId: routeToken,
+                  }}
+                  checkoutStatus={checkoutAvailability.checkoutStatus}
+                  selectedPaymentMethod={
+                    checkoutAvailability.selectedPaymentMethod
+                  }
+                  serviceSubtotalSnapshot={
+                    checkoutAvailability.amounts.serviceSubtotal
+                  }
+                  productSubtotalSnapshot={
+                    checkoutAvailability.amounts.productSubtotal
+                  }
+                  tipAmount={checkoutAvailability.amounts.tipAmount}
+                  taxAmount={checkoutAvailability.amounts.taxAmount}
+                  discountAmount={checkoutAvailability.amounts.discountAmount}
+                  totalAmount={checkoutAvailability.amounts.totalAmount}
+                  acceptedMethods={checkoutAvailability.paymentOptions.methods}
+                  tipsEnabled={checkoutAvailability.paymentOptions.tipsEnabled}
+                  allowCustomTip={
+                    checkoutAvailability.paymentOptions.allowCustomTip
+                  }
+                  tipSuggestions={
+                    checkoutAvailability.paymentOptions.tipSuggestions
+                  }
+                />
+              </div>
+            </section>
           </>
         ) : null}
 

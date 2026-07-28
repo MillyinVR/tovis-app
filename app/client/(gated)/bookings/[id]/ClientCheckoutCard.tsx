@@ -2,7 +2,7 @@
 
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { type MouseEvent, useMemo, useState, useTransition } from 'react'
 import { formatMoneyFromUnknown } from '@/lib/money'
 import { useRouter } from 'next/navigation'
 import {
@@ -30,8 +30,27 @@ type AcceptedMethod = {
   handle: string | null
 }
 
+/**
+ * Where this card sends its writes. The gated booking page leaves it unset and
+ * gets the authed booking routes; the PUBLIC aftercare page passes the
+ * token-authenticated twins so an unclaimed client can use the very same
+ * checkout UI. Parameterising the endpoints keeps one implementation of the
+ * tip/method/deep-link logic instead of a second copy that drifts.
+ */
+export type ClientCheckoutEndpoints = {
+  /** POST target for save-tip and off-platform confirm. */
+  checkoutUrl: string
+  /** POST target that mints a Stripe Checkout session. */
+  stripeSessionUrl: string
+  /** Idempotency scope + entity for both of the above. */
+  idempotencyScope: string
+  stripeIdempotencyScope: string
+  idempotencyEntityId: string
+}
+
 type Props = {
   bookingId: string
+  endpoints?: ClientCheckoutEndpoints
   checkoutStatus: CheckoutStatus
   paymentCollectedAt?: string | Date | null
   selectedPaymentMethod?: string | null
@@ -133,34 +152,19 @@ function parseSubmitErrorMessage(data: unknown): string | null {
   return null
 }
 
+// The UI key and the wire PaymentMethod differ only by case (see
+// PAYMENT_METHOD_KEYS in lib/payments/acceptedMethods), so these are pure case
+// transforms rather than hand-kept lists. The old enumerations silently dropped
+// PAYPAL — the client could select PayPal, pay for real through the deep link,
+// then get "Choose a payment method" forever because the request value came back
+// null. Deriving can't go stale; the server still authorizes the method.
 function normalizePaymentMethodKey(value: unknown): string {
-  const normalized = upper(value)
-  if (!normalized) return ''
-
-  if (normalized === 'CARD_ON_FILE') return 'card_on_file'
-  if (normalized === 'TAP_TO_PAY') return 'tap_to_pay'
-  if (normalized === 'APPLE_CASH') return 'apple_cash'
-  if (normalized === 'STRIPE_CARD') return 'stripe_card'
-  if (normalized === 'CASH') return 'cash'
-  if (normalized === 'VENMO') return 'venmo'
-  if (normalized === 'ZELLE') return 'zelle'
-
-  return normalized.toLowerCase()
+  return upper(value).toLowerCase()
 }
 
 function methodKeyToRequestValue(value: string): string | null {
-  const normalized = value.trim().toLowerCase()
-  if (!normalized) return null
-
-  if (normalized === 'cash') return 'CASH'
-  if (normalized === 'card_on_file') return 'CARD_ON_FILE'
-  if (normalized === 'tap_to_pay') return 'TAP_TO_PAY'
-  if (normalized === 'venmo') return 'VENMO'
-  if (normalized === 'zelle') return 'ZELLE'
-  if (normalized === 'apple_cash') return 'APPLE_CASH'
-  if (normalized === 'stripe_card') return 'STRIPE_CARD'
-
-  return null
+  const normalized = value.trim().toUpperCase()
+  return normalized ? normalized : null
 }
 
 function normalizeTipSuggestionPercents(value: unknown): number[] {
@@ -201,15 +205,55 @@ function moneyMatches(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.005
 }
 
+/**
+ * True on a phone/tablet, where a provider's custom URL scheme can actually
+ * resolve to an installed app. Read at click time, never during render, so it
+ * can't cause a hydration mismatch.
+ */
+function isMobileBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+}
+
+/**
+ * Hand off to the provider's native app when there's an app-scheme URL and we're
+ * on a phone. Custom schemes must be navigated from the user's own gesture in
+ * the CURRENT tab — the https URL can't do it (Venmo only reaches the app via a
+ * server redirect, which Safari won't follow out of a target=_blank tab), and a
+ * new tab is exactly where iOS blocks scheme hand-offs. Desktop keeps the plain
+ * https link, which opens the provider's web payment page.
+ */
+function handlePayLinkClick(
+  event: MouseEvent<HTMLAnchorElement>,
+  action: { appHref?: string },
+): void {
+  if (!action.appHref || !isMobileBrowser()) return
+
+  event.preventDefault()
+  window.location.href = action.appHref
+}
+
+/** The authed booking routes — used unless a caller passes its own endpoints. */
+function defaultEndpoints(bookingId: string): ClientCheckoutEndpoints {
+  const base = `/api/v1/client/bookings/${encodeURIComponent(bookingId)}/checkout`
+  return {
+    checkoutUrl: base,
+    stripeSessionUrl: `${base}/stripe-session`,
+    idempotencyScope: 'client-checkout',
+    stripeIdempotencyScope: 'client-checkout-stripe-session',
+    idempotencyEntityId: bookingId,
+  }
+}
+
 async function submitCheckout(args: {
-  bookingId: string
+  endpoints: ClientCheckoutEndpoints
   tipAmount?: string | null
   selectedPaymentMethod?: string
   confirmPayment: boolean
 }): Promise<SubmitResponse> {
   const idempotencyKey = buildClientIdempotencyKey({
-    scope: 'client-checkout',
-    entityId: args.bookingId,
+    scope: args.endpoints.idempotencyScope,
+    entityId: args.endpoints.idempotencyEntityId,
     action: args.confirmPayment ? 'confirm-payment' : 'save-checkout',
     // Save-tip is iterative (save 15%, change to 20%, save again). Those are
     // distinct bodies under one key, so without a nonce the second save in the
@@ -222,21 +266,18 @@ async function submitCheckout(args: {
       : `${args.tipAmount ?? ''}|${args.selectedPaymentMethod ?? ''}`,
   })
 
-  const response = await fetch(
-    `/api/v1/client/bookings/${encodeURIComponent(args.bookingId)}/checkout`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...idempotencyHeaders(idempotencyKey),
-      },
-      body: JSON.stringify({
-        tipAmount: args.tipAmount,
-        selectedPaymentMethod: args.selectedPaymentMethod,
-        confirmPayment: args.confirmPayment,
-      }),
+  const response = await fetch(args.endpoints.checkoutUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...idempotencyHeaders(idempotencyKey),
     },
-  )
+    body: JSON.stringify({
+      tipAmount: args.tipAmount,
+      selectedPaymentMethod: args.selectedPaymentMethod,
+      confirmPayment: args.confirmPayment,
+    }),
+  })
 
   let data: unknown = null
   try {
@@ -255,12 +296,12 @@ async function submitCheckout(args: {
 }
 
 async function createStripeCheckoutSession(args: {
-  bookingId: string
+  endpoints: ClientCheckoutEndpoints
   tipAmount: string
 }): Promise<StripeSessionResponse> {
   const idempotencyKey = buildClientIdempotencyKey({
-    scope: 'client-checkout-stripe-session',
-    entityId: args.bookingId,
+    scope: args.endpoints.stripeIdempotencyScope,
+    entityId: args.endpoints.idempotencyEntityId,
     action: 'create-stripe-session',
     // Re-initiating with a changed tip (e.g. after returning from Stripe)
     // is a distinct body under one key; nonce on the tip avoids a 409 while
@@ -268,19 +309,16 @@ async function createStripeCheckoutSession(args: {
     nonce: args.tipAmount,
   })
 
-  const response = await fetch(
-    `/api/v1/client/bookings/${encodeURIComponent(args.bookingId)}/checkout/stripe-session`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...idempotencyHeaders(idempotencyKey),
-      },
-      body: JSON.stringify({
-        tipAmount: args.tipAmount,
-      }),
+  const response = await fetch(args.endpoints.stripeSessionUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...idempotencyHeaders(idempotencyKey),
     },
-  )
+    body: JSON.stringify({
+      tipAmount: args.tipAmount,
+    }),
+  })
 
   let data: unknown = null
   try {
@@ -348,6 +386,13 @@ function CopyChip(props: { label: string; value: string }) {
 export default function ClientCheckoutCard(props: Props) {
   const router = useRouter()
   const { brand } = useBrand()
+
+  // Public aftercare passes token-authenticated twins; the gated page uses the
+  // authed booking routes.
+  const endpoints = useMemo(
+    () => props.endpoints ?? defaultEndpoints(props.bookingId),
+    [props.endpoints, props.bookingId],
+  )
 
   const [selectedMethodKey, setSelectedMethodKey] = useState<string>(() =>
     normalizePaymentMethodKey(props.selectedPaymentMethod),
@@ -530,7 +575,7 @@ export default function ClientCheckoutCard(props: Props) {
     startTransition(() => {
       if (selectedMethodIsStripe) {
         void createStripeCheckoutSession({
-          bookingId: props.bookingId,
+          endpoints,
           tipAmount: tipAmount.toFixed(2),
         })
           .then((data) => {
@@ -554,7 +599,7 @@ export default function ClientCheckoutCard(props: Props) {
       }
 
       void submitCheckout({
-        bookingId: props.bookingId,
+        endpoints,
         tipAmount: tipAmount.toFixed(2),
         selectedPaymentMethod: requestMethod,
         confirmPayment: true,
@@ -588,7 +633,7 @@ export default function ClientCheckoutCard(props: Props) {
 
     startTransition(() => {
       void submitCheckout({
-        bookingId: props.bookingId,
+        endpoints,
         tipAmount: tipAmount.toFixed(2),
         // Only forward a method if the user chose a non-Stripe method.
         // Manual checkout endpoint rejects STRIPE_CARD on the confirm path,
@@ -868,6 +913,7 @@ export default function ClientCheckoutCard(props: Props) {
               <>
                 <a
                   href={payAction.href}
+                  onClick={(event) => handlePayLinkClick(event, payAction)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex w-full items-center justify-center rounded-full border border-accentPrimary bg-accentPrimary/10 px-4 py-2 text-[12px] font-black text-accentPrimary sm:w-auto"

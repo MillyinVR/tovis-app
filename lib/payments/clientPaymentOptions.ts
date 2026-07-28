@@ -10,9 +10,14 @@
 // ordering + labels + handle mapping, and (3) the tip-suggestion normalization.
 // The web booking page and the native client-bookings list DTO both build from
 // here so the two never drift.
-import type { Prisma } from '@prisma/client'
+import { PaymentMethod, type Prisma } from '@prisma/client'
 
 import { isRecord } from '@/lib/guards'
+import {
+  buildClientSelfServePaymentMethods,
+  paymentMethodKey,
+  paymentMethodLabel,
+} from '@/lib/payments/acceptedMethods'
 import type {
   ClientBookingPaymentMethodDTO,
   ClientBookingPaymentOptionsDTO,
@@ -59,12 +64,16 @@ type StripeGateFields = {
   stripePayoutsEnabled: boolean
 }
 
-// The off-platform handle + note fields that get trimmed to null when blank.
-type HandleFields = {
+// The per-method off-platform handles a client can be shown.
+type MethodHandleFields = {
   venmoHandle: string | null
   zelleHandle: string | null
   appleCashHandle: string | null
   paypalHandle: string | null
+}
+
+// The off-platform handle + note fields that get trimmed to null when blank.
+type HandleFields = MethodHandleFields & {
   paymentNote: string | null
 }
 
@@ -90,6 +99,17 @@ function normalizeHandle(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+// Which stored handle (if any) a method surfaces to the client. Methods absent
+// from this map are handle-free (cash / Stripe / the pro-run rails).
+const HANDLE_FOR_METHOD: Partial<
+  Record<PaymentMethod, (settings: MethodHandleFields) => string | null>
+> = {
+  [PaymentMethod.VENMO]: (s) => s.venmoHandle,
+  [PaymentMethod.ZELLE]: (s) => s.zelleHandle,
+  [PaymentMethod.APPLE_CASH]: (s) => s.appleCashHandle,
+  [PaymentMethod.PAYPAL]: (s) => s.paypalHandle,
 }
 
 function canAcceptStripeCard(settings: StripeGateFields): boolean {
@@ -133,56 +153,26 @@ export function buildClientAcceptedMethods(
   // default), so a client is never hard-blocked from paying — mirror the web
   // page's fallback.
   if (!settings) {
-    return [{ key: 'cash', label: 'Cash', handle: null }]
+    return [
+      {
+        key: paymentMethodKey(PaymentMethod.CASH),
+        label: paymentMethodLabel(PaymentMethod.CASH),
+        handle: null,
+      },
+    ]
   }
 
-  const methods: ClientBookingPaymentMethodDTO[] = []
-
-  if (settings.acceptCash) {
-    methods.push({ key: 'cash', label: 'Cash', handle: null })
-  }
-  if (settings.acceptCardOnFile) {
-    methods.push({ key: 'card_on_file', label: 'Card on file', handle: null })
-  }
-  if (settings.acceptTapToPay) {
-    methods.push({ key: 'tap_to_pay', label: 'Tap to pay', handle: null })
-  }
-  if (settings.acceptVenmo) {
-    methods.push({
-      key: 'venmo',
-      label: 'Venmo',
-      handle: normalizeHandle(settings.venmoHandle),
-    })
-  }
-  if (settings.acceptZelle) {
-    methods.push({
-      key: 'zelle',
-      label: 'Zelle',
-      handle: normalizeHandle(settings.zelleHandle),
-    })
-  }
-  if (settings.acceptAppleCash) {
-    methods.push({
-      key: 'apple_cash',
-      label: 'Apple Cash',
-      handle: normalizeHandle(settings.appleCashHandle),
-    })
-  }
-  if (settings.acceptPaypal) {
-    methods.push({
-      key: 'paypal',
-      label: 'PayPal',
-      handle: normalizeHandle(settings.paypalHandle),
-    })
-  }
-  if (settings.acceptApplePay) {
-    methods.push({ key: 'apple_pay', label: 'Apple Pay', handle: null })
-  }
-  if (settings.acceptStripeCard) {
-    methods.push({ key: 'stripe_card', label: 'Credit/debit card', handle: null })
-  }
-
-  return methods
+  // Built from the same set the client checkout route authorizes against, so a
+  // method can never be OFFERED here yet rejected on confirm — the drift that
+  // let a client pay a real PayPal transfer and then be unable to record it.
+  // Pro-run rails (card on file / tap to pay / Apple Pay) are excluded: the
+  // client can't execute those themselves, and confirming one used to stamp the
+  // booking PAID with nothing charged.
+  return [...buildClientSelfServePaymentMethods(settings)].map((method) => ({
+    key: paymentMethodKey(method),
+    label: paymentMethodLabel(method),
+    handle: normalizeHandle(HANDLE_FOR_METHOD[method]?.(settings) ?? null),
+  }))
 }
 
 /**

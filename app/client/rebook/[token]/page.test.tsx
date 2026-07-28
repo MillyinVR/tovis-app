@@ -38,6 +38,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('next/navigation', () => ({
   notFound: mocks.notFound,
+  // The public page now renders the shared ClientCheckoutCard, which is a client
+  // component that reads useRouter to refresh after a write.
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+}))
+
+// ...and reads the brand for the Venmo deep-link note.
+vi.mock('@/lib/brand/BrandProvider', () => ({
+  useBrand: () => ({ brand: { displayName: 'TOVIS' } }),
 }))
 
 vi.mock('next/link', () => ({
@@ -553,8 +561,29 @@ describe('app/client/rebook/[token]/page.tsx', () => {
   it('renders the complete-payment card when checkout is PAYABLE', async () => {
     mocks.getPublicCheckoutAvailability.mockResolvedValueOnce({
       status: 'PAYABLE',
-      amountCents: 4500,
-      currency: 'usd',
+      checkoutStatus: 'READY',
+      selectedPaymentMethod: null,
+      amounts: {
+        serviceSubtotal: '45.00',
+        productSubtotal: '0.00',
+        tipAmount: '0.00',
+        taxAmount: '0.00',
+        discountAmount: '0.00',
+        totalAmount: '45.00',
+        amountCents: 4500,
+        currency: 'usd',
+      },
+      paymentOptions: {
+        methods: [
+          { key: 'cash', label: 'Cash', handle: null },
+          { key: 'venmo', label: 'Venmo', handle: '@amara' },
+        ],
+        tipsEnabled: true,
+        allowCustomTip: true,
+        tipSuggestions: [],
+        paymentNote: null,
+        collectPaymentAt: 'AFTER_SERVICE',
+      },
     })
 
     const page = await renderPage({
@@ -565,13 +594,98 @@ describe('app/client/rebook/[token]/page.tsx', () => {
 
     expect(markup).toContain('Complete your payment')
     expect(markup).toContain('$45.00')
+    // The pro's real accepted methods, not a Stripe-only card — this is what an
+    // unclaimed client used to be shown nothing in place of.
+    expect(markup).toContain('Venmo')
+    expect(markup).toContain('@amara')
+  })
+
+  // Regression: a pro with no Stripe account made the whole payment surface
+  // vanish, so the client had to create an account to find out Venmo was on
+  // offer all along.
+  it('offers off-platform methods to an unclaimed client with no Stripe on the pro', async () => {
+    mocks.clientProfileFindUnique.mockResolvedValueOnce({
+      claimStatus: 'UNCLAIMED',
+      userId: null,
+    })
+    mocks.getPublicCheckoutAvailability.mockResolvedValueOnce({
+      status: 'PAYABLE',
+      checkoutStatus: 'READY',
+      selectedPaymentMethod: null,
+      amounts: {
+        serviceSubtotal: '45.00',
+        productSubtotal: '0.00',
+        tipAmount: '0.00',
+        taxAmount: '0.00',
+        discountAmount: '0.00',
+        totalAmount: '45.00',
+        amountCents: 4500,
+        currency: 'usd',
+      },
+      paymentOptions: {
+        methods: [
+          { key: 'cash', label: 'Cash', handle: null },
+          { key: 'zelle', label: 'Zelle', handle: '555-1212' },
+        ],
+        tipsEnabled: true,
+        allowCustomTip: true,
+        tipSuggestions: [],
+        paymentNote: null,
+        collectPaymentAt: 'AFTER_SERVICE',
+      },
+    })
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({ offeringId: 'offering_1' }),
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).toContain('Complete your payment')
+    expect(markup).toContain('Zelle')
+    expect(markup).toContain('555-1212')
+  })
+
+  it('shows the awaiting-confirmation notice once the client has attested payment', async () => {
+    mocks.getPublicCheckoutAvailability.mockResolvedValueOnce({
+      status: 'AWAITING_CONFIRMATION',
+    })
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({ offeringId: 'offering_1' }),
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).not.toContain('Complete your payment')
   })
 
   it('shows a payment-received notice when returning with checkout=success', async () => {
     mocks.getPublicCheckoutAvailability.mockResolvedValueOnce({
       status: 'PAYABLE',
-      amountCents: 4500,
-      currency: 'usd',
+      checkoutStatus: 'READY',
+      selectedPaymentMethod: null,
+      amounts: {
+        serviceSubtotal: '45.00',
+        productSubtotal: '0.00',
+        tipAmount: '0.00',
+        taxAmount: '0.00',
+        discountAmount: '0.00',
+        totalAmount: '45.00',
+        amountCents: 4500,
+        currency: 'usd',
+      },
+      paymentOptions: {
+        methods: [
+          { key: 'cash', label: 'Cash', handle: null },
+          { key: 'venmo', label: 'Venmo', handle: '@amara' },
+        ],
+        tipsEnabled: true,
+        allowCustomTip: true,
+        tipSuggestions: [],
+        paymentNote: null,
+        collectPaymentAt: 'AFTER_SERVICE',
+      },
     })
 
     const page = await renderPage({

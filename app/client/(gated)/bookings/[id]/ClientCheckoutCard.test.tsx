@@ -104,6 +104,105 @@ describe('ClientCheckoutCard — AWAITING_CONFIRMATION', () => {
   })
 })
 
+// The bug Tori hit in the field: tapping "Pay with Venmo" on a phone did
+// nothing. The https URL is not a Venmo universal link (venmo.com's
+// apple-app-site-association claims /u/*, not a bare /<username>), so iOS handed
+// it to Safari, which followed a 302→307 chain ending at venmo://paycharge — a
+// server redirect into a custom scheme, out of a target=_blank tab, which Safari
+// refuses. The fix is to navigate to that scheme ourselves from the click.
+describe('ClientCheckoutCard — Venmo hands off to the app on mobile', () => {
+  const realUserAgent = navigator.userAgent
+  let assigned: string | null
+
+  function setUserAgent(value: string) {
+    Object.defineProperty(navigator, 'userAgent', {
+      value,
+      configurable: true,
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    assigned = null
+
+    // jsdom won't navigate; capture the assignment instead.
+    Object.defineProperty(window, 'location', {
+      value: {
+        set href(value: string) {
+          assigned = value
+        },
+        get href() {
+          return 'http://localhost/'
+        },
+        assign: (value: string) => {
+          assigned = value
+        },
+      },
+      configurable: true,
+      writable: true,
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+    setUserAgent(realUserAgent)
+  })
+
+  function renderVenmoCard() {
+    render(
+      <ClientCheckoutCard
+        bookingId="booking_1"
+        checkoutStatus="READY"
+        paymentCollectedAt={null}
+        selectedPaymentMethod="VENMO"
+        serviceSubtotalSnapshot="65.00"
+        totalAmount="65.00"
+        acceptedMethods={[{ key: 'venmo', label: 'Venmo', handle: '@tovispro' }]}
+      />,
+    )
+    return screen.getByRole('link', { name: /with Venmo/i }) as HTMLAnchorElement
+  }
+
+  it('navigates to venmo://paycharge instead of the dead https URL on iPhone', () => {
+    setUserAgent(
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+    )
+
+    const link = renderVenmoCard()
+    // The anchor still carries the https URL, so it degrades gracefully.
+    expect(link.getAttribute('href')).toContain('https://venmo.com/tovispro')
+
+    const event = new window.MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(link, event)
+
+    // The default https navigation was suppressed in favour of the app scheme.
+    expect(event.defaultPrevented).toBe(true)
+    expect(assigned).toBe(
+      'venmo://paycharge?txn=pay&recipients=tovispro&amount=65.00&note=TOVIS',
+    )
+  })
+
+  it('leaves the https URL alone on desktop, where the web pay page works', () => {
+    setUserAgent(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+    )
+
+    const link = renderVenmoCard()
+
+    const event = new window.MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(link, event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(assigned).toBeNull()
+  })
+})
+
 // Regression guard for CHK-tip-live (origin 9ec115fb0). The persisted
 // `totalAmount` snapshot is almost always non-null, so the old
 // `totalSnapshot ?? livePreviewTotal` short-circuit froze the on-screen Total and

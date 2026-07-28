@@ -51,6 +51,8 @@ export const IDEMPOTENCY_ROUTES = {
     'POST /api/v1/client/bookings/[id]/deposit/stripe-session',
   PUBLIC_AFTERCARE_CHECKOUT_STRIPE_SESSION:
     'POST /api/v1/client/rebook/[token]/checkout',
+  PUBLIC_AFTERCARE_CHECKOUT_MANUAL:
+    'POST /api/v1/client/rebook/[token]/checkout/manual',
   CLIENT_CHECKOUT_PRODUCTS: 'POST /api/v1/client/bookings/[id]/checkout/products',
 
   CLIENT_REVIEW_CREATE: 'POST /api/v1/client/bookings/[id]/review',

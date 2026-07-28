@@ -420,6 +420,8 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
       acceptVenmo: true,
       acceptZelle: true,
       acceptAppleCash: true,
+      acceptPaypal: true,
+      acceptApplePay: true,
       acceptStripeCard: true,
       tipsEnabled: true,
     })
@@ -460,7 +462,7 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
   it('returns 400 for an unsupported payment method before idempotency starts', async () => {
     const response = await POST(
       makeRequest({
-        selectedPaymentMethod: 'paypal',
+        selectedPaymentMethod: 'bitcoin',
         confirmPayment: false,
       }),
       makeCtx(),
@@ -469,12 +471,60 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual({
       error:
-        'selectedPaymentMethod must be one of: cash, card on file, tap to pay, Venmo, Zelle, Apple Cash, Stripe card.',
+        'selectedPaymentMethod must be one of: cash, Venmo, Zelle, Apple Cash, PayPal, Stripe card.',
     })
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
   })
+
+  // Regression: PAYPAL was unparseable here, so a client who followed the
+  // (working) paypal.me deep link and really paid could never record it — the
+  // confirm came back "not one of…" every time. PayPal is off-platform, so it
+  // lands in AWAITING_CONFIRMATION for the pro to confirm receipt, exactly like
+  // Venmo and Zelle.
+  it('confirms a PayPal payment into AWAITING_CONFIRMATION', async () => {
+    const response = await POST(
+      makeRequest({
+        selectedPaymentMethod: 'paypal',
+        confirmPayment: true,
+      }),
+      makeCtx(),
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.updateClientBookingCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedPaymentMethod: PaymentMethod.PAYPAL,
+        checkoutStatus: BookingCheckoutStatus.AWAITING_CONFIRMATION,
+        markPaymentAuthorized: true,
+        markPaymentCollected: false,
+      }),
+    )
+  })
+
+  // Regression: card-on-file / tap-to-pay / Apple Pay are rails the PRO runs.
+  // A client confirming one used to be treated as a "verifiable" payment and
+  // stamped PAID + paymentCollectedAt with nothing actually charged.
+  it.each(['card_on_file', 'tap_to_pay', 'apple_pay'])(
+    'refuses to let a client self-serve %s',
+    async (method) => {
+      const response = await POST(
+        makeRequest({
+          selectedPaymentMethod: method,
+          confirmPayment: true,
+        }),
+        makeCtx(),
+      )
+
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toEqual({
+        error: 'That payment method is not enabled by this provider.',
+      })
+
+      expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
+    },
+  )
 
   it('returns handled missing-key idempotency response without loading booking or updating checkout', async () => {
     const handledResponse = makeJsonResponse(
@@ -879,7 +929,12 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
     await expect(response.json()).resolves.toEqual(responseBody)
   })
 
-  it('keeps a verifiable card-on-file confirmation on the immediate-PAID path', async () => {
+  // This used to assert the opposite — that a client confirming "card on file"
+  // went straight to PAID + paymentCollectedAt. Nothing charges a card on this
+  // route, so that was a client closing out their own booking on money that
+  // never moved. Card-on-file is a rail the PRO runs; it now belongs solely to
+  // the pro's manual mark-paid flow, and the client can't select it at all.
+  it('refuses a client-side card-on-file confirmation outright', async () => {
     const response = await POST(
       makeIdempotentRequest(
         {
@@ -892,17 +947,8 @@ describe('POST /api/v1/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.updateClientBookingCheckout).toHaveBeenCalledWith({
-      bookingId: 'booking_1',
-      clientId: 'client_1',
-      tipAmount: '15.00',
-      selectedPaymentMethod: PaymentMethod.CARD_ON_FILE,
-      checkoutStatus: BookingCheckoutStatus.PAID,
-      markPaymentAuthorized: true,
-      markPaymentCollected: true,
-    })
-
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(400)
+    expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
   })
 
   it('uses existing manual selected payment method when confirming payment without selectedPaymentMethod', async () => {

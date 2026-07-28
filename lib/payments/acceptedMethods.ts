@@ -15,6 +15,8 @@ export const acceptedPaymentMethodsSelect = {
   acceptVenmo: true,
   acceptZelle: true,
   acceptAppleCash: true,
+  acceptPaypal: true,
+  acceptApplePay: true,
   acceptStripeCard: true,
 } satisfies Prisma.ProfessionalPaymentSettingsSelect
 
@@ -27,13 +29,22 @@ export type AcceptedPaymentMethodFlags = {
   acceptVenmo: boolean
   acceptZelle: boolean
   acceptAppleCash: boolean
+  acceptPaypal: boolean
+  acceptApplePay: boolean
   acceptStripeCard: boolean
 }
 
-// Normalize a free-form request value (e.g. "cash", "tap to pay", "APPLE_CASH")
-// into a checkout-supported PaymentMethod, or undefined when unrecognized.
-// Mirrors the set of methods checkout actually supports — APPLE_PAY / PAYPAL are
-// intentionally excluded (not collectible through this path).
+// Parse a free-form request value (e.g. "cash", "tap to pay", "APPLE_CASH") into
+// a PaymentMethod, or undefined when it names no method at all.
+//
+// This is PARSING ONLY — it deliberately covers every enum member. Whether a
+// given actor may actually choose a method is an authorization question answered
+// by buildAcceptedPaymentMethods (does the pro take it?) and
+// buildClientSelfServePaymentMethods (may a CLIENT pick it themselves?). Keeping
+// the two apart is what this module got wrong before: PAYPAL was unparseable, so
+// a client could be offered PayPal, pay for real through the working paypal.me
+// deep link, and then be unable to record it — the confirm was rejected here
+// with "not one of…" rather than by any deliberate policy.
 export function normalizePaymentMethodInput(
   value: unknown,
 ): PaymentMethod | undefined {
@@ -55,6 +66,10 @@ export function normalizePaymentMethodInput(
       return PaymentMethod.ZELLE
     case PaymentMethod.APPLE_CASH:
       return PaymentMethod.APPLE_CASH
+    case PaymentMethod.PAYPAL:
+      return PaymentMethod.PAYPAL
+    case PaymentMethod.APPLE_PAY:
+      return PaymentMethod.APPLE_PAY
     case PaymentMethod.STRIPE_CARD:
       return PaymentMethod.STRIPE_CARD
     default:
@@ -84,6 +99,25 @@ export function isUnverifiablePaymentMethod(
   return method != null && UNVERIFIABLE_PAYMENT_METHODS.has(method)
 }
 
+// The accept* flag that turns each method on, in the canonical checkout display
+// order. Single source of truth for "which methods exist and what enables them"
+// — buildAcceptedPaymentMethods, the client-selectable list and the pro's
+// manual-collect list all read this rather than repeating their own switch.
+const PAYMENT_METHOD_FLAGS: ReadonlyArray<{
+  method: PaymentMethod
+  flag: keyof AcceptedPaymentMethodFlags
+}> = [
+  { method: PaymentMethod.CASH, flag: 'acceptCash' },
+  { method: PaymentMethod.CARD_ON_FILE, flag: 'acceptCardOnFile' },
+  { method: PaymentMethod.TAP_TO_PAY, flag: 'acceptTapToPay' },
+  { method: PaymentMethod.VENMO, flag: 'acceptVenmo' },
+  { method: PaymentMethod.ZELLE, flag: 'acceptZelle' },
+  { method: PaymentMethod.APPLE_CASH, flag: 'acceptAppleCash' },
+  { method: PaymentMethod.PAYPAL, flag: 'acceptPaypal' },
+  { method: PaymentMethod.APPLE_PAY, flag: 'acceptApplePay' },
+  { method: PaymentMethod.STRIPE_CARD, flag: 'acceptStripeCard' },
+]
+
 export function buildAcceptedPaymentMethods(
   settings: AcceptedPaymentMethodFlags | null,
 ): Set<PaymentMethod> {
@@ -91,13 +125,50 @@ export function buildAcceptedPaymentMethods(
 
   if (!settings) return out
 
-  if (settings.acceptCash) out.add(PaymentMethod.CASH)
-  if (settings.acceptCardOnFile) out.add(PaymentMethod.CARD_ON_FILE)
-  if (settings.acceptTapToPay) out.add(PaymentMethod.TAP_TO_PAY)
-  if (settings.acceptVenmo) out.add(PaymentMethod.VENMO)
-  if (settings.acceptZelle) out.add(PaymentMethod.ZELLE)
-  if (settings.acceptAppleCash) out.add(PaymentMethod.APPLE_CASH)
-  if (settings.acceptStripeCard) out.add(PaymentMethod.STRIPE_CARD)
+  for (const { method, flag } of PAYMENT_METHOD_FLAGS) {
+    if (settings[flag]) out.add(method)
+  }
+
+  return out
+}
+
+// Rails the PRO runs on their own hardware/account: the client never executes
+// these themselves, they just watch the pro take the card. A client "confirming"
+// one used to stamp the booking PAID + paymentCollectedAt with nothing having
+// been charged — a self-serve close-out on money that never moved. They stay
+// available to the pro's manual mark-paid flow, where a human has actually run
+// the card, and are excluded from the client's own checkout entirely.
+const PRO_RUN_PAYMENT_METHODS: ReadonlySet<PaymentMethod> = new Set([
+  PaymentMethod.CARD_ON_FILE,
+  PaymentMethod.TAP_TO_PAY,
+  PaymentMethod.APPLE_PAY,
+])
+
+/**
+ * May a CLIENT pick this method in their own checkout? False for pro-run card
+ * rails. Everything else is either off-platform (client pays in another app and
+ * attests) or Stripe (client pays through hosted checkout).
+ */
+export function isClientSelfServePaymentMethod(
+  method: PaymentMethod | null | undefined,
+): boolean {
+  return method != null && !PRO_RUN_PAYMENT_METHODS.has(method)
+}
+
+/**
+ * The methods a client may choose in self-checkout: what the pro accepts, minus
+ * the pro-run card rails. The client checkout route authorizes against THIS, and
+ * buildClientAcceptedMethods renders from it, so the offered list and the
+ * accepted write can never drift apart again.
+ */
+export function buildClientSelfServePaymentMethods(
+  settings: AcceptedPaymentMethodFlags | null,
+): Set<PaymentMethod> {
+  const out = new Set<PaymentMethod>()
+
+  for (const method of buildAcceptedPaymentMethods(settings)) {
+    if (isClientSelfServePaymentMethod(method)) out.add(method)
+  }
 
   return out
 }
@@ -118,6 +189,25 @@ export function paymentMethodLabel(method: PaymentMethod): string {
   return PAYMENT_METHOD_LABELS[method] ?? method
 }
 
+// The lowercase wire/UI key each method travels under on client surfaces (web
+// checkout card, native checkout, public profile). Paired with the enum here so
+// a new method can't pick up a different key on one surface than another.
+export const PAYMENT_METHOD_KEYS: Record<PaymentMethod, string> = {
+  [PaymentMethod.CASH]: 'cash',
+  [PaymentMethod.CARD_ON_FILE]: 'card_on_file',
+  [PaymentMethod.TAP_TO_PAY]: 'tap_to_pay',
+  [PaymentMethod.VENMO]: 'venmo',
+  [PaymentMethod.ZELLE]: 'zelle',
+  [PaymentMethod.APPLE_CASH]: 'apple_cash',
+  [PaymentMethod.APPLE_PAY]: 'apple_pay',
+  [PaymentMethod.PAYPAL]: 'paypal',
+  [PaymentMethod.STRIPE_CARD]: 'stripe_card',
+}
+
+export function paymentMethodKey(method: PaymentMethod): string {
+  return PAYMENT_METHOD_KEYS[method] ?? method.toLowerCase()
+}
+
 export type ManualCollectablePaymentMethod = {
   value: PaymentMethod
   label: string
@@ -131,13 +221,18 @@ export function listManualCollectablePaymentMethods(
 ): ManualCollectablePaymentMethod[] {
   const accepted = buildAcceptedPaymentMethods(settings)
 
+  // Pro-centric order (the rails they run themselves first). PAYPAL / APPLE_PAY
+  // belong here too: a pro can receive a PayPal transfer or take Apple Pay in
+  // person, and marking it collected is the only way either gets recorded.
   const ORDER: PaymentMethod[] = [
     PaymentMethod.CASH,
     PaymentMethod.TAP_TO_PAY,
     PaymentMethod.CARD_ON_FILE,
+    PaymentMethod.APPLE_PAY,
     PaymentMethod.VENMO,
     PaymentMethod.ZELLE,
     PaymentMethod.APPLE_CASH,
+    PaymentMethod.PAYPAL,
   ]
 
   return ORDER.filter((method) => accepted.has(method)).map((method) => ({
