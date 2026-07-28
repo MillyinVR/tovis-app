@@ -96,6 +96,40 @@ describe('buildClientAcceptedMethods', () => {
     ])
   })
 
+  // Regression: PayPal was offered here but rejected by the confirm route, so a
+  // client could follow a working paypal.me link, actually pay, and then never
+  // be able to record it. The offered list and the accepted set are now built
+  // from the same source.
+  it('offers PayPal with its handle', () => {
+    const methods = buildClientAcceptedMethods(
+      normalizeClientVisiblePaymentSettings(
+        makeRow({ acceptPaypal: true, paypalHandle: '  @amara-pays ' }),
+      ),
+    )
+
+    expect(methods).toEqual([
+      { key: 'paypal', label: 'PayPal', handle: '@amara-pays' },
+    ])
+  })
+
+  // Regression: a client selecting one of these and confirming used to stamp the
+  // booking PAID + paymentCollectedAt with nothing charged — these are rails the
+  // PRO runs, so they belong to the pro's manual mark-paid flow only.
+  it('never offers the pro-run card rails to a client', () => {
+    const methods = buildClientAcceptedMethods(
+      normalizeClientVisiblePaymentSettings(
+        makeRow({
+          acceptCash: true,
+          acceptCardOnFile: true,
+          acceptTapToPay: true,
+          acceptApplePay: true,
+        }),
+      ),
+    )
+
+    expect(methods.map((m) => m.key)).toEqual(['cash'])
+  })
+
   it('gates Stripe out when the connected account is not chargeable', () => {
     const methods = buildClientAcceptedMethods(
       normalizeClientVisiblePaymentSettings(

@@ -18,8 +18,17 @@
 export type PaymentDeepLink =
   | {
       kind: 'link'
-      /** App/universal URL that opens the payment pre-filled. */
+      /**
+       * Web URL for the payment. Safe as an anchor href everywhere: it is a real
+       * https page, so it works on desktop and degrades gracefully.
+       */
       href: string
+      /**
+       * Custom-scheme URL that hands straight off to the native app, when the
+       * provider has one. Callers on a phone should navigate here INSTEAD of
+       * `href` (see the Venmo note below for why the https URL can't do it).
+       */
+      appHref?: string
       /** Human label for the button, e.g. "Pay $80.00 with Venmo". */
       label: string
     }
@@ -84,11 +93,33 @@ export function buildPaymentDeepLink(args: {
       const note = args.note?.trim()
       if (note) params.set('note', note)
 
-      // venmo.com universal link: opens the Venmo app pre-filled on mobile,
-      // falls back to the web flow on desktop.
+      // `https://venmo.com/<user>?txn=pay…` does NOT open the Venmo app, despite
+      // being what every "Venmo deep link" article recommends. Venmo's live
+      // apple-app-site-association claims /u/*, /payment/, /complete_payment,
+      // /code — but not a bare /<username>, so iOS never hands the tap over.
+      // Safari loads it instead and gets redirected:
+      //
+      //   venmo.com/<user>?txn=pay     302 →
+      //   account.venmo.com/<user>?…   307 →  venmo://paycharge?…   (on mobile)
+      //                                200 →  a web pay page        (on desktop)
+      //
+      // That final custom-scheme hop is a SERVER redirect, which iOS Safari will
+      // not follow out of a freshly-opened tab — so the app never opens and the
+      // client is left on a dead page. We therefore hand the app-scheme URL back
+      // ourselves (byte-for-byte what Venmo's own 307 returns) for callers on a
+      // phone, and keep the https URL for desktop, where the chain does resolve
+      // to a working payment page.
+      const appParams = new URLSearchParams({
+        txn: 'pay',
+        recipients: user,
+        amount,
+      })
+      if (note) appParams.set('note', note)
+
       return {
         kind: 'link',
         href: `https://venmo.com/${encodeURIComponent(user)}?${params.toString()}`,
+        appHref: `venmo://paycharge?${appParams.toString()}`,
         label: `Pay $${amount} with Venmo`,
       }
     }
@@ -98,6 +129,9 @@ export function buildPaymentDeepLink(args: {
       if (!user) return null
 
       // PayPal.Me locks the amount into the URL path; currency is inferred.
+      // No appHref needed: paypal.me's apple-app-site-association claims "/*"
+      // (excluding /pools/*), so this IS a real universal link and the PayPal
+      // app opens on it — unlike the Venmo case above.
       return {
         kind: 'link',
         href: `https://paypal.me/${encodeURIComponent(user)}/${amount}`,

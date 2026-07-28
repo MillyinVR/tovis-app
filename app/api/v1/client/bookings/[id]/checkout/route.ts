@@ -30,7 +30,8 @@ import {
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { updateClientBookingCheckout } from '@/lib/booking/writeBoundary'
 import {
-  buildAcceptedPaymentMethods,
+  acceptedPaymentMethodsSelect,
+  buildClientSelfServePaymentMethods,
   isUnverifiablePaymentMethod,
   normalizePaymentMethodInput,
 } from '@/lib/payments/acceptedMethods'
@@ -96,7 +97,7 @@ function parseBody(body: Record<string, unknown>): ParsedBodyResult {
       return {
         ok: false,
         error:
-          'selectedPaymentMethod must be one of: cash, card on file, tap to pay, Venmo, Zelle, Apple Cash, Stripe card.',
+          'selectedPaymentMethod must be one of: cash, Venmo, Zelle, Apple Cash, PayPal, Stripe card.',
       }
     }
   }
@@ -247,18 +248,16 @@ export async function POST(req: NextRequest, props: RouteContext) {
     const paymentSettings = await prisma.professionalPaymentSettings.findUnique({
       where: { professionalId: booking.professionalId },
       select: {
-        acceptCash: true,
-        acceptCardOnFile: true,
-        acceptTapToPay: true,
-        acceptVenmo: true,
-        acceptZelle: true,
-        acceptAppleCash: true,
-        acceptStripeCard: true,
+        ...acceptedPaymentMethodsSelect,
         tipsEnabled: true,
       } satisfies Prisma.ProfessionalPaymentSettingsSelect,
     })
 
-    const acceptedMethods = buildAcceptedPaymentMethods(paymentSettings)
+    // What a CLIENT may pick for themselves — the pro's accepted set minus the
+    // rails only the pro can run (card on file / tap to pay / Apple Pay). Same
+    // set buildClientAcceptedMethods renders from, so the offered list and the
+    // accepted write cannot drift.
+    const acceptedMethods = buildClientSelfServePaymentMethods(paymentSettings)
 
     if (
       parsed.value.selectedPaymentMethod &&

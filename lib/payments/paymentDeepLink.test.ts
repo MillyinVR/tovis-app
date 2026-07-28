@@ -43,11 +43,38 @@ describe('buildPaymentDeepLink', () => {
     expect(link).toEqual({
       kind: 'link',
       href: 'https://venmo.com/jane-doe?txn=pay&amount=80.50&note=Tovis',
+      appHref:
+        'venmo://paycharge?txn=pay&recipients=jane-doe&amount=80.50&note=Tovis',
       label: 'Pay $80.50 with Venmo',
     })
   })
 
-  it('omits the Venmo note when none is given', () => {
+  // The https URL alone never opens the Venmo app: venmo.com's
+  // apple-app-site-association does not claim a bare /<username>, so iOS hands
+  // it to Safari, which then gets a 302→307 chain ending at venmo://paycharge —
+  // a server redirect into a custom scheme that Safari will not follow. We must
+  // emit that scheme ourselves for a mobile caller to navigate to directly.
+  it('emits a venmo:// app-scheme URL alongside the web URL', () => {
+    const link = buildPaymentDeepLink({
+      methodKey: 'venmo',
+      handle: 'jane',
+      amountDue: 12.3,
+      note: 'Tovis',
+    })
+
+    expect(link).toMatchObject({ kind: 'link' })
+    const appHref = link?.kind === 'link' ? link.appHref : null
+    expect(appHref).toBeTruthy()
+
+    const parsed = new URL(appHref ?? '')
+    expect(parsed.protocol).toBe('venmo:')
+    expect(parsed.searchParams.get('txn')).toBe('pay')
+    expect(parsed.searchParams.get('recipients')).toBe('jane')
+    expect(parsed.searchParams.get('amount')).toBe('12.30')
+    expect(parsed.searchParams.get('note')).toBe('Tovis')
+  })
+
+  it('omits the Venmo note from both URLs when none is given', () => {
     const link = buildPaymentDeepLink({
       methodKey: 'venmo',
       handle: 'jane',
@@ -57,6 +84,7 @@ describe('buildPaymentDeepLink', () => {
     expect(link).toMatchObject({
       kind: 'link',
       href: 'https://venmo.com/jane?txn=pay&amount=80.00',
+      appHref: 'venmo://paycharge?txn=pay&recipients=jane&amount=80.00',
     })
   })
 
@@ -72,6 +100,18 @@ describe('buildPaymentDeepLink', () => {
       href: 'https://paypal.me/jane/80.00',
       label: 'Pay $80.00 with PayPal',
     })
+  })
+
+  // paypal.me's apple-app-site-association claims "/*", so the https URL is a
+  // genuine universal link and needs no custom-scheme escape hatch.
+  it('needs no app-scheme URL for PayPal', () => {
+    const link = buildPaymentDeepLink({
+      methodKey: 'paypal',
+      handle: 'jane',
+      amountDue: 80,
+    })
+
+    expect(link?.kind === 'link' ? link.appHref : 'unset').toBeUndefined()
   })
 
   it('extracts the PayPal username from a full paypal.me URL', () => {

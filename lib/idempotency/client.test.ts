@@ -151,7 +151,21 @@ describe('converted call-site key namespace', () => {
     { site: 'useManagementPanel accept', scope: 'pro-calendar-management', action: 'ACCEPTED' },
     { site: 'useManagementPanel cancel', scope: 'pro-calendar-management', action: 'CANCELLED' },
     { site: 'ShareLookSheet submit', scope: 'share-look', action: 'submit' },
-    { site: 'CompletePaymentCard checkout', scope: 'public-rebook', action: 'checkout' },
+    {
+      site: 'public aftercare Stripe session',
+      scope: 'public-rebook',
+      action: 'create-stripe-session',
+    },
+    {
+      site: 'public aftercare confirm payment',
+      scope: 'public-aftercare-checkout',
+      action: 'confirm-payment',
+    },
+    {
+      site: 'public aftercare save tip',
+      scope: 'public-aftercare-checkout',
+      action: 'save-checkout',
+    },
     { site: 'RebookCard book', scope: 'public-rebook', action: 'book' },
     { site: 'consultation approve', scope: 'public-consultation', action: 'APPROVE' },
     { site: 'consultation reject', scope: 'public-consultation', action: 'REJECT' },
