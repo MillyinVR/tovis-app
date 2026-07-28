@@ -20,6 +20,7 @@ import { mergeAvailableDays } from '../utils/mergeAvailableDays'
 import {
   buildAvailabilityPrefetchArgsFromContext,
   buildAvailabilitySummaryPrefetchKey,
+  fetchAvailabilityOtherPros,
   fetchAvailabilitySummaryWindow,
   getAnyCachedAvailabilitySummaryWindow,
   getCachedAvailabilitySummaryWindow,
@@ -452,11 +453,23 @@ export function useAvailability(
     startBackgroundRefresh(refreshMeta)
 
     try {
-      const fullPage = await fetchAvailabilitySummaryWindow({
-        ...fullPrefetchArgs,
-        startDate: ctxInitialStartDate,
-        days: INITIAL_WINDOW_DAYS,
-        includeOtherPros: true,
+      /**
+       * The rail's OWN endpoint, not a full bootstrap refetch. It answers this
+       * one list off the same cached loader instead of recomputing every day's
+       * slots to update it.
+       *
+       * Only the ROWS are merged: `other-pros` versions itself in a separate
+       * namespace and resolves its timezone through a placement fork, so
+       * stamping its payload over a bootstrap response would corrupt the very
+       * fields day-slot invalidation keys on.
+       */
+      const otherPros = await fetchAvailabilityOtherPros({
+        professionalId: fullPrefetchArgs.professionalId,
+        serviceId: fullPrefetchArgs.serviceId,
+        locationType: fullPrefetchArgs.locationType,
+        locationId: fullPrefetchArgs.locationId,
+        clientAddressId: fullPrefetchArgs.clientAddressId,
+        viewer: fullPrefetchArgs.viewer,
       })
 
       if (seq !== requestSeqRef.current) {
@@ -464,7 +477,13 @@ export function useAvailability(
         return
       }
 
-      const nextData = mergeBootstrapRefresh(dataRef.current, fullPage)
+      const current = dataRef.current
+      if (!current) {
+        cancelBackgroundRefresh('no_primary_data')
+        return
+      }
+
+      const nextData: BootstrapOk = { ...current, otherPros }
 
       commitBootstrapData(nextData, {
         key: fullWindowKey,
@@ -473,9 +492,9 @@ export function useAvailability(
       setError(null)
 
       completeBackgroundRefresh(refreshMeta, {
-        dayCount: fullPage.availableDays.length,
-        hasOtherPros: fullPage.otherPros.length > 0,
-        availabilityVersion: fullPage.availabilityVersion,
+        dayCount: nextData.availableDays.length,
+        hasOtherPros: otherPros.length > 0,
+        availabilityVersion: nextData.availabilityVersion,
       })
     } catch (e: unknown) {
       if (seq !== requestSeqRef.current) {
@@ -497,7 +516,6 @@ export function useAvailability(
     includeOtherPros,
     fullPrefetchArgs,
     fullWindowKey,
-    ctxInitialStartDate,
     startBackgroundRefresh,
     completeBackgroundRefresh,
     cancelBackgroundRefresh,

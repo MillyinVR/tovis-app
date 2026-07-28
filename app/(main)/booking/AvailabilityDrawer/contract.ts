@@ -604,6 +604,41 @@ export function parseAvailabilitySummaryResponse(
   return parseAvailabilityBootstrapResponse(x)
 }
 
+export type AvailabilityOtherProsRail = {
+  ok: true
+  mode: 'OTHER_PROS'
+  otherPros: AvailabilityOtherPro[]
+}
+
+/**
+ * GET /api/v1/availability/other-pros — the dedicated rail response.
+ *
+ * Deliberately NARROW: it exposes the rows and nothing else. That route's
+ * `availabilityVersion` is its own namespace (`other-pros:<sha>` of the request
+ * args) and its top-level `timeZone` comes from a placement fork that falls back
+ * to UTC where the shared resolver falls back to the professional's zone — so
+ * neither may ever be stamped onto a bootstrap payload. Callers merge the ROWS.
+ */
+export function parseAvailabilityOtherProsResponse(
+  x: unknown,
+): AvailabilityOtherProsRail | null {
+  if (!isRecord(x)) return null
+  if (x.ok !== true) return null
+  if (x.mode !== 'OTHER_PROS') return null
+
+  const otherProsRaw = x.otherPros
+  if (!Array.isArray(otherProsRaw)) return null
+
+  const otherPros: AvailabilityOtherPro[] = []
+  for (const row of otherProsRaw) {
+    const parsed = pickAvailabilityOtherPro(row)
+    if (!parsed) return null
+    otherPros.push(parsed)
+  }
+
+  return { ok: true, mode: 'OTHER_PROS', otherPros }
+}
+
 export function parseAvailabilityDayResponse(
   x: unknown,
 ): AvailabilityDayResponse | null {
