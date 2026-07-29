@@ -8,6 +8,11 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import {
+  REBOOK_SOURCE_WIDTH_SELECT,
+  type RebookSourceWidthRow,
+  computeRebookCloneDurationMinutes,
+} from '@/lib/booking/rebookWidth'
+import {
   RESCHEDULE_TARGET_SELECT,
   resolveRescheduleCommitDurationMinutes,
 } from '@/lib/booking/rescheduleWidth'
@@ -45,6 +50,13 @@ export type ResolveAvailabilityDurationArgs = {
   locationType: ServiceLocationType
   baseDurationMinutes: number
   reschedule: RescheduleAvailabilityContext | null
+  /**
+   * Set when the answer sizes an AFTERCARE REBOOK of this booking. The rebook
+   * commit clones the source booking's service items — base plus add-ons, at
+   * snapshot durations — so the offer must be that wide too, not offering-base
+   * wide. Same ownership shape as `reschedule`; mutually exclusive with it.
+   */
+  rebookOf?: RescheduleAvailabilityContext | null
   client?: AvailabilityDbClient
 }
 
@@ -80,6 +92,21 @@ export type ResolveAvailabilityDurationResult =
 export async function resolveAvailabilityDurationMinutes(
   args: ResolveAvailabilityDurationArgs,
 ): Promise<ResolveAvailabilityDurationResult> {
+  if (args.rebookOf && args.reschedule) {
+    // One request cannot be both a move of an existing booking and a clone of
+    // a finished one — the two size differently and discount occupancy
+    // differently. Refuse rather than pick one.
+    return {
+      ok: false,
+      code: 'INVALID_AVAILABILITY_CONTEXT',
+      userMessage: 'This request mixes a reschedule with a rebook.',
+    }
+  }
+
+  if (args.rebookOf) {
+    return resolveRebookOfDurationMinutes(args, args.rebookOf)
+  }
+
   if (!args.reschedule) {
     const result = await resolveDurationWithAddOns({
       professionalId: args.professionalId,
@@ -160,5 +187,90 @@ export async function resolveAvailabilityDurationMinutes(
     }
 
     throw error
+  }
+}
+
+/**
+ * Width for an AFTERCARE REBOOK of `rebookOf.bookingId`.
+ *
+ * The rebook commit (`performLockedCreateRebookedBooking`) clones the SOURCE
+ * booking's service items — base plus add-ons at their snapshot durations — so
+ * a same-mode offer must be sized by `computeRebookCloneDurationMinutes`, the
+ * function the commit itself runs. Sizing from the offering alone advertised
+ * starts the clone doesn't fit whenever the original had add-ons.
+ *
+ * A MODE-SWITCHED rebook (salon original offered as mobile, or vice versa) is
+ * the commit's `isLocationOverride` branch: it re-derives duration from the
+ * live offering for the requested mode and only allows single-item bookings.
+ * Mirror both halves — multi-item switches get the commit's own refusal, and
+ * single-item switches fall through to the offering-based sizing the caller
+ * already resolved for the requested mode.
+ */
+async function resolveRebookOfDurationMinutes(
+  args: ResolveAvailabilityDurationArgs,
+  rebookOf: RescheduleAvailabilityContext,
+): Promise<ResolveAvailabilityDurationResult> {
+  // The clone carries the source's add-ons already — a separate add-on
+  // selection has nothing to attach to. Same refusal the reschedule path gives.
+  if (args.addOnIds.length > 0) {
+    return {
+      ok: false,
+      code: 'ADDONS_INVALID',
+      userMessage:
+        'Add-ons can’t be changed when booking the next appointment. They come from the original booking.',
+    }
+  }
+
+  const client = args.client ?? prisma
+
+  const source: RebookSourceWidthRow | null = await client.booking.findUnique({
+    where: { id: rebookOf.bookingId },
+    select: REBOOK_SOURCE_WIDTH_SELECT,
+  })
+
+  // A missing booking and someone else's booking answer identically — the
+  // same anti-enumeration rule the reschedule context follows.
+  const owner = rebookOf.owner
+  const ownedByViewer = source
+    ? owner.kind === 'CLIENT'
+      ? source.clientId === owner.clientId
+      : source.professionalId === owner.professionalId
+    : false
+
+  if (!source || !ownedByViewer || source.professionalId !== args.professionalId) {
+    return { ok: false, code: 'BOOKING_NOT_FOUND' }
+  }
+
+  if (source.locationType !== args.locationType) {
+    if (source.serviceItems.length > 1) {
+      // The commit refuses to switch in-person/mobile on a multi-item rebook
+      // ("no add-ons to re-price") — so the offer must not count for it either.
+      return {
+        ok: false,
+        code: 'INVALID_SERVICE_ITEMS',
+        userMessage:
+          'Switching in-person/mobile isn’t available for this booking.',
+      }
+    }
+
+    // Single-item mode switch: the commit re-derives from the live offering
+    // for the requested mode — exactly the base sizing the plain path does.
+    const result = await resolveDurationWithAddOns({
+      professionalId: args.professionalId,
+      offeringId: args.offeringId,
+      addOnIds: [],
+      locationType: args.locationType,
+      baseDurationMinutes: args.baseDurationMinutes,
+      client: args.client,
+    })
+
+    return result.ok
+      ? { ok: true, durationMinutes: result.durationMinutes }
+      : { ok: false, code: result.code }
+  }
+
+  return {
+    ok: true,
+    durationMinutes: computeRebookCloneDurationMinutes(source),
   }
 }

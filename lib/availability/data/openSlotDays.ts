@@ -62,6 +62,15 @@ export type LoadOpenSlotDaysArgs = {
    * (B3-B — otherwise its own day looks fuller than it is).
    */
   rescheduleBookingId: string | null
+  /**
+   * Set when the pro is booking the NEXT appointment from this booking's
+   * aftercare. The width is then the CLONE's width — the rebook commit copies
+   * the source booking's items (base + add-ons), so counting at offering-base
+   * width lights up days the clone doesn't fit. Unlike a reschedule the source
+   * booking keeps occupying its own (past) day, so it is NOT excluded from the
+   * busy read.
+   */
+  rebookOfBookingId: string | null
   /** Inclusive local-day range, "YYYY-MM-DD". Caller has already clamped it. */
   fromYmd: string
   toYmd: string
@@ -157,6 +166,12 @@ export async function loadOpenSlotDays(
     reschedule: args.rescheduleBookingId
       ? {
           bookingId: args.rescheduleBookingId,
+          owner: { kind: 'PRO', professionalId: args.professionalId },
+        }
+      : null,
+    rebookOf: args.rebookOfBookingId
+      ? {
+          bookingId: args.rebookOfBookingId,
           owner: { kind: 'PRO', professionalId: args.professionalId },
         }
       : null,

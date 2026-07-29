@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 
 import { ServiceLocationType } from '@prisma/client'
 
-import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { jsonFail, jsonOk, requireClient, requirePro } from '@/app/api/_utils'
 import type { AvailabilityDayOk, AvailabilityOffering } from '@/app/(main)/booking/AvailabilityDrawer/types'
 import {
   resolveAvailabilityDurationMinutes,
@@ -134,6 +134,7 @@ export async function GET(req: Request) {
       dateStr,
       addOnIds,
       rescheduleBookingId,
+      rebookOfBookingId,
       debug,
       stepRaw,
       leadRaw,
@@ -155,6 +156,20 @@ export async function GET(req: Request) {
       reschedule = {
         bookingId: rescheduleBookingId,
         owner: { kind: 'CLIENT', clientId: auth.clientId },
+      }
+    }
+
+    // An aftercare rebook is offered its source BOOKING's clone width (base +
+    // add-ons at snapshot durations) — the pro's own data, so this branch
+    // authenticates the PRO the same way the reschedule branch authenticates
+    // the client. Only the aftercare authoring surfaces send this.
+    let rebookOf: RescheduleAvailabilityContext | null = null
+    if (rebookOfBookingId) {
+      const auth = await requirePro()
+      if (!auth.ok) return auth.res
+      rebookOf = {
+        bookingId: rebookOfBookingId,
+        owner: { kind: 'PRO', professionalId: auth.professionalId },
       }
     }
 
@@ -256,6 +271,7 @@ export async function GET(req: Request) {
       locationType: effectiveLocationType,
       baseDurationMinutes,
       reschedule,
+      rebookOf,
       client: prismaRead,
     })
 

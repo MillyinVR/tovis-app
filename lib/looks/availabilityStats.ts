@@ -38,6 +38,7 @@ import { type PrismaClient } from '@prisma/client'
 import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 import {
   DEFAULT_TIME_ZONE,
+  addDaysToYMD,
   getZonedParts,
   sanitizeTimeZone,
   startOfLocalDayUtc,
@@ -112,13 +113,7 @@ function addCalendarDays(
   parts: { year: number; month: number; day: number },
   days: number,
 ): { year: number; month: number; day: number } {
-  const d = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
-  d.setUTCDate(d.getUTCDate() + days)
-  return {
-    year: d.getUTCFullYear(),
-    month: d.getUTCMonth() + 1,
-    day: d.getUTCDate(),
-  }
+  return addDaysToYMD(parts.year, parts.month, parts.day, days)
 }
 
 /**

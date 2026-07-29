@@ -1459,6 +1459,7 @@ export default function AftercareForm({
                       onChange={onPickRebookSlot}
                       offWeekdays={offWeekdays}
                       suggestedYmd={rebookSuggestedYmd}
+                      rebookOfBookingId={bookingId}
                     />
                   </>
                 )}

@@ -1,63 +1,22 @@
 // availability/core/summaryWindow.ts
 
 import { clampInt } from '@/lib/pick'
-import { addDaysToYMD } from '@/lib/time'
+import { addDaysToYMD, parseYYYYMMDD, ymdToString, type YMD } from '@/lib/time'
 
-export type YMD = {
-  year: number
-  month: number
-  day: number
-}
+// The strict parser and formatter moved to lib/timeZone (the single home for
+// date primitives) when the rebook-picker audit found a second strict-parse
+// copy in lib/booking/rebookDates. Re-exported here so this module's
+// availability-route consumers keep one import site for their window helpers.
+export { parseYYYYMMDD, ymdToString }
+export type { YMD }
 
 const DEFAULT_SUMMARY_WINDOW_DAYS = 7
 const MAX_SUMMARY_WINDOW_DAYS = 21
-
-export function parseYYYYMMDD(value: unknown): YMD | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim())
-  if (!match) return null
-
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const day = Number(match[3])
-
-  if (
-    !Number.isFinite(year) ||
-    !Number.isFinite(month) ||
-    !Number.isFinite(day)
-  ) {
-    return null
-  }
-
-  if (month < 1 || month > 12) return null
-  if (day < 1 || day > 31) return null
-
-  // Reject dates that don't exist ("2026-02-31") rather than letting Date roll
-  // them forward to March 3. The busy-days route carried its own strict parser
-  // for exactly this; the two were merged here in R4, keeping the stricter
-  // behaviour — a caller that sends an impossible date wants a 400, not a
-  // silently different day ([[drifted-duplicate-is-a-bug-report]]).
-  const probe = new Date(Date.UTC(year, month - 1, day))
-  if (
-    probe.getUTCFullYear() !== year ||
-    probe.getUTCMonth() !== month - 1 ||
-    probe.getUTCDate() !== day
-  ) {
-    return null
-  }
-
-  return { year, month, day }
-}
 
 export function ymdSerial(ymd: YMD): number {
   return Math.floor(
     Date.UTC(ymd.year, ymd.month - 1, ymd.day, 12, 0, 0, 0) / 86_400_000,
   )
-}
-
-export function ymdToString(ymd: YMD): string {
-  const month = String(ymd.month).padStart(2, '0')
-  const day = String(ymd.day).padStart(2, '0')
-  return `${ymd.year}-${month}-${day}`
 }
 
 /**

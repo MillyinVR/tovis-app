@@ -62,6 +62,14 @@ type Props = {
    * the calendar's "Suggested" jump chip. Null hides the chip.
    */
   suggestedYmd?: string | null
+  /**
+   * The booking this aftercare rebooks. The rebook commit CLONES that
+   * booking's items (base + add-ons at snapshot durations), so the day's open
+   * slots and the calendar's counts are sized from the clone width — without
+   * it they'd be offering-base wide and advertise starts the save won't fit.
+   * Omitted on non-aftercare surfaces (waitlist offer).
+   */
+  rebookOfBookingId?: string | null
 }
 
 function parseSlots(data: unknown): { slots: string[]; durationMinutes: number } {
@@ -134,6 +142,7 @@ export default function RebookSlotPicker({
   onChange,
   offWeekdays,
   suggestedYmd,
+  rebookOfBookingId,
 }: Props) {
   const initialDay = value?.startsAt
     ? isoToYmdInTimeZone(value.startsAt, timeZone)
@@ -175,6 +184,9 @@ export default function RebookSlotPicker({
         if (locationType === 'MOBILE' && clientAddressId) {
           params.set('clientAddressId', clientAddressId)
         }
+        if (rebookOfBookingId) {
+          params.set('rebookOfBookingId', rebookOfBookingId)
+        }
 
         const res = await fetch(`/api/v1/availability/day?${params.toString()}`, {
           signal: controller.signal,
@@ -202,7 +214,15 @@ export default function RebookSlotPicker({
         setLoading(false)
       }
     },
-    [professionalId, serviceId, offeringId, locationType, locationId, clientAddressId],
+    [
+      professionalId,
+      serviceId,
+      offeringId,
+      locationType,
+      locationId,
+      clientAddressId,
+      rebookOfBookingId,
+    ],
   )
 
   useEffect(() => {
@@ -415,10 +435,18 @@ export default function RebookSlotPicker({
           offWeekdays={offWeekdays}
           disabled={disabled}
           onPick={(ymd) => onDayChange(ymd)}
-          // The rebook is a NEW booking for the same service, so the counts are
-          // sized from the offering (R4) — no reschedule context here.
+          // The rebook CLONES the source booking (base + add-ons), so the
+          // counts are sized from that booking's clone width when we know it —
+          // offering-base otherwise (waitlist offer has no source booking).
           slotContext={
-            serviceId ? { serviceId, locationType, locationId } : null
+            serviceId
+              ? {
+                  serviceId,
+                  locationType,
+                  locationId,
+                  rebookOfBookingId: rebookOfBookingId ?? null,
+                }
+              : null
           }
         />
       </div>

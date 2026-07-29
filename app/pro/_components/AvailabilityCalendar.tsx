@@ -29,7 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
-import { formatInTimeZone } from '@/lib/time'
+import { formatInTimeZone, parseYYYYMMDD } from '@/lib/time'
 import {
   addDaysToYmd,
   addMonthsToYmd,
@@ -60,6 +60,13 @@ export type CalendarSlotContext = {
    * booking's committed width, and the booking stops blocking its own day.
    */
   rescheduleBookingId?: string | null
+  /**
+   * Set when the pro is booking the NEXT appointment from this booking's
+   * aftercare. The rebook commit clones the source booking's items (base +
+   * add-ons), so the count is sized from that clone width — offering-base
+   * counting lights up days the clone doesn't fit.
+   */
+  rebookOfBookingId?: string | null
 }
 
 type Props = {
@@ -111,16 +118,10 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-function ymdParts(ymd: string): { y: number; m: number; d: number } | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd)
-  if (!match) return null
-  return { y: Number(match[1]), m: Number(match[2]), d: Number(match[3]) }
-}
-
 function firstOfMonth(ymd: string): string {
-  const p = ymdParts(ymd)
+  const p = parseYYYYMMDD(ymd)
   if (!p) return ymd
-  return `${pad2(p.y).padStart(4, '0')}-${pad2(p.m)}-01`
+  return `${String(p.year).padStart(4, '0')}-${pad2(p.month)}-01`
 }
 
 function daysInMonth(y: number, m: number): number {
@@ -132,20 +133,17 @@ function weekdayOfFirst(y: number, m: number): number {
 }
 
 function monthLabel(monthYmd: string): string {
-  const p = ymdParts(monthYmd)
+  const p = parseYYYYMMDD(monthYmd)
   if (!p) return ''
   try {
-    return formatInTimeZone(
-      new Date(Date.UTC(p.y, p.m - 1, 1)),
-      'UTC',
-      {
-        month: 'long',
-        year: 'numeric',
-      },
-      'en-US',
-    )
+    // No explicit locale: month names render in the viewer's own language,
+    // like every other pro-surface date label.
+    return formatInTimeZone(new Date(Date.UTC(p.year, p.month - 1, 1)), 'UTC', {
+      month: 'long',
+      year: 'numeric',
+    })
   } catch {
-    return `${p.y}-${pad2(p.m)}`
+    return `${p.year}-${pad2(p.month)}`
   }
 }
 
@@ -178,6 +176,11 @@ export default function AvailabilityCalendar({
   // bookable placement), and the grid must then fall back to the busy overlay
   // rather than render every day as "0 open".
   const [openSlotsComputed, setOpenSlotsComputed] = useState(false)
+  // Counts were asked for but the server declined (openSlots.reason set). The
+  // grid degrades to the busy overlay; this makes the degrade VISIBLE instead
+  // of letting a wide-open month silently masquerade as "no counts feature"
+  // ([[authorized-override-needs-visibility]]).
+  const [countsUnavailable, setCountsUnavailable] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   // Stable primitive key: a new object/array identity with the same contents
@@ -189,6 +192,7 @@ export default function AvailabilityCalendar({
         slotContext.locationId ?? '',
         (slotContext.addOnIds ?? []).join(','),
         slotContext.rescheduleBookingId ?? '',
+        slotContext.rebookOfBookingId ?? '',
       ].join('|')
     : ''
 
@@ -211,14 +215,24 @@ export default function AvailabilityCalendar({
     }
   }, [selectedYmd])
 
+  // A changed CONTEXT means the shown counts answer a different question
+  // (another service, another width) — clear them rather than let them stand
+  // in for the new request while it's in flight. Month browsing alone keeps
+  // the previous overlay (same data domain, no flash of wrong numbers).
+  useEffect(() => {
+    setBusy({})
+    setOpenSlotsComputed(false)
+    setCountsUnavailable(false)
+  }, [slotContextKey])
+
   useEffect(() => {
     if (!open) return
 
-    const p = ymdParts(viewMonth)
+    const p = parseYYYYMMDD(viewMonth)
     if (!p) return
 
-    const from = `${pad2(p.y).padStart(4, '0')}-${pad2(p.m)}-01`
-    const to = `${pad2(p.y).padStart(4, '0')}-${pad2(p.m)}-${pad2(daysInMonth(p.y, p.m))}`
+    const from = `${String(p.year).padStart(4, '0')}-${pad2(p.month)}-01`
+    const to = `${String(p.year).padStart(4, '0')}-${pad2(p.month)}-${pad2(daysInMonth(p.year, p.month))}`
 
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -238,6 +252,9 @@ export default function AvailabilityCalendar({
       if (slotContext.rescheduleBookingId) {
         params.set('rescheduleBookingId', slotContext.rescheduleBookingId)
       }
+      if (slotContext.rebookOfBookingId) {
+        params.set('rebookOfBookingId', slotContext.rebookOfBookingId)
+      }
     }
 
     fetch(`/api/v1/pro/availability/busy-days?${params.toString()}`, {
@@ -249,12 +266,14 @@ export default function AvailabilityCalendar({
         if (!res.ok || !isRecord(data) || !isRecord(data.days)) {
           setBusy({})
           setOpenSlotsComputed(false)
+          setCountsUnavailable(false)
           return
         }
         setBusy(data.days as BusyMap)
-        setOpenSlotsComputed(
-          isRecord(data.openSlots) && data.openSlots.computed === true,
-        )
+        const computed =
+          isRecord(data.openSlots) && data.openSlots.computed === true
+        setOpenSlotsComputed(computed)
+        setCountsUnavailable(Boolean(slotContext?.serviceId) && !computed)
       })
       .catch(() => {
         // Aborted or network error — leave the grid usable without overlay.
@@ -307,15 +326,15 @@ export default function AvailabilityCalendar({
 
   if (!open) return null
 
-  const p = ymdParts(viewMonth)
+  const p = parseYYYYMMDD(viewMonth)
   const cells: Array<{ ymd: string; day: number; weekday: number } | null> = []
   if (p) {
-    const lead = weekdayOfFirst(p.y, p.m)
+    const lead = weekdayOfFirst(p.year, p.month)
     for (let i = 0; i < lead; i += 1) cells.push(null)
-    const total = daysInMonth(p.y, p.m)
+    const total = daysInMonth(p.year, p.month)
     for (let d = 1; d <= total; d += 1) {
       cells.push({
-        ymd: `${pad2(p.y).padStart(4, '0')}-${pad2(p.m)}-${pad2(d)}`,
+        ymd: `${String(p.year).padStart(4, '0')}-${pad2(p.month)}-${pad2(d)}`,
         day: d,
         weekday: (lead + d - 1) % 7,
       })
@@ -430,11 +449,12 @@ export default function AvailabilityCalendar({
 
           // Busy-only wording is unchanged from R1–R3; the counted variant leads
           // with the openings, then adds the same booked/off-day context.
-          let title: string
+          // (Named cellTitle so it can't shadow the component's `title` prop.)
+          let cellTitle: string
           if (isBlocked) {
-            title = 'Time blocked'
+            cellTitle = 'Time blocked'
           } else if (hasCounts) {
-            title = [
+            cellTitle = [
               openCount > 0
                 ? `${openCount} open time${openCount === 1 ? '' : 's'}`
                 : 'No open times — you can still book a custom time',
@@ -446,13 +466,13 @@ export default function AvailabilityCalendar({
               .filter(Boolean)
               .join(' · ')
           } else if (bookings > 0) {
-            title = `${bookings} booking${bookings === 1 ? '' : 's'}${
+            cellTitle = `${bookings} booking${bookings === 1 ? '' : 's'}${
               isOffDay ? ' · off day' : ''
             }`
           } else if (isOffDay) {
-            title = 'Off day — you can still book it'
+            cellTitle = 'Off day — you can still book it'
           } else {
-            title = 'Open'
+            cellTitle = 'Open'
           }
 
           return (
@@ -465,7 +485,7 @@ export default function AvailabilityCalendar({
                 onPick(cell.ymd)
                 if (isModal) onClose?.()
               }}
-              title={title}
+              title={cellTitle}
               className={[
                 'relative flex aspect-square flex-col items-center justify-center rounded-card border text-xs font-black transition',
                 cellDisabled
@@ -531,6 +551,13 @@ export default function AvailabilityCalendar({
         ) : null}
         <span>{loading ? 'Loading…' : `Times in ${tz}`}</span>
       </div>
+
+      {countsUnavailable && !loading ? (
+        <div className="mt-1 text-[10px] font-semibold text-textSecondary">
+          Open-time counts aren’t available for this service right now — showing
+          your booked days instead.
+        </div>
+      ) : null}
     </>
   )
 

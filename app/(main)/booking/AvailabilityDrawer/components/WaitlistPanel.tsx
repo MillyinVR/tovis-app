@@ -8,7 +8,12 @@ import type { DrawerContext } from '../types'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
 import { isRecord, asTrimmedString, getRecordProp } from '@/lib/guards'
-import { getZonedParts, weekdayInTimeZone } from '@/lib/time'
+import {
+  addDaysToYMD,
+  getZonedParts,
+  weekdayInTimeZone,
+  ymdToString,
+} from '@/lib/time'
 
 type WaitlistPreferenceType = 'ANY_TIME' | 'TIME_OF_DAY' | 'SPECIFIC_DATE'
 type WaitlistTimeOfDay = 'MORNING' | 'AFTERNOON' | 'EVENING'
@@ -174,29 +179,11 @@ function nowPartsInTz(timeZone: string) {
   }
 }
 
-function ymdToString(ymd: {
-  year: number
-  month: number
-  day: number
-}): string {
-  const month = String(ymd.month).padStart(2, '0')
-  const day = String(ymd.day).padStart(2, '0')
-  return `${ymd.year}-${month}-${day}`
-}
-
 function addDaysYmd(
   ymd: { year: number; month: number; day: number },
   daysToAdd: number,
 ): { year: number; month: number; day: number } {
-  const d = new Date(
-    Date.UTC(ymd.year, ymd.month - 1, ymd.day + daysToAdd, 12, 0, 0, 0),
-  )
-
-  return {
-    year: d.getUTCFullYear(),
-    month: d.getUTCMonth() + 1,
-    day: d.getUTCDate(),
-  }
+  return addDaysToYMD(ymd.year, ymd.month, ymd.day, daysToAdd)
 }
 
 function computeQuickPick(

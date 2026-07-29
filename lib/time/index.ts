@@ -23,6 +23,7 @@ export {
 } from '@/lib/booking/timeZoneTruth'
 export type {
   IanaTimeZone,
+  YMD,
 } from '@/lib/timeZone'
 export type {
   TimeZoneTruthSource,
@@ -45,6 +46,8 @@ export {
 // Prefer the higher-level helpers below; reach for these only for custom math.
 export {
   addDaysToYMD,
+  parseYYYYMMDD,
+  ymdToString,
   getZonedParts,
   timeZoneOffsetMinutes,
   zonedTimeToUtc,

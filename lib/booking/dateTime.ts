@@ -1,5 +1,6 @@
 // lib/booking/dateTime.ts
 import {
+  addDaysToYMD,
   getZonedParts,
   isValidIanaTimeZone,
   sanitizeTimeZone,
@@ -217,12 +218,8 @@ function localPartsToUtcDate(parts: DateParts, timeZone: string): Date {
 
 function addDaysToYmd(ymd: string, days: number): string {
   const { year, month, day } = parseYmd(ymd)
-  const d = new Date(Date.UTC(year, month - 1, day + days))
-  return [
-    d.getUTCFullYear(),
-    pad2(d.getUTCMonth() + 1),
-    pad2(d.getUTCDate()),
-  ].join('-')
+  const next = addDaysToYMD(year, month, day, days)
+  return [next.year, pad2(next.month), pad2(next.day)].join('-')
 }
 
 export function formatDateTimeLocalParts(parts: DateParts, includeSeconds = false): string {

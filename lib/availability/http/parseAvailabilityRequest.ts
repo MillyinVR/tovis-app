@@ -27,6 +27,14 @@ export type ParsedAvailabilityRequest = {
    * authenticate and check ownership first.
    */
   rescheduleBookingId: string | null
+  /**
+   * Present when the caller is booking the NEXT appointment from this
+   * booking's aftercare. The rebook commit clones the source booking's items
+   * (base + add-ons), so the offer is sized from that clone width rather than
+   * the offering's base. Per-client data — same auth rule as
+   * `rescheduleBookingId`.
+   */
+  rebookOfBookingId: string | null
   debug: boolean
   includeOtherPros: boolean
 
@@ -75,6 +83,7 @@ export function parseAvailabilityRequest(
   const rescheduleBookingId = pickString(
     searchParams.get('rescheduleBookingId'),
   )
+  const rebookOfBookingId = pickString(searchParams.get('rebookOfBookingId'))
 
   const debug = pickString(searchParams.get('debug')) === '1'
   const includeOtherPros =
@@ -117,6 +126,7 @@ export function parseAvailabilityRequest(
 
     addOnIds,
     rescheduleBookingId,
+    rebookOfBookingId,
     debug,
     includeOtherPros,
 

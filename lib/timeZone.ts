@@ -111,6 +111,61 @@ export function addDaysToYMD(
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
 }
 
+/** A calendar date as numeric parts — no time-of-day, no timezone. */
+export type YMD = {
+  year: number
+  month: number
+  day: number
+}
+
+/**
+ * Strict "YYYY-MM-DD" parse. The single home for this primitive (it lived in
+ * availability/core/summaryWindow until the rebook-picker audit found a second
+ * copy growing in lib/booking/rebookDates).
+ *
+ * Rejects dates that don't exist ("2026-02-31") rather than letting Date roll
+ * them forward to March 3 — a caller that sends an impossible date wants a
+ * refusal, not a silently different day
+ * ([[drifted-duplicate-is-a-bug-report]]).
+ */
+export function parseYYYYMMDD(value: unknown): YMD | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim())
+  if (!match) return null
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
+    return null
+  }
+
+  if (month < 1 || month > 12) return null
+  if (day < 1 || day > 31) return null
+
+  const probe = new Date(Date.UTC(year, month - 1, day))
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  ) {
+    return null
+  }
+
+  return { year, month, day }
+}
+
+/** "YYYY-MM-DD" from numeric parts, zero-padded. */
+export function ymdToString(ymd: YMD): string {
+  const month = String(ymd.month).padStart(2, '0')
+  const day = String(ymd.day).padStart(2, '0')
+  return `${ymd.year}-${month}-${day}`
+}
+
 /**
  * Convert a UTC instant into wall-clock parts in `timeZone`.
  *
