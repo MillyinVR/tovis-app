@@ -63,7 +63,7 @@ describe('loadMigrationReviewSummary', () => {
     ])
   })
 
-  it('counts imported bookings by source and import-tagged blocks', async () => {
+  it('counts imported bookings by source and imported blocks by the UID column', async () => {
     await loadMigrationReviewSummary('pro-1')
 
     expect(mocks.bookingCount).toHaveBeenCalledWith(
@@ -71,11 +71,14 @@ describe('loadMigrationReviewSummary', () => {
         where: expect.objectContaining({ professionalId: 'pro-1', source: 'IMPORTED' }),
       }),
     )
+    // NOT `note: { contains: 'import:' }` — #779 stopped writing that tag, so a
+    // note match counts 0 for every post-#779 import (and the note is
+    // pro-editable, so it was never a safe identity).
     expect(mocks.blockCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           professionalId: 'pro-1',
-          note: { contains: 'import:' },
+          importedEventUid: { not: null },
         }),
       }),
     )

@@ -60,7 +60,13 @@ export async function loadMigrationReviewSummary(
       where: { professionalId, source: BookingSource.IMPORTED },
     }),
     prisma.calendarBlock.count({
-      where: { professionalId, note: { contains: 'import:' } },
+      // Imported blocks are identified by the importedEventUid COLUMN. The note
+      // used to carry an `[import:<uid>]` tag and this counted by
+      // `note: { contains: 'import:' }` — but #779 moved the UID out of the
+      // pro-editable note (and stopped writing the tag), so that match counts 0
+      // for every block imported since. The note is also pro-editable, so it
+      // was never a safe identity.
+      where: { professionalId, importedEventUid: { not: null } },
     }),
     prisma.offeringPriceRamp.findMany({
       where: { offering: { professionalId }, completedAt: null },
