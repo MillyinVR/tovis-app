@@ -413,7 +413,7 @@ export default async function ClaimInvitePage(props: PageProps) {
             <div className="flex flex-wrap gap-3">
               <Link
                 href={loginLink}
-                className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
+                className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10"
               >
                 Continue with a different account
               </Link>
@@ -503,7 +503,7 @@ export default async function ClaimInvitePage(props: PageProps) {
 
                   <Link
                     href={loginLink}
-                    className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
+                    className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10"
                   >
                     I already have an account
                   </Link>
@@ -525,7 +525,7 @@ export default async function ClaimInvitePage(props: PageProps) {
 
                   <Link
                     href={signupLink}
-                    className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass"
+                    className="inline-flex items-center justify-center rounded-full border border-surfaceGlass/12 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10"
                   >
                     Create a client account
                   </Link>

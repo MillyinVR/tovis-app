@@ -151,7 +151,7 @@ export default function AftercareNextAppointmentCard({
         ) : null}
         <Link
           href={`/client/bookings/${encodeURIComponent(confirmedBookingId)}`}
-          className="mt-3 inline-flex items-center gap-1 rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+          className="mt-3 inline-flex items-center gap-1 rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10"
         >
           {COPY.bookings.aftercare.nextAppointmentConfirmedCta} <span aria-hidden>→</span>
         </Link>
@@ -203,7 +203,7 @@ export default function AftercareNextAppointmentCard({
           type="button"
           onClick={() => act('DECLINE')}
           disabled={loading !== null}
-          className="brand-focus inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass disabled:cursor-not-allowed disabled:opacity-60"
+          className="brand-focus inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading === 'DECLINE'
             ? COPY.bookings.aftercare.nextAppointmentCancelling

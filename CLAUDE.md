@@ -43,6 +43,12 @@ will catch them.
     `toneWarn` / `toneInfo`) and `rgb(var(--…))` tokens that respect
     `[data-mode]`, never raw hex or raw Tailwind color classes.
     ⚠️ **Raw colors are NOT caught by the static guards — self-check them.**
+  - Tint tokens always carry an alpha. A token whose declaration in
+    `lib/brand/types.ts` says `used with opacity` (today: `surfaceGlass`) is a
+    tint meant to layer over a surface, never painted solid — its value is
+    byte-identical to `textPrimary` in *both* modes, so a bare
+    `bg-surfaceGlass` renders the label invisible. Write `bg-surfaceGlass/10`.
+    *Enforced* by `check:no-bare-tint-token`.
 
 Before pushing any change, run:
 

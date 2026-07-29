@@ -342,7 +342,7 @@ export default async function ProRemindersPage() {
                       >
                         <button
                           type="submit"
-                          className="inline-flex items-center rounded-full border border-toneSuccess/30 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneSuccess hover:bg-surfaceGlass"
+                          className="inline-flex items-center rounded-full border border-toneSuccess/30 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneSuccess hover:bg-surfaceGlass/10"
                         >
                           Mark done
                         </button>

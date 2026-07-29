@@ -837,7 +837,7 @@ function ServiceHistoryList({
           <Link
             key={booking.id}
             href={`/pro/bookings/${encodeURIComponent(booking.id)}`}
-            className="block rounded-card border border-white/10 bg-bgPrimary p-4 hover:bg-surfaceGlass"
+            className="block rounded-card border border-white/10 bg-bgPrimary p-4 hover:bg-surfaceGlass/10"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

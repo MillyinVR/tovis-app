@@ -219,7 +219,7 @@ function friendlyCollectionTiming(value: unknown): string | null {
 function pillClassByVariant(
   _variant: Exclude<StatusVariant, 'neutral'>,
 ): string {
-  return 'border border-white/10 bg-surfaceGlass text-textPrimary'
+  return 'border border-white/10 bg-surfaceGlass/10 text-textPrimary'
 }
 
 function alertClassByVariant(variant: StatusVariant): string {
@@ -233,7 +233,7 @@ function tabClass(active: boolean): string {
     'border border-white/10',
     active
       ? 'bg-accentPrimary text-bgPrimary shadow-sm'
-      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
   )
 }
 
@@ -1151,7 +1151,7 @@ export default async function ClientBookingPage(props: {
 
             <Link
               href="/client/bookings"
-              className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[11px] font-black text-textPrimary hover:bg-surfaceGlass"
+              className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[11px] font-black text-textPrimary hover:bg-surfaceGlass/10"
             >
               ← {COPY.bookings.backToBookings}
             </Link>
@@ -1343,7 +1343,7 @@ export default async function ClientBookingPage(props: {
               <div className="flex flex-wrap gap-2">
                 <a
                   href={`/api/v1/calendar?bookingId=${encodeURIComponent(booking.id)}`}
-                  className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
+                  className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
                 >
                   {COPY.bookings.addToCalendar}
                 </a>

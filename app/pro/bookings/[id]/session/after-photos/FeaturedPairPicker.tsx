@@ -79,7 +79,7 @@ function Strip({
                 isFeatured
                   ? 'border-2 border-accentPrimary'
                   : 'border border-white/10',
-                'hover:bg-surfaceGlass',
+                'hover:bg-surfaceGlass/10',
               ].join(' ')}
             >
               {isVideo ? (
@@ -103,7 +103,7 @@ function Strip({
                   'absolute right-1 top-1 z-10 rounded-full px-2 py-1 text-[10px] font-black transition',
                   isFeatured
                     ? 'bg-accentPrimary text-bgPrimary'
-                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass',
+                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
                 ].join(' ')}
               >
                 {isFeatured ? '★ Featured' : 'Feature'}

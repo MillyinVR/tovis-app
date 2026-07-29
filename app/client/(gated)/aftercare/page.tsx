@@ -131,7 +131,7 @@ export default async function ClientAftercareInboxPage() {
                     <Link
                       href={href}
                       aria-label={`Open aftercare: ${item.title}`}
-                      className="mt-1 inline-flex w-fit rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
+                      className="mt-1 inline-flex w-fit rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
                     >
                       {COPY.aftercareInbox.openCta}
                     </Link>

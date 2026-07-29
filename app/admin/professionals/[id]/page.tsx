@@ -305,7 +305,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
                             href={openHref}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                            className="inline-flex rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10"
                           >
                             Open document
                           </a>

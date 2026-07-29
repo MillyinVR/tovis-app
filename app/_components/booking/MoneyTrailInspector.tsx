@@ -633,7 +633,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                       placeholder={`Full: ${(
                         trail.capabilities.refundableRemainingCents / 100
                       ).toFixed(2)}`}
-                      className="rounded-lg border border-white/10 bg-surfaceGlass px-2 py-1 text-[13px] font-black text-textPrimary"
+                      className="rounded-lg border border-white/10 bg-surfaceGlass/10 px-2 py-1 text-[13px] font-black text-textPrimary"
                     />
                   </label>
                   <label className="grid gap-1 text-[11px] font-black text-textSecondary">
@@ -643,7 +643,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                       onChange={(ev) => setRefundReason(ev.target.value)}
                       maxLength={500}
                       placeholder="e.g. service issue"
-                      className="rounded-lg border border-white/10 bg-surfaceGlass px-2 py-1 text-[13px] font-black text-textPrimary"
+                      className="rounded-lg border border-white/10 bg-surfaceGlass/10 px-2 py-1 text-[13px] font-black text-textPrimary"
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">

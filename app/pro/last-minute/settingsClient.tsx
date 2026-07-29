@@ -154,7 +154,7 @@ function TogglePill({
       onClick={onClick}
       className={[
         'rounded-full px-4 py-2 text-[12px] font-black transition border',
-        disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass',
+        disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass/10',
         on
           ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
           : 'border-white/10 bg-bgPrimary text-textPrimary',
@@ -426,7 +426,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   const btnPrimary =
     'rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60'
   const btnDanger =
-    'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-60'
+    'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass/10 disabled:opacity-60'
 
   return (
     <div className="grid gap-3">
@@ -631,7 +631,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
                   className={[
                     'rounded-full border px-3 py-2 text-[12px] font-black transition',
                     classes,
-                    busy || !enabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass',
+                    busy || !enabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass/10',
                   ].join(' ')}
                 >
                   {dayLabel}
@@ -789,7 +789,7 @@ function ServiceRuleRow({
             ruleEnabled
               ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
               : 'border-white/10 bg-bgPrimary text-textPrimary',
-            busy || !enabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass',
+            busy || !enabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass/10',
           ].join(' ')}
         >
           {ruleEnabled ? 'Enabled' : 'Disabled'}
