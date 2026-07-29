@@ -31,6 +31,20 @@ export function parseYYYYMMDD(value: unknown): YMD | null {
   if (month < 1 || month > 12) return null
   if (day < 1 || day > 31) return null
 
+  // Reject dates that don't exist ("2026-02-31") rather than letting Date roll
+  // them forward to March 3. The busy-days route carried its own strict parser
+  // for exactly this; the two were merged here in R4, keeping the stricter
+  // behaviour — a caller that sends an impossible date wants a 400, not a
+  // silently different day ([[drifted-duplicate-is-a-bug-report]]).
+  const probe = new Date(Date.UTC(year, month - 1, day))
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  ) {
+    return null
+  }
+
   return { year, month, day }
 }
 
@@ -44,6 +58,37 @@ export function ymdToString(ymd: YMD): string {
   const month = String(ymd.month).padStart(2, '0')
   const day = String(ymd.day).padStart(2, '0')
   return `${ymd.year}-${month}-${day}`
+}
+
+/**
+ * Every local day in `[fromYmd, toYmd]` inclusive, ascending.
+ *
+ * Unlike `buildSummaryYMDs` this takes an explicit END rather than a length,
+ * and applies NO booking-horizon clamp — the pro-facing month grid wants a day
+ * past the horizon returned so it can be counted as zero-open rather than
+ * silently dropped. Callers are expected to have bounded the range already
+ * (`busy-days` caps it at `MAX_RANGE_DAYS`); `maxDays` is a backstop, not the
+ * policy.
+ */
+export function enumerateYmdRange(
+  fromYmd: string,
+  toYmd: string,
+  maxDays = 400,
+): YMD[] {
+  const start = parseYYYYMMDD(fromYmd)
+  const end = parseYYYYMMDD(toYmd)
+  if (!start || !end) return []
+
+  const endSerial = ymdSerial(end)
+  const out: YMD[] = []
+
+  for (let offset = 0; offset < maxDays; offset += 1) {
+    const current = addDaysToYMD(start.year, start.month, start.day, offset)
+    if (ymdSerial(current) > endSerial) break
+    out.push(current)
+  }
+
+  return out
 }
 
 export function parseSummaryWindowDays(

@@ -31,8 +31,8 @@ import {
   getScheduleVersion,
 } from '@/lib/booking/cacheVersion'
 import {
-  MAX_BUFFER_MINUTES,
-  MAX_SLOT_DURATION_MINUTES,
+  MAX_LEAD_MINUTES,
+  OCCUPANCY_WINDOW_PADDING_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes } from '@/lib/booking/conflicts'
 import { utcDateToLocalParts } from '@/lib/booking/dateTime'
@@ -50,9 +50,6 @@ import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
 
-const MAX_LEAD_MINUTES = 30 * 24 * 60
-const OCCUPANCY_WINDOW_PADDING_MINUTES =
-  MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
 const TTL_DAY_SECONDS = 120
 
 type AvailabilityRequestBasePayload = {
@@ -157,7 +154,7 @@ export async function GET(req: Request) {
       if (!auth.ok) return auth.res
       reschedule = {
         bookingId: rescheduleBookingId,
-        clientId: auth.clientId,
+        owner: { kind: 'CLIENT', clientId: auth.clientId },
       }
     }
 

@@ -1,20 +1,45 @@
 // app/api/v1/pro/availability/busy-days/route.ts
 //
-// Lightweight, service-agnostic view of a PRO's OWN commitments per calendar
-// day, for the aftercare date-picker popup ("which days am I already booked /
-// blocked?"). Unlike /api/v1/availability/* (client-facing, per-service slot
-// computation) this just buckets the pro's OCCUPYING bookings
-// (BOOKING_BLOCKING_STATUSES) + calendar blocks by local day across all
-// locations.
+// The per-day overlay behind every pro-facing date picker, in two modes.
+//
+// 1. BUSY-ONLY (no `serviceId`) — the original, service-agnostic shape: buckets
+//    the pro's OCCUPYING bookings (BOOKING_BLOCKING_STATUSES) and calendar
+//    blocks by local day, across all locations. Answers "where am I already
+//    committed?". Days with nothing on them are omitted.
+//
+// 2. OPEN-SLOT (with `serviceId`) — R4. Additionally counts the BOOKABLE start
+//    times left on each day for that service, so the grid can show where the
+//    pro can still fit someone rather than only where they can't. Days are then
+//    zero-filled across the range, because "0 open" is information and must not
+//    look like "not counted".
+//
+// The counting lives in `lib/availability/data/openSlotDays.ts`, which drives
+// the same slot engine `/api/v1/availability/*` uses — one occupancy read for
+// the whole range plus an in-memory pass per day.
+//
+// Scope: everything is the SESSION's pro. There is no `professionalId`
+// parameter; the service context params only narrow which of THEIR offerings is
+// being counted.
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import {
+  enumerateYmdRange,
+  parseYYYYMMDD,
+  ymdSerial,
+  ymdToString,
+  type YMD,
+} from '@/lib/availability/core/summaryWindow'
+import { loadOpenSlotDays } from '@/lib/availability/data/openSlotDays'
+import { parseAvailabilityRequest } from '@/lib/availability/http/parseAvailabilityRequest'
 import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import type {
   ProAvailabilityBusyDaysOk,
   ProBusyDayDTO,
+  ProOpenSlotContextDTO,
 } from '@/lib/dto/proAvailability'
 import { prisma } from '@/lib/prisma'
+import { addDaysToYMD } from '@/lib/time'
 import {
   isValidIanaTimeZone,
   sanitizeTimeZone,
@@ -24,55 +49,13 @@ import {
 export const dynamic = 'force-dynamic'
 
 const MAX_RANGE_DAYS = 62
-const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/
 
 // The wire shape is the DTO, so native decode models are generated from the
 // same declaration the route is checked against (`satisfies` below).
 type DayBusy = ProBusyDayDTO
 
-function parseYmd(value: string | null): {
-  year: number
-  month: number
-  day: number
-} | null {
-  if (!value) return null
-  const m = YMD_RE.exec(value.trim())
-  if (!m) return null
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null
-  const probe = new Date(Date.UTC(year, month - 1, day))
-  if (
-    probe.getUTCFullYear() !== year ||
-    probe.getUTCMonth() !== month - 1 ||
-    probe.getUTCDate() !== day
-  ) {
-    return null
-  }
-  return { year, month, day }
-}
-
-function ymdString(parts: { year: number; month: number; day: number }): string {
-  return `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
-}
-
-function addDaysUtc(parts: { year: number; month: number; day: number }, days: number) {
-  const d = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
-  d.setUTCDate(d.getUTCDate() + days)
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
-}
-
-function daysBetweenInclusive(
-  fromYmd: string,
-  toYmd: string,
-): number {
-  const a = parseYmd(fromYmd)
-  const b = parseYmd(toYmd)
-  if (!a || !b) return 0
-  const da = Date.UTC(a.year, a.month - 1, a.day)
-  const db = Date.UTC(b.year, b.month - 1, b.day)
-  return Math.round((db - da) / (24 * 60 * 60 * 1000)) + 1
+function daysBetweenInclusive(from: YMD, to: YMD): number {
+  return ymdSerial(to) - ymdSerial(from) + 1
 }
 
 export async function GET(req: Request) {
@@ -82,36 +65,74 @@ export async function GET(req: Request) {
     const professionalId = auth.professionalId
 
     const url = new URL(req.url)
-    const fromParts = parseYmd(url.searchParams.get('from'))
-    const toParts = parseYmd(url.searchParams.get('to'))
+    const fromParts = parseYYYYMMDD(url.searchParams.get('from'))
+    const toParts = parseYYYYMMDD(url.searchParams.get('to'))
 
     if (!fromParts || !toParts) {
       return jsonFail(400, 'from and to must be YYYY-MM-DD dates.')
     }
 
-    const fromYmd = ymdString(fromParts)
-    let toYmd = ymdString(toParts)
+    const fromYmd = ymdToString(fromParts)
 
-    if (toYmd < fromYmd) {
+    if (ymdSerial(toParts) < ymdSerial(fromParts)) {
       return jsonFail(400, 'to must be on or after from.')
     }
 
     // Bound the scan; clamp an over-long range rather than erroring.
-    if (daysBetweenInclusive(fromYmd, toYmd) > MAX_RANGE_DAYS) {
-      toYmd = ymdString(addDaysUtc(fromParts, MAX_RANGE_DAYS - 1))
-    }
-    const toPartsClamped = parseYmd(toYmd) ?? toParts
+    const clampedToParts =
+      daysBetweenInclusive(fromParts, toParts) > MAX_RANGE_DAYS
+        ? addDaysToYMD(
+            fromParts.year,
+            fromParts.month,
+            fromParts.day,
+            MAX_RANGE_DAYS - 1,
+          )
+        : toParts
+    const toYmd = ymdToString(clampedToParts)
 
-    const tzParam = url.searchParams.get('tz')
+    // Reuses the availability routes' own query parser so the service-context
+    // params (serviceId / locationType / locationId / addOnIds /
+    // rescheduleBookingId) are spelled and normalized identically everywhere.
+    const {
+      serviceId,
+      requestedLocationType,
+      requestedLocationId,
+      addOnIds,
+      rescheduleBookingId,
+    } = parseAvailabilityRequest(req)
+
+    const openSlotResult = serviceId
+      ? await loadOpenSlotDays({
+          professionalId,
+          serviceId,
+          requestedLocationType,
+          requestedLocationId,
+          addOnIds,
+          rescheduleBookingId,
+          fromYmd,
+          toYmd,
+        })
+      : null
+
+    // Timezone truth: when counts were computed they were bucketed in the
+    // OFFERING's location zone, so the busy buckets MUST use that same zone —
+    // two overlays keyed to different local days would land on the same grid
+    // cell and disagree. Otherwise fall back to the requested zone, then the
+    // pro's profile zone.
     let tz: string
-    if (tzParam && isValidIanaTimeZone(tzParam)) {
-      tz = sanitizeTimeZone(tzParam, 'UTC')
+    if (openSlotResult?.ok) {
+      tz = openSlotResult.timeZone
     } else {
-      const profile = await prisma.professionalProfile.findUnique({
-        where: { id: professionalId },
-        select: { timeZone: true },
-      })
-      tz = sanitizeTimeZone(profile?.timeZone, 'UTC')
+      const tzParam = url.searchParams.get('tz')
+      if (tzParam && isValidIanaTimeZone(tzParam)) {
+        tz = sanitizeTimeZone(tzParam, 'UTC')
+      } else {
+        const profile = await prisma.professionalProfile.findUnique({
+          where: { id: professionalId },
+          select: { timeZone: true },
+        })
+        tz = sanitizeTimeZone(profile?.timeZone, 'UTC')
+      }
     }
 
     // UTC window covering [from 00:00 local, (to+1) 00:00 local).
@@ -121,7 +142,12 @@ export async function GET(req: Request) {
       day: fromParts.day,
       timeZone: tz,
     })
-    const toExclusiveParts = addDaysUtc(toPartsClamped, 1)
+    const toExclusiveParts = addDaysToYMD(
+      clampedToParts.year,
+      clampedToParts.month,
+      clampedToParts.day,
+      1,
+    )
     const toUtcExclusive = startOfLocalDayUtc({
       year: toExclusiveParts.year,
       month: toExclusiveParts.month,
@@ -156,7 +182,7 @@ export async function GET(req: Request) {
     const ensure = (ymd: string): DayBusy => {
       const existing = days[ymd]
       if (existing) return existing
-      const created = { bookings: 0, blocked: false }
+      const created: DayBusy = { bookings: 0, blocked: false }
       days[ymd] = created
       return created
     }
@@ -168,18 +194,46 @@ export async function GET(req: Request) {
     }
 
     for (const block of blocks) {
-      let cursor = utcDateToLocalYmd(block.startsAt, tz)
+      // Walk only the part of the block that OVERLAPS the requested range.
+      //
+      // The clamp is what makes a long block correct, not just cheaper: this
+      // used to walk from the block's own first day with an iteration cap, so a
+      // block spanning more days than the cap (a months-long closure) ran out of
+      // iterations before reaching the requested window and left every day in
+      // it unmarked — the picker offered days the pro had blocked off.
+      const firstDay = utcDateToLocalYmd(block.startsAt, tz)
       const lastDay = utcDateToLocalYmd(block.endsAt, tz)
-      // Walk each local day the block touches, clamped to the requested range.
-      // The MAX_RANGE_DAYS cap on the window bounds the iteration.
-      for (let guard = 0; guard <= MAX_RANGE_DAYS + 1; guard += 1) {
-        if (cursor >= fromYmd && cursor <= toYmd) ensure(cursor).blocked = true
-        if (cursor >= lastDay) break
-        const parts = parseYmd(cursor)
-        if (!parts) break
-        cursor = ymdString(addDaysUtc(parts, 1))
+      const walkFrom = firstDay > fromYmd ? firstDay : fromYmd
+      const walkTo = lastDay < toYmd ? lastDay : toYmd
+      if (walkFrom > walkTo) continue
+
+      for (const ymd of enumerateYmdRange(walkFrom, walkTo, MAX_RANGE_DAYS + 1)) {
+        ensure(ymdToString(ymd)).blocked = true
       }
     }
+
+    // Zero-fill the whole range when counts exist: a day with no openings is a
+    // real answer, and must be distinguishable from one never counted.
+    if (openSlotResult?.ok) {
+      for (const ymd of enumerateYmdRange(fromYmd, toYmd, MAX_RANGE_DAYS + 1)) {
+        const key = ymdToString(ymd)
+        ensure(key).openSlots = openSlotResult.openSlots[key] ?? 0
+      }
+    }
+
+    const openSlots: ProOpenSlotContextDTO | null = !serviceId
+      ? null
+      : openSlotResult?.ok
+        ? {
+            computed: true,
+            durationMinutes: openSlotResult.durationMinutes,
+            reason: null,
+          }
+        : {
+            computed: false,
+            durationMinutes: null,
+            reason: openSlotResult?.code ?? 'UNKNOWN',
+          }
 
     return jsonOk(
       {
@@ -188,6 +242,7 @@ export async function GET(req: Request) {
         from: fromYmd,
         to: toYmd,
         days,
+        openSlots,
       } satisfies ProAvailabilityBusyDaysOk,
       200,
     )

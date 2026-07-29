@@ -28,8 +28,8 @@ import {
 import { withVersionedCache } from '@/lib/cache/versionedCache'
 import { prismaRead } from '@/lib/prisma'
 import {
-  MAX_BUFFER_MINUTES,
-  MAX_SLOT_DURATION_MINUTES,
+  MAX_LEAD_MINUTES,
+  OCCUPANCY_WINDOW_PADDING_MINUTES,
 } from '@/lib/booking/constants'
 import { addMinutes } from '@/lib/booking/conflicts'
 import { utcDateToLocalParts } from '@/lib/booking/dateTime'
@@ -43,9 +43,6 @@ import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
 
-const MAX_LEAD_MINUTES = 30 * 24 * 60
-const OCCUPANCY_WINDOW_PADDING_MINUTES =
-  MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
 const MAX_ALTERNATES = 12
 const DEFAULT_ALTERNATES_LIMIT = 6
 const ALTERNATE_COMPUTE_CONCURRENCY = 4

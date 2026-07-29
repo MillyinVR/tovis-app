@@ -38,8 +38,29 @@ import {
 } from '@/lib/booking/rebookDates'
 import { zClass } from '@/lib/zIndex'
 
-type DayBusy = { bookings: number; blocked: boolean }
+type DayBusy = { bookings: number; blocked: boolean; openSlots?: number }
 type BusyMap = Record<string, DayBusy>
+
+/**
+ * What to count open slots FOR (R4). When supplied, the grid stops showing only
+ * how full each day already is and starts showing how many bookable starts are
+ * left on it — the question a pro opening a date picker is actually asking.
+ *
+ * Omit it and the calendar keeps its original busy-only behaviour, so a surface
+ * that doesn't know the service yet degrades instead of breaking.
+ */
+export type CalendarSlotContext = {
+  serviceId: string
+  locationType?: 'SALON' | 'MOBILE' | null
+  locationId?: string | null
+  /** Selected add-on link ids — they widen the appointment, so they change the count. */
+  addOnIds?: string[]
+  /**
+   * Set when the pro is MOVING this booking. The count is then sized from the
+   * booking's committed width, and the booking stops blocking its own day.
+   */
+  rescheduleBookingId?: string | null
+}
 
 type Props = {
   open: boolean
@@ -69,6 +90,11 @@ type Props = {
   suggestedYmd?: string | null
   /** Disables every control (read-only aftercare, in-flight save). */
   disabled?: boolean
+  /**
+   * Count BOOKABLE starts per day for this service (R4). Omit for the
+   * busy-only overlay.
+   */
+  slotContext?: CalendarSlotContext | null
 }
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
@@ -136,6 +162,7 @@ export default function AvailabilityCalendar({
   selectedYmd,
   suggestedYmd,
   disabled = false,
+  slotContext,
 }: Props) {
   const todayYmd = useMemo(() => todayYmdInTimeZone(tz), [tz])
   const earliest = minYmd && minYmd > todayYmd ? minYmd : todayYmd
@@ -146,7 +173,24 @@ export default function AvailabilityCalendar({
   )
   const [busy, setBusy] = useState<BusyMap>({})
   const [loading, setLoading] = useState(false)
+  // Whether the response actually carried per-day open-slot counts. A request
+  // can ask for them and still not get them (service/location resolves to no
+  // bookable placement), and the grid must then fall back to the busy overlay
+  // rather than render every day as "0 open".
+  const [openSlotsComputed, setOpenSlotsComputed] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+
+  // Stable primitive key: a new object/array identity with the same contents
+  // must not retrigger the month fetch.
+  const slotContextKey = slotContext
+    ? [
+        slotContext.serviceId,
+        slotContext.locationType ?? '',
+        slotContext.locationId ?? '',
+        (slotContext.addOnIds ?? []).join(','),
+        slotContext.rescheduleBookingId ?? '',
+      ].join('|')
+    : ''
 
   // Re-anchor to a sensible month each time the popup opens.
   useEffect(() => {
@@ -182,6 +226,20 @@ export default function AvailabilityCalendar({
     setLoading(true)
 
     const params = new URLSearchParams({ from, to, tz })
+    if (slotContext?.serviceId) {
+      params.set('serviceId', slotContext.serviceId)
+      if (slotContext.locationType) {
+        params.set('locationType', slotContext.locationType)
+      }
+      if (slotContext.locationId) params.set('locationId', slotContext.locationId)
+      if (slotContext.addOnIds?.length) {
+        params.set('addOnIds', slotContext.addOnIds.join(','))
+      }
+      if (slotContext.rescheduleBookingId) {
+        params.set('rescheduleBookingId', slotContext.rescheduleBookingId)
+      }
+    }
+
     fetch(`/api/v1/pro/availability/busy-days?${params.toString()}`, {
       signal: controller.signal,
       cache: 'no-store',
@@ -190,9 +248,13 @@ export default function AvailabilityCalendar({
         const data = await safeJson(res)
         if (!res.ok || !isRecord(data) || !isRecord(data.days)) {
           setBusy({})
+          setOpenSlotsComputed(false)
           return
         }
         setBusy(data.days as BusyMap)
+        setOpenSlotsComputed(
+          isRecord(data.openSlots) && data.openSlots.computed === true,
+        )
       })
       .catch(() => {
         // Aborted or network error — leave the grid usable without overlay.
@@ -203,7 +265,8 @@ export default function AvailabilityCalendar({
       })
 
     return () => controller.abort()
-  }, [open, viewMonth, tz])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, viewMonth, tz, slotContextKey])
 
   useEffect(() => {
     if (!open || !isModal) return
@@ -357,6 +420,41 @@ export default function AvailabilityCalendar({
           const bookings = info?.bookings ?? 0
           const cellDisabled = disabled || isPast
 
+          // R4: when the server counted bookable starts, THAT is the signal —
+          // "where can I fit them" rather than "where am I busy". A day with no
+          // openings reads as full even when nothing is booked on it (off day,
+          // outside working hours, too short a gap between two appointments).
+          const hasCounts = openSlotsComputed && !isPast
+          const openCount = info?.openSlots ?? 0
+          const isFull = hasCounts && openCount === 0
+
+          // Busy-only wording is unchanged from R1–R3; the counted variant leads
+          // with the openings, then adds the same booked/off-day context.
+          let title: string
+          if (isBlocked) {
+            title = 'Time blocked'
+          } else if (hasCounts) {
+            title = [
+              openCount > 0
+                ? `${openCount} open time${openCount === 1 ? '' : 's'}`
+                : 'No open times — you can still book a custom time',
+              bookings > 0
+                ? `${bookings} booking${bookings === 1 ? '' : 's'}`
+                : null,
+              isOffDay ? 'off day' : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          } else if (bookings > 0) {
+            title = `${bookings} booking${bookings === 1 ? '' : 's'}${
+              isOffDay ? ' · off day' : ''
+            }`
+          } else if (isOffDay) {
+            title = 'Off day — you can still book it'
+          } else {
+            title = 'Open'
+          }
+
           return (
             <button
               key={cell.ymd}
@@ -367,17 +465,7 @@ export default function AvailabilityCalendar({
                 onPick(cell.ymd)
                 if (isModal) onClose?.()
               }}
-              title={
-                isBlocked
-                  ? 'Time blocked'
-                  : bookings > 0
-                    ? `${bookings} booking${bookings === 1 ? '' : 's'}${
-                        isOffDay ? ' · off day' : ''
-                      }`
-                    : isOffDay
-                      ? 'Off day — you can still book it'
-                      : 'Open'
-              }
+              title={title}
               className={[
                 'relative flex aspect-square flex-col items-center justify-center rounded-card border text-xs font-black transition',
                 cellDisabled
@@ -386,15 +474,27 @@ export default function AvailabilityCalendar({
                     ? 'border-transparent bg-accentPrimary text-bgPrimary'
                     : isBlocked
                       ? 'border-microAccent/40 bg-microAccent/10 text-textPrimary hover:bg-microAccent/20'
-                      : bookings > 0
-                        ? 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10'
-                        : isOffDay
-                          ? 'border-dashed border-white/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass/10 hover:text-textPrimary'
-                          : 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
+                      : isFull
+                        ? 'border-white/10 bg-bgPrimary text-textSecondary/60 hover:bg-surfaceGlass/10'
+                        : hasCounts
+                          ? 'border-toneSuccess/30 bg-toneSuccess/10 text-textPrimary hover:bg-toneSuccess/20'
+                          : bookings > 0
+                            ? 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10'
+                            : isOffDay
+                              ? 'border-dashed border-white/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass/10 hover:text-textPrimary'
+                              : 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
               ].join(' ')}
             >
               <span>{cell.day}</span>
-              {!cellDisabled && !isSelected && (isBlocked || bookings > 0) ? (
+
+              {hasCounts && !isSelected && openCount > 0 ? (
+                <span className="mt-0.5 text-[9px] font-black leading-none text-toneSuccess">
+                  {openCount}
+                </span>
+              ) : !hasCounts &&
+                !cellDisabled &&
+                !isSelected &&
+                (isBlocked || bookings > 0) ? (
                 <span
                   className={[
                     'mt-0.5 h-1.5 w-1.5 rounded-full',
@@ -407,11 +507,18 @@ export default function AvailabilityCalendar({
         })}
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2 text-[10px] font-semibold text-textSecondary">
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-accentPrimary" />
-          Booked
-        </span>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[10px] font-semibold text-textSecondary">
+        {openSlotsComputed ? (
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-toneSuccess" />
+            Open times
+          </span>
+        ) : (
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accentPrimary" />
+            Booked
+          </span>
+        )}
         <span className="flex items-center gap-1">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-microAccent" />
           Blocked

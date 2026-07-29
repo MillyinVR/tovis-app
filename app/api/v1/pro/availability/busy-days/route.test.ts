@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
   bookingFindMany: vi.fn(),
   calendarBlockFindMany: vi.fn(),
   professionalProfileFindUnique: vi.fn(),
+  loadOpenSlotDays: vi.fn(),
+}))
+
+vi.mock('@/lib/availability/data/openSlotDays', () => ({
+  loadOpenSlotDays: mocks.loadOpenSlotDays,
 }))
 
 vi.mock('@/app/api/_utils', async (orig) => ({
@@ -107,12 +112,151 @@ describe('GET /api/v1/pro/availability/busy-days', () => {
     expect(days['2026-09-17']).toBeUndefined()
   })
 
+  // Regression: the walk used to start at the BLOCK's first day with an
+  // iteration cap, so a block longer than the cap ran out of steps before it
+  // reached the requested window — a months-long closure left every day in the
+  // picker looking free. The walk is now clamped to the requested range.
+  it('marks the range as blocked for a block that spans far beyond it', async () => {
+    mocks.calendarBlockFindMany.mockResolvedValue([
+      {
+        startsAt: new Date('2026-01-05T08:00:00.000Z'),
+        endsAt: new Date('2026-12-20T08:00:00.000Z'),
+      },
+    ])
+
+    const res = await GET(req('from=2026-09-01&to=2026-09-30&tz=America/Los_Angeles'))
+    const data = await body(res)
+    const days = data.days as Record<string, { blocked: boolean }>
+
+    expect(days['2026-09-01']?.blocked).toBe(true)
+    expect(days['2026-09-15']?.blocked).toBe(true)
+    expect(days['2026-09-30']?.blocked).toBe(true)
+    expect(Object.keys(days)).toHaveLength(30)
+  })
+
   it('falls back to the profile timezone when tz param is absent/invalid', async () => {
     await GET(req('from=2026-09-01&to=2026-09-30&tz=Not/AZone'))
     expect(mocks.professionalProfileFindUnique).toHaveBeenCalledWith({
       where: { id: 'pro_1' },
       select: { timeZone: true },
     })
+  })
+
+  // R4 — the open-slot overlay.
+
+  it('stays busy-only, with a null openSlots envelope, when no serviceId is sent', async () => {
+    const res = await GET(req('from=2026-09-01&to=2026-09-30&tz=America/Los_Angeles'))
+    const data = await body(res)
+
+    expect(mocks.loadOpenSlotDays).not.toHaveBeenCalled()
+    expect(data.openSlots).toBeNull()
+  })
+
+  it('counts open slots for the requested service and zero-fills the range', async () => {
+    mocks.loadOpenSlotDays.mockResolvedValue({
+      ok: true,
+      timeZone: 'America/Los_Angeles',
+      durationMinutes: 90,
+      // Only two days have openings; every OTHER day in range must still come
+      // back with an explicit 0 — "fully booked" and "never counted" must not
+      // look alike to the grid.
+      openSlots: { '2026-09-02': 4, '2026-09-05': 1 },
+    })
+
+    const res = await GET(
+      req('from=2026-09-01&to=2026-09-30&tz=America/Los_Angeles&serviceId=svc_1'),
+    )
+    const data = await body(res)
+    const days = data.days as Record<string, { openSlots?: number }>
+
+    expect(data.openSlots).toEqual({
+      computed: true,
+      durationMinutes: 90,
+      reason: null,
+    })
+    expect(days['2026-09-02']?.openSlots).toBe(4)
+    expect(days['2026-09-05']?.openSlots).toBe(1)
+    expect(days['2026-09-01']?.openSlots).toBe(0)
+    expect(days['2026-09-30']?.openSlots).toBe(0)
+    expect(Object.keys(days)).toHaveLength(30)
+  })
+
+  it('passes the service/location/reschedule context straight through', async () => {
+    mocks.loadOpenSlotDays.mockResolvedValue({
+      ok: true,
+      timeZone: 'America/Los_Angeles',
+      durationMinutes: 60,
+      openSlots: {},
+    })
+
+    await GET(
+      req(
+        'from=2026-09-01&to=2026-09-30&serviceId=svc_1&locationType=MOBILE&locationId=loc_9&addOnIds=a2,a1&rescheduleBookingId=bk_7',
+      ),
+    )
+
+    expect(mocks.loadOpenSlotDays).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Always the SESSION's pro — never a query param.
+        professionalId: 'pro_1',
+        serviceId: 'svc_1',
+        requestedLocationType: 'MOBILE',
+        requestedLocationId: 'loc_9',
+        addOnIds: ['a1', 'a2'],
+        rescheduleBookingId: 'bk_7',
+        fromYmd: '2026-09-01',
+        toYmd: '2026-09-30',
+      }),
+    )
+  })
+
+  // The counts are bucketed in the OFFERING's location zone. If the busy
+  // buckets used the requested zone instead, the two overlays would key
+  // different local days onto the same grid cell.
+  it('buckets busy days in the zone the counts were computed in', async () => {
+    mocks.loadOpenSlotDays.mockResolvedValue({
+      ok: true,
+      timeZone: 'America/New_York',
+      durationMinutes: 60,
+      openSlots: {},
+    })
+    mocks.bookingFindMany.mockResolvedValue([
+      // 22:00 PDT Sep 10 == 01:00 EDT Sep 11: the two zones disagree on the day.
+      { scheduledFor: new Date('2026-09-11T05:00:00.000Z') },
+    ])
+
+    const res = await GET(
+      req('from=2026-09-01&to=2026-09-30&tz=America/Los_Angeles&serviceId=svc_1'),
+    )
+    const data = await body(res)
+    const days = data.days as Record<string, { bookings: number }>
+
+    expect(data.tz).toBe('America/New_York')
+    expect(days['2026-09-11']?.bookings).toBe(1)
+    expect(days['2026-09-10']?.bookings).toBe(0)
+  })
+
+  it('degrades to the busy overlay, with a reason, when counting fails', async () => {
+    mocks.loadOpenSlotDays.mockResolvedValue({
+      ok: false,
+      code: 'SERVICE_NOT_FOUND',
+    })
+
+    const res = await GET(
+      req('from=2026-09-01&to=2026-09-30&tz=America/Los_Angeles&serviceId=svc_gone'),
+    )
+    const data = await body(res)
+    const days = data.days as Record<string, { openSlots?: number }>
+
+    // Still a 200 with a usable grid — a pro who can't get counts must still be
+    // able to pick a day.
+    expect(res.status).toBe(200)
+    expect(data.openSlots).toEqual({
+      computed: false,
+      durationMinutes: null,
+      reason: 'SERVICE_NOT_FOUND',
+    })
+    expect(Object.values(days).every((d) => d.openSlots === undefined)).toBe(true)
   })
 
   it('returns the pro auth failure response when not a pro', async () => {

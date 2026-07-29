@@ -486,6 +486,43 @@ export function BookingModal(props: BookingModalProps) {
     [booking?.serviceItems, serviceItemsDraft],
   )
 
+  /**
+   * What the day grid counts open slots for (R4).
+   *
+   * Deliberately the booking's COMMITTED base service, not `serviceItems`
+   * (which may be an unsaved draft): it is paired with `rescheduleBookingId`,
+   * so the server sizes the count from this booking's committed width — the
+   * width the reschedule will actually commit
+   * ([[offer-reserve-commit-are-three-windows]]). Mixing a draft service with a
+   * committed width would count for an appointment that exists nowhere. If the
+   * pro also edits services, the counts refresh once that save lands.
+   */
+  const rescheduleSlotContext = useMemo(() => {
+    const baseServiceId = (booking?.serviceItems ?? []).find(
+      (item) => item.itemType === 'BASE',
+    )?.serviceId
+    if (!booking || !baseServiceId) return null
+
+    // `BookingDetails['locationType']` is an OPEN string union (forward-compat
+    // for wire values this build doesn't know). Narrow to the two the
+    // availability engine accepts and send nothing when it's neither, letting
+    // the server resolve the offering's default placement.
+    const rawLocationType = booking.locationType
+    const locationType: 'SALON' | 'MOBILE' | null =
+      rawLocationType === 'SALON'
+        ? 'SALON'
+        : rawLocationType === 'MOBILE'
+          ? 'MOBILE'
+          : null
+
+    return {
+      serviceId: baseServiceId,
+      locationType,
+      locationId: booking.locationId ?? null,
+      rescheduleBookingId: booking.id,
+    }
+  }, [booking])
+
   const bookingLabel = useMemo(
     () =>
       buildBookingLabel({
@@ -638,6 +675,7 @@ export function BookingModal(props: BookingModalProps) {
                   selectedYmd={reschedDate || null}
                   disabled={saving}
                   onPick={onChangeReschedDate}
+                  slotContext={rescheduleSlotContext}
                 />
               </div>
 

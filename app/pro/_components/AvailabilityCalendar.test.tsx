@@ -306,4 +306,126 @@ describe('AvailabilityCalendar', () => {
     expect(screen.getByRole('button', { name: 'Next month' })).toBeDisabled()
     expect(screen.getByText('20').closest('button')).toBeDisabled()
   })
+
+  // R4 — open-slot counts.
+
+  it('asks for open-slot counts only when given a service context', async () => {
+    const fetchMock = vi.fn((_url: string) =>
+      Promise.resolve(
+        jsonResponse({ ok: true, tz: 'UTC', days: {}, openSlots: null }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <AvailabilityCalendar
+        open
+        tz="UTC"
+        anchorYmd="2099-09-15"
+        onPick={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('serviceId=')
+  })
+
+  it('sends the service context and shows the per-day open count', async () => {
+    const fetchMock = vi.fn((_url: string) =>
+      Promise.resolve(
+        jsonResponse({
+          ok: true,
+          tz: 'UTC',
+          days: {
+            '2099-09-10': { bookings: 1, blocked: false, openSlots: 3 },
+            '2099-09-11': { bookings: 4, blocked: false, openSlots: 0 },
+          },
+          openSlots: { computed: true, durationMinutes: 90, reason: null },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <AvailabilityCalendar
+        open
+        tz="UTC"
+        anchorYmd="2099-09-15"
+        onPick={vi.fn()}
+        slotContext={{
+          serviceId: 'svc_1',
+          locationType: 'MOBILE',
+          locationId: 'loc_2',
+          addOnIds: ['a1'],
+          rescheduleBookingId: 'bk_3',
+        }}
+      />,
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+
+    const url = String(fetchMock.mock.calls[0]?.[0])
+    expect(url).toContain('serviceId=svc_1')
+    expect(url).toContain('locationType=MOBILE')
+    expect(url).toContain('locationId=loc_2')
+    expect(url).toContain('addOnIds=a1')
+    expect(url).toContain('rescheduleBookingId=bk_3')
+
+    // The count leads the tooltip, and a day with openings renders the number.
+    await waitFor(() =>
+      expect(screen.getByText('10').closest('button')).toHaveAttribute(
+        'title',
+        '3 open times · 1 booking',
+      ),
+    )
+    // The badge lives inside the day-10 cell (scoped, because "3" is also a
+    // day number elsewhere in the grid).
+    expect(screen.getByText('10').closest('button')).toHaveTextContent('103')
+
+    // A day with no openings says so rather than looking uncounted, and still
+    // offers the custom-time escape hatch the save supports.
+    expect(screen.getByText('11').closest('button')).toHaveAttribute(
+      'title',
+      'No open times — you can still book a custom time · 4 bookings',
+    )
+  })
+
+  it('falls back to the busy overlay when the server could not count', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({
+          ok: true,
+          tz: 'UTC',
+          days: { '2099-09-10': { bookings: 2, blocked: false } },
+          openSlots: {
+            computed: false,
+            durationMinutes: null,
+            reason: 'SERVICE_NOT_FOUND',
+          },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <AvailabilityCalendar
+        open
+        tz="UTC"
+        anchorYmd="2099-09-15"
+        onPick={vi.fn()}
+        slotContext={{ serviceId: 'svc_gone' }}
+      />,
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+
+    // Asked for counts, didn't get them: the day must read as "2 bookings",
+    // NOT as "no open times" — an uncounted day is not a full one.
+    await waitFor(() =>
+      expect(screen.getByText('10').closest('button')).toHaveAttribute(
+        'title',
+        '2 bookings',
+      ),
+    )
+  })
 })
