@@ -27,6 +27,11 @@ import {
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { isCloseoutPaymentAndAftercareComplete } from '@/lib/booking/closeoutState'
+import {
+  PAYMENT_BADGE_SELECT,
+  derivePaymentBadge,
+  type PaymentBadge,
+} from '@/lib/booking/paymentBadge'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
 export type BookingsListStatusFilter =
@@ -70,8 +75,11 @@ export const bookingsListSelect = {
   finishedAt: true,
   locationTimeZone: true,
 
-  checkoutStatus: true,
-  paymentCollectedAt: true,
+  // Payment-badge inputs (checkout + deposit + dispute + refund columns) —
+  // spread from the helper's select so the badge can never miss a field it
+  // derives from. Also supplies checkoutStatus/paymentCollectedAt/totalAmount,
+  // which the bucketing + money math below read directly.
+  ...PAYMENT_BADGE_SELECT,
   aftercareSummary: {
     select: {
       sentToClientAt: true,
@@ -351,6 +359,12 @@ export type ProBookingListItemDTO = {
   id: string
   status: BookingStatus
   statusLabel: string
+  /**
+   * At-a-glance payment state (deposit / paid / disputed …), computed by THE
+   * one helper (lib/booking/paymentBadge.ts) — iOS renders `label`/`tone`
+   * verbatim, never recomputing them on device (K1/K2).
+   */
+  paymentBadge: PaymentBadge
   sessionStep: SessionStep | null
   scheduledFor: string
   timeZone: string
@@ -401,6 +415,7 @@ export function serializeBookingsListRow(
     id: booking.id,
     status: booking.status,
     statusLabel: labelForBookingStatus(String(booking.status)),
+    paymentBadge: derivePaymentBadge(booking),
     sessionStep: booking.sessionStep ?? null,
     scheduledFor: booking.scheduledFor.toISOString(),
     timeZone: safeTz,

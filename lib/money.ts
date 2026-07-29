@@ -48,6 +48,18 @@ export function moneyToCentsInt(value: string): number | null {
 }
 
 /**
+ * Decimal dollars → integer cents (bankers-safe rounding). Single source of
+ * truth for "Decimal column → cents" reads (moneyTrail, paymentBadge). null in,
+ * null out — callers that want a 0 default say so at the call site.
+ */
+export function decimalToCents(
+  value: Prisma.Decimal | null | undefined,
+): number | null {
+  if (value == null) return null
+  return Math.round(value.toNumber() * 100)
+}
+
+/**
  * Display formatter.
  *
  * Keeps this as the single source of truth for showing money values.

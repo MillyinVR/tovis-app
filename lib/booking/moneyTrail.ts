@@ -28,6 +28,8 @@ import {
   StripePaymentStatus,
 } from '@prisma/client'
 
+import { decimalToCents } from '@/lib/money'
+
 /**
  * The exact Booking selection the assembler needs. The route selects with this
  * so `assembleMoneyTrail` receives a fully-typed row and nothing extra leaks.
@@ -178,12 +180,6 @@ export type BookingMoneyTrail = {
     canWaiveNoShowFee: boolean
     canRefundNoShowFee: boolean
   }
-}
-
-/** Decimal dollars → integer cents (bankers-safe rounding). */
-function decimalToCents(value: Prisma.Decimal | null): number | null {
-  if (value == null) return null
-  return Math.round(value.toNumber() * 100)
 }
 
 function toIso(value: Date | null): string | null {

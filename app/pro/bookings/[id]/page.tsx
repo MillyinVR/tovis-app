@@ -23,6 +23,7 @@ import {
   badgeToneForBookingStatus,
   labelForBookingStatus,
 } from '@/lib/booking/statusLabel'
+import { derivePaymentBadge } from '@/lib/booking/paymentBadge'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
@@ -251,6 +252,7 @@ export default async function ProBookingDetailPage(props: {
   )
 
   const serviceName = booking.service?.name ?? 'Booking'
+  const paymentBadge = derivePaymentBadge(booking)
   const total =
     moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ?? '0.00'
   const dur = Math.round(Number(booking.totalDurationMinutes ?? 0)) || 0
@@ -407,9 +409,17 @@ export default async function ProBookingDetailPage(props: {
           </span>
         </Link>
 
-        <Badge tone={badgeToneForBookingStatus(booking.status)} size="sm">
-          {labelForBookingStatus(booking.status)}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {/* Payment state from THE one helper (lib/booking/paymentBadge.ts) —
+              the same words the calendar card and bookings list show. Rendered
+              even when UNPAID: on the detail page the pro is asking. */}
+          <Badge tone={paymentBadge.tone} size="sm">
+            {paymentBadge.label}
+          </Badge>
+          <Badge tone={badgeToneForBookingStatus(booking.status)} size="sm">
+            {labelForBookingStatus(booking.status)}
+          </Badge>
+        </div>
       </div>
 
       {/* header card */}

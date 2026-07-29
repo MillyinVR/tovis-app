@@ -1,6 +1,7 @@
 // app/pro/calendar/_types.ts
 
 import type { IanaTimeZone } from '@/lib/timeZone'
+import type { PaymentBadge } from '@/lib/booking/paymentBadge'
 
 export type ViewMode = 'day' | 'week' | 'month'
 export type EntityType = 'booking' | 'block'
@@ -163,6 +164,13 @@ export type BookingCalendarEvent = CalendarEventBase & {
   kind: 'BOOKING'
   status: BookingCalendarStatus
   locationType: ServiceLocationType | null
+
+  /**
+   * At-a-glance payment state (deposit / paid / disputed …) derived server-side
+   * by lib/booking/paymentBadge.ts. Absent on waitlist rows and when the wire
+   * value fails to parse — the card simply omits the chip then (K1).
+   */
+  paymentBadge?: PaymentBadge
 
   /**
    * ClientProfile id, present only when the viewing pro may open this client's
