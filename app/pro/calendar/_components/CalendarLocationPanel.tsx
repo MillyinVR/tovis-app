@@ -3,6 +3,8 @@
 
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 
+import { locationFullLabel } from '../_utils/locationLabels'
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type CalendarLocation = {
@@ -21,6 +23,7 @@ export type CalendarLocationPanelCopy = {
   selectFallback: string
   timeZoneLabel: string
   emptyState: string
+  allLocationsLabel: string
 }
 
 type CalendarLocationPanelProps = {
@@ -33,40 +36,10 @@ type CalendarLocationPanelProps = {
   onChangeLocation: (locationId: string | null) => void
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const LOCATION_TYPE_LABELS: Record<string, string> = {
-  MOBILE_BASE: 'Mobile base',
-  SUITE: 'Suite',
-  SALON: 'Salon',
-}
-
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function normalizeText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function locationTypeLabel(
-  type: string | null | undefined,
-  fallbackLabel: string,
-): string {
-  const normalizedType = normalizeText(type).toUpperCase()
-
-  return LOCATION_TYPE_LABELS[normalizedType] ?? fallbackLabel
-}
-
-function labelForLocation(args: {
-  location: CalendarLocation
-  fallbackLabel: string
-}): string {
-  const { location, fallbackLabel } = args
-
-  const name = normalizeText(location.name)
-  const address = normalizeText(location.formattedAddress)
-  const baseLabel = name || locationTypeLabel(location.type, fallbackLabel)
-
-  return address ? `${baseLabel} — ${address}` : baseLabel
 }
 
 function selectedLocationLabel(args: {
@@ -92,7 +65,7 @@ function selectedLocationLabel(args: {
 
   if (!selectedLocation) return null
 
-  return labelForLocation({
+  return locationFullLabel({
     location: selectedLocation,
     fallbackLabel,
   })
@@ -174,13 +147,15 @@ export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
                 className="brand-pro-calendar-location-panel-select brand-focus"
                 aria-label={copy.selectAriaLabel}
               >
-                {selectedIsValid ? null : (
-                  <option value="">{copy.titleFallback}</option>
-                )}
+                {/* Empty value = no filter. A real option now, not a "nothing
+                    chosen" placeholder: showing every location is the default
+                    and the one view that matches what the booking overlap
+                    constraint enforces (K3). */}
+                <option value="">{copy.allLocationsLabel}</option>
 
                 {scopedLocations.map((location) => (
                   <option key={location.id} value={location.id}>
-                    {labelForLocation({
+                    {locationFullLabel({
                       location,
                       fallbackLabel: copy.selectFallback,
                     })}

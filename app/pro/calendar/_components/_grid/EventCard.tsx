@@ -41,6 +41,14 @@ type EventCardProps = {
   compact: boolean
   micro: boolean
 
+  /**
+   * Short label for the event's own location, when the grid is showing more
+   * than one (K3). Undefined = don't mark the card at all, which is the case
+   * for a single-location pro and for a calendar filtered to one location —
+   * there, naming it on every card is noise, not information.
+   */
+  locationLabel?: string
+
   day: Date
   startMinutes: number
   originalDuration: number
@@ -220,6 +228,20 @@ function PaymentBadgeChip(props: { label: string; tone: string }) {
   )
 }
 
+/**
+ * Which location this job is at, on a grid that mixes them.
+ *
+ * Deliberately TEXT, not a colour: status already owns the card's fill and the
+ * accent stripe is spoken for (the colour system is K7's step, and its channel
+ * allocation gives the stripe to service). A word also survives being read by
+ * a colour-blind pro, and needs no legend entry to decode.
+ */
+function LocationChip(props: { label: string }) {
+  return (
+    <span className="brand-pro-calendar-event-location">{props.label}</span>
+  )
+}
+
 function ConflictBadge(props: { label: string }) {
   return (
     <span
@@ -276,6 +298,7 @@ export function EventCard(props: EventCardProps) {
     entityType,
     apiId,
     conflict,
+    locationLabel,
     topPx,
     heightPx,
     timeLabel,
@@ -314,9 +337,14 @@ export function EventCard(props: EventCardProps) {
   const withPayment = paymentBadge
     ? `${baseLabel}, ${paymentBadge.label}`
     : baseLabel
-  const accessibleLabel = conflict
-    ? `${withPayment}, ${copy.labels.overlapWarning}`
+  // Always in the accessible name, even where the chip is too small to render —
+  // on a mixed-location grid, which location a job is at is not decoration.
+  const withLocation = locationLabel
+    ? `${withPayment}, ${locationLabel}`
     : withPayment
+  const accessibleLabel = conflict
+    ? `${withLocation}, ${copy.labels.overlapWarning}`
+    : withLocation
 
   return (
     <div
@@ -328,6 +356,7 @@ export function EventCard(props: EventCardProps) {
       data-calendar-event-micro={micro ? 'true' : 'false'}
       data-calendar-event-blocked={isBlocked ? 'true' : 'false'}
       data-calendar-event-conflict={conflict ? 'true' : 'false'}
+      data-calendar-event-location={locationLabel}
       // A hold does nothing when activated, so it must not advertise itself as
       // a button or take focus — that would be an accessibility lie (B5).
       role={isHold ? undefined : 'button'}
@@ -446,7 +475,10 @@ export function EventCard(props: EventCardProps) {
               </p>
             ) : null}
 
-            <p className="brand-pro-calendar-event-time">{timeLabel}</p>
+            <p className="brand-pro-calendar-event-time">
+              {timeLabel}
+              {locationLabel ? <LocationChip label={locationLabel} /> : null}
+            </p>
           </>
         )}
 

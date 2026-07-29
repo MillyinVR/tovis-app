@@ -2,6 +2,7 @@
 
 import type { IanaTimeZone } from '@/lib/timeZone'
 import type { PaymentBadge } from '@/lib/booking/paymentBadge'
+import type { CalendarScopeMode } from '@/lib/calendar/constants'
 
 export type ViewMode = 'day' | 'week' | 'month'
 export type EntityType = 'booking' | 'block'
@@ -332,6 +333,13 @@ export type CalendarRangeMeta = {
 export type CalendarResponse = {
   /** The authed pro's own id — used by the waitlist "Offer a time" modal. */
   professionalId?: string
+  /**
+   * Which locations the events came from (K3). `ALL` = every location, the
+   * scope the DB's overlap constraint actually enforces; `LOCATION` = filtered
+   * to `location`. In ALL scope `location` is only the VIEWPORT ANCHOR (whose
+   * timezone the grid is drawn in) and must not be adopted as the selection.
+   */
+  scope: CalendarScopeMode
   location: CalendarResponseLocation | null
   range: CalendarRangeMeta
 

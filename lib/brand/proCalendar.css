@@ -1830,6 +1830,34 @@
   }
 }
 
+/* Which location this job is at, on a grid showing more than one (K3).
+   Deliberately monochrome: status owns the card's fill, and the accent stripe
+   is reserved for the service colour the colour-system step introduces — a
+   location hue here would be a fourth meaning competing for the same channel.
+   Hidden on the narrowest grids, like the payment chip, where the card has room
+   for the time and nothing else; the accessible name still carries it. */
+.brand-pro-calendar-event-location {
+  display: none;
+  flex-shrink: 0;
+  margin-left: 6px;
+  border-radius: 2px;
+  background: rgb(var(--text-secondary) / 0.14);
+  color: rgb(var(--text-secondary));
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 1px 4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+@media (min-width: 768px) {
+  .brand-pro-calendar-event-location {
+    display: inline-block;
+  }
+}
+
 .brand-pro-calendar-event-completed-check {
   display: none;
   flex-shrink: 0;

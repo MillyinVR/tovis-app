@@ -151,15 +151,18 @@ export function defaultProCalendarCopy(
 
   locationPanel: {
     eyebrow: '◆ Calendar location',
-    titleFallback: 'Select location.',
+    // The default is now every location, so "select one" is no longer what the
+    // pro is being asked to do — filtering is optional (K3).
+    titleFallback: 'All locations',
     description:
-      'Booking creation and blocked-time actions use this selected location.',
+      'Showing every location. Filter to one to see just that location’s day.',
     selectLabel: 'Location',
-    selectAriaLabel: 'Select calendar location',
-    selectFallback: 'Select location',
+    selectAriaLabel: 'Filter calendar by location',
+    selectFallback: 'Location',
     timeZoneLabel: 'TZ',
     emptyState:
       'No bookable locations yet. Add a location to use the calendar.',
+    allLocationsLabel: 'All locations',
   },
 
   mobileAutoAccept: {

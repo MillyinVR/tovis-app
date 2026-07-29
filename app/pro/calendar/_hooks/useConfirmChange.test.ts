@@ -192,6 +192,45 @@ describe('useConfirmChange', () => {
     expect(forceProFooterRefresh).toHaveBeenCalled()
   })
 
+  // K3: with every location on one grid, a booking can be dragged while a job
+  // from a DIFFERENT location sits in the same column. Reschedule must stay a
+  // pure time change — the drop target contributes a time, never a place — or
+  // the all-locations view would let a pro silently move a mobile job into the
+  // salon. This is the structural half of that guarantee: the write the drag
+  // performs has no location in it at all.
+  it('never sends a location when a drag reschedules a booking', async () => {
+    mocks.safeJson.mockResolvedValueOnce({ ok: true })
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const { result } = renderConfirmChange()
+
+    act(() => {
+      result.current.openConfirm({
+        ...makeMoveChange(),
+        // A mobile job, dropped on a day column that is showing salon work too.
+        original: makeBookingEvent({
+          locationId: 'loc_mobile',
+          locationType: 'MOBILE',
+        }),
+      })
+    })
+
+    await act(async () => {
+      await result.current.applyConfirm()
+    })
+
+    const patchCalls = bookingPatchCalls()
+    expect(patchCalls).toHaveLength(1)
+
+    const body: unknown = JSON.parse(String(patchCalls[0]?.[1]?.body))
+    const sentKeys = Object.keys(body as Record<string, unknown>)
+
+    expect(sentKeys).toContain('scheduledFor')
+    expect(
+      sentKeys.filter((key) => key.toLowerCase().includes('location')),
+    ).toEqual([])
+  })
+
   it('offers an override and retries the move when advance notice blocks it', async () => {
     mocks.safeJson
       .mockResolvedValueOnce({ ok: false, code: 'ADVANCE_NOTICE_REQUIRED' })

@@ -487,6 +487,7 @@ function CalendarDesktopBody(props: CalendarDesktopBodyProps) {
           workingHoursMobile={cal.workingHoursMobile}
           activeLocationType={cal.activeLocationType}
           stepMinutes={cal.activeStepMinutes}
+          eventLocationLabels={cal.eventLocationLabels}
           timeZone={calendarTimeZone}
           onClickEvent={onPickEventId}
           onCreateForClick={cal.openCreateForClick}
