@@ -20,8 +20,8 @@ import {
   normalizeCalendarOverlapEvents,
   overlappingClientNamesForRange,
 } from '@/lib/calendar/overlap'
-import { isoToYmdInTimeZone, stepYmd, type StepUnit } from './aftercareDates'
-import AvailabilityCalendarPopup from './AvailabilityCalendarPopup'
+import { isoToYmdInTimeZone, stepYmd, type StepUnit } from '@/lib/booking/rebookDates'
+import AvailabilityCalendar from '@/app/pro/_components/AvailabilityCalendar'
 import StepButtons from './StepButtons'
 
 export type SelectedRebookSlot = {
@@ -404,7 +404,7 @@ export default function RebookSlotPicker({
           booked/blocked/off-day shading and skip-ahead chips. The bare date
           input below is the typed-entry fallback. */}
       <div className="mt-1">
-        <AvailabilityCalendarPopup
+        <AvailabilityCalendar
           open
           variant="inline"
           tz={timeZone}

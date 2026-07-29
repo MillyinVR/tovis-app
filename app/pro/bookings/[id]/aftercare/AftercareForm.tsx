@@ -22,8 +22,8 @@ import {
   ymdToIsoEndOfDay,
   ymdToIsoStartOfDay,
   type StepUnit,
-} from './aftercareDates'
-import AvailabilityCalendarPopup from './AvailabilityCalendarPopup'
+} from '@/lib/booking/rebookDates'
+import AvailabilityCalendar from '@/app/pro/_components/AvailabilityCalendar'
 import StepButtons from './StepButtons'
 import RebookSlotPicker, {
   type SelectedRebookSlot,
@@ -1499,7 +1499,7 @@ export default function AftercareForm({
                     suggested span ahead when it would trail the new start. */}
                 <div>
                   <label className={labelClass()}>Window start</label>
-                  <AvailabilityCalendarPopup
+                  <AvailabilityCalendar
                     open
                     variant="inline"
                     tz={tz}
@@ -1812,7 +1812,7 @@ export default function AftercareForm({
       )}
 
       {endPickerOpen ? (
-        <AvailabilityCalendarPopup
+        <AvailabilityCalendar
           open
           tz={tz}
           title="Pick a window end date"

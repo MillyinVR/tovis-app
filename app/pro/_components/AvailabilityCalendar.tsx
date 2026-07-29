@@ -1,10 +1,20 @@
-// app/pro/bookings/[id]/aftercare/AvailabilityCalendarPopup.tsx
+// app/pro/_components/AvailabilityCalendar.tsx
 'use client'
 
-// A month calendar that overlays the pro's own schedule (booked + blocked
-// days, from /api/v1/pro/availability/busy-days) so the pro can pick a
-// recommended next-visit / window date around their existing commitments.
-// Returns the chosen day as a "YYYY-MM-DD" string via onPick.
+// A month calendar that overlays the AUTHED pro's own schedule (booked +
+// blocked days, from /api/v1/pro/availability/busy-days) so the pro can pick a
+// date around their existing commitments. Returns the chosen day as a
+// "YYYY-MM-DD" string via onPick.
+//
+// Shared by every pro-facing day picker (R3): aftercare rebook, the waitlist
+// offer, the new-booking slot picker, and the calendar's reschedule modal.
+// The busy-days feed is derived from the SESSION's pro, so this only belongs on
+// surfaces where the authed pro is picking a day on their OWN calendar.
+//
+// Not to be confused with the pro calendar's `MonthGrid`: that one browses an
+// already-loaded `CalendarEvent[]` and renders per-event chips. This is a form
+// control — it fetches its own per-day aggregate, floors at a minimum day,
+// tracks a selection, and emits a date.
 //
 // Two variants:
 //  - "modal" (default): the original popup — backdrop, title, close button;
@@ -25,7 +35,7 @@ import {
   addMonthsToYmd,
   compareYmd,
   todayYmdInTimeZone,
-} from './aftercareDates'
+} from '@/lib/booking/rebookDates'
 import { zClass } from '@/lib/zIndex'
 
 type DayBusy = { bookings: number; blocked: boolean }
@@ -113,7 +123,7 @@ function monthLabel(monthYmd: string): string {
   }
 }
 
-export default function AvailabilityCalendarPopup({
+export default function AvailabilityCalendar({
   open,
   onClose,
   onPick,
@@ -257,7 +267,7 @@ export default function AvailabilityCalendarPopup({
       'rounded-full border border-white/10 px-2.5 py-1 text-[11px] font-black transition',
       chipDisabled
         ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
-        : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+        : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
     ].join(' ')
 
   const calendarBody = (
@@ -272,7 +282,7 @@ export default function AvailabilityCalendarPopup({
             'rounded-full border border-white/10 px-3 py-1 text-xs font-black',
             prevDisabled
               ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
-              : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+              : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
           ].join(' ')}
         >
           ‹
@@ -289,7 +299,7 @@ export default function AvailabilityCalendarPopup({
             'rounded-full border border-white/10 px-3 py-1 text-xs font-black',
             disabled
               ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
-              : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+              : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
           ].join(' ')}
         >
           ›
@@ -377,9 +387,9 @@ export default function AvailabilityCalendarPopup({
                     : isBlocked
                       ? 'border-microAccent/40 bg-microAccent/10 text-textPrimary hover:bg-microAccent/20'
                       : bookings > 0
-                        ? 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass'
+                        ? 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10'
                         : isOffDay
-                          ? 'border-dashed border-white/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass hover:text-textPrimary'
+                          ? 'border-dashed border-white/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass/10 hover:text-textPrimary'
                           : 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
               ].join(' ')}
             >
@@ -443,7 +453,7 @@ export default function AvailabilityCalendarPopup({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-xs font-black text-textSecondary hover:bg-surfaceGlass"
+            className="rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-xs font-black text-textSecondary hover:bg-surfaceGlass/10"
           >
             ✕
           </button>

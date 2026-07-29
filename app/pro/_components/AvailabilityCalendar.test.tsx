@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import AvailabilityCalendarPopup from './AvailabilityCalendarPopup'
+import AvailabilityCalendar from './AvailabilityCalendar'
 
 function jsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -10,7 +10,7 @@ function jsonResponse(payload: unknown): Response {
   })
 }
 
-describe('AvailabilityCalendarPopup', () => {
+describe('AvailabilityCalendar', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -35,7 +35,7 @@ describe('AvailabilityCalendarPopup', () => {
     const onClose = vi.fn()
 
     render(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         tz="America/Los_Angeles"
         anchorYmd="2099-09-15"
@@ -82,7 +82,7 @@ describe('AvailabilityCalendarPopup', () => {
     const onPick = vi.fn()
 
     render(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         tz="UTC"
         anchorYmd="2099-09-15"
@@ -112,7 +112,7 @@ describe('AvailabilityCalendarPopup', () => {
 
   it('renders nothing when closed', () => {
     const { container } = render(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open={false}
         tz="UTC"
         onClose={vi.fn()}
@@ -132,7 +132,7 @@ describe('AvailabilityCalendarPopup', () => {
     const onClose = vi.fn()
 
     render(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         tz="UTC"
         anchorYmd="2099-09-15"
@@ -167,7 +167,7 @@ describe('AvailabilityCalendarPopup', () => {
     const onPick = vi.fn()
 
     const { rerender } = render(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         tz="UTC"
         anchorYmd="2099-09-15"
@@ -187,7 +187,7 @@ describe('AvailabilityCalendarPopup', () => {
     // A suggestion in the past is stale — the chip disappears instead of
     // offering an unselectable day.
     rerender(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         tz="UTC"
         anchorYmd="2099-09-15"
@@ -212,7 +212,7 @@ describe('AvailabilityCalendarPopup', () => {
     const onPick = vi.fn()
 
     render(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         variant="inline"
         tz="UTC"
@@ -249,7 +249,7 @@ describe('AvailabilityCalendarPopup', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const { rerender } = render(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         variant="inline"
         tz="UTC"
@@ -264,7 +264,7 @@ describe('AvailabilityCalendarPopup', () => {
 
     // A jump/step/typed date lands in another month — the grid follows.
     rerender(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         variant="inline"
         tz="UTC"
@@ -284,7 +284,7 @@ describe('AvailabilityCalendarPopup', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <AvailabilityCalendarPopup
+      <AvailabilityCalendar
         open
         variant="inline"
         tz="UTC"
