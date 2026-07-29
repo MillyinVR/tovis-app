@@ -410,14 +410,14 @@ export default async function ProBookingDetailPage(props: {
         </Link>
 
         <div className="flex items-center gap-2">
+          <Badge tone={badgeToneForBookingStatus(booking.status)} size="sm">
+            {labelForBookingStatus(booking.status)}
+          </Badge>
           {/* Payment state from THE one helper (lib/booking/paymentBadge.ts) —
               the same words the calendar card and bookings list show. Rendered
               even when UNPAID: on the detail page the pro is asking. */}
           <Badge tone={paymentBadge.tone} size="sm">
             {paymentBadge.label}
-          </Badge>
-          <Badge tone={badgeToneForBookingStatus(booking.status)} size="sm">
-            {labelForBookingStatus(booking.status)}
           </Badge>
         </div>
       </div>
