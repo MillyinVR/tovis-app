@@ -152,6 +152,37 @@ export function ymdToIsoEndOfDay(ymd: string, timeZone: string): string | null {
 export const SUGGESTED_REBOOK_WINDOW_SPAN_DAYS = 7
 
 /**
+ * The suggested rebook target DAY ("YYYY-MM-DD"): the service date plus the
+ * offering's typical rebook interval, in the pro's timezone. This is the
+ * anchor `computeSuggestedRebookWindow` builds its window from, exposed on its
+ * own so pickers can offer a "Suggested" jump regardless of whether a window
+ * suggestion applies (it works even after aftercare has been saved).
+ *
+ * Returns null when no suggestion exists — no/invalid interval or an unusable
+ * anchor.
+ */
+export function computeSuggestedRebookStartYmd(input: {
+  intervalDays: number | null | undefined
+  anchorIso: string | null | undefined
+  timeZone: string
+}): string | null {
+  const { intervalDays, anchorIso, timeZone } = input
+
+  if (
+    intervalDays == null ||
+    !Number.isFinite(intervalDays) ||
+    intervalDays <= 0
+  ) {
+    return null
+  }
+
+  const anchorYmd = isoToYmdInTimeZone(anchorIso, timeZone)
+  if (!anchorYmd) return null
+
+  return addDaysToYmd(anchorYmd, Math.trunc(intervalDays))
+}
+
+/**
  * Auto-suggested recommended-window rebook dates for session wrap-up.
  *
  * Given the offering's typical rebook interval (`intervalDays`) and the service
@@ -172,20 +203,9 @@ export function computeSuggestedRebookWindow(input: {
   anchorIso: string | null | undefined
   timeZone: string
 }): { windowStartIso: string; windowEndIso: string } | null {
-  const { intervalDays, anchorIso, timeZone } = input
+  const { timeZone } = input
 
-  if (
-    intervalDays == null ||
-    !Number.isFinite(intervalDays) ||
-    intervalDays <= 0
-  ) {
-    return null
-  }
-
-  const anchorYmd = isoToYmdInTimeZone(anchorIso, timeZone)
-  if (!anchorYmd) return null
-
-  const windowStartYmd = addDaysToYmd(anchorYmd, Math.trunc(intervalDays))
+  const windowStartYmd = computeSuggestedRebookStartYmd(input)
   if (!windowStartYmd) return null
 
   const windowEndYmd = addDaysToYmd(

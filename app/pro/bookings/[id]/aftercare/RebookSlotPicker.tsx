@@ -20,8 +20,9 @@ import {
   normalizeCalendarOverlapEvents,
   overlappingClientNamesForRange,
 } from '@/lib/calendar/overlap'
-import { isoToYmdInTimeZone } from './aftercareDates'
+import { isoToYmdInTimeZone, stepYmd, type StepUnit } from './aftercareDates'
 import AvailabilityCalendarPopup from './AvailabilityCalendarPopup'
+import StepButtons from './StepButtons'
 
 export type SelectedRebookSlot = {
   offeringId: string
@@ -56,6 +57,11 @@ type Props = {
    * book it with a custom time (the save asks them to confirm the override).
    */
   offWeekdays?: ReadonlySet<number> | null
+  /**
+   * The offering's suggested rebook day (service date + rebook interval), for
+   * the calendar's "Suggested" jump chip. Null hides the chip.
+   */
+  suggestedYmd?: string | null
 }
 
 function parseSlots(data: unknown): { slots: string[]; durationMinutes: number } {
@@ -127,6 +133,7 @@ export default function RebookSlotPicker({
   disabled,
   onChange,
   offWeekdays,
+  suggestedYmd,
 }: Props) {
   const initialDay = value?.startsAt
     ? isoToYmdInTimeZone(value.startsAt, timeZone)
@@ -140,7 +147,6 @@ export default function RebookSlotPicker({
   const [timeMode, setTimeMode] = useState<'slots' | 'custom'>('slots')
   const [customTime, setCustomTime] = useState<string>('')
   const [customError, setCustomError] = useState<string | null>(null)
-  const [calendarOpen, setCalendarOpen] = useState(false)
   const [overlapNames, setOverlapNames] = useState<string[]>([])
   const abortRef = useRef<AbortController | null>(null)
 
@@ -378,6 +384,10 @@ export default function RebookSlotPicker({
     onChange(null)
   }
 
+  function onStepDay(unit: StepUnit) {
+    onDayChange(stepYmd(day, unit, minYmd))
+  }
+
   const toggleBtn =
     'rounded-full border px-3 py-1.5 text-[12px] font-bold transition disabled:opacity-60'
   const toggleActive = 'border-transparent bg-cta text-onCta'
@@ -389,24 +399,51 @@ export default function RebookSlotPicker({
       <label className="block text-xs font-black uppercase tracking-[0.08em] text-textSecondary">
         Pick a day
       </label>
-      <div className="mt-1 flex gap-2">
+
+      {/* The pro's own calendar IS the picker (R1): always visible, with
+          booked/blocked/off-day shading and skip-ahead chips. The bare date
+          input below is the typed-entry fallback. */}
+      <div className="mt-1">
+        <AvailabilityCalendarPopup
+          open
+          variant="inline"
+          tz={timeZone}
+          minYmd={minYmd}
+          anchorYmd={day || undefined}
+          selectedYmd={day || null}
+          suggestedYmd={suggestedYmd}
+          offWeekdays={offWeekdays}
+          disabled={disabled}
+          onPick={(ymd) => onDayChange(ymd)}
+        />
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <span className="shrink-0 text-[11px] font-semibold text-textSecondary">
+          or type a date
+        </span>
         <input
           type="date"
           value={day}
           min={minYmd}
           disabled={disabled}
           onChange={(e) => onDayChange(e.target.value)}
+          aria-label="Next appointment day"
           className="w-full rounded-card border border-textPrimary/15 bg-bgPrimary px-3 py-2 text-sm font-semibold text-textPrimary disabled:opacity-60"
         />
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => setCalendarOpen(true)}
-          className="shrink-0 rounded-card border border-textPrimary/15 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:border-textPrimary/30 disabled:opacity-60"
-        >
-          📅 My calendar
-        </button>
       </div>
+      <StepButtons
+        disabled={Boolean(disabled)}
+        onStep={onStepDay}
+        buttonClass={(btnDisabled) =>
+          [
+            'rounded-full border px-3 py-1.5 text-[12px] font-bold transition',
+            btnDisabled
+              ? 'cursor-not-allowed border-textPrimary/16 text-textSecondary opacity-60'
+              : 'border-textPrimary/16 text-textPrimary hover:border-textPrimary/30',
+          ].join(' ')
+        }
+      />
 
       <div className="mt-3 flex gap-2">
         <button
@@ -534,17 +571,6 @@ export default function RebookSlotPicker({
       <div className="mt-2 text-[11px] font-semibold text-textSecondary">
         Timezone: <span className="text-textPrimary">{timeZone}</span>
       </div>
-
-      <AvailabilityCalendarPopup
-        open={calendarOpen}
-        onClose={() => setCalendarOpen(false)}
-        onPick={(ymd) => onDayChange(ymd)}
-        tz={timeZone}
-        minYmd={minYmd}
-        anchorYmd={day || undefined}
-        title="Next appointment day"
-        offWeekdays={offWeekdays}
-      />
     </div>
   )
 }

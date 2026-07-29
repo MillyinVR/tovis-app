@@ -10,7 +10,10 @@ import {
 } from '@prisma/client'
 
 import AftercareForm from './AftercareForm'
-import { computeSuggestedRebookWindow } from './aftercareDates'
+import {
+  computeSuggestedRebookStartYmd,
+  computeSuggestedRebookWindow,
+} from './aftercareDates'
 import ClientProfilePanel from './ClientProfilePanel'
 import ServicesReceivedCard from './ServicesReceivedCard'
 
@@ -765,6 +768,15 @@ export default async function ProAftercarePage({
         timeZone,
       })
 
+  // The suggested rebook DAY for the calendars' "Suggested" jump chip. Unlike
+  // the window suggestion above it is offered on every visit — jumping to the
+  // offering's usual interval stays useful after aftercare has been saved.
+  const rebookSuggestedYmd = computeSuggestedRebookStartYmd({
+    intervalDays: booking.offering?.rebookIntervalDays ?? null,
+    anchorIso: booking.scheduledFor.toISOString(),
+    timeZone,
+  })
+
   // Sign every asset's full + thumb in one batched pass (one round-trip per
   // private bucket) rather than 2×N sequential signed-URL calls — the latter is
   // what made this force-dynamic page slow and made full vs. thumb resolve
@@ -1004,6 +1016,7 @@ export default async function ProAftercarePage({
             existingRebookedBookingId={aftercare?.rebookedBookingId ?? null}
             suggestedRebookWindowStart={rebookSuggestion?.windowStartIso ?? null}
             suggestedRebookWindowEnd={rebookSuggestion?.windowEndIso ?? null}
+            rebookSuggestedYmd={rebookSuggestedYmd}
             existingRebookSlot={
               rebookSeed.slot
                 ? {

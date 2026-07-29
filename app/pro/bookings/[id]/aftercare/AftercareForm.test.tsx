@@ -450,6 +450,9 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
   })
 
   it('floors the BOOKED day at TODAY while the recommended window still starts tomorrow', () => {
+    // The inline calendars fetch busy-days on mount — route it benignly.
+    routeFetch([])
+
     // 2026-09-01T18:00Z = 11:00 in America/Los_Angeles, so "today" in the
     // form's zone is unambiguously 2026-09-01.
     vi.useFakeTimers()
@@ -479,6 +482,9 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
   })
 
   it('uses date-only window inputs and auto-advances the end past the start', () => {
+    // The inline calendars fetch busy-days on mount — route it benignly.
+    routeFetch([])
+
     const { container } = renderForm()
 
     fireEvent.click(screen.getByRole('button', { name: 'Booking window' }))

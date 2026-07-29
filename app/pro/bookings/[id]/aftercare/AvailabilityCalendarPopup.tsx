@@ -1,16 +1,31 @@
 // app/pro/bookings/[id]/aftercare/AvailabilityCalendarPopup.tsx
 'use client'
 
-// A month-calendar popup that overlays the pro's own schedule (booked + blocked
-// days, from /api/v1/pro/availability/busy-days) so the pro can pick a recommended
-// next-visit / window date around their existing commitments. Returns the
-// chosen day as a "YYYY-MM-DD" string via onPick.
+// A month calendar that overlays the pro's own schedule (booked + blocked
+// days, from /api/v1/pro/availability/busy-days) so the pro can pick a
+// recommended next-visit / window date around their existing commitments.
+// Returns the chosen day as a "YYYY-MM-DD" string via onPick.
+//
+// Two variants:
+//  - "modal" (default): the original popup — backdrop, title, close button;
+//    picking a day also closes it.
+//  - "inline": just the calendar card, always visible, selection stays put —
+//    the primary rebook picker (R1), not a secondary affordance.
+//
+// The jump chips (+1w / +2w / +4w / Suggested) step the SELECTION forward from
+// the currently selected day — tapping "+1w" repeatedly skips ahead a week at
+// a time — and never close the modal, so the pro can keep stepping.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { formatInTimeZone } from '@/lib/time'
-import { addMonthsToYmd, compareYmd, todayYmdInTimeZone } from './aftercareDates'
+import {
+  addDaysToYmd,
+  addMonthsToYmd,
+  compareYmd,
+  todayYmdInTimeZone,
+} from './aftercareDates'
 import { zClass } from '@/lib/zIndex'
 
 type DayBusy = { bookings: number; blocked: boolean }
@@ -18,7 +33,7 @@ type BusyMap = Record<string, DayBusy>
 
 type Props = {
   open: boolean
-  onClose: () => void
+  onClose?: () => void
   onPick: (ymd: string) => void
   tz: string
   /** Earliest selectable day (inclusive). Defaults to today in tz. */
@@ -33,9 +48,28 @@ type Props = {
    * confirm the working-hours override).
    */
   offWeekdays?: ReadonlySet<number> | null
+  /** "modal" (default) overlays with a backdrop; "inline" renders the bare card. */
+  variant?: 'modal' | 'inline'
+  /** The currently chosen day — highlighted, and the base the jump chips step from. */
+  selectedYmd?: string | null
+  /**
+   * The offering's suggested rebook day (service date + rebook interval).
+   * When set and still selectable, a "Suggested" jump chip goes straight there.
+   */
+  suggestedYmd?: string | null
+  /** Disables every control (read-only aftercare, in-flight save). */
+  disabled?: boolean
 }
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+const JUMP_CHIPS: { days: number; label: string; aria: string }[] = [
+  { days: 7, label: '+1w', aria: 'Skip ahead 1 week' },
+  { days: 14, label: '+2w', aria: 'Skip ahead 2 weeks' },
+  { days: 28, label: '+4w', aria: 'Skip ahead 4 weeks' },
+]
+
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
@@ -88,9 +122,14 @@ export default function AvailabilityCalendarPopup({
   anchorYmd,
   title = 'Pick a date',
   offWeekdays,
+  variant = 'modal',
+  selectedYmd,
+  suggestedYmd,
+  disabled = false,
 }: Props) {
   const todayYmd = useMemo(() => todayYmdInTimeZone(tz), [tz])
   const earliest = minYmd && minYmd > todayYmd ? minYmd : todayYmd
+  const isModal = variant === 'modal'
 
   const [viewMonth, setViewMonth] = useState(() =>
     firstOfMonth(anchorYmd && anchorYmd >= earliest ? anchorYmd : earliest),
@@ -108,6 +147,15 @@ export default function AvailabilityCalendarPopup({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  // Follow the selection: when the chosen day changes (fallback date input,
+  // step buttons, jump chips), show its month. Browsing ‹/› alone never snaps
+  // back — this only runs when the selection itself moves.
+  useEffect(() => {
+    if (selectedYmd && YMD_RE.test(selectedYmd)) {
+      setViewMonth(firstOfMonth(selectedYmd))
+    }
+  }, [selectedYmd])
 
   useEffect(() => {
     if (!open) return
@@ -148,13 +196,13 @@ export default function AvailabilityCalendarPopup({
   }, [open, viewMonth, tz])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !isModal) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onClose?.()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, isModal, onClose])
 
   const goPrevMonth = useCallback(() => {
     setViewMonth((m) => firstOfMonth(addMonthsToYmd(m, -1) ?? m))
@@ -162,6 +210,27 @@ export default function AvailabilityCalendarPopup({
   const goNextMonth = useCallback(() => {
     setViewMonth((m) => firstOfMonth(addMonthsToYmd(m, 1) ?? m))
   }, [])
+
+  // Jump chips step from the current selection (else the earliest day) and
+  // select the target — the month view follows via the selection effect.
+  const jumpBase =
+    selectedYmd && YMD_RE.test(selectedYmd) && selectedYmd >= earliest
+      ? selectedYmd
+      : earliest
+
+  const jumpAhead = useCallback(
+    (days: number) => {
+      const target = addDaysToYmd(jumpBase, days)
+      if (target) onPick(target)
+    },
+    [jumpBase, onPick],
+  )
+
+  const suggestedSelectable = Boolean(
+    suggestedYmd &&
+      YMD_RE.test(suggestedYmd) &&
+      compareYmd(suggestedYmd, earliest) >= 0,
+  )
 
   if (!open) return null
 
@@ -181,7 +250,180 @@ export default function AvailabilityCalendarPopup({
   }
 
   // Don't allow navigating to months entirely before the earliest month.
-  const prevDisabled = compareYmd(viewMonth, firstOfMonth(earliest)) <= 0
+  const prevDisabled = disabled || compareYmd(viewMonth, firstOfMonth(earliest)) <= 0
+
+  const chipClass = (chipDisabled: boolean) =>
+    [
+      'rounded-full border border-white/10 px-2.5 py-1 text-[11px] font-black transition',
+      chipDisabled
+        ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
+        : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+    ].join(' ')
+
+  const calendarBody = (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={goPrevMonth}
+          disabled={prevDisabled}
+          aria-label="Previous month"
+          className={[
+            'rounded-full border border-white/10 px-3 py-1 text-xs font-black',
+            prevDisabled
+              ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
+              : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+          ].join(' ')}
+        >
+          ‹
+        </button>
+        <div className="text-sm font-black text-textPrimary">
+          {monthLabel(viewMonth)}
+        </div>
+        <button
+          type="button"
+          onClick={goNextMonth}
+          disabled={disabled}
+          aria-label="Next month"
+          className={[
+            'rounded-full border border-white/10 px-3 py-1 text-xs font-black',
+            disabled
+              ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
+              : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+          ].join(' ')}
+        >
+          ›
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="text-[10px] font-black uppercase tracking-[0.08em] text-textSecondary">
+          Skip ahead
+        </span>
+        {JUMP_CHIPS.map((chip) => (
+          <button
+            key={chip.days}
+            type="button"
+            disabled={disabled}
+            onClick={() => jumpAhead(chip.days)}
+            aria-label={chip.aria}
+            className={chipClass(disabled)}
+          >
+            {chip.label}
+          </button>
+        ))}
+        {suggestedSelectable && suggestedYmd ? (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(suggestedYmd)}
+            aria-label="Jump to the suggested rebook date"
+            title="The service date plus this offering’s usual rebook interval"
+            className={chipClass(disabled)}
+          >
+            Suggested
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-3 grid grid-cols-7 gap-1">
+        {WEEKDAYS.map((w, i) => (
+          <div
+            key={`${w}-${i}`}
+            className="py-1 text-center text-[10px] font-black text-textSecondary"
+          >
+            {w}
+          </div>
+        ))}
+
+        {cells.map((cell, i) => {
+          if (!cell) return <div key={`blank-${i}`} />
+
+          const info = busy[cell.ymd]
+          const isPast = compareYmd(cell.ymd, earliest) < 0
+          const isBlocked = Boolean(info?.blocked)
+          const isOffDay = Boolean(offWeekdays?.has(cell.weekday))
+          const isSelected = selectedYmd === cell.ymd
+          const bookings = info?.bookings ?? 0
+          const cellDisabled = disabled || isPast
+
+          return (
+            <button
+              key={cell.ymd}
+              type="button"
+              disabled={cellDisabled}
+              aria-pressed={isSelected}
+              onClick={() => {
+                onPick(cell.ymd)
+                if (isModal) onClose?.()
+              }}
+              title={
+                isBlocked
+                  ? 'Time blocked'
+                  : bookings > 0
+                    ? `${bookings} booking${bookings === 1 ? '' : 's'}${
+                        isOffDay ? ' · off day' : ''
+                      }`
+                    : isOffDay
+                      ? 'Off day — you can still book it'
+                      : 'Open'
+              }
+              className={[
+                'relative flex aspect-square flex-col items-center justify-center rounded-card border text-xs font-black transition',
+                cellDisabled
+                  ? 'cursor-not-allowed border-transparent text-textSecondary/40'
+                  : isSelected
+                    ? 'border-transparent bg-accentPrimary text-bgPrimary'
+                    : isBlocked
+                      ? 'border-microAccent/40 bg-microAccent/10 text-textPrimary hover:bg-microAccent/20'
+                      : bookings > 0
+                        ? 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass'
+                        : isOffDay
+                          ? 'border-dashed border-white/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass hover:text-textPrimary'
+                          : 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
+              ].join(' ')}
+            >
+              <span>{cell.day}</span>
+              {!cellDisabled && !isSelected && (isBlocked || bookings > 0) ? (
+                <span
+                  className={[
+                    'mt-0.5 h-1.5 w-1.5 rounded-full',
+                    isBlocked ? 'bg-microAccent' : 'bg-accentPrimary',
+                  ].join(' ')}
+                />
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2 text-[10px] font-semibold text-textSecondary">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-accentPrimary" />
+          Booked
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-microAccent" />
+          Blocked
+        </span>
+        {offWeekdays && offWeekdays.size > 0 ? (
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full border border-dashed border-textSecondary" />
+            Off day
+          </span>
+        ) : null}
+        <span>{loading ? 'Loading…' : `Times in ${tz}`}</span>
+      </div>
+    </>
+  )
+
+  if (!isModal) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+        {calendarBody}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -195,7 +437,7 @@ export default function AvailabilityCalendarPopup({
         className="w-full max-w-sm rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-3">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <div className="text-sm font-black text-textPrimary">{title}</div>
           <button
             type="button"
@@ -207,118 +449,7 @@ export default function AvailabilityCalendarPopup({
           </button>
         </div>
 
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={goPrevMonth}
-            disabled={prevDisabled}
-            aria-label="Previous month"
-            className={[
-              'rounded-full border border-white/10 px-3 py-1 text-xs font-black',
-              prevDisabled
-                ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
-                : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
-            ].join(' ')}
-          >
-            ‹
-          </button>
-          <div className="text-sm font-black text-textPrimary">
-            {monthLabel(viewMonth)}
-          </div>
-          <button
-            type="button"
-            onClick={goNextMonth}
-            aria-label="Next month"
-            className="rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
-          >
-            ›
-          </button>
-        </div>
-
-        <div className="mt-3 grid grid-cols-7 gap-1">
-          {WEEKDAYS.map((w, i) => (
-            <div
-              key={`${w}-${i}`}
-              className="py-1 text-center text-[10px] font-black text-textSecondary"
-            >
-              {w}
-            </div>
-          ))}
-
-          {cells.map((cell, i) => {
-            if (!cell) return <div key={`blank-${i}`} />
-
-            const info = busy[cell.ymd]
-            const isPast = compareYmd(cell.ymd, earliest) < 0
-            const isBlocked = Boolean(info?.blocked)
-            const isOffDay = Boolean(offWeekdays?.has(cell.weekday))
-            const bookings = info?.bookings ?? 0
-            const disabled = isPast
-
-            return (
-              <button
-                key={cell.ymd}
-                type="button"
-                disabled={disabled}
-                onClick={() => {
-                  onPick(cell.ymd)
-                  onClose()
-                }}
-                title={
-                  isBlocked
-                    ? 'Time blocked'
-                    : bookings > 0
-                      ? `${bookings} booking${bookings === 1 ? '' : 's'}${
-                          isOffDay ? ' · off day' : ''
-                        }`
-                      : isOffDay
-                        ? 'Off day — you can still book it'
-                        : 'Open'
-                }
-                className={[
-                  'relative flex aspect-square flex-col items-center justify-center rounded-card border text-xs font-black transition',
-                  disabled
-                    ? 'cursor-not-allowed border-transparent text-textSecondary/40'
-                    : isBlocked
-                      ? 'border-microAccent/40 bg-microAccent/10 text-textPrimary hover:bg-microAccent/20'
-                      : bookings > 0
-                        ? 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass'
-                        : isOffDay
-                          ? 'border-dashed border-white/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass hover:text-textPrimary'
-                          : 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
-                ].join(' ')}
-              >
-                <span>{cell.day}</span>
-                {!disabled && (isBlocked || bookings > 0) ? (
-                  <span
-                    className={[
-                      'mt-0.5 h-1.5 w-1.5 rounded-full',
-                      isBlocked ? 'bg-microAccent' : 'bg-accentPrimary',
-                    ].join(' ')}
-                  />
-                ) : null}
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="mt-3 flex items-center justify-between gap-2 text-[10px] font-semibold text-textSecondary">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accentPrimary" />
-            Booked
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-microAccent" />
-            Blocked
-          </span>
-          {offWeekdays && offWeekdays.size > 0 ? (
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-1.5 w-1.5 rounded-full border border-dashed border-textSecondary" />
-              Off day
-            </span>
-          ) : null}
-          <span>{loading ? 'Loading…' : `Times in ${tz}`}</span>
-        </div>
+        {calendarBody}
       </div>
     </div>
   )
