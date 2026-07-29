@@ -60,6 +60,15 @@ describe('GET /api/v1/pro/availability/busy-days', () => {
     expect(res.status).toBe(400)
   })
 
+  // The route's own parser used to reject impossible-but-well-formed dates;
+  // R4 consolidated it into summaryWindow's parser, which was made strict so
+  // the merge kept this behaviour. Pin it: "2026-02-31" must 400, not roll
+  // forward to March 3.
+  it('rejects a well-formed date that does not exist on the calendar', async () => {
+    const res = await GET(req('from=2026-02-31&to=2026-03-15'))
+    expect(res.status).toBe(400)
+  })
+
   // F8: this popup used to keep its own status list, omitting COMPLETED on the
   // theory that "completed is past" — false for an early-finished or same-day
   // session, and it made the pro's own busy-day view disagree with what
@@ -204,8 +213,31 @@ describe('GET /api/v1/pro/availability/busy-days', () => {
         requestedLocationId: 'loc_9',
         addOnIds: ['a1', 'a2'],
         rescheduleBookingId: 'bk_7',
+        rebookOfBookingId: null,
         fromYmd: '2026-09-01',
         toYmd: '2026-09-30',
+      }),
+    )
+  })
+
+  // The aftercare surfaces size their counts from the SOURCE booking's clone
+  // width (base + add-ons) via rebookOfBookingId.
+  it('passes the rebook-of context straight through', async () => {
+    mocks.loadOpenSlotDays.mockResolvedValue({
+      ok: true,
+      timeZone: 'America/Los_Angeles',
+      durationMinutes: 135,
+      openSlots: {},
+    })
+
+    await GET(
+      req('from=2026-09-01&to=2026-09-30&serviceId=svc_1&rebookOfBookingId=bk_src'),
+    )
+
+    expect(mocks.loadOpenSlotDays).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rebookOfBookingId: 'bk_src',
+        rescheduleBookingId: null,
       }),
     )
   })

@@ -42,6 +42,7 @@ const BASE_ARGS = {
   requestedLocationId: null,
   addOnIds: [] as string[],
   rescheduleBookingId: null,
+  rebookOfBookingId: null,
   fromYmd: '2026-09-01',
   toYmd: '2026-09-03',
 }
@@ -148,6 +149,26 @@ describe('loadOpenSlotDays', () => {
 
     expect(mocks.resolveAvailabilityDurationMinutes).toHaveBeenCalledWith(
       expect.objectContaining({ reschedule: null, addOnIds: [] }),
+    )
+    expect(mocks.loadBusyIntervals).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeBookingId: null }),
+    )
+  })
+
+  // An aftercare rebook is a CLONE of the source booking (base + add-ons at
+  // snapshot widths), so the count is sized from that booking — but unlike a
+  // reschedule, the source keeps its own (past) occupancy: nothing is excluded.
+  it('sizes a rebook from the source booking WITHOUT excluding its occupancy', async () => {
+    await loadOpenSlotDays({ ...BASE_ARGS, rebookOfBookingId: 'bk_done' })
+
+    expect(mocks.resolveAvailabilityDurationMinutes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reschedule: null,
+        rebookOf: {
+          bookingId: 'bk_done',
+          owner: { kind: 'PRO', professionalId: 'pro_1' },
+        },
+      }),
     )
     expect(mocks.loadBusyIntervals).toHaveBeenCalledWith(
       expect.objectContaining({ excludeBookingId: null }),

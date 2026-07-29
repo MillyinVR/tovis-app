@@ -124,6 +124,7 @@ import {
   resolveHeldSalonAddressText,
   validateHoldForClientMutation,
 } from '@/lib/booking/policies/holdRules'
+import { computeRebookCloneDurationMinutes } from '@/lib/booking/rebookWidth'
 import {
   RESCHEDULE_TARGET_SELECT,
   resolveRescheduleCommitDurationMinutes,
@@ -10639,15 +10640,14 @@ assertCanCreateRebookFromSourceBooking({
 
   const subtotalSnapshot = source.subtotalSnapshot ?? subtotalFromItems
 
-  const totalDurationFromItems = normalizedItems.reduce(
-    (sum, item) => sum + item.durationMinutesSnapshot,
-    0,
-  )
-
-  const totalDurationMinutes =
-    totalDurationFromItems > 0
-      ? clampInt(totalDurationFromItems, 15, MAX_SLOT_DURATION_MINUTES)
-      : normalizePositiveDurationMinutes(source.totalDurationMinutes) ?? 60
+  // The shared width function — the availability offer (day slots, open-slot
+  // counts under `rebookOfBookingId`) runs the same math, so the offer can't
+  // promise a width this commit won't take
+  // ([[promise-site-runs-the-commit-site-gate]]).
+  const totalDurationMinutes = computeRebookCloneDurationMinutes({
+    serviceItems: items,
+    totalDurationMinutes: source.totalDurationMinutes,
+  })
 
   const bufferMinutes = clampInt(
     Number(source.bufferMinutes ?? 0),

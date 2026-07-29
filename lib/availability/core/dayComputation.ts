@@ -1,7 +1,7 @@
 // lib/availability/core/dayComputation.ts
 
 import { clampInt } from '@/lib/pick'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { addDaysToYMD, sanitizeTimeZone } from '@/lib/timeZone'
 import {
   dateTimeLocalToUtcDate,
   getUtcBoundsForLocalDate,
@@ -125,15 +125,7 @@ export function localSlotToUtcOrNull(args: {
 }
 
 function shiftYmd(dateYMD: YMD, dayOffset: number): YMD {
-  const shifted = new Date(
-    Date.UTC(dateYMD.year, dateYMD.month - 1, dateYMD.day + dayOffset),
-  )
-
-  return {
-    year: shifted.getUTCFullYear(),
-    month: shifted.getUTCMonth() + 1,
-    day: shifted.getUTCDate(),
-  }
+  return addDaysToYMD(dateYMD.year, dateYMD.month, dateYMD.day, dayOffset)
 }
 
 function normalizeMinuteOffset(minuteOffset: number): {

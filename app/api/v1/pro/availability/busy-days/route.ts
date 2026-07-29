@@ -99,6 +99,7 @@ export async function GET(req: Request) {
       requestedLocationId,
       addOnIds,
       rescheduleBookingId,
+      rebookOfBookingId,
     } = parseAvailabilityRequest(req)
 
     const openSlotResult = serviceId
@@ -109,6 +110,7 @@ export async function GET(req: Request) {
           requestedLocationId,
           addOnIds,
           rescheduleBookingId,
+          rebookOfBookingId,
           fromYmd,
           toYmd,
         })

@@ -9,6 +9,7 @@ export type BookingErrorCode =
   | "INVALID_LOCATION_TYPE"
   | "OFFERING_ID_REQUIRED"
   | "INVALID_SCHEDULED_FOR"
+  | "INVALID_AVAILABILITY_CONTEXT"
   | "INVALID_SERVICE_ITEMS"
   | "INVALID_BUFFER_MINUTES"
   | "INVALID_DURATION_MINUTES"
@@ -186,6 +187,14 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Scheduled time is invalid.",
     userMessage: "Invalid scheduled time.",
+  },
+  INVALID_AVAILABILITY_CONTEXT: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message:
+      "An availability request cannot carry both a reschedule and a rebook context.",
+    userMessage: "Invalid availability request.",
   },
   INVALID_SERVICE_ITEMS: {
     httpStatus: 400,
