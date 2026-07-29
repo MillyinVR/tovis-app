@@ -1012,7 +1012,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
                   type="button"
                   onClick={() => void submitDecision('REJECT')}
                   disabled={Boolean(submittingAction)}
-                  className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-5 py-2.5 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-5 py-2.5 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {rejectBusy ? 'Declining…' : 'Decline consultation'}
                 </button>
@@ -1039,7 +1039,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
             <div className="mt-3">
               <Link
                 href={`/professionals/${encodeURIComponent(data.booking.professional.id)}`}
-                className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass"
+                className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
               >
                 View professional profile
               </Link>

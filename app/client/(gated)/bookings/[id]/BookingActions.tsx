@@ -312,8 +312,8 @@ export default function BookingActions({
               : action.primary
                 ? 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
                 : isDestructive
-                  ? 'border border-white/10 bg-bgPrimary text-microAccent hover:bg-surfaceGlass'
-                  : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+                  ? 'border border-white/10 bg-bgPrimary text-microAccent hover:bg-surfaceGlass/10'
+                  : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
           ].join(' ')
 
           return (
@@ -356,7 +356,7 @@ export default function BookingActions({
                   'rounded-full px-4 py-2 text-sm font-black transition',
                   busy
                     ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
-                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass',
+                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
                 ].join(' ')}
               >
                 Pick new time
@@ -371,7 +371,7 @@ export default function BookingActions({
                 'rounded-full px-4 py-2 text-sm font-black transition',
                 busy
                   ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
-                  : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass',
+                  : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
               ].join(' ')}
             >
               Close

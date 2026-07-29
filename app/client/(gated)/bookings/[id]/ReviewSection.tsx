@@ -95,7 +95,7 @@ function btnBase(disabled?: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black transition',
     'border border-white/10',
-    disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-surfaceGlass',
+    disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-surfaceGlass/10',
   ].join(' ')
 }
 
@@ -115,7 +115,7 @@ function btnDanger(disabled?: boolean) {
     'border border-white/10',
     disabled
       ? 'cursor-not-allowed opacity-70 bg-bgPrimary text-textSecondary'
-      : 'bg-bgPrimary text-microAccent hover:bg-surfaceGlass',
+      : 'bg-bgPrimary text-microAccent hover:bg-surfaceGlass/10',
   ].join(' ')
 }
 
@@ -123,7 +123,7 @@ function tinyBtn(disabled?: boolean, active?: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-3 py-1 text-[11px] font-black transition',
     'border border-white/10',
-    disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-surfaceGlass',
+    disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-surfaceGlass/10',
     active ? 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover' : 'bg-bgPrimary text-textPrimary',
   ].join(' ')
 }
@@ -1046,7 +1046,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
                         type="button"
                         onClick={() => removePending(p.id)}
                         disabled={loading || p.status === 'UPLOADING'}
-                        className="rounded-full border border-white/10 bg-bgPrimary px-2 py-1 text-[11px] font-black text-textPrimary transition hover:bg-surfaceGlass disabled:cursor-not-allowed disabled:opacity-70"
+                        className="rounded-full border border-white/10 bg-bgPrimary px-2 py-1 text-[11px] font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-70"
                         title="Remove"
                         aria-label="Remove photo"
                       >

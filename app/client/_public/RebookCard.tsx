@@ -521,7 +521,7 @@ export function RebookCard({
                       type="button"
                       onClick={() => void handleBook(iso)}
                       disabled={booking.kind === 'submitting'}
-                      className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isSubmitting ? 'Booking…' : formatSlotTime(iso, timeZone)}
                     </button>

@@ -463,7 +463,7 @@ export default function MediaUploader({
             onChange={(event) =>
               void onPickFile(event.target.files?.[0] ?? null)
             }
-            className="block w-full text-sm text-textSecondary file:mr-3 file:rounded-full file:border file:border-white/10 file:bg-bgPrimary file:px-4 file:py-2 file:text-xs file:font-black file:text-textPrimary hover:file:bg-surfaceGlass"
+            className="block w-full text-sm text-textSecondary file:mr-3 file:rounded-full file:border file:border-white/10 file:bg-bgPrimary file:px-4 file:py-2 file:text-xs file:font-black file:text-textPrimary hover:file:bg-surfaceGlass/10"
           />
 
           <div className="mt-2 text-[11px] font-semibold text-textSecondary">

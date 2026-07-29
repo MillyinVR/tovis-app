@@ -230,7 +230,7 @@ function pillClass(active: boolean) {
     'border border-white/10',
     active
       ? 'bg-accentPrimary text-bgPrimary'
-      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
   ].join(' ')
 }
 
@@ -248,7 +248,7 @@ function secondaryBtn(disabled: boolean) {
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
     disabled
       ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-60'
-      : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+      : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
   ].join(' ')
 }
 
@@ -1886,7 +1886,7 @@ function MediaGrid({
                   : isProClient
                     ? 'border border-white/10'
                     : 'border border-transparent',
-                'hover:bg-surfaceGlass',
+                'hover:bg-surfaceGlass/10',
               ].join(' ')}
             >
               {isVideo ? (
@@ -1916,7 +1916,7 @@ function MediaGrid({
                   'disabled:cursor-not-allowed disabled:opacity-50',
                   isFeatured
                     ? 'bg-accentPrimary text-bgPrimary'
-                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass',
+                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
                 ].join(' ')}
               >
                 {isFeatured ? '★ Featured' : 'Feature'}

@@ -20,7 +20,7 @@ function chipClass(active: boolean): string {
     'inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs font-black transition',
     active
       ? 'bg-accentPrimary text-bgPrimary shadow-sm'
-      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+      : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
   ].join(' ')
 }
 

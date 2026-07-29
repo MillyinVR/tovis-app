@@ -76,7 +76,7 @@ function moneyLabel(v: unknown): string {
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass px-2 py-1 text-[11px] font-black text-textPrimary">
+    <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass/10 px-2 py-1 text-[11px] font-black text-textPrimary">
       {children}
     </span>
   )
@@ -231,7 +231,7 @@ export default function ConsultationDecisionCard(props: {
             'rounded-full px-4 py-2 text-sm font-black transition',
             disabled || loading
               ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
-              : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+              : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
           ].join(' ')}
         >
           {loading === 'REJECT' ? COPY.consultationDecisionCard.rejecting : COPY.consultationDecisionCard.reject}
