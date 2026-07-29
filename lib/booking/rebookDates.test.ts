@@ -11,11 +11,11 @@ import {
   stepYmd,
   ymdToIsoEndOfDay,
   ymdToIsoStartOfDay,
-} from './aftercareDates'
+} from './rebookDates'
 
 const LA = 'America/Los_Angeles'
 
-describe('aftercareDates', () => {
+describe('rebookDates', () => {
   it('adds days, crossing month/year boundaries', () => {
     expect(addDaysToYmd('2026-06-13', 1)).toBe('2026-06-14')
     expect(addDaysToYmd('2026-06-13', 7)).toBe('2026-06-20')

@@ -13,7 +13,7 @@ import AftercareForm from './AftercareForm'
 import {
   computeSuggestedRebookStartYmd,
   computeSuggestedRebookWindow,
-} from './aftercareDates'
+} from '@/lib/booking/rebookDates'
 import ClientProfilePanel from './ClientProfilePanel'
 import ServicesReceivedCard from './ServicesReceivedCard'
 

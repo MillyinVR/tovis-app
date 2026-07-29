@@ -1,6 +1,7 @@
-// app/pro/bookings/[id]/aftercare/aftercareDates.ts
+// lib/booking/rebookDates.ts
 //
-// Pure date helpers for the aftercare rebook controls:
+// Pure date helpers for the pro's rebook / date-picking controls (aftercare
+// rebook, the shared availability calendar, the aftercare API route):
 //  - day/week/month stepping for the "next visit" datetime and the booking
 //    window dates
 //  - date-only (no time) handling for the booking window, converted to

@@ -5,7 +5,7 @@
 // rebook date fields. Styling stays at the call site via `buttonClass` so the
 // buttons match their surrounding form.
 
-import type { StepUnit } from './aftercareDates'
+import type { StepUnit } from '@/lib/booking/rebookDates'
 
 const STEP_UNITS: { unit: StepUnit; label: string }[] = [
   { unit: 'day', label: '+1 day' },

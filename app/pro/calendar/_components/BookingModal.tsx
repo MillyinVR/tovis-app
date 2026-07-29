@@ -8,6 +8,7 @@ import type { BookingDetails, ServiceOption } from '../_types'
 
 import { SECONDS_PER_MINUTE } from '../_constants'
 
+import AvailabilityCalendar from '@/app/pro/_components/AvailabilityCalendar'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { DEFAULT_TIME_ZONE, friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 
@@ -620,6 +621,25 @@ export function BookingModal(props: BookingModalProps) {
                   onToggleAllowOutsideHours={onToggleAllowOutsideHours}
                 />
               ) : null}
+
+              {/* The pro's own calendar is the day picker (R3) — they can see
+                  where they're already booked or blocked before moving this
+                  appointment. The date field below stays for typed entry, and
+                  is the only way to set a day before today (the calendar floors
+                  at today). max-w-sm because the day cells are aspect-square:
+                  unbounded in this wide panel they'd blow up to ~110px each and
+                  push the fields off-screen. */}
+              <div className="mt-3 max-w-sm">
+                <AvailabilityCalendar
+                  open
+                  variant="inline"
+                  tz={timeZone}
+                  anchorYmd={reschedDate || undefined}
+                  selectedYmd={reschedDate || null}
+                  disabled={saving}
+                  onPick={onChangeReschedDate}
+                />
+              </div>
 
               <div className="brand-pro-calendar-booking-field-grid">
                 <Field label={copy.dateLabel}>

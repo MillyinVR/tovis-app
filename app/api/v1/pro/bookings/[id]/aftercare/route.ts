@@ -32,7 +32,7 @@ import {
   resolveAftercareEditWindow,
 } from '@/lib/aftercare/aftercareEditWindow'
 import { resolveAftercareRebookSeed } from '@/lib/aftercare/aftercareRebookSeed'
-import { computeSuggestedRebookWindow } from '@/app/pro/bookings/[id]/aftercare/aftercareDates'
+import { computeSuggestedRebookWindow } from '@/lib/booking/rebookDates'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'

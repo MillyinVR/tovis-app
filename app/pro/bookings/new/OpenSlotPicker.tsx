@@ -1,17 +1,23 @@
 // app/pro/bookings/new/OpenSlotPicker.tsx
 'use client'
 
-// A reusable open-appointment-slot picker for the pro new-booking form — a date
-// input plus the pro's real available start times for a service + location,
-// fetched from GET /api/v1/availability/day (the same availability the client
-// booking flow uses). Web parity port of iOS `ProOpenSlotPicker`; it replaces
-// the free `datetime-local` input as the default time-selection mode.
+// A reusable open-appointment-slot picker for the pro new-booking form — the
+// pro's own availability calendar plus their real available start times for a
+// service + location, fetched from GET /api/v1/availability/day (the same
+// availability the client booking flow uses). Web parity port of iOS
+// `ProOpenSlotPicker`; it replaces the free `datetime-local` input as the
+// default time-selection mode.
+//
+// The day is picked on the shared `AvailabilityCalendar` (R3), so the pro sees
+// where they're already booked/blocked before choosing; the date input below it
+// stays as the typed-entry fallback.
 //
 // The value is the chosen slot's ISO UTC start instant (null = nothing picked);
 // the parent submits it directly, so no wall-clock round-trip is needed.
 
 import { useEffect, useRef, useState } from 'react'
 
+import AvailabilityCalendar from '@/app/pro/_components/AvailabilityCalendar'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { formatInTimeZone, sanitizeTimeZone, ymdInTimeZone } from '@/lib/time'
@@ -166,15 +172,34 @@ export default function OpenSlotPicker({
         <label htmlFor="slot-date" className="text-[12px] font-black text-textPrimary">
           Date <span className="text-textSecondary">*</span>
         </label>
-        <input
-          id="slot-date"
-          type="date"
-          value={selectedDate}
-          min={todayYmd}
+
+        {/* The pro's own calendar is the picker; the date input is the typed
+            fallback (same arrangement as the aftercare rebook picker). */}
+        <AvailabilityCalendar
+          open
+          variant="inline"
+          tz={tz}
+          minYmd={todayYmd}
+          anchorYmd={selectedDate || undefined}
+          selectedYmd={selectedDate || null}
           disabled={disabled}
-          onChange={(e) => setSelectedDate(e.target.value)}
-          className={fieldClass}
+          onPick={(ymd) => setSelectedDate(ymd)}
         />
+
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[11px] font-semibold text-textSecondary">
+            or type a date
+          </span>
+          <input
+            id="slot-date"
+            type="date"
+            value={selectedDate}
+            min={todayYmd}
+            disabled={disabled}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className={fieldClass}
+          />
+        </div>
       </div>
 
       {!offeringId || !locationId ? (
@@ -192,7 +217,11 @@ export default function OpenSlotPicker({
           No open times on this day. Try another date, or enter a custom time.
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+        <div
+          role="group"
+          aria-label="Open times"
+          className="grid grid-cols-3 gap-2 sm:grid-cols-4"
+        >
           {slots.map((slot) => {
             const active = value === slot
             return (
