@@ -135,10 +135,7 @@ import {
   evaluateProSchedulingDecision,
   type ProSchedulingAppliedOverride,
 } from '@/lib/booking/policies/proSchedulingPolicy'
-import {
-  bumpScheduleConfigVersion,
-  bumpScheduleVersion,
-} from '@/lib/booking/cacheVersion'
+import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import {
   deleteActiveHoldsForClient,
   deleteExpiredHoldsForProfessional,

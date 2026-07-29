@@ -5,9 +5,11 @@
 // event UID, so existing bookings/blocks/history are untouched and only NEW
 // appointments are added ("live during the transition").
 //
-// Additive only: appointments the pro DELETES in their old app are not removed
-// here (v1 caveat), and a pro who has fully moved over should disconnect the
-// feed. Per-subscription best-effort; one bad feed never blocks the others.
+// Removals reconcile too: an event that disappears from the feed has its
+// pristine imported booking cancelled / its imported block removed via
+// reconcileRemovedImportedEvents (rows the pro touched in-app are left alone).
+// A pro who has fully moved over should disconnect the feed. Per-subscription
+// best-effort; one bad feed never blocks the others.
 
 import { CalendarFeedStatus, Prisma } from '@prisma/client'
 

@@ -553,6 +553,19 @@ describe('B9 — a real .ics feed through the resync, against real Postgres', ()
     expect(cacheVersion.bumpScheduleVersion).not.toHaveBeenCalled()
   }, 120_000)
 
+  it('the migration review page counts these blocks (post-#779 notes carry no tag)', async () => {
+    // Read-only against the state the two runs above left. The review summary
+    // used to count blocks by `note: { contains: 'import:' }` — case 1 pins
+    // that the importer no longer writes that tag, so the old query answered 0
+    // for everything on this feed while the blocks sat right there on the
+    // calendar.
+    const { loadMigrationReviewSummary } = await import('@/lib/migration/migrationReview')
+    const summary = await loadMigrationReviewSummary(professionalId)
+
+    expect(summary.importedBlocks).toBe(3)
+    expect(summary.importedBookings).toBe(1)
+  }, 120_000)
+
   it('still dedupes after the pro RENAMES the imported block', async () => {
     // The old scheme kept the UID in the note and matched it with `contains`, so
     // this rename orphaned the block: the next resync made a second copy and the
