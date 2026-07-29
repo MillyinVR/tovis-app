@@ -154,6 +154,12 @@ export type BrandProCalendarLocationPanelCopy = {
   selectFallback: string
   timeZoneLabel: string
   emptyState: string
+  /**
+   * The unfiltered option, and the calendar's default: every location's
+   * occupancy on one grid, which is what the booking overlap constraint
+   * actually enforces (K3).
+   */
+  allLocationsLabel: string
 }
 
 export type BrandProCalendarAutoAcceptCopy = {

@@ -79,6 +79,12 @@ type DayColumnProps = {
   workingHoursMobile: WorkingHoursJson
   activeLocationType?: LocationType
   stepMinutes: number
+  /**
+   * Short label per location id, for the chip on each card. Empty (the default)
+   * whenever the grid is showing a single location's day, so nothing changes
+   * for a one-location pro or a filtered calendar (K3).
+   */
+  eventLocationLabels?: Record<string, string>
 
   isBusy: boolean
   suppressClickRef: MutableRefObject<boolean>
@@ -463,6 +469,7 @@ export function DayColumn(props: DayColumnProps) {
     workingHoursMobile,
     activeLocationType = 'SALON',
     stepMinutes,
+    eventLocationLabels,
     isBusy,
     suppressClickRef,
     onClickEvent,
@@ -624,6 +631,11 @@ export function DayColumn(props: DayColumnProps) {
             entityType={layout.entityType}
             apiId={layout.apiId}
             conflict={conflictIds.has(event.id)}
+            locationLabel={
+              event.locationId
+                ? eventLocationLabels?.[event.locationId]
+                : undefined
+            }
             topPx={layout.topPx}
             heightPx={layout.heightPx}
             timeLabel={layout.timeLabel}

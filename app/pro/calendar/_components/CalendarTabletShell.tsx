@@ -84,6 +84,7 @@ type TabletLocationPickerProps = {
   selectAriaLabel: string
   selectFallbackLabel: string
   optionFallbackLabel: string
+  allLocationsLabel: string
   locationsLoaded: boolean
   scopedLocations: CalendarLocationOption[]
   activeLocationId: string | null
@@ -331,6 +332,7 @@ function TabletToolbar(props: TabletToolbarProps) {
         selectAriaLabel={copy.locationPanel.selectAriaLabel}
         selectFallbackLabel={copy.locationPanel.selectFallback}
         optionFallbackLabel={copy.locationPanel.selectLabel}
+        allLocationsLabel={copy.locationPanel.allLocationsLabel}
         locationsLoaded={locationsLoaded}
         scopedLocations={scopedLocations}
         activeLocationId={activeLocationId}
@@ -396,6 +398,7 @@ function TabletCalendarBody(props: TabletCalendarBodyProps) {
           workingHoursMobile={cal.workingHoursMobile}
           activeLocationType={cal.activeLocationType}
           stepMinutes={cal.activeStepMinutes}
+          eventLocationLabels={cal.eventLocationLabels}
           timeZone={calendarTimeZone}
           onClickEvent={cal.openBookingOrBlock}
           onCreateForClick={cal.openCreateForClick}
@@ -472,6 +475,7 @@ function TabletLocationPicker(props: TabletLocationPickerProps) {
     selectAriaLabel,
     selectFallbackLabel,
     optionFallbackLabel,
+    allLocationsLabel,
     locationsLoaded,
     scopedLocations,
     activeLocationId,
@@ -492,14 +496,20 @@ function TabletLocationPicker(props: TabletLocationPickerProps) {
       })
     : selectFallbackLabel
 
-  const displayLabel = calendarLocationDisplayLabel({
-    activeLocationId,
-    activeLocationLabel,
-    scopedLocations,
-    fallbackLabel: singleLocationFallbackLabel,
-  })
-
   const hasMultipleLocations = scopedLocations.length > 1
+
+  // No filter means every location, not "we couldn't work out which one" — so
+  // it must never borrow the first location's name (K3). With a single bookable
+  // location there is nothing to disambiguate, so that name still reads best.
+  const displayLabel =
+    !activeLocationId && hasMultipleLocations
+      ? allLocationsLabel
+      : calendarLocationDisplayLabel({
+          activeLocationId,
+          activeLocationLabel,
+          scopedLocations,
+          fallbackLabel: singleLocationFallbackLabel,
+        })
 
   return (
     <div className="brand-pro-calendar-tablet-location">
@@ -512,7 +522,7 @@ function TabletLocationPicker(props: TabletLocationPickerProps) {
           aria-label={selectAriaLabel}
           className="brand-pro-calendar-tablet-location-select brand-focus"
         >
-          {!activeLocationId ? <option value="">{displayLabel}</option> : null}
+          <option value="">{allLocationsLabel}</option>
 
           {scopedLocations.map((location) => (
             <option key={location.id} value={location.id}>

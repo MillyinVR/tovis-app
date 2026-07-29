@@ -42,6 +42,7 @@ import { overlapMinutes } from '@/lib/calendar/overlap'
 
 import {
   CALENDAR_MS_PER_DAY,
+  CALENDAR_SCOPE_ALL,
   DEFAULT_BLOCK_CLIENT_NAME,
   DEFAULT_BLOCK_TITLE,
   DEFAULT_BOOKING_CLIENT_NAME,
@@ -220,10 +221,34 @@ type CalendarRangeResult =
       message: string
     }
 
-type SelectedLocationResult =
+/**
+ * Which locations this request's occupancy is drawn from.
+ *
+ * 🔴 The audit behind K3: `Booking_no_active_professional_overlap` excludes on
+ * `professionalId` ALONE — there is no location term in the constraint — so the
+ * database treats the pro as ONE resource. A feed filtered to one location
+ * therefore renders free space that a job at another location already owns.
+ * `ALL` is the scope that matches what the database enforces.
+ *
+ * `anchor` is the location the VIEWPORT is resolved from (timezone, the
+ * `location` echo, `needsTimeZoneSetup`). In `LOCATION` scope it is also the
+ * filter; in `ALL` scope it is only an anchor and filters nothing.
+ */
+type CalendarScope =
+  | {
+      mode: 'ALL'
+      anchor: ProfessionalLocationRow
+    }
+  | {
+      mode: 'LOCATION'
+      anchor: ProfessionalLocationRow
+      location: ProfessionalLocationRow
+    }
+
+type CalendarScopeResult =
   | {
       ok: true
-      location: ProfessionalLocationRow
+      scope: CalendarScope
     }
   | {
       ok: false
@@ -447,13 +472,13 @@ function validTimeZoneOrNull(value: string | null | undefined): string | null {
 }
 
 function getViewportTimeZone(args: {
-  selectedLocation: ProfessionalLocationRow
+  anchorLocation: ProfessionalLocationRow
   profile: ProfessionalProfileRow
 }): ViewportTimeZoneResult {
   const selectedLocationTimeZoneRaw =
-    typeof args.selectedLocation.timeZone === 'string' &&
-    args.selectedLocation.timeZone.trim()
-      ? args.selectedLocation.timeZone.trim()
+    typeof args.anchorLocation.timeZone === 'string' &&
+    args.anchorLocation.timeZone.trim()
+      ? args.anchorLocation.timeZone.trim()
       : null
 
   const selectedLocationTimeZone = validTimeZoneOrNull(
@@ -476,13 +501,30 @@ function getViewportTimeZone(args: {
   }
 }
 
-function getSelectedLocation(args: {
+/**
+ * Resolves `?scope=` + `?locationId=` into the scope this request answers for.
+ *
+ * The wire contract is deliberately OPT-IN: `scope` absent reproduces the
+ * pre-K3 behaviour exactly (`locationId`, else the primary bookable location).
+ * The native client sends `locationId` — or nothing at all, since it leaves its
+ * `activeLocationId` nil until the pro picks one — so widening the *default*
+ * would have changed what an unchanged device shows, in a build with no
+ * per-location marker to explain it. iOS gets ALL in K4, on purpose. The WEB
+ * calendar defaults to `scope=ALL`; that is where "default ALL" lives.
+ *
+ * `scope` accepts `ALL` or a location id (`scope=<id>` ≡ `locationId=<id>`) and
+ * wins over `locationId` when both are sent.
+ */
+function getCalendarScope(args: {
   locations: ProfessionalLocationRow[]
+  requestedScope: string
   requestedLocationId: string
-}): SelectedLocationResult {
-  const { locations, requestedLocationId } = args
+}): CalendarScopeResult {
+  const { locations, requestedScope, requestedLocationId } = args
 
-  if (!locations.length) {
+  const anchor = locations.find((location) => location.isPrimary) ?? locations[0]
+
+  if (!anchor) {
     return {
       ok: false,
       status: 409,
@@ -491,10 +533,20 @@ function getSelectedLocation(args: {
     }
   }
 
-  if (requestedLocationId) {
-    const requested = locations.find(
-      (location) => location.id === requestedLocationId,
-    )
+  if (requestedScope.toUpperCase() === CALENDAR_SCOPE_ALL) {
+    return {
+      ok: true,
+      scope: {
+        mode: 'ALL',
+        anchor,
+      },
+    }
+  }
+
+  const requestedId = requestedScope || requestedLocationId
+
+  if (requestedId) {
+    const requested = locations.find((location) => location.id === requestedId)
 
     if (!requested) {
       return {
@@ -507,26 +559,55 @@ function getSelectedLocation(args: {
 
     return {
       ok: true,
-      location: requested,
-    }
-  }
-
-  const selected =
-    locations.find((location) => location.isPrimary) ?? locations[0]
-
-  if (!selected) {
-    return {
-      ok: false,
-      status: 409,
-      code: 'LOCATION_REQUIRED',
-      message: 'Add a bookable location to use the calendar.',
+      scope: {
+        mode: 'LOCATION',
+        anchor: requested,
+        location: requested,
+      },
     }
   }
 
   return {
     ok: true,
-    location: selected,
+    scope: {
+      mode: 'LOCATION',
+      anchor,
+      location: anchor,
+    },
   }
+}
+
+/**
+ * The one place the scope decides whether a query gets a location term at all:
+ * the id to filter on, or `null` for "no location term", which is precisely
+ * what `Booking_no_active_professional_overlap` does.
+ */
+function scopeLocationId(scope: CalendarScope): string | null {
+  return scope.mode === 'ALL' ? null : scope.location.id
+}
+
+/**
+ * Location term for the two queries whose rows always carry a location —
+ * bookings and B5's live checkout holds. Leaving either one filtered in ALL
+ * scope reintroduces exactly the invisible-occupancy bug this step exists to
+ * fix, so they share a builder rather than each carrying their own `if`.
+ */
+function occupancyLocationWhere(scope: CalendarScope): { locationId?: string } {
+  const locationId = scopeLocationId(scope)
+
+  return locationId ? { locationId } : {}
+}
+
+/**
+ * Blocks alone may have a NULL location — that is the pro's time everywhere, so
+ * it belongs to every location's view and to ALL scope.
+ */
+function blockLocationWhere(
+  scope: CalendarScope,
+): Pick<Prisma.CalendarBlockWhereInput, 'OR'> {
+  const locationId = scopeLocationId(scope)
+
+  return locationId ? { OR: [{ locationId }, { locationId: null }] } : {}
 }
 
 // ─── Range helpers ────────────────────────────────────────────────────────────
@@ -996,6 +1077,7 @@ export async function GET(req: Request) {
     const requestedLocationId = (
       url.searchParams.get('locationId') || ''
     ).trim()
+    const requestedScope = (url.searchParams.get('scope') || '').trim()
 
     const [proProfile, locations] = await Promise.all([
       prisma.professionalProfile.findUnique({
@@ -1021,22 +1103,20 @@ export async function GET(req: Request) {
       })
     }
 
-    const selectedLocationResult = getSelectedLocation({
+    const scopeResult = getCalendarScope({
       locations,
+      requestedScope,
       requestedLocationId,
     })
 
-    if (!selectedLocationResult.ok) {
-      return jsonFail(
-        selectedLocationResult.status,
-        selectedLocationResult.message,
-        {
-          code: selectedLocationResult.code,
-        },
-      )
+    if (!scopeResult.ok) {
+      return jsonFail(scopeResult.status, scopeResult.message, {
+        code: scopeResult.code,
+      })
     }
 
-    const selectedLocation = selectedLocationResult.location
+    const scope = scopeResult.scope
+    const anchorLocation = scope.anchor
     const canSalon = locations.some((location) => supportsSalon(location.type))
     const canMobile = locations.some((location) =>
       supportsMobile(location.type),
@@ -1048,7 +1128,7 @@ export async function GET(req: Request) {
       selectedLocationTimeZoneValid,
       needsTimeZoneSetup,
     } = getViewportTimeZone({
-      selectedLocation,
+      anchorLocation,
       profile: proProfile,
     })
 
@@ -1078,7 +1158,12 @@ export async function GET(req: Request) {
       prisma.booking.findMany({
         where: {
           professionalId,
-          locationId: selectedLocation.id,
+          // ALL scope drops the location term entirely rather than listing the
+          // pro's bookable location ids: the overlap constraint has no location
+          // term either, and an `in` list would silently hide a booking at a
+          // location since made unbookable (or past MAX_CALENDAR_LOCATIONS_PER_PRO)
+          // — occupancy the pro genuinely does not have free.
+          ...occupancyLocationWhere(scope),
           scheduledFor: {
             gte: from,
             lt: effectiveToExclusive,
@@ -1102,7 +1187,7 @@ export async function GET(req: Request) {
           endsAt: {
             gt: from,
           },
-          OR: [{ locationId: selectedLocation.id }, { locationId: null }],
+          ...blockLocationWhere(scope),
         },
         select: calendarBlockSelect,
         orderBy: {
@@ -1117,7 +1202,10 @@ export async function GET(req: Request) {
       //
       // Location-scoped to match the BOOKING query above rather than the BLOCK
       // query's `OR [selected, null]`: a hold always carries the location it
-      // was taken at, and the pro's grid is a per-location view.
+      // was taken at. In ALL scope it widens with them — a hold left filtered
+      // here would undo B5's truth-fix in exactly the mode that exists to tell
+      // the truth, and a cross-location hold is occupancy the write path
+      // already refuses to book over.
       //
       // The window filter is `scheduledFor`-based like the booking query. A
       // hold's rendered end can extend past `scheduledFor` by its snapshot
@@ -1126,7 +1214,7 @@ export async function GET(req: Request) {
       prisma.bookingHold.findMany({
         where: {
           professionalId,
-          locationId: selectedLocation.id,
+          ...occupancyLocationWhere(scope),
           expiresAt: { gt: now },
           scheduledFor: {
             gte: from,
@@ -1302,9 +1390,16 @@ export async function GET(req: Request) {
         // The authed pro's own id — used by the waitlist "Offer a time" modal to
         // query availability (GET /api/v1/availability/day) for a proposed slot.
         professionalId,
+        // Which locations the events below came from. `LOCATION` means
+        // `location` is also the filter; `ALL` means it is ONLY the viewport
+        // anchor and the feed spans every location. A client that adopts
+        // `location.id` as its selection must gate that on this field, or
+        // asking for ALL bounces straight back to one location
+        // ([[two-states-owning-one-selection]]).
+        scope: scope.mode,
         location: {
-          id: selectedLocation.id,
-          type: selectedLocation.type,
+          id: anchorLocation.id,
+          type: anchorLocation.type,
           timeZone: selectedLocationTimeZoneRaw,
           timeZoneValid: selectedLocationTimeZoneValid,
         },

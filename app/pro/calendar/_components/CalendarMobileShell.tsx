@@ -60,6 +60,7 @@ type MobileLocationBarProps = {
   selectAriaLabel: string
   selectFallbackLabel: string
   optionFallbackLabel: string
+  allLocationsLabel: string
   locationsLoaded: boolean
   scopedLocations: CalendarLocationOption[]
   activeLocationId: string | null
@@ -158,6 +159,7 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
             selectAriaLabel={copy.locationPanel.selectAriaLabel}
             selectFallbackLabel={copy.locationPanel.selectFallback}
             optionFallbackLabel={copy.locationPanel.selectLabel}
+            allLocationsLabel={copy.locationPanel.allLocationsLabel}
             locationsLoaded={cal.locationsLoaded}
             scopedLocations={cal.scopedLocations}
             activeLocationId={cal.activeLocationId}
@@ -189,6 +191,7 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
               workingHoursMobile={cal.workingHoursMobile}
               activeLocationType={cal.activeLocationType}
               stepMinutes={cal.activeStepMinutes}
+              eventLocationLabels={cal.eventLocationLabels}
               timeZone={calendarTimeZone}
               initialScrollTarget="now"
               onClickEvent={cal.openBookingOrBlock}
@@ -304,6 +307,7 @@ function MobileLocationBar(props: MobileLocationBarProps) {
     selectAriaLabel,
     selectFallbackLabel,
     optionFallbackLabel,
+    allLocationsLabel,
     locationsLoaded,
     scopedLocations,
     activeLocationId,
@@ -313,12 +317,15 @@ function MobileLocationBar(props: MobileLocationBarProps) {
 
   if (!locationsLoaded || scopedLocations.length <= 1) return null
 
-  const displayLabel = calendarLocationDisplayLabel({
-    activeLocationId,
-    activeLocationLabel,
-    scopedLocations,
-    fallbackLabel: selectFallbackLabel,
-  })
+  // No filter = every location (K3), never a stand-in for one of them.
+  const displayLabel = activeLocationId
+    ? calendarLocationDisplayLabel({
+        activeLocationId,
+        activeLocationLabel,
+        scopedLocations,
+        fallbackLabel: selectFallbackLabel,
+      })
+    : allLocationsLabel
 
   return (
     <div className="brand-pro-calendar-location-bar">
@@ -330,7 +337,7 @@ function MobileLocationBar(props: MobileLocationBarProps) {
         aria-label={selectAriaLabel}
         className="brand-pro-calendar-location-select brand-focus"
       >
-        {!activeLocationId ? <option value="">{displayLabel}</option> : null}
+        <option value="">{allLocationsLabel}</option>
 
         {scopedLocations.map((location) => (
           <option key={location.id} value={location.id}>

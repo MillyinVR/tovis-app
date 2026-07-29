@@ -5,6 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { normalizeStepMinutes } from '../_utils/calendarMath'
 import {
+  locationFullLabel,
+  locationShortLabel,
+} from '../_utils/locationLabels'
+import {
   locationTypeFromProfessionalType,
   parseProLocation,
   pickLocationType,
@@ -21,31 +25,17 @@ type LocationCapabilitySummary = {
   canMobile: boolean
 }
 
-const LOCATION_TYPE_LABELS: Record<string, string> = {
-  MOBILE_BASE: 'Mobile base',
-  SUITE: 'Suite',
-  SALON: 'Salon',
-}
-
-function normalizeText(value: string | null | undefined) {
-  return typeof value === 'string' ? value.trim() : ''
-}
+const LOCATION_TYPE_FALLBACK_LABEL = 'Location'
 
 function isProLocation(value: ProLocation | null): value is ProLocation {
   return value !== null
 }
 
-function labelForLocationType(type: string | null | undefined) {
-  const normalizedType = upper(type)
-  return LOCATION_TYPE_LABELS[normalizedType] ?? 'Location'
-}
-
 function labelForLocation(location: ProLocation) {
-  const name = normalizeText(location.name)
-  const address = normalizeText(location.formattedAddress)
-  const base = name || labelForLocationType(location.type)
-
-  return address ? `${base} — ${address}` : base
+  return locationFullLabel({
+    location,
+    fallbackLabel: LOCATION_TYPE_FALLBACK_LABEL,
+  })
 }
 
 function summarizeCapabilities(bookableLocations: ProLocation[]): LocationCapabilitySummary {
@@ -136,6 +126,14 @@ export function useCalendarLocations() {
     [scopedLocations],
   )
 
+  /**
+   * The location the calendar is FILTERED to, or null for "all locations".
+   *
+   * 🔴 null no longer falls back to the primary location (K3). All-locations is
+   * a real selection — the one that matches what the DB's overlap constraint
+   * enforces — and resolving it back to a single location here is what made the
+   * calendar hide occupancy in the first place.
+   */
   const activeLocationId = useMemo(() => {
     if (
       selectedLocationIsBookable({
@@ -146,8 +144,8 @@ export function useCalendarLocations() {
       return selectedLocationId
     }
 
-    return primaryBookableLocation?.id ?? null
-  }, [primaryBookableLocation?.id, scopedLocations, selectedLocationId])
+    return null
+  }, [scopedLocations, selectedLocationId])
 
   const activeLocation = useMemo(() => {
     if (!activeLocationId) return null
@@ -157,30 +155,70 @@ export function useCalendarLocations() {
     )
   }, [activeLocationId, locations])
 
+  const isAllLocations = activeLocationId === null
+
+  /**
+   * The location that stands in for "the calendar" when nothing is filtered:
+   * the primary bookable one. Timezone, step and the hours-editor mode read
+   * from it so all-locations keeps the defaults the pro had before, and so the
+   * client's guessed viewport zone matches the anchor the server answers with
+   * (a mismatch costs an extra round trip on every load — see useCalendarFetch).
+   * It is NEVER a filter; only `activeLocationId` is.
+   */
+  const anchorLocation = useMemo(
+    () => activeLocation ?? primaryBookableLocation,
+    [activeLocation, primaryBookableLocation],
+  )
+
   const activeLocationType = useMemo<LocationType>(() => {
-    if (activeLocation) {
-      return locationTypeFromProfessionalType(activeLocation.type)
+    if (anchorLocation) {
+      return locationTypeFromProfessionalType(anchorLocation.type)
     }
 
     return pickLocationType(canSalon, canMobile, manualHoursEditorLocationType)
-  }, [activeLocation, canMobile, canSalon, manualHoursEditorLocationType])
+  }, [anchorLocation, canMobile, canSalon, manualHoursEditorLocationType])
 
   const hoursEditorLocationType = useMemo<LocationType>(() => {
-    if (activeLocation) {
-      return locationTypeFromProfessionalType(activeLocation.type)
+    if (anchorLocation) {
+      return locationTypeFromProfessionalType(anchorLocation.type)
     }
 
     return manualHoursEditorLocationType
-  }, [activeLocation, manualHoursEditorLocationType])
+  }, [anchorLocation, manualHoursEditorLocationType])
 
   const activeLocationLabel = useMemo(() => {
     return activeLocation ? labelForLocation(activeLocation) : null
   }, [activeLocation])
 
+  const anchorLocationLabel = useMemo(() => {
+    return anchorLocation ? labelForLocation(anchorLocation) : null
+  }, [anchorLocation])
+
   const activeStepMinutes = useMemo(
-    () => normalizeStepMinutes(activeLocation?.stepMinutes),
-    [activeLocation?.stepMinutes],
+    () => normalizeStepMinutes(anchorLocation?.stepMinutes),
+    [anchorLocation?.stepMinutes],
   )
+
+  /**
+   * Short label per location id for the chip on an event card — populated ONLY
+   * while the grid mixes locations, so a single-location pro's cards stay
+   * exactly as they were and a filtered view doesn't repeat the filter on every
+   * card. An empty map is the signal "don't render location chips".
+   */
+  const eventLocationLabels = useMemo<Record<string, string>>(() => {
+    if (!isAllLocations || scopedLocations.length < 2) return {}
+
+    const labels: Record<string, string> = {}
+
+    for (const location of scopedLocations) {
+      labels[location.id] = locationShortLabel({
+        location,
+        fallbackLabel: LOCATION_TYPE_FALLBACK_LABEL,
+      })
+    }
+
+    return labels
+  }, [isAllLocations, scopedLocations])
 
   const resolveLocationById = useCallback(
     (locationId: string | null) => {
@@ -276,6 +314,10 @@ export function useCalendarLocations() {
     activeLocationLabel,
     activeLocationType,
     activeStepMinutes,
+    isAllLocations,
+    anchorLocation,
+    anchorLocationLabel,
+    eventLocationLabels,
 
     canSalon,
     setCanSalon,

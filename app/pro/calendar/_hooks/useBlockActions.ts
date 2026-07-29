@@ -278,15 +278,21 @@ export function useBlockActions(deps: BlockActionsDeps) {
     setBlockCreateOpen(true)
   }, [deps, showTemporaryError])
 
+  /**
+   * Opens the block editor, or does nothing when the event carries no block id.
+   *
+   * Returned the block's location until K3, so the caller could switch the whole
+   * calendar to it and borrow that location's zone and step. The editor now
+   * takes the block's own scheduling context directly, so there is nothing left
+   * to hand back.
+   */
   const openEditBlockFromEvent = useCallback((event: CalendarEvent) => {
     const blockId = extractBlockId(event)
 
-    if (!blockId) return null
+    if (!blockId) return
 
     setEditBlockId(blockId)
     setEditBlockOpen(true)
-
-    return event.locationId ?? null
   }, [])
 
   useEffect(() => {

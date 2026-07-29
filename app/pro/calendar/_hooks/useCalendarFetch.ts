@@ -33,6 +33,7 @@ import {
   isValidIanaTimeZone,
   sanitizeTimeZone,
 } from '@/lib/timeZone'
+import { CALENDAR_SCOPE_ALL } from '@/lib/calendar/constants'
 
 import { toIso } from '../_utils/date'
 import { isRecord } from '@/lib/guards'
@@ -72,6 +73,15 @@ function workingHoursEndpoint(locationType: LocationType): string {
   return `/api/v1/pro/working-hours?${params.toString()}`
 }
 
+/**
+ * `scope` carries the selection: a location id, or ALL when nothing is
+ * filtered — the scope that matches the DB's professional-wide overlap
+ * constraint, and the web calendar's default (K3).
+ *
+ * `locationId` is still sent alongside a specific id purely so a server that
+ * predates `scope` honours the pro's choice instead of silently answering for
+ * its primary location. The K3 route prefers `scope`; the two always agree.
+ */
 function calendarEndpoint(args: {
   from: Date
   to: Date
@@ -80,6 +90,7 @@ function calendarEndpoint(args: {
   const params = new URLSearchParams({
     from: toIso(args.from),
     to: toIso(args.to),
+    scope: args.locationId ?? CALENDAR_SCOPE_ALL,
   })
 
   if (args.locationId) {
@@ -386,7 +397,13 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
         return
       }
 
+      // 🔴 Only adopt the echoed location when the server says it FILTERED to
+      // it. In ALL scope that field is just the viewport anchor, and adopting
+      // it would flip the selection back to one location on the very first
+      // load — the request the pro never made, re-asserted by the response
+      // ([[two-states-owning-one-selection]]).
       if (
+        parsedCalendar.scope === 'LOCATION' &&
         parsedCalendar.location?.id &&
         parsedCalendar.location.id !== activeLocationId
       ) {

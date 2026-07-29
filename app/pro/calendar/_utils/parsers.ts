@@ -27,8 +27,10 @@ import type {
 } from '../_types'
 
 import {
+  CALENDAR_SCOPE_ALL,
   DEFAULT_HOLD_CLIENT_NAME,
   DEFAULT_HOLD_TITLE,
+  type CalendarScopeMode,
 } from '@/lib/calendar/constants'
 import { parsePaymentBadgeWire } from '@/lib/booking/paymentBadge'
 import { isRecord } from '@/lib/guards'
@@ -161,6 +163,16 @@ function normalizeBookingCalendarStatus(value: unknown): BookingCalendarStatus {
   if (raw === 'UNKNOWN') return 'UNKNOWN'
 
   return nullableText(value) ?? 'UNKNOWN'
+}
+
+/**
+ * ⚠️ Anything that is not literally `ALL` reads as `LOCATION` — including an
+ * ABSENT field. A pre-K3 server ignores `?scope=` and answers with a
+ * single-location feed; believing that was "all locations" is the very lie this
+ * step exists to remove, so the client degrades to the filtered UI instead.
+ */
+function normalizeCalendarScopeMode(value: unknown): CalendarScopeMode {
+  return upper(value) === CALENDAR_SCOPE_ALL ? 'ALL' : 'LOCATION'
 }
 
 function normalizeTimeZoneTruthSource(value: unknown): TimeZoneTruthSource {
@@ -628,6 +640,7 @@ export function parseCalendarResponse(value: unknown): CalendarResponse | null {
 
   return {
     ...(professionalId ? { professionalId } : {}),
+    scope: normalizeCalendarScopeMode(value.scope),
     location: parseCalendarResponseLocation(value.location),
     range,
 

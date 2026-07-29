@@ -97,6 +97,32 @@ function clearTemporaryErrorTimeout(timeoutId: number | null): void {
   }
 }
 
+/**
+ * The seed for `/pro/bookings/new` — one builder for both entry points (the "+"
+ * action and click-to-create), which had drifted into two identical copies.
+ *
+ * ⚠️ `locationId` is omitted when the calendar shows ALL locations: there is no
+ * selected location to carry, and the new-booking form has its own location
+ * select that resolves — and shows — an explicit one. Sending a guess would
+ * commit the pro to a location they never picked (K3).
+ */
+function buildNewBookingQuery(args: {
+  locationId: string | null
+  locationType: LocationType
+  scheduledAt: string
+}): string {
+  const query = new URLSearchParams({
+    locationType: args.locationType,
+    scheduledAt: args.scheduledAt,
+  })
+
+  if (args.locationId) {
+    query.set('locationId', args.locationId)
+  }
+
+  return query.toString()
+}
+
 // ─── Exported hook ────────────────────────────────────────────────────────────
 
 export function useCalendarData(args: UseCalendarDataArgs) {
@@ -116,17 +142,21 @@ export function useCalendarData(args: UseCalendarDataArgs) {
         DEFAULT_TIME_ZONE,
       )
 
-      const activeLocationTimeZone = validTimeZoneOrNull(
-        loc.activeLocation?.timeZone,
+      // The ANCHOR, not the filter: with all locations shown there is no active
+      // location, and the server resolves its viewport from the primary one —
+      // guessing anything else here makes every load refetch (see
+      // shouldRefetchForApiTimeZone).
+      const anchorLocationTimeZone = validTimeZoneOrNull(
+        loc.anchorLocation?.timeZone,
       )
 
-      if (activeLocationTimeZone) {
-        return sanitizeTimeZone(activeLocationTimeZone, fallbackTimeZone)
+      if (anchorLocationTimeZone) {
+        return sanitizeTimeZone(anchorLocationTimeZone, fallbackTimeZone)
       }
 
       return fallbackTimeZone
     },
-    [loc.activeLocation?.timeZone],
+    [loc.anchorLocation?.timeZone],
   )
 
   const cal = useCalendarFetch({
@@ -280,7 +310,12 @@ export function useCalendarData(args: UseCalendarDataArgs) {
   })
 
   const blocks = useBlockActions({
-    activeLocationId: loc.activeLocationId,
+    // The ANCHOR, not the filter: blocked time must post a real location
+    // (`POST /api/v1/pro/calendar/blocked` requires one), and with all
+    // locations shown there is no filter to take it from. The block modal
+    // displays the resolved location, so the pro sees which one they are
+    // blocking rather than having it chosen behind them.
+    activeLocationId: loc.anchorLocation?.id ?? null,
     activeStepMinutes: loc.activeStepMinutes,
     resolveActiveCalendarTimeZone,
     reloadCalendar: cal.loadCalendar,
@@ -294,6 +329,13 @@ export function useCalendarData(args: UseCalendarDataArgs) {
   }, [cal, mgmt])
 
   const [showHoursForm, setShowHoursForm] = useState(false)
+
+  // Zone + step of the block currently open in the editor, captured from the
+  // event itself so a cross-location block edits in its own local time.
+  const [editBlockContext, setEditBlockContext] = useState<{
+    timeZone: string
+    stepMinutes: number
+  } | null>(null)
 
   // Click-to-create: the clicked slot's start instant while the pro is choosing
   // between adding an appointment and blocking personal time. Non-null = the
@@ -327,11 +369,19 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       const event = cal.eventsRef.current.find((entry) => entry.id === id)
 
       if (event && isBlockedEvent(event)) {
-        const locationId = blocks.openEditBlockFromEvent(event)
+        // Give the editor the block's OWN zone and step rather than switching
+        // the whole calendar to that block's location to borrow them. Under a
+        // single-location feed those were the same thing; with every location
+        // on one grid, the old move would silently narrow the pro's view to
+        // whichever block they happened to open.
+        const context = resolveEventSchedulingContext(event)
 
-        if (locationId) {
-          loc.setActiveLocationId(locationId)
-        }
+        setEditBlockContext({
+          timeZone: context.timeZone,
+          stepMinutes: context.stepMinutes,
+        })
+
+        blocks.openEditBlockFromEvent(event)
 
         return
       }
@@ -342,7 +392,14 @@ export function useCalendarData(args: UseCalendarDataArgs) {
 
       void bookingModal.openBooking(id)
     },
-    [blocks, bookingModal, cal, confirm, loc, mgmt],
+    [
+      blocks,
+      bookingModal,
+      cal,
+      confirm,
+      mgmt,
+      resolveEventSchedulingContext,
+    ],
   )
 
   const openCreateForClick = useCallback(
@@ -358,7 +415,10 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       if (mgmt.managementOpen) return
       if (blocks.blockCreateOpen || blocks.editBlockOpen) return
 
-      if (!loc.activeLocationId) {
+      // Gated on having ANY bookable location, not on one being filtered to:
+      // all-locations is now the default view, and refusing to create there
+      // would make the default view read-only.
+      if (!loc.anchorLocation) {
         showTemporaryError(NO_LOCATION_SELECTED_MESSAGE)
         return
       }
@@ -376,7 +436,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       bookingModal.openBookingId,
       confirm.confirmOpen,
       confirm.pendingChange,
-      loc.activeLocationId,
+      loc.anchorLocation,
       loc.activeStepMinutes,
       mgmt.managementOpen,
       resolveActiveCalendarTimeZone,
@@ -393,7 +453,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
 
     setCreateChoiceStart(null)
 
-    if (!loc.activeLocationId) {
+    if (!loc.anchorLocation) {
       showTemporaryError(NO_LOCATION_SELECTED_MESSAGE)
       return
     }
@@ -404,17 +464,18 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       timeZone,
     )
 
-    const query = new URLSearchParams({
-      locationId: loc.activeLocationId,
-      locationType: loc.activeLocationType,
-      scheduledAt,
-    })
-
-    router.push(`/pro/bookings/new?${query.toString()}`)
+    router.push(
+      `/pro/bookings/new?${buildNewBookingQuery({
+        locationId: loc.activeLocationId,
+        locationType: loc.activeLocationType,
+        scheduledAt,
+      })}`,
+    )
   }, [
     createChoiceStart,
     loc.activeLocationId,
     loc.activeLocationType,
+    loc.anchorLocation,
     resolveActiveCalendarTimeZone,
     router,
     showTemporaryError,
@@ -441,7 +502,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     if (mgmt.managementOpen) return
     if (blocks.blockCreateOpen || blocks.editBlockOpen) return
 
-    if (!loc.activeLocationId) {
+    if (!loc.anchorLocation) {
       showTemporaryError(NO_LOCATION_SELECTED_MESSAGE)
       return
     }
@@ -458,13 +519,13 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     })
     const scheduledAt = toDatetimeLocalValueInTimeZone(startUtc, timeZone)
 
-    const query = new URLSearchParams({
-      locationId: loc.activeLocationId,
-      locationType: loc.activeLocationType,
-      scheduledAt,
-    })
-
-    router.push(`/pro/bookings/new?${query.toString()}`)
+    router.push(
+      `/pro/bookings/new?${buildNewBookingQuery({
+        locationId: loc.activeLocationId,
+        locationType: loc.activeLocationType,
+        scheduledAt,
+      })}`,
+    )
   }, [
     blocks.blockCreateOpen,
     blocks.editBlockOpen,
@@ -474,6 +535,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     currentDate,
     loc.activeLocationId,
     loc.activeLocationType,
+    loc.anchorLocation,
     loc.activeStepMinutes,
     mgmt.managementOpen,
     resolveActiveCalendarTimeZone,
@@ -511,6 +573,19 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     activeLocationLabel: loc.activeLocationLabel,
     activeLocationType: loc.activeLocationType,
     activeStepMinutes: loc.activeStepMinutes,
+
+    // All-locations view (K3): no filter, every location's occupancy at once.
+    isAllLocations: loc.isAllLocations,
+    // Where a create action lands when nothing is filtered. Named separately
+    // from the filter so no surface can mistake one for the other.
+    createLocationId: loc.anchorLocation?.id ?? null,
+    createLocationLabel: loc.anchorLocationLabel,
+    // Per-location chip labels for event cards; empty unless the grid mixes
+    // locations.
+    eventLocationLabels: loc.eventLocationLabels,
+
+    editBlockTimeZone: editBlockContext?.timeZone ?? null,
+    editBlockStepMinutes: editBlockContext?.stepMinutes ?? null,
 
     professionalId: cal.professionalId,
 

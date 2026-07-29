@@ -343,8 +343,11 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onClose={() => cal.setBlockCreateOpen(false)}
         initialStart={cal.blockCreateInitialStart}
         timeZone={activeLocationTimeZone}
-        locationId={cal.activeLocationId}
-        locationLabel={cal.activeLocationLabel}
+        // The location a NEW block lands at — the filtered one, or the primary
+        // when the grid shows every location. The modal prints this label, so
+        // the pro reads which location they are blocking (K3).
+        locationId={cal.createLocationId}
+        locationLabel={cal.createLocationLabel}
         stepMinutes={cal.activeStepMinutes}
         onCreated={cal.reload}
       />
@@ -352,8 +355,11 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
       <EditBlockModal
         open={cal.editBlockOpen}
         blockId={cal.editBlockId}
-        timeZone={activeLocationTimeZone}
-        stepMinutes={cal.activeStepMinutes}
+        // The opened block's own zone/step when it has a location of its own,
+        // so a block at another location edits in ITS local time instead of
+        // the viewport's.
+        timeZone={cal.editBlockTimeZone ?? activeLocationTimeZone}
+        stepMinutes={cal.editBlockStepMinutes ?? cal.activeStepMinutes}
         onClose={() => {
           cal.setEditBlockOpen(false)
           cal.setEditBlockId(null)

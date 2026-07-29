@@ -45,6 +45,8 @@ type DayWeekGridProps = {
   workingHoursMobile: WorkingHoursJson
   activeLocationType?: 'SALON' | 'MOBILE'
   stepMinutes: number
+  /** Short label per location id for the per-card location chip (K3). */
+  eventLocationLabels?: Record<string, string>
   timeZone: string
   /**
    * Where the timeline scrolls to on first paint (and on range change):
@@ -277,6 +279,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
     workingHoursMobile,
     activeLocationType = 'SALON',
     stepMinutes,
+    eventLocationLabels,
     timeZone: rawTimeZone,
     initialScrollTarget = 'workingStart',
     onClickEvent,
@@ -425,6 +428,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
                     workingHoursMobile={workingHoursMobile}
                     activeLocationType={activeLocationType}
                     stepMinutes={stepMinutes}
+                    eventLocationLabels={eventLocationLabels}
                     isBusy={isBusy}
                     suppressClickRef={suppressClickRef}
                     onClickEvent={onClickEvent}

@@ -50,6 +50,19 @@ export const MAX_CALENDAR_EVENTS_PER_RANGE = 1_200
  */
 export const MAX_CALENDAR_LOCATIONS_PER_PRO = 50
 
+// ─── Calendar scope (K3) ──────────────────────────────────────────────────────
+
+/**
+ * `?scope=ALL` on GET /api/v1/pro/calendar — every location's occupancy in one
+ * feed, which is what `Booking_no_active_professional_overlap` actually
+ * enforces (it excludes on `professionalId` alone, with no location term).
+ * Anything else in `scope` is read as a location id.
+ */
+export const CALENDAR_SCOPE_ALL = 'ALL'
+
+/** Which scope the feed answered for — echoed on the response. */
+export type CalendarScopeMode = 'ALL' | 'LOCATION'
+
 // ─── Blocked-time API defaults ────────────────────────────────────────────────
 
 export const DEFAULT_BLOCK_QUERY_LOOKBACK_DAYS = 7
