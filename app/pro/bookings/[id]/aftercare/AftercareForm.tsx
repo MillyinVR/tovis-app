@@ -1510,6 +1510,18 @@ export default function AftercareForm({
                     offWeekdays={offWeekdays}
                     disabled={disabled}
                     onPick={(ymd) => applyWindowStart(ymd)}
+                    // The window is where the CLIENT will book, so the counts
+                    // answer "which days in here can they actually get in" for
+                    // the same service (R4).
+                    slotContext={
+                      rebookServiceId
+                        ? {
+                            serviceId: rebookServiceId,
+                            locationType: rebookLocationType,
+                            locationId: rebookLocationId,
+                          }
+                        : null
+                    }
                   />
                 </div>
 
@@ -1826,6 +1838,15 @@ export default function AftercareForm({
           onClose={() => setEndPickerOpen(false)}
           onPick={(ymd) => pickWindowEnd(ymd)}
           offWeekdays={offWeekdays}
+          slotContext={
+            rebookServiceId
+              ? {
+                  serviceId: rebookServiceId,
+                  locationType: rebookLocationType,
+                  locationId: rebookLocationId,
+                }
+              : null
+          }
         />
       ) : null}
     </div>

@@ -12,6 +12,7 @@
 // the pro's timezone via the shared timeZone helpers.
 
 import {
+  addDaysToYMD,
   getZonedParts,
   sanitizeTimeZone,
   zonedTimeToUtc,
@@ -55,8 +56,19 @@ function utcDateToYmd(dt: Date): string {
 export function addDaysToYmd(ymd: string, days: number): string | null {
   const dt = ymdToUtcDate(ymd)
   if (!dt) return null
-  dt.setUTCDate(dt.getUTCDate() + days)
-  return utcDateToYmd(dt)
+
+  // Delegates to `addDaysToYMD` rather than re-rolling `setUTCDate`: that
+  // function's doc comment declares itself the single home for day-stepping
+  // (it is DST-critical, and had already been re-implemented once before). This
+  // wrapper only adds the string parse/format either side of it.
+  const next = addDaysToYMD(
+    dt.getUTCFullYear(),
+    dt.getUTCMonth() + 1,
+    dt.getUTCDate(),
+    days,
+  )
+
+  return `${String(next.year).padStart(4, '0')}-${String(next.month).padStart(2, '0')}-${String(next.day).padStart(2, '0')}`
 }
 
 export function addMonthsToYmd(ymd: string, months: number): string | null {

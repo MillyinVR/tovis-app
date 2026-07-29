@@ -415,6 +415,11 @@ export default function RebookSlotPicker({
           offWeekdays={offWeekdays}
           disabled={disabled}
           onPick={(ymd) => onDayChange(ymd)}
+          // The rebook is a NEW booking for the same service, so the counts are
+          // sized from the offering (R4) — no reschedule context here.
+          slotContext={
+            serviceId ? { serviceId, locationType, locationId } : null
+          }
         />
       </div>
 

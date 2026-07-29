@@ -18,12 +18,11 @@ import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import {
   DEFAULT_DURATION_MINUTES,
   MAX_BUFFER_MINUTES,
+  MAX_LEAD_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
 } from '@/lib/booking/constants'
 import { checkSlotReadiness } from '@/lib/booking/slotReadiness'
 import { type YMD, ymdToString } from '@/lib/availability/core/summaryWindow'
-
-const MAX_LEAD_MINUTES = 30 * 24 * 60
 
 export type DayComputationResult =
   | {

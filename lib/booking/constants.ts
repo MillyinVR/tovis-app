@@ -8,6 +8,29 @@ export const DEFAULT_DURATION_MINUTES = 60
 export const MAX_OTHER_OVERLAP_MINUTES =
   MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
 
+/**
+ * How far either side of a counted day-range an occupancy load must reach.
+ *
+ * An appointment that STARTS before the window (or ends after it) still eats
+ * slots inside it, so every availability read pads its busy-interval query by
+ * the widest an appointment plus its buffer can be. Numerically equal to
+ * `MAX_OTHER_OVERLAP_MINUTES` but a different question — that one bounds how
+ * far another booking may overlap; this one bounds a query window — so they get
+ * separate names rather than one alias ([[same-shape-is-not-same-intent]]).
+ *
+ * Lived as four byte-identical local copies (the day / bootstrap / alternates
+ * routes and the pro open-slot counter) before R4 consolidated them here.
+ */
+export const OCCUPANCY_WINDOW_PADDING_MINUTES =
+  MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
+
+/**
+ * Ceiling for a `?lead=` debug override on the availability routes — a month,
+ * far past any real lead time, so a typo can't push every slot out of range.
+ * Also the clamp `computeDaySlotsFast` applies to whatever it is handed.
+ */
+export const MAX_LEAD_MINUTES = 30 * 24 * 60
+
 export const MAX_ADVANCE_NOTICE_MINUTES = 24 * 60
 export const MAX_DAYS_AHEAD = 3650
 export const HOLD_MINUTES = 10

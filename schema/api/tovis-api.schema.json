@@ -9374,6 +9374,17 @@
           "const": true,
           "type": "boolean"
         },
+        "openSlots": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProOpenSlotContextDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The open-slot overlay's state. `null` when the request carried no service context at all — the classic \"which days am I busy\" call."
+        },
         "to": {
           "type": "string"
         },
@@ -9387,7 +9398,8 @@
         "tz",
         "from",
         "to",
-        "days"
+        "days",
+        "openSlots"
       ],
       "type": "object"
     },
@@ -9774,6 +9786,10 @@
         },
         "bookings": {
           "description": "Occupying bookings (BOOKING_BLOCKING_STATUSES) starting that local day.",
+          "type": "number"
+        },
+        "openSlots": {
+          "description": "Bookable START TIMES left on that local day for the service the request named — \"can I still fit someone in\", as opposed to the two fields above, which only say how full the day already is (R4).\n\nPresent ONLY when `openSlots.computed` is true on the envelope, and then on EVERY day in range including zeroes — a fully-booked day and a day the server never counted must not look alike. Read the envelope first; don't infer \"unknown\" from a missing key here.",
           "type": "number"
         }
       },
@@ -10866,6 +10882,35 @@
         "feePercent",
         "chargeNoShow",
         "chargeLateCancel"
+      ],
+      "type": "object"
+    },
+    "ProOpenSlotContextDTO": {
+      "description": "Describes the open-slot overlay: whether it was computed, for what, and why not when it wasn't.\n\nAlways present on the envelope so a consumer can distinguish the three states explicitly instead of guessing from an absent field ([[optional-field-hides-a-required-one]]).",
+      "properties": {
+        "computed": {
+          "description": "True when every day in [from, to] carries an `openSlots` count.",
+          "type": "boolean"
+        },
+        "durationMinutes": {
+          "description": "The appointment width the counts were computed for. A reschedule is sized from the BOOKING, everything else from the offering plus its add-ons, so this is echoed rather than assumed. Null when nothing was computed.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "Why counts are missing, when `computed` is false — a booking error code (e.g. \"WORKING_HOURS_REQUIRED\") or \"SERVICE_NOT_FOUND\". Null on success. For display, treat it as a reason to hide the overlay, not to fail: the day picker still works without counts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computed",
+        "durationMinutes",
+        "reason"
       ],
       "type": "object"
     },

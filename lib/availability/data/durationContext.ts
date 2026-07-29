@@ -16,13 +16,26 @@ import { prisma } from '@/lib/prisma'
 type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
 
 /**
- * Who is asking, when the answer depends on a booking they own. `clientId` is
- * the viewer's CLIENT profile id — the route authenticates before calling, so
- * an unauthenticated request never reaches here with a booking id.
+ * Whose booking the reschedule belongs to. The route authenticates before
+ * calling, so an unauthenticated request never reaches here with a booking id.
+ *
+ * Two shapes because both sides of the app reschedule: the client grid keys
+ * ownership on the viewer's CLIENT profile, while the pro-facing open-slot
+ * count (R4) keys it on the PROFESSIONAL. Everything after the ownership check
+ * — the add-on refusal, the offering-identity check, the committed width — is
+ * identical, which is exactly why this is one parameter rather than two copies
+ * of the function ([[drifted-duplicate-is-a-bug-report]]).
+ */
+export type RescheduleAvailabilityOwner =
+  | { kind: 'CLIENT'; clientId: string }
+  | { kind: 'PRO'; professionalId: string }
+
+/**
+ * Who is asking, when the answer depends on a booking they own.
  */
 export type RescheduleAvailabilityContext = {
   bookingId: string
-  clientId: string
+  owner: RescheduleAvailabilityOwner
 }
 
 export type ResolveAvailabilityDurationArgs = {
@@ -106,11 +119,18 @@ export async function resolveAvailabilityDurationMinutes(
     select: RESCHEDULE_TARGET_SELECT,
   })
 
-  // A missing booking and another client's booking answer identically, so the
-  // shape of a refusal never reveals that someone else's booking exists — the
+  // A missing booking and someone else's booking answer identically, so the
+  // shape of a refusal never reveals that another party's booking exists — the
   // same anti-enumeration rule `lockClientOwnedBookingSchedule` and B3's hold
   // path follow.
-  if (!booking || booking.clientId !== args.reschedule.clientId) {
+  const owner = args.reschedule.owner
+  const ownedByViewer = booking
+    ? owner.kind === 'CLIENT'
+      ? booking.clientId === owner.clientId
+      : booking.professionalId === owner.professionalId
+    : false
+
+  if (!booking || !ownedByViewer) {
     return { ok: false, code: 'BOOKING_NOT_FOUND' }
   }
 
