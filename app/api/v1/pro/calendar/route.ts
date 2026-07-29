@@ -19,6 +19,11 @@ import {
 import { addMinutes } from '@/lib/booking/conflicts'
 import { holdRecordToBusyInterval } from '@/lib/booking/conflictQueries'
 import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
+import {
+  PAYMENT_BADGE_SELECT,
+  derivePaymentBadge,
+  type PaymentBadge,
+} from '@/lib/booking/paymentBadge'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import {
   resolveApptTimeZoneFromValues,
@@ -87,6 +92,10 @@ type BookingEvent = {
   timeZoneSource: TimeZoneTruthSource
   localDateKey: string
   viewLocalDateKey: string
+  // At-a-glance payment state (deposit / paid / disputed …), derived by THE
+  // one helper (lib/booking/paymentBadge.ts) so this card, the bookings list
+  // and iOS can never disagree about what the money is doing (K1).
+  paymentBadge: PaymentBadge
   details: {
     serviceName: string
     bufferMinutes: number
@@ -256,6 +265,9 @@ const bookingSelect = {
   locationType: true,
   locationId: true,
   locationTimeZone: true,
+  // Payment-badge inputs (deposit + checkout + dispute columns) — spread from
+  // the helper's select so the badge can never miss a field it derives from.
+  ...PAYMENT_BADGE_SELECT,
   client: {
     select: {
       id: true,
@@ -694,6 +706,7 @@ function toBookingEvent(args: {
     timeZoneSource,
     localDateKey,
     viewLocalDateKey,
+    paymentBadge: derivePaymentBadge(booking),
     details: {
       serviceName,
       bufferMinutes,

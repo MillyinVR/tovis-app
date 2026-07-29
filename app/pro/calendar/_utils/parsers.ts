@@ -30,6 +30,7 @@ import {
   DEFAULT_HOLD_CLIENT_NAME,
   DEFAULT_HOLD_TITLE,
 } from '@/lib/calendar/constants'
+import { parsePaymentBadgeWire } from '@/lib/booking/paymentBadge'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage } from '@/lib/http'
 import { pickBool, pickNumber, pickString } from '@/lib/pick'
@@ -421,6 +422,9 @@ function parseBookingEvent(
             'SALON',
         }
       : null
+  // Kind-validated against the canonical helper; a malformed wire value just
+  // drops the chip rather than rendering a made-up money state.
+  const paymentBadge = parsePaymentBadgeWire(value.paymentBadge)
 
   const event: BookingCalendarEvent = {
     kind: 'BOOKING',
@@ -450,6 +454,7 @@ function parseBookingEvent(
     },
     ...(viewLocalDateKey ? { viewLocalDateKey } : {}),
     ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+    ...(paymentBadge ? { paymentBadge } : {}),
     ...(clientProfileId ? { clientProfileId } : {}),
     ...(preferenceLabel ? { preferenceLabel } : {}),
     ...(offerHref ? { offerHref } : {}),

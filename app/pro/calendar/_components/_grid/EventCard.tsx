@@ -212,6 +212,14 @@ function PendingBadge(props: { label: string }) {
   )
 }
 
+function PaymentBadgeChip(props: { label: string; tone: string }) {
+  return (
+    <span className="brand-pro-calendar-event-payment" data-tone={props.tone}>
+      {props.label}
+    </span>
+  )
+}
+
 function ConflictBadge(props: { label: string }) {
   return (
     <span
@@ -293,11 +301,22 @@ export function EventCard(props: EventCardProps) {
     copy,
   })
 
+  // Payment state chip — derived server-side by THE one helper
+  // (lib/booking/paymentBadge.ts). `significant` gates it here so a wall of
+  // "Unpaid" upcoming cards stays quiet; the helper owns that call, not the card.
+  const paymentBadge =
+    ev.kind === 'BOOKING' && ev.paymentBadge?.significant
+      ? ev.paymentBadge
+      : null
+
   const canDragOrResize = apiId !== null
   const baseLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
-  const accessibleLabel = conflict
-    ? `${baseLabel}, ${copy.labels.overlapWarning}`
+  const withPayment = paymentBadge
+    ? `${baseLabel}, ${paymentBadge.label}`
     : baseLabel
+  const accessibleLabel = conflict
+    ? `${withPayment}, ${copy.labels.overlapWarning}`
+    : withPayment
 
   return (
     <div
@@ -398,6 +417,13 @@ export function EventCard(props: EventCardProps) {
 
               {statusMeta.isPending ? (
                 <PendingBadge label={copy.statusLabels.pending} />
+              ) : null}
+
+              {paymentBadge ? (
+                <PaymentBadgeChip
+                  label={paymentBadge.label}
+                  tone={paymentBadge.tone}
+                />
               ) : null}
 
               {statusMeta.isCompleted ? <CompletedCheck /> : null}

@@ -1768,6 +1768,68 @@
   }
 }
 
+/* Payment state chip (K1) — tone comes from the wire badge's `tone`, one of the
+   app-wide Badge tones, so a disputed deposit reads danger here exactly like it
+   does on the bookings list. Tokens only; flips with [data-mode]. */
+.brand-pro-calendar-event-payment {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  border: 1px solid rgb(var(--text-secondary) / 0.35);
+  border-radius: 2px;
+  background: rgb(var(--text-secondary) / 0.12);
+  color: rgb(var(--text-secondary));
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 1px 4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.brand-pro-calendar-event-payment[data-tone="pending"] {
+  border-color: rgb(var(--tone-pending) / 0.35);
+  background: rgb(var(--tone-pending) / 0.15);
+  color: rgb(var(--tone-pending));
+}
+
+.brand-pro-calendar-event-payment[data-tone="warn"] {
+  border-color: rgb(var(--tone-warn) / 0.35);
+  background: rgb(var(--tone-warn) / 0.15);
+  color: rgb(var(--tone-warn));
+}
+
+.brand-pro-calendar-event-payment[data-tone="success"] {
+  border-color: rgb(var(--tone-success) / 0.35);
+  background: rgb(var(--tone-success) / 0.15);
+  color: rgb(var(--tone-success));
+}
+
+.brand-pro-calendar-event-payment[data-tone="info"] {
+  border-color: rgb(var(--tone-info) / 0.35);
+  background: rgb(var(--tone-info) / 0.15);
+  color: rgb(var(--tone-info));
+}
+
+.brand-pro-calendar-event-payment[data-tone="danger"] {
+  border-color: rgb(var(--tone-danger) / 0.35);
+  background: rgb(var(--tone-danger) / 0.15);
+  color: rgb(var(--tone-danger));
+}
+
+.brand-pro-calendar-event-payment[data-tone="accent"] {
+  border-color: rgb(var(--accent-primary) / 0.35);
+  background: rgb(var(--accent-primary) / 0.15);
+  color: rgb(var(--accent-primary));
+}
+
+@media (min-width: 768px) {
+  .brand-pro-calendar-event-payment {
+    display: inline-flex;
+  }
+}
+
 .brand-pro-calendar-event-completed-check {
   display: none;
   flex-shrink: 0;

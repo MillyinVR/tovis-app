@@ -7,6 +7,7 @@ import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import BookingActions from './BookingActions'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { moneyToString } from '@/lib/money'
+import { derivePaymentBadge } from '@/lib/booking/paymentBadge'
 import {
   resolveBookingLocationMeta,
   type BookingLocationMeta,
@@ -64,6 +65,15 @@ function StatusPill({ status }: { status: string }) {
   const s = String(status || '')
 
   return <Badge tone={badgeToneForBookingStatus(s)}>{labelForBookingStatus(s)}</Badge>
+}
+
+// Payment state chip — derived by THE one helper (lib/booking/paymentBadge.ts);
+// `significant` gates it so upcoming rows aren't a wall of "Unpaid".
+function PaymentPill({ booking }: { booking: BookingRow }) {
+  const badge = derivePaymentBadge(booking)
+  if (!badge.significant) return null
+
+  return <Badge tone={badge.tone}>{badge.label}</Badge>
 }
 
 function CloseoutBadge({ bookingId }: { bookingId: string }) {
@@ -365,6 +375,8 @@ function Section({
                       </h3>
 
                       <StatusPill status={booking.status} />
+
+                      <PaymentPill booking={booking} />
 
                       {needsCloseout(booking) ? (
                         <CloseoutBadge bookingId={booking.id} />

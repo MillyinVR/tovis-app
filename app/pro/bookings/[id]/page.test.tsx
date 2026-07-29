@@ -394,4 +394,22 @@ describe('app/pro/bookings/[id]/page.tsx', () => {
       })
     }
   })
+
+  // K1: the header also renders THE canonical payment badge
+  // (lib/booking/paymentBadge.ts) next to the status chip — the same words the
+  // calendar card and bookings list show. The helper's own suite pins every
+  // state; here we only pin that the page renders its output.
+  it('renders the payment badge in the header', async () => {
+    const page = await renderPage(
+      makeBooking({
+        // Silence the (paid) final bill so the deposit axis is what shows.
+        paymentCollectedAt: null,
+        stripePaymentStatus: null,
+        depositStatus: 'PAID',
+        depositAmount: new Prisma.Decimal(60),
+        depositRefundedCents: 0,
+      }),
+    )
+    expect(hasText(page, 'Deposit paid $60.00')).toBe(true)
+  })
 })
