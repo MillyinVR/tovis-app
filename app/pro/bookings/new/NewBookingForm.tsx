@@ -1108,12 +1108,14 @@ export default function NewBookingForm({
   // Clients the proposed time collides with (empty when clear). Fetched from the
   // pro calendar so it stays in lockstep with the grid's own overlap signal.
   const [overlapNames, setOverlapNames] = useState<string[]>([])
-  const overlapLocationId = selectedLocation?.id ?? null
+  // Gate only — the check still waits for a chosen location, because the form
+  // can't be submitted without one. It is NOT the scope of the query below.
+  const hasBookingLocation = selectedLocation !== null
 
   useEffect(() => {
     if (
       loading ||
-      !overlapLocationId ||
+      !hasBookingLocation ||
       !proposedStartISO ||
       proposedDurationMinutes <= 0
     ) {
@@ -1140,10 +1142,17 @@ export default function NewBookingForm({
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       try {
+        // 🔴 ALL locations, not the one being booked.
+        // `Booking_no_active_professional_overlap` excludes on `professionalId`
+        // ALONE — there is no location term — so a pro booking a salon slot got
+        // no warning at all about the mobile job already sitting in it, and then
+        // a hard refusal on submit. A warning has to ask about the same resource
+        // the write is checked against. (K3 widened the calendar grid's own feed;
+        // this surface reads the same route and was left narrow.)
         const qs = new URLSearchParams({
           from: fromISO,
           to: toISO,
-          locationId: overlapLocationId,
+          scope: 'ALL',
         })
 
         const res = await fetch(`/api/v1/pro/calendar?${qs.toString()}`, {
@@ -1181,7 +1190,7 @@ export default function NewBookingForm({
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [loading, overlapLocationId, proposedStartISO, proposedDurationMinutes])
+  }, [loading, hasBookingLocation, proposedStartISO, proposedDurationMinutes])
 
   function handleCancel() {
     if (loading) return

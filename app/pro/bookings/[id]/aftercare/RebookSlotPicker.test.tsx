@@ -287,6 +287,18 @@ describe('RebookSlotPicker', () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ startsAt: '2026-07-01T07:30:00.000Z' }),
     )
+
+    // 🔴 …and it asked about EVERY location. The constraint this warns about
+    // (`Booking_no_active_professional_overlap`) excludes on `professionalId`
+    // alone, so a feed filtered to this booking's location hides a real
+    // collision — the pro is warned about nothing and refused on save.
+    const calendarUrl = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .find((url) => url.includes('/api/v1/pro/calendar'))
+    expect(calendarUrl).toBeTruthy()
+    const params = new URL(String(calendarUrl), 'http://x').searchParams
+    expect(params.get('scope')).toBe('ALL')
+    expect(params.get('locationId')).toBeNull()
   })
 
   it('renders the inline availability calendar as the primary picker and picks a day from it', async () => {

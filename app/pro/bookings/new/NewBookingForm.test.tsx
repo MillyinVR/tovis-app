@@ -152,14 +152,19 @@ describe('NewBookingForm passive double-book warning', () => {
       expect(screen.getByText(/This overlaps Sam Rivera/i)).toBeInTheDocument()
     })
 
-    // The proposed booking's location scopes the calendar fetch.
+    // 🔴 The check asks about EVERY location, not the one being booked. The
+    // overlap it warns about is enforced on `professionalId` alone
+    // (`Booking_no_active_professional_overlap` carries no location term), so a
+    // location-filtered feed hides a collision the write will then refuse. This
+    // used to assert `locationId=loc_1`.
     const calendarCall = vi
       .mocked(fetch)
       .mock.calls.map((call) => String(call[0]))
       .find((url) => url.includes('/api/v1/pro/calendar'))
     expect(calendarCall).toBeTruthy()
     const url = new URL(String(calendarCall), 'http://x')
-    expect(url.searchParams.get('locationId')).toBe('loc_1')
+    expect(url.searchParams.get('scope')).toBe('ALL')
+    expect(url.searchParams.get('locationId')).toBeNull()
     expect(url.searchParams.get('from')).toBeTruthy()
     expect(url.searchParams.get('to')).toBeTruthy()
   })
