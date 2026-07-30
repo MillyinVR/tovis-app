@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   calendarBlockUpdate: vi.fn(),
   calendarBlockDelete: vi.fn(),
   professionalLocationFindFirst: vi.fn(),
+  professionalLocationAggregate: vi.fn(),
 
   assertNoCalendarBlockConflict: vi.fn(),
   hasBookingConflict: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/prisma', () => ({
     },
     professionalLocation: {
       findFirst: mocks.professionalLocationFindFirst,
+      aggregate: mocks.professionalLocationAggregate,
     },
   },
 }))
@@ -93,6 +95,7 @@ const tx = {
   },
   professionalLocation: {
     findFirst: mocks.professionalLocationFindFirst,
+    aggregate: mocks.professionalLocationAggregate,
   },
 }
 
@@ -130,8 +133,14 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
     mocks.calendarBlockFindFirst.mockResolvedValue(existingBlock)
 
     mocks.professionalLocationFindFirst.mockResolvedValue({
-      id: 'loc_1',
       bufferMinutes: 15,
+    })
+
+    // Two bookable locations, the larger buffer being 40 — the value an
+    // UNSCOPED block takes (see `resolveBlockScope`).
+    mocks.professionalLocationAggregate.mockResolvedValue({
+      _count: { _all: 2 },
+      _max: { bufferMinutes: 40 },
     })
 
     mocks.assertNoCalendarBlockConflict.mockResolvedValue(undefined)
@@ -221,9 +230,19 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
     })
   })
 
-  it('returns 400 when block location is missing', async () => {
+  it('edits a block whose location has gone away, under global semantics', async () => {
+    // `onDelete: SetNull` rewrites a deleted location's blocks to
+    // `locationId: null`. Refusing here is what stranded them: still occupying
+    // time, still on the calendar, never movable again.
     mocks.calendarBlockFindFirst.mockResolvedValueOnce({
       ...existingBlock,
+      locationId: null,
+    })
+
+    mocks.calendarBlockUpdate.mockResolvedValueOnce({
+      ...existingBlock,
+      startsAt: new Date('2026-03-11T19:00:00.000Z'),
+      endsAt: new Date('2026-03-11T20:00:00.000Z'),
       locationId: null,
     })
 
@@ -235,19 +254,69 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      400,
-      'This block is missing a location and cannot be edited.',
-      {
-        code: 'BLOCK_LOCATION_MISSING',
-      },
-    )
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: 'This block is missing a location and cannot be edited.',
-      code: 'BLOCK_LOCATION_MISSING',
+    // No single location to read a buffer from, so it comes from the MAX across
+    // the pro's bookable locations.
+    expect(mocks.professionalLocationFindFirst).not.toHaveBeenCalled()
+    expect(mocks.professionalLocationAggregate).toHaveBeenCalledWith({
+      where: { professionalId: 'pro_123', isBookable: true },
+      _count: { _all: true },
+      _max: { bufferMinutes: true },
     })
+
+    // The unscoped block keeps its own conflict semantics: it clashes with
+    // EVERY block of this pro's, at any location.
+    expect(mocks.assertNoCalendarBlockConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ locationId: null, excludeBlockId: 'block_1' }),
+    )
+    expect(mocks.hasHoldConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultBufferMinutes: 40 }),
+    )
+
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_123')
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: {
+        block: {
+          id: 'block_1',
+          startsAt: '2026-03-11T19:00:00.000Z',
+          endsAt: '2026-03-11T20:00:00.000Z',
+          note: 'Lunch',
+          locationId: null,
+        },
+      },
+    })
+  })
+
+  it('edits a block at a location that is no longer bookable', async () => {
+    // The other half of the same defect. Deleting a location that anchors
+    // bookings ARCHIVES it (`isBookable: false`) rather than removing the row,
+    // so the block keeps its locationId — and the old `isBookable: true` lookup
+    // then 404'd every edit.
+    mocks.professionalLocationFindFirst.mockResolvedValueOnce({
+      bufferMinutes: 25,
+    })
+
+    const result = await PATCH(
+      makePatchRequest({
+        startsAt: '2026-03-11T19:00:00.000Z',
+        endsAt: '2026-03-11T20:00:00.000Z',
+      }),
+      makeCtx(),
+    )
+
+    // The edit path deliberately does NOT require `isBookable`.
+    expect(mocks.professionalLocationFindFirst).toHaveBeenCalledWith({
+      where: { id: 'loc_1', professionalId: 'pro_123' },
+      select: { bufferMinutes: true },
+    })
+
+    expect(mocks.hasHoldConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultBufferMinutes: 25 }),
+    )
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, status: 200 }),
+    )
   })
 
   it('returns 404 when the block location is no longer valid', async () => {
@@ -454,14 +523,14 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
       expect.any(Function),
     )
 
+    // No `isBookable` term: an EDIT must not refuse a block whose location the
+    // pro has since archived or made unbookable.
     expect(mocks.professionalLocationFindFirst).toHaveBeenCalledWith({
       where: {
         id: 'loc_1',
         professionalId: 'pro_123',
-        isBookable: true,
       },
       select: {
-        id: true,
         bufferMinutes: true,
       },
     })
