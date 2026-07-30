@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   calendarBlockFindMany: vi.fn(),
   calendarBlockCreate: vi.fn(),
   professionalLocationFindFirst: vi.fn(),
+  professionalLocationAggregate: vi.fn(),
 
   getTimeRangeConflict: vi.fn(),
   logBookingConflict: vi.fn(),
@@ -142,8 +143,14 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
     }))
 
     mocks.professionalLocationFindFirst.mockResolvedValue({
-      id: 'loc_1',
       bufferMinutes: 15,
+    })
+
+    // Two bookable locations, the larger buffer being 40 — the value an
+    // UNSCOPED block must take (see `resolveBlockScope`).
+    mocks.professionalLocationAggregate.mockResolvedValue({
+      _count: { _all: 2 },
+      _max: { bufferMinutes: 40 },
     })
 
     mocks.calendarBlockCreate.mockResolvedValue({
@@ -203,6 +210,7 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
           tx: {
             professionalLocation: {
               findFirst: typeof mocks.professionalLocationFindFirst
+              aggregate: typeof mocks.professionalLocationAggregate
             }
             calendarBlock: {
               create: typeof mocks.calendarBlockCreate
@@ -213,6 +221,7 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
         const tx = {
           professionalLocation: {
             findFirst: mocks.professionalLocationFindFirst,
+            aggregate: mocks.professionalLocationAggregate,
           },
           calendarBlock: {
             create: mocks.calendarBlockCreate,
@@ -248,7 +257,18 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
     })
   })
 
-  it('returns 400 with a local code when locationId is missing', async () => {
+  it('creates an UNSCOPED block when no locationId is named', async () => {
+    // `CalendarBlock.locationId` is nullable and null means "blocks all
+    // locations". An omitted (or explicitly null) locationId is that scope, not
+    // a missing field — this used to be a guaranteed 400.
+    mocks.calendarBlockCreate.mockResolvedValueOnce({
+      id: 'block_global',
+      startsAt: new Date('2026-03-11T17:00:00.000Z'),
+      endsAt: new Date('2026-03-11T18:00:00.000Z'),
+      note: null,
+      locationId: null,
+    })
+
     const result = await POST(
       makeRequest({
         startsAt: '2026-03-11T17:00:00.000Z',
@@ -256,18 +276,96 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
       }),
     )
 
-    expect(mocks.withLockedProfessionalTransaction).not.toHaveBeenCalled()
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      400,
-      'Blocked time requires a locationId.',
-      { code: 'LOCATION_ID_REQUIRED' },
+    // No single location to look up; the buffer comes from the MAX across the
+    // pro's bookable locations, and that query doubles as the existence guard.
+    expect(mocks.professionalLocationFindFirst).not.toHaveBeenCalled()
+    expect(mocks.professionalLocationAggregate).toHaveBeenCalledWith({
+      where: {
+        professionalId: 'pro_123',
+        isBookable: true,
+      },
+      _count: { _all: true },
+      _max: { bufferMinutes: true },
+    })
+
+    expect(mocks.getTimeRangeConflict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        professionalId: 'pro_123',
+        // Null here is what makes the gate check EVERY location.
+        locationId: null,
+        defaultBufferMinutes: 40,
+      }),
     )
+
+    expect(mocks.calendarBlockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ locationId: null }),
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      status: 201,
+      data: {
+        block: {
+          id: 'block_global',
+          startsAt: '2026-03-11T17:00:00.000Z',
+          endsAt: '2026-03-11T18:00:00.000Z',
+          note: null,
+          locationId: null,
+        },
+      },
+    })
+  })
+
+  it('refuses an EMPTY-STRING locationId rather than treating it as global', async () => {
+    // Blanket-blocking every location must be deliberate (null / omitted), not
+    // something a caller falls into by sending a blank string.
+    const result = await POST(
+      makeRequest({
+        locationId: '   ',
+        startsAt: '2026-03-11T17:00:00.000Z',
+        endsAt: '2026-03-11T18:00:00.000Z',
+      }),
+    )
+
+    expect(mocks.withLockedProfessionalTransaction).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: false,
       status: 400,
-      error: 'Blocked time requires a locationId.',
+      error: 'Invalid locationId.',
       extra: {
-        code: 'LOCATION_ID_REQUIRED',
+        code: 'INVALID_LOCATION_ID',
+      },
+    })
+  })
+
+  it('refuses an unscoped block from a pro with no bookable location', async () => {
+    // The existence guard that replaces "this location is yours and bookable"
+    // when there is no location to name.
+    mocks.professionalLocationAggregate.mockResolvedValueOnce({
+      _count: { _all: 0 },
+      _max: { bufferMinutes: null },
+    })
+
+    const result = await POST(
+      makeRequest({
+        startsAt: '2026-03-11T17:00:00.000Z',
+        endsAt: '2026-03-11T18:00:00.000Z',
+        locationId: null,
+      }),
+    )
+
+    expect(mocks.getTimeRangeConflict).not.toHaveBeenCalled()
+    expect(mocks.calendarBlockCreate).not.toHaveBeenCalled()
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'Add a bookable location before blocking time.',
+      extra: {
+        code: 'NO_BOOKABLE_LOCATION',
       },
     })
   })
@@ -306,7 +404,6 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
         isBookable: true,
       },
       select: {
-        id: true,
         bufferMinutes: true,
       },
     })
@@ -505,7 +602,6 @@ describe('POST /api/v1/pro/calendar/blocked', () => {
         isBookable: true,
       },
       select: {
-        id: true,
         bufferMinutes: true,
       },
     })

@@ -8,7 +8,6 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
-import { bufferOrZero } from '@/lib/booking/conflicts'
 import {
   assertNoCalendarBlockConflict,
   hasBookingConflict,
@@ -21,6 +20,8 @@ import {
   getBookingFailPayload,
   isBookingError,
 } from '@/lib/booking/errors'
+
+import { resolveBlockScope } from '../_blockScope'
 
 import {
   parseNoteInput,
@@ -36,7 +37,6 @@ export const dynamic = 'force-dynamic'
 type BlockRouteLocalErrorCode =
   | 'BLOCK_ID_REQUIRED'
   | 'BLOCK_NOT_FOUND'
-  | 'BLOCK_LOCATION_MISSING'
   | 'BLOCK_LOCATION_NOT_FOUND'
   | 'INVALID_STARTS_AT'
   | 'INVALID_ENDS_AT'
@@ -163,7 +163,8 @@ function blockDeleteSuccess(args: {
 
 function logBlockUpdateConflict(args: {
   professionalId: string
-  locationId: string
+  /** Null for a block that scopes to every location. */
+  locationId: string | null
   requestedStart: Date
   requestedEnd: Date
   conflictType: BlockConflictType
@@ -189,7 +190,7 @@ function logBlockUpdateConflict(args: {
 
 function throwBlockedConflict(args: {
   professionalId: string
-  locationId: string
+  locationId: string | null
   requestedStart: Date
   requestedEnd: Date
   blockId: string
@@ -213,7 +214,7 @@ function throwBlockedConflict(args: {
 function handleCalendarBlockConflictError(args: {
   error: unknown
   professionalId: string
-  locationId: string
+  locationId: string | null
   requestedStart: Date
   requestedEnd: Date
   blockId: string
@@ -376,14 +377,6 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           })
         }
 
-        if (!existing.locationId) {
-          return blockUpdateFailure({
-            status: 400,
-            code: 'BLOCK_LOCATION_MISSING',
-            error: 'This block is missing a location and cannot be edited.',
-          })
-        }
-
         if (!hasStartsAt && !hasEndsAt && !noteInput.isSet) {
           return blockUpdateSuccess({
             status: 200,
@@ -405,19 +398,25 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           })
         }
 
-        const location = await tx.professionalLocation.findFirst({
-          where: {
-            id: existing.locationId,
-            professionalId,
-            isBookable: true,
-          },
-          select: {
-            id: true,
-            bufferMinutes: true,
-          },
+        // `mode: 'edit'` on purpose. This block already exists and already
+        // occupies the pro's time, so its location may since have been archived
+        // (`isBookable: false`) or hard-deleted (`onDelete: SetNull`, leaving
+        // `locationId: null`). Both used to refuse the edit — which stranded the
+        // block: still occupying time, still on the calendar, never movable
+        // again, with delete-and-recreate the only way out.
+        const scope = await resolveBlockScope({
+          tx,
+          professionalId,
+          locationId: existing.locationId,
+          mode: 'edit',
         })
 
-        if (!location) {
+        if (!scope.ok) {
+          // `mode: 'edit'` never answers NO_BOOKABLE_LOCATION (that guard is
+          // create-only), so the only failure reachable here is a block pointing
+          // at a location that is not this pro's — which the FK makes
+          // unreachable. Kept as a defensive refusal rather than defaulting the
+          // buffer behind a broken row.
           return blockUpdateFailure({
             status: 404,
             code: 'BLOCK_LOCATION_NOT_FOUND',
@@ -429,6 +428,8 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           await assertNoCalendarBlockConflict({
             tx,
             professionalId,
+            // Null keeps the unscoped block's own semantics: it conflicts with
+            // EVERY other block of this pro's, at any location.
             locationId: existing.locationId,
             requestedStart: startsAt,
             requestedEnd: endsAt,
@@ -445,9 +446,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           })
         }
 
-        const defaultBufferMinutes = bufferOrZero(
-          location.bufferMinutes,
-        )
+        const defaultBufferMinutes = scope.defaultBufferMinutes
 
         const bookingConflict = await hasBookingConflict({
           tx,

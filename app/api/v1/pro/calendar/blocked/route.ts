@@ -4,7 +4,6 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
-import { bufferOrZero } from '@/lib/booking/conflicts'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { withLockedProfessionalTransaction } from '@/lib/booking/scheduleTransaction'
@@ -13,6 +12,8 @@ import {
   getBookingFailPayload,
   isBookingError,
 } from '@/lib/booking/errors'
+
+import { resolveBlockScope } from './_blockScope'
 
 import {
   clampRange,
@@ -33,8 +34,8 @@ type BlockCollectionRouteLocalErrorCode =
   | 'INVALID_ENDS_AT'
   | 'INVALID_NOTE'
   | 'INVALID_LOCATION_ID'
-  | 'LOCATION_ID_REQUIRED'
   | 'BLOCK_LOCATION_NOT_FOUND'
+  | 'NO_BOOKABLE_LOCATION'
   | 'INVALID_BLOCK_WINDOW'
   | 'INTERNAL_ERROR'
 
@@ -132,7 +133,8 @@ function hasOwnField(
 
 function logBlockConflict(args: {
   professionalId: string
-  locationId: string
+  /** Null for a block that scopes to every location. */
+  locationId: string | null
   requestedStart: Date
   requestedEnd: Date
   conflictType: 'BLOCKED' | 'BOOKING' | 'HOLD'
@@ -258,47 +260,61 @@ export async function POST(req: Request) {
       })
     }
 
-    const locationId = locationIdInput.value
-    if (!locationId) {
-      return jsonFail(400, 'Blocked time requires a locationId.', {
-        code: 'LOCATION_ID_REQUIRED',
+    // An EMPTY STRING is not "all locations". The shared parser folds `''` to
+    // null because that is what an absent `?locationId=` query param means on
+    // GET — but on a WRITE, blanket-blocking every location has to be a
+    // deliberate choice (omit the field, or send null), never something a caller
+    // falls into by sending a blank. This input 400'd before the null scope was
+    // accepted, and it still does.
+    if (typeof body.locationId === 'string' && !locationIdInput.value) {
+      return jsonFail(400, 'Invalid locationId.', {
+        code: 'INVALID_LOCATION_ID',
       })
     }
+
+    // Null, though, IS a real scope rather than a missing field:
+    // `CalendarBlock.locationId` is nullable and null means "blocks all
+    // locations" (schema.prisma). The web modal's "Block all locations" checkbox
+    // posts exactly this and used to get a guaranteed 400 back.
+    const locationId = locationIdInput.value
 
     const professionalId = auth.professionalId
 
     const result = await withLockedProfessionalTransaction(
       professionalId,
       async ({ tx }): Promise<BlockCreateTransactionResult> => {
-        const location = await tx.professionalLocation.findFirst({
-          where: {
-            id: locationId,
-            professionalId,
-            isBookable: true,
-          },
-          select: {
-            id: true,
-            bufferMinutes: true,
-          },
+        const scope = await resolveBlockScope({
+          tx,
+          professionalId,
+          locationId,
+          mode: 'create',
         })
 
-        if (!location) {
-          return blockCreateFailure({
-            status: 404,
-            code: 'BLOCK_LOCATION_NOT_FOUND',
-            error: 'Location not found.',
-          })
+        if (!scope.ok) {
+          return scope.code === 'NO_BOOKABLE_LOCATION'
+            ? blockCreateFailure({
+                status: 409,
+                code: 'NO_BOOKABLE_LOCATION',
+                error: 'Add a bookable location before blocking time.',
+              })
+            : blockCreateFailure({
+                status: 404,
+                code: 'BLOCK_LOCATION_NOT_FOUND',
+                error: 'Location not found.',
+              })
         }
 
         const timeRangeConflict = await getTimeRangeConflict({
           tx,
           professionalId,
+          // Null here is what makes an unscoped block conflict EVERYWHERE:
+          // `buildCalendarBlockConflictWhere` drops its location filter, and
+          // the booking/hold checks were already pro-wide (the GIST constraint
+          // has no location term either).
           locationId,
           requestedStart: startsAt,
           requestedEnd: endsAt,
-          defaultBufferMinutes: bufferOrZero(
-            location.bufferMinutes,
-          ),
+          defaultBufferMinutes: scope.defaultBufferMinutes,
         })
 
         if (timeRangeConflict === 'BLOCKED') {
