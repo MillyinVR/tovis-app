@@ -25,7 +25,7 @@ import {
   badgeToneForBookingStatus,
   labelForBookingStatus,
 } from '@/lib/booking/statusLabel'
-import { RELATIONSHIP_BADGE_SELECT } from '@/lib/booking/relationshipLabel'
+import { CHART_BOOKING_SELECT } from '@/lib/clients/chartBookingSelect'
 import RelationshipBadgePill from '@/app/_components/RelationshipBadgePill'
 import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
 import {
@@ -139,42 +139,13 @@ const CLIENT_DETAIL_SELECT = {
   },
 } satisfies Prisma.ClientProfileSelect
 
+// The history rows this page renders are the SAME rows the native chart API
+// serves, so the column list lives in one place (lib/clients/chartBookingSelect).
+// `serviceId` is this page's only extra — it backs the MATCHES_MY_SERVICES
+// booking filter, which the native chart doesn't offer.
 const BOOKING_ROW_SELECT = {
-  id: true,
-  status: true,
-  // Relationship-badge input: only the K5 snapshot column, by design.
-  ...RELATIONSHIP_BADGE_SELECT,
-  scheduledFor: true,
-  locationTimeZone: true,
-  createdAt: true,
-  finishedAt: true,
-  totalDurationMinutes: true,
-  totalAmount: true,
-  subtotalSnapshot: true,
-  professionalId: true,
+  ...CHART_BOOKING_SELECT,
   serviceId: true,
-  service: {
-    select: {
-      name: true,
-      category: {
-        select: {
-          name: true,
-        },
-      },
-    },
-  },
-  professional: {
-    select: {
-      businessName: true,
-      firstName: true,
-      lastName: true,
-    },
-  },
-  aftercareSummary: {
-    select: {
-      notes: true,
-    },
-  },
 } satisfies Prisma.BookingSelect
 
 const PRODUCT_REC_SELECT = {
