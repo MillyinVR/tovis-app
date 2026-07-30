@@ -54,6 +54,12 @@ export default function CalendarSwatchPicker(props: {
     // A real radio group: native inputs give arrow-key navigation, a single tab
     // stop and correct grouping for free — a div of buttons gives none of that
     // without a roving-tabindex implementation.
+    //
+    // `disabled` is set on the fieldset AND on each input. The fieldset alone
+    // does bar its descendants, but only as inherited *state* — each input's
+    // own `disabled` property stays false, so anything reading the control
+    // rather than the group (a test, an a11y tool, a future refactor that
+    // unwraps the fieldset) would be told these are editable.
     <fieldset className="grid gap-2" disabled={disabled}>
       <legend className="text-[11px] font-black text-textSecondary">
         Calendar colour
@@ -66,6 +72,7 @@ export default function CalendarSwatchPicker(props: {
             name={name}
             className="peer sr-only"
             checked={value === null}
+            disabled={disabled}
             onChange={() => onChange(null)}
           />
 
@@ -93,6 +100,7 @@ export default function CalendarSwatchPicker(props: {
                 name={name}
                 className="peer sr-only"
                 checked={selected}
+                disabled={disabled}
                 onChange={() => onChange(id)}
                 aria-label={label}
               />
@@ -110,11 +118,11 @@ export default function CalendarSwatchPicker(props: {
                     : 'border-white/20 hover:border-white/40',
                 )}
                 style={{ background: `rgb(var(--swatch-${id}))` }}
-              >
-                {/* Non-colour confirmation of the selection, for anyone who
-                    cannot separate the ring from the chip. */}
-                <span className="sr-only">{selected ? 'Selected' : ''}</span>
-              </span>
+              />
+              {/* No sr-only "selected" text here on purpose: the input's own
+                  `checked` state is what a screen reader announces, and its
+                  `aria-label` overrides any label text anyway — a hidden span
+                  would be dead weight that reads as if it were doing work. */}
             </label>
           )
         })}
