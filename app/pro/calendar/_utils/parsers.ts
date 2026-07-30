@@ -34,6 +34,7 @@ import {
 } from '@/lib/calendar/constants'
 import { parsePaymentBadgeWire } from '@/lib/booking/paymentBadge'
 import { parseRelationshipBadgeWire } from '@/lib/booking/relationshipLabel'
+import { parseCalendarSwatch } from '@/lib/calendar/eventColor'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage } from '@/lib/http'
 import { pickBool, pickNumber, pickString } from '@/lib/pick'
@@ -440,6 +441,10 @@ function parseBookingEvent(
   const paymentBadge = parsePaymentBadgeWire(value.paymentBadge)
   // Same rule for the K5 relationship mark — unknown kind → no chip.
   const relationshipBadge = parseRelationshipBadgeWire(value.relationshipBadge)
+  // And for the K7 service colour: an id this build's palette doesn't define
+  // resolves to neutral (the stripe keeps its status tone) rather than to a
+  // data-swatch attribute the stylesheet silently ignores.
+  const serviceSwatch = parseCalendarSwatch(value.serviceSwatch)
 
   const event: BookingCalendarEvent = {
     kind: 'BOOKING',
@@ -471,6 +476,7 @@ function parseBookingEvent(
     ...(durationMinutes !== undefined ? { durationMinutes } : {}),
     ...(paymentBadge ? { paymentBadge } : {}),
     ...(relationshipBadge ? { relationshipBadge } : {}),
+    ...(serviceSwatch ? { serviceSwatch } : {}),
     ...(clientProfileId ? { clientProfileId } : {}),
     ...(preferenceLabel ? { preferenceLabel } : {}),
     ...(offerHref ? { offerHref } : {}),

@@ -22,6 +22,7 @@ import type {
 import type { PaymentBadge } from '@/lib/booking/paymentBadge'
 import type { RelationshipBadge } from '@/lib/booking/relationshipLabel'
 import type { TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
+import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
 
 export type ProCalendarServiceItemDTO = {
   id: string
@@ -70,6 +71,18 @@ export type ProCalendarBookingEventDTO = {
    * from live history. iOS renders label/description verbatim (K6).
    */
   relationshipBadge: RelationshipBadge
+  /**
+   * The pro's colour for this booking's service (K7), resolved by the one
+   * helper (lib/calendar/eventColor.ts) and painted on the card's 4px accent
+   * stripe — the SERVICE channel, while status keeps the fill (decision D2).
+   *
+   * OPTIONAL, and absent on every booking today: the swatch a pro picks is
+   * stored on `ProfessionalServiceOffering` by K8, so until then nothing has a
+   * colour of its own and the stripe keeps its status tone. Absent must always
+   * mean neutral, never a default hue — a colour nobody chose is a lie about
+   * which service this is.
+   */
+  serviceSwatch?: CalendarSwatchId
   details: ProCalendarEventDetailsDTO
 }
 

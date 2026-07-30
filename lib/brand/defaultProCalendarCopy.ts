@@ -201,6 +201,12 @@ export function defaultProCalendarCopy(
     // own, that phrase named a *live session* on one row and a *hold* on this
     // one. "Checkout" keeps B5's anonymity and says which of the two it is.
     held: 'Checkout in progress',
+    // The channel key (K7). "Confirmed"/"Pending request"/… below are what the
+    // card FILL says; this line is what the fill IS. Decision D2 keeps status
+    // on the fill and gives service the stripe, so these two never swap without
+    // this copy swapping with them.
+    fillChannel: 'Card colour · booking status',
+    stripeChannel: 'Side stripe · service colour',
   },
 
   emptyState: {

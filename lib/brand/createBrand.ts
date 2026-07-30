@@ -6,7 +6,12 @@
 // typography, layout, and the shared pro-calendar product copy). See
 // docs/design/white-label-runbook.md and lib/brand/brands/_template.ts.
 import type { BrandConfig, BrandMode, BrandTokens, RgbTriplet } from './types'
-import { DEFAULT_LAYOUT, DEFAULT_TYPOGRAPHY, defaultEffects } from './defaults'
+import {
+  DEFAULT_CALENDAR_SWATCHES,
+  DEFAULT_LAYOUT,
+  DEFAULT_TYPOGRAPHY,
+  defaultEffects,
+} from './defaults'
 import { defaultProCalendarCopy } from './defaultProCalendarCopy'
 
 export type CreateBrandInput = {
@@ -22,6 +27,15 @@ export type CreateBrandInput = {
   // ── Optional overrides (rarely needed) ──────────────────────────────
   /** Shadow tint; defaults to the dark background (deep-ink shadows). */
   shadowColor?: RgbTriplet
+  /**
+   * Per-service calendar swatches (K7). Defaults to the shared twelve-hue
+   * palette, which is already contrast-tuned for both modes — override only
+   * with a full replacement set that has been checked the same way.
+   */
+  calendarSwatches?: {
+    dark: BrandTokens['calendarSwatches']
+    light: BrandTokens['calendarSwatches']
+  }
   typography?: Partial<BrandTokens['typography']>
   layout?: Partial<BrandTokens['layout']>
   effects?: {
@@ -39,6 +53,8 @@ export function createBrandConfig(input: CreateBrandInput): BrandConfig {
 
   const buildTokens = (mode: BrandMode): BrandTokens => ({
     colors: input.colors[mode],
+    calendarSwatches:
+      input.calendarSwatches?.[mode] ?? DEFAULT_CALENDAR_SWATCHES[mode],
     effects: { ...defaultEffects(mode, shadowColor), ...input.effects?.[mode] },
     typography,
     layout,

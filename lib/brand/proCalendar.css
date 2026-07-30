@@ -789,6 +789,15 @@
   text-transform: uppercase;
 }
 
+/* Names the CHANNEL the tones below belong to (K7) — the fill means status,
+   the stripe means service. Sits between the title and the tone list. */
+.brand-pro-calendar-legend-channel {
+  margin-bottom: 10px;
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+  line-height: 1.3;
+}
+
 .brand-pro-calendar-legend-list {
   display: grid;
   gap: 8px;
@@ -838,6 +847,18 @@
 .brand-pro-calendar-legend-dot[data-tone="blocked"],
 .brand-pro-calendar-legend-dot[data-tone="muted"] {
   background: rgb(var(--text-muted));
+}
+
+/* The SERVICE channel's key (K7). It stands for the whole twelve-swatch
+   palette rather than one colour, so it reads as a spectrum — a single hue here
+   would name one service and mislead about the other eleven. */
+.brand-pro-calendar-legend-dot[data-tone="service"] {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--swatch-05)),
+    rgb(var(--swatch-08)),
+    rgb(var(--swatch-11))
+  );
 }
 
 .brand-pro-calendar-legend-label {
@@ -1049,6 +1070,34 @@
 .brand-pro-calendar-event-accent[data-tone="held"] {
   background: rgb(var(--tone-pending));
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   The SERVICE channel (K7).
+
+   One meaning per visual channel, or four colour dimensions fight over one
+   card: the fill + border carry booking STATUS, this 4px stripe carries the
+   pro's colour for the SERVICE, location/relationship/payment are text chips,
+   and client confirmation (K11) is a glyph — decisions D2 + D3.
+
+   These rules must stay AFTER the [data-tone] block above: both are
+   `.class[attr]` (specificity 0,2,0), so source order decides, and a booking
+   with a swatch must beat its status tone here. A booking with no swatch emits
+   no data-swatch at all, so the stripe renders exactly as it did before K7 —
+   which is every booking until the picker lands in K8.
+────────────────────────────────────────────────────────────────── */
+
+.brand-pro-calendar-event-accent[data-swatch="01"] { background: rgb(var(--swatch-01)); }
+.brand-pro-calendar-event-accent[data-swatch="02"] { background: rgb(var(--swatch-02)); }
+.brand-pro-calendar-event-accent[data-swatch="03"] { background: rgb(var(--swatch-03)); }
+.brand-pro-calendar-event-accent[data-swatch="04"] { background: rgb(var(--swatch-04)); }
+.brand-pro-calendar-event-accent[data-swatch="05"] { background: rgb(var(--swatch-05)); }
+.brand-pro-calendar-event-accent[data-swatch="06"] { background: rgb(var(--swatch-06)); }
+.brand-pro-calendar-event-accent[data-swatch="07"] { background: rgb(var(--swatch-07)); }
+.brand-pro-calendar-event-accent[data-swatch="08"] { background: rgb(var(--swatch-08)); }
+.brand-pro-calendar-event-accent[data-swatch="09"] { background: rgb(var(--swatch-09)); }
+.brand-pro-calendar-event-accent[data-swatch="10"] { background: rgb(var(--swatch-10)); }
+.brand-pro-calendar-event-accent[data-swatch="11"] { background: rgb(var(--swatch-11)); }
+.brand-pro-calendar-event-accent[data-swatch="12"] { background: rgb(var(--swatch-12)); }
 
 /* ──────────────────────────────────────────────────────────────────
    Mobile floating actions

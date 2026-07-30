@@ -4,6 +4,7 @@ import type { IanaTimeZone } from '@/lib/timeZone'
 import type { PaymentBadge } from '@/lib/booking/paymentBadge'
 import type { RelationshipBadge } from '@/lib/booking/relationshipLabel'
 import type { CalendarScopeMode } from '@/lib/calendar/constants'
+import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
 
 export type ViewMode = 'day' | 'week' | 'month'
 export type EntityType = 'booking' | 'block'
@@ -181,6 +182,15 @@ export type BookingCalendarEvent = CalendarEventBase & {
    * omits the chip then (and UNKNOWN is insignificant, so it never renders).
    */
   relationshipBadge?: RelationshipBadge
+
+  /**
+   * The pro's colour for this booking's service (K7), resolved server-side by
+   * lib/calendar/eventColor.ts and painted on the card's 4px accent stripe —
+   * the SERVICE channel. Absent means neutral: the stripe keeps its status
+   * tone, which is every booking today, because the swatch a pro picks is
+   * stored by K8.
+   */
+  serviceSwatch?: CalendarSwatchId
 
   /**
    * ClientProfile id, present only when the viewing pro may open this client's

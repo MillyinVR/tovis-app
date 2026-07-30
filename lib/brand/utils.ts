@@ -6,7 +6,7 @@ function rgbChannels(value: RgbTriplet): string {
 }
 
 export function toCssVars(tokens: BrandTokens): Record<string, string> {
-  const { colors, effects, typography, layout } = tokens
+  const { colors, calendarSwatches, effects, typography, layout } = tokens
 
   // CSS rgba() needs comma-separated channels.
   // Brand tokens store RGB as space-separated triplets: "244 239 231".
@@ -14,7 +14,18 @@ export function toCssVars(tokens: BrandTokens): Record<string, string> {
   const shadowRgb = rgbChannels(effects.shadowColor)
   const accentRgb = rgbChannels(colors.accentPrimary)
 
+  // Per-service calendar swatches → --swatch-01 … --swatch-12 (K7). Emitted
+  // from the token set like every other colour, so they flip with [data-mode]
+  // and a white-label brand can repaint them.
+  const swatchVars: Record<string, string> = {}
+
+  for (const [id, triplet] of Object.entries(calendarSwatches)) {
+    swatchVars[`--swatch-${id}`] = triplet
+  }
+
   return {
+    ...swatchVars,
+
     // ── Semantic names used by existing components ────────────────
     '--bg-primary': colors.bgPrimary,
     '--bg-secondary': colors.bgSecondary,

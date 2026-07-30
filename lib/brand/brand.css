@@ -93,6 +93,28 @@
   --tone-success: var(--color-fern);
   --tone-info: var(--accent-primary);
 
+  /* Per-service calendar swatches (K7) — the DARK fallback, like every token
+     in this :root block. BrandProvider emits the real per-mode pair from
+     lib/brand/defaults.ts (DEFAULT_CALENDAR_SWATCHES), so these flip with
+     [data-mode] and a white-label brand can repaint them.
+
+     🔴 A dedicated palette on purpose: every hue above is semantically loaded
+     (--tone-pending IS amber, --tone-danger IS ember), so a service coloured
+     amber would read as "pending". These paint ONE channel — the event card's
+     4px accent stripe — while status keeps the card fill (decision D2). */
+  --swatch-01: 247 101 96;
+  --swatch-02: 222 123 41;
+  --swatch-03: 185 143 41;
+  --swatch-04: 136 158 40;
+  --swatch-05: 45 170 94;
+  --swatch-06: 45 166 152;
+  --swatch-07: 45 162 186;
+  --swatch-08: 44 155 234;
+  --swatch-09: 125 141 245;
+  --swatch-10: 182 120 245;
+  --swatch-11: 247 66 239;
+  --swatch-12: 247 92 163;
+
   /* Prototype aliases / migration aliases */
   --ink: var(--bg-primary);
   --ink-2: var(--bg-secondary);
