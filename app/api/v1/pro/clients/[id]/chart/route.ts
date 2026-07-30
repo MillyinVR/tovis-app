@@ -20,6 +20,8 @@ import {
   computeRelationshipIntelligence,
   formatRelationshipIntelligence,
 } from '@/lib/clients/relationshipIntelligence'
+import { deriveRelationshipBadge } from '@/lib/booking/relationshipLabel'
+import { CHART_BOOKING_SELECT } from '@/lib/clients/chartBookingSelect'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { decimalToNullableNumber } from '@/lib/booking/snapshots'
@@ -57,21 +59,10 @@ const CLIENT_SELECT = {
   },
 } satisfies Prisma.ClientProfileSelect
 
-const BOOKING_SELECT = {
-  id: true,
-  status: true,
-  scheduledFor: true,
-  createdAt: true, // relationship-intelligence lead time = scheduledFor − createdAt
-  locationTimeZone: true,
-  finishedAt: true,
-  totalDurationMinutes: true,
-  totalAmount: true,
-  subtotalSnapshot: true,
-  professionalId: true,
-  service: { select: { name: true, category: { select: { name: true } } } },
-  professional: { select: { businessName: true, firstName: true, lastName: true } },
-  aftercareSummary: { select: { notes: true } },
-} satisfies Prisma.BookingSelect
+// Booking history rows come from the shared chart select — the web chart page
+// reads the SAME shape, so a column added for one surface can't go missing on
+// the other (that drift is how this route came to lack K5's mark).
+const BOOKING_SELECT = CHART_BOOKING_SELECT
 
 const PRODUCT_SELECT = {
   id: true,
@@ -295,6 +286,13 @@ export async function GET(_req: Request, ctx: RouteContext) {
         categoryName: b.service?.category?.name ?? null,
         proName: proName(b.professional),
         isMine: b.professionalId === proId,
+        // K5 mark, sent ONLY on the viewing pro's own rows — it answers "did
+        // this client request ME, and had I seen them before?", so on another
+        // pro's booking it would misread. Web's chart page gates the same way
+        // at render; the API gates at the SOURCE so no client can render a mark
+        // that was never about them. null ⇒ nothing to show.
+        relationshipBadge:
+          b.professionalId === proId ? deriveRelationshipBadge(b) : null,
         total: moneyToString(b.totalAmount ?? b.subtotalSnapshot) ?? null,
         aftercareNotes: pickString(b.aftercareSummary?.notes),
       })),

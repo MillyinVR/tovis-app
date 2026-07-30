@@ -64,6 +64,16 @@
       ],
       "type": "string"
     },
+    "$Enums.ClientRelationshipLabel": {
+      "enum": [
+        "UNKNOWN",
+        "NR",
+        "NNR",
+        "RR",
+        "RNR"
+      ],
+      "type": "string"
+    },
     "$Enums.DevicePlatform": {
       "enum": [
         "IOS",
@@ -1737,6 +1747,18 @@
       },
       "type": "object"
     },
+    "BadgeTone": {
+      "enum": [
+        "neutral",
+        "accent",
+        "danger",
+        "success",
+        "warn",
+        "info",
+        "pending"
+      ],
+      "type": "string"
+    },
     "BoardType": {
       "$ref": "#/definitions/%24Enums.BoardType"
     },
@@ -1958,11 +1980,54 @@
       ],
       "type": "object"
     },
+    "BookingLocationMeta": {
+      "properties": {
+        "formattedAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isMobile": {
+          "type": "boolean"
+        },
+        "lat": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lng": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "formattedAddress",
+        "lat",
+        "lng",
+        "isMobile"
+      ],
+      "type": "object"
+    },
     "BookingServiceItemType": {
       "$ref": "#/definitions/%24Enums.BookingServiceItemType"
     },
     "BookingStatus": {
       "$ref": "#/definitions/%24Enums.BookingStatus"
+    },
+    "BookingsListStatusFilter": {
+      "enum": [
+        "ALL",
+        "PENDING",
+        "ACCEPTED",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "CANCELLED"
+      ],
+      "type": "string"
     },
     "ChannelPreferenceState": {
       "description": "Read/write surface for the *NotificationPreference tables. The delivery engine already consumes these rows (see channelPolicy.ts); this module only lets a user view and edit their own rows. It changes no policy default.\n\nQuiet hours are stored per-eventKey on every preference row, so a single user-facing window is written uniformly across all of an owner's rows.\n\nTo tell \"never configured\" apart from \"explicitly turned off\", we use a sentinel the engine already treats as no-quiet-hours: equal start/end minutes (channelPolicy.isWithinQuietHours returns false when start === end). So:   - both null               → never configured → UI default ON (22:00–08:00)   - start === end (e.g. 0)  → explicitly OFF   - start !== end           → explicitly ON with that window",
@@ -5922,6 +5987,9 @@
       ],
       "type": "object"
     },
+    "ClientRelationshipLabel": {
+      "$ref": "#/definitions/%24Enums.ClientRelationshipLabel"
+    },
     "ClientReviewMediaAssetSummaryDTO": {
       "properties": {
         "createdAt": {
@@ -9277,6 +9345,46 @@
       ],
       "type": "object"
     },
+    "PaymentBadge": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/PaymentBadgeKind"
+        },
+        "label": {
+          "description": "Ready-to-render wording — iOS shows this string verbatim (K2 parity).",
+          "type": "string"
+        },
+        "significant": {
+          "description": "false only for UNPAID: dense surfaces (the calendar card) skip the badge there — a wall of \"Unpaid\" on every upcoming appointment is noise, and absence already reads as \"nothing collected\". List/detail surfaces may still render it. The DECISION lives here so surfaces can't drift on it.",
+          "type": "boolean"
+        },
+        "tone": {
+          "$ref": "#/definitions/BadgeTone"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "tone",
+        "significant"
+      ],
+      "type": "object"
+    },
+    "PaymentBadgeKind": {
+      "enum": [
+        "UNPAID",
+        "DEPOSIT_DUE",
+        "DEPOSIT_PAID",
+        "PREPAID_IN_FULL",
+        "PARTIALLY_PAID",
+        "AWAITING_CONFIRMATION",
+        "PAID",
+        "WAIVED",
+        "REFUNDED",
+        "DISPUTED"
+      ],
+      "type": "string"
+    },
     "PaymentMethod": {
       "$ref": "#/definitions/%24Enums.PaymentMethod"
     },
@@ -9400,6 +9508,136 @@
         "to",
         "days",
         "openSlots"
+      ],
+      "type": "object"
+    },
+    "ProBookingListItemDTO": {
+      "properties": {
+        "addOnNames": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "client": {
+          "properties": {
+            "canViewClient": {
+              "type": "boolean"
+            },
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fullName": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "phone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "fullName",
+            "email",
+            "phone",
+            "canViewClient"
+          ],
+          "type": "object"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/definitions/BookingLocationMeta"
+        },
+        "needsCloseout": {
+          "type": "boolean"
+        },
+        "paymentBadge": {
+          "$ref": "#/definitions/PaymentBadge",
+          "description": "At-a-glance payment state (deposit / paid / disputed …), computed by THE one helper (lib/booking/paymentBadge.ts) — iOS renders `label`/`tone` verbatim, never recomputing them on device (K1/K2)."
+        },
+        "relationshipBadge": {
+          "$ref": "#/definitions/RelationshipBadge",
+          "description": "NR/NNR/RR/RNR client-relationship mark (K5), mapped from the per-booking SNAPSHOT column by lib/booking/relationshipLabel.ts — iOS renders `label`/`description` verbatim (K6). `significant: false` (UNKNOWN) rows render no chip anywhere."
+        },
+        "scheduledFor": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "sessionStep": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionStep"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/BookingStatus"
+        },
+        "statusLabel": {
+          "type": "string"
+        },
+        "timeZone": {
+          "type": "string"
+        },
+        "total": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "whenLabel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "statusLabel",
+        "paymentBadge",
+        "relationshipBadge",
+        "sessionStep",
+        "scheduledFor",
+        "timeZone",
+        "whenLabel",
+        "serviceName",
+        "addOnNames",
+        "durationMinutes",
+        "total",
+        "client",
+        "location",
+        "needsCloseout",
+        "startedAt",
+        "finishedAt"
       ],
       "type": "object"
     },
@@ -9777,6 +10015,69 @@
       ],
       "type": "object"
     },
+    "ProBookingsListResponse": {
+      "properties": {
+        "cancelled": {
+          "items": {
+            "$ref": "#/definitions/ProBookingListItemDTO"
+          },
+          "type": "array"
+        },
+        "past": {
+          "items": {
+            "$ref": "#/definitions/ProBookingListItemDTO"
+          },
+          "type": "array"
+        },
+        "scheduleTimeZone": {
+          "type": "string"
+        },
+        "stats": {
+          "properties": {
+            "inSession": {
+              "type": "number"
+            },
+            "paymentDue": {
+              "type": "number"
+            },
+            "today": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "today",
+            "inSession",
+            "paymentDue"
+          ],
+          "type": "object"
+        },
+        "statusFilter": {
+          "$ref": "#/definitions/BookingsListStatusFilter"
+        },
+        "today": {
+          "items": {
+            "$ref": "#/definitions/ProBookingListItemDTO"
+          },
+          "type": "array"
+        },
+        "upcoming": {
+          "items": {
+            "$ref": "#/definitions/ProBookingListItemDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "scheduleTimeZone",
+        "statusFilter",
+        "stats",
+        "today",
+        "upcoming",
+        "past",
+        "cancelled"
+      ],
+      "type": "object"
+    },
     "ProBusyDayDTO": {
       "description": "One calendar day's commitments in the requested timezone.",
       "properties": {
@@ -9796,6 +10097,637 @@
       "required": [
         "bookings",
         "blocked"
+      ],
+      "type": "object"
+    },
+    "ProCalendarBlockEventDTO": {
+      "properties": {
+        "blockId": {
+          "type": "string"
+        },
+        "clientName": {
+          "const": "Personal",
+          "type": "string"
+        },
+        "details": {
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "note"
+          ],
+          "type": "object"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "endsAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "BLOCK",
+          "type": "string"
+        },
+        "localDateKey": {
+          "type": "string"
+        },
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationType": {
+          "type": "null"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startsAt": {
+          "type": "string"
+        },
+        "status": {
+          "const": "BLOCKED",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "blockId",
+        "kind",
+        "startsAt",
+        "endsAt",
+        "title",
+        "clientName",
+        "status",
+        "note",
+        "locationType",
+        "locationId",
+        "durationMinutes",
+        "localDateKey",
+        "details"
+      ],
+      "type": "object"
+    },
+    "ProCalendarBookingEventDTO": {
+      "properties": {
+        "clientName": {
+          "type": "string"
+        },
+        "clientProfileId": {
+          "description": "ClientProfile id, present only when this pro is allowed to open the client's chart (see getVisibleClientIdSetForPro). null keeps the id from leaking so the name renders as plain text for anyone without access.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "details": {
+          "$ref": "#/definitions/ProCalendarEventDetailsDTO"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "endsAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "BOOKING",
+          "type": "string"
+        },
+        "localDateKey": {
+          "type": "string"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ServiceLocationType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "paymentBadge": {
+          "$ref": "#/definitions/PaymentBadge",
+          "description": "At-a-glance payment state (deposit / paid / disputed …), derived by THE one helper (lib/booking/paymentBadge.ts) so this card, the bookings list and iOS can never disagree about what the money is doing (K1)."
+        },
+        "relationshipBadge": {
+          "$ref": "#/definitions/RelationshipBadge",
+          "description": "NR/NNR/RR/RNR client-relationship mark (K5) — mapped from the SNAPSHOT column by the one helper (lib/booking/relationshipLabel.ts); never derived from live history. iOS renders label/description verbatim (K6)."
+        },
+        "startsAt": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/BookingStatus"
+        },
+        "timeZone": {
+          "type": "string"
+        },
+        "timeZoneSource": {
+          "$ref": "#/definitions/TimeZoneTruthSource"
+        },
+        "title": {
+          "type": "string"
+        },
+        "viewLocalDateKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "startsAt",
+        "endsAt",
+        "title",
+        "clientName",
+        "clientProfileId",
+        "status",
+        "locationType",
+        "locationId",
+        "durationMinutes",
+        "timeZone",
+        "timeZoneSource",
+        "localDateKey",
+        "viewLocalDateKey",
+        "paymentBadge",
+        "relationshipBadge",
+        "details"
+      ],
+      "type": "object"
+    },
+    "ProCalendarEventDTO": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ProCalendarBookingEventDTO"
+        },
+        {
+          "$ref": "#/definitions/ProCalendarBlockEventDTO"
+        },
+        {
+          "$ref": "#/definitions/ProCalendarHoldEventDTO"
+        }
+      ]
+    },
+    "ProCalendarEventDetailsDTO": {
+      "properties": {
+        "bufferMinutes": {
+          "type": "number"
+        },
+        "serviceItems": {
+          "items": {
+            "$ref": "#/definitions/ProCalendarServiceItemDTO"
+          },
+          "type": "array"
+        },
+        "serviceName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "serviceName",
+        "bufferMinutes",
+        "serviceItems"
+      ],
+      "type": "object"
+    },
+    "ProCalendarHoldEventDTO": {
+      "description": "A client's LIVE checkout reservation, shown so the pro's day tells the truth about what their time is doing. Before B5 the feed rendered BOOKING + BLOCK only, so a hold was invisible on the calendar AND in both overlap-warning surfaces that read this array — while the write path happily authorized a pro booking straight over it. [[reserving-a-slot-needs-a-surface]]\n\nDeliberately ANONYMOUS (Tori's call, 2026-07-25): no clientName, no clientProfileId, no service name. A hold means somebody is mid-checkout this minute; the pro needs to know the slot is spoken for, not who is hesitating over it. It carries no `blockId`/`waitlistEntryId` because nothing acts on it — it is a read-only occupancy segment that expires on its own.",
+      "properties": {
+        "clientName": {
+          "type": "string"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "endsAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "holdId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "HOLD",
+          "type": "string"
+        },
+        "localDateKey": {
+          "type": "string"
+        },
+        "locationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locationType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ServiceLocationType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startsAt": {
+          "type": "string"
+        },
+        "status": {
+          "const": "HELD",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "holdId",
+        "kind",
+        "startsAt",
+        "endsAt",
+        "title",
+        "clientName",
+        "status",
+        "locationType",
+        "locationId",
+        "durationMinutes",
+        "localDateKey",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "ProCalendarResponseDTO": {
+      "properties": {
+        "autoAcceptBookings": {
+          "type": "boolean"
+        },
+        "blockedMinutesToday": {
+          "type": "number"
+        },
+        "canMobile": {
+          "type": "boolean"
+        },
+        "canSalon": {
+          "type": "boolean"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/definitions/ProCalendarEventDTO"
+          },
+          "type": "array"
+        },
+        "location": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "timeZone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeZoneValid": {
+              "type": "boolean"
+            },
+            "type": {
+              "$ref": "#/definitions/ProfessionalLocationType",
+              "description": "The PRO location's kind (SALON / SUITE / MOBILE_BASE …) — a `ProfessionalLocationType`, NOT the `ServiceLocationType` an event's `locationType` carries. The two enums are neighbours and don't overlap fully; `SUITE` exists only here."
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "timeZone",
+            "timeZoneValid"
+          ],
+          "type": "object"
+        },
+        "management": {
+          "properties": {
+            "blockedToday": {
+              "items": {
+                "$ref": "#/definitions/ProCalendarEventDTO"
+              },
+              "type": "array"
+            },
+            "pendingRequests": {
+              "items": {
+                "$ref": "#/definitions/ProCalendarEventDTO"
+              },
+              "type": "array"
+            },
+            "todaysBookings": {
+              "items": {
+                "$ref": "#/definitions/ProCalendarEventDTO"
+              },
+              "type": "array"
+            },
+            "waitlistToday": {
+              "items": {
+                "$ref": "#/definitions/ProCalendarWaitlistEventDTO"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "todaysBookings",
+            "pendingRequests",
+            "waitlistToday",
+            "blockedToday"
+          ],
+          "type": "object"
+        },
+        "needsTimeZoneSetup": {
+          "type": "boolean"
+        },
+        "professionalId": {
+          "description": "The authed pro's own id — used by the waitlist \"Offer a time\" modal to query availability (GET /api/v1/availability/day) for a proposed slot.",
+          "type": "string"
+        },
+        "range": {
+          "properties": {
+            "clamped": {
+              "type": "boolean"
+            },
+            "effectiveTo": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string"
+            },
+            "maxDays": {
+              "type": "number"
+            },
+            "requestedTo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "requestedTo",
+            "effectiveTo",
+            "clamped",
+            "maxDays"
+          ],
+          "type": "object"
+        },
+        "scope": {
+          "$ref": "#/definitions/ProCalendarScopeDTO"
+        },
+        "stats": {
+          "$ref": "#/definitions/ProCalendarStatsDTO"
+        },
+        "timeZone": {
+          "type": "string"
+        },
+        "viewportTimeZone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "professionalId",
+        "scope",
+        "location",
+        "timeZone",
+        "viewportTimeZone",
+        "needsTimeZoneSetup",
+        "range",
+        "events",
+        "canSalon",
+        "canMobile",
+        "stats",
+        "blockedMinutesToday",
+        "autoAcceptBookings",
+        "management"
+      ],
+      "type": "object"
+    },
+    "ProCalendarScopeDTO": {
+      "description": "Which locations the events came from (K3). `LOCATION` means `location` is also the filter; `ALL` means it is ONLY the viewport anchor and the feed spans every location.\n\n🔴 A client that adopts `location.id` as its own selection must gate that on this field, or asking for ALL bounces straight back to one location ([[two-states-owning-one-selection]]). An ABSENT `scope` (a pre-K3 server) must be read as LOCATION — that server always filtered, and reading its answer as \"everything\" is the original bug inverted.",
+      "enum": [
+        "ALL",
+        "LOCATION"
+      ],
+      "type": "string"
+    },
+    "ProCalendarServiceItemDTO": {
+      "properties": {
+        "durationMinutes": {
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "price": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sortOrder": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "durationMinutes",
+        "price",
+        "sortOrder"
+      ],
+      "type": "object"
+    },
+    "ProCalendarStatsDTO": {
+      "properties": {
+        "availableHours": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "blockedHours": {
+          "type": "number"
+        },
+        "pendingRequests": {
+          "type": "number"
+        },
+        "todaysBookings": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "todaysBookings",
+        "availableHours",
+        "pendingRequests",
+        "blockedHours"
+      ],
+      "type": "object"
+    },
+    "ProCalendarWaitlistEventDTO": {
+      "description": "Synthetic BOOKING-kind event used only for the management.waitlistToday list. Waitlist entries are not real calendar occupancy, so this carries no location and a 'WAITLIST' status (part of the client BookingCalendarStatus union). It never enters the top-level `events` grid — only the management modal / stats tile.",
+      "properties": {
+        "clientName": {
+          "type": "string"
+        },
+        "clientProfileId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "details": {
+          "$ref": "#/definitions/ProCalendarEventDetailsDTO"
+        },
+        "durationMinutes": {
+          "type": "number"
+        },
+        "endsAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "BOOKING",
+          "type": "string"
+        },
+        "localDateKey": {
+          "type": "string"
+        },
+        "locationId": {
+          "type": "null"
+        },
+        "locationType": {
+          "type": "null"
+        },
+        "offerHref": {
+          "description": "Deep-link into the pre-filled new-booking flow (client + offering) so the pro can offer a matching slot. null when the pro has no active offering for the requested service.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offeringId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pendingOffer": {
+          "anyOf": [
+            {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "locationType": {
+                  "$ref": "#/definitions/ServiceLocationType"
+                },
+                "startsAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "startsAt",
+                "locationType"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A still-PENDING offer already sent for this entry, so the row can show \"Offer pending · <time>\" instead of the offer action. null when none outstanding."
+        },
+        "preferenceLabel": {
+          "description": "Human label for the client's preferred time (e.g. \"Any time\", \"Morning\", \"Jun 14\") shown in place of a concrete time on waitlist rows.",
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "startsAt": {
+          "type": "string"
+        },
+        "status": {
+          "const": "WAITLIST",
+          "type": "string"
+        },
+        "timeZone": {
+          "type": "string"
+        },
+        "timeZoneSource": {
+          "$ref": "#/definitions/TimeZoneTruthSource"
+        },
+        "title": {
+          "type": "string"
+        },
+        "viewLocalDateKey": {
+          "type": "string"
+        },
+        "waitlistEntryId": {
+          "description": "The underlying waitlist entry + service/offering, so the pro can open the availability-aware \"Offer a time\" modal and POST a proposed slot. (id here is the raw WaitlistEntry.id — the row's `id` field carries the \"waitlist:\" prefix.)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "startsAt",
+        "endsAt",
+        "title",
+        "clientName",
+        "clientProfileId",
+        "status",
+        "locationType",
+        "locationId",
+        "durationMinutes",
+        "timeZone",
+        "timeZoneSource",
+        "localDateKey",
+        "viewLocalDateKey",
+        "preferenceLabel",
+        "offerHref",
+        "waitlistEntryId",
+        "serviceId",
+        "offeringId",
+        "pendingOffer",
+        "details"
       ],
       "type": "object"
     },
@@ -12408,6 +13340,36 @@
     "ReceiptSource": {
       "$ref": "#/definitions/%24Enums.ReceiptSource"
     },
+    "RelationshipBadge": {
+      "properties": {
+        "description": {
+          "description": "Plain-words expansion (\"New client · requested you\") for tooltips and accessibility labels — the marks are shorthand and screen readers should not spell out bare letters.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ClientRelationshipLabel"
+        },
+        "label": {
+          "description": "The salon-book mark itself (\"NR\") — what the chip prints.",
+          "type": "string"
+        },
+        "significant": {
+          "description": "false only for UNKNOWN: an unclassified row renders NO chip anywhere — absence is the honest display for \"nobody recorded this\", and a wall of \"Unknown\" on imported history is noise. The DECISION lives here so surfaces can't drift on it.",
+          "type": "boolean"
+        },
+        "tone": {
+          "$ref": "#/definitions/BadgeTone"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "description",
+        "tone",
+        "significant"
+      ],
+      "type": "object"
+    },
     "ReminderLeadDTO": {
       "description": "A single configured reminder lead time, both as the scalar SSOT (minutes) and humanized/structured for display + editing.",
       "properties": {
@@ -12808,6 +13770,16 @@
         "createdAt"
       ],
       "type": "object"
+    },
+    "TimeZoneTruthSource": {
+      "enum": [
+        "BOOKING_SNAPSHOT",
+        "HOLD_SNAPSHOT",
+        "LOCATION",
+        "PROFESSIONAL",
+        "FALLBACK"
+      ],
+      "type": "string"
     },
     "UserDeviceDTO": {
       "properties": {

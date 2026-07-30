@@ -362,6 +362,35 @@ export type {
   SearchServicesResponseDto,
 } from '@/lib/search/contracts'
 
+// ── Pro calendar feed ─────────────────────────────────────────────────────────
+// GET /api/v1/pro/calendar. The route's response is `satisfies`-checked against
+// ProCalendarResponseDTO, so this barrel entry is what the iOS contract
+// validator measures the device's captured payload against.
+export type {
+  ProCalendarServiceItemDTO,
+  ProCalendarEventDetailsDTO,
+  ProCalendarBookingEventDTO,
+  ProCalendarWaitlistEventDTO,
+  ProCalendarBlockEventDTO,
+  ProCalendarHoldEventDTO,
+  ProCalendarEventDTO,
+  ProCalendarStatsDTO,
+  ProCalendarScopeDTO,
+  ProCalendarResponseDTO,
+} from '@/lib/dto/proCalendar'
+
+// ── Pro bookings list ─────────────────────────────────────────────────────────
+// The native pro bookings list (GET /api/v1/pro/bookings). Exported so the iOS
+// contract validator can check its fixture against the real shape — until now
+// `proBookingsList.json` was Swift-decoded only, which meant the K1 payment
+// badge and the K5 relationship mark rode the wire with no contract coverage
+// at all (K4-B / K5-B).
+export type {
+  BookingsListStatusFilter,
+  ProBookingListItemDTO,
+  ProBookingsListResponse,
+} from '@/lib/pro/proBookingsList'
+
 // ── Pro locations ─────────────────────────────────────────────────────────────
 export type {
   LocationType,
