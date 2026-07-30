@@ -1768,10 +1768,15 @@
   }
 }
 
-/* Payment state chip (K1) — tone comes from the wire badge's `tone`, one of the
-   app-wide Badge tones, so a disputed deposit reads danger here exactly like it
-   does on the bookings list. Tokens only; flips with [data-mode]. */
-.brand-pro-calendar-event-payment {
+/* Payment state chip (K1) and client-relationship mark (K5) — one visual
+   system: tone comes from the wire badge's `tone`, one of the app-wide Badge
+   tones, so a disputed deposit reads danger here exactly like it does on the
+   bookings list, and an NR mark reads accent like it does on the client chart.
+   Separate class names so tests and tooling can tell the chips apart; the
+   declarations are shared here so they cannot drift. Tokens only; flips with
+   [data-mode]. */
+.brand-pro-calendar-event-payment,
+.brand-pro-calendar-event-relationship {
   display: none;
   flex-shrink: 0;
   align-items: center;
@@ -1788,44 +1793,51 @@
   white-space: nowrap;
 }
 
-.brand-pro-calendar-event-payment[data-tone="pending"] {
+.brand-pro-calendar-event-payment[data-tone="pending"],
+.brand-pro-calendar-event-relationship[data-tone="pending"] {
   border-color: rgb(var(--tone-pending) / 0.35);
   background: rgb(var(--tone-pending) / 0.15);
   color: rgb(var(--tone-pending));
 }
 
-.brand-pro-calendar-event-payment[data-tone="warn"] {
+.brand-pro-calendar-event-payment[data-tone="warn"],
+.brand-pro-calendar-event-relationship[data-tone="warn"] {
   border-color: rgb(var(--tone-warn) / 0.35);
   background: rgb(var(--tone-warn) / 0.15);
   color: rgb(var(--tone-warn));
 }
 
-.brand-pro-calendar-event-payment[data-tone="success"] {
+.brand-pro-calendar-event-payment[data-tone="success"],
+.brand-pro-calendar-event-relationship[data-tone="success"] {
   border-color: rgb(var(--tone-success) / 0.35);
   background: rgb(var(--tone-success) / 0.15);
   color: rgb(var(--tone-success));
 }
 
-.brand-pro-calendar-event-payment[data-tone="info"] {
+.brand-pro-calendar-event-payment[data-tone="info"],
+.brand-pro-calendar-event-relationship[data-tone="info"] {
   border-color: rgb(var(--tone-info) / 0.35);
   background: rgb(var(--tone-info) / 0.15);
   color: rgb(var(--tone-info));
 }
 
-.brand-pro-calendar-event-payment[data-tone="danger"] {
+.brand-pro-calendar-event-payment[data-tone="danger"],
+.brand-pro-calendar-event-relationship[data-tone="danger"] {
   border-color: rgb(var(--tone-danger) / 0.35);
   background: rgb(var(--tone-danger) / 0.15);
   color: rgb(var(--tone-danger));
 }
 
-.brand-pro-calendar-event-payment[data-tone="accent"] {
+.brand-pro-calendar-event-payment[data-tone="accent"],
+.brand-pro-calendar-event-relationship[data-tone="accent"] {
   border-color: rgb(var(--accent-primary) / 0.35);
   background: rgb(var(--accent-primary) / 0.15);
   color: rgb(var(--accent-primary));
 }
 
 @media (min-width: 768px) {
-  .brand-pro-calendar-event-payment {
+  .brand-pro-calendar-event-payment,
+  .brand-pro-calendar-event-relationship {
     display: inline-flex;
   }
 }

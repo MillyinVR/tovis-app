@@ -32,6 +32,11 @@ import {
   derivePaymentBadge,
   type PaymentBadge,
 } from '@/lib/booking/paymentBadge'
+import {
+  RELATIONSHIP_BADGE_SELECT,
+  deriveRelationshipBadge,
+  type RelationshipBadge,
+} from '@/lib/booking/relationshipLabel'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
 export type BookingsListStatusFilter =
@@ -80,6 +85,8 @@ export const bookingsListSelect = {
   // derives from. Also supplies checkoutStatus/paymentCollectedAt/totalAmount,
   // which the bucketing + money math below read directly.
   ...PAYMENT_BADGE_SELECT,
+  // Relationship-badge input: only the K5 snapshot column, by design.
+  ...RELATIONSHIP_BADGE_SELECT,
   aftercareSummary: {
     select: {
       sentToClientAt: true,
@@ -365,6 +372,13 @@ export type ProBookingListItemDTO = {
    * verbatim, never recomputing them on device (K1/K2).
    */
   paymentBadge: PaymentBadge
+  /**
+   * NR/NNR/RR/RNR client-relationship mark (K5), mapped from the per-booking
+   * SNAPSHOT column by lib/booking/relationshipLabel.ts — iOS renders
+   * `label`/`description` verbatim (K6). `significant: false` (UNKNOWN) rows
+   * render no chip anywhere.
+   */
+  relationshipBadge: RelationshipBadge
   sessionStep: SessionStep | null
   scheduledFor: string
   timeZone: string
@@ -416,6 +430,7 @@ export function serializeBookingsListRow(
     status: booking.status,
     statusLabel: labelForBookingStatus(String(booking.status)),
     paymentBadge: derivePaymentBadge(booking),
+    relationshipBadge: deriveRelationshipBadge(booking),
     sessionStep: booking.sessionStep ?? null,
     scheduledFor: booking.scheduledFor.toISOString(),
     timeZone: safeTz,

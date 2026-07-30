@@ -8,6 +8,7 @@ import BookingActions from './BookingActions'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { moneyToString } from '@/lib/money'
 import { derivePaymentBadge } from '@/lib/booking/paymentBadge'
+import RelationshipBadgePill from '@/app/_components/RelationshipBadgePill'
 import {
   resolveBookingLocationMeta,
   type BookingLocationMeta,
@@ -375,6 +376,8 @@ function Section({
                       </h3>
 
                       <StatusPill status={booking.status} />
+
+                      <RelationshipBadgePill booking={booking} />
 
                       <PaymentPill booking={booking} />
 

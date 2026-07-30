@@ -24,6 +24,11 @@ import {
   derivePaymentBadge,
   type PaymentBadge,
 } from '@/lib/booking/paymentBadge'
+import {
+  RELATIONSHIP_BADGE_SELECT,
+  deriveRelationshipBadge,
+  type RelationshipBadge,
+} from '@/lib/booking/relationshipLabel'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import {
   resolveApptTimeZoneFromValues,
@@ -97,6 +102,10 @@ type BookingEvent = {
   // one helper (lib/booking/paymentBadge.ts) so this card, the bookings list
   // and iOS can never disagree about what the money is doing (K1).
   paymentBadge: PaymentBadge
+  // NR/NNR/RR/RNR client-relationship mark (K5) — mapped from the SNAPSHOT
+  // column by the one helper (lib/booking/relationshipLabel.ts); never derived
+  // from live history. iOS renders label/description verbatim (K6).
+  relationshipBadge: RelationshipBadge
   details: {
     serviceName: string
     bufferMinutes: number
@@ -293,6 +302,8 @@ const bookingSelect = {
   // Payment-badge inputs (deposit + checkout + dispute columns) — spread from
   // the helper's select so the badge can never miss a field it derives from.
   ...PAYMENT_BADGE_SELECT,
+  // Relationship-badge input: only the K5 snapshot column, by design.
+  ...RELATIONSHIP_BADGE_SELECT,
   client: {
     select: {
       id: true,
@@ -788,6 +799,7 @@ function toBookingEvent(args: {
     localDateKey,
     viewLocalDateKey,
     paymentBadge: derivePaymentBadge(booking),
+    relationshipBadge: deriveRelationshipBadge(booking),
     details: {
       serviceName,
       bufferMinutes,

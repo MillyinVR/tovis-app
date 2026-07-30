@@ -33,6 +33,7 @@ import {
   type CalendarScopeMode,
 } from '@/lib/calendar/constants'
 import { parsePaymentBadgeWire } from '@/lib/booking/paymentBadge'
+import { parseRelationshipBadgeWire } from '@/lib/booking/relationshipLabel'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage } from '@/lib/http'
 import { pickBool, pickNumber, pickString } from '@/lib/pick'
@@ -437,6 +438,8 @@ function parseBookingEvent(
   // Kind-validated against the canonical helper; a malformed wire value just
   // drops the chip rather than rendering a made-up money state.
   const paymentBadge = parsePaymentBadgeWire(value.paymentBadge)
+  // Same rule for the K5 relationship mark — unknown kind → no chip.
+  const relationshipBadge = parseRelationshipBadgeWire(value.relationshipBadge)
 
   const event: BookingCalendarEvent = {
     kind: 'BOOKING',
@@ -467,6 +470,7 @@ function parseBookingEvent(
     ...(viewLocalDateKey ? { viewLocalDateKey } : {}),
     ...(durationMinutes !== undefined ? { durationMinutes } : {}),
     ...(paymentBadge ? { paymentBadge } : {}),
+    ...(relationshipBadge ? { relationshipBadge } : {}),
     ...(clientProfileId ? { clientProfileId } : {}),
     ...(preferenceLabel ? { preferenceLabel } : {}),
     ...(offerHref ? { offerHref } : {}),

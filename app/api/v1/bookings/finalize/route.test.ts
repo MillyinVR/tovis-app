@@ -339,6 +339,7 @@ function makeExpectedFinalizeArgs(
     offering: finalizeOffering,
     discovery: overrides.discovery ?? {
       provenance: 'DIRECT_PROFILE',
+      relationshipLabel: 'NR',
       feeEligible: false,
       depositSettings: {
         depositEnabled: false,
@@ -537,6 +538,9 @@ describe('POST /api/v1/bookings/finalize', () => {
 
     mocks.resolveDiscoveryFinalize.mockResolvedValue({
       provenance: 'DIRECT_PROFILE',
+      // K5: the resolver derives the NR/NNR/RR/RNR snapshot and the boundary
+      // stamps it verbatim — the expected-args builder above must stay in sync.
+      relationshipLabel: 'NR',
       feeEligible: false,
       depositSettings: {
         depositEnabled: false,
