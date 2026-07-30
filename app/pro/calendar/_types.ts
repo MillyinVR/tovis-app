@@ -2,6 +2,7 @@
 
 import type { IanaTimeZone } from '@/lib/timeZone'
 import type { PaymentBadge } from '@/lib/booking/paymentBadge'
+import type { RelationshipBadge } from '@/lib/booking/relationshipLabel'
 import type { CalendarScopeMode } from '@/lib/calendar/constants'
 
 export type ViewMode = 'day' | 'week' | 'month'
@@ -172,6 +173,14 @@ export type BookingCalendarEvent = CalendarEventBase & {
    * value fails to parse — the card simply omits the chip then (K1).
    */
   paymentBadge?: PaymentBadge
+
+  /**
+   * NR/NNR/RR/RNR client-relationship mark (K5), mapped server-side from the
+   * per-booking SNAPSHOT column by lib/booking/relationshipLabel.ts. Absent on
+   * waitlist rows and when the wire value fails to parse — the card simply
+   * omits the chip then (and UNKNOWN is insignificant, so it never renders).
+   */
+  relationshipBadge?: RelationshipBadge
 
   /**
    * ClientProfile id, present only when the viewing pro may open this client's

@@ -229,6 +229,29 @@ function PaymentBadgeChip(props: { label: string; tone: string }) {
 }
 
 /**
+ * NR/NNR/RR/RNR client-relationship mark (K5) — the salon-book shorthand,
+ * mapped server-side from the per-booking snapshot. Same visual system as the
+ * payment chip (shared CSS declarations), its own class so the two stay
+ * distinguishable in the DOM. The chip prints the mark; the plain-words
+ * expansion rides `title` and the card's accessible name.
+ */
+function RelationshipBadgeChip(props: {
+  label: string
+  description: string
+  tone: string
+}) {
+  return (
+    <span
+      className="brand-pro-calendar-event-relationship"
+      data-tone={props.tone}
+      title={props.description}
+    >
+      {props.label}
+    </span>
+  )
+}
+
+/**
  * Which location this job is at, on a grid that mixes them.
  *
  * Deliberately TEXT, not a colour: status already owns the card's fill and the
@@ -332,11 +355,23 @@ export function EventCard(props: EventCardProps) {
       ? ev.paymentBadge
       : null
 
+  // Client-relationship mark (K5) — same significance gate: UNKNOWN (imported /
+  // pro-created / legacy rows) renders nothing, per the helper's call.
+  const relationshipBadge =
+    ev.kind === 'BOOKING' && ev.relationshipBadge?.significant
+      ? ev.relationshipBadge
+      : null
+
   const canDragOrResize = apiId !== null
   const baseLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
-  const withPayment = paymentBadge
-    ? `${baseLabel}, ${paymentBadge.label}`
+  // The accessible name spells the mark out ("Returning client · requested
+  // you") — screen readers shouldn't be handed bare letters.
+  const withRelationship = relationshipBadge
+    ? `${baseLabel}, ${relationshipBadge.description}`
     : baseLabel
+  const withPayment = paymentBadge
+    ? `${withRelationship}, ${paymentBadge.label}`
+    : withRelationship
   // Always in the accessible name, even where the chip is too small to render —
   // on a mixed-location grid, which location a job is at is not decoration.
   const withLocation = locationLabel
@@ -446,6 +481,14 @@ export function EventCard(props: EventCardProps) {
 
               {statusMeta.isPending ? (
                 <PendingBadge label={copy.statusLabels.pending} />
+              ) : null}
+
+              {relationshipBadge ? (
+                <RelationshipBadgeChip
+                  label={relationshipBadge.label}
+                  description={relationshipBadge.description}
+                  tone={relationshipBadge.tone}
+                />
               ) : null}
 
               {paymentBadge ? (

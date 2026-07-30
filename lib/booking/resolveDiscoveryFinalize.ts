@@ -16,6 +16,7 @@ import {
   BookingDiscoveryProvenance,
   BookingSource,
   BookingStatus,
+  ClientRelationshipLabel,
   LookPostStatus,
   ModerationStatus,
   ProClientInviteStatus,
@@ -23,6 +24,7 @@ import {
 
 import { prisma } from '@/lib/prisma'
 import { resolveDiscoveryProvenance } from '@/lib/booking/discoveryProvenance'
+import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
 import {
   isNewDiscoveryClient,
   resolveDiscoveryFeeCents,
@@ -48,6 +50,13 @@ const ESTABLISHED_BOOKING_STATUSES: BookingStatus[] = [
 
 export type FinalizeDiscoveryDirective = Readonly<{
   provenance: BookingDiscoveryProvenance
+  /**
+   * NR/NNR/RR/RNR mark to SNAPSHOT onto the booking (K5). Derived here — from
+   * the validated source axis and the same established-booking count the fee
+   * uses — so the label and the fee can never disagree about whether a client
+   * is "new". Stamped once by the write boundary, never re-derived at read time.
+   */
+  relationshipLabel: ClientRelationshipLabel
   /** New-via-discovery client + deposit-enabled, Stripe-ready pro => deposit + fee apply. */
   feeEligible: boolean
   depositSettings: DepositSettings
@@ -78,11 +87,13 @@ export async function resolveDiscoveryFinalize(args: {
   // Pro creation never routes through the client finalize endpoint.
   const baseDirective = (
     provenance: BookingDiscoveryProvenance,
+    relationshipLabel: ClientRelationshipLabel,
     feeEligible: boolean,
     depositSettings: DepositSettings,
     sourceLookPostId: string | null = null,
   ): FinalizeDiscoveryDirective => ({
     provenance,
+    relationshipLabel,
     feeEligible,
     depositSettings,
     discoveryFeeCents: feeCents,
@@ -97,8 +108,19 @@ export async function resolveDiscoveryFinalize(args: {
   }
 
   // Aftercare short-circuits: it's a rebook of an existing relationship, never a fee.
+  // The label is RR by definition (returning + rebooked this pro by name), so no
+  // history count is needed before the early return.
   if (args.aftercare || args.source === BookingSource.AFTERCARE) {
-    return baseDirective(BookingDiscoveryProvenance.AFTERCARE, false, disabledSettings)
+    return baseDirective(
+      BookingDiscoveryProvenance.AFTERCARE,
+      deriveClientRelationshipLabel({
+        source: BookingSource.AFTERCARE,
+        establishedBookingCount: 0,
+        proCreated: false,
+      }),
+      false,
+      disabledSettings,
+    )
   }
 
   const discoveryViewLookbackFrom = new Date(
@@ -222,6 +244,11 @@ export async function resolveDiscoveryFinalize(args: {
 
   const directive = baseDirective(
     provenance,
+    deriveClientRelationshipLabel({
+      source: args.source,
+      establishedBookingCount,
+      proCreated: false,
+    }),
     feeEligible,
     depositSettings,
     validLookPost.sourceLookPostId,

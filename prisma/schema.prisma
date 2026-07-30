@@ -58,6 +58,23 @@ enum BookingSource {
   IMPORTED // migrated from a competitor calendar; excluded from revenue until edited
 }
 
+// The classic salon-book client-relationship marks, snapshotted per booking
+// (K5, decision D1). Two axes: request-vs-discovery (BookingSource — a
+// server-validated trust boundary) × new-vs-return (the pair's established
+// booking history, same count the discovery fee uses). RNR is the Tovis-specific
+// fourth cell: a returning client who rebooked via discovery without asking for
+// this pro by name. SNAPSHOTTED once at create by the write boundary — never
+// derived at read time, or a client's third booking would retroactively rewrite
+// their first booking's label and the historical NR count (the number that says
+// whether marketing works) would silently drift. See lib/booking/relationshipLabel.ts.
+enum ClientRelationshipLabel {
+  UNKNOWN // imported / pro-created / legacy rows — never guessed (BookingSource defaults to DISCOVERY, which was never a real signal for these)
+  NR // new request: first booking together, client sought out THIS pro
+  NNR // new non-request: first booking together, arrived via discovery
+  RR // returning request: repeat client who sought out this pro (incl. aftercare rebooks)
+  RNR // returning non-request: repeat client who arrived via discovery again
+}
+
 enum BookingOverrideRule {
   ADVANCE_NOTICE
   MAX_DAYS_AHEAD
@@ -3259,6 +3276,12 @@ model Booking {
   // here at finalize — NEVER trusted from client input, because LOOKS_FEED /
   // DISCOVERY_SEARCH gate the one-time platform fee. See lib/booking/discoveryFee.ts.
   discoveryProvenance BookingDiscoveryProvenance @default(UNKNOWN)
+
+  // NR/NNR/RR/RNR salon-book mark, stamped once at create (same snapshot rule as
+  // discoveryProvenance). The default only covers rows that predate the column —
+  // history backfills to UNKNOWN rather than guessing; every write path stamps
+  // explicitly via lib/booking/relationshipLabel.ts.
+  clientRelationshipLabel ClientRelationshipLabel @default(UNKNOWN)
 
   // New-client deposit captured up front, as its OWN charge (distinct from the
   // final bill's stripe* fields). The deposit credits toward the final total.

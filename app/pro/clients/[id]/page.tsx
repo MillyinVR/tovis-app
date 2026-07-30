@@ -25,6 +25,8 @@ import {
   badgeToneForBookingStatus,
   labelForBookingStatus,
 } from '@/lib/booking/statusLabel'
+import { RELATIONSHIP_BADGE_SELECT } from '@/lib/booking/relationshipLabel'
+import RelationshipBadgePill from '@/app/_components/RelationshipBadgePill'
 import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
 import {
   isClientTechnicalRecordEnabled,
@@ -140,6 +142,8 @@ const CLIENT_DETAIL_SELECT = {
 const BOOKING_ROW_SELECT = {
   id: true,
   status: true,
+  // Relationship-badge input: only the K5 snapshot column, by design.
+  ...RELATIONSHIP_BADGE_SELECT,
   scheduledFor: true,
   locationTimeZone: true,
   createdAt: true,
@@ -847,6 +851,13 @@ function ServiceHistoryList({
                   </div>
 
                   <StatusPill status={booking.status} />
+
+                  {/* K5 mark, ONLY on the viewing pro's own rows: it answers
+                      "did this client request ME, and had I seen them before?",
+                      so on another pro's booking it would misread. */}
+                  {booking.professionalId === proId ? (
+                    <RelationshipBadgePill booking={booking} />
+                  ) : null}
                 </div>
 
                 <div className="mt-1 text-[12px] font-semibold text-textSecondary">
@@ -1507,7 +1518,7 @@ function SafetyStrip({ client }: { client: ClientDetailRecord }) {
       aria-label="Safety"
       className="tovis-glass rounded-card border border-toneWarn/30 bg-bgSecondary p-4"
     >
-      <div className="text-[11px] font-black uppercase tracking-[0.1em] text-textSecondary">
+      <div className="text-[11px] font-black uppercase tracking-widest text-textSecondary">
         Safety
       </div>
 
@@ -1592,7 +1603,7 @@ function IntelStat({
 }) {
   return (
     <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-      <div className="text-[10px] font-black uppercase tracking-[0.1em] text-textSecondary">
+      <div className="text-[10px] font-black uppercase tracking-widest text-textSecondary">
         {label}
       </div>
       <div className="mt-1 text-[15px] font-black text-textPrimary">{value}</div>

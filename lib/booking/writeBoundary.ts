@@ -11,6 +11,7 @@ import {
   BookingSource,
   BookingStatus,
   ClientAddressKind,
+  ClientRelationshipLabel,
   ConsultationApprovalProofMethod,
   ConsultationApprovalStatus,
   ConsultationDecision,
@@ -56,6 +57,7 @@ import {
   resolveProTenantId,
 } from '@/lib/tenant/bookingAttribution'
 import { upper } from '@/lib/booking/guards'
+import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
 import { clientCheckoutProductsEditBlockReason } from '@/lib/booking/checkoutProductsEditable'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import {
@@ -538,6 +540,9 @@ type FinalizeBookingFromHoldArgs = {
   // fee are computed from the service subtotal and recorded on the booking.
   discovery?: {
     provenance: BookingDiscoveryProvenance
+    // NR/NNR/RR/RNR mark to snapshot (K5) — derived by the resolver from the
+    // validated source axis + the same established-booking count the fee uses.
+    relationshipLabel: ClientRelationshipLabel
     feeEligible: boolean
     depositSettings: DepositSettings
     discoveryFeeCents: number
@@ -9684,6 +9689,11 @@ async function performLockedFinalizeBookingFromHold(args: {
         allowsOverlap: overlapDecision.allowsOverlap,
         source: args.source,
         discoveryProvenance,
+        // K5 snapshot: derived by the resolver alongside provenance (same
+        // established-booking count as the fee), stamped once here, never at
+        // read time. UNKNOWN only if a future caller skips the resolver.
+        clientRelationshipLabel:
+          args.discovery?.relationshipLabel ?? ClientRelationshipLabel.UNKNOWN,
         // Remix attribution: the validated look this booking was started from.
         sourceLookPostId: args.discovery?.sourceLookPostId ?? null,
         depositStatus: hasUpfrontCharge
@@ -10284,6 +10294,15 @@ async function performLockedCreateProBooking(args: {
         status: getProCreatedBookingStatus(),
         allowsOverlap: overlapDecision.allowsOverlap,
         source: importMode ? BookingSource.IMPORTED : BookingSource.DISCOVERY,
+        // K5 snapshot: UNKNOWN for both branches — imported history and
+        // pro-created rows (dashboard create, waitlist-offer + consultation
+        // materialization ride this path) are never guessed. The DISCOVERY in
+        // `source` above is only the column default, not a real signal.
+        clientRelationshipLabel: deriveClientRelationshipLabel({
+          source: importMode ? BookingSource.IMPORTED : BookingSource.DISCOVERY,
+          establishedBookingCount: 0,
+          proCreated: !importMode,
+        }),
         creationIdempotencyKey: args.idempotencyKey ?? null,
 
         locationType: args.locationType,
@@ -11027,6 +11046,14 @@ assertCanCreateRebookFromSourceBooking({
         status: args.initialStatus,
         allowsOverlap: overlapDecision.allowsOverlap,
         source: BookingSource.AFTERCARE,
+        // K5 snapshot: an aftercare rebook is RR by definition — a returning
+        // client who rebooked THIS pro by name. Derived by the one helper so
+        // the mapping can't drift from the finalize path's.
+        clientRelationshipLabel: deriveClientRelationshipLabel({
+          source: BookingSource.AFTERCARE,
+          establishedBookingCount: 0,
+          proCreated: false,
+        }),
         rebookOfBookingId: source.id,
 
         locationType: effectiveLocationType,
