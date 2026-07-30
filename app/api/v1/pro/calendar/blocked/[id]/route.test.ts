@@ -319,6 +319,117 @@ describe('PATCH /api/v1/pro/calendar/blocked/[id]', () => {
     )
   })
 
+  it('does NOT touch the location when the patch does not name one', async () => {
+    // The silent-widening risk: a plain time edit must leave the scope alone.
+    // If an absent `locationId` read as null, every time edit would quietly turn
+    // a location-scoped block into a block on every location.
+    await PATCH(
+      makePatchRequest({
+        startsAt: '2026-03-11T19:00:00.000Z',
+        endsAt: '2026-03-11T20:00:00.000Z',
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.calendarBlockUpdate).toHaveBeenCalledTimes(1)
+    const data = mocks.calendarBlockUpdate.mock.calls[0]?.[0]?.data
+    expect(data).not.toHaveProperty('locationId')
+
+    // …and the conflict checks still run under the STORED scope.
+    expect(mocks.assertNoCalendarBlockConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ locationId: 'loc_1' }),
+    )
+  })
+
+  it('re-scopes a block to another location, authorizing it like a create', async () => {
+    mocks.professionalLocationFindFirst.mockResolvedValueOnce({
+      bufferMinutes: 30,
+    })
+
+    await PATCH(makePatchRequest({ locationId: 'loc_2' }), makeCtx())
+
+    // Authorized like a create: it must be one of THIS pro's BOOKABLE locations.
+    expect(mocks.professionalLocationFindFirst).toHaveBeenCalledWith({
+      where: { id: 'loc_2', professionalId: 'pro_123', isBookable: true },
+      select: { bufferMinutes: true },
+    })
+
+    // Conflicts re-checked under the NEW scope, and the new location's buffer.
+    expect(mocks.assertNoCalendarBlockConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ locationId: 'loc_2', excludeBlockId: 'block_1' }),
+    )
+    expect(mocks.hasHoldConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultBufferMinutes: 30 }),
+    )
+
+    expect(mocks.calendarBlockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { locationId: 'loc_2' },
+      }),
+    )
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_123')
+  })
+
+  it('re-scopes a block to ALL locations on an explicit null', async () => {
+    await PATCH(makePatchRequest({ locationId: null }), makeCtx())
+
+    // No single location to authorize; the unscoped guard runs instead.
+    expect(mocks.professionalLocationFindFirst).not.toHaveBeenCalled()
+    expect(mocks.professionalLocationAggregate).toHaveBeenCalled()
+
+    // Widening has to be checked against EVERY block of this pro's.
+    expect(mocks.assertNoCalendarBlockConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ locationId: null }),
+    )
+    expect(mocks.calendarBlockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { locationId: null } }),
+    )
+  })
+
+  it('refuses re-scoping to a location that is not this pro’s', async () => {
+    mocks.professionalLocationFindFirst.mockResolvedValueOnce(null)
+
+    const result = await PATCH(
+      makePatchRequest({ locationId: 'loc_someone_else' }),
+      makeCtx(),
+    )
+
+    expect(mocks.calendarBlockUpdate).not.toHaveBeenCalled()
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      ok: false,
+      status: 404,
+      error: 'Location not found.',
+      code: 'BLOCK_LOCATION_NOT_FOUND',
+    })
+  })
+
+  it('refuses a blank locationId rather than reading it as "everywhere"', async () => {
+    const result = await PATCH(makePatchRequest({ locationId: '  ' }), makeCtx())
+
+    expect(mocks.withLockedProfessionalTransaction).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: 'Invalid locationId.',
+      code: 'INVALID_LOCATION_ID',
+    })
+  })
+
+  it('treats re-scoping to the SAME location as a no-op', async () => {
+    const result = await PATCH(
+      makePatchRequest({ locationId: 'loc_1' }),
+      makeCtx(),
+    )
+
+    expect(mocks.calendarBlockUpdate).not.toHaveBeenCalled()
+    // Nothing moved, so the availability cache is still correct.
+    expect(mocks.bumpScheduleVersion).not.toHaveBeenCalled()
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, status: 200 }),
+    )
+  })
+
   it('returns 404 when the block location is no longer valid', async () => {
     mocks.professionalLocationFindFirst.mockResolvedValueOnce(null)
 

@@ -34,6 +34,11 @@ type EditBlockModalProps = {
   blockId: string | null
   timeZone: string
   stepMinutes?: number | null
+  /**
+   * The pro's bookable locations, for re-scoping the block. An empty list hides
+   * the scope control entirely — there is nothing to move it to.
+   */
+  locations?: BlockScopeOption[]
   onClose: () => void
   onSaved: () => void
 
@@ -61,6 +66,8 @@ type EditBlockModalCopy = {
   blockDetailsTitle: string
   blockDetailsDescription: string
   timeZoneLabel: string
+  scopeLabel: string
+  allLocationsLabel: string
 
   timeTitle: string
   timeDescription: string
@@ -92,6 +99,13 @@ type BlockDto = {
   startsAt: string
   endsAt: string
   note: string | null
+  /** Null = the block applies to every location. */
+  locationId: string | null
+}
+
+export type BlockScopeOption = {
+  id: string
+  label: string
 }
 
 type DateParts = {
@@ -104,6 +118,12 @@ type PatchBlockPayload = {
   startsAt: string
   endsAt: string
   note: string | null
+  /**
+   * Only present when the pro actually changed the scope. Absent means "leave
+   * the location alone" — sending it on every save would silently widen a
+   * location-scoped block to every location on an ordinary time edit.
+   */
+  locationId?: string | null
 }
 
 type BuildPatchPayloadArgs = {
@@ -114,6 +134,9 @@ type BuildPatchPayloadArgs = {
   timeZone: string
   stepMinutes: number
   copy: EditBlockModalCopy
+  /** The scope the pro selected, and the one the block already has. */
+  locationId: string | null
+  originalLocationId: string | null
 }
 
 type ActionButtonProps = {
@@ -168,6 +191,8 @@ const DEFAULT_COPY: EditBlockModalCopy = {
   blockDetailsDescription:
     'Edit the unavailable window using the calendar timezone and step size.',
   timeZoneLabel: 'Timezone',
+  scopeLabel: 'Location',
+  allLocationsLabel: 'All locations',
 
   timeTitle: 'Time',
   timeDescription: 'Change when the block starts and how long it lasts.',
@@ -234,6 +259,7 @@ function parseBlockDto(
     startsAt: requiredString(raw.startsAt, copy.missingStartError),
     endsAt: requiredString(raw.endsAt, copy.missingEndError),
     note: typeof raw.note === 'string' ? raw.note : null,
+    locationId: typeof raw.locationId === 'string' ? raw.locationId : null,
   }
 }
 
@@ -333,11 +359,13 @@ function buildPatchPayload(args: BuildPatchPayloadArgs): PatchBlockPayload {
   }
 
   const trimmedNote = args.note.trim()
+  const scopeChanged = args.locationId !== args.originalLocationId
 
   return {
     startsAt: startsAt.toISOString(),
     endsAt: endsAt.toISOString(),
     note: trimmedNote ? trimmedNote : null,
+    ...(scopeChanged ? { locationId: args.locationId } : {}),
   }
 }
 
@@ -392,6 +420,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
     blockId,
     timeZone,
     stepMinutes,
+    locations,
     onClose,
     onSaved,
     copy: copyOverride,
@@ -421,6 +450,12 @@ export default function EditBlockModal(props: EditBlockModalProps) {
     String(DEFAULT_DURATION_MINUTES),
   )
   const [note, setNote] = useState('')
+  /**
+   * The scope the pro has selected: a location id, or null for "all locations".
+   * Seeded from the loaded block, so an untouched save sends no `locationId` and
+   * cannot widen the block by accident.
+   */
+  const [locationId, setLocationId] = useState<string | null>(null)
 
   const busy = loading || saving || deleting
   const canEdit = open && blockId !== null && block !== null && !loading
@@ -451,6 +486,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
       setStartTimeInput('')
       setDurationInput(String(DEFAULT_DURATION_MINUTES))
       setNote('')
+      setLocationId(null)
       return
     }
 
@@ -500,6 +536,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
         setStartTimeInput(timeInputFromMinutes(startMinutes))
         setDurationInput(String(durationMinutes))
         setNote(loadedBlock.note ?? '')
+        setLocationId(loadedBlock.locationId)
       } catch (caught) {
         if (!cancelled) {
           setError(
@@ -543,6 +580,8 @@ export default function EditBlockModal(props: EditBlockModalProps) {
         note,
         timeZone: resolvedTimeZone,
         stepMinutes: step,
+        locationId,
+        originalLocationId: block.locationId,
         copy,
       })
 
@@ -663,6 +702,35 @@ export default function EditBlockModal(props: EditBlockModalProps) {
                   <InfoRow label={copy.timeZoneLabel}>
                     {friendlyTimeZoneLabel(resolvedTimeZone) ?? resolvedTimeZone} · {step} minute step
                   </InfoRow>
+
+                  {/*
+                    Re-scoping: "All locations" is a real option, and it is the
+                    only way to give a block orphaned by a location delete a home
+                    again. Rendered only when the pro has somewhere to move it to.
+                  */}
+                  {locations && locations.length > 0 ? (
+                    <Field label={copy.scopeLabel}>
+                      <select
+                        value={locationId ?? ''}
+                        onChange={(event) =>
+                          setLocationId(event.target.value || null)
+                        }
+                        disabled={busy}
+                        className="brand-pro-calendar-block-field brand-focus"
+                      >
+                        <option value="">{copy.allLocationsLabel}</option>
+
+                        {locations.map((location) => (
+                          <option
+                            key={location.id}
+                            value={location.id}
+                          >
+                            {location.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  ) : null}
                 </div>
               </section>
 

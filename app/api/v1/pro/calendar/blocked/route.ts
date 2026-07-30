@@ -17,6 +17,7 @@ import { resolveBlockScope } from './_blockScope'
 
 import {
   clampRange,
+  parseBlockScopeInput,
   parseLocationIdInput,
   parseNoteInput,
   toBlockDto,
@@ -253,29 +254,18 @@ export async function POST(req: Request) {
       })
     }
 
-    const locationIdInput = parseLocationIdInput(body.locationId)
+    // Null IS a real scope rather than a missing field: `CalendarBlock.locationId`
+    // is nullable and null means "blocks all locations" (schema.prisma). The web
+    // modal's "Block all locations" checkbox posts exactly this and used to get a
+    // guaranteed 400 back. A blank string stays refused — see
+    // `parseBlockScopeInput`.
+    const locationIdInput = parseBlockScopeInput(body.locationId)
     if (!locationIdInput.ok) {
       return jsonFail(400, 'Invalid locationId.', {
         code: 'INVALID_LOCATION_ID',
       })
     }
 
-    // An EMPTY STRING is not "all locations". The shared parser folds `''` to
-    // null because that is what an absent `?locationId=` query param means on
-    // GET — but on a WRITE, blanket-blocking every location has to be a
-    // deliberate choice (omit the field, or send null), never something a caller
-    // falls into by sending a blank. This input 400'd before the null scope was
-    // accepted, and it still does.
-    if (typeof body.locationId === 'string' && !locationIdInput.value) {
-      return jsonFail(400, 'Invalid locationId.', {
-        code: 'INVALID_LOCATION_ID',
-      })
-    }
-
-    // Null, though, IS a real scope rather than a missing field:
-    // `CalendarBlock.locationId` is nullable and null means "blocks all
-    // locations" (schema.prisma). The web modal's "Block all locations" checkbox
-    // posts exactly this and used to get a guaranteed 400 back.
     const locationId = locationIdInput.value
 
     const professionalId = auth.professionalId

@@ -120,6 +120,28 @@ export function parseLocationIdInput(
   return { ok: true, value: trimmed || null }
 }
 
+/**
+ * A WRITE's locationId, where null means "blocks all locations"
+ * (`CalendarBlock.locationId String?`).
+ *
+ * Identical to `parseLocationIdInput` except an empty or blank STRING is
+ * REFUSED rather than folded to null. On a read that folding is right — an
+ * absent `?locationId=` filter genuinely means "all locations" — but on a write,
+ * blanket-blocking every location has to be something the caller asked for, not
+ * something they fall into by sending a blank. Absent or explicitly null is the
+ * deliberate way to say it.
+ */
+export function parseBlockScopeInput(
+  v: unknown,
+): { ok: true; value: string | null } | { ok: false } {
+  const parsed = parseLocationIdInput(v)
+
+  if (!parsed.ok) return { ok: false }
+  if (typeof v === 'string' && !parsed.value) return { ok: false }
+
+  return parsed
+}
+
 export function buildBlockConflictWhere(args: BuildBlockConflictWhereArgs): {
   professionalId: string
   startsAt: { lt: Date }
