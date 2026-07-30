@@ -154,4 +154,23 @@ describe('DEFAULT_CALENDAR_SWATCHES', () => {
       )
     }
   })
+
+  // A swatch the stylesheet cannot paint fails SILENTLY: the stripe just keeps
+  // its status tone and nothing anywhere says the pro's choice was ignored. So
+  // a 13th token must arrive with its rule or this goes red.
+  it('has an accent-stripe rule in proCalendar.css for every id', () => {
+    const css = fs.readFileSync(
+      path.join(process.cwd(), 'lib/brand/proCalendar.css'),
+      'utf8',
+    )
+
+    for (const id of CALENDAR_SWATCH_IDS) {
+      expect(
+        css.includes(
+          `.brand-pro-calendar-event-accent[data-swatch="${id}"] { background: rgb(var(--swatch-${id})); }`,
+        ),
+        `no accent-stripe rule for swatch ${id}`,
+      ).toBe(true)
+    }
+  })
 })
