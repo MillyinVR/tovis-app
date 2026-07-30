@@ -325,10 +325,14 @@ export default function RebookSlotPicker({
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       try {
+        // ALL locations, for the same reason the new-booking form asks that way:
+        // the overlap being warned about is enforced on `professionalId` alone
+        // (`Booking_no_active_professional_overlap` has no location term), so a
+        // feed filtered to this booking's location silently hides the collision.
         const qs = new URLSearchParams({
           from: fromISO,
           to: toISO,
-          locationId,
+          scope: 'ALL',
         })
 
         const res = await fetch(`/api/v1/pro/calendar?${qs.toString()}`, {
