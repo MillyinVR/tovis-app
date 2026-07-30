@@ -67,6 +67,9 @@ type CalendarLegendTone =
   | 'waitlist'
   | 'blocked'
   | 'held'
+  // Not a status: the SERVICE channel's key swatch (K7), which stands for the
+  // whole palette rather than one colour.
+  | 'service'
 
 type PageHeroProps = {
   modeLabel: string
@@ -108,6 +111,12 @@ type CalendarDesktopDetailPanelProps = {
 type StatusLegendProps = {
   title: string
   copy: BrandProCalendarCopy['legend']
+  /**
+   * Whether any event on the grid actually carries a service colour. The stripe
+   * row is a claim about what the pro is looking at, so it stays off until the
+   * claim is true — the same rule K3's location chip follows.
+   */
+  showServiceChannel: boolean
 }
 
 type AutoAcceptCardProps = {
@@ -161,6 +170,17 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
         ? cal.events.find((event) => event.id === selectedEventId) ?? null
         : null,
     [cal.events, selectedEventId],
+  )
+
+  // The service channel only earns a legend row once something on the grid is
+  // painted with it (K7). Until the picker lands (K8) nothing is, so the key
+  // keeps describing exactly what the pro can see.
+  const showServiceChannel = useMemo(
+    () =>
+      cal.events.some(
+        (event) => isBookingCalendarEvent(event) && Boolean(event.serviceSwatch),
+      ),
+    [cal.events],
   )
 
   const topPendingRequest = firstPendingBooking(cal.management.pendingRequests)
@@ -258,6 +278,7 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
               <StatusLegend
                 title={copy.desktop.sidebarStatusKeyTitle}
                 copy={copy.legend}
+                showServiceChannel={showServiceChannel}
               />
 
               <AutoAcceptCard
@@ -655,11 +676,14 @@ function BookingServiceList(props: {
 // ─── Sidebar sub-components ───────────────────────────────────────────────────
 
 function StatusLegend(props: StatusLegendProps) {
-  const { title, copy } = props
+  const { title, copy, showServiceChannel } = props
 
   return (
     <div className="brand-pro-calendar-legend">
       <p className="brand-pro-calendar-legend-title">{title}</p>
+
+      {/* What the fill MEANS, above the list of what it says (K7). */}
+      <p className="brand-pro-calendar-legend-channel">{copy.fillChannel}</p>
 
       <div className="brand-pro-calendar-legend-list">
         <LegendRow tone="accepted" label={copy.accepted} />
@@ -668,6 +692,10 @@ function StatusLegend(props: StatusLegendProps) {
         <LegendRow tone="waitlist" label={copy.waitlist} />
         <LegendRow tone="blocked" label={copy.blocked} dashed />
         <LegendRow tone="held" label={copy.held} dashed />
+
+        {showServiceChannel ? (
+          <LegendRow tone="service" label={copy.stripeChannel} />
+        ) : null}
       </div>
     </div>
   )

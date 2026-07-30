@@ -191,6 +191,19 @@ export type BrandProCalendarLegendCopy = {
   waitlist: string
   blocked: string
   held: string
+
+  /**
+   * Names what the card's FILL currently means (K7). Three things want colour
+   * on one card, so the key has to say which channel is which — a legend that
+   * only lists tones leaves the pro guessing what the stripe is for.
+   */
+  fillChannel: string
+  /**
+   * Names what the 4px accent stripe means. Shown only while the grid actually
+   * carries service colours: until a pro picks one (K8) the stripe still shows
+   * the status tone, and a key claiming otherwise would be a lie.
+   */
+  stripeChannel: string
 }
 
 export type BrandProCalendarEmptyStateCopy = {
@@ -402,6 +415,37 @@ export type BrandProCalendarCopy = {
   confirmChangeModal: BrandProCalendarConfirmChangeModalCopy
 }
 
+/**
+ * The twelve calendar swatch ids (K7). A pro picks one of these per service
+ * offering (K8); the calendar paints it on the event card's accent stripe.
+ *
+ * 🔴 A FIXED set, deliberately — never a free hex picker. A raw colour skips
+ * `[data-mode]` (a hue that reads on paper vanishes on ink), skips the contrast
+ * budget, and is not caught by any static guard. Twelve tokens with a tuned
+ * light/dark pair each is the only version that survives white-label.
+ *
+ * 🔴 A DEDICATED palette, not the brand hues — every one of those is
+ * semantically loaded (`colorAmber` *is* `--tone-pending`, `colorEmber` *is*
+ * `--tone-danger`, `colorFern` *is* `--tone-success`), so a service coloured
+ * amber would read as "pending".
+ */
+export type CalendarSwatchId =
+  | '01'
+  | '02'
+  | '03'
+  | '04'
+  | '05'
+  | '06'
+  | '07'
+  | '08'
+  | '09'
+  | '10'
+  | '11'
+  | '12'
+
+/** The per-mode swatch palette → `--swatch-01` … `--swatch-12`. */
+export type BrandCalendarSwatches = Record<CalendarSwatchId, RgbTriplet>
+
 export type BrandTokens = {
   colors: {
     // ── Background layers ─────────────────────────────────────────
@@ -429,6 +473,14 @@ export type BrandTokens = {
     colorEmber: RgbTriplet // danger / cancelled / error → --ember
     colorAmber: RgbTriplet // pending / review / attention → --amber
   }
+
+  /**
+   * Per-service calendar colours → `--swatch-01` … `--swatch-12` (K7).
+   * Filled by createBrandConfig from DEFAULT_CALENDAR_SWATCHES unless a brand
+   * overrides it, so a white-label tenant gets a working palette for free and
+   * can still repaint one.
+   */
+  calendarSwatches: BrandCalendarSwatches
 
   effects: {
     // ── Glass ─────────────────────────────────────────────────────

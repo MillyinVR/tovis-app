@@ -362,6 +362,11 @@ export function EventCard(props: EventCardProps) {
       ? ev.relationshipBadge
       : null
 
+  // The SERVICE channel (K7): the pro's colour for this booking's service,
+  // painted on the accent stripe. Blocks and holds are not a service, so they
+  // never claim it. Absent → the stripe keeps its status tone, unchanged.
+  const serviceSwatch = ev.kind === 'BOOKING' ? ev.serviceSwatch : undefined
+
   const canDragOrResize = apiId !== null
   const baseLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
   // The accessible name spells the mark out ("Returning client · requested
@@ -446,6 +451,10 @@ export function EventCard(props: EventCardProps) {
       <div
         className="brand-pro-calendar-event-accent"
         data-tone={statusMeta.tone}
+        // Brand CSS paints data-swatch over data-tone when both are present —
+        // the stripe is the service channel, and falls back to the status tone
+        // only while a booking has no colour of its own.
+        data-swatch={serviceSwatch}
         aria-hidden="true"
       />
 
