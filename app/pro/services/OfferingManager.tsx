@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import CalendarSwatchPicker from '@/app/pro/services/CalendarSwatchPicker'
+import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
 type Offering = {
   id: string
   serviceId: string
@@ -43,6 +45,10 @@ type Offering = {
   // suggestion. Null = no suggestion.
   rebookIntervalDays: number | null
 
+  // K8: the pro's calendar colour for this service. Null = no service colour,
+  // and the appointment's accent stripe keeps its status tone.
+  calendarSwatch: CalendarSwatchId | null
+
   /**
    * ✅ Option 1 support (preferred names)
    */
@@ -72,6 +78,7 @@ type OfferingPatch = {
   mobilePriceStartingAt?: string | null
   mobileDurationMinutes?: number | null
   rebookIntervalDays?: number | null
+  calendarSwatch?: CalendarSwatchId | null
 }
 
 type EligibleAddOn = {
@@ -607,6 +614,9 @@ function OfferingEditor(props: {
   const [rebookInterval, setRebookInterval] = useState(
     o.rebookIntervalDays ? String(o.rebookIntervalDays) : '',
   )
+  const [calendarSwatch, setCalendarSwatch] = useState<CalendarSwatchId | null>(
+    o.calendarSwatch ?? null,
+  )
   const [addonsOpen, setAddonsOpen] = useState(false)
 
   const disabledForEdit = busy || uploadBusy || !upstreamOk
@@ -705,6 +715,7 @@ function OfferingEditor(props: {
         mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
         mobileDurationMinutes: offersMobile ? mobileDurInt : null,
         rebookIntervalDays: rebookIntervalInt,
+        calendarSwatch,
       },
     }
   }
@@ -916,6 +927,13 @@ function OfferingEditor(props: {
           many days). Leave blank to keep it off.
         </div>
       </label>
+
+      <CalendarSwatchPicker
+        name={`calendar-swatch-${o.id}`}
+        value={calendarSwatch}
+        onChange={setCalendarSwatch}
+        disabled={disabledForEdit}
+      />
 
       {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
       {success ? <div className="text-[12px] text-toneSuccess">{success}</div> : null}

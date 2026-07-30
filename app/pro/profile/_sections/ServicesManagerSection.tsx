@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { getBrandConfig } from '@/lib/brand'
+import { parseCalendarSwatch } from '@/lib/calendar/eventColor'
 
 import OfferingManager from '@/app/pro/services/OfferingManager'
 import ServicesManagerSectionClient from './ServicesManagerSectionClient'
@@ -101,6 +102,7 @@ export default async function ServicesManagerSection({
       mobileDurationMinutes: true,
 
       rebookIntervalDays: true,
+      calendarSwatch: true,
 
       service: {
         select: {
@@ -168,6 +170,11 @@ export default async function ServicesManagerSection({
     mobileDurationMinutes: o.mobileDurationMinutes ?? null,
 
     rebookIntervalDays: o.rebookIntervalDays ?? null,
+
+    // K8: narrowed here rather than handed over raw — a stored value outside
+    // the current palette must reach the picker as "no colour", the same way
+    // the calendar reads it.
+    calendarSwatch: parseCalendarSwatch(o.calendarSwatch),
 
     serviceName: o.service.name,
     categoryName: o.service.category?.name ?? null,

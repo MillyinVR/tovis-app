@@ -52,6 +52,10 @@ import {
 } from '@/lib/timeZone'
 
 import { overlapMinutes } from '@/lib/calendar/overlap'
+import {
+  loadOfferingSwatchesByServiceId,
+  resolveBookingServiceSwatch,
+} from '@/lib/calendar/serviceSwatch'
 
 import {
   CALENDAR_MS_PER_DAY,
@@ -175,6 +179,9 @@ const bookingSelect = {
   locationType: true,
   locationId: true,
   locationTimeZone: true,
+  // K8 service-colour fallback key: the pro's offering for THIS service, for
+  // the bookings whose own `offeringId` is null.
+  serviceId: true,
   // Payment-badge inputs (deposit + checkout + dispute columns) — spread from
   // the helper's select so the badge can never miss a field it derives from.
   ...PAYMENT_BADGE_SELECT,
@@ -197,6 +204,13 @@ const bookingSelect = {
       name: true,
     },
   },
+  // K8 service-colour input: the booking's OWN offering link. Nullable, which
+  // is why the route also loads the per-serviceId fallback map.
+  offering: {
+    select: {
+      calendarSwatch: true,
+    },
+  },
   location: {
     select: {
       id: true,
@@ -213,6 +227,13 @@ const bookingSelect = {
       service: {
         select: {
           name: true,
+        },
+      },
+      // K8: the BASE item's offering wins the colour (an add-on gloss must not
+      // repaint a colour appointment) — see resolveCalendarSwatch.
+      offering: {
+        select: {
+          calendarSwatch: true,
         },
       },
     },
@@ -618,9 +639,15 @@ function toBookingEvent(args: {
   professionalTimeZone: string | null
   viewportTimeZone: string
   visibleClientIds: ReadonlySet<string>
+  swatchByServiceId: ReadonlyMap<string, string>
 }): BookingEvent | null {
-  const { booking, professionalTimeZone, viewportTimeZone, visibleClientIds } =
-    args
+  const {
+    booking,
+    professionalTimeZone,
+    viewportTimeZone,
+    visibleClientIds,
+    swatchByServiceId,
+  } = args
 
   if (!booking.locationId) return null
 
@@ -657,6 +684,7 @@ function toBookingEvent(args: {
   const localDateKey = utcDateToLocalYmd(start, appointmentTimeZone)
   const viewLocalDateKey = utcDateToLocalYmd(start, viewportTimeZone)
   const serviceName = getServiceName(booking)
+  const serviceSwatch = resolveBookingServiceSwatch(booking, swatchByServiceId)
 
   return {
     id: booking.id,
@@ -676,6 +704,10 @@ function toBookingEvent(args: {
     viewLocalDateKey,
     paymentBadge: derivePaymentBadge(booking),
     relationshipBadge: deriveRelationshipBadge(booking),
+    // Optional on the wire (K7) — omitted entirely when the pro has chosen no
+    // colour for the service, so an event with no swatch is byte-identical to
+    // what it was before K8 and the card renders no `data-swatch` attribute.
+    ...(serviceSwatch ? { serviceSwatch } : {}),
     details: {
       serviceName,
       bufferMinutes,
@@ -1042,7 +1074,7 @@ export async function GET(req: Request) {
     // link to the pro-only client chart without leaking ids for anyone else.
     const visibleClientIds = await getVisibleClientIdSetForPro(professionalId)
 
-    const [bookings, blocks, holds] = await Promise.all([
+    const [bookings, blocks, holds, swatchByServiceId] = await Promise.all([
       prisma.booking.findMany({
         where: {
           professionalId,
@@ -1115,6 +1147,12 @@ export async function GET(req: Request) {
         },
         take: MAX_CALENDAR_EVENTS_PER_RANGE
       }),
+      // K8 service colour: the pro's chosen colours, for the bookings whose own
+      // `offeringId` is null. Keyed on the pro alone, so it belongs IN this
+      // Promise.all rather than after it — this route's known performance
+      // problem is a fetch waterfall, and a lookup narrowed to the bookings'
+      // service ids would have had to wait for them.
+      loadOfferingSwatchesByServiceId({ db: prisma, professionalId }),
     ])
 
     const bookingEvents = bookings
@@ -1124,6 +1162,7 @@ export async function GET(req: Request) {
           professionalTimeZone: proProfile.timeZone,
           viewportTimeZone,
           visibleClientIds,
+          swatchByServiceId,
         }),
       )
       .filter((event): event is BookingEvent => event !== null)

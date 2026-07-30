@@ -14,6 +14,10 @@ import {
   defaultWorkingHours,
   toInputJsonValue,
 } from '@/lib/scheduling/workingHoursValidation'
+import {
+  parseCalendarSwatch,
+  type CalendarSwatchId,
+} from '@/lib/calendar/eventColor'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +50,34 @@ function trimOrNull(v: unknown): string | null | undefined {
 
 function pickBoolean(v: unknown): boolean | undefined {
   return typeof v === 'boolean' ? v : undefined
+}
+
+/**
+ * K8: the pro's calendar colour for this service.
+ *
+ * 🔴 Fixed palette tokens only — never a free colour. `parseCalendarSwatch` is
+ * the same narrowing the calendar's own parser uses, so a raw hex, a token from
+ * a palette that has since shrunk, or anything else outside
+ * `CALENDAR_SWATCH_IDS` cannot reach the column. That is not merely tidiness: a
+ * raw colour skips `[data-mode]` (readable in light, invisible in dark) and no
+ * static guard catches one, so the refusal has to live here.
+ *
+ * `null` (or a blank string, matching `trimOrNull`'s convention elsewhere in
+ * this route) clears the colour. An unrecognised value returns `undefined`,
+ * which the caller turns into a 400 rather than a silent clear — a pro who
+ * sends a bad swatch should hear about it, not quietly lose their colour.
+ */
+function pickCalendarSwatch(
+  v: unknown,
+): CalendarSwatchId | null | undefined {
+  if (v === null) return null
+  if (typeof v !== 'string') return undefined
+
+  const trimmed = v.trim()
+
+  if (!trimmed) return null
+
+  return parseCalendarSwatch(trimmed) ?? undefined
 }
 
 function pickNullablePriceString(v: unknown): string | null | undefined {
@@ -148,6 +180,10 @@ function toDto(off: OfferingRow) {
     mobileDurationMinutes: off.mobileDurationMinutes ?? null,
 
     rebookIntervalDays: off.rebookIntervalDays ?? null,
+
+    // Narrowed on the way out too: a column value outside the current palette
+    // reads as "no colour" on every surface, including the picker.
+    calendarSwatch: parseCalendarSwatch(off.calendarSwatch),
 
     isActive: Boolean(off.isActive),
 
@@ -493,6 +529,28 @@ export async function PATCH(request: Request, ctx: RouteContext) {
 
       if (customImageUrl !== undefined) {
         data.customImageUrl = customImageUrl
+      }
+
+      const calendarSwatch = Object.prototype.hasOwnProperty.call(
+        body,
+        'calendarSwatch',
+      )
+        ? pickCalendarSwatch(body.calendarSwatch)
+        : undefined
+
+      if (
+        Object.prototype.hasOwnProperty.call(body, 'calendarSwatch') &&
+        calendarSwatch === undefined
+      ) {
+        return {
+          kind: 'ERROR',
+          status: 400,
+          msg: 'calendarSwatch must be one of the calendar palette colours, or null.',
+        }
+      }
+
+      if (calendarSwatch !== undefined) {
+        data.calendarSwatch = calendarSwatch
       }
 
       if (typeof offersInSalonIn === 'boolean') {

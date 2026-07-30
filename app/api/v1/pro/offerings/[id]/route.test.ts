@@ -210,6 +210,7 @@ function makeOffering(
     serviceActive: boolean
     categoryActive: boolean
     minPrice: string
+    calendarSwatch: string | null
   }> = {},
 ) {
   return {
@@ -240,6 +241,8 @@ function makeOffering(
         ? overrides.mobileDurationMinutes
         : null,
     isActive: overrides.isActive ?? true,
+    calendarSwatch:
+      overrides.calendarSwatch !== undefined ? overrides.calendarSwatch : null,
     createdAt: new Date('2026-05-22T12:00:00.000Z'),
     updatedAt: new Date('2026-05-22T12:00:00.000Z'),
     service: makeService({
@@ -374,6 +377,39 @@ describe('app/api/v1/pro/offerings/[id]/route.ts', () => {
           salonPriceStartingAt: '75',
         }),
       )
+    })
+
+    // K8: the column is TEXT so a white-label palette can change, which means a
+    // stored id can outlive the palette that defined it. Such a value has no
+    // CSS rule behind it, so it must read as "no colour" here rather than reach
+    // the picker as a selection that paints nothing.
+    it('reports a stored value outside the palette as no colour', async () => {
+      mocks.professionalServiceOffering.findFirst.mockResolvedValueOnce(
+        makeOffering({ calendarSwatch: 'legacy-teal' }),
+      )
+
+      const result = await GET(new Request('http://localhost'), makeCtx())
+      const body = await readJson<{
+        ok: true
+        offering: { calendarSwatch: string | null }
+      }>(result)
+
+      expect(result.status).toBe(200)
+      expect(body.offering.calendarSwatch).toBeNull()
+    })
+
+    it('returns the stored swatch when it is in the palette', async () => {
+      mocks.professionalServiceOffering.findFirst.mockResolvedValueOnce(
+        makeOffering({ calendarSwatch: '11' }),
+      )
+
+      const result = await GET(new Request('http://localhost'), makeCtx())
+      const body = await readJson<{
+        ok: true
+        offering: { calendarSwatch: string | null }
+      }>(result)
+
+      expect(body.offering.calendarSwatch).toBe('11')
     })
   })
 
@@ -703,6 +739,96 @@ describe('app/api/v1/pro/offerings/[id]/route.ts', () => {
       }
 
       expect(mocks.professionalServiceOffering.update).not.toHaveBeenCalled()
+    })
+
+    // K8 — the pro's calendar colour. The refusal below is the ONLY thing
+    // standing between a raw colour and the database: no static guard catches a
+    // hex, and one that got stored would skip [data-mode] entirely (readable in
+    // light, invisible in dark).
+    it('stores a swatch from the fixed palette', async () => {
+      const result = await PATCH(
+        makeRequest({ calendarSwatch: '07' }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(200)
+      expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith({
+        where: { id: 'offering_1' },
+        data: { calendarSwatch: '07' },
+        include: {
+          service: {
+            include: {
+              category: true,
+            },
+          },
+        },
+      })
+    })
+
+    it('clears the swatch when passed null or a blank string', async () => {
+      for (const cleared of [null, '', '   ']) {
+        vi.clearAllMocks()
+        mocks.professionalServiceOffering.findFirst.mockResolvedValue(
+          makeOffering({ calendarSwatch: '07' }),
+        )
+        mocks.professionalServiceOffering.update.mockResolvedValue(
+          makeOffering({ calendarSwatch: null }),
+        )
+        mocks.prisma.$transaction.mockImplementation(
+          async (fn: (txArg: unknown) => Promise<unknown>) =>
+            fn({
+              professionalLocation: mocks.professionalLocation,
+              professionalServiceOffering: mocks.professionalServiceOffering,
+              offeringPriceRamp: mocks.offeringPriceRamp,
+            }),
+        )
+
+        const result = await PATCH(
+          makeRequest({ calendarSwatch: cleared }),
+          makeCtx(),
+        )
+
+        expect(result.status).toBe(200)
+        expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: { calendarSwatch: null },
+          }),
+        )
+      }
+    })
+
+    it('returns 400 for a colour outside the palette instead of silently clearing it', async () => {
+      for (const bad of ['#ff0000', 'red', '13', '00', 'rgb(1,2,3)', 7]) {
+        const result = await PATCH(
+          makeRequest({ calendarSwatch: bad }),
+          makeCtx(),
+        )
+
+        const body = await readJson<{ ok: false; error: string }>(result)
+
+        expect(result.status).toBe(400)
+        expect(body).toEqual({
+          ok: false,
+          error:
+            'calendarSwatch must be one of the calendar palette colours, or null.',
+        })
+      }
+
+      expect(mocks.professionalServiceOffering.update).not.toHaveBeenCalled()
+    })
+
+    it('leaves the swatch untouched when the body omits it', async () => {
+      const result = await PATCH(
+        makeRequest({ description: 'Updated' }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(200)
+      expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { description: 'Updated' },
+        }),
+      )
     })
 
     it('returns 400 when description is not string or null', async () => {
