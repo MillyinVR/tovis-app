@@ -74,6 +74,15 @@ function makeBooking(args: {
   clientFirstName: string
   locationTimeZone?: string | null
   location?: { id: string; timeZone: string | null } | null
+  // K8 service colour. Defaults model the common row: a booking for a service
+  // the pro has not coloured, which must emit no `serviceSwatch` at all.
+  serviceId?: string
+  offering?: { calendarSwatch: string | null } | null
+  serviceItems?: {
+    itemType: 'BASE' | 'ADD_ON'
+    sortOrder: number
+    offering: { calendarSwatch: string | null } | null
+  }[]
 }) {
   return {
     id: args.id,
@@ -85,6 +94,8 @@ function makeBooking(args: {
     locationId: args.locationId,
     locationTimeZone: args.locationTimeZone ?? null,
     location: args.location ?? null,
+    serviceId: args.serviceId ?? `${args.id}-service`,
+    offering: args.offering ?? null,
     client: {
       firstName: args.clientFirstName,
       lastName: 'Client',
@@ -93,7 +104,7 @@ function makeBooking(args: {
     service: {
       name: args.serviceName,
     },
-    serviceItems: [],
+    serviceItems: args.serviceItems ?? [],
   }
 }
 
@@ -242,6 +253,135 @@ describe('GET /api/v1/pro/calendar', () => {
     ).toMatchObject({
       locationType: 'MOBILE',
       locationId: 'mobile-1',
+    })
+  })
+
+  // K8 — the service-colour channel on the wire. K9 (iOS) consumes this field
+  // verbatim, so what it looks like when a service has NO colour matters as
+  // much as what it looks like when it does.
+  describe('serviceSwatch (K8)', () => {
+    async function bookingEventsFor(
+      rows: ReturnType<typeof makeBooking>[],
+    ): Promise<Array<Record<string, unknown>>> {
+      mocks.bookingFindMany.mockResolvedValue(rows)
+
+      const response = await GET(
+        new Request('https://example.test/api/v1/pro/calendar'),
+      )
+      const body = await response.json()
+
+      expect(response.status).toBe(200)
+
+      return body.events.filter(
+        (event: { kind: string }) => event.kind === 'BOOKING',
+      )
+    }
+
+    async function oneBookingEventFor(
+      rows: ReturnType<typeof makeBooking>[],
+    ): Promise<Record<string, unknown>> {
+      const events = await bookingEventsFor(rows)
+
+      expect(events).toHaveLength(1)
+
+      const event = events[0]
+
+      if (!event) throw new Error('expected exactly one booking event')
+
+      return event
+    }
+
+    it('omits the field entirely when the pro has coloured nothing', async () => {
+      const event = await oneBookingEventFor([salonBooking])
+
+      expect(event).toBeDefined()
+      // Absent, not null: an event with no colour must serialise exactly as it
+      // did before K8, so the card renders no `data-swatch` attribute at all.
+      expect('serviceSwatch' in event).toBe(false)
+    })
+
+    it('emits the BASE item’s colour for a multi-service booking', async () => {
+      const event = await oneBookingEventFor([
+        makeBooking({
+          id: 'booking-multi',
+          startsAt: '2030-01-15T10:00:00.000Z',
+          locationType: 'SALON',
+          locationId: 'salon-1',
+          serviceName: 'Colour + Gloss',
+          clientFirstName: 'Multi',
+          location: { id: 'salon-1', timeZone: 'America/Chicago' },
+          offering: { calendarSwatch: '02' },
+          serviceItems: [
+            { itemType: 'ADD_ON', sortOrder: 0, offering: { calendarSwatch: '11' } },
+            { itemType: 'BASE', sortOrder: 1, offering: { calendarSwatch: '09' } },
+          ],
+        }),
+      ])
+
+      expect(event.serviceSwatch).toBe('09')
+    })
+
+    it('falls back to the pro’s offering for the service when offeringId is null', async () => {
+      mocks.professionalServiceOfferingFindMany.mockResolvedValue([
+        { serviceId: 'booking-nooffering-service', calendarSwatch: '05' },
+      ])
+
+      const event = await oneBookingEventFor([
+        makeBooking({
+          id: 'booking-nooffering',
+          startsAt: '2030-01-15T10:00:00.000Z',
+          locationType: 'SALON',
+          locationId: 'salon-1',
+          serviceName: 'Legacy row',
+          clientFirstName: 'NoOffering',
+          location: { id: 'salon-1', timeZone: 'America/Chicago' },
+          offering: null,
+        }),
+      ])
+
+      expect(event.serviceSwatch).toBe('05')
+    })
+
+    it('prefers the booking’s own offering colour over the pro’s map', async () => {
+      mocks.professionalServiceOfferingFindMany.mockResolvedValue([
+        { serviceId: 'booking-coloured-service', calendarSwatch: '01' },
+      ])
+
+      const event = await oneBookingEventFor([
+        makeBooking({
+          id: 'booking-coloured',
+          startsAt: '2030-01-15T10:00:00.000Z',
+          locationType: 'SALON',
+          locationId: 'salon-1',
+          serviceName: 'Coloured',
+          clientFirstName: 'Coloured',
+          location: { id: 'salon-1', timeZone: 'America/Chicago' },
+          offering: { calendarSwatch: '04' },
+        }),
+      ])
+
+      expect(event.serviceSwatch).toBe('04')
+    })
+
+    // The lookup is keyed on the pro, not on the bookings in view, so it can
+    // run alongside the booking query instead of after it — the calendar's
+    // known performance problem is a fetch waterfall.
+    it('looks the pro’s colours up without waiting for the booking rows', async () => {
+      mocks.professionalServiceOfferingFindMany.mockClear()
+      mocks.professionalServiceOfferingFindMany.mockResolvedValue([])
+
+      await bookingEventsFor([salonBooking])
+
+      const swatchWheres = mocks.professionalServiceOfferingFindMany.mock.calls
+        .map((call) => (call as [{ where?: Record<string, unknown> }])[0]?.where)
+        .filter((where) => where?.calendarSwatch !== undefined)
+
+      expect(swatchWheres).toEqual([
+        {
+          professionalId: 'pro-1',
+          calendarSwatch: { not: null },
+        },
+      ])
     })
   })
 

@@ -2831,6 +2831,15 @@ model ProfessionalServiceOffering {
   // rebook recommendation stays "None", the pre-existing behavior).
   rebookIntervalDays Int?
 
+  /// K8: the pro's calendar colour for THIS service — one of the twelve
+  /// `--swatch-01`…`--swatch-12` brand tokens (`CALENDAR_SWATCH_IDS`), painted
+  /// on the event card's accent stripe. Null = no service colour, and the
+  /// stripe keeps the booking's status tone. Stored here, on the pro↔service
+  /// join, because `Service` is a global catalog row shared by every pro.
+  /// Read through `parseCalendarSwatch`, never raw: a value outside the current
+  /// palette must degrade to "no colour", not to a broken attribute.
+  calendarSwatch String?
+
   customImageUrl String?
 
   isActive  Boolean  @default(true)
