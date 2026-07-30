@@ -27,7 +27,7 @@
 // location lookup. A mocked client proves none of that.
 //
 // Run with: pnpm test:integration
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import {
   BookingStatus,
@@ -781,6 +781,223 @@ describe('global calendar blocks — the stranded block (real DB)', () => {
       code: null,
     })
     expect(moved.body?.startsAt).toBe(movedStart.toISOString())
+  })
+})
+
+describe('global calendar blocks — re-scoping an existing block (real DB)', () => {
+  // The pro's way out of a stranded (or simply mis-scoped) block: move it,
+  // rather than delete-and-recreate. Authorized like a create.
+  //
+  // Every block here carries the RS_NOTE prefix and gets its OWN hour: these
+  // tests deliberately create colliding windows, so a leftover row would make
+  // the NEXT test fail for the wrong reason.
+  const RS_NOTE = `${TAG} rs`
+
+  afterEach(async () => {
+    await db.calendarBlock.deleteMany({
+      where: { professionalId: fx.professionalId, note: { startsWith: RS_NOTE } },
+    })
+  })
+
+  async function createBlockAt(args: {
+    hourUtc: number
+    locationId: string
+    label: string
+  }): Promise<{ id: string; start: Date }> {
+    const start = futureUtc(DAY + 6, args.hourUtc)
+
+    const created = await postBlock({
+      startsAt: start.toISOString(),
+      endsAt: new Date(start.getTime() + HOUR_MS).toISOString(),
+      note: `${RS_NOTE} ${args.label}`,
+      locationId: args.locationId,
+    })
+
+    expect(created.status).toBe(201)
+
+    return { id: created.body?.id ?? '', start }
+  }
+
+  it('moves a block to another of the pro’s locations', async () => {
+    const block = await createBlockAt({
+      hourUtc: 8,
+      locationId: fx.salonLocationId,
+      label: 'move',
+    })
+
+    const moved = await patchBlock(block.id, {
+      locationId: fx.mobileLocationId,
+    })
+
+    expect({ status: moved.status, code: moved.code }).toEqual({
+      status: 200,
+      code: null,
+    })
+    expect(moved.body?.locationId).toBe(fx.mobileLocationId)
+
+    // The stored row is the truth, not just the response.
+    const stored = await db.calendarBlock.findUnique({
+      where: { id: block.id },
+      select: { locationId: true },
+    })
+    expect(stored?.locationId).toBe(fx.mobileLocationId)
+  })
+
+  it('widens a block to every location on an explicit null', async () => {
+    const block = await createBlockAt({
+      hourUtc: 10,
+      locationId: fx.salonLocationId,
+      label: 'widen',
+    })
+
+    const widened = await patchBlock(block.id, { locationId: null })
+
+    expect(widened.status).toBe(200)
+    expect(widened.body?.locationId).toBeNull()
+
+    const stored = await db.calendarBlock.findUnique({
+      where: { id: block.id },
+      select: { locationId: true },
+    })
+    expect(stored?.locationId).toBeNull()
+  })
+
+  it('re-scopes a STRANDED block back to a real location', async () => {
+    // The question the card left open, now answered: a block orphaned by a
+    // location delete can be given a home again, not just moved in time.
+    const throwaway = await db.professionalLocation.create({
+      data: {
+        professionalId: fx.professionalId,
+        type: ProfessionalLocationType.SALON,
+        name: 'Rescope Sublet',
+        isPrimary: false,
+        isBookable: true,
+        countryCode: 'US',
+        timeZone: ZONE,
+        workingHours: workingHours(),
+        bufferMinutes: 5,
+        stepMinutes: 15,
+        advanceNoticeMinutes: 0,
+        maxDaysAhead: 365,
+        formattedAddress: '31 Rescope Rd, San Diego, CA 92101',
+        addressLine1: '31 Rescope Rd',
+        city: 'San Diego',
+        state: 'CA',
+        postalCode: '92101',
+      },
+      select: { id: true },
+    })
+
+    const block = await createBlockAt({
+      hourUtc: 12,
+      locationId: throwaway.id,
+      label: 'stranded',
+    })
+
+    expect(await deleteLocation(throwaway.id)).toBe(200)
+    expect(
+      (
+        await db.calendarBlock.findUnique({
+          where: { id: block.id },
+          select: { locationId: true },
+        })
+      )?.locationId,
+    ).toBeNull()
+
+    const rehomed = await patchBlock(block.id, {
+      locationId: fx.salonLocationId,
+    })
+
+    expect({ status: rehomed.status, code: rehomed.code }).toEqual({
+      status: 200,
+      code: null,
+    })
+    expect(rehomed.body?.locationId).toBe(fx.salonLocationId)
+  })
+
+  it('leaves the scope alone when the patch does not name a location', async () => {
+    // The silent-widening guard: a plain time edit must not turn a scoped block
+    // into a block on every location.
+    const block = await createBlockAt({
+      hourUtc: 14,
+      locationId: fx.salonLocationId,
+      label: 'time only',
+    })
+
+    const movedStart = new Date(block.start.getTime() + 30 * 60_000)
+    const moved = await patchBlock(block.id, {
+      startsAt: movedStart.toISOString(),
+      endsAt: new Date(movedStart.getTime() + HOUR_MS).toISOString(),
+    })
+
+    expect(moved.status).toBe(200)
+    expect(moved.body?.locationId).toBe(fx.salonLocationId)
+  })
+
+  it('refuses a location that is not this pro’s, and a blank one', async () => {
+    const block = await createBlockAt({
+      hourUtc: 16,
+      locationId: fx.salonLocationId,
+      label: 'refusals',
+    })
+
+    const foreign = await patchBlock(block.id, { locationId: 'not-this-pros' })
+    expect({ status: foreign.status, code: foreign.code }).toEqual({
+      status: 404,
+      code: 'BLOCK_LOCATION_NOT_FOUND',
+    })
+
+    const blank = await patchBlock(block.id, { locationId: '   ' })
+    expect({ status: blank.status, code: blank.code }).toEqual({
+      status: 400,
+      code: 'INVALID_LOCATION_ID',
+    })
+
+    // Neither refusal moved anything.
+    const stored = await db.calendarBlock.findUnique({
+      where: { id: block.id },
+      select: { locationId: true },
+    })
+    expect(stored?.locationId).toBe(fx.salonLocationId)
+  })
+
+  it('re-checks conflicts under the NEW scope, not the old one', async () => {
+    // A block at the salon and a block at the mobile base can coexist at the same
+    // time. Moving one onto the other must be refused — which only happens if the
+    // conflict query runs against the TARGET location.
+    const start = futureUtc(DAY + 6, 20)
+    const end = new Date(start.getTime() + HOUR_MS)
+
+    const atSalon = await postBlock({
+      startsAt: start.toISOString(),
+      endsAt: end.toISOString(),
+      note: `${RS_NOTE} salon side`,
+      locationId: fx.salonLocationId,
+    })
+    expect(atSalon.status).toBe(201)
+
+    // Same window, other location — allowed, which is the premise of the test.
+    const atMobile = await postBlock({
+      startsAt: start.toISOString(),
+      endsAt: end.toISOString(),
+      note: `${RS_NOTE} mobile side`,
+      locationId: fx.mobileLocationId,
+    })
+    expect(atMobile.status).toBe(201)
+
+    const collide = await patchBlock(atMobile.body?.id ?? '', {
+      locationId: fx.salonLocationId,
+    })
+
+    expect(collide.status).toBe(409)
+    expect(collide.code).toBe('TIME_BLOCKED')
+
+    // Still at its own location, untouched.
+    const stored = await db.calendarBlock.findUnique({
+      where: { id: atMobile.body?.id ?? '' },
+      select: { locationId: true },
+    })
+    expect(stored?.locationId).toBe(fx.mobileLocationId)
   })
 })
 

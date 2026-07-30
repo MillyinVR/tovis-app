@@ -20,6 +20,7 @@ import { useCalendarData } from './_hooks/useCalendarData'
 import { useCalendarNavigation } from './_hooks/useCalendarNavigation'
 
 import { isBlockedEvent } from './_utils/calendarMath'
+import { locationFullLabel } from './_utils/locationLabels'
 
 import { DEFAULT_CALENDAR_VIEW } from './_constants'
 
@@ -111,6 +112,20 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
   const bookingModalTimeZone = useMemo(
     () => safeCalendarTimeZone(cal.booking?.timeZone ?? calendarTimeZone),
     [cal.booking?.timeZone, calendarTimeZone],
+  )
+
+  // The scope options the block editor offers. Same label helper as the
+  // location filter, so a location reads identically in both places.
+  const editBlockLocations = useMemo(
+    () =>
+      (cal.scopedLocations ?? []).map((location) => ({
+        id: location.id,
+        label: locationFullLabel({
+          location,
+          fallbackLabel: copy.locationPanel.selectFallback,
+        }),
+      })),
+    [cal.scopedLocations, copy.locationPanel.selectFallback],
   )
 
   const anchoredCurrentDate = useMemo(
@@ -355,6 +370,10 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
       <EditBlockModal
         open={cal.editBlockOpen}
         blockId={cal.editBlockId}
+        // Somewhere to move the block TO. Includes an "All locations" option, so
+        // a block orphaned by a location delete can be given a home again
+        // instead of only being movable in time.
+        locations={editBlockLocations}
         // The opened block's own zone/step when it has a location of its own,
         // so a block at another location edits in ITS local time instead of
         // the viewport's.

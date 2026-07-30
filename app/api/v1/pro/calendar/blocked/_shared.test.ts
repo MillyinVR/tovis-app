@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildBlockConflictWhere,
   clampRange,
+  parseBlockScopeInput,
   parseLocationIdInput,
   parseNoteInput,
   toDateOrNull,
@@ -169,6 +170,33 @@ describe('blocked/_shared', () => {
 
     it('rejects non-string values', () => {
       expect(parseLocationIdInput(42)).toEqual({ ok: false })
+    })
+  })
+
+  describe('parseBlockScopeInput', () => {
+    // The WRITE-side parser. Same as parseLocationIdInput except a blank string
+    // is refused instead of folded to null, because null means "block EVERY
+    // location" and that has to be asked for, not fallen into.
+    it('reads absent and explicit null as "all locations"', () => {
+      expect(parseBlockScopeInput(undefined)).toEqual({ ok: true, value: null })
+      expect(parseBlockScopeInput(null)).toEqual({ ok: true, value: null })
+    })
+
+    it('trims a real location id', () => {
+      expect(parseBlockScopeInput('  loc_1  ')).toEqual({
+        ok: true,
+        value: 'loc_1',
+      })
+    })
+
+    it('REFUSES a blank string rather than reading it as "all locations"', () => {
+      expect(parseBlockScopeInput('')).toEqual({ ok: false })
+      expect(parseBlockScopeInput('   ')).toEqual({ ok: false })
+    })
+
+    it('rejects non-string values', () => {
+      expect(parseBlockScopeInput(42)).toEqual({ ok: false })
+      expect(parseBlockScopeInput({})).toEqual({ ok: false })
     })
   })
 

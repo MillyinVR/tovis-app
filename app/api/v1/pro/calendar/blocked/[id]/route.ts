@@ -24,6 +24,7 @@ import {
 import { resolveBlockScope } from '../_blockScope'
 
 import {
+  parseBlockScopeInput,
   parseNoteInput,
   toBlockDto,
   toDateOrNull,
@@ -38,6 +39,8 @@ type BlockRouteLocalErrorCode =
   | 'BLOCK_ID_REQUIRED'
   | 'BLOCK_NOT_FOUND'
   | 'BLOCK_LOCATION_NOT_FOUND'
+  | 'INVALID_LOCATION_ID'
+  | 'NO_BOOKABLE_LOCATION'
   | 'INVALID_STARTS_AT'
   | 'INVALID_ENDS_AT'
   | 'INVALID_NOTE'
@@ -352,6 +355,22 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       })
     }
 
+    // Re-scoping a block is opt-in per request: an ABSENT `locationId` means
+    // "leave the scope alone", an explicit null means "make this block apply to
+    // every location", and a blank string is refused (`parseBlockScopeInput`).
+    // Without the absent/null distinction a plain time edit would silently widen
+    // a location-scoped block to all locations.
+    const hasLocationId = hasOwnField(body, 'locationId')
+    const locationIdInput = parseBlockScopeInput(body.locationId)
+
+    if (hasLocationId && !locationIdInput.ok) {
+      return jsonFail(400, 'Invalid locationId.', {
+        code: 'INVALID_LOCATION_ID',
+      })
+    }
+
+    const requestedLocationId = locationIdInput.ok ? locationIdInput.value : null
+
     const result = await withLockedProfessionalTransaction(
       professionalId,
       async ({ tx }): Promise<BlockUpdateTransactionResult> => {
@@ -377,13 +396,26 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           })
         }
 
-        if (!hasStartsAt && !hasEndsAt && !noteInput.isSet) {
+        // A scope change counts as a change even when the window and note are
+        // untouched — moving a block between locations moves occupancy.
+        const scopeChanged =
+          hasLocationId && requestedLocationId !== existing.locationId
+
+        if (!hasStartsAt && !hasEndsAt && !noteInput.isSet && !scopeChanged) {
           return blockUpdateSuccess({
             status: 200,
             block: existing,
             changed: false,
           })
         }
+
+        // The scope this block will have AFTER the patch. Every conflict check
+        // below runs against THIS, not the stored one: widening a block to all
+        // locations can collide with a block at another location that the old
+        // scope never had to care about.
+        const targetLocationId = hasLocationId
+          ? requestedLocationId
+          : existing.locationId
 
         const startsAt = startsAtInput ?? existing.startsAt
         const endsAt = endsAtInput ?? existing.endsAt
@@ -398,39 +430,46 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           })
         }
 
-        // `mode: 'edit'` on purpose. This block already exists and already
-        // occupies the pro's time, so its location may since have been archived
-        // (`isBookable: false`) or hard-deleted (`onDelete: SetNull`, leaving
-        // `locationId: null`). Both used to refuse the edit — which stranded the
-        // block: still occupying time, still on the calendar, never movable
-        // again, with delete-and-recreate the only way out.
+        // Which mode depends on WHO CHOSE the location, not on the fact that
+        // this is a PATCH:
+        //
+        // - The pro is naming a NEW location, so authorize it exactly like a
+        //   create — it must be one of their own bookable locations, and going
+        //   unscoped still requires them to have at least one. Anything laxer
+        //   would let an edit place a block somewhere a create could not.
+        // - Nobody asked to move it, so never strand: the stored location may
+        //   since have been archived (`isBookable: false`) or hard-deleted
+        //   (`onDelete: SetNull` → `locationId: null`), and refusing on either is
+        //   what left blocks permanently uneditable.
         const scope = await resolveBlockScope({
           tx,
           professionalId,
-          locationId: existing.locationId,
-          mode: 'edit',
+          locationId: targetLocationId,
+          mode: scopeChanged ? 'create' : 'edit',
         })
 
         if (!scope.ok) {
-          // `mode: 'edit'` never answers NO_BOOKABLE_LOCATION (that guard is
-          // create-only), so the only failure reachable here is a block pointing
-          // at a location that is not this pro's — which the FK makes
-          // unreachable. Kept as a defensive refusal rather than defaulting the
-          // buffer behind a broken row.
-          return blockUpdateFailure({
-            status: 404,
-            code: 'BLOCK_LOCATION_NOT_FOUND',
-            error: 'Location not found.',
-          })
+          return scope.code === 'NO_BOOKABLE_LOCATION'
+            ? blockUpdateFailure({
+                status: 409,
+                code: 'NO_BOOKABLE_LOCATION',
+                error: 'Add a bookable location before blocking time.',
+              })
+            : blockUpdateFailure({
+                status: 404,
+                code: 'BLOCK_LOCATION_NOT_FOUND',
+                error: 'Location not found.',
+              })
         }
 
         try {
           await assertNoCalendarBlockConflict({
             tx,
             professionalId,
-            // Null keeps the unscoped block's own semantics: it conflicts with
-            // EVERY other block of this pro's, at any location.
-            locationId: existing.locationId,
+            // The TARGET scope, not the stored one. Null keeps the unscoped
+            // block's own semantics: it conflicts with EVERY other block of this
+            // pro's, at any location.
+            locationId: targetLocationId,
             requestedStart: startsAt,
             requestedEnd: endsAt,
             excludeBlockId: existing.id,
@@ -439,7 +478,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           handleCalendarBlockConflictError({
             error,
             professionalId,
-            locationId: existing.locationId,
+            locationId: targetLocationId,
             requestedStart: startsAt,
             requestedEnd: endsAt,
             blockId: existing.id,
@@ -458,7 +497,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         if (bookingConflict) {
           logBlockUpdateConflict({
             professionalId,
-            locationId: existing.locationId,
+            locationId: targetLocationId,
             requestedStart: startsAt,
             requestedEnd: endsAt,
             conflictType: 'BOOKING',
@@ -481,7 +520,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         if (holdConflict) {
           logBlockUpdateConflict({
             professionalId,
-            locationId: existing.locationId,
+            locationId: targetLocationId,
             requestedStart: startsAt,
             requestedEnd: endsAt,
             conflictType: 'HOLD',
@@ -501,6 +540,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
             ...(hasStartsAt ? { startsAt } : {}),
             ...(hasEndsAt ? { endsAt } : {}),
             ...(noteInput.isSet ? { note: noteInput.value } : {}),
+            ...(scopeChanged ? { locationId: targetLocationId } : {}),
           },
           select: {
             id: true,
