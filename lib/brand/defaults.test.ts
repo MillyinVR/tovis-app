@@ -5,6 +5,8 @@
 // modes. Raw colours are not caught by any static guard, so this suite is the
 // guard — it recomputes WCAG contrast from the token values rather than
 // trusting the comment next to them.
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { CALENDAR_SWATCH_IDS } from '@/lib/calendar/eventColor'
@@ -119,6 +121,36 @@ describe('DEFAULT_CALENDAR_SWATCHES', () => {
     for (const mode of MODES) {
       expect(tovisBrand.tokensByMode[mode].calendarSwatches).toEqual(
         DEFAULT_CALENDAR_SWATCHES[mode],
+      )
+    }
+  })
+
+  // brand.css restates the DARK set as a :root fallback, the same way it
+  // restates every other colour token. That is a second copy, and a second copy
+  // drifts — so pin it here rather than hope. If this fails, one of the two was
+  // edited alone.
+  it('matches the :root dark fallback in brand.css, value for value', () => {
+    const css = fs.readFileSync(
+      path.join(process.cwd(), 'lib/brand/brand.css'),
+      'utf8',
+    )
+
+    const declared = new Map<string, string>()
+
+    for (const match of css.matchAll(/--swatch-(\d{2}):\s*([^;]+);/g)) {
+      const [, id, value] = match
+
+      if (id && value) declared.set(id, value.trim())
+    }
+
+    expect(
+      [...declared.keys()].sort(),
+      'brand.css declares a different set of swatch ids',
+    ).toEqual([...CALENDAR_SWATCH_IDS].sort())
+
+    for (const id of CALENDAR_SWATCH_IDS) {
+      expect(declared.get(id), `--swatch-${id} in brand.css`).toBe(
+        DEFAULT_CALENDAR_SWATCHES.dark[id],
       )
     }
   })
