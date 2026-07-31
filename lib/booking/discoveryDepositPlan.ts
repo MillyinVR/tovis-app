@@ -63,26 +63,22 @@ export function computeDepositCents(args: {
  * owed up front, or when the combined deposit + fee can't clear Stripe's
  * minimum charge.
  *
- * 🔴 The two flags are SEPARATE decisions and must stay that way (K10-A):
- * `depositRequired` follows the pro's `depositScope`
- * (lib/booking/depositRequirement.ts) and can be true for a returning client;
- * `feeEligible` is the platform's new-via-discovery gate
- * (lib/booking/discoveryFee.ts) and never widens with it. Collapsing them back
- * into one boolean is how the pro's scope setting came to have no reader.
+ * 🔴 The deposit and the fee are SEPARATE decisions and must stay that way
+ * (K10-A): the deposit follows the pro's `depositScope` and, since K10, the
+ * per-service prepay requirement — both sized by
+ * `computeUpfrontDepositCents` (lib/booking/prepay.ts), which is why this
+ * function takes an already-computed `depositCents`. `feeEligible` is the
+ * platform's new-via-discovery gate (lib/booking/discoveryFee.ts) and never
+ * widens with either. Collapsing them back into one boolean is how the pro's
+ * scope setting came to have no reader.
  */
 export function computeDiscoveryDepositPlan(args: {
-  settings: DepositSettings
-  servicePriceCents: number
-  depositRequired: boolean
+  /** The deposit to collect, already sized — see lib/booking/prepay.ts. */
+  depositCents: number
   feeEligible: boolean
   discoveryFeeCents: number
 }): DiscoveryDepositPlan {
-  const depositCents = args.depositRequired
-    ? computeDepositCents({
-        settings: args.settings,
-        servicePriceCents: args.servicePriceCents,
-      })
-    : 0
+  const depositCents = Math.max(0, Math.round(args.depositCents))
   const discoveryFeeCents = args.feeEligible
     ? Math.max(0, Math.round(args.discoveryFeeCents))
     : 0

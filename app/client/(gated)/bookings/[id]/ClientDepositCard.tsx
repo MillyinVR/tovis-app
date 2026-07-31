@@ -24,6 +24,25 @@ type Props = {
   depositAmount: string | number | null | undefined
   /** One-time platform fee in CENTS. */
   discoveryFeeCents: number | null | undefined
+  /**
+   * K10: this "deposit" is the whole bill — the pro marked the service
+   * prepay-required, so it is a 100% deposit. Derived server-side by
+   * `depositWouldCoverTotal`. The card must not call that a deposit that will
+   * be "credited later": the client is paying for the appointment, and there
+   * will be nothing to settle on the day.
+   */
+  prepaysInFull?: boolean
+  /**
+   * Deposit money the pro actually still holds, in cents
+   * (`deriveNetDepositHeldCents`) — `depositAmount` minus anything refunded.
+   *
+   * Only the PAID branch uses it, and only that branch may: the DISPUTED branch
+   * has to name the sum under dispute (the net is 0 while a dispute is open, so
+   * it would read "your $0.00 is under dispute"), and a PENDING deposit is an
+   * amount being ASKED for, not held. Without this a client refunded $50 of a
+   * $210 prepay was still told "$210.00 is held".
+   */
+  netDepositHeldCents?: number | null
 }
 
 type DepositSessionResponse = {
@@ -43,6 +62,8 @@ export default function ClientDepositCard({
   depositDisputed,
   depositAmount,
   discoveryFeeCents,
+  prepaysInFull = false,
+  netDepositHeldCents,
 }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -126,12 +147,23 @@ export default function ClientDepositCard({
         </section>
       )
     }
+    // What the pro still holds — not what was originally charged. A partial
+    // refund leaves depositStatus PAID, so `depositAmount` alone would keep
+    // quoting money that has already gone back to the client.
+    const heldLabel =
+      netDepositHeldCents == null
+        ? depositLabel
+        : centsToMoney(Math.max(0, netDepositHeldCents))
+
     return (
       <section className="rounded-card border border-toneSuccess/30 bg-bgSecondary p-4">
-        <div className="text-[13px] font-black text-textPrimary">Deposit paid ✓</div>
+        <div className="text-[13px] font-black text-textPrimary">
+          {prepaysInFull ? 'Paid in full ✓' : 'Deposit paid ✓'}
+        </div>
         <div className="mt-1 text-[12px] text-textSecondary">
-          Your {depositLabel ?? 'deposit'} is held and will be credited toward your
-          service total.
+          {prepaysInFull
+            ? `Your ${heldLabel ?? 'payment'} covers this appointment. There’s nothing to pay on the day.`
+            : `Your ${heldLabel ?? 'deposit'} is held and will be credited toward your service total.`}
         </div>
       </section>
     )
@@ -140,18 +172,34 @@ export default function ClientDepositCard({
   return (
     <section className="rounded-card border border-white/10 bg-bgSecondary p-4">
       <div className="text-[13px] font-black text-textPrimary">
-        Secure your booking
+        {prepaysInFull ? 'Pay for your appointment' : 'Secure your booking'}
       </div>
       <div className="mt-1 text-[12px] text-textSecondary">
-        This pro requires a deposit to hold your booking. Because you found them through
-        the Looks feed or Discovery, a one-time booking fee also applies. Your
-        deposit is credited toward your service total.
+        {prepaysInFull
+          ? 'This pro asks for this service to be paid in full when you book, so there’s nothing left to settle on the day.'
+          : 'This pro requires a deposit to hold your booking. Your deposit is credited toward your service total.'}
+        {/* The one-time platform fee only applies to a cold Looks/Discovery
+            match. Since K10-A the deposit can be required far more widely (the
+            pro's depositScope, and now a prepay-required service), so this
+            sentence has to follow the fee rather than the deposit — it used to
+            tell every deposit-paying client they had come through Discovery. */}
+        {feeLabel
+          ? ' Because you found this pro through the Looks feed or Discovery, a one-time booking fee also applies.'
+          : ''}
       </div>
 
       <div className="mt-3 grid gap-1 rounded-card border border-white/10 bg-bgPrimary p-3 text-[13px]">
         {depositLabel ? (
           <div className="flex items-center justify-between">
-            <span className="text-textSecondary">Deposit (credited later)</span>
+            {/* Not "Service total": the up-front charge can legitimately EXCEED
+                the bill when a pro's flat deposit is larger than a discounted
+                total (K10-A surfaces the difference as excessHeldCents), and a
+                row labelled "total" showing more than the total is a lie. This
+                label claims only that nothing is left to pay, which is true in
+                both cases. */}
+            <span className="text-textSecondary">
+              {prepaysInFull ? 'Service (paid in full)' : 'Deposit (credited later)'}
+            </span>
             <span className="font-semibold text-textPrimary">{depositLabel}</span>
           </div>
         ) : null}
@@ -178,7 +226,15 @@ export default function ClientDepositCard({
             : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
         ].join(' ')}
       >
-        {pending ? 'Starting secure checkout…' : 'Pay deposit & booking fee'}
+        {pending
+          ? 'Starting secure checkout…'
+          : prepaysInFull
+            ? feeLabel
+              ? 'Pay in full & booking fee'
+              : 'Pay in full'
+            : feeLabel
+              ? 'Pay deposit & booking fee'
+              : 'Pay deposit'}
       </button>
 
       <div className="mt-2 text-[11px] text-textSecondary">

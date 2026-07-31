@@ -3,6 +3,7 @@ import { BookingDepositStatus, Prisma } from '@prisma/client'
 
 import {
   DEPOSIT_CREDIT_SELECT,
+  depositWouldCoverTotal,
   deriveDepositCredit,
   deriveNetDepositHeldCents,
   type DepositCreditBookingRow,
@@ -197,6 +198,75 @@ describe('deriveDepositCredit', () => {
     expect(credit.creditCents).toBe(3_333)
     expect(credit.totalCents).toBe(9_999)
     expect(credit.amountDueCents).toBe(6_666)
+  })
+})
+
+// K10: the prepay surfaces ask a question `deriveDepositCredit` cannot answer
+// for money that has not landed yet.
+describe('depositWouldCoverTotal', () => {
+  it('is true for a PENDING deposit sized at the whole bill — the prepay case', () => {
+    expect(
+      depositWouldCoverTotal(
+        row({
+          depositStatus: BookingDepositStatus.PENDING,
+          depositAmount: new Prisma.Decimal(200),
+        }),
+      ),
+    ).toBe(true)
+
+    // ...where the credit is still 0, because nothing is held.
+    expect(
+      deriveDepositCredit(
+        row({
+          depositStatus: BookingDepositStatus.PENDING,
+          depositAmount: new Prisma.Decimal(200),
+        }),
+      ).coversTotal,
+    ).toBe(false)
+  })
+
+  it('is false for an ordinary part-payment', () => {
+    expect(
+      depositWouldCoverTotal(
+        row({
+          depositStatus: BookingDepositStatus.PENDING,
+          depositAmount: new Prisma.Decimal(60),
+        }),
+      ),
+    ).toBe(false)
+  })
+
+  it('is true once that prepay is captured', () => {
+    expect(depositWouldCoverTotal(paidDeposit(200))).toBe(true)
+  })
+
+  // 🔴 The display lie this exists to stop: "Paid in full ✓ — nothing to pay on
+  // the day" printed over a balance the client still owes.
+  it('is FALSE once part of the prepay has been refunded', () => {
+    expect(
+      depositWouldCoverTotal(paidDeposit(200, { depositRefundedCents: 5_000 })),
+    ).toBe(false)
+  })
+
+  it('is FALSE while the charge is disputed', () => {
+    expect(
+      depositWouldCoverTotal(paidDeposit(200, { depositDisputedAt: new Date() })),
+    ).toBe(false)
+  })
+
+  it('is false for a $0 bill, matching coversTotal', () => {
+    const empty = row({
+      depositStatus: BookingDepositStatus.PENDING,
+      depositAmount: new Prisma.Decimal(200),
+      totalAmount: new Prisma.Decimal(0),
+    })
+
+    expect(depositWouldCoverTotal(empty)).toBe(false)
+    expect(deriveDepositCredit(empty).coversTotal).toBe(false)
+  })
+
+  it('is false when there is no deposit at all', () => {
+    expect(depositWouldCoverTotal(row())).toBe(false)
   })
 })
 

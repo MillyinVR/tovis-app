@@ -31,7 +31,10 @@ import {
   isNewDiscoveryClient,
   resolveDiscoveryFeeCents,
 } from '@/lib/booking/discoveryFee'
-import { isDepositRequired } from '@/lib/booking/depositRequirement'
+import {
+  resolveDepositRequirement,
+  type DepositRequirement,
+} from '@/lib/booking/depositRequirement'
 import type { DepositSettings } from '@/lib/booking/discoveryDepositPlan'
 import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import { resolveEffectiveEntitlements } from '@/lib/pro/entitlements'
@@ -68,11 +71,13 @@ export type FinalizeDiscoveryDirective = Readonly<{
    */
   feeEligible: boolean
   /**
-   * The pro's `depositScope` calls for a deposit on this booking
+   * Whether this booking takes money up front, and why
    * (lib/booking/depositRequirement.ts). Under the default NEW_DISCOVERY_ONLY
-   * this equals `feeEligible`; under ALL_NEW_CLIENTS / ALL_CLIENTS it is wider.
+   * with no prepay-required service, `required` equals `feeEligible`; under
+   * ALL_NEW_CLIENTS / ALL_CLIENTS, or under K10's per-service prepay, it is
+   * wider. `prepayScope` sizes the 100% term in the transaction.
    */
-  depositRequired: boolean
+  depositRequirement: DepositRequirement
   depositSettings: DepositSettings
   discoveryFeeCents: number
   /**
@@ -89,6 +94,12 @@ export async function resolveDiscoveryFinalize(args: {
   /** Authenticated client's user id (for NFC attribution); null for token flows. */
   clientUserId: string | null
   professionalId: string
+  /**
+   * The BASE offering this booking is for. K10 reads its `prepayScope` here,
+   * inside the trust boundary, rather than trusting a value the route passed
+   * down — the requirement decides how much money is charged.
+   */
+  offeringId: string
   lookPostId: string | null
   mediaId: string | null
   source: BookingSource
@@ -105,12 +116,16 @@ export async function resolveDiscoveryFinalize(args: {
     feeEligible: boolean,
     depositSettings: DepositSettings,
     sourceLookPostId: string | null = null,
-    depositRequired: boolean = feeEligible,
+    depositRequirement: DepositRequirement = {
+      required: feeEligible,
+      scopeRequired: feeEligible,
+      prepayScope: null,
+    },
   ): FinalizeDiscoveryDirective => ({
     provenance,
     relationshipLabel,
     feeEligible,
-    depositRequired,
+    depositRequirement,
     depositSettings,
     discoveryFeeCents: feeCents,
     sourceLookPostId,
@@ -134,6 +149,12 @@ export async function resolveDiscoveryFinalize(args: {
   // PENDING with no surface that can pay it — a hold nobody can clear
   // (reserving-a-slot-needs-a-surface). Widening this needs a deposit step in
   // the token flow first; logged as a follow-up, not silently half-shipped.
+  //
+  // 🔴 K10 does NOT change that. A prepay-required service rebooked through
+  // aftercare still collects nothing up front, for the same reason: the token
+  // flow has no authenticated client, so the prepay would be a bill with no
+  // surface that can pay it, and the 24h release sweep would then cancel a
+  // rebook the client asked for. Tracked as K10-A-2.
   if (args.aftercare || args.source === BookingSource.AFTERCARE) {
     return baseDirective(
       BookingDiscoveryProvenance.AFTERCARE,
@@ -160,6 +181,7 @@ export async function resolveDiscoveryFinalize(args: {
     threadCount,
     paymentSettings,
     subscription,
+    offeringPrepay,
   ] = await Promise.all([
     resolveValidLookPost({
       professionalId: args.professionalId,
@@ -230,6 +252,13 @@ export async function resolveDiscoveryFinalize(args: {
         compUntil: true,
       },
     }),
+    // K10: the per-service prepay requirement. Scoped to the pro as well as the
+    // id — an offeringId that belongs to somebody else must not be able to
+    // impose (or lift) a charge on this pro's booking.
+    prisma.professionalServiceOffering.findFirst({
+      where: { id: args.offeringId, professionalId: args.professionalId },
+      select: { prepayScope: true },
+    }),
   ])
 
   const provenance = resolveDiscoveryProvenance({
@@ -273,14 +302,16 @@ export async function resolveDiscoveryFinalize(args: {
   })
 
   // The DEPOSIT gate — the pro's own scope setting, read here for the first
-  // time since it shipped (K10-A). Under the default NEW_DISCOVERY_ONLY this
+  // time since it shipped (K10-A), plus K10's per-service prepay requirement.
+  // Under the default NEW_DISCOVERY_ONLY with no prepay-required service this
   // resolves identically to `feeEligible`.
-  const depositRequired = isDepositRequired({
+  const depositRequirement = resolveDepositRequirement({
     scope: paymentSettings?.depositScope ?? DepositScope.NEW_DISCOVERY_ONLY,
     proDepositEnabled: depositSettings.depositEnabled,
     proStripeReady,
     provenance,
     hasPriorRelationship: hasPriorRelationship(relationshipSignals),
+    offeringPrepayScope: offeringPrepay?.prepayScope ?? null,
   })
 
   const directive = baseDirective(
@@ -293,7 +324,7 @@ export async function resolveDiscoveryFinalize(args: {
     feeEligible,
     depositSettings,
     validLookPost.sourceLookPostId,
-    depositRequired,
+    depositRequirement,
   )
 
   // Membership perk (client-paid-fee model, Option 1): a subscribed pro's new

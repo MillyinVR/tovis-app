@@ -103,6 +103,7 @@ export default async function ServicesManagerSection({
 
       rebookIntervalDays: true,
       calendarSwatch: true,
+      prepayScope: true,
 
       service: {
         select: {
@@ -175,6 +176,10 @@ export default async function ServicesManagerSection({
     // the current palette must reach the picker as "no colour", the same way
     // the calendar reads it.
     calendarSwatch: parseCalendarSwatch(o.calendarSwatch),
+
+    // K10: the per-service prepay requirement. A real enum column, so it needs
+    // no narrowing on the way out.
+    prepayScope: o.prepayScope,
 
     serviceName: o.service.name,
     categoryName: o.service.category?.name ?? null,

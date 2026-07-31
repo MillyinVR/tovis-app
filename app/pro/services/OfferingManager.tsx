@@ -11,7 +11,9 @@ import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import CalendarSwatchPicker from '@/app/pro/services/CalendarSwatchPicker'
+import PrepayScopePicker from '@/app/pro/services/PrepayScopePicker'
 import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
+import type { OfferingPrepayScope } from '@prisma/client'
 type Offering = {
   id: string
   serviceId: string
@@ -49,6 +51,10 @@ type Offering = {
   // and the appointment's accent stripe keeps its status tone.
   calendarSwatch: CalendarSwatchId | null
 
+  // K10: this service must be paid in full up front. Null = no prepay, and the
+  // booking follows the pro's account-wide deposit setting exactly as before.
+  prepayScope: OfferingPrepayScope | null
+
   /**
    * ✅ Option 1 support (preferred names)
    */
@@ -79,6 +85,7 @@ type OfferingPatch = {
   mobileDurationMinutes?: number | null
   rebookIntervalDays?: number | null
   calendarSwatch?: CalendarSwatchId | null
+  prepayScope?: OfferingPrepayScope | null
 }
 
 type EligibleAddOn = {
@@ -617,6 +624,9 @@ function OfferingEditor(props: {
   const [calendarSwatch, setCalendarSwatch] = useState<CalendarSwatchId | null>(
     o.calendarSwatch ?? null,
   )
+  const [prepayScope, setPrepayScope] = useState<OfferingPrepayScope | null>(
+    o.prepayScope ?? null,
+  )
   const [addonsOpen, setAddonsOpen] = useState(false)
 
   const disabledForEdit = busy || uploadBusy || !upstreamOk
@@ -716,6 +726,7 @@ function OfferingEditor(props: {
         mobileDurationMinutes: offersMobile ? mobileDurInt : null,
         rebookIntervalDays: rebookIntervalInt,
         calendarSwatch,
+        prepayScope,
       },
     }
   }
@@ -932,6 +943,13 @@ function OfferingEditor(props: {
         name={`calendar-swatch-${o.id}`}
         value={calendarSwatch}
         onChange={setCalendarSwatch}
+        disabled={disabledForEdit}
+      />
+
+      <PrepayScopePicker
+        name={`prepay-scope-${o.id}`}
+        value={prepayScope}
+        onChange={setPrepayScope}
         disabled={disabledForEdit}
       />
 

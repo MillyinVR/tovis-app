@@ -38,6 +38,10 @@ import {
 } from './_view/statusPresentation'
 import ClientCheckoutCard from './ClientCheckoutCard'
 import ClientDepositCard from './ClientDepositCard'
+import {
+  depositWouldCoverTotal,
+  deriveNetDepositHeldCents,
+} from '@/lib/booking/depositCredit'
 
 export const dynamic = 'force-dynamic'
 
@@ -1312,6 +1316,8 @@ export default async function ClientBookingPage(props: {
                 depositDisputed={raw.depositDisputedAt != null}
                 depositAmount={raw.depositAmount?.toString() ?? null}
                 discoveryFeeCents={raw.discoveryFeeAmount}
+                prepaysInFull={depositWouldCoverTotal(raw)}
+                netDepositHeldCents={deriveNetDepositHeldCents(raw)}
               />
 
               {booking.cancellationPolicy ? (
