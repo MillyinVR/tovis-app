@@ -64,6 +64,7 @@ export {
 export {
   formatInTimeZone,
   formatAppointmentWhen,
+  formatDatedAppointmentWhen,
   formatRangeInTimeZone,
 } from '@/lib/formatInTimeZone'
 

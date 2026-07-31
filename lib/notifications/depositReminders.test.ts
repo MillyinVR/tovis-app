@@ -16,6 +16,7 @@ import {
   buildDepositReminderContent,
   buildDepositReminderDedupeKey,
   buildDepositReminderHref,
+  computeDepositReminderRunAt,
   scheduleDepositReminderOnBooking,
   validateDueDepositReminder,
 } from './depositReminders'
@@ -95,6 +96,60 @@ describe('buildDepositReminderContent', () => {
     })
     expect(content.title).toBe('Finish your deposit')
     expect(content.body).not.toContain('with ')
+  })
+})
+
+// K10-B-1: the pure formula, shared by the DEPOSIT_REMINDER schedule and the
+// unclaimed pay-link nudge dispatch — one instant, two rails.
+describe('computeDepositReminderRunAt', () => {
+  const HOUR = 60 * 60 * 1000
+
+  it('anchors on the stamped deadline minus the lead', () => {
+    const dueAt = new Date(NOW.getTime() + 96 * HOUR)
+    const runAt = computeDepositReminderRunAt({
+      depositDueAt: dueAt,
+      scheduledFor: new Date(NOW.getTime() + 200 * HOUR),
+      now: NOW,
+      reminderLeadHours: 24,
+    })
+
+    expect(runAt?.getTime()).toBe(dueAt.getTime() - 24 * HOUR)
+  })
+
+  it('collapses to halfway through what remains when the window is shorter than the lead', () => {
+    // dueAt is 10h out, lead is 24h → anchored lands in the past → halfway = +5h.
+    const dueAt = new Date(NOW.getTime() + 10 * HOUR)
+    const runAt = computeDepositReminderRunAt({
+      depositDueAt: dueAt,
+      scheduledFor: new Date(NOW.getTime() + 30 * HOUR),
+      now: NOW,
+      reminderLeadHours: 24,
+    })
+
+    expect(runAt?.getTime()).toBe(NOW.getTime() + 5 * HOUR)
+  })
+
+  it('keeps the legacy createdAt-anchored offset when no deadline is stamped', () => {
+    const runAt = computeDepositReminderRunAt({
+      depositDueAt: null,
+      scheduledFor: FUTURE_APPOINTMENT,
+      now: NOW,
+    })
+
+    expect(runAt?.getTime()).toBe(NOW.getTime() + REMINDER_OFFSET_MS)
+  })
+
+  it('returns null when the instant would land at/after the appointment', () => {
+    // Appointment 4h out, dueAt 10h out → halfway collapse (+5h) is past the
+    // appointment → no nudge at all (the release sweep still owns the slot).
+    expect(
+      computeDepositReminderRunAt({
+        depositDueAt: new Date(NOW.getTime() + 10 * HOUR),
+        scheduledFor: new Date(NOW.getTime() + 4 * HOUR),
+        now: NOW,
+        reminderLeadHours: 24,
+      }),
+    ).toBeNull()
   })
 })
 

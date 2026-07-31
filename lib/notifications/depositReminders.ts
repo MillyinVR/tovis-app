@@ -108,6 +108,50 @@ function isReleasableStatus(status: BookingStatus): boolean {
 }
 
 /**
+ * The instant the deposit nudge fires, or null when no nudge should exist.
+ *
+ * Anchored on the stamped release deadline (dueAt − lead). If the lead reaches
+ * past "now" (a window shorter than the lead), collapse to halfway through
+ * what remains — mirrors the lead-vs-deadline collapse in depositDeadline.ts —
+ * so a short-window booking still gets one nudge instead of an instant or
+ * missing one. Legacy rows with no stamp keep the original createdAt-anchored
+ * offset. Null when the instant would land at/after the appointment itself —
+ * such a booking gets no reminder (the release sweep still handles the slot).
+ *
+ * K10-B-1: exported so the unclaimed pay-link nudge (a scheduled dispatch on
+ * the client-action rail, lib/clientActions/createDepositPaymentDelivery.ts)
+ * fires at the SAME instant DEPOSIT_REMINDER computes — one formula, two
+ * rails, no drift.
+ */
+export function computeDepositReminderRunAt(args: {
+  depositDueAt: Date | null
+  scheduledFor: Date
+  now: Date
+  reminderLeadHours?: number
+}): Date | null {
+  let runAt: Date
+  if (args.depositDueAt) {
+    const leadHours = args.reminderLeadHours ?? depositReminderLeadHours()
+    const anchored = args.depositDueAt.getTime() - leadHours * 60 * 60 * 1000
+    runAt =
+      anchored > args.now.getTime()
+        ? new Date(anchored)
+        : new Date(
+            args.now.getTime() +
+              Math.max(
+                0,
+                (args.depositDueAt.getTime() - args.now.getTime()) / 2,
+              ),
+          )
+  } else {
+    runAt = new Date(args.now.getTime() + depositReminderOffsetMs())
+  }
+
+  if (runAt.getTime() >= args.scheduledFor.getTime()) return null
+  return runAt
+}
+
+/**
  * Schedules the deposit nudge. Call from the finalize transaction right after a
  * discovery-deposit booking is created. Self-validating and never throws: it
  * no-ops for any booking that isn't a still-unpaid, still-occupying, future
@@ -135,33 +179,13 @@ export async function scheduleDepositReminderOnBooking(args: {
   if (booking.depositStatus !== BookingDepositStatus.PENDING) return
   if (!isReleasableStatus(booking.status)) return
 
-  let runAt: Date
-  if (booking.depositDueAt) {
-    // Anchored on the stamped release deadline. If the lead reaches past "now"
-    // (a window shorter than the lead), collapse to halfway through what
-    // remains — mirrors the lead-vs-deadline collapse in depositDeadline.ts —
-    // so a short-window booking still gets one nudge instead of an instant or
-    // missing one.
-    const leadHours = args.reminderLeadHours ?? depositReminderLeadHours()
-    const anchored = booking.depositDueAt.getTime() - leadHours * 60 * 60 * 1000
-    runAt =
-      anchored > args.now.getTime()
-        ? new Date(anchored)
-        : new Date(
-            args.now.getTime() +
-              Math.max(
-                0,
-                (booking.depositDueAt.getTime() - args.now.getTime()) / 2,
-              ),
-          )
-  } else {
-    runAt = new Date(args.now.getTime() + depositReminderOffsetMs())
-  }
-
-  // Never schedule a nudge at/after the appointment itself — a last-minute
-  // booking whose deadline offset lands past the appointment gets no reminder
-  // (the release sweep still handles the slot).
-  if (runAt.getTime() >= booking.scheduledFor.getTime()) return
+  const runAt = computeDepositReminderRunAt({
+    depositDueAt: booking.depositDueAt,
+    scheduledFor: booking.scheduledFor,
+    now: args.now,
+    reminderLeadHours: args.reminderLeadHours,
+  })
+  if (!runAt) return
 
   await scheduleClientNotification({
     tx: args.tx,
