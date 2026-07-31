@@ -1917,6 +1917,7 @@ model ProfessionalProfile {
   clientNotes                 ClientProfessionalNote[]
   clientFormulaEntries        ClientFormulaEntry[]
   clientConsentRecords        ClientConsentRecord[]
+  consentForms                ConsentForm[]
   recordedAllergies           ClientAllergy[] // for recordedBy relation
   reviews                     Review[]
   reminders                   Reminder[]
@@ -4115,6 +4116,87 @@ model ClientFormulaEntry {
   @@index([bookingId])
 }
 
+// K14 — a consent/waiver form a pro can put in front of a client.
+//
+// A form is IDENTITY + ownership only; everything a client would ever read
+// (title AND body) lives on its append-only versions, because a record that
+// snapshots the body but lets the heading be rewritten later is not defensible
+// either. The current text is simply the highest-numbered version.
+//
+// Ownership:
+//   * professionalId NULL  → a PLATFORM template, adoptable by any pro.
+//     Created only by an admin (POST /api/v1/admin/consent-forms); the platform
+//     TEXT is a legal deliverable (D6), not something this code invents.
+//   * professionalId SET   → a pro's own form. `sourceTemplateId` records that
+//     it was adopted from a platform template; per-version
+//     `verbatimFromTemplate` records whether that pro then CHANGED the words.
+//     Origin is derived from these two columns (lib/consentForms/origin.ts) and
+//     deliberately not stored a third time.
+model ConsentForm {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // NULL = platform-owned template.
+  professionalId String?
+  kind           ClientConsentKind
+
+  // Retire a form without touching history: existing signatures keep resolving
+  // their version forever. Never delete a form that has been signed.
+  isActive Boolean @default(true)
+
+  // Set when a pro adopted a platform template into their own library.
+  sourceTemplateId String?
+
+  professional   ProfessionalProfile? @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  sourceTemplate ConsentForm?         @relation("ConsentFormTemplateAdoptions", fields: [sourceTemplateId], references: [id], onDelete: SetNull)
+  adoptions      ConsentForm[]        @relation("ConsentFormTemplateAdoptions")
+  versions       ConsentFormVersion[]
+
+  @@index([professionalId, kind, isActive])
+  @@index([sourceTemplateId])
+}
+
+// K14 — one published revision of a consent form. APPEND-ONLY, enforced by the
+// database: migration 20260822000000 installs a BEFORE UPDATE trigger that
+// raises on every row, so a pro editing their waiver can never change what an
+// already-signed record says. Editing publishes version n+1; signatures keep
+// pointing at the version they were made against, forever. Same rule
+// Booking.cancellationPolicySnapshot enforces one floor down — different
+// mechanism (a shared row, not a per-booking JSON copy) because one version is
+// signed by many clients and carries the full text.
+//
+// `body` is PLAIN TEXT, not markdown: nothing in this repo renders markdown, and
+// an HTML-rendering path over pro-authored legal text is an XSS surface nobody
+// asked for. Rendered with white-space: pre-wrap.
+model ConsentFormVersion {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  formId  String
+  version Int
+  title   String
+  body    String
+
+  publishedAt               DateTime @default(now())
+  // NULL = published by the platform (an admin), not by a pro.
+  publishedByProfessionalId String?
+
+  // Provenance (D6). Which platform-template version this text came from, and
+  // whether it is that text VERBATIM — computed at publish by comparing the
+  // words themselves, never taken from the client.
+  sourceTemplateVersionId String?
+  verbatimFromTemplate    Boolean @default(false)
+
+  form                  ConsentForm           @relation(fields: [formId], references: [id], onDelete: Cascade)
+  sourceTemplateVersion ConsentFormVersion?   @relation("ConsentFormVersionTemplateSource", fields: [sourceTemplateVersionId], references: [id], onDelete: SetNull)
+  derivedVersions       ConsentFormVersion[]  @relation("ConsentFormVersionTemplateSource")
+  consentRecords        ClientConsentRecord[]
+
+  @@unique([formId, version])
+  @@index([sourceTemplateVersionId])
+}
+
 // Consent/waiver + patch-test record. The signed artifact (proof) stays
 // author-scoped; patch-test SAFETY fields (result + validity) travel to any pro
 // with chart access per the design access matrix. PR4 — flagged, legal-gated.
@@ -4129,6 +4211,13 @@ model ClientConsentRecord {
 
   kind         ClientConsentKind
   serviceScope String? // e.g. "color services", "lash extensions"
+
+  // K14 — the exact text this record attests to. NULLABLE on purpose: every row
+  // written before K14 is free-text-only (serviceScope + encrypted notes, no
+  // form at all), and those rows must keep reading. A record that HAS one is
+  // pinned to that version forever — Restrict, because deleting the text out
+  // from under a signature is the failure this whole model exists to prevent.
+  formVersionId String?
 
   // Signature / proof capture (mirrors the clientActionToken/proof pattern; the
   // reference is a soft snapshot id, author-scoped — not surfaced to other pros).
@@ -4148,10 +4237,12 @@ model ClientConsentRecord {
   client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
   booking      Booking?            @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  formVersion  ConsentFormVersion? @relation(fields: [formVersionId], references: [id], onDelete: Restrict)
 
   @@index([professionalId, clientId, createdAt])
   @@index([clientId, kind, validUntil])
   @@index([bookingId])
+  @@index([formVersionId])
 }
 
 model Review {

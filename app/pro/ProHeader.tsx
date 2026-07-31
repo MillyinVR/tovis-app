@@ -21,6 +21,13 @@ type ProHeaderProps = {
    */
   migrationEnabled?: boolean
   /**
+   * Whether the consent-form library is enabled for this pro (K14 — the same
+   * technical-record gate the consent records themselves sit behind). Resolved
+   * server-side; when false the Forms tab is omitted entirely, because the page
+   * itself 404s and a tab that leads nowhere is worse than no tab.
+   */
+  formsEnabled?: boolean
+  /**
    * Workspaces the user can switch into (resolved server-side). Drives the
    * "Switch workspace" row in the account menu — empty/single = row hidden.
    */
@@ -59,6 +66,7 @@ const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
   { path: '/pro/locations', title: 'Locations' },
   { path: '/pro/verification', title: 'Verification' },
   { path: '/pro/migrate', title: 'Import' },
+  { path: '/pro/forms', title: 'Consent Forms' },
 ]
 
 const PRO_HEADER_TABS: ProHeaderTabItem[] = [
@@ -76,6 +84,14 @@ const PRO_HEADER_TABS: ProHeaderTabItem[] = [
 const PRO_MIGRATE_TAB: ProHeaderTabItem = {
   href: '/pro/migrate',
   label: 'Import',
+  match: 'prefix',
+}
+
+// K14 — only surfaced when the technical-record gate is on for this pro (see
+// formsEnabled prop); /pro/forms notFound()s otherwise.
+const PRO_FORMS_TAB: ProHeaderTabItem = {
+  href: '/pro/forms',
+  label: 'Forms',
   match: 'prefix',
 }
 
@@ -102,6 +118,7 @@ export default function ProHeader({
   subtitle,
   publicUrl,
   migrationEnabled = false,
+  formsEnabled = false,
   workspaceOptions,
 }: ProHeaderProps) {
   const pathname = usePathname()
@@ -173,7 +190,11 @@ export default function ProHeader({
             </div>
           </div>
 
-          <ProHeaderTabs pathname={pathname} migrationEnabled={migrationEnabled} />
+          <ProHeaderTabs
+            pathname={pathname}
+            migrationEnabled={migrationEnabled}
+            formsEnabled={formsEnabled}
+          />
         </div>
       </div>
     </header>
@@ -207,13 +228,17 @@ function NotificationsLink({
 function ProHeaderTabs({
   pathname,
   migrationEnabled,
+  formsEnabled,
 }: {
   pathname: string
   migrationEnabled: boolean
+  formsEnabled: boolean
 }) {
-  const tabs = migrationEnabled
-    ? [...PRO_HEADER_TABS, PRO_MIGRATE_TAB]
-    : PRO_HEADER_TABS
+  const tabs = [
+    ...PRO_HEADER_TABS,
+    ...(formsEnabled ? [PRO_FORMS_TAB] : []),
+    ...(migrationEnabled ? [PRO_MIGRATE_TAB] : []),
+  ]
 
   return (
     <nav className="brand-pro-overview-tabs no-scroll" aria-label="Pro tabs">

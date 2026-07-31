@@ -1311,6 +1311,23 @@ function ConsentList({
               </div>
             ) : null}
 
+            {record.formVersion ? (
+              <details className="mt-2 rounded-card border border-white/10 bg-bgSecondary p-2">
+                <summary className="cursor-pointer text-[12px] font-black text-textPrimary">
+                  {record.formVersion.title}{' '}
+                  <span className="font-semibold text-textSecondary">
+                    · v{record.formVersion.version} ·{' '}
+                    {record.formVersion.originLabel}
+                  </span>
+                </summary>
+                {/* The words as signed. This version can never be edited — the
+                    pro publishes a new one, and this record keeps pointing here. */}
+                <div className="mt-2 whitespace-pre-wrap text-[12px] font-semibold text-textSecondary">
+                  {record.formVersion.body}
+                </div>
+              </details>
+            ) : null}
+
             {record.notes ? (
               <div className="mt-2 whitespace-pre-wrap text-[12px] font-semibold text-textSecondary">
                 {record.notes}
@@ -1369,7 +1386,7 @@ function TechnicalRecordTab({
         subtitle="Signed waivers stay private to you; patch-test results travel to any pro with access."
       >
         <div className="mb-4">
-          <NewConsentForm clientId={clientId} />
+          <NewConsentForm clientId={clientId} forms={data.consentForms} />
         </div>
         <ConsentList consents={data.consents} now={now} tz={tz} />
       </SectionCard>
