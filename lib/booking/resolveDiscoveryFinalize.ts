@@ -36,6 +36,7 @@ import {
   type DepositRequirement,
 } from '@/lib/booking/depositRequirement'
 import type { DepositSettings } from '@/lib/booking/discoveryDepositPlan'
+import { loadProClientPolicy } from '@/lib/proClientPolicy/load'
 import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import { resolveEffectiveEntitlements } from '@/lib/pro/entitlements'
 
@@ -182,6 +183,7 @@ export async function resolveDiscoveryFinalize(args: {
     paymentSettings,
     subscription,
     offeringPrepay,
+    clientPolicy,
   ] = await Promise.all([
     resolveValidLookPost({
       professionalId: args.professionalId,
@@ -259,6 +261,14 @@ export async function resolveDiscoveryFinalize(args: {
       where: { id: args.offeringId, professionalId: args.professionalId },
       select: { prepayScope: true },
     }),
+    // K16: this pro's policy for THIS client. Joined into the same Promise.all
+    // rather than added as a serial hop — the same reasoning K8 recorded for the
+    // per-service swatch query, on a path whose known weakness is a fetch
+    // waterfall. Indexed by the (professionalId, clientId) unique key.
+    loadProClientPolicy({
+      professionalId: args.professionalId,
+      clientId: args.clientId,
+    }),
   ])
 
   const provenance = resolveDiscoveryProvenance({
@@ -312,6 +322,8 @@ export async function resolveDiscoveryFinalize(args: {
     provenance,
     hasPriorRelationship: hasPriorRelationship(relationshipSignals),
     offeringPrepayScope: offeringPrepay?.prepayScope ?? null,
+    clientPolicyRequiresDeposit: clientPolicy.requiresDeposit,
+    clientPolicyPrepayScope: clientPolicy.prepayScope,
   })
 
   const directive = baseDirective(

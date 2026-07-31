@@ -24,6 +24,11 @@ function signals(
     provenance: BookingDiscoveryProvenance.LOOKS_FEED,
     hasPriorRelationship: false,
     offeringPrepayScope: null,
+    // K16 defaults = no per-client policy, which is every existing (pro, client)
+    // pair. The whole K10 matrix below therefore still asserts pre-K16
+    // behaviour, unchanged.
+    clientPolicyRequiresDeposit: false,
+    clientPolicyPrepayScope: null,
     ...overrides,
   }
 }
@@ -209,6 +214,8 @@ describe('resolveDepositRequirement', () => {
                 provenance,
                 hasPriorRelationship: prior,
                 offeringPrepayScope: null,
+                clientPolicyRequiresDeposit: false,
+                clientPolicyPrepayScope: null,
               }).required
 
               const legacy = isNewDiscoveryClient({

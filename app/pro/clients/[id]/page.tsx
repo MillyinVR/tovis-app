@@ -32,6 +32,7 @@ import {
   isClientTechnicalRecordEnabled,
   isPatchTestCurrent,
 } from '@/lib/clients/technicalRecord'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import {
   loadTechnicalRecord,
   type FormulaView,
@@ -48,6 +49,7 @@ import PublicProfileView from '@/app/u/[handle]/_components/PublicProfileView'
 
 import EditAlertBannerForm from './EditAlertBannerForm'
 import EditDoNotRebookForm from './EditDoNotRebookForm'
+import EditClientPolicyForm from './EditClientPolicyForm'
 import EditPhotoReleaseForm from './EditPhotoReleaseForm'
 import EditProfileContextForm from './EditProfileContextForm'
 import NewAllergyForm from './NewAllergyForm'
@@ -1943,6 +1945,25 @@ export default async function ClientDetailPage(props: {
   const occupation = readEncryptedNoteOrFallback(client.occupationEncrypted, null)
   const socialHandle = client.proCapturedSocialHandle ?? null
 
+  // K16 — this pro's booking requirements for this client. Read raw (not through
+  // `loadProClientPolicy`) because the CONTROL must show what is STORED: the
+  // resolver applies the card-on-file rail gate, and a switch the pro turned on
+  // must not silently read as off in the very form they set it in. The rail flag
+  // is passed separately so the control can disable that one row instead.
+  const clientPolicy = technicalEnabled
+    ? await prisma.proClientPolicy.findUnique({
+        where: {
+          professionalId_clientId: { professionalId: proId, clientId: client.id },
+        },
+        select: {
+          requireDeposit: true,
+          prepayScope: true,
+          requireCardOnFile: true,
+          blockSelfServeBooking: true,
+        },
+      })
+    : null
+
   const totalVisits = bookingRowsAll.length
   const lastVisit = totalVisits ? bookingRowsAll[0] : null
   const upcoming = upcomingBookingFromRows(bookingRowsAll)
@@ -2157,6 +2178,21 @@ export default async function ClientDetailPage(props: {
                 initialReason={doNotRebookNote?.body ?? null}
               />
             </div>
+            {/* K16 — omitted entirely when the technical-record gate is off, the
+                same way the technical tab is: the kill switch reaches the
+                CONTROL, not only the write route. */}
+            {technicalEnabled ? (
+              <div className="grid gap-2">
+                <div className="text-[11px] font-black uppercase tracking-[0.08em] text-textSecondary">
+                  Booking requirements
+                </div>
+                <EditClientPolicyForm
+                  clientId={client.id}
+                  initialPolicy={clientPolicy}
+                  cardOnFileRailEnabled={noShowProtectionEnabled()}
+                />
+              </div>
+            ) : null}
           </div>
         </Card>
       </div>

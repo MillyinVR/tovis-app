@@ -28,6 +28,7 @@ import { DepositScope } from '@prisma/client'
 import type { BookingDiscoveryProvenance, OfferingPrepayScope } from '@prisma/client'
 
 import { isDiscoveryProvenance } from '@/lib/booking/discoveryFee'
+import { widerPrepayScope } from '@/lib/proClientPolicy/policy'
 
 export type DepositRequirementSignals = Readonly<{
   /** The pro's chosen scope. */
@@ -46,6 +47,24 @@ export type DepositRequirementSignals = Readonly<{
    * settings say.
    */
   offeringPrepayScope: OfferingPrepayScope | null
+  /**
+   * K16: this pro requires a deposit from THIS client specifically
+   * (`ProClientPolicy.requireDeposit`).
+   *
+   * 🔴 It widens the SCOPE, not the amount — which is why it sits inside the
+   * `proDepositEnabled` gate rather than overriding it the way prepay does. The
+   * amount still comes from the pro's configured flat/percent rule, and
+   * `computeDepositCents` returns 0 for a pro whose deposit is switched off, so
+   * an override here would produce "deposit required, $0 to pay". The write
+   * route refuses to SET the switch in that state instead
+   * (`describeDepositRequirementBlocker`).
+   */
+  clientPolicyRequiresDeposit: boolean
+  /**
+   * K16: this pro requires prepay from THIS client, at this scope, or null.
+   * Unioned with the offering's requirement — the wider scope wins.
+   */
+  clientPolicyPrepayScope: OfferingPrepayScope | null
 }>
 
 export type DepositRequirement = Readonly<{
@@ -92,14 +111,26 @@ const NO_DEPOSIT: DepositRequirement = {
  *     `isNewDiscoveryClient` exactly, so every pro who never touched the
  *     setting sees no change — pinned by a test that drives both functions over
  *     the same signal matrix.
+ *  4. **K16's per-client policy joins at two different heights.** A per-client
+ *     DEPOSIT requirement is an extra way to satisfy the scope rule, so it sits
+ *     inside the `proDepositEnabled` gate; a per-client PREPAY requirement is
+ *     unioned with the offering's and, like it, overrides that gate. The
+ *     asymmetry is not an oversight — prepay sizes itself from the bill, a
+ *     deposit is sized by configuration that may not exist.
  */
 export function resolveDepositRequirement(
   signals: DepositRequirementSignals,
 ): DepositRequirement {
   if (!signals.proStripeReady) return NO_DEPOSIT
 
-  const prepayScope = signals.offeringPrepayScope
-  const scopeRequired = signals.proDepositEnabled && matchesDepositScope(signals)
+  const prepayScope = widerPrepayScope(
+    signals.offeringPrepayScope,
+    signals.clientPolicyPrepayScope,
+  )
+
+  const scopeRequired =
+    signals.proDepositEnabled &&
+    (matchesDepositScope(signals) || signals.clientPolicyRequiresDeposit)
 
   return {
     required: scopeRequired || prepayScope != null,

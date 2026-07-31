@@ -86,6 +86,8 @@ export type BookingErrorCode =
   | "NO_SHOW_FEE_NOT_REFUNDABLE"
   | "NO_SHOW_FEE_ALREADY_REFUNDED"
   | "NO_SHOW_FEE_REFUND_FROZEN_DISPUTED"
+  | "SELF_SERVE_BOOKING_UNAVAILABLE"
+  | "CARD_ON_FILE_REQUIRED"
   | "STALE_VERSION"
   | "INTERNAL_ERROR";
 
@@ -93,6 +95,10 @@ export type BookingErrorUiAction =
   | "REFRESH_AVAILABILITY"
   | "PICK_NEW_SLOT"
   | "ADD_SERVICE_ADDRESS"
+  /** K16: the client must save a card before this booking can complete. */
+  | "ADD_PAYMENT_METHOD"
+  /** K16: nothing the client can do here — send them to the pro, not to a retry. */
+  | "CONTACT_PRO"
   | "FIX_LOCATION_CONFIG"
   | "FIX_OFFERING_CONFIG"
   | "FIX_WORKING_HOURS"
@@ -639,6 +645,36 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Booking duration does not match the selected services.",
     userMessage: "Duration does not match the selected services.",
+  },
+  // K16 — the two per-client policy refusals.
+  //
+  // 🔴 Both userMessages are deliberately NEUTRAL. The policy is pro-private:
+  // the client feels its effect but is never told a pro set something about
+  // them, so no copy on this path may say "flagged", "restricted", "blocked",
+  // or name the pro's reason. The copy states the requirement and the next
+  // action, nothing about the person. Pinned by a test.
+  SELF_SERVE_BOOKING_UNAVAILABLE: {
+    httpStatus: 403,
+    retryable: false,
+    // Not PICK_NEW_SLOT: no other slot works either, and sending this client
+    // round the availability grid to discover that one refusal at a time is
+    // worse than telling them where to go.
+    uiAction: "CONTACT_PRO",
+    message:
+      "This professional does not accept self-serve bookings from this client.",
+    userMessage:
+      "Online booking isn’t available for this appointment. Message this pro directly and they can book it for you.",
+  },
+  CARD_ON_FILE_REQUIRED: {
+    httpStatus: 402,
+    // Retryable: saving a card genuinely clears it, and the same request then
+    // succeeds — unlike every other refusal in this catalog that reports a
+    // state the client cannot change.
+    retryable: true,
+    uiAction: "ADD_PAYMENT_METHOD",
+    message: "This booking requires the client to have a card on file.",
+    userMessage:
+      "This appointment needs a card on file. Add one to finish booking — you won’t be charged now.",
   },
   CANCELLATION_POLICY_NOT_ACCEPTED: {
     httpStatus: 400,

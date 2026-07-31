@@ -16,6 +16,7 @@ import {
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { isRecord } from '@/lib/guards'
+import SaveCardStep from '@/app/_components/payments/SaveCardStep'
 // Shared wire DTO for GET /api/v1/offerings/add-ons — single source of truth for
 // the add-on shape (web + native). The `id` is the OfferingAddOn link id.
 import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
@@ -199,6 +200,18 @@ function describeSyncFailure(args: {
   return `Those add-ons don’t fit this appointment time — ${message} Pick an earlier time, or book without them.`
 }
 
+/**
+ * K16 — the machine-readable refusal code, alongside the human sentence.
+ *
+ * `CARD_ON_FILE_REQUIRED` is the one refusal on this path the CLIENT can clear
+ * without leaving the page, so it is the one the flow branches on rather than
+ * simply printing.
+ */
+function getFinalizeErrorCode(raw: unknown): string | null {
+  if (!isRecord(raw)) return null
+  return readString(raw.code)
+}
+
 function getFinalizeBookingId(raw: unknown): string | null {
   if (!isRecord(raw)) return null
   if (raw.ok !== true) return null
@@ -239,6 +252,8 @@ export default function AddOnsClient({
 
   const [error, setError] = useState<string | null>(initialError ?? null)
   const [submitting, setSubmitting] = useState(false)
+  /** K16: finalize refused for a missing card on file; show the inline step. */
+  const [needsCard, setNeedsCard] = useState(false)
   const [touched, setTouched] = useState(false)
   const [holdSecondsLeft, setHoldSecondsLeft] = useState<number | null>(null)
   // M15: when the pro charges no-show/late-cancel fees, the client must agree to
@@ -564,6 +579,17 @@ export default function AddOnsClient({
           return
         }
 
+        // K16: the pro requires a card on file and this client has none. The
+        // hold is deliberately still standing (the requirement is enforced at
+        // finalize, not at hold creation), so the client can save a card right
+        // here and finish inside the same reservation instead of losing the
+        // slot and starting over.
+        if (getFinalizeErrorCode(raw) === 'CARD_ON_FILE_REQUIRED') {
+          setNeedsCard(true)
+          setError(null)
+          return
+        }
+
         setError(apiError || 'Could not complete booking. Please try again.')
         return
       }
@@ -656,6 +682,35 @@ export default function AddOnsClient({
       {error ? (
         <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-toneDanger">
           {error}
+        </div>
+      ) : null}
+
+      {/* K16 — the inline add-card step. Neutral copy by design: this client is
+          never told that a policy exists about them, only what this appointment
+          needs. The hold is still running behind this step. */}
+      {needsCard ? (
+        <div
+          data-testid="booking-card-on-file-step"
+          className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4"
+        >
+          <div className="text-[13px] font-black text-textPrimary">
+            Add a card to finish booking
+          </div>
+          <div className="mt-1 text-xs font-semibold leading-5 text-textSecondary">
+            This appointment needs a card on file. You won’t be charged now —
+            your time slot is still held while you add it.
+          </div>
+
+          <SaveCardStep
+            saveLabel="Save card & book"
+            onSaved={() => {
+              setNeedsCard(false)
+              // Retry the finalize the card was blocking. The hold has not moved,
+              // so this is the same booking the client already confirmed.
+              void finalize()
+            }}
+            onCancel={() => setNeedsCard(false)}
+          />
         </div>
       ) : null}
 

@@ -2,24 +2,13 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { loadStripe } from '@stripe/stripe-js'
-import {
-  Elements,
-  PaymentElement,
-  useElements,
-  useStripe,
-} from '@stripe/react-stripe-js'
 
 import Badge from '@/app/_components/ui/Badge'
 import Button from '@/app/_components/ui/Button'
+import SaveCardStep from '@/app/_components/payments/SaveCardStep'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage, safeJson } from '@/lib/http'
 import type { ClientPaymentMethodDTO } from '@/lib/dto/clientPaymentMethods'
-
-// Created ONCE at module scope so Stripe.js isn't re-loaded per render.
-const stripePromise = loadStripe(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '',
-)
 
 function pickPaymentMethod(raw: unknown): ClientPaymentMethodDTO | null {
   if (!isRecord(raw)) return null
@@ -59,102 +48,13 @@ function formatExpiry(month: number | null, year: number | null): string | null 
   return `${mm}/${yy}`
 }
 
-/** Inner form rendered inside <Elements>; owns the Stripe.js confirm step. */
-function AddCardForm(props: {
-  setupIntentId: string
-  onSaved: () => void
-  onCancel: () => void
-}) {
-  const stripe = useStripe()
-  const elements = useElements()
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!stripe || !elements || saving) return
-
-    setSaving(true)
-    setError(null)
-
-    try {
-      const { error: confirmError } = await stripe.confirmSetup({
-        elements,
-        confirmParams: { return_url: window.location.href },
-        redirect: 'if_required',
-      })
-
-      if (confirmError) {
-        throw new Error(
-          confirmError.message ?? 'We could not confirm that card.',
-        )
-      }
-
-      const res = await fetch('/api/v1/client/payment-methods', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({ setupIntentId: props.setupIntentId }),
-      })
-
-      const raw = await safeJson(res)
-      if (!res.ok) {
-        throw new Error(readErrorMessage(raw) ?? 'Failed to save the card.')
-      }
-
-      props.onSaved()
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to save the card.')
-      setSaving(false)
-    }
-  }
-
-  return (
-    <form onSubmit={onSubmit} className="mt-4 grid gap-4">
-      <div className="rounded-card border border-white/10 bg-bgSecondary/35 p-3">
-        <PaymentElement />
-      </div>
-
-      {error ? (
-        <div className="rounded-card border border-toneDanger/30 bg-toneDanger/10 px-3 py-2 text-xs font-bold text-toneDanger">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={props.onCancel}
-          disabled={saving}
-        >
-          Cancel
-        </Button>
-        <Button
-          type="submit"
-          variant="primary"
-          size="sm"
-          disabled={!stripe || !elements || saving}
-        >
-          {saving ? 'Saving…' : 'Save card'}
-        </Button>
-      </div>
-    </form>
-  )
-}
-
 export default function ClientPaymentMethodsSettings() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [cards, setCards] = useState<ClientPaymentMethodDTO[]>([])
   const [removingId, setRemovingId] = useState<string | null>(null)
 
-  const [starting, setStarting] = useState(false)
-  const [clientSecret, setClientSecret] = useState<string | null>(null)
-  const [setupIntentId, setSetupIntentId] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
 
   const loadCards = useCallback(async () => {
     setLoading(true)
@@ -181,43 +81,12 @@ export default function ClientPaymentMethodsSettings() {
     void loadCards()
   }, [loadCards])
 
-  const startAddCard = useCallback(async () => {
-    if (starting) return
-    setStarting(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/v1/client/payment-methods/setup-intent', {
-        method: 'POST',
-        headers: { Accept: 'application/json' },
-      })
-      const raw = await safeJson(res)
-      if (!res.ok) {
-        throw new Error(readErrorMessage(raw) ?? 'Failed to start setup.')
-      }
-      if (
-        !isRecord(raw) ||
-        typeof raw.clientSecret !== 'string' ||
-        typeof raw.setupIntentId !== 'string'
-      ) {
-        throw new Error('Setup response was malformed.')
-      }
-      setClientSecret(raw.clientSecret)
-      setSetupIntentId(raw.setupIntentId)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to start setup.')
-    } finally {
-      setStarting(false)
-    }
-  }, [starting])
-
   const cancelAddCard = useCallback(() => {
-    setClientSecret(null)
-    setSetupIntentId(null)
+    setAdding(false)
   }, [])
 
   const onSaved = useCallback(() => {
-    setClientSecret(null)
-    setSetupIntentId(null)
+    setAdding(false)
     void loadCards()
   }, [loadCards])
 
@@ -241,8 +110,6 @@ export default function ClientPaymentMethodsSettings() {
       setRemovingId(null)
     }
   }
-
-  const adding = clientSecret !== null && setupIntentId !== null
 
   return (
     <div className="mt-4">
@@ -311,18 +178,12 @@ export default function ClientPaymentMethodsSettings() {
         </div>
       )}
 
-      {adding && clientSecret ? (
+      {adding ? (
         <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary/20 p-3 sm:p-4">
           <div className="text-xs font-black tracking-[var(--ls-caps)] text-textSecondary">
             Add a card
           </div>
-          <Elements stripe={stripePromise} options={{ clientSecret }}>
-            <AddCardForm
-              setupIntentId={setupIntentId}
-              onSaved={onSaved}
-              onCancel={cancelAddCard}
-            />
-          </Elements>
+          <SaveCardStep onSaved={onSaved} onCancel={cancelAddCard} />
         </div>
       ) : (
         <div className="mt-4">
@@ -330,10 +191,10 @@ export default function ClientPaymentMethodsSettings() {
             type="button"
             variant="primary"
             size="sm"
-            onClick={() => void startAddCard()}
-            disabled={starting || loading}
+            onClick={() => setAdding(true)}
+            disabled={loading}
           >
-            {starting ? 'Starting…' : 'Add a card'}
+            Add a card
           </Button>
         </div>
       )}
