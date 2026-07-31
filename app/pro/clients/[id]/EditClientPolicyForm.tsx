@@ -170,7 +170,10 @@ export default function EditClientPolicyForm({
                 padding: '6px 8px',
                 borderRadius: 8,
                 border: '1px solid rgb(var(--text-primary) / 0.12)',
-                background: 'rgb(var(--surface-1))',
+                // --bg-surface, not a made-up --surface-1: an undefined token
+                // resolves to nothing, so the select would paint transparent and
+                // its options unreadable in one of the two modes.
+                background: 'rgb(var(--bg-surface))',
                 color: 'rgb(var(--text-primary))',
               }}
             >
