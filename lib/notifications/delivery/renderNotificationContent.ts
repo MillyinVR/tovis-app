@@ -160,9 +160,32 @@ function buildBrandSubject(title: string, brandName: string): string {
   return clip(subject, MAX_EMAIL_SUBJECT)
 }
 
-function joinSmsParts(parts: Array<string | null | undefined>): string {
+function joinSmsPartsUnclipped(parts: Array<string | null | undefined>): string {
   const normalized = parts.map((part) => normalizeText(part)).filter(Boolean)
-  return clip(normalized.join(' '), MAX_SMS_TEXT)
+  return normalized.join(' ')
+}
+
+/**
+ * Compose the SMS base text so the trailing CTA link survives the length cap
+ * INTACT — a truncated action URL (a pay link, a claim link) is worthless, so
+ * when brand + title + body + href overflow MAX_SMS_TEXT it is the human text
+ * that gets clipped, never the link. Same rule the calendar link gets. Within
+ * the cap the output is byte-identical to the plain join. A href longer than
+ * the whole cap is sent alone and over-length (providers segment; a broken
+ * link would not).
+ */
+function joinSmsPartsKeepingHref(args: {
+  parts: Array<string | null | undefined>
+  href: string
+}): string {
+  const joined = joinSmsPartsUnclipped([...args.parts, args.href])
+  if (!args.href || joined.length <= MAX_SMS_TEXT) {
+    return clip(joined, MAX_SMS_TEXT)
+  }
+
+  const room = Math.max(0, MAX_SMS_TEXT - args.href.length - 1)
+  const text = clip(joinSmsPartsUnclipped(args.parts), room).trimEnd()
+  return text ? `${text} ${args.href}` : args.href
 }
 
 function buildCalendarTextLines(
@@ -290,7 +313,10 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
       // "add to calendar" URL is worthless if truncated. Prefer the shorter
       // same-origin .ics link (opens Apple/Google/Outlook natively) over the
       // long Google template URL to keep segment count down.
-      const base = joinSmsParts([`${brandName}: ${title}`, body, href])
+      const base = joinSmsPartsKeepingHref({
+        parts: [`${brandName}: ${title}`, body],
+        href,
+      })
       const calendarUrl =
         dispatch.calendarLinks?.icsUrl ??
         dispatch.calendarLinks?.googleUrl ??

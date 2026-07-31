@@ -55,8 +55,15 @@ function makeDepositTx(args: {
       findUnique: vi.fn(),
       update,
     },
-    // The deposit-paid applier cancels the pending M5 deposit reminder (M5).
+    // The deposit-paid applier cancels the pending M5 deposit reminder (M5)…
     scheduledClientNotification: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
+    // …and the K10-B-1 scheduled pay-link nudge (dispatch + its deliveries).
+    notificationDelivery: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
+    notificationDispatch: {
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
   })

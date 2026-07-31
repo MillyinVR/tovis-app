@@ -15,13 +15,19 @@
 // stamped on the booking row — the enqueue writes dispatch rows on the same tx,
 // so a refused create can never have sent a pay link.
 
-import { ClientActionTokenKind, ContactMethod, Prisma } from '@prisma/client'
+import {
+  ClientActionTokenKind,
+  ContactMethod,
+  NotificationDeliveryStatus,
+  Prisma,
+} from '@prisma/client'
 
 import {
   generateClientActionToken,
   hashClientActionToken,
 } from '@/lib/consultation/clientActionTokens'
 import { asTrimmedString } from '@/lib/guards'
+import { formatDatedAppointmentWhen } from '@/lib/time'
 
 import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
@@ -46,10 +52,28 @@ export type CreateDepositPaymentDeliveryArgs = {
 
   /** Preformatted money string, e.g. "$50.00" (lib/money). */
   depositAmountLabel: string | null
-  /** Preformatted release deadline in the appointment's timezone. */
-  payByLabel: string
+  /**
+   * The stamped release deadline (Booking.depositDueAt). Rendered into the
+   * copy by formatDepositPayByLabel in the location's timezone — formatted
+   * HERE, not by the caller, so no call site can hand the templates an
+   * unformatted or wrong-zone deadline.
+   */
+  depositDueAt: Date
+  /** The appointment location's IANA zone the deadline renders in. */
+  locationTimeZone: string | null
   /** Token lifetime: pass max(depositDueAt, scheduledFor). */
   expiresAt: Date
+  /**
+   * K10-B-1: when set, a SECOND dispatch of the same link is scheduled at this
+   * instant (the DEPOSIT_REMINDER runAt — computeDepositReminderRunAt) as the
+   * pre-release nudge for UNCLAIMED clients, who can't use the login-gated
+   * DEPOSIT_REMINDER (no in-app inbox, email suppressed on the unverified
+   * destination, no SMS channel). ⚠️ The dispatch drain does NOT revalidate
+   * deposit state at send time, so every state change that makes the nudge a
+   * lie must call cancelDepositPaymentNudgeDispatch (today: the deposit-paid
+   * webhook applier, and performLockedCancel — which the release sweep rides).
+   */
+  nudgeRunAt?: Date | null
 
   recipientEmail?: string | null
   recipientPhone?: string | null
@@ -67,13 +91,28 @@ export type CreateDepositPaymentDeliveryResult = {
   token: ClientActionIssuedToken
   link: ClientActionBuildLinkResult
   dispatch: Awaited<ReturnType<typeof enqueueClientActionDispatch>>
+  /** The scheduled pre-release nudge, when nudgeRunAt was set. */
+  nudgeDispatch: Awaited<ReturnType<typeof enqueueClientActionDispatch>> | null
 }
 
-function buildDepositPaymentTitle(amountLabel: string | null): string {
+/**
+ * The release deadline as the client reads it — in the appointment location's
+ * zone, e.g. "Fri, Aug 14, 2026, 7:30 PM". Exported so the render tests prove
+ * the delivered copy through the exact formatter the boundary path uses.
+ */
+export function formatDepositPayByLabel(
+  dueAt: Date,
+  timeZone: string | null,
+): string {
+  // formatInTimeZone sanitizes: a missing/invalid zone falls back to UTC.
+  return formatDatedAppointmentWhen(dueAt, timeZone ?? '', 'en-US')
+}
+
+export function buildDepositPaymentTitle(amountLabel: string | null): string {
   return amountLabel ? `Pay your ${amountLabel} deposit` : 'Pay your deposit'
 }
 
-function buildDepositPaymentBody(args: {
+export function buildDepositPaymentBody(args: {
   professionalName: string | null
   payByLabel: string
 }): string {
@@ -84,6 +123,74 @@ function buildDepositPaymentBody(args: {
     `Use this secure link to pay the deposit by ${args.payByLabel} — ` +
     `the booking is released automatically if it stays unpaid.`
   )
+}
+
+export function buildDepositPaymentNudgeTitle(
+  amountLabel: string | null,
+): string {
+  return amountLabel
+    ? `Reminder: pay your ${amountLabel} deposit`
+    : 'Reminder: pay your deposit'
+}
+
+export function buildDepositPaymentNudgeBody(args: {
+  professionalName: string | null
+  payByLabel: string
+}): string {
+  const withWhom = args.professionalName ? ` with ${args.professionalName}` : ''
+
+  // Tighter than the initial-send body ON PURPOSE: this rides SMS where the
+  // render caps the message and clips prose around the link — the deadline and
+  // the consequence must survive a real-world professionalName.
+  return (
+    `Your appointment${withWhom} is still waiting on its deposit. ` +
+    `Pay by ${args.payByLabel} — ` +
+    `the booking is released automatically if it stays unpaid.`
+  )
+}
+
+/**
+ * The nudge dispatch's idempotency/source key. Deterministic from the booking
+ * id alone ON PURPOSE: the cancellation paths (the deposit-paid webhook
+ * applier, performLockedCancel) only hold a bookingId, and this is how they
+ * find the row. One nudge per booking — the enqueue layer dedupes on it.
+ */
+export function buildDepositPaymentNudgeSourceKey(bookingId: string): string {
+  return `deposit-payment-nudge:${bookingId}`
+}
+
+/**
+ * Stamp the scheduled pre-release nudge (and its not-yet-attempted deliveries)
+ * cancelled. The generic dispatch drain has NO drain-time revalidation — the
+ * claim query only checks dispatch.cancelledAt — so the moment the nudge stops
+ * being true (deposit paid, booking cancelled/released) the state-change path
+ * must call this. Safe to call unconditionally: no matching row is a no-op.
+ */
+export async function cancelDepositPaymentNudgeDispatch(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  now?: Date
+}): Promise<void> {
+  const now = args.now ?? new Date()
+  const sourceKey = buildDepositPaymentNudgeSourceKey(args.bookingId)
+
+  await args.tx.notificationDelivery.updateMany({
+    where: {
+      dispatch: { sourceKey },
+      status: NotificationDeliveryStatus.PENDING,
+      cancelledAt: null,
+      sentAt: null,
+    },
+    data: {
+      status: NotificationDeliveryStatus.CANCELLED,
+      cancelledAt: now,
+    },
+  })
+
+  await args.tx.notificationDispatch.updateMany({
+    where: { sourceKey, cancelledAt: null },
+    data: { cancelledAt: now },
+  })
 }
 
 function buildDepositPaymentMetadata(
@@ -225,26 +332,50 @@ export async function createDepositPaymentDelivery(
     metadata,
   }
 
+  const payByLabel = formatDepositPayByLabel(
+    args.depositDueAt,
+    args.locationTimeZone,
+  )
+
+  const payload: Prisma.InputJsonObject = {
+    ...metadata,
+    clientActionTokenId: token.id,
+    expiresAt: token.expiresAt.toISOString(),
+  }
+
   const dispatch = await enqueueClientActionDispatch({
     plan: planWithMetadata,
     href: link.href,
     title: buildDepositPaymentTitle(args.depositAmountLabel),
     body: buildDepositPaymentBody({
       professionalName: args.professionalName,
-      payByLabel: args.payByLabel,
+      payByLabel,
     }),
-    payload: {
-      ...metadata,
-      clientActionTokenId: token.id,
-      expiresAt: token.expiresAt.toISOString(),
-    },
+    payload,
     tx: args.tx,
   })
+
+  const nudgeDispatch = args.nudgeRunAt
+    ? await enqueueClientActionDispatch({
+        plan: planWithMetadata,
+        href: link.href,
+        title: buildDepositPaymentNudgeTitle(args.depositAmountLabel),
+        body: buildDepositPaymentNudgeBody({
+          professionalName: args.professionalName,
+          payByLabel,
+        }),
+        payload: { ...payload, nudge: true },
+        scheduledFor: args.nudgeRunAt,
+        sourceKeyOverride: buildDepositPaymentNudgeSourceKey(args.bookingId),
+        tx: args.tx,
+      })
+    : null
 
   return {
     plan: planWithMetadata,
     token,
     link,
     dispatch,
+    nudgeDispatch,
   }
 }

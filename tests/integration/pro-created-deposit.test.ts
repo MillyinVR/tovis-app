@@ -20,6 +20,12 @@
 //   5. skip and importMode stamp nothing.
 //   6. The unauthenticated token resolves to the same prepare-checkout core
 //      the authed deposit route uses.
+//   7. K10-B-1 — an UNCLAIMED client gets a SECOND, scheduled dispatch of the
+//      same pay link at the instant the login-gated DEPOSIT_REMINDER computes
+//      (they can't use that reminder: no in-app inbox, email suppressed on the
+//      unverified destination, no SMS channel), and every state change that
+//      makes the nudge a lie cancels it — the generic dispatch drain does NOT
+//      revalidate deposit state at send time.
 //
 // Run with `pnpm test:integration`.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -28,6 +34,9 @@ import {
   BookingStatus,
   ClientActionTokenKind,
   DepositType,
+  NotificationChannel,
+  NotificationDeliveryStatus,
+  NotificationEventKey,
   OfferingPrepayScope,
   Prisma,
   PrismaClient,
@@ -38,6 +47,8 @@ import {
 } from '@prisma/client'
 
 import {
+  applyStripeDepositSucceededInTransaction,
+  cancelBooking,
   createProBooking,
   prepareClientDepositCheckout,
 } from '@/lib/booking/writeBoundary'
@@ -57,6 +68,13 @@ vi.hoisted(() => {
   const key32 = Buffer.alloc(32, 9).toString('base64')
   process.env.PII_LOOKUP_HMAC_KEYS_JSON ||= JSON.stringify({ 1: key32 })
   process.env.PII_AEAD_KEYS_JSON ||= JSON.stringify({ 'address-aead-v1': key32 })
+  // The K10-B-1 nudge asserts an SMS delivery ROW is enqueued for the
+  // phone-only-reachable population; without Twilio config the enqueue-time
+  // launch gate drops the SMS capability entirely. Nothing here ever SENDS —
+  // the delivery drain never runs in this suite.
+  process.env.TWILIO_ACCOUNT_SID ||= `AC${'0'.repeat(32)}`
+  process.env.TWILIO_AUTH_TOKEN ||= 'test-auth-token'
+  process.env.TWILIO_FROM_NUMBER ||= '+15005550006'
 })
 
 const databaseUrl = process.env.DATABASE_URL
@@ -102,11 +120,12 @@ function proCreate(args: {
   depositRequested?: boolean
   importMode?: boolean
   allowShortNotice?: boolean
+  clientId?: string
 }) {
   return createProBooking({
     professionalId: fx.professionalId,
     actorUserId: fx.proUserId,
-    clientId: fx.clientId,
+    clientId: args.clientId ?? fx.clientId,
     offeringId: fx.offeringId,
     locationId: fx.locationId,
     locationType: ServiceLocationType.SALON,
@@ -241,13 +260,14 @@ beforeAll(async () => {
     },
   })
 
-  // Deliberately UNCLAIMED (no user) with a direct email — the population the
-  // token pay link exists for.
+  // Deliberately UNCLAIMED (no user) with a direct email AND phone — the
+  // population the token pay link (and the K10-B-1 nudge) exists for.
   const client = await db.clientProfile.create({
     data: {
       firstName: 'Walkin',
       lastName: 'Regular',
       email: `${tag}_client@example.com`,
+      phone: '+15550123001',
       homeTenantId: tenant.id,
     },
     select: { id: true },
@@ -316,6 +336,12 @@ afterEach(async () => {
   await db.clientActionToken.deleteMany({
     where: { professionalId: fx.professionalId },
   })
+  await db.notificationDelivery.deleteMany({
+    where: { dispatch: { client: { homeTenantId: fx.tenantId } } },
+  })
+  await db.notificationDispatch.deleteMany({
+    where: { client: { homeTenantId: fx.tenantId } },
+  })
   await db.booking.deleteMany({ where: { professionalId: fx.professionalId } })
 })
 
@@ -325,6 +351,12 @@ afterAll(async () => {
   })
   await db.clientActionToken.deleteMany({
     where: { professionalId: fx.professionalId },
+  })
+  await db.notificationDelivery.deleteMany({
+    where: { dispatch: { client: { homeTenantId: fx.tenantId } } },
+  })
+  await db.notificationDispatch.deleteMany({
+    where: { client: { homeTenantId: fx.tenantId } },
   })
   await db.booking.deleteMany({ where: { professionalId: fx.professionalId } })
   await db.professionalServiceOffering.deleteMany({
@@ -564,7 +596,8 @@ describe('the pay-link token reaches the same deposit checkout core', () => {
       clientId: fx.clientId,
       bookingId: created.booking.id,
       depositAmountLabel: '$40.00',
-      payByLabel: 'later',
+      depositDueAt: new Date(scheduledFor.getTime() - LEAD_MS),
+      locationTimeZone: ZONE,
       expiresAt: new Date(scheduledFor.getTime()),
       recipientEmail: `${tag}_client@example.com`,
       recipientPhone: null,
@@ -611,7 +644,8 @@ describe('the pay-link token reaches the same deposit checkout core', () => {
       clientId: fx.clientId,
       bookingId: created.booking.id,
       depositAmountLabel: '$40.00',
-      payByLabel: 'soon',
+      depositDueAt: new Date(Date.now() + 60_000),
+      locationTimeZone: ZONE,
       expiresAt: new Date(Date.now() + 60_000),
       recipientEmail: `${tag}_client@example.com`,
       recipientPhone: null,
@@ -629,5 +663,237 @@ describe('the pay-link token reaches the same deposit checkout core', () => {
     await expect(
       resolveDepositPaymentTokenForRead({ rawToken: delivery.token.rawToken }),
     ).rejects.toMatchObject({ code: 'DEPOSIT_TOKEN_INVALID' })
+  })
+})
+
+describe('the unclaimed pre-release nudge (K10-B-1)', () => {
+  // The cancellation contract keys on this literal — payment/cancel paths find
+  // the nudge by sourceKey alone (the webhook applier only has a bookingId).
+  const nudgeSourceKey = (bookingId: string) =>
+    `deposit-payment-nudge:${bookingId}`
+
+  function readNudgeDispatch(bookingId: string) {
+    return db.notificationDispatch.findUnique({
+      where: { sourceKey: nudgeSourceKey(bookingId) },
+      select: {
+        id: true,
+        eventKey: true,
+        scheduledFor: true,
+        cancelledAt: true,
+        href: true,
+        recipientEmail: true,
+        recipientPhone: true,
+        deliveries: {
+          select: {
+            channel: true,
+            status: true,
+            nextAttemptAt: true,
+            cancelledAt: true,
+          },
+        },
+      },
+    })
+  }
+
+  async function requireNudgeDispatch(bookingId: string) {
+    const nudge = await readNudgeDispatch(bookingId)
+    if (!nudge) {
+      throw new Error(`expected a nudge dispatch for booking ${bookingId}`)
+    }
+    return nudge
+  }
+
+  it('schedules a SECOND dispatch of the same pay link at the DEPOSIT_REMINDER instant, on both channels', async () => {
+    const created = await proCreate({
+      scheduledFor: futureStart(30),
+      depositRequested: true,
+    })
+
+    const nudge = await requireNudgeDispatch(created.booking.id)
+    expect(nudge.eventKey).toBe(NotificationEventKey.DEPOSIT_PAYMENT_LINK)
+    expect(nudge.cancelledAt).toBeNull()
+
+    // Fires at the SAME instant the login-gated DEPOSIT_REMINDER computes —
+    // one formula, two rails.
+    const reminder = await db.scheduledClientNotification.findFirstOrThrow({
+      where: {
+        bookingId: created.booking.id,
+        eventKey: NotificationEventKey.DEPOSIT_REMINDER,
+      },
+      select: { runAt: true },
+    })
+    expect(nudge.scheduledFor.getTime()).toBe(reminder.runAt.getTime())
+
+    // …and that instant is dueAt − the pro-created reminder lead (24h).
+    const row = await readDeposit(created.booking.id)
+    if (!row.depositDueAt) throw new Error('expected a stamped depositDueAt')
+    expect(nudge.scheduledFor.getTime()).toBe(
+      row.depositDueAt.getTime() - 24 * HOUR_MS,
+    )
+
+    // The SAME public token URL the initial send carries — never a login path.
+    const initial = await db.notificationDispatch.findFirstOrThrow({
+      where: {
+        eventKey: NotificationEventKey.DEPOSIT_PAYMENT_LINK,
+        clientId: fx.clientId,
+        sourceKey: { not: nudgeSourceKey(created.booking.id) },
+        payload: { path: ['bookingId'], equals: created.booking.id },
+      },
+      select: { href: true },
+    })
+    expect(nudge.href).toBe(initial.href)
+    expect(nudge.href).toMatch(/^\/client\/deposit\/[0-9a-f]{64}$/)
+
+    // Both channels for the unclaimed recipient (email + phone on file), armed
+    // to attempt exactly at the scheduled instant.
+    const channels = nudge.deliveries.map((d) => d.channel)
+    expect(channels).toContain(NotificationChannel.EMAIL)
+    expect(channels).toContain(NotificationChannel.SMS)
+    for (const delivery of nudge.deliveries) {
+      expect(delivery.status).toBe(NotificationDeliveryStatus.PENDING)
+      expect(delivery.cancelledAt).toBeNull()
+      expect(delivery.nextAttemptAt.getTime()).toBe(
+        nudge.scheduledFor.getTime(),
+      )
+    }
+  })
+
+  it('does NOT schedule the nudge for a CLAIMED client (the login-gated DEPOSIT_REMINDER serves them)', async () => {
+    const email = `${tag}_claimed@example.com`
+    const user = await db.user.create({
+      data: { email, password: 'test-password', role: Role.CLIENT },
+      select: { id: true },
+    })
+    seededUserEmails.push(email)
+    const claimed = await db.clientProfile.create({
+      data: {
+        userId: user.id,
+        firstName: 'Claimed',
+        lastName: 'Client',
+        email,
+        phone: '+15550123002',
+        homeTenantId: fx.tenantId,
+      },
+      select: { id: true },
+    })
+
+    try {
+      const created = await proCreate({
+        scheduledFor: futureStart(31),
+        depositRequested: true,
+        clientId: claimed.id,
+      })
+
+      // The initial pay link still goes out (paying by token is fine for a
+      // claimed client too)…
+      const initial = await db.notificationDispatch.findFirst({
+        where: {
+          eventKey: NotificationEventKey.DEPOSIT_PAYMENT_LINK,
+          clientId: claimed.id,
+          payload: { path: ['bookingId'], equals: created.booking.id },
+        },
+        select: { id: true },
+      })
+      expect(initial).not.toBeNull()
+
+      // …the login-gated reminder is scheduled for them…
+      const reminder = await db.scheduledClientNotification.findFirst({
+        where: {
+          bookingId: created.booking.id,
+          eventKey: NotificationEventKey.DEPOSIT_REMINDER,
+        },
+        select: { id: true },
+      })
+      expect(reminder).not.toBeNull()
+
+      // …and the token nudge is NOT (they can read the reminder; two nudges at
+      // the same instant would double-text the same ask).
+      expect(await readNudgeDispatch(created.booking.id)).toBeNull()
+    } finally {
+      await db.notificationDelivery.deleteMany({
+        where: { dispatch: { clientId: claimed.id } },
+      })
+      await db.notificationDispatch.deleteMany({
+        where: { clientId: claimed.id },
+      })
+      await db.scheduledClientNotification.deleteMany({
+        where: { clientId: claimed.id },
+      })
+      await db.clientActionToken.deleteMany({ where: { clientId: claimed.id } })
+      await db.booking.deleteMany({ where: { clientId: claimed.id } })
+      await db.clientProfile.delete({ where: { id: claimed.id } })
+    }
+  })
+
+  it('cancel-on-pay: the deposit-paid applier stamps the nudge cancelled (the drain never revalidates)', async () => {
+    const created = await proCreate({
+      scheduledFor: futureStart(32),
+      depositRequested: true,
+    })
+
+    const before = await requireNudgeDispatch(created.booking.id)
+    expect(before.cancelledAt).toBeNull()
+
+    await db.$transaction(async (tx) => {
+      const applied = await applyStripeDepositSucceededInTransaction(tx, {
+        stripePaymentIntentId: `pi_${tag}_nudge_paid`,
+        chargeId: null,
+        bookingIdHint: created.booking.id,
+      })
+      expect(applied.handled).toBe(true)
+      expect(applied.alreadyPaid).toBe(false)
+    })
+
+    const row = await readDeposit(created.booking.id)
+    expect(row.depositStatus).toBe(BookingDepositStatus.PAID)
+
+    const after = await requireNudgeDispatch(created.booking.id)
+    expect(after.cancelledAt).not.toBeNull()
+    for (const delivery of after.deliveries) {
+      expect(delivery.cancelledAt).not.toBeNull()
+    }
+  })
+
+  it('cancel-on-release: the sweep cancelling the booking cancels the nudge with it', async () => {
+    const created = await proCreate({
+      scheduledFor: futureStart(33),
+      depositRequested: true,
+    })
+
+    // Force the stamped deadline into the past so the sweep picks the row up.
+    await db.booking.update({
+      where: { id: created.booking.id },
+      data: { depositDueAt: new Date(Date.now() - 60_000) },
+    })
+
+    const run = await releaseAbandonedDepositBookings()
+    expect(run.enabled).toBe(true)
+    const outcome = run.results.find(
+      (r) => r.bookingId === created.booking.id,
+    )?.outcome
+    expect(outcome).toBe('released')
+
+    const row = await readDeposit(created.booking.id)
+    expect(row.status).toBe(BookingStatus.CANCELLED)
+
+    const after = await requireNudgeDispatch(created.booking.id)
+    expect(after.cancelledAt).not.toBeNull()
+  })
+
+  it('cancel-on-cancel: a pro cancel stamps the nudge cancelled', async () => {
+    const created = await proCreate({
+      scheduledFor: futureStart(34),
+      depositRequested: true,
+    })
+
+    await cancelBooking({
+      bookingId: created.booking.id,
+      actor: { kind: 'pro', professionalId: fx.professionalId },
+      notifyClient: false,
+      reason: 'test cancel',
+    })
+
+    const after = await requireNudgeDispatch(created.booking.id)
+    expect(after.cancelledAt).not.toBeNull()
   })
 })

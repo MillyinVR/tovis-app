@@ -66,6 +66,31 @@ export function formatAppointmentWhen(date: DateLike, timeZone: string, locale?:
   )
 }
 
+/**
+ * formatAppointmentWhen plus the YEAR — "Fri, Aug 14, 2026, 7:30 PM" — for
+ * copy that can reference an instant far out (deposit deadlines, rebook
+ * windows), where a bare month/day could read as the wrong year.
+ */
+export function formatDatedAppointmentWhen(
+  date: DateLike,
+  timeZone: string,
+  locale?: string,
+) {
+  return formatInTimeZone(
+    date,
+    timeZone,
+    {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    },
+    locale,
+  )
+}
+
 export function formatRangeInTimeZone(start: DateLike, end: DateLike, timeZone: string, locale?: string) {
   const s = toDate(start)
   const e = toDate(end)

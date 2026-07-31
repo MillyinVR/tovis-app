@@ -86,7 +86,10 @@ import {
   depositProCreatedReminderLeadHours,
 } from '@/lib/booking/depositDeadline'
 import { computeUpfrontDepositCents } from '@/lib/booking/prepay'
-import { createDepositPaymentDelivery } from '@/lib/clientActions/createDepositPaymentDelivery'
+import {
+  cancelDepositPaymentNudgeDispatch,
+  createDepositPaymentDelivery,
+} from '@/lib/clientActions/createDepositPaymentDelivery'
 import {
   withLockedClientOwnedBookingTransaction,
   withLockedProfessionalScheduleByLookup,
@@ -124,7 +127,7 @@ import {
 } from '@/lib/booking/snapshots'
 import {
   DEFAULT_TIME_ZONE,
-  formatInTimeZone,
+  formatDatedAppointmentWhen,
   isValidIanaTimeZone,
   sanitizeTimeZone,
 } from '@/lib/time'
@@ -201,7 +204,10 @@ import {
   cancelScheduledClientNotificationsForBooking,
   upsertClientNotification,
 } from '@/lib/notifications/clientNotifications'
-import { scheduleDepositReminderOnBooking } from '@/lib/notifications/depositReminders'
+import {
+  computeDepositReminderRunAt,
+  scheduleDepositReminderOnBooking,
+} from '@/lib/notifications/depositReminders'
 import {
   cancelBookingAppointmentReminders,
   syncBookingAppointmentReminders,
@@ -2865,21 +2871,8 @@ function resolveAftercareTimeZone(args: {
 }
 
 function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
-  const tz = timeZone && isValidIanaTimeZone(timeZone) ? timeZone : 'UTC'
-
-  return formatInTimeZone(
-    date,
-    tz,
-    {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    },
-    'en-US',
-  )
+  // formatInTimeZone sanitizes: a missing/invalid zone falls back to UTC.
+  return formatDatedAppointmentWhen(date, timeZone, 'en-US')
 }
 
 /** Booking's display timezone via the standard truth precedence, never throwing. */
@@ -6014,6 +6007,15 @@ async function performLockedCancel(args: {
   })
 
   await cancelBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: booking.id,
+  })
+
+  // K10-B-1: the scheduled pay-link nudge has NO drain-time revalidation, so a
+  // cancel — every path lands here, including the deposit release sweep — must
+  // stamp it cancelled. "Pay your deposit or the booking is released" after
+  // the booking is gone is a lie. No-op for bookings without one.
+  await cancelDepositPaymentNudgeDispatch({
     tx: args.tx,
     bookingId: booking.id,
   })
@@ -10701,10 +10703,8 @@ if (!importMode) {
       clientId: args.clientId,
       bookingId: booking.id,
       depositAmountLabel: formatMoneyFromUnknown(requestedDeposit.amount),
-      payByLabel: formatDateTimeInTimeZone(
-        requestedDeposit.dueAt,
-        locationContext.timeZone,
-      ),
+      depositDueAt: requestedDeposit.dueAt,
+      locationTimeZone: locationContext.timeZone,
       // The link stays payable through the appointment: when the appointment
       // arrives before the deadline the sweep never fires, and the client can
       // still settle the deposit up to (and at) the chair.
@@ -10714,6 +10714,20 @@ if (!importMode) {
           booking.scheduledFor.getTime(),
         ),
       ),
+      // K10-B-1: an UNCLAIMED client can't use the login-gated DEPOSIT_REMINDER
+      // (no in-app inbox, email suppressed on the unverified destination, no
+      // SMS channel), so their pre-release nudge is a second scheduled dispatch
+      // of this same pay link, at the same instant the reminder computes.
+      // Claimed clients keep the reminder alone — two nudges at one instant
+      // would double-message the same ask.
+      nudgeRunAt: client.userId
+        ? null
+        : computeDepositReminderRunAt({
+            depositDueAt: requestedDeposit.dueAt,
+            scheduledFor: booking.scheduledFor,
+            now: args.now,
+            reminderLeadHours: depositProCreatedReminderLeadHours(),
+          }),
       recipientEmail: pickFirstNonEmpty(client.email, client.user?.email ?? null),
       recipientPhone: pickFirstNonEmpty(client.phone, client.user?.phone ?? null),
       preferredContactMethod: inferPreferredContactMethod({
@@ -17999,6 +18013,16 @@ export async function applyStripeDepositSucceededInTransaction(
     tx,
     bookingId: resolved.id,
     eventKeys: [NotificationEventKey.DEPOSIT_REMINDER],
+  })
+
+  // K10-B-1: the unclaimed client's scheduled pay-link nudge does NOT self-heal
+  // — the dispatch drain never revalidates deposit state — so the paid commit
+  // point must cancel it, or the client is texted to pay a deposit they just
+  // paid. Every paid path lands here (live webhook, redelivery, M14 recovery).
+  await cancelDepositPaymentNudgeDispatch({
+    tx,
+    bookingId: resolved.id,
+    now,
   })
 
   return {

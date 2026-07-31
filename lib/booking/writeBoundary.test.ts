@@ -27,6 +27,11 @@ const mocks = vi.hoisted(() => ({
 
   txBookingHoldFindUnique: vi.fn(),
   txBookingHoldDelete: vi.fn(),
+
+  // K10-B-1: performLockedCancel stamps the scheduled pay-link nudge
+  // dispatch cancelled (the dispatch drain never revalidates).
+  txNotificationDeliveryUpdateMany: vi.fn(),
+  txNotificationDispatchUpdateMany: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -72,6 +77,12 @@ const tx = {
   bookingHold: {
     findUnique: mocks.txBookingHoldFindUnique,
     delete: mocks.txBookingHoldDelete,
+  },
+  notificationDelivery: {
+    updateMany: mocks.txNotificationDeliveryUpdateMany,
+  },
+  notificationDispatch: {
+    updateMany: mocks.txNotificationDispatchUpdateMany,
   },
 }
 
@@ -186,6 +197,16 @@ describe('lib/booking/writeBoundary', () => {
     ).toHaveBeenCalledWith({
       tx,
       bookingId: 'booking_1',
+    })
+
+    // K10-B-1: the scheduled pay-link nudge is stamped cancelled on every
+    // cancel path — the dispatch drain never revalidates deposit state.
+    expect(mocks.txNotificationDispatchUpdateMany).toHaveBeenCalledWith({
+      where: {
+        sourceKey: 'deposit-payment-nudge:booking_1',
+        cancelledAt: null,
+      },
+      data: { cancelledAt: expect.any(Date) },
     })
 
     expect(mocks.upsertClientNotification).toHaveBeenCalledWith({
