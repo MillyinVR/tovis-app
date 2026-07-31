@@ -379,6 +379,29 @@ export type {
   ProCalendarResponseDTO,
 } from '@/lib/dto/proCalendar'
 
+// ── Pro session hub ───────────────────────────────────────────────────────────
+// GET /api/v1/pro/session — the device's session-start surface. Exported so the
+// iOS contract validator can measure its fixture against the real shape; before
+// K17-web these types were named but unpublished, so everything on this feed
+// crossed to the device with no contract coverage (the K4-B / K5-B gap).
+export type {
+  UiSessionMode,
+  UiSessionCenterAction,
+  StepKey,
+  SessionBooking,
+  ProSessionPayload,
+} from '@/lib/proSession/types'
+export type { UnsignedConsentForm } from '@/lib/consentForms/requirement'
+
+// ── Pro per-client booking requirements ───────────────────────────────────────
+// GET/PUT/DELETE /api/v1/pro/clients/{id}/policy (K16's switches, K17-web's read
+// path). All three handlers are `satisfies`-checked against the response type,
+// so the read and the two writes cannot answer in different shapes.
+export type {
+  ProClientPolicyDTO,
+  ProClientPolicyResponseDTO,
+} from '@/lib/dto/proClientPolicy'
+
 // ── Pro bookings list ─────────────────────────────────────────────────────────
 // The native pro bookings list (GET /api/v1/pro/bookings). Exported so the iOS
 // contract validator can check its fixture against the real shape — until now

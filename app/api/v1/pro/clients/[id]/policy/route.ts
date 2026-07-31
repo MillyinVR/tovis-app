@@ -29,6 +29,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import type { ProClientPolicyResponseDTO } from '@/lib/dto/proClientPolicy'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { prisma } from '@/lib/prisma'
@@ -41,8 +42,61 @@ import {
 
 export const dynamic = 'force-dynamic'
 
+/** The columns the control shows — the STORED row, never the resolved policy. */
+const POLICY_SELECT = {
+  requireDeposit: true,
+  prepayScope: true,
+  requireCardOnFile: true,
+  blockSelfServeBooking: true,
+} satisfies Prisma.ProClientPolicySelect
+
 function pickBoolean(value: unknown): boolean {
   return value === true
+}
+
+/**
+ * K17-web — the READ path. K16 shipped the switches with no way to see them
+ * except the chart page's own Prisma query, so the state could not reach a
+ * device at all.
+ *
+ * 🔴 Returns the STORED row, deliberately NOT `resolveProClientPolicy`'s answer.
+ * The resolver zeroes `requireCardOnFile` while the save-card rail is dark,
+ * which is right at booking time and wrong in the control: a pro would open the
+ * form they just set and find the switch off. The rail state travels alongside,
+ * as a capability, so the client disables that row instead of misreporting it.
+ */
+export async function GET(_req: Request, context: RouteContext) {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
+
+    if (!isClientTechnicalRecordEnabled(professionalId)) {
+      return jsonFail(404, 'Not found.')
+    }
+
+    const params = await resolveRouteParams(context)
+    const clientId = pickString(params.id)
+    if (!clientId) return jsonFail(400, 'Missing client id.')
+
+    const gate = await assertProCanViewClient(professionalId, clientId)
+    if (!gate.ok) return jsonFail(403, 'Forbidden.')
+
+    const policy = await prisma.proClientPolicy.findUnique({
+      where: { professionalId_clientId: { professionalId, clientId } },
+      select: POLICY_SELECT,
+    })
+
+    const body = {
+      policy,
+      cardOnFileRailEnabled: noShowProtectionEnabled(),
+    } satisfies ProClientPolicyResponseDTO
+
+    return jsonOk(body, 200)
+  } catch (e) {
+    console.error('GET /api/v1/pro/clients/[id]/policy error', e)
+    return jsonFail(500, 'Failed to load client policy.')
+  }
 }
 
 /** `null` = no prepay requirement; an unknown string is a 400, never a silent null. */
@@ -155,7 +209,13 @@ export async function PUT(req: Request, context: RouteContext) {
         where: { professionalId, clientId },
       })
 
-      return jsonOk({ policy: null }, 200)
+      return jsonOk(
+        {
+          policy: null,
+          cardOnFileRailEnabled: noShowProtectionEnabled(),
+        } satisfies ProClientPolicyResponseDTO,
+        200,
+      )
     }
 
     const data = {
@@ -169,15 +229,18 @@ export async function PUT(req: Request, context: RouteContext) {
       where: { professionalId_clientId: { professionalId, clientId } },
       create: { professionalId, clientId, ...data },
       update: data,
-      select: {
-        requireDeposit: true,
-        prepayScope: true,
-        requireCardOnFile: true,
-        blockSelfServeBooking: true,
-      },
+      select: POLICY_SELECT,
     })
 
-    return jsonOk({ policy }, 200)
+    // Same envelope as GET, so a client can adopt the SERVER's echo of what it
+    // just wrote rather than trusting its own optimistic value (the K13 rule).
+    return jsonOk(
+      {
+        policy,
+        cardOnFileRailEnabled: noShowProtectionEnabled(),
+      } satisfies ProClientPolicyResponseDTO,
+      200,
+    )
   } catch (e) {
     console.error('PUT /api/v1/pro/clients/[id]/policy error', e)
     return jsonFail(500, 'Failed to update client policy.')
@@ -205,7 +268,13 @@ export async function DELETE(_req: Request, context: RouteContext) {
       where: { professionalId, clientId },
     })
 
-    return jsonOk({ policy: null }, 200)
+    return jsonOk(
+      {
+        policy: null,
+        cardOnFileRailEnabled: noShowProtectionEnabled(),
+      } satisfies ProClientPolicyResponseDTO,
+      200,
+    )
   } catch (e) {
     console.error('DELETE /api/v1/pro/clients/[id]/policy error', e)
     return jsonFail(500, 'Failed to clear client policy.')

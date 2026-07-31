@@ -2,6 +2,11 @@
 import { BookingStatus, MediaPhase, Prisma, Role } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
+import {
+  loadUnsignedConsentFormsForBookings,
+  type UnsignedConsentForm,
+} from '@/lib/consentForms/requirement'
 import { prisma } from '@/lib/prisma'
 import {
   getProSessionStartWindow,
@@ -16,6 +21,11 @@ const bookingCardSelect = Prisma.validator<Prisma.BookingSelect>()({
   id: true,
   scheduledFor: true,
   sessionStep: true,
+  // K17-web: the consent chain keys on services, so both the booking's own
+  // `serviceId` and its items' ids are required. `ConsentRequirementBookingRow`
+  // is what enforces that — drop either and typecheck fails at the call below.
+  clientId: true,
+  serviceId: true,
   client: {
     select: {
       firstName: true,
@@ -35,6 +45,7 @@ const bookingCardSelect = Prisma.validator<Prisma.BookingSelect>()({
   serviceItems: {
     select: {
       sortOrder: true,
+      serviceId: true,
       service: {
         select: {
           name: true,
@@ -44,7 +55,11 @@ const bookingCardSelect = Prisma.validator<Prisma.BookingSelect>()({
     orderBy: {
       sortOrder: 'asc',
     },
-    take: 1,
+    // 🔴 The `take: 1` that used to sit here was for the DISPLAY NAME only, and
+    // it silently capped what the consent chain could see: a two-service visit
+    // whose waiver hangs off the SECOND service would have shown no warning at
+    // all. The card still reads `serviceItems[0]` under the same `orderBy`, so
+    // the name it prints is unchanged.
   },
 })
 
@@ -98,14 +113,21 @@ async function getProBeforeAfterCounts(
   return { before, after }
 }
 
-function toBookingCard(booking: BookingCardRecord): SessionBooking {
+function toBookingCard(
+  booking: BookingCardRecord,
+  unsignedByBooking: ReadonlyMap<string, UnsignedConsentForm[]>,
+): SessionBooking {
   const firstItemName = booking.serviceItems[0]?.service.name ?? null
   const serviceName = firstItemName ?? booking.service?.name ?? ''
+  const unsignedConsentForms = unsignedByBooking.get(booking.id)
 
   return {
     id: booking.id,
     sessionStep: booking.sessionStep ?? null,
     serviceName,
+    // Omitted entirely when there is nothing outstanding, so a pro who has bound
+    // no form sees a payload byte-identical to pre-K17 (the K7/K11/K15 rule).
+    ...(unsignedConsentForms ? { unsignedConsentForms } : {}),
     clientName:
       fullName(booking.client?.firstName, booking.client?.lastName) ||
       booking.client?.user?.email ||
@@ -114,6 +136,33 @@ function toBookingCard(booking: BookingCardRecord): SessionBooking {
       ? booking.scheduledFor.toISOString()
       : null,
   }
+}
+
+/**
+ * K17-web — the forms these bookings' clients still owe, for the session-start
+ * surface (web renders this as `UnsignedConsentBanner`; the native session hub
+ * had no way to know about it at all).
+ *
+ * 🔴 The raw unsigned LIST, never `deriveConsentRequirementBadge`. The badge
+ * turns `significant` off once `scheduledFor <= now`, which on this surface is
+ * almost always true — the pro is starting the appointment. Web makes the same
+ * call structurally, by rendering the banner on pre-service screens only.
+ *
+ * Gated like every other technical-record surface, and batched to two queries
+ * for the picker's N bookings.
+ */
+async function loadUnsignedConsentByBooking(
+  professionalId: string,
+  bookings: readonly BookingCardRecord[],
+): Promise<ReadonlyMap<string, UnsignedConsentForm[]>> {
+  if (!isClientTechnicalRecordEnabled(professionalId)) return new Map()
+
+  return loadUnsignedConsentFormsForBookings({
+    db: prisma,
+    professionalId,
+    bookings,
+    now: new Date(),
+  })
 }
 
 function idlePayload(): ProSessionPayload {
@@ -170,8 +219,11 @@ export async function GET() {
     })
 
     if (active) {
-      const booking = toBookingCard(active)
-      const counts = await getProBeforeAfterCounts(active.id)
+      const [counts, unsigned] = await Promise.all([
+        getProBeforeAfterCounts(active.id),
+        loadUnsignedConsentByBooking(proId, [active]),
+      ])
+      const booking = toBookingCard(active, unsigned)
 
       const payload: ProSessionPayload = {
         ok: true,
@@ -223,7 +275,8 @@ export async function GET() {
     const upcoming = eligibleUpcoming.length === 1 ? eligibleUpcoming[0] : undefined
 
     if (upcoming !== undefined) {
-      const booking = toBookingCard(upcoming)
+      const unsigned = await loadUnsignedConsentByBooking(proId, [upcoming])
+      const booking = toBookingCard(upcoming, unsigned)
 
       const payload: ProSessionPayload = {
         ok: true,
@@ -244,7 +297,10 @@ export async function GET() {
     }
 
     if (eligibleUpcoming.length > 1) {
-      const eligibleBookings = eligibleUpcoming.map(toBookingCard)
+      const unsigned = await loadUnsignedConsentByBooking(proId, eligibleUpcoming)
+      const eligibleBookings = eligibleUpcoming.map((row) =>
+        toBookingCard(row, unsigned),
+      )
 
       const payload: ProSessionPayload = {
         ok: true,

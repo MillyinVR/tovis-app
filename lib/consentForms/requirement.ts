@@ -38,6 +38,7 @@ import {
 } from '@prisma/client'
 
 import type { BadgeTone } from '@/app/_components/ui'
+import { CONSENT_KIND_LABELS } from '@/lib/consentForms/kindLabels'
 
 type Db = PrismaClient | Prisma.TransactionClient
 
@@ -210,6 +211,126 @@ export async function loadSignedConsentFormIds(args: {
   }
 
   return byClient
+}
+
+// ─── The unsigned list (session-start surfaces) ──────────────────────────────
+//
+// 🔴 Deliberately NOT the badge below, and this is the distinction to keep.
+//
+// `deriveConsentRequirementBadge` sets `significant: false` once the appointment
+// has started, because a chip warning a pro about a visit that already happened
+// is noise they cannot act on. A SESSION-START surface is the opposite case: the
+// pro is standing in front of the client at, or just after, the scheduled time,
+// which is precisely when `scheduledFor <= now` is true. Running the unsigned
+// list through the badge's time gate would therefore blank the warning exactly
+// when it is worth the most.
+//
+// Web's session page already got this right by construction — it renders the
+// banner on the PRE-SERVICE screens only, so WHICH SCREEN carries the decision
+// and the list itself is ungated. Anything else consuming this list (the native
+// session hub) must make the same choice about its own surface; it must not
+// reach for `significant`, which answers a different question.
+
+/** One unsigned form, in the words a session-start surface prints. */
+export type UnsignedConsentForm = {
+  formId: string
+  title: string
+  /** `kind` as words, from the one label table (K14). */
+  kindLabel: string
+}
+
+/**
+ * The unsigned forms for a SET of bookings, in two queries regardless of how
+ * many bookings are passed.
+ *
+ * Batched rather than per-booking on purpose: the session route's picker mode
+ * resolves several eligible bookings at once, and a per-booking helper would
+ * turn that into 2N queries on a surface the pro hits on every app open.
+ *
+ * Returns a map keyed by the caller's booking id. A booking with nothing
+ * outstanding is ABSENT from the map rather than present with an empty array —
+ * so "nothing to sign" has one representation, not two.
+ */
+export async function loadUnsignedConsentFormsForBookings(args: {
+  db: Db
+  professionalId: string
+  bookings: readonly (ConsentRequirementBookingRow & {
+    id: string
+    clientId: string
+  })[]
+  now: Date
+}): Promise<ReadonlyMap<string, UnsignedConsentForm[]>> {
+  const out = new Map<string, UnsignedConsentForm[]>()
+  if (args.bookings.length === 0) return out
+
+  const byServiceId = await loadConsentRequirementsByServiceId({
+    db: args.db,
+    professionalId: args.professionalId,
+  })
+
+  // A pro who has bound no form pays for exactly one query and stops here —
+  // which today is every pro (the ship-dark default this rides on).
+  if (byServiceId.size === 0) return out
+
+  const requiredByBooking = new Map<string, ConsentRequirement[]>()
+  const formIds = new Set<string>()
+  const clientIds = new Set<string>()
+
+  for (const booking of args.bookings) {
+    const required = collectBookingConsentRequirements(booking, byServiceId)
+    if (required.length === 0) continue
+
+    requiredByBooking.set(booking.id, required)
+    clientIds.add(booking.clientId)
+    for (const requirement of required) formIds.add(requirement.formId)
+  }
+
+  if (requiredByBooking.size === 0) return out
+
+  const signedByClient = await loadSignedConsentFormIds({
+    db: args.db,
+    professionalId: args.professionalId,
+    clientIds: [...clientIds],
+    formIds: [...formIds],
+    now: args.now,
+  })
+
+  for (const booking of args.bookings) {
+    const required = requiredByBooking.get(booking.id)
+    if (!required) continue
+
+    const signed = signedByClient.get(booking.clientId) ?? new Set<string>()
+    const unsigned = required
+      .filter((requirement) => !signed.has(requirement.formId))
+      .map((requirement) => ({
+        formId: requirement.formId,
+        // A form whose current version has no title still needs naming — the pro
+        // has to know something is outstanding even if they left it blank.
+        title: requirement.title || 'Consent form',
+        kindLabel: CONSENT_KIND_LABELS[requirement.kind],
+      }))
+
+    if (unsigned.length > 0) out.set(booking.id, unsigned)
+  }
+
+  return out
+}
+
+/** The single-booking case, over the same chain. */
+export async function loadUnsignedConsentFormsForBooking(args: {
+  db: Db
+  professionalId: string
+  booking: ConsentRequirementBookingRow & { id: string; clientId: string }
+  now: Date
+}): Promise<UnsignedConsentForm[]> {
+  const byBooking = await loadUnsignedConsentFormsForBookings({
+    db: args.db,
+    professionalId: args.professionalId,
+    bookings: [args.booking],
+    now: args.now,
+  })
+
+  return byBooking.get(args.booking.id) ?? []
 }
 
 // ─── The badge ───────────────────────────────────────────────────────────────

@@ -6289,6 +6289,37 @@
       ],
       "type": "object"
     },
+    "ConsentRequirementBadge": {
+      "properties": {
+        "description": {
+          "description": "The plain-words expansion, for tooltips and accessible names. The calendar card renders a chip, but the words are what a screen reader gets (K5's rule), and they NAME the form — \"which waiver?\" is the pro's next question.",
+          "type": "string"
+        },
+        "kind": {
+          "const": "UNSIGNED_CONSENT",
+          "type": "string"
+        },
+        "label": {
+          "description": "What a chip prints. Kind-neutral: a patch test is not a \"waiver\".",
+          "type": "string"
+        },
+        "significant": {
+          "description": "🔴 False for a booking that is already OVER.\n\nA pro who sets their first requirement today would otherwise light up every past appointment for that service in amber — warnings about visits that already happened, which nobody can act on. The DECISION lives here so no surface can drift on it (the K1 `significant` rule).",
+          "type": "boolean"
+        },
+        "tone": {
+          "$ref": "#/definitions/BadgeTone"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "description",
+        "tone",
+        "significant"
+      ],
+      "type": "object"
+    },
     "CreateMessageResponseDTO": {
       "properties": {
         "message": {
@@ -10321,6 +10352,10 @@
             "null"
           ]
         },
+        "consentRequirement": {
+          "$ref": "#/definitions/ConsentRequirementBadge",
+          "description": "Unsigned-consent mark (K15) — the client owes a signature on a form the pro requires for one of this booking's services. Derived by the one helper (lib/consentForms/requirement.ts) and rendered as a TEXT CHIP (\"Form due\", warn tone) per K7's channel budget: NOT a colour, and NOT a second warning glyph, because the conflict triangle already owns that shape.\n\nOPTIONAL, and absent unless there is genuinely an unsigned form on an appointment that has not happened yet — `significant` is false once the appointment is over, so a pro setting their first requirement does not light up their whole history in amber. It WARNS, never blocks.\n\n🔴 This field shipped in K15 without being declared here, so it crossed to the device with zero contract coverage — the K4-B/K5-B gap reopened. It was invisible because the route adds it with a conditional SPREAD (`...(badge ? { consentRequirement: badge } : {})`), and TypeScript does not run excess-property checks on spread members. So this file's own header claim — \"a field added to one and not the other is a compile error\" — holds only for fields written as plain properties. Any future optional field must be declared HERE first, or `gen:api-schema` never sees it."
+        },
         "details": {
           "$ref": "#/definitions/ProCalendarEventDetailsDTO"
         },
@@ -10895,6 +10930,65 @@
         "quota",
         "remaining",
         "enforced"
+      ],
+      "type": "object"
+    },
+    "ProClientPolicyDTO": {
+      "description": "The four switches, exactly as stored. `null` for the whole object means the pro has set no policy for this client — which is a different fact from four falses, and the write route preserves the difference by DELETING the row rather than storing an all-false one.",
+      "properties": {
+        "blockSelfServeBooking": {
+          "description": "Client may not create a NEW appointment themselves.",
+          "type": "boolean"
+        },
+        "prepayScope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OfferingPrepayScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-client prepay requirement, unioned with the offering's (wider wins)."
+        },
+        "requireCardOnFile": {
+          "description": "Client must have a saved card before a booking can be finalized.",
+          "type": "boolean"
+        },
+        "requireDeposit": {
+          "description": "Widen the pro's deposit scope to cover this client's bookings.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "requireDeposit",
+        "prepayScope",
+        "requireCardOnFile",
+        "blockSelfServeBooking"
+      ],
+      "type": "object"
+    },
+    "ProClientPolicyResponseDTO": {
+      "properties": {
+        "cardOnFileRailEnabled": {
+          "description": "Whether the save-card rail is live (ENABLE_NO_SHOW_PROTECTION).\n\nA capability, not a policy value: while this is false the write route 409s a card-on-file requirement, so a client that renders that switch as available is offering something the server will refuse. The device must gate the CONTROL on this, not just handle the error ([[kill-switch-must-reach-the-control]]).",
+          "type": "boolean"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProClientPolicyDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The stored policy, or null when this pro has set nothing for this client."
+        }
+      },
+      "required": [
+        "policy",
+        "cardOnFileRailEnabled"
       ],
       "type": "object"
     },
@@ -12365,6 +12459,81 @@
       "required": [
         "reviewId",
         "reply"
+      ],
+      "type": "object"
+    },
+    "ProSessionPayload": {
+      "properties": {
+        "booking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionBooking"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "center": {
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/UiSessionCenterAction"
+            },
+            "href": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "action",
+            "href"
+          ],
+          "type": "object"
+        },
+        "eligibleBookings": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/SessionBooking"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "#/definitions/UiSessionMode"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "targetStep": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StepKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "ok",
+        "mode",
+        "booking",
+        "eligibleBookings",
+        "targetStep",
+        "center"
       ],
       "type": "object"
     },
@@ -13849,8 +14018,52 @@
     "ServiceLocationType": {
       "$ref": "#/definitions/%24Enums.ServiceLocationType"
     },
+    "SessionBooking": {
+      "properties": {
+        "clientName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "scheduledFor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "sessionStep": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unsignedConsentForms": {
+          "description": "K17-web — consent forms this client still owes for this appointment (K15). Web's session page renders the same list as `UnsignedConsentBanner`; this is how the native session hub gets it.\n\nOPTIONAL and ABSENT when there is nothing outstanding, so a pro who has bound no form sees a payload byte-identical to pre-K17. Absent means \"nothing to sign\", never an error — and it WARNS, never blocks.\n\n🔴 Not the calendar's `significant`-gated badge: at session start the appointment time has arrived, which is exactly when that gate would suppress the warning. See the note above `loadUnsignedConsentFormsForBookings`.",
+          "items": {
+            "$ref": "#/definitions/UnsignedConsentForm"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "SessionStep": {
       "$ref": "#/definitions/%24Enums.SessionStep"
+    },
+    "StepKey": {
+      "enum": [
+        "consult",
+        "session",
+        "aftercare"
+      ],
+      "type": "string"
     },
     "StripeCheckoutSessionDTO": {
       "properties": {
@@ -13910,6 +14123,48 @@
         "FALLBACK"
       ],
       "type": "string"
+    },
+    "UiSessionCenterAction": {
+      "enum": [
+        "NONE",
+        "START",
+        "NAVIGATE",
+        "FINISH",
+        "CAPTURE_BEFORE",
+        "CAPTURE_AFTER",
+        "PICK_BOOKING"
+      ],
+      "type": "string"
+    },
+    "UiSessionMode": {
+      "enum": [
+        "IDLE",
+        "UPCOMING",
+        "UPCOMING_PICKER",
+        "ACTIVE"
+      ],
+      "type": "string"
+    },
+    "UnsignedConsentForm": {
+      "description": "One unsigned form, in the words a session-start surface prints.",
+      "properties": {
+        "formId": {
+          "type": "string"
+        },
+        "kindLabel": {
+          "description": "`kind` as words, from the one label table (K14).",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "formId",
+        "title",
+        "kindLabel"
+      ],
+      "type": "object"
     },
     "UserDeviceDTO": {
       "properties": {

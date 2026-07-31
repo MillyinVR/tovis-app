@@ -59,12 +59,7 @@ import {
 import { fullName } from '@/lib/names'
 import { buildProSessionCloseoutChecklist } from '@/lib/proSession/closeoutChecklist'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
-import { CONSENT_KIND_LABELS } from '@/lib/consentForms/kindLabels'
-import {
-  collectBookingConsentRequirements,
-  loadConsentRequirementsByServiceId,
-  loadSignedConsentFormIds,
-} from '@/lib/consentForms/requirement'
+import { loadUnsignedConsentFormsForBooking } from '@/lib/consentForms/requirement'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 import {
   acceptedPaymentMethodsSelect,
@@ -1555,51 +1550,6 @@ function UnmappedStateView({
   )
 }
 
-/**
- * K15 — the unsigned forms for ONE booking, assembled from the same three
- * helpers the calendar feed uses, in the same order. Not a second resolution
- * chain: `lib/consentForms/requirement.ts` owns what "required" and "signed"
- * mean, and this only supplies the booking.
- */
-async function loadUnsignedConsentFormsForSession(args: {
-  professionalId: string
-  booking: {
-    clientId: string
-    serviceId: string
-    serviceItems: readonly { serviceId: string }[]
-  }
-}): Promise<{ formId: string; title: string; kindLabel: string }[]> {
-  if (!isClientTechnicalRecordEnabled(args.professionalId)) return []
-
-  const byServiceId = await loadConsentRequirementsByServiceId({
-    db: prisma,
-    professionalId: args.professionalId,
-  })
-
-  if (byServiceId.size === 0) return []
-
-  const required = collectBookingConsentRequirements(args.booking, byServiceId)
-  if (required.length === 0) return []
-
-  const signedByClient = await loadSignedConsentFormIds({
-    db: prisma,
-    professionalId: args.professionalId,
-    clientIds: [args.booking.clientId],
-    formIds: required.map((requirement) => requirement.formId),
-    now: new Date(),
-  })
-
-  const signed = signedByClient.get(args.booking.clientId) ?? new Set<string>()
-
-  return required
-    .filter((requirement) => !signed.has(requirement.formId))
-    .map((requirement) => ({
-      formId: requirement.formId,
-      title: requirement.title || 'Consent form',
-      kindLabel: CONSENT_KIND_LABELS[requirement.kind],
-    }))
-}
-
 export default async function ProBookingSessionPage(props: PageProps) {
   const { id } = await props.params
   const bookingId = String(id || '').trim()
@@ -1760,10 +1710,14 @@ export default async function ProBookingSessionPage(props: PageProps) {
   // Gated like every other technical-record surface, and skipped entirely when
   // the pro has bound no forms, so an ungated pro's page runs the same queries
   // it ran before K15.
-  const unsignedConsentForms = await loadUnsignedConsentFormsForSession({
-    professionalId,
-    booking,
-  })
+  const unsignedConsentForms = isClientTechnicalRecordEnabled(professionalId)
+    ? await loadUnsignedConsentFormsForBooking({
+        db: prisma,
+        professionalId,
+        booking,
+        now: new Date(),
+      })
+    : []
   const amountDueLabel =
     depositCredit.creditCents > 0 ? formatCents(depositCredit.amountDueCents) : null
   const depositCreditLabel =
