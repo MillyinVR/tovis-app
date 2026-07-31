@@ -324,6 +324,10 @@ enum ConsultationApprovalProofMethod {
 enum ClientActionTokenKind {
   CONSULTATION_ACTION
   AFTERCARE_ACCESS
+  // K10-B: unauthenticated deposit-payment link for a pro-created booking whose
+  // client is often UNCLAIMED (ClientProfile.userId null) and so can never pass
+  // requireClient() on the authed deposit route.
+  DEPOSIT_PAYMENT
 }
 
 enum NfcCardType {
@@ -640,6 +644,10 @@ enum NotificationEventKey {
   // approaching its auto-release deadline (M5). Client-facing nudge to complete
   // the deposit checkout before the slot is freed. Respects quiet hours.
   DEPOSIT_REMINDER
+  // K10-B: the secure pay-link delivery for a pro-created booking's deposit —
+  // EMAIL/SMS carrying the /client/deposit/<token> magic link, because the
+  // client is often unclaimed and cannot use the login-gated deposit surface.
+  DEPOSIT_PAYMENT_LINK
   LOOK_FOLLOWER_NEW
   // Client→client follow ("started following you") — powers the activity feed.
   CLIENT_FOLLOW
@@ -3338,6 +3346,14 @@ model Booking {
   // funds via the dispute, so issuing our own refund would double-return them.
   // See lib/booking/writeBoundary.ts (applyStripeDepositDisputeInTransaction).
   depositDisputedAt            DateTime?
+  // K10-B: when an unpaid (PENDING) deposit's hold is auto-released. STAMPED at
+  // creation — the release sweep and the reminder key on this column, never on
+  // env-derived arithmetic at run time, so a knob change can't move the deadline
+  // under an existing booking. Discovery bookings stamp createdAt + 24h (the
+  // shipped policy); pro-created prepay stamps max(scheduledFor − 72h,
+  // createdAt + 24h). Null on rows with no deposit — and on legacy rows, where
+  // the sweep falls back to ageing on createdAt.
+  depositDueAt                 DateTime?
 
   // One-time platform discovery fee (cents), captured as the Stripe application
   // fee on the deposit charge. refundedAt is set when the fee is returned, so a

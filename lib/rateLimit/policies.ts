@@ -16,6 +16,7 @@ export type RateLimitBucket =
   | 'account-invite:mint:token'
   | 'client:rebook:token'
   | 'client:checkout:token'
+  | 'client:deposit:token'
   | 'pro:bookings:write'
   | 'pro:media:write'
   | 'pro:offerings:write'
@@ -170,6 +171,14 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 10,
     windowSeconds: 5 * 60,
     prefix: 'rl:client:checkout:token',
+    mode: 'redis-only',
+  },
+  // K10-B: the public deposit pay link (same shape as the aftercare token
+  // checkout — a Stripe-session mint per tap, bounded per token+IP).
+  'client:deposit:token': {
+    limit: 10,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:client:deposit:token',
     mode: 'redis-only',
   },
   'pro:bookings:write': {

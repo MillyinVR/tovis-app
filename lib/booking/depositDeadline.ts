@@ -20,6 +20,20 @@ import { readOptionalEnv } from '@/lib/env'
 export const DEPOSIT_UNPAID_DEADLINE_HOURS_DEFAULT = 24
 export const DEPOSIT_REMINDER_LEAD_HOURS_DEFAULT = 4
 
+// K10-B — pro-created prepay release timing.
+//   lead   — hours BEFORE the appointment the unpaid hold is released. The pro
+//            chose this client and chose to hold the slot, so the deadline
+//            anchors on the appointment, not on creation (which is the
+//            squatter-protection anchor for self-serve discovery bookings).
+//   floor  — the client always gets at least the discovery window (deadline
+//            hours after creation) to pay, so a booking created inside the
+//            72h window is never born past its own deadline.
+//   reminder lead — hours before RELEASE the nudge fires. The discovery value
+//            (4h) is tuned for a 24h window; a pro-created window can be weeks,
+//            so the nudge fires a day out.
+export const DEPOSIT_PRO_CREATED_LEAD_HOURS_DEFAULT = 72
+export const DEPOSIT_PRO_CREATED_REMINDER_LEAD_HOURS_DEFAULT = 24
+
 // M14 — deposit-success recovery sweep knobs.
 //   minAge — a lost deposit `payment_intent.succeeded` is first the live
 //            webhook's job, then Stripe's native retries'. Give both a head start
@@ -73,6 +87,48 @@ export function depositReminderOffsetMs(): number {
 /** Milliseconds from createdAt to the auto-release deadline. */
 export function depositUnpaidDeadlineMs(): number {
   return depositUnpaidDeadlineHours() * 60 * 60 * 1000
+}
+
+/** Hours before the appointment a pro-created unpaid prepay hold is released. */
+export function depositProCreatedLeadHours(): number {
+  return readPositiveIntEnv(
+    'DEPOSIT_PRO_CREATED_LEAD_HOURS',
+    DEPOSIT_PRO_CREATED_LEAD_HOURS_DEFAULT,
+  )
+}
+
+/** Hours before the pro-created release deadline the reminder nudge fires. */
+export function depositProCreatedReminderLeadHours(): number {
+  return readPositiveIntEnv(
+    'DEPOSIT_PRO_CREATED_REMINDER_LEAD_HOURS',
+    DEPOSIT_PRO_CREATED_REMINDER_LEAD_HOURS_DEFAULT,
+  )
+}
+
+/**
+ * The stamped release deadline for a DISCOVERY deposit: exactly the arithmetic
+ * the sweep used to run at sweep time (createdAt + deadline hours), frozen at
+ * creation so a later knob change cannot move it.
+ */
+export function computeDiscoveryDepositDueAt(createdAt: Date): Date {
+  return new Date(createdAt.getTime() + depositUnpaidDeadlineMs())
+}
+
+/**
+ * The stamped release deadline for a PRO-CREATED prepay:
+ * max(scheduledFor − lead, createdAt + floor). The floor (the discovery
+ * window) guarantees the client a minimum time to pay; when the appointment
+ * arrives before the deadline the sweep — which only touches future
+ * appointments — naturally never fires, and the pro collects in person.
+ */
+export function computeProCreatedDepositDueAt(args: {
+  createdAt: Date
+  scheduledFor: Date
+}): Date {
+  const anchoredOnAppointment =
+    args.scheduledFor.getTime() - depositProCreatedLeadHours() * 60 * 60 * 1000
+  const floor = args.createdAt.getTime() + depositUnpaidDeadlineMs()
+  return new Date(Math.max(anchoredOnAppointment, floor))
 }
 
 function readBooleanEnv(name: string, fallback: boolean): boolean {

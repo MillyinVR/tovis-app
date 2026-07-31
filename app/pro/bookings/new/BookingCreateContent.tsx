@@ -6,15 +6,20 @@ import {
   Role,
 } from '@prisma/client'
 
+import {
+  depositProCreatedLeadHours,
+  depositUnpaidDeadlineHours,
+} from '@/lib/booking/depositDeadline'
 import { getCurrentUser } from '@/lib/currentUser'
 import {
   buildProBookingNewClientDTO,
   buildProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 import { getProClientVisibility } from '@/lib/clientVisibility'
+import { moneyToNumber } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 
-import NewBookingForm from './NewBookingForm'
+import NewBookingForm, { type ProBookingDepositConfig } from './NewBookingForm'
 
 export type BookingCreateSearchParams = {
   clientId?: string
@@ -164,7 +169,7 @@ export default async function BookingCreateContent(props: {
 
   const professionalId = user.professionalProfile.id
 
-  const [offeringsRaw, locationsRaw] = await Promise.all([
+  const [offeringsRaw, locationsRaw, paymentSettingsRaw] = await Promise.all([
     prisma.professionalServiceOffering.findMany({
       where: {
         professionalId,
@@ -180,6 +185,7 @@ export default async function BookingCreateContent(props: {
         mobileDurationMinutes: true,
         offersInSalon: true,
         offersMobile: true,
+        prepayScope: true,
         customImageUrl: true,
         isActive: true,
         createdAt: true,
@@ -236,9 +242,44 @@ export default async function BookingCreateContent(props: {
       },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     }),
+
+    // K10-B: the deposit step needs the pro's deposit config + Stripe
+    // readiness (to size and gate the request) and the release knobs (to
+    // preview the concrete auto-release datetime the pro is agreeing to).
+    prisma.professionalPaymentSettings.findUnique({
+      where: { professionalId },
+      select: {
+        depositEnabled: true,
+        depositType: true,
+        depositFlatAmount: true,
+        depositPercent: true,
+        stripeChargesEnabled: true,
+        stripePayoutsEnabled: true,
+      },
+    }),
   ])
 
   const offerings = offeringsRaw.map(buildProBookingNewOfferingDTO)
+
+  const depositConfig: ProBookingDepositConfig = {
+    // Same readiness signal resolveDiscoveryFinalize uses (charges+payouts);
+    // the write boundary re-checks the full gate incl. the account id.
+    stripeReady: Boolean(
+      paymentSettingsRaw?.stripeChargesEnabled &&
+        paymentSettingsRaw?.stripePayoutsEnabled,
+    ),
+    depositEnabled: paymentSettingsRaw?.depositEnabled ?? false,
+    depositType: paymentSettingsRaw?.depositType ?? null,
+    depositFlatAmountCents:
+      paymentSettingsRaw?.depositFlatAmount == null
+        ? null
+        : Math.round(
+            (moneyToNumber(paymentSettingsRaw.depositFlatAmount) ?? 0) * 100,
+          ),
+    depositPercent: paymentSettingsRaw?.depositPercent ?? null,
+    releaseLeadHours: depositProCreatedLeadHours(),
+    releaseFloorHours: depositUnpaidDeadlineHours(),
+  }
 
   const locations: BookableLocationOption[] = locationsRaw.map((location) => ({
     id: location.id,
@@ -332,6 +373,7 @@ export default async function BookingCreateContent(props: {
       offerings={offerings}
       locations={locations}
       clientAddressesByClientId={clientAddressesByClientId}
+      depositConfig={depositConfig}
       defaultClientId={validClientId}
       defaultOfferingId={validOfferingId}
       defaultLocationId={validLocationId}

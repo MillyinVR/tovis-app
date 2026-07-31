@@ -26,6 +26,11 @@ import {
 export const AFTERCARE_ACCESS_TOKEN_EXPIRY_MS =
   1000 * 60 * 60 * 24 * 7 // 7 days
 
+// K10-B: fallback only — issue sites always pass an expiresAtOverride derived
+// from the booking (max(depositDueAt, scheduledFor)).
+export const DEPOSIT_PAYMENT_TOKEN_FALLBACK_EXPIRY_MS =
+  1000 * 60 * 60 * 24 * 30 // 30 days
+
 const EMAIL_OR_SMS_CONTACT_METHODS: readonly ContactMethod[] = [
   ContactMethod.EMAIL,
   ContactMethod.SMS,
@@ -156,6 +161,41 @@ export const CLIENT_ACTION_REGISTRY: Record<
     link: {
       target: 'AFTERCARE',
       pathPrefix: '/client/rebook',
+      requiresToken: true,
+    },
+  },
+
+  DEPOSIT_PAYMENT: {
+    type: 'DEPOSIT_PAYMENT',
+    token: {
+      required: true,
+      kind: ClientActionTokenKind.DEPOSIT_PAYMENT,
+      // Re-openable like AFTERCARE_ACCESS: the client may open the link, bail
+      // out of Stripe Checkout, and come back. Payment completion is enforced
+      // by the booking's depositStatus, not by burning the token.
+      singleUse: false,
+      // Fallback only — every issue site passes an expiresAtOverride tied to
+      // the booking (max of the release deadline and the appointment), so a
+      // link never outlives the deposit it collects by much.
+      expiresInMs: DEPOSIT_PAYMENT_TOKEN_FALLBACK_EXPIRY_MS,
+      revokeOutstandingOnResend: true,
+    },
+    delivery: {
+      /**
+       * Email-preferred, SMS fallback. Phone-only (often unclaimed) clients
+       * receive the secure pay link via SMS. Kept in sync with the
+       * DEPOSIT_PAYMENT_LINK notification catalog (CLIENT_EMAIL_SMS_CHANNELS)
+       * and resolveAllowUnverifiedDestination() in enqueueClientActionDispatch.
+       */
+      allowedContactMethods: EMAIL_OR_SMS_CONTACT_METHODS,
+      preferredContactMethod: ContactMethod.EMAIL,
+      notificationEventKey: NotificationEventKey.DEPOSIT_PAYMENT_LINK,
+      notificationRecipientKind: NotificationRecipientKind.CLIENT,
+      createFreshDeliveryOnResend: true,
+    },
+    link: {
+      target: 'DEPOSIT',
+      pathPrefix: '/client/deposit',
       requiresToken: true,
     },
   },

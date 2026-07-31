@@ -2,6 +2,7 @@ export {
   beginIdempotency,
   buildPublicAftercareTokenActorKey,
   buildPublicConsultationTokenActorKey,
+  buildPublicDepositTokenActorKey,
   completeIdempotency,
   failIdempotency,
   type BeginIdempotencyResult,

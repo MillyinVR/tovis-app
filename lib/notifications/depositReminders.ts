@@ -19,7 +19,10 @@ import {
   type Prisma,
 } from '@prisma/client'
 
-import { depositReminderOffsetMs } from '@/lib/booking/depositDeadline'
+import {
+  depositReminderLeadHours,
+  depositReminderOffsetMs,
+} from '@/lib/booking/depositDeadline'
 import { formatMoneyFromUnknown } from '@/lib/money'
 import { scheduleClientNotification } from '@/lib/notifications/clientNotifications'
 import {
@@ -62,6 +65,7 @@ const DEPOSIT_REMINDER_BOOKING_SELECT = {
   status: true,
   depositStatus: true,
   depositAmount: true,
+  depositDueAt: true,
   scheduledFor: true,
   service: { select: { name: true } },
   professional: {
@@ -113,6 +117,14 @@ export async function scheduleDepositReminderOnBooking(args: {
   tx: Prisma.TransactionClient
   bookingId: string
   now: Date
+  /**
+   * K10-B: hours before the RELEASE the nudge fires, for bookings carrying a
+   * stamped depositDueAt. Pro-created windows can be weeks long, so their
+   * caller passes depositProCreatedReminderLeadHours() (24h) instead of the
+   * discovery lead (4h). Ignored on legacy rows with no stamp, which keep the
+   * original createdAt-anchored offset.
+   */
+  reminderLeadHours?: number
 }): Promise<void> {
   const booking = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
@@ -123,7 +135,28 @@ export async function scheduleDepositReminderOnBooking(args: {
   if (booking.depositStatus !== BookingDepositStatus.PENDING) return
   if (!isReleasableStatus(booking.status)) return
 
-  const runAt = new Date(args.now.getTime() + depositReminderOffsetMs())
+  let runAt: Date
+  if (booking.depositDueAt) {
+    // Anchored on the stamped release deadline. If the lead reaches past "now"
+    // (a window shorter than the lead), collapse to halfway through what
+    // remains — mirrors the lead-vs-deadline collapse in depositDeadline.ts —
+    // so a short-window booking still gets one nudge instead of an instant or
+    // missing one.
+    const leadHours = args.reminderLeadHours ?? depositReminderLeadHours()
+    const anchored = booking.depositDueAt.getTime() - leadHours * 60 * 60 * 1000
+    runAt =
+      anchored > args.now.getTime()
+        ? new Date(anchored)
+        : new Date(
+            args.now.getTime() +
+              Math.max(
+                0,
+                (booking.depositDueAt.getTime() - args.now.getTime()) / 2,
+              ),
+          )
+  } else {
+    runAt = new Date(args.now.getTime() + depositReminderOffsetMs())
+  }
 
   // Never schedule a nudge at/after the appointment itself — a last-minute
   // booking whose deadline offset lands past the appointment gets no reminder

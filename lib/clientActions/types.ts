@@ -19,6 +19,7 @@ export const CLIENT_ACTION_TYPES = [
   'CLIENT_CLAIM_INVITE',
   'AFTERCARE_ACCESS',
   'CONSULTATION_ACTION',
+  'DEPOSIT_PAYMENT',
 ] as const
 
 export type ClientActionType = (typeof CLIENT_ACTION_TYPES)[number]
@@ -36,6 +37,7 @@ export const CLIENT_ACTION_LINK_TARGETS = [
   'CLAIM',
   'AFTERCARE',
   'CONSULTATION',
+  'DEPOSIT',
 ] as const
 
 export type ClientActionLinkTarget =

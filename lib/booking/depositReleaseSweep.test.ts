@@ -68,10 +68,15 @@ describe('releaseAbandonedDepositBookings', () => {
       in: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
     })
     expect(where?.scheduledFor).toEqual({ gt: NOW })
-    // cutoff = now - 24h
-    expect(where?.createdAt).toEqual({
-      lte: new Date(NOW.getTime() - 24 * 60 * 60 * 1000),
-    })
+    // K10-B: stamped rows key on depositDueAt (frozen at creation); legacy
+    // null-stamp rows keep the createdAt ageing (cutoff = now - 24h).
+    expect(where?.OR).toEqual([
+      { depositDueAt: { lte: NOW } },
+      {
+        depositDueAt: null,
+        createdAt: { lte: new Date(NOW.getTime() - 24 * 60 * 60 * 1000) },
+      },
+    ])
   })
 
   it('releases each candidate and tallies the outcome', async () => {

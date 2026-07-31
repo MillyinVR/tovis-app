@@ -552,6 +552,7 @@ describe('createProBookingWithClient', () => {
       allowOutsideWorkingHours: true,
       allowShortNotice: true,
       allowFarFuture: false,
+      depositRequested: false,
       requestId: null,
       idempotencyKey: null,
     })

@@ -67,6 +67,8 @@ export type BookingErrorCode =
   | "CANCELLATION_POLICY_NOT_ACCEPTED"
   | "AFTERCARE_TOKEN_MISSING"
   | "AFTERCARE_TOKEN_INVALID"
+  | "DEPOSIT_TOKEN_MISSING"
+  | "DEPOSIT_TOKEN_INVALID"
   | "AFTERCARE_NOT_COMPLETED"
   | "AFTERCARE_CLIENT_MISMATCH"
   | "AFTERCARE_OFFERING_MISMATCH"
@@ -654,6 +656,20 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Aftercare token is invalid.",
     userMessage: "Invalid aftercare token.",
+  },
+  DEPOSIT_TOKEN_MISSING: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Deposit payment token is missing.",
+    userMessage: "That payment link is invalid or expired.",
+  },
+  DEPOSIT_TOKEN_INVALID: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Deposit payment token is invalid.",
+    userMessage: "That payment link is invalid or expired.",
   },
   AFTERCARE_NOT_COMPLETED: {
     httpStatus: 409,

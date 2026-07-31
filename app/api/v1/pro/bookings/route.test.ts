@@ -206,6 +206,7 @@ function expectedSuccessBody(overrides?: {
       email: clientEmail,
       claimStatus,
     },
+    deposit: null,
   }
 
   if (overrides && 'invite' in overrides && overrides.invite !== null) {
@@ -553,6 +554,7 @@ describe('POST /api/v1/pro/bookings', () => {
         allowOutsideWorkingHours: false,
         allowShortNotice: false,
         allowFarFuture: false,
+        depositRequested: false,
       },
     })
     expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
@@ -666,6 +668,7 @@ describe('POST /api/v1/pro/bookings', () => {
         allowOutsideWorkingHours: true,
         allowShortNotice: false,
         allowFarFuture: true,
+        depositRequested: false,
       },
     })
 
@@ -689,6 +692,7 @@ describe('POST /api/v1/pro/bookings', () => {
       allowOutsideWorkingHours: true,
       allowShortNotice: false,
       allowFarFuture: true,
+      depositRequested: false,
       requestId: null,
       idempotencyKey: 'idem_parsed_payload_1',
     })
@@ -778,6 +782,7 @@ describe('POST /api/v1/pro/bookings', () => {
       allowOutsideWorkingHours: false,
       allowShortNotice: false,
       allowFarFuture: false,
+      depositRequested: false,
       requestId: null,
       idempotencyKey: 'idem_nested_payload_1',
     })
@@ -856,6 +861,7 @@ describe('POST /api/v1/pro/bookings', () => {
       allowOutsideWorkingHours: false,
       allowShortNotice: false,
       allowFarFuture: false,
+      depositRequested: false,
       requestId: null,
       idempotencyKey: 'idem_success_1',
     })
