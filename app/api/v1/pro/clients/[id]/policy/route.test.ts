@@ -43,7 +43,11 @@ const mocks = vi.hoisted(() => {
   const assertProCanViewClient = vi.fn()
   const isClientTechnicalRecordEnabled = vi.fn()
 
-  const proClientPolicy = { upsert: vi.fn(), deleteMany: vi.fn() }
+  const proClientPolicy = {
+    upsert: vi.fn(),
+    deleteMany: vi.fn(),
+    findUnique: vi.fn(),
+  }
   const professionalPaymentSettings = { findUnique: vi.fn() }
 
   return {
@@ -77,7 +81,7 @@ vi.mock('@/lib/clients/technicalRecord', () => ({
   isClientTechnicalRecordEnabled: mocks.isClientTechnicalRecordEnabled,
 }))
 
-import { PUT } from './route'
+import { GET, PUT } from './route'
 
 const PRO_ID = 'pro_1'
 const CLIENT_ID = 'client_1'
@@ -118,7 +122,120 @@ beforeEach(() => {
     blockSelfServeBooking: false,
   })
   mocks.proClientPolicy.deleteMany.mockResolvedValue({ count: 1 })
+  mocks.proClientPolicy.findUnique.mockResolvedValue(null)
   readyPro()
+})
+
+// ─── K17-web: the READ path ──────────────────────────────────────────────────
+//
+// K16 shipped four switches with no way to read them back except the chart
+// page's own Prisma query, so the state could not reach a device at all. These
+// tests pin the two things that make the read USABLE by a client that has to
+// draw the control: what it returns, and what it must never substitute.
+
+describe('GET /api/v1/pro/clients/[id]/policy', () => {
+  function getReq(): Request {
+    return new Request('http://localhost/api/v1/pro/clients/client_1/policy')
+  }
+
+  it('returns null when this pro has set nothing for this client', async () => {
+    const res = await GET(getReq(), ctx)
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.policy).toBeNull()
+    // "No policy" and "a policy requiring nothing" must not be the same answer.
+    expect(body.policy).not.toEqual({})
+  })
+
+  it('returns the stored switches', async () => {
+    mocks.proClientPolicy.findUnique.mockResolvedValue({
+      requireDeposit: true,
+      prepayScope: OfferingPrepayScope.ENTIRE_BOOKING,
+      requireCardOnFile: false,
+      blockSelfServeBooking: true,
+    })
+
+    const body = await (await GET(getReq(), ctx)).json()
+
+    expect(body.policy).toEqual({
+      requireDeposit: true,
+      prepayScope: 'ENTIRE_BOOKING',
+      requireCardOnFile: false,
+      blockSelfServeBooking: true,
+    })
+  })
+
+  // 🔴 The whole reason this route returns a raw row.
+  //
+  // `resolveProClientPolicy` zeroes `requiresCardOnFile` while the save-card
+  // rail is dark. That is right at BOOKING time and wrong in a CONTROL: a pro
+  // would open the form they just set and find the switch off, with nothing to
+  // tell them why. The rail state travels separately so the client can disable
+  // that one row instead of misreporting its value.
+  //
+  // RED-PROOF (RUN): swap the handler's `prisma.proClientPolicy.findUnique`
+  // result through `resolveProClientPolicy({ policy, cardOnFileRailEnabled })`
+  // and return its `requiresCardOnFile` → this test fails with
+  // "expected false to be true".
+  it('reports a stored card-on-file switch as SET even while the rail is dark', async () => {
+    delete process.env.ENABLE_NO_SHOW_PROTECTION
+    mocks.proClientPolicy.findUnique.mockResolvedValue({
+      requireDeposit: false,
+      prepayScope: null,
+      requireCardOnFile: true,
+      blockSelfServeBooking: false,
+    })
+
+    const body = await (await GET(getReq(), ctx)).json()
+
+    expect(body.policy.requireCardOnFile).toBe(true)
+    // ...and the capability says why the control must still be disabled.
+    expect(body.cardOnFileRailEnabled).toBe(false)
+  })
+
+  it('reports the rail as available when the flag is on', async () => {
+    process.env.ENABLE_NO_SHOW_PROTECTION = '1'
+
+    const body = await (await GET(getReq(), ctx)).json()
+
+    expect(body.cardOnFileRailEnabled).toBe(true)
+  })
+
+  // The kill switch reaches the READ too, not only the writers: a device that
+  // can still fetch the policy would draw a control the PUT route 404s.
+  it('404s when the technical-record gate is off, without querying', async () => {
+    mocks.isClientTechnicalRecordEnabled.mockReturnValue(false)
+
+    const res = await GET(getReq(), ctx)
+
+    expect(res.status).toBe(404)
+    expect(mocks.proClientPolicy.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('403s a pro who cannot view this client', async () => {
+    mocks.assertProCanViewClient.mockResolvedValue({ ok: false })
+
+    const res = await GET(getReq(), ctx)
+
+    expect(res.status).toBe(403)
+    expect(mocks.proClientPolicy.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('scopes the read to the AUTHENTICATED pro, never the URL', async () => {
+    await GET(getReq(), ctx)
+
+    expect(mocks.proClientPolicy.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          professionalId_clientId: {
+            professionalId: PRO_ID,
+            clientId: CLIENT_ID,
+          },
+        },
+      }),
+    )
+  })
 })
 
 describe('PUT /api/v1/pro/clients/[id]/policy', () => {

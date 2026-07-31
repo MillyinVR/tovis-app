@@ -24,6 +24,7 @@ import type { PaymentBadge } from '@/lib/booking/paymentBadge'
 import type { RelationshipBadge } from '@/lib/booking/relationshipLabel'
 import type { TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
 import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
+import type { ConsentRequirementBadge } from '@/lib/consentForms/requirement'
 
 export type ProCalendarServiceItemDTO = {
   id: string
@@ -97,6 +98,28 @@ export type ProCalendarBookingEventDTO = {
    * PRO's acceptance, the opposite direction.
    */
   clientConfirmation?: ClientConfirmationBadge
+  /**
+   * Unsigned-consent mark (K15) — the client owes a signature on a form the pro
+   * requires for one of this booking's services. Derived by the one helper
+   * (lib/consentForms/requirement.ts) and rendered as a TEXT CHIP ("Form due",
+   * warn tone) per K7's channel budget: NOT a colour, and NOT a second warning
+   * glyph, because the conflict triangle already owns that shape.
+   *
+   * OPTIONAL, and absent unless there is genuinely an unsigned form on an
+   * appointment that has not happened yet — `significant` is false once the
+   * appointment is over, so a pro setting their first requirement does not light
+   * up their whole history in amber. It WARNS, never blocks.
+   *
+   * 🔴 This field shipped in K15 without being declared here, so it crossed to
+   * the device with zero contract coverage — the K4-B/K5-B gap reopened. It was
+   * invisible because the route adds it with a conditional SPREAD
+   * (`...(badge ? { consentRequirement: badge } : {})`), and TypeScript does not
+   * run excess-property checks on spread members. So this file's own header
+   * claim — "a field added to one and not the other is a compile error" — holds
+   * only for fields written as plain properties. Any future optional field must
+   * be declared HERE first, or `gen:api-schema` never sees it.
+   */
+  consentRequirement?: ConsentRequirementBadge
   details: ProCalendarEventDetailsDTO
 }
 

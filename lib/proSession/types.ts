@@ -1,5 +1,7 @@
 // app/lib/proSession/types.ts
 
+import type { UnsignedConsentForm } from '@/lib/consentForms/requirement'
+
 export type UiSessionMode = 'IDLE' | 'UPCOMING' | 'UPCOMING_PICKER' | 'ACTIVE'
 
 export type UiSessionCenterAction =
@@ -19,6 +21,20 @@ export type SessionBooking = {
   clientName?: string
   scheduledFor?: string | null
   sessionStep?: string | null
+  /**
+   * K17-web — consent forms this client still owes for this appointment (K15).
+   * Web's session page renders the same list as `UnsignedConsentBanner`; this is
+   * how the native session hub gets it.
+   *
+   * OPTIONAL and ABSENT when there is nothing outstanding, so a pro who has
+   * bound no form sees a payload byte-identical to pre-K17. Absent means
+   * "nothing to sign", never an error — and it WARNS, never blocks.
+   *
+   * 🔴 Not the calendar's `significant`-gated badge: at session start the
+   * appointment time has arrived, which is exactly when that gate would suppress
+   * the warning. See the note above `loadUnsignedConsentFormsForBookings`.
+   */
+  unsignedConsentForms?: UnsignedConsentForm[]
 }
 
 export type ProSessionPayload = {

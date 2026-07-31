@@ -27,7 +27,7 @@
 //
 // Run with `pnpm test:integration` (or the whole dir in CI via integration.yml).
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
   BookingServiceItemType,
   BookingStatus,
@@ -46,6 +46,7 @@ import {
   deriveConsentRequirementBadge,
   loadConsentRequirementsByServiceId,
   loadSignedConsentFormIds,
+  loadUnsignedConsentFormsForBookings,
 } from '@/lib/consentForms/requirement'
 import {
   createConsentFormWithFirstVersion,
@@ -874,5 +875,195 @@ describe('the requirement warns until it is satisfied', () => {
       where: { id: fx.addOnOfferingId },
       data: { consentFormId: null },
     })
+  })
+})
+
+// ─── K17-web: the session-start list vs the calendar badge ───────────────────
+//
+// The device had no way to learn about an unsigned form at all. Giving it one
+// meant answering a question web answers STRUCTURALLY and a wire cannot:
+// WHEN does the warning stop mattering?
+//
+// `deriveConsentRequirementBadge` turns `significant` off once the appointment
+// has started, because a chip about a visit that already happened is noise on a
+// calendar. A session-start surface is the opposite case — the pro is standing
+// with the client at the scheduled time, which is exactly when that gate fires.
+// Web never had to decide this: it renders `UnsignedConsentBanner` on the
+// PRE-SERVICE screens only, so the screen carries the decision. The native hub
+// has one screen, so the wire has to carry the raw list instead.
+//
+// RED-PROOF (RUN): make `loadUnsignedConsentFormsForBookings` drop any booking
+// whose badge is not `significant` (i.e. resolve it through
+// `deriveConsentRequirementBadge`) → 1 failed | 15 passed. Test 13 fails with
+// "expected undefined to be 1". That is the whole bug: a warning that
+// disappears at the moment of use.
+//
+// ⚠️ Worth recording because it contradicted the first run: before the cleanup
+// moved to `afterEach`, that same proof failed TWO tests — 13 legitimately, and
+// 14 as collateral, because a failing test never reaches a cleanup written at
+// the end of its own body and left the base offering still bound. The second
+// number was an artefact of the harness, not a second defect.
+
+describe('K17-web — the unsigned list a session-start surface needs', () => {
+  // 🔴 Unbind in afterEach, not at the end of each test body. A test that FAILS
+  // never reaches its own cleanup, so the next test inherits the binding and
+  // fails for a reason that has nothing to do with what it is checking — which
+  // is exactly what happened while red-proving test 13
+  // ([[failed-seed-leaves-orphans-confounds-next-run]]).
+  afterEach(async () => {
+    await db.professionalServiceOffering.updateMany({
+      where: { professionalId: fx.professionalId },
+      data: { consentFormId: null },
+    })
+    await db.clientConsentRecord.deleteMany({
+      where: { professionalId: fx.professionalId },
+    })
+  })
+
+  async function bindBaseRequirement(): Promise<string> {
+    const { formId } = await seedForm()
+    await db.professionalServiceOffering.update({
+      where: { id: fx.offeringId },
+      data: { consentFormId: formId },
+    })
+    return formId
+  }
+
+  async function loadRow(bookingId: string) {
+    return db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        clientId: true,
+        serviceId: true,
+        scheduledFor: true,
+        finishedAt: true,
+        serviceItems: { select: { serviceId: true } },
+      },
+    })
+  }
+
+  it('13. still warns once the appointment time has ARRIVED — where the badge goes quiet', async () => {
+    const formId = await bindBaseRequirement()
+    // Ten minutes ago: the pro is starting the appointment. This is the normal
+    // state of the session hub, not an edge case.
+    const started = new Date(Date.now() - 10 * 60 * 1000)
+    const bookingId = await seedBooking({ scheduledFor: started })
+    const row = await loadRow(bookingId)
+
+    const byBooking = await loadUnsignedConsentFormsForBookings({
+      db,
+      professionalId: fx.professionalId,
+      bookings: [row],
+      now: new Date(),
+    })
+
+    expect(byBooking.get(bookingId)?.length).toBe(1)
+    expect(byBooking.get(bookingId)?.[0]?.formId).toBe(formId)
+    expect(byBooking.get(bookingId)?.[0]?.title).toBe(V1_TITLE)
+    expect(byBooking.get(bookingId)?.[0]?.kindLabel).toBe('Service waiver')
+
+    // ...and the SAME booking through the calendar badge is deliberately quiet.
+    // Pinning both answers in one test is the point: they must disagree, and a
+    // future refactor that collapses them breaks here rather than in the field.
+    const byServiceId = await loadConsentRequirementsByServiceId({
+      db,
+      professionalId: fx.professionalId,
+    })
+    const badge = deriveConsentRequirementBadge({
+      unsigned: collectBookingConsentRequirements(row, byServiceId),
+      finishedAt: row.finishedAt,
+      scheduledFor: row.scheduledFor,
+      now: new Date(),
+    })
+    expect(badge?.significant).toBe(false)
+
+  })
+
+  it('14. finds a waiver bound to the SECOND service on a multi-service visit', async () => {
+    // The session route used to select `serviceItems` with `take: 1` — enough
+    // for the display name, and silently blind to every requirement past the
+    // first item.
+    const addOnForm = await createConsentFormWithFirstVersion(db, {
+      professionalId: fx.professionalId,
+      kind: ClientConsentKind.PATCH_TEST,
+      title: `${tag} second-service patch test`,
+      body: 'Patch test consent.',
+    })
+    await db.professionalServiceOffering.update({
+      where: { id: fx.addOnOfferingId },
+      data: { consentFormId: addOnForm.formId },
+    })
+
+    const bookingId = await seedBooking({ withAddOn: true })
+    const row = await loadRow(bookingId)
+
+    const byBooking = await loadUnsignedConsentFormsForBookings({
+      db,
+      professionalId: fx.professionalId,
+      bookings: [row],
+      now: new Date(),
+    })
+
+    expect(byBooking.get(bookingId)?.map((f) => f.formId)).toEqual([
+      addOnForm.formId,
+    ])
+    expect(byBooking.get(bookingId)?.[0]?.kindLabel).toBe('Patch test')
+
+  })
+
+  it('15. a booking with nothing outstanding is ABSENT, not an empty array', async () => {
+    const formId = await bindBaseRequirement()
+    const signedBookingId = await seedBooking()
+    const unsignedBookingId = await seedBooking()
+
+    // Sign for this client — which clears the requirement on BOTH their
+    // bookings, so the two rows below differ only in the client.
+    const version = await db.consentFormVersion.findFirstOrThrow({
+      where: { formId },
+      orderBy: { version: 'desc' },
+      select: { id: true },
+    })
+    await db.clientConsentRecord.create({
+      data: {
+        professionalId: fx.professionalId,
+        clientId: fx.clientId,
+        kind: ClientConsentKind.SERVICE_WAIVER,
+        formVersionId: version.id,
+        proofMethod: ConsentProofMethod.IN_PERSON,
+        signedAt: new Date(),
+      },
+    })
+
+    const rows = await Promise.all([
+      loadRow(signedBookingId),
+      loadRow(unsignedBookingId),
+    ])
+
+    const byBooking = await loadUnsignedConsentFormsForBookings({
+      db,
+      professionalId: fx.professionalId,
+      bookings: rows,
+      now: new Date(),
+    })
+
+    expect(byBooking.has(signedBookingId)).toBe(false)
+    expect(byBooking.has(unsignedBookingId)).toBe(false)
+    expect(byBooking.size).toBe(0)
+
+  })
+
+  it('16. a pro who has bound no form gets an empty map (the ship-dark default)', async () => {
+    const bookingId = await seedBooking()
+    const row = await loadRow(bookingId)
+
+    const byBooking = await loadUnsignedConsentFormsForBookings({
+      db,
+      professionalId: fx.professionalId,
+      bookings: [row],
+      now: new Date(),
+    })
+
+    expect(byBooking.size).toBe(0)
   })
 })
