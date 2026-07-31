@@ -87,6 +87,7 @@ import {
   depositProCreatedReminderLeadHours,
 } from '@/lib/booking/depositDeadline'
 import { computeUpfrontDepositCents } from '@/lib/booking/prepay'
+import { loadProClientPolicy } from '@/lib/proClientPolicy/load'
 import {
   cancelDepositPaymentNudgeDispatch,
   createDepositPaymentDelivery,
@@ -4179,6 +4180,74 @@ async function assertProfessionalIsBookingReady(args: {
   })
 }
 
+/**
+ * K16 — refuse a NEW self-serve appointment when this pro has closed self-serve
+ * booking for this client (`ProClientPolicy.blockSelfServeBooking`).
+ *
+ * Runs on the client-initiated paths only. Deliberately NOT reached by:
+ *
+ *   * `performLockedCreateProBooking` — the pro booking this client by hand is
+ *     the whole point of the switch, not something to refuse;
+ *   * a reschedule (`rescheduleBookingId` set) — the appointment already exists;
+ *   * a waitlist-offer confirmation — the pro sent that offer to this client
+ *     specifically, which is an invitation, not self-serve booking.
+ *
+ * The thrown code carries neutral client-facing copy: the client learns that
+ * online booking is closed and that the pro can book it for them, never that a
+ * policy exists about them.
+ */
+async function assertClientMaySelfServeBook(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  clientId: string
+}): Promise<void> {
+  const policy = await loadProClientPolicy({
+    db: args.tx,
+    professionalId: args.professionalId,
+    clientId: args.clientId,
+  })
+
+  if (!policy.blocksSelfServeBooking) return
+
+  throw bookingError('SELF_SERVE_BOOKING_UNAVAILABLE')
+}
+
+/**
+ * K16 — refuse a booking when this pro requires a card on file from this client
+ * and the client has none saved.
+ *
+ * `loadProClientPolicy` has already applied the ENABLE_NO_SHOW_PROTECTION gate,
+ * so with the card-on-file rail dark this resolves false and no booking is ever
+ * refused for a card no client could have saved.
+ *
+ * "Has a card" means a `ClientPaymentMethod` row exists. Stripe remains the
+ * source of truth for the card itself; this table caches the attachment, and it
+ * is the same signal the client's own settings surface lists — so what the
+ * client is told they have is what this check counts.
+ */
+async function assertClientCardOnFileSatisfied(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  clientId: string
+}): Promise<void> {
+  const policy = await loadProClientPolicy({
+    db: args.tx,
+    professionalId: args.professionalId,
+    clientId: args.clientId,
+  })
+
+  if (!policy.requiresCardOnFile) return
+
+  const savedCard = await args.tx.clientPaymentMethod.findFirst({
+    where: { clientId: args.clientId },
+    select: { id: true },
+  })
+
+  if (savedCard) return
+
+  throw bookingError('CARD_ON_FILE_REQUIRED')
+}
+
 function normalizeOutputTimeZone(value: string): string {
   return isValidIanaTimeZone(value) ? sanitizeTimeZone(value, 'UTC') : 'UTC'
 }
@@ -7860,6 +7929,23 @@ async function performLockedCreateHold(args: {
     bookingEntryPoint,
   })
 
+  // K16: this pro's policy for this client. Refuses BEFORE any slot is reserved,
+  // so a blocked client never takes calendar time from the pro who blocked them.
+  //
+  // 🔴 A RESCHEDULE is exempt. `rescheduleBookingId` means the appointment
+  // already exists and the pro already agreed to it; refusing here would strand
+  // a confirmed booking and 400 the Reschedule button inside K12's own reminder
+  // link. The switch stops NEW appointments (Tori, 2026-07-31) — and the exempt
+  // path is the reason this check reads the argument rather than sitting one
+  // level up in `createHold`, where both callers look identical.
+  if (!rescheduleBookingId) {
+    await assertClientMaySelfServeBook({
+      tx,
+      professionalId: offering.professionalId,
+      clientId,
+    })
+  }
+
   const startedAtMs = Date.now()
   let afterClientAddressLoadMs = startedAtMs
   let afterValidatedContextMs = startedAtMs
@@ -9346,6 +9432,36 @@ async function performLockedFinalizeBookingFromHold(args: {
     professionalId: args.offering.professionalId,
     bookingEntryPoint: args.bookingEntryPoint,
   })
+
+  // K16: the card-on-file requirement is enforced HERE and not at hold creation,
+  // on purpose. Refusing at the hold would cost the client their slot while they
+  // go and save a card; refusing at finalize leaves the hold standing, so the
+  // inline add-card step can complete and retry inside the same hold window.
+  //
+  // 🔴 It runs AFTER the idempotency replay above. A booking that already exists
+  // must keep returning itself: re-refusing a completed finalize because the
+  // client later deleted their card would turn a successful booking into an
+  // error on retry.
+  //
+  // 🔴 AFTERCARE is exempt, and this is not a loophole — it is the same rule the
+  // deposit already follows one floor down. `source: AFTERCARE` reaches this
+  // function ONLY through the unauthenticated aftercare-token branch of
+  // POST /api/v1/bookings/finalize (that branch refuses without a token), and a
+  // token-flow client has no session, so `POST /api/v1/client/payment-methods/
+  // setup-intent` — which calls requireClient() — 401s for them. Enforcing here
+  // would refuse the rebook and hand them an add-card step that cannot work:
+  // a requirement with no means of compliance
+  // ([[offered-option-must-be-an-accepted-write]]). `resolveDiscoveryFinalize`
+  // stamps no deposit on this same path for exactly this reason (K10-A-2); a pro
+  // who wants this client gated has `blockSelfServeBooking`, which DOES cover
+  // aftercare rebooks.
+  if (args.source !== BookingSource.AFTERCARE) {
+    await assertClientCardOnFileSatisfied({
+      tx: args.tx,
+      professionalId: args.offering.professionalId,
+      clientId: args.clientId,
+    })
+  }
 
   const hold = await args.tx.bookingHold.findUnique({
     where: { id: args.holdId },
@@ -15932,6 +16048,17 @@ export async function createClientRebookedBookingFromAftercare(
     },
     run: async ({ tx, now }) => {
       const booking = assertAftercareRefOwned(await readAftercareRef(tx))
+
+      // K16: the aftercare rebook link creates a NEW appointment the client
+      // chose, so the self-serve switch reaches it too. This is the second of
+      // the two client-initiated creation paths — missing it would leave the
+      // switch true on the booking page and false in the aftercare email, which
+      // is a hole in a control that reads as closed.
+      await assertClientMaySelfServeBook({
+        tx,
+        professionalId: booking.professionalId,
+        clientId: args.clientId,
+      })
 
       return performLockedCreateRebookedBooking({
         tx,

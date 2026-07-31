@@ -32,6 +32,9 @@ vi.mock('@/lib/prisma', () => ({
     professionalPaymentSettings: { findUnique: mocks.paymentSettingsFindUnique },
     professionalSubscription: { findUnique: mocks.subscriptionFindUnique },
     professionalServiceOffering: { findFirst: mocks.offeringFindFirst },
+    // K16: resolveDiscoveryFinalize now reads this pro's policy for this
+    // client. No row = every default, which is what these fixtures assume.
+    proClientPolicy: { findUnique: async () => null },
   },
 }))
 

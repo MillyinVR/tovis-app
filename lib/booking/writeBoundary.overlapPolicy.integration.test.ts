@@ -53,6 +53,16 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
     },
 
+    // K16: the client-initiated creation paths now read this pro's policy for
+    // this client. No row = every default, which is what these fixtures assume —
+    // the policy switches have their own suites.
+    proClientPolicy: {
+      findUnique: vi.fn(async () => null),
+    },
+    clientPaymentMethod: {
+      findFirst: vi.fn(async () => null),
+    },
+
     bookingHold: {
       findUnique: vi.fn(),
       delete: vi.fn(),

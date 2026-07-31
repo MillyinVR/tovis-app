@@ -229,6 +229,11 @@ import {
 } from './writeBoundary'
 
 const tx = {
+  // K16: the write boundary now reads this pro's policy for this client on the
+  // client-initiated creation paths. No row = every default, which is what these
+  // fixtures assume — the policy switches have their own suites.
+  proClientPolicy: { findUnique: async () => null },
+  clientPaymentMethod: { findFirst: async () => null },
   bookingHold: {
     create: mocks.txBookingHoldCreate,
     findUnique: mocks.txBookingHoldFindUnique,

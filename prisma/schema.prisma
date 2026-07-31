@@ -1705,6 +1705,7 @@ model ClientProfile {
   proClientInvites       ProClientInvite[]
   bookingHolds           BookingHold[]
   notes                  ClientProfessionalNote[]
+  proPolicies            ProClientPolicy[]
   formulaEntries         ClientFormulaEntry[]
   consentRecords         ClientConsentRecord[]
   allergies              ClientAllergy[]
@@ -1941,6 +1942,7 @@ model ProfessionalProfile {
   holds BookingHold[] @relation("ProHolds") // name optional but makes it clear
 
   clientNotes                 ClientProfessionalNote[]
+  clientPolicies              ProClientPolicy[]
   clientFormulaEntries        ClientFormulaEntry[]
   clientConsentRecords        ClientConsentRecord[]
   consentForms                ConsentForm[]
@@ -4078,6 +4080,81 @@ model VerificationDocument {
   @@index([professionalId, createdAt])
   @@index([status, createdAt])
   @@index([type, status, createdAt])
+}
+
+/// K16 — one pro's booking policy for ONE client. The "difficult clients" half
+/// of the release-forms ask, split off deliberately: a judgement about a person
+/// must not be modelled as a waiver, because that produces a signed legal
+/// artifact encoding that judgement.
+///
+/// 🔴 EXPLICIT SWITCHES, NEVER FREE TEXT. Anything a pro types about a client is
+/// discoverable in a dispute; a boolean is not a characterisation. The pro's own
+/// prose about a client already has a home — `ClientProfessionalNote`
+/// (DO_NOT_REBOOK carries the reason) — and this table deliberately does not
+/// duplicate it. Do not add a `reason` column here.
+///
+/// Pro-private: scoped to (professionalId, clientId), never shown to the client
+/// and never shared with another pro. The CLIENT experiences the effect (a
+/// deposit, a card, a closed booking page) but is never told they were flagged —
+/// the refusal copy is neutral by construction (lib/proClientPolicy/copy.ts).
+///
+/// A row exists only when the pro set something. Absent row == every default,
+/// which is why the resolver takes `ProClientPolicy | null` and never requires
+/// callers to create one first.
+model ProClientPolicy {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professionalId String
+  clientId       String
+
+  /// Take a deposit from THIS client whatever the account-wide
+  /// `ProfessionalPaymentSettings.depositScope` says. Read by
+  /// `resolveDepositRequirement` as a fourth reason a booking owes money up
+  /// front — it widens the deposit, never the platform discovery fee, which
+  /// stays pinned to the new-via-discovery subset.
+  requireDeposit Boolean @default(false)
+
+  /// Prepay (pay in full up front) for THIS client, at this scope. Null = no
+  /// per-client prepay requirement.
+  ///
+  /// Modelled exactly like `ProfessionalServiceOffering.prepayScope`: the scope
+  /// column IS the switch. A separate `requirePrepay` boolean beside a nullable
+  /// scope would be two columns encoding one fact, and the pair can disagree
+  /// (see [[optional-field-hides-a-required-one]]). The pro picks the scope
+  /// (Tori, 2026-07-31); when both this and the offering's requirement apply,
+  /// the WIDER scope wins and the money terms take max, never a sum.
+  prepayScope OfferingPrepayScope?
+
+  /// Require a saved card before this client can book. Enforced at finalize,
+  /// with an inline add-card step in the booking flow (Tori, 2026-07-31).
+  ///
+  /// 🔴 Gated on `noShowProtectionEnabled()` — the card-on-file rail
+  /// (setup-intent route + the save-card surface) is dark behind
+  /// ENABLE_NO_SHOW_PROTECTION. Offering a requirement whose only means of
+  /// compliance 404s is an offered option that cannot be accepted, so the pro
+  /// cannot SET this while the rail is dark and the gate no-ops if a stored row
+  /// says otherwise.
+  requireCardOnFile Boolean @default(false)
+
+  /// This client cannot book a NEW appointment themselves. Refuses hold
+  /// creation and the aftercare-rebook token path (Tori, 2026-07-31).
+  ///
+  /// 🔴 Deliberately does NOT refuse: rescheduling an appointment that already
+  /// exists, or confirming a waitlist offer the pro explicitly sent. Both are
+  /// appointments the pro already agreed to; blocking them would strand a
+  /// confirmed booking and 400 the Reschedule button in K12's own reminder.
+  /// Pro-created bookings are untouched — the pro can always book them by hand.
+  blockSelfServeBooking Boolean @default(false)
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  /// One policy per (pro, client) pair — the resolver reads at most one row, and
+  /// a second row would make "the policy" ambiguous on a money path.
+  @@unique([professionalId, clientId])
+  @@index([professionalId, updatedAt])
 }
 
 // ✅ Pro-to-pro shared feedback about a client.

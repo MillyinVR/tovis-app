@@ -142,6 +142,11 @@ vi.mock('@/lib/notifications/proNotifications', () => ({
 import { createHold, finalizeBookingFromHold } from './writeBoundary'
 
 const tx = {
+  // K16: the write boundary now reads this pro's policy for this client on the
+  // client-initiated creation paths. No row = every default, which is what these
+  // fixtures assume — the policy switches have their own suites.
+  proClientPolicy: { findUnique: async () => null },
+  clientPaymentMethod: { findFirst: async () => null },
   clientAddress: {
     findFirst: mocks.txClientAddressFindFirst,
   },
