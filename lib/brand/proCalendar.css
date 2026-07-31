@@ -1931,6 +1931,36 @@
   }
 }
 
+/* Client-confirmation corner glyph (K11) — the channel K7's budget reserved.
+   A CIRCLED glyph family, deliberately distinct from the completed check's
+   bare ✓ (K7-A). Tone comes from the wire badge like the K1/K5 chips; the
+   "filled" marks knock their glyph out via an SVG mask, so no second colour
+   token is needed and the card's own fill shows through. Same ≥768px density
+   gate as the completed check; the words always ride the accessible name. */
+.brand-pro-calendar-event-confirmation {
+  display: none;
+  flex-shrink: 0;
+  color: rgb(var(--text-secondary));
+}
+
+.brand-pro-calendar-event-confirmation[data-tone="pending"] {
+  color: rgb(var(--tone-pending));
+}
+
+.brand-pro-calendar-event-confirmation[data-tone="success"] {
+  color: rgb(var(--tone-success));
+}
+
+.brand-pro-calendar-event-confirmation[data-tone="danger"] {
+  color: rgb(var(--tone-danger));
+}
+
+@media (min-width: 768px) {
+  .brand-pro-calendar-event-confirmation {
+    display: inline-flex;
+  }
+}
+
 .brand-pro-calendar-event-resize {
   position: absolute;
   right: 0;

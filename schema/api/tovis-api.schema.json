@@ -3783,6 +3783,45 @@
       ],
       "type": "object"
     },
+    "ClientConfirmationBadge": {
+      "properties": {
+        "description": {
+          "description": "Plain-words expansion for tooltips and accessibility labels — the calendar card renders this state as a GLYPH (K7's corner channel), and a screen reader must get the words, never a shape (K5's rule).",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ClientConfirmationState"
+        },
+        "label": {
+          "description": "The short display words (\"Client confirmed\") — what a pill prints.",
+          "type": "string"
+        },
+        "significant": {
+          "description": "false only for NOT_REQUESTED: a booking nobody asked a confirmation for renders NOTHING anywhere — absence is the honest display, and as of K11 (no writers yet) that is every booking, which is exactly the ship-dark default. The DECISION lives here so surfaces can't drift on it.",
+          "type": "boolean"
+        },
+        "tone": {
+          "$ref": "#/definitions/BadgeTone"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "description",
+        "tone",
+        "significant"
+      ],
+      "type": "object"
+    },
+    "ClientConfirmationState": {
+      "enum": [
+        "NOT_REQUESTED",
+        "AWAITING_CLIENT",
+        "CLIENT_CONFIRMED",
+        "DECLINED"
+      ],
+      "type": "string"
+    },
     "ClientHomeActionDTO": {
       "anyOf": [
         {
@@ -9613,6 +9652,10 @@
           ],
           "type": "object"
         },
+        "clientConfirmation": {
+          "$ref": "#/definitions/ClientConfirmationBadge",
+          "description": "Client-confirmation state (K11), derived by lib/booking/clientConfirmation.ts. OPTIONAL and absent when confirmation was never requested — every row until K12 ships the writers — so today's payload is byte-identical to pre-K11 and an old fixture still validates."
+        },
         "durationMinutes": {
           "type": "number"
         },
@@ -10258,6 +10301,10 @@
     },
     "ProCalendarBookingEventDTO": {
       "properties": {
+        "clientConfirmation": {
+          "$ref": "#/definitions/ClientConfirmationBadge",
+          "description": "Client-confirmation state (K11) — whether the CLIENT said they're coming, derived by the one helper (lib/booking/clientConfirmation.ts) from the loop's timestamp columns. Rendered as the card's CORNER GLYPH (K7's channel budget), with `description` in the accessible name.\n\nOPTIONAL, and absent when confirmation was never requested — which, until K12 ships the writers, is every booking, so today's payload is byte-identical to pre-K11. Absent must always read as \"not requested\", never as an error. 🔴 NOT derived from BookingStatus: PENDING tracks the PRO's acceptance, the opposite direction."
+        },
         "clientName": {
           "type": "string"
         },

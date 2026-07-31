@@ -28,6 +28,11 @@ import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { isCloseoutPaymentAndAftercareComplete } from '@/lib/booking/closeoutState'
 import {
+  CLIENT_CONFIRMATION_SELECT,
+  deriveClientConfirmationBadge,
+  type ClientConfirmationBadge,
+} from '@/lib/booking/clientConfirmation'
+import {
   PAYMENT_BADGE_SELECT,
   derivePaymentBadge,
   type PaymentBadge,
@@ -87,6 +92,8 @@ export const bookingsListSelect = {
   ...PAYMENT_BADGE_SELECT,
   // Relationship-badge input: only the K5 snapshot column, by design.
   ...RELATIONSHIP_BADGE_SELECT,
+  // Client-confirmation inputs (K11): only the three loop timestamps.
+  ...CLIENT_CONFIRMATION_SELECT,
   aftercareSummary: {
     select: {
       sentToClientAt: true,
@@ -379,6 +386,13 @@ export type ProBookingListItemDTO = {
    * render no chip anywhere.
    */
   relationshipBadge: RelationshipBadge
+  /**
+   * Client-confirmation state (K11), derived by
+   * lib/booking/clientConfirmation.ts. OPTIONAL and absent when confirmation
+   * was never requested — every row until K12 ships the writers — so today's
+   * payload is byte-identical to pre-K11 and an old fixture still validates.
+   */
+  clientConfirmation?: ClientConfirmationBadge
   sessionStep: SessionStep | null
   scheduledFor: string
   timeZone: string
@@ -424,6 +438,7 @@ export function serializeBookingsListRow(
   const fullName = `${booking.client.firstName ?? ''} ${
     booking.client.lastName ?? ''
   }`.trim()
+  const clientConfirmation = deriveClientConfirmationBadge(booking)
 
   return {
     id: booking.id,
@@ -431,6 +446,9 @@ export function serializeBookingsListRow(
     statusLabel: labelForBookingStatus(String(booking.status)),
     paymentBadge: derivePaymentBadge(booking),
     relationshipBadge: deriveRelationshipBadge(booking),
+    // K11 confirmation state — omitted (not null) when never requested, so an
+    // untouched row serialises byte-identically to pre-K11.
+    ...(clientConfirmation.significant ? { clientConfirmation } : {}),
     sessionStep: booking.sessionStep ?? null,
     scheduledFor: booking.scheduledFor.toISOString(),
     timeZone: safeTz,

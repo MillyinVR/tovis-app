@@ -117,6 +117,12 @@ type StatusLegendProps = {
    * claim is true — the same rule K3's location chip follows.
    */
   showServiceChannel: boolean
+  /**
+   * Whether any event carries a client-confirmation state (K11) — same rule:
+   * the corner-glyph row stays off until a glyph is actually on the grid,
+   * which until K12 ships the writers is never.
+   */
+  showConfirmationChannel: boolean
 }
 
 type AutoAcceptCardProps = {
@@ -179,6 +185,18 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
     () =>
       cal.events.some(
         (event) => isBookingCalendarEvent(event) && Boolean(event.serviceSwatch),
+      ),
+    [cal.events],
+  )
+
+  // Same rule for the K11 confirmation glyph: the legend row appears only once
+  // something on the grid actually renders one.
+  const showConfirmationChannel = useMemo(
+    () =>
+      cal.events.some(
+        (event) =>
+          isBookingCalendarEvent(event) &&
+          Boolean(event.clientConfirmation?.significant),
       ),
     [cal.events],
   )
@@ -279,6 +297,7 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
                 title={copy.desktop.sidebarStatusKeyTitle}
                 copy={copy.legend}
                 showServiceChannel={showServiceChannel}
+                showConfirmationChannel={showConfirmationChannel}
               />
 
               <AutoAcceptCard
@@ -676,7 +695,7 @@ function BookingServiceList(props: {
 // ─── Sidebar sub-components ───────────────────────────────────────────────────
 
 function StatusLegend(props: StatusLegendProps) {
-  const { title, copy, showServiceChannel } = props
+  const { title, copy, showServiceChannel, showConfirmationChannel } = props
 
   return (
     <div className="brand-pro-calendar-legend">
@@ -697,6 +716,13 @@ function StatusLegend(props: StatusLegendProps) {
           <LegendRow tone="service" label={copy.stripeChannel} />
         ) : null}
       </div>
+
+      {/* What the corner glyph MEANS (K11) — a channel caption like the fill's,
+          not a tone row: the glyph has three states and its words already ride
+          each card's tooltip and accessible name. */}
+      {showConfirmationChannel ? (
+        <p className="brand-pro-calendar-legend-channel">{copy.glyphChannel}</p>
+      ) : null}
     </div>
   )
 }

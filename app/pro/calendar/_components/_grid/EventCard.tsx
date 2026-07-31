@@ -1,12 +1,15 @@
 // app/pro/calendar/_components/_grid/EventCard.tsx
 'use client'
 
+import { useId } from 'react'
 import type {
   CSSProperties,
   DragEvent,
   KeyboardEvent,
   MutableRefObject,
 } from 'react'
+
+import type { ClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType } from '../../_types'
@@ -290,6 +293,79 @@ function ConflictBadge(props: { label: string }) {
   )
 }
 
+/**
+ * Client-confirmation corner glyph (K11, decision D3) — the one channel K7's
+ * budget reserved for it. 🔴 Deliberately a CIRCLED glyph family, distinct
+ * from CompletedCheck's bare ✓ (K7-A): the two can share a row on a completed
+ * booking, and two same-shape checks with different meanings is the
+ * glyph-shaped version of the disease B10 cured.
+ *
+ * The family reads: SOLID disc = the client answered (knocked-out ✓ =
+ * confirmed, knocked-out ✕ = declined — D3's "filled"), HOLLOW ring = still
+ * waiting (stroked ?). The knockout is an SVG mask, not a painted colour, so
+ * the mark shows the card's own fill through it and needs no per-status
+ * colour token. Words never render here — `description` rides the card's
+ * accessible name and `title` (K5's rule: screen readers don't get shapes).
+ */
+function ConfirmationGlyph(props: { badge: ClientConfirmationBadge }) {
+  const { badge } = props
+  const maskId = useId()
+
+  return (
+    <span
+      className="brand-pro-calendar-event-confirmation"
+      data-kind={badge.kind}
+      data-tone={badge.tone}
+      title={badge.description}
+      aria-hidden="true"
+    >
+      {badge.kind === 'AWAITING_CLIENT' ? (
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="9.5" />
+          <path d="M9.3 9.2a2.8 2.8 0 0 1 5.44.93c0 1.87-2.8 2.8-2.8 2.8" />
+          <line x1="12" y1="16.8" x2="12.01" y2="16.8" />
+        </svg>
+      ) : (
+        <svg width="11" height="11" viewBox="0 0 24 24">
+          <mask id={maskId}>
+            <rect width="24" height="24" fill="white" />
+            {badge.kind === 'DECLINED' ? (
+              <g
+                stroke="black"
+                strokeWidth="3"
+                strokeLinecap="round"
+                fill="none"
+              >
+                <line x1="8.2" y1="8.2" x2="15.8" y2="15.8" />
+                <line x1="15.8" y1="8.2" x2="8.2" y2="15.8" />
+              </g>
+            ) : (
+              <polyline
+                points="17 8.6 10.6 15.4 7 11.9"
+                stroke="black"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            )}
+          </mask>
+          <circle cx="12" cy="12" r="10.5" fill="currentColor" mask={`url(#${maskId})`} />
+        </svg>
+      )}
+    </span>
+  )
+}
+
 function CompletedCheck() {
   return (
     <span
@@ -367,6 +443,14 @@ export function EventCard(props: EventCardProps) {
   // never claim it. Absent → the stripe keeps its status tone, unchanged.
   const serviceSwatch = ev.kind === 'BOOKING' ? ev.serviceSwatch : undefined
 
+  // The CONFIRMATION channel (K11): whether the client said they're coming.
+  // Same significance gate as the other badges — NOT_REQUESTED (every booking
+  // until K12 ships the writers) renders nothing, so the card is unchanged.
+  const clientConfirmation =
+    ev.kind === 'BOOKING' && ev.clientConfirmation?.significant
+      ? ev.clientConfirmation
+      : null
+
   const canDragOrResize = apiId !== null
   const baseLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
   // The accessible name spells the mark out ("Returning client · requested
@@ -377,11 +461,17 @@ export function EventCard(props: EventCardProps) {
   const withPayment = paymentBadge
     ? `${withRelationship}, ${paymentBadge.label}`
     : withRelationship
+  // The glyph is aria-hidden; the WORDS live here (K5's rule). "Awaiting
+  // client confirmation", never a bare shape — and never the bare word
+  // "Confirmed", which B10 gave to the ACCEPTED status.
+  const withConfirmation = clientConfirmation
+    ? `${withPayment}, ${clientConfirmation.description}`
+    : withPayment
   // Always in the accessible name, even where the chip is too small to render —
   // on a mixed-location grid, which location a job is at is not decoration.
   const withLocation = locationLabel
-    ? `${withPayment}, ${locationLabel}`
-    : withPayment
+    ? `${withConfirmation}, ${locationLabel}`
+    : withConfirmation
   const accessibleLabel = conflict
     ? `${withLocation}, ${copy.labels.overlapWarning}`
     : withLocation
@@ -505,6 +595,10 @@ export function EventCard(props: EventCardProps) {
                   label={paymentBadge.label}
                   tone={paymentBadge.tone}
                 />
+              ) : null}
+
+              {clientConfirmation ? (
+                <ConfirmationGlyph badge={clientConfirmation} />
               ) : null}
 
               {statusMeta.isCompleted ? <CompletedCheck /> : null}

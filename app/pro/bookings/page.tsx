@@ -7,6 +7,7 @@ import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import BookingActions from './BookingActions'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { moneyToString } from '@/lib/money'
+import { deriveClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 import { derivePaymentBadge } from '@/lib/booking/paymentBadge'
 import RelationshipBadgePill from '@/app/_components/RelationshipBadgePill'
 import {
@@ -72,6 +73,17 @@ function StatusPill({ status }: { status: string }) {
 // `significant` gates it so upcoming rows aren't a wall of "Unpaid".
 function PaymentPill({ booking }: { booking: BookingRow }) {
   const badge = derivePaymentBadge(booking)
+  if (!badge.significant) return null
+
+  return <Badge tone={badge.tone}>{badge.label}</Badge>
+}
+
+// Client-confirmation state (K11) — the words behind the calendar card's
+// corner glyph, from THE one helper (lib/booking/clientConfirmation.ts). Same
+// gate: "Not requested" (every row until K12 ships the writers) renders
+// nothing.
+function ConfirmationPill({ booking }: { booking: BookingRow }) {
+  const badge = deriveClientConfirmationBadge(booking)
   if (!badge.significant) return null
 
   return <Badge tone={badge.tone}>{badge.label}</Badge>
@@ -380,6 +392,8 @@ function Section({
                       <RelationshipBadgePill booking={booking} />
 
                       <PaymentPill booking={booking} />
+
+                      <ConfirmationPill booking={booking} />
 
                       {needsCloseout(booking) ? (
                         <CloseoutBadge bookingId={booking.id} />

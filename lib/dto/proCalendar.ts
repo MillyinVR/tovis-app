@@ -19,6 +19,7 @@ import type {
   ServiceLocationType,
 } from '@prisma/client'
 
+import type { ClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 import type { PaymentBadge } from '@/lib/booking/paymentBadge'
 import type { RelationshipBadge } from '@/lib/booking/relationshipLabel'
 import type { TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
@@ -83,6 +84,19 @@ export type ProCalendarBookingEventDTO = {
    * which service this is.
    */
   serviceSwatch?: CalendarSwatchId
+  /**
+   * Client-confirmation state (K11) — whether the CLIENT said they're coming,
+   * derived by the one helper (lib/booking/clientConfirmation.ts) from the
+   * loop's timestamp columns. Rendered as the card's CORNER GLYPH (K7's
+   * channel budget), with `description` in the accessible name.
+   *
+   * OPTIONAL, and absent when confirmation was never requested — which, until
+   * K12 ships the writers, is every booking, so today's payload is
+   * byte-identical to pre-K11. Absent must always read as "not requested",
+   * never as an error. 🔴 NOT derived from BookingStatus: PENDING tracks the
+   * PRO's acceptance, the opposite direction.
+   */
+  clientConfirmation?: ClientConfirmationBadge
   details: ProCalendarEventDetailsDTO
 }
 

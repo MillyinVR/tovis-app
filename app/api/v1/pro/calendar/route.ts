@@ -20,6 +20,10 @@ import { addMinutes } from '@/lib/booking/conflicts'
 import { holdRecordToBusyInterval } from '@/lib/booking/conflictQueries'
 import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import {
+  CLIENT_CONFIRMATION_SELECT,
+  deriveClientConfirmationBadge,
+} from '@/lib/booking/clientConfirmation'
+import {
   PAYMENT_BADGE_SELECT,
   derivePaymentBadge,
 } from '@/lib/booking/paymentBadge'
@@ -187,6 +191,8 @@ const bookingSelect = {
   ...PAYMENT_BADGE_SELECT,
   // Relationship-badge input: only the K5 snapshot column, by design.
   ...RELATIONSHIP_BADGE_SELECT,
+  // Client-confirmation inputs (K11): only the three loop timestamps.
+  ...CLIENT_CONFIRMATION_SELECT,
   client: {
     select: {
       id: true,
@@ -685,6 +691,7 @@ function toBookingEvent(args: {
   const viewLocalDateKey = utcDateToLocalYmd(start, viewportTimeZone)
   const serviceName = getServiceName(booking)
   const serviceSwatch = resolveBookingServiceSwatch(booking, swatchByServiceId)
+  const clientConfirmation = deriveClientConfirmationBadge(booking)
 
   return {
     id: booking.id,
@@ -708,6 +715,10 @@ function toBookingEvent(args: {
     // colour for the service, so an event with no swatch is byte-identical to
     // what it was before K8 and the card renders no `data-swatch` attribute.
     ...(serviceSwatch ? { serviceSwatch } : {}),
+    // Same rule for the K11 confirmation state: omitted when never requested
+    // (every booking until K12 ships the writers), so today's payload — and
+    // the card DOM — stays byte-identical to pre-K11.
+    ...(clientConfirmation.significant ? { clientConfirmation } : {}),
     details: {
       serviceName,
       bufferMinutes,
