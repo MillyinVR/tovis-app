@@ -8,6 +8,7 @@ import {
   Role,
   SessionStep,
   StripePaymentStatus,
+  Prisma,
 } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
@@ -173,6 +174,10 @@ function makeCurrentUser() {
     destinationSnapshot: string | null
   } | null
   proposedTotal?: string | null
+    depositStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED'
+    depositAmount?: string | null
+    depositRefundedCents?: number
+    depositDisputedAt?: Date | null
 }) {
   const consultationStatus =
     overrides?.consultationStatus ?? ConsultationApprovalStatus.PENDING
@@ -200,8 +205,19 @@ function makeCurrentUser() {
       },
     },
 
-    subtotalSnapshot: '95.00',
-    totalAmount: '125.00',
+    subtotalSnapshot: new Prisma.Decimal('95.00'),
+    totalAmount: new Prisma.Decimal('125.00'),
+
+    // K10-A-1: the deposit credit the TOTAL tile now nets out. Money columns
+    // are Prisma Decimals on the real row — modelling them as strings here is
+    // what let this fixture drift from what the page actually receives.
+    depositStatus: overrides?.depositStatus ?? 'NONE',
+    depositAmount:
+      overrides?.depositAmount == null
+        ? null
+        : new Prisma.Decimal(overrides.depositAmount),
+    depositRefundedCents: overrides?.depositRefundedCents ?? 0,
+    depositDisputedAt: overrides?.depositDisputedAt ?? null,
     consultationNotes: 'Client wants a trim and gloss.',
 
     consultationApproval:
@@ -209,7 +225,7 @@ function makeCurrentUser() {
         ? null
         : {
             status: consultationStatus,
-            proposedTotal: overrides?.proposedTotal ?? '125.00',
+            proposedTotal: new Prisma.Decimal(overrides?.proposedTotal ?? '125.00'),
             notes: 'Please review the plan.',
             approvedAt:
               consultationStatus === ConsultationApprovalStatus.APPROVED
@@ -719,5 +735,86 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
     expect(hasText(page, 'This booking is completed.')).toBe(true)
     expect(hasText(page, 'View aftercare')).toBe(true)
     expect(hasText(page, 'Record in-person approval')).toBe(false)
+  })
+
+  // K10-A-1 — the pro is told what to COLLECT, not just what the service cost.
+  // Before this, a pro taking cash on a booking with a paid deposit read the
+  // total off the header and would ask for the whole thing, collecting the
+  // deposit twice — the same bug the client's own checkout surfaces stopped
+  // doing in K10-A. This is the wrap-up row that carries MarkPaidButton.
+  describe('wrap-up — the paid deposit is netted off what to collect', () => {
+    const wrapUp = (deposit: Parameters<typeof makeBooking>[0]) => ({
+      booking: makeBooking({
+        status: BookingStatus.IN_PROGRESS,
+        sessionStep: SessionStep.AFTER_PHOTOS,
+        checkoutStatus: BookingCheckoutStatus.READY,
+        paymentCollectedAt: null,
+        consultationStatus: ConsultationApprovalStatus.APPROVED,
+        ...deposit,
+      }),
+      beforeCount: 1,
+      afterCount: 1,
+      aftercare: {
+        id: 'aftercare_1',
+        draftSavedAt: new Date('2026-04-12T20:00:00.000Z'),
+        sentToClientAt: new Date('2026-04-12T20:30:00.000Z'),
+        lastEditedAt: null,
+        version: 1,
+      },
+    })
+
+    it('names the balance to collect, not the whole bill', async () => {
+      const page = await renderPage(
+        wrapUp({ depositStatus: 'PAID', depositAmount: '40.00' }),
+      )
+
+      expect(hasText(page, 'Deposit paid −$40.00 · $85.00 to collect')).toBe(true)
+    })
+
+    it('says nothing extra when there is no deposit', async () => {
+      const page = await renderPage(wrapUp({}))
+
+      expect(hasText(page, 'to collect')).toBe(false)
+    })
+
+    it('collects only the net still held after a partial refund', async () => {
+      const page = await renderPage(
+        wrapUp({
+          depositStatus: 'PAID',
+          depositAmount: '40.00',
+          depositRefundedCents: 1_500,
+        }),
+      )
+
+      expect(hasText(page, 'Deposit paid −$25.00 · $100.00 to collect')).toBe(true)
+    })
+
+    // Stripe has already pulled the funds: crediting them would have the pro
+    // hand over the service for money they no longer hold.
+    it('credits nothing while the deposit is disputed', async () => {
+      const page = await renderPage(
+        wrapUp({
+          depositStatus: 'PAID',
+          depositAmount: '40.00',
+          depositDisputedAt: new Date('2026-07-30T00:00:00.000Z'),
+        }),
+      )
+
+      expect(hasText(page, 'to collect')).toBe(false)
+    })
+
+    // Once the money is in, "to collect" is a lie — the row flips to done.
+    it('drops the line once payment is collected', async () => {
+      const page = await renderPage(
+        wrapUp({
+          depositStatus: 'PAID',
+          depositAmount: '40.00',
+          paymentCollectedAt: new Date('2026-04-12T21:00:00.000Z'),
+          checkoutStatus: BookingCheckoutStatus.PAID,
+        }),
+      )
+
+      expect(hasText(page, 'to collect')).toBe(false)
+    })
   })
 })
