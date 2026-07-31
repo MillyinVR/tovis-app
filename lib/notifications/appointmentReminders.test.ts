@@ -29,6 +29,9 @@ vi.mock('@/lib/reminderSettings/settings', () => ({
 }))
 
 import {
+  APPOINTMENT_REMINDER_CONFIRMATION_ASK_NUDGE,
+  APPOINTMENT_REMINDER_MANAGE_NUDGE,
+  applyConfirmationAskToReminderContent,
   buildAppointmentReminderContent,
   buildAppointmentReminderPayload,
   cancelBookingAppointmentReminders,
@@ -296,6 +299,33 @@ describe('lib/notifications/appointmentReminders', () => {
 
     it('reads "in 2 days" for a 2-day lead', () => {
       expect(contentFor(2880).body).toContain('in 2 days')
+    })
+
+    // K12: the cron swaps the closing nudge when it arms a confirmation ask.
+    it('closes with the pre-K12 manage nudge by default', () => {
+      expect(contentFor(1440).body.endsWith(APPOINTMENT_REMINDER_MANAGE_NUDGE)).toBe(
+        true,
+      )
+    })
+
+    it('swaps the manage nudge for the confirmation ask, keeping the rest of the body byte-identical', () => {
+      const base = contentFor(1440)
+      const asked = applyConfirmationAskToReminderContent(base)
+
+      const prefix = base.body.slice(
+        0,
+        base.body.length - APPOINTMENT_REMINDER_MANAGE_NUDGE.length,
+      )
+      expect(asked.body).toBe(prefix + APPOINTMENT_REMINDER_CONFIRMATION_ASK_NUDGE)
+      expect(asked.title).toBe(base.title)
+      // Never both nudges — the swap replaces, it does not append.
+      expect(asked.body).not.toContain(APPOINTMENT_REMINDER_MANAGE_NUDGE)
+      expect(asked.body.toLowerCase()).toContain('confirm')
+    })
+
+    it('passes a body through unchanged when it does not carry the canonical nudge', () => {
+      const odd = { title: 'x', body: 'Your appointment is soon.', data: null }
+      expect(applyConfirmationAskToReminderContent(odd)).toEqual(odd)
     })
 
     it('reads "in 4 hours" for a 4-hour lead', () => {

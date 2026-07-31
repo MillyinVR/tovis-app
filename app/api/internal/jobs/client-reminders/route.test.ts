@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
   validateDueReviewRequest: vi.fn(),
   upsertClientNotification: vi.fn(),
 
+  // K12
+  clientConfirmationLoopEnabled: vi.fn(),
+  armAppointmentConfirmationAsk: vi.fn(),
+
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'NonErrorThrown',
     message: error instanceof Error ? error.message : String(error),
@@ -38,10 +42,30 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-vi.mock('@/lib/notifications/appointmentReminders', () => ({
-  validateDueAppointmentReminder: mocks.validateDueAppointmentReminder,
-  cancelDueAppointmentReminder: mocks.cancelDueAppointmentReminder,
-  rescheduleDueAppointmentReminder: mocks.rescheduleDueAppointmentReminder,
+// The DB-touching validators/mutators are stubbed, but the module's REAL copy
+// helpers are kept: applyConfirmationAskToReminderContent is the nudge swap
+// under test, and a bare factory would leave it undefined at the call site
+// ([[adding-export-to-mocked-module]]).
+vi.mock('@/lib/notifications/appointmentReminders', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('@/lib/notifications/appointmentReminders')
+    >()
+
+  return {
+    ...actual,
+    validateDueAppointmentReminder: mocks.validateDueAppointmentReminder,
+    cancelDueAppointmentReminder: mocks.cancelDueAppointmentReminder,
+    rescheduleDueAppointmentReminder: mocks.rescheduleDueAppointmentReminder,
+  }
+})
+
+vi.mock('@/lib/booking/clientConfirmationLoop', () => ({
+  clientConfirmationLoopEnabled: mocks.clientConfirmationLoopEnabled,
+}))
+
+vi.mock('@/lib/booking/writeBoundary', () => ({
+  armAppointmentConfirmationAsk: mocks.armAppointmentConfirmationAsk,
 }))
 
 vi.mock('@/lib/notifications/reviewRequests', () => ({
@@ -171,6 +195,10 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     mocks.scheduledClientNotificationUpdateMany.mockResolvedValue({
       count: 1,
     })
+
+    // K12 default: the loop is DARK unless a test turns it on.
+    mocks.clientConfirmationLoopEnabled.mockReturnValue(false)
+    mocks.armAppointmentConfirmationAsk.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -746,5 +774,119 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     })
 
     consoleErrorSpy.mockRestore()
+  })
+  // ---------------------------------------------------------------------
+  // K12 — the confirmation ASK rides the appointment reminder.
+  // ---------------------------------------------------------------------
+
+  const MANAGE_NUDGE = ' Need to change it? Tap to manage.'
+  const CONFIRM_NUDGE =
+    ' Can you make it? Tap to confirm — or reschedule if you need to.'
+
+  function makeAppointmentProcessValidation() {
+    return {
+      action: 'PROCESS' as const,
+      rowId: 'reminder_1',
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      dedupeKey: 'CLIENT_REMINDER:M1440:booking_1',
+      href: '/client/bookings/booking_1?step=overview',
+      notification: {
+        title: 'Appointment tomorrow',
+        body: `Your silk press is tomorrow at 10:00 AM.${MANAGE_NUDGE}`,
+        data: { bookingId: 'booking_1' },
+      },
+    }
+  }
+
+  function queueDueAppointmentReminder() {
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'reminder_1', eventKey: NotificationEventKey.APPOINTMENT_REMINDER },
+    ])
+    mocks.validateDueAppointmentReminder.mockResolvedValueOnce(
+      makeAppointmentProcessValidation(),
+    )
+  }
+
+  it('K12: arms nothing and keeps the pre-K12 reminder verbatim while the loop is off', async () => {
+    mocks.clientConfirmationLoopEnabled.mockReturnValue(false)
+    queueDueAppointmentReminder()
+
+    await GET(makeRequest({ authorization: 'Bearer job_secret_1' }))
+
+    expect(mocks.armAppointmentConfirmationAsk).not.toHaveBeenCalled()
+    expect(mocks.upsertClientNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        href: '/client/bookings/booking_1?step=overview',
+        body: `Your silk press is tomorrow at 10:00 AM.${MANAGE_NUDGE}`,
+      }),
+    )
+  })
+
+  it('K12: arms the ask on the SAME tx and points the reminder at the public action link', async () => {
+    mocks.clientConfirmationLoopEnabled.mockReturnValue(true)
+    mocks.armAppointmentConfirmationAsk.mockResolvedValueOnce({
+      href: '/client/appointment/rawtoken123',
+      tokenId: 'cat_1',
+      requestedAtStamped: true,
+    })
+    queueDueAppointmentReminder()
+
+    await GET(makeRequest({ authorization: 'Bearer job_secret_1' }))
+
+    // The stamp, the token and the inbox row commit together or not at all.
+    expect(mocks.armAppointmentConfirmationAsk).toHaveBeenCalledWith({
+      tx: expect.any(Object),
+      bookingId: 'booking_1',
+      now: NOW,
+    })
+
+    const upserted = mocks.upsertClientNotification.mock.calls[0]?.[0] as {
+      href: string
+      body: string
+    }
+    expect(upserted.href).toBe('/client/appointment/rawtoken123')
+    expect(upserted.body.endsWith(CONFIRM_NUDGE)).toBe(true)
+    expect(upserted.body).not.toContain(MANAGE_NUDGE)
+  })
+
+  it('K12: sends the ordinary reminder when the booking cannot be armed', async () => {
+    mocks.clientConfirmationLoopEnabled.mockReturnValue(true)
+    mocks.armAppointmentConfirmationAsk.mockResolvedValueOnce(null)
+    queueDueAppointmentReminder()
+
+    await GET(makeRequest({ authorization: 'Bearer job_secret_1' }))
+
+    expect(mocks.upsertClientNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        href: '/client/bookings/booking_1?step=overview',
+        body: `Your silk press is tomorrow at 10:00 AM.${MANAGE_NUDGE}`,
+      }),
+    )
+  })
+
+  it('K12: never arms an ask for a non-appointment reminder kind', async () => {
+    mocks.clientConfirmationLoopEnabled.mockReturnValue(true)
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'review_req_1', eventKey: NotificationEventKey.REVIEW_REQUESTED },
+    ])
+    mocks.validateDueReviewRequest.mockResolvedValueOnce({
+      action: 'PROCESS',
+      rowId: 'review_req_1',
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      eventKey: NotificationEventKey.REVIEW_REQUESTED,
+      dedupeKey: 'REVIEW_REQUEST:booking_1',
+      href: '/client/bookings/booking_1#review',
+      notification: {
+        title: 'How was your visit?',
+        body: 'Leave a quick review.',
+        data: { bookingId: 'booking_1' },
+      },
+    })
+
+    await GET(makeRequest({ authorization: 'Bearer job_secret_1' }))
+
+    expect(mocks.armAppointmentConfirmationAsk).not.toHaveBeenCalled()
   })
 })

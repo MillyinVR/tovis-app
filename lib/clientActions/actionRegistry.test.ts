@@ -12,6 +12,7 @@ import { CONSULTATION_ACTION_TOKEN_EXPIRY_MS } from '@/lib/consultation/clientAc
 
 import {
   AFTERCARE_ACCESS_TOKEN_EXPIRY_MS,
+  APPOINTMENT_CONFIRMATION_TOKEN_FALLBACK_EXPIRY_MS,
   CLIENT_ACTION_REGISTRY,
   getClientActionDefinition,
   getClientActionTokenKindForType,
@@ -48,6 +49,34 @@ describe('lib/clientActions/actionRegistry', () => {
         link: {
           target: 'CLAIM',
           pathPrefix: '/claim',
+          requiresToken: true,
+        },
+      })
+    })
+
+    it('defines the expected appointment confirmation policy', () => {
+      expect(CLIENT_ACTION_REGISTRY.APPOINTMENT_CONFIRMATION).toEqual({
+        type: 'APPOINTMENT_CONFIRMATION',
+        token: {
+          required: true,
+          kind: ClientActionTokenKind.APPOINTMENT_CONFIRMATION,
+          // K12: re-openable (confirm now, reschedule later from the same SMS)
+          // and NOT revoked on resend — a booking with two reminders mints two
+          // live links, and the earlier message must keep working.
+          singleUse: false,
+          expiresInMs: APPOINTMENT_CONFIRMATION_TOKEN_FALLBACK_EXPIRY_MS,
+          revokeOutstandingOnResend: false,
+        },
+        delivery: {
+          allowedContactMethods: [ContactMethod.EMAIL, ContactMethod.SMS],
+          preferredContactMethod: null,
+          notificationEventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+          notificationRecipientKind: NotificationRecipientKind.CLIENT,
+          createFreshDeliveryOnResend: false,
+        },
+        link: {
+          target: 'APPOINTMENT',
+          pathPrefix: '/client/appointment',
           requiresToken: true,
         },
       })
