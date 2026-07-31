@@ -38,6 +38,7 @@ export type NotificationTemplateKey =
   | 'no_show_deposit_kept'
   | 'deposit_reminder'
   | 'deposit_payment_link'
+  | 'consent_signature_request'
   | 'look_follower_new'
   | 'client_follow'
   | 'look_commented'
@@ -764,6 +765,23 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // EMAIL/SMS only, like CLIENT_CLAIM_INVITE: snapshot-based delivery for
       // often-unclaimed clients. Claimed clients already have the login-gated
       // deposit surface via BOOKING_CONFIRMED's in-app row.
+      [NotificationRecipientKind.CLIENT]: CLIENT_EMAIL_SMS_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.CONSENT_SIGNATURE_REQUEST]: {
+    key: NotificationEventKey.CONSENT_SIGNATURE_REQUEST,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: true,
+    // Pro-initiated, often with the client standing right there or on their way
+    // in — the signing link must arrive immediately (the DEPOSIT_PAYMENT_LINK
+    // precedent). A waiver that turns up tomorrow is a waiver signed on paper.
+    allowQuietHoursBypass: true,
+    templateKey: 'consent_signature_request',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // EMAIL/SMS only, like DEPOSIT_PAYMENT_LINK: snapshot-based delivery for
+      // often-unclaimed clients, who have no in-app inbox to receive it in.
       [NotificationRecipientKind.CLIENT]: CLIENT_EMAIL_SMS_CHANNELS,
     },
   },

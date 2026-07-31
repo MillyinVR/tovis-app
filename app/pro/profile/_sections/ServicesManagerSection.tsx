@@ -6,6 +6,9 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { getBrandConfig } from '@/lib/brand'
 import { parseCalendarSwatch } from '@/lib/calendar/eventColor'
+import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
+import { CONSENT_KIND_LABELS } from '@/lib/consentForms/kindLabels'
+import { loadConsentFormOptions } from '@/lib/consentForms/loader'
 
 import OfferingManager from '@/app/pro/services/OfferingManager'
 import ServicesManagerSectionClient from './ServicesManagerSectionClient'
@@ -104,6 +107,7 @@ export default async function ServicesManagerSection({
       rebookIntervalDays: true,
       calendarSwatch: true,
       prepayScope: true,
+      consentFormId: true,
 
       service: {
         select: {
@@ -125,6 +129,18 @@ export default async function ServicesManagerSection({
       },
     },
   })
+
+  // K15: the forms a service may require. EMPTY when the technical-record gate
+  // is off for this pro, which is what keeps the picker itself dark — the kill
+  // switch reaches the CONTROL, not only the write route (K13-web's bug).
+  const consentFormChoices = isClientTechnicalRecordEnabled(profId)
+    ? (await loadConsentFormOptions(profId)).map((option) => ({
+        formId: option.formId,
+        title: option.title,
+        kindLabel: CONSENT_KIND_LABELS[option.kind],
+        version: option.version,
+      }))
+    : []
 
   const categoryPayload = categories.map((cat) => ({
     id: String(cat.id),
@@ -181,6 +197,9 @@ export default async function ServicesManagerSection({
     // no narrowing on the way out.
     prepayScope: o.prepayScope,
 
+    // K15: the consent form this service requires. Null = none.
+    consentFormId: o.consentFormId,
+
     serviceName: o.service.name,
     categoryName: o.service.category?.name ?? null,
     defaultImageUrl: o.service.defaultImageUrl ?? null,
@@ -234,7 +253,12 @@ export default async function ServicesManagerSection({
             You haven&apos;t added any services yet.
           </div>
         ) : (
-          <OfferingManager initialOfferings={offeringsPayload} enforceCanonicalServiceNames enableServiceImageUpload />
+          <OfferingManager
+            initialOfferings={offeringsPayload}
+            enforceCanonicalServiceNames
+            enableServiceImageUpload
+            consentForms={consentFormChoices}
+          />
         )}
       </section>
     </section>

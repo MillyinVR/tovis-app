@@ -2,6 +2,7 @@
 
 import type { IanaTimeZone } from '@/lib/timeZone'
 import type { ClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
+import type { ConsentRequirementBadge } from '@/lib/consentForms/requirement'
 import type { PaymentBadge } from '@/lib/booking/paymentBadge'
 import type { RelationshipBadge } from '@/lib/booking/relationshipLabel'
 import type { CalendarScopeMode } from '@/lib/calendar/constants'
@@ -201,6 +202,18 @@ export type BookingCalendarEvent = CalendarEventBase & {
    * simply omits the glyph then.
    */
   clientConfirmation?: ClientConfirmationBadge
+
+  /**
+   * Unsigned consent form (K15), derived server-side by
+   * lib/consentForms/requirement.ts and rendered as a TEXT CHIP (K7's channel
+   * budget — the glyph channel is K11's and the conflict triangle already owns
+   * the warning shape). Absent when nothing is outstanding, when the
+   * appointment has already happened, and for every pro who has bound no form
+   * — which is why a pre-K15 card and a post-K15 card are the same card.
+   *
+   * 🔴 It WARNS. Nothing about the booking path consults it.
+   */
+  consentRequirement?: ConsentRequirementBadge
 
   /**
    * ClientProfile id, present only when the viewing pro may open this client's

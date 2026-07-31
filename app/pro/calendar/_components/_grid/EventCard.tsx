@@ -268,6 +268,27 @@ function LocationChip(props: { label: string }) {
   )
 }
 
+/**
+ * Unsigned consent form (K15) — the FIFTH text chip a card can carry.
+ *
+ * A word, not a colour and not a second warning glyph: the glyph channel is
+ * K11's and the conflict triangle already owns the "something is wrong" shape,
+ * so a second triangle would make both mean "one of two things". `title` and
+ * the card's accessible name carry which form it is — the chip has room for a
+ * flag, not a document name.
+ */
+function ConsentRequirementChip(props: { label: string; description: string }) {
+  return (
+    <span
+      className="brand-pro-calendar-event-consent"
+      data-tone="warn"
+      title={props.description}
+    >
+      {props.label}
+    </span>
+  )
+}
+
 function ConflictBadge(props: { label: string }) {
   return (
     <span
@@ -451,6 +472,14 @@ export function EventCard(props: EventCardProps) {
       ? ev.clientConfirmation
       : null
 
+  // The CONSENT mark (K15): a form this service requires that the client has
+  // not signed. Same significance gate as the others — the helper decides, and
+  // it says nothing about an appointment that already happened.
+  const consentRequirement =
+    ev.kind === 'BOOKING' && ev.consentRequirement?.significant
+      ? ev.consentRequirement
+      : null
+
   const canDragOrResize = apiId !== null
   const baseLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
   // The accessible name spells the mark out ("Returning client · requested
@@ -469,9 +498,15 @@ export function EventCard(props: EventCardProps) {
     : withPayment
   // Always in the accessible name, even where the chip is too small to render —
   // on a mixed-location grid, which location a job is at is not decoration.
-  const withLocation = locationLabel
-    ? `${withConfirmation}, ${locationLabel}`
+  // The chip prints "Form due"; the accessible name says WHICH form, because
+  // "which waiver?" is the pro's very next question (K5's words-not-shapes rule
+  // applied to an abbreviation).
+  const withConsent = consentRequirement
+    ? `${withConfirmation}, ${consentRequirement.description}`
     : withConfirmation
+  const withLocation = locationLabel
+    ? `${withConsent}, ${locationLabel}`
+    : withConsent
   const accessibleLabel = conflict
     ? `${withLocation}, ${copy.labels.overlapWarning}`
     : withLocation
@@ -594,6 +629,13 @@ export function EventCard(props: EventCardProps) {
                 <PaymentBadgeChip
                   label={paymentBadge.label}
                   tone={paymentBadge.tone}
+                />
+              ) : null}
+
+              {consentRequirement ? (
+                <ConsentRequirementChip
+                  label={consentRequirement.label}
+                  description={consentRequirement.description}
                 />
               ) : null}
 

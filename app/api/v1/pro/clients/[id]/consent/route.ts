@@ -67,6 +67,21 @@ export async function POST(req: Request, context: RouteContext) {
 
     const serviceScope = pickString(body.serviceScope)?.slice(0, SCOPE_MAX) ?? null
     const proofMethod = asEnum(ConsentProofMethod, body.proofMethod)
+
+    // 🔴 K15 (closing K14-B). CLIENT_TOKEN means "the platform witnessed this
+    // signature through a link it sent", and from K15 the only writer of it is
+    // the signing route behind /client/consent/<token> — which also stamps
+    // `signatureTokenId`, the UNIQUE column that proves a real link existed.
+    // Accepting a hand-typed claim here would put the same proof method on a
+    // record with no link behind it, which is exactly the lie K14 found this
+    // control telling. Refused, not hidden: dropping it from the dropdown alone
+    // would leave the claim one curl away.
+    if (proofMethod === ConsentProofMethod.CLIENT_TOKEN) {
+      return jsonFail(
+        400,
+        'Send the form to the client to record a link signature.',
+      )
+    }
     const proofRef = pickString(body.proofRef)?.slice(0, REF_MAX) ?? null
     const signedAt = parseDate(body.signedAt)
     const notes = pickString(body.notes)?.slice(0, NOTES_MAX) ?? null

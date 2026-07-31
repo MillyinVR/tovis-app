@@ -407,6 +407,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   no_show_deposit_kept: 'View details',
   deposit_reminder: 'Complete your deposit',
   deposit_payment_link: 'Pay your deposit',
+  consent_signature_request: 'Read and sign',
   look_follower_new: 'View your profile',
   client_follow: 'View activity',
   look_commented: 'View comment',
@@ -435,6 +436,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   deposit_payment_link: buildStandardTemplateRenderer(
     templateCtaLabels.deposit_payment_link,
+  ),
+  consent_signature_request: buildStandardTemplateRenderer(
+    templateCtaLabels.consent_signature_request,
   ),
   appointment_confirmation_declined: buildStandardTemplateRenderer(
     templateCtaLabels.appointment_confirmation_declined,

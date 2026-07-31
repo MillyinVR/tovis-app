@@ -22,6 +22,7 @@ import PendingActionButton from './PendingActionButton'
 import ElapsedTimer from './_components/ElapsedTimer'
 import MarkPaidButton from './MarkPaidButton'
 import ReopenCheckoutButton from './ReopenCheckoutButton'
+import { UnsignedConsentBanner } from './_components/UnsignedConsentBanner'
 import ConfirmPaymentReceivedButton from '../ConfirmPaymentReceivedButton'
 
 import { getCurrentUser } from '@/lib/currentUser'
@@ -57,6 +58,13 @@ import {
 } from '@/lib/booking/depositCredit'
 import { fullName } from '@/lib/names'
 import { buildProSessionCloseoutChecklist } from '@/lib/proSession/closeoutChecklist'
+import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
+import { CONSENT_KIND_LABELS } from '@/lib/consentForms/kindLabels'
+import {
+  collectBookingConsentRequirements,
+  loadConsentRequirementsByServiceId,
+  loadSignedConsentFormIds,
+} from '@/lib/consentForms/requirement'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 import {
   acceptedPaymentMethodsSelect,
@@ -1547,6 +1555,51 @@ function UnmappedStateView({
   )
 }
 
+/**
+ * K15 — the unsigned forms for ONE booking, assembled from the same three
+ * helpers the calendar feed uses, in the same order. Not a second resolution
+ * chain: `lib/consentForms/requirement.ts` owns what "required" and "signed"
+ * mean, and this only supplies the booking.
+ */
+async function loadUnsignedConsentFormsForSession(args: {
+  professionalId: string
+  booking: {
+    clientId: string
+    serviceId: string
+    serviceItems: readonly { serviceId: string }[]
+  }
+}): Promise<{ formId: string; title: string; kindLabel: string }[]> {
+  if (!isClientTechnicalRecordEnabled(args.professionalId)) return []
+
+  const byServiceId = await loadConsentRequirementsByServiceId({
+    db: prisma,
+    professionalId: args.professionalId,
+  })
+
+  if (byServiceId.size === 0) return []
+
+  const required = collectBookingConsentRequirements(args.booking, byServiceId)
+  if (required.length === 0) return []
+
+  const signedByClient = await loadSignedConsentFormIds({
+    db: prisma,
+    professionalId: args.professionalId,
+    clientIds: [args.booking.clientId],
+    formIds: required.map((requirement) => requirement.formId),
+    now: new Date(),
+  })
+
+  const signed = signedByClient.get(args.booking.clientId) ?? new Set<string>()
+
+  return required
+    .filter((requirement) => !signed.has(requirement.formId))
+    .map((requirement) => ({
+      formId: requirement.formId,
+      title: requirement.title || 'Consent form',
+      kindLabel: CONSENT_KIND_LABELS[requirement.kind],
+    }))
+}
+
 export default async function ProBookingSessionPage(props: PageProps) {
   const { id } = await props.params
   const bookingId = String(id || '').trim()
@@ -1566,8 +1619,12 @@ export default async function ProBookingSessionPage(props: PageProps) {
     select: {
       id: true,
       professionalId: true,
+      clientId: true,
       status: true,
       scheduledFor: true,
+      // K15: the requirement map is keyed by serviceId, so the booking's own
+      // service and each item's service are what resolve it.
+      serviceId: true,
       locationTimeZone: true,
       startedAt: true,
       finishedAt: true,
@@ -1698,6 +1755,15 @@ export default async function ProBookingSessionPage(props: PageProps) {
   // of it: the total is what the service cost, and the pro's earnings view must
   // keep saying so.
   const depositCredit = deriveDepositCredit(booking)
+
+  // K15 — the forms this appointment needs that the client has not signed.
+  // Gated like every other technical-record surface, and skipped entirely when
+  // the pro has bound no forms, so an ungated pro's page runs the same queries
+  // it ran before K15.
+  const unsignedConsentForms = await loadUnsignedConsentFormsForSession({
+    professionalId,
+    booking,
+  })
   const amountDueLabel =
     depositCredit.creditCents > 0 ? formatCents(depositCredit.amountDueCents) : null
   const depositCreditLabel =
@@ -1845,6 +1911,18 @@ export default async function ProBookingSessionPage(props: PageProps) {
     )
   }
 
+  // 🔴 Rendered on the PRE-SERVICE screens only. Once the visit is over, a
+  // warning about signing beforehand is a fact nobody can act on — the same
+  // call deriveConsentRequirementBadge makes for the calendar card.
+  const consentBanner =
+    unsignedConsentForms.length > 0 ? (
+      <UnsignedConsentBanner
+        bookingId={booking.id}
+        clientId={booking.clientId}
+        unsigned={unsignedConsentForms}
+      />
+    ) : null
+
   const proofCard = consultationProof ? (
     <ProofCard
       decisionLabel={proofDecisionLabel}
@@ -1858,6 +1936,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
   if (screenKey === 'CONSULTATION') {
     return (
       <>
+        {consentBanner}
         <ConsultationView
           bookingId={booking.id}
           serviceName={serviceName}
@@ -1885,6 +1964,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
   if (screenKey === 'WAITING_ON_CLIENT' || screenKey === 'BEFORE_PHOTOS') {
     return (
       <>
+        {consentBanner}
         <WaitingBeforePhotosView
           bookingId={booking.id}
           effectiveStep={effectiveStep}
@@ -1909,17 +1989,20 @@ export default async function ProBookingSessionPage(props: PageProps) {
 
   if (screenKey === 'SERVICE_IN_PROGRESS') {
     return (
-      <ServiceInProgressView
-        serviceName={serviceName}
-        clientName={clientName}
-        effectiveStep={effectiveStep}
-        startedAt={booking.startedAt}
-        durationLabel={durationLabel}
-        beforeCount={beforeCount}
-        changeService={changeServiceSlot}
-        onFinish={finishService}
-        timeZone={appointmentTimeZone}
-      />
+      <>
+        {consentBanner}
+        <ServiceInProgressView
+          serviceName={serviceName}
+          clientName={clientName}
+          effectiveStep={effectiveStep}
+          startedAt={booking.startedAt}
+          durationLabel={durationLabel}
+          beforeCount={beforeCount}
+          changeService={changeServiceSlot}
+          onFinish={finishService}
+          timeZone={appointmentTimeZone}
+        />
+      </>
     )
   }
 

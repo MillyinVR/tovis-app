@@ -12,6 +12,7 @@ import { isRecord } from '@/lib/guards'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import CalendarSwatchPicker from '@/app/pro/services/CalendarSwatchPicker'
 import PrepayScopePicker from '@/app/pro/services/PrepayScopePicker'
+import ConsentRequirementPicker from '@/app/pro/services/ConsentRequirementPicker'
 import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
 import type { OfferingPrepayScope } from '@prisma/client'
 type Offering = {
@@ -55,6 +56,10 @@ type Offering = {
   // booking follows the pro's account-wide deposit setting exactly as before.
   prepayScope: OfferingPrepayScope | null
 
+  // K15: the consent form this service requires the client to have signed.
+  // Null = none. Warns only — nothing on the booking path reads it.
+  consentFormId: string | null
+
   /**
    * ✅ Option 1 support (preferred names)
    */
@@ -68,10 +73,24 @@ type Offering = {
   categoryIsActive?: boolean
 }
 
+/** K15: one of the pro's active forms that has text to sign. */
+type ConsentFormChoice = {
+  formId: string
+  title: string
+  kindLabel: string
+  version: number
+}
+
 type Props = {
   initialOfferings: Offering[]
   enforceCanonicalServiceNames?: boolean
   enableServiceImageUpload?: boolean
+  /**
+   * K15: the forms a service may require. EMPTY when the technical-record gate
+   * is off for this pro — the picker is then not rendered at all, so the kill
+   * switch reaches the control and not only the write route.
+   */
+  consentForms?: ConsentFormChoice[]
 }
 
 type OfferingPatch = {
@@ -86,6 +105,7 @@ type OfferingPatch = {
   rebookIntervalDays?: number | null
   calendarSwatch?: CalendarSwatchId | null
   prepayScope?: OfferingPrepayScope | null
+  consentFormId?: string | null
 }
 
 type EligibleAddOn = {
@@ -202,6 +222,7 @@ export default function OfferingManager({
   initialOfferings,
   enforceCanonicalServiceNames = true,
   enableServiceImageUpload = true,
+  consentForms = [],
 }: Props) {
   const router = useRouter()
   const offerings = useMemo(() => initialOfferings ?? [], [initialOfferings])
@@ -329,6 +350,7 @@ export default function OfferingManager({
           offering={o}
           enforceCanonicalServiceNames={enforceCanonicalServiceNames}
           enableServiceImageUpload={enableServiceImageUpload}
+          consentForms={consentForms}
           isOpen={openId === o.id}
           busy={busyId === o.id}
           uploadBusy={uploadBusyId === o.id}
@@ -354,6 +376,7 @@ function OfferingCard(props: {
   offering: Offering
   enforceCanonicalServiceNames: boolean
   enableServiceImageUpload: boolean
+  consentForms: readonly ConsentFormChoice[]
   isOpen: boolean
   busy: boolean
   uploadBusy: boolean
@@ -371,6 +394,7 @@ function OfferingCard(props: {
     offering: o,
     enforceCanonicalServiceNames,
     enableServiceImageUpload,
+    consentForms,
     isOpen,
     busy,
     uploadBusy,
@@ -566,6 +590,7 @@ function OfferingCard(props: {
           <OfferingEditor
             key={o.id}
             offering={o}
+            consentForms={consentForms}
             busy={busy}
             uploadBusy={uploadBusy}
             upstreamOk={upstreamOk}
@@ -584,6 +609,7 @@ function OfferingCard(props: {
 
 function OfferingEditor(props: {
   offering: Offering
+  consentForms: readonly ConsentFormChoice[]
   busy: boolean
   uploadBusy: boolean
   upstreamOk: boolean
@@ -596,6 +622,7 @@ function OfferingEditor(props: {
 }) {
   const {
     offering: o,
+    consentForms,
     busy,
     uploadBusy,
     upstreamOk,
@@ -626,6 +653,9 @@ function OfferingEditor(props: {
   )
   const [prepayScope, setPrepayScope] = useState<OfferingPrepayScope | null>(
     o.prepayScope ?? null,
+  )
+  const [consentFormId, setConsentFormId] = useState<string | null>(
+    o.consentFormId ?? null,
   )
   const [addonsOpen, setAddonsOpen] = useState(false)
 
@@ -727,6 +757,7 @@ function OfferingEditor(props: {
         rebookIntervalDays: rebookIntervalInt,
         calendarSwatch,
         prepayScope,
+        consentFormId,
       },
     }
   }
@@ -952,6 +983,18 @@ function OfferingEditor(props: {
         onChange={setPrepayScope}
         disabled={disabledForEdit}
       />
+
+      {/* K15 — omitted entirely when the technical-record gate is off for this
+          pro: the page then passes no forms, so there is no control to press. */}
+      {consentForms.length > 0 || o.consentFormId ? (
+        <ConsentRequirementPicker
+          id={`consent-form-${o.id}`}
+          value={consentFormId}
+          onChange={setConsentFormId}
+          forms={consentForms}
+          disabled={disabledForEdit}
+        />
+      ) : null}
 
       {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
       {success ? <div className="text-[12px] text-toneSuccess">{success}</div> : null}

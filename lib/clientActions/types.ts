@@ -21,6 +21,7 @@ export const CLIENT_ACTION_TYPES = [
   'CONSULTATION_ACTION',
   'DEPOSIT_PAYMENT',
   'APPOINTMENT_CONFIRMATION',
+  'CONSENT_SIGNATURE',
 ] as const
 
 export type ClientActionType = (typeof CLIENT_ACTION_TYPES)[number]
@@ -40,6 +41,7 @@ export const CLIENT_ACTION_LINK_TARGETS = [
   'CONSULTATION',
   'DEPOSIT',
   'APPOINTMENT',
+  'CONSENT',
 ] as const
 
 export type ClientActionLinkTarget =

@@ -52,6 +52,7 @@ import EditPhotoReleaseForm from './EditPhotoReleaseForm'
 import EditProfileContextForm from './EditProfileContextForm'
 import NewAllergyForm from './NewAllergyForm'
 import NewConsentForm from './NewConsentForm'
+import SendConsentFormButton from './SendConsentFormButton'
 import NewFormulaForm from './NewFormulaForm'
 import NewNoteForm from './NewNoteForm'
 import { Badge, Button, Card, buttonClassName } from '@/app/_components/ui'
@@ -1385,6 +1386,16 @@ function TechnicalRecordTab({
         title="Consent & patch tests"
         subtitle="Signed waivers stay private to you; patch-test results travel to any pro with access."
       >
+        {/* K15 — the pro sends the form; the CLIENT signs it. Above the manual
+            record entry because it is the honest path: this one produces a
+            signature the platform witnessed, that one records one the pro did. */}
+        <div className="mb-4">
+          <SendConsentFormButton
+            clientId={clientId}
+            forms={data.consentForms}
+          />
+        </div>
+
         <div className="mb-4">
           <NewConsentForm clientId={clientId} forms={data.consentForms} />
         </div>
