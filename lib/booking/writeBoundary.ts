@@ -19067,28 +19067,6 @@ export async function cleanupAllExpiredHolds(args: {
   }
 }
 
-/**
- * Re-point every booking (and any live hold) from one client identity to another.
- *
- * The claim merge's only booking write — a pro-created UNCLAIMED profile is being
- * absorbed into the signed-in client's own identity, so its bookings must follow
- * the person. This lives here rather than in `lib/clients/mergeUnclaimedClientProfile.ts`
- * because every Booking / BookingHold write goes through this boundary
- * (`check:booking-boundary`), so a reader looking for "what can move a booking"
- * finds it in one file.
- *
- * Deliberately narrow: it changes ownership ONLY. No lifecycle field moves — the
- * booking's status, schedule, money and audit trail are all untouched, because a
- * merge is a change of *who the client is*, not of what happened.
- *
- * `creationIdempotencyKey` is cleared on the moved rows: it is unique per
- * `[clientId, creationIdempotencyKey]`, so a (vanishingly unlikely) collision with
- * the target's own key would abort the merge. The key is a create-time replay guard
- * that has already done its job — these bookings exist — so dropping it costs
- * nothing and can never drop a booking.
- *
- * Caller must hold a transaction; the merge asserts the source is unclaimed first.
- */
 // ---------------------------------------------------------------------------
 // K12 — the client-confirmation loop's WRITERS (the K11 timestamps' only
 // mutation paths besides the reschedule resets above).
@@ -19352,6 +19330,28 @@ export async function recordAppointmentConfirmationFromClientToken(args: {
   })
 }
 
+/**
+ * Re-point every booking (and any live hold) from one client identity to another.
+ *
+ * The claim merge's only booking write — a pro-created UNCLAIMED profile is being
+ * absorbed into the signed-in client's own identity, so its bookings must follow
+ * the person. This lives here rather than in `lib/clients/mergeUnclaimedClientProfile.ts`
+ * because every Booking / BookingHold write goes through this boundary
+ * (`check:booking-boundary`), so a reader looking for "what can move a booking"
+ * finds it in one file.
+ *
+ * Deliberately narrow: it changes ownership ONLY. No lifecycle field moves — the
+ * booking's status, schedule, money and audit trail are all untouched, because a
+ * merge is a change of *who the client is*, not of what happened.
+ *
+ * `creationIdempotencyKey` is cleared on the moved rows: it is unique per
+ * `[clientId, creationIdempotencyKey]`, so a (vanishingly unlikely) collision with
+ * the target's own key would abort the merge. The key is a create-time replay guard
+ * that has already done its job — these bookings exist — so dropping it costs
+ * nothing and can never drop a booking.
+ *
+ * Caller must hold a transaction; the merge asserts the source is unclaimed first.
+ */
 export async function reassignClientBookings(args: {
   tx: Prisma.TransactionClient
   fromClientId: string

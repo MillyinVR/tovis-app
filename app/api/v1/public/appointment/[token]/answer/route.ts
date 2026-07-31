@@ -12,7 +12,7 @@
 
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
-import { jsonFail, pickString } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import {
   bookingErrorJsonFail,
   bookingJsonFail,
@@ -86,8 +86,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
       kickNotificationDrain()
     }
 
-    return Response.json({
-      ok: true,
+    return jsonOk({
       state: result.state,
       booking: {
         id: result.booking.id,
