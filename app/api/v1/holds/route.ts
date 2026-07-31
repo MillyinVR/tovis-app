@@ -1,7 +1,7 @@
 // app/api/v1/holds/route.ts
 
 import { NextRequest } from 'next/server'
-import { Prisma, ServiceLocationType } from '@prisma/client'
+import { ServiceLocationType } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
@@ -20,6 +20,10 @@ import {
   bookingJsonFail,
 } from '@/app/api/_utils/bookingResponses'
 import { createHold } from '@/lib/booking/writeBoundary'
+import {
+  HOLD_CREATE_OFFERING_SELECT,
+  toCreateHoldOffering,
+} from '@/lib/booking/holdCreateOffering'
 import type { BookingHoldCreateResponseDTO } from '@/lib/dto/holds'
 import {
   bookingEntryPointFromHoldContext,
@@ -32,27 +36,6 @@ export const dynamic = 'force-dynamic'
 // Mirrors finalize's cap on the same field: the hold reserves what finalize
 // will take, so both ends must accept the same selection size.
 const MAX_HOLD_ADD_ON_IDS = 50
-
-const HOLD_CREATE_OFFERING_SELECT = {
-  id: true,
-  isActive: true,
-  professionalId: true,
-  offersInSalon: true,
-  offersMobile: true,
-  salonDurationMinutes: true,
-  mobileDurationMinutes: true,
-  salonPriceStartingAt: true,
-  mobilePriceStartingAt: true,
-  professional: {
-    select: {
-      timeZone: true,
-    },
-  },
-} satisfies Prisma.ProfessionalServiceOfferingSelect
-
-type HoldCreateOfferingRecord = Prisma.ProfessionalServiceOfferingGetPayload<{
-  select: typeof HOLD_CREATE_OFFERING_SELECT
-}>
 
 type ParsedHoldRequest = {
   offeringId: string
@@ -71,32 +54,6 @@ type HeaderCarrier = {
 
 function isValidDate(value: Date): boolean {
   return value instanceof Date && Number.isFinite(value.getTime())
-}
-
-function toCreateHoldOffering(
-  offering: HoldCreateOfferingRecord,
-): {
-  id: string
-  professionalId: string
-  offersInSalon: boolean
-  offersMobile: boolean
-  salonDurationMinutes: number | null
-  mobileDurationMinutes: number | null
-  salonPriceStartingAt: Prisma.Decimal | null
-  mobilePriceStartingAt: Prisma.Decimal | null
-  professionalTimeZone: string | null
-} {
-  return {
-    id: offering.id,
-    professionalId: offering.professionalId,
-    offersInSalon: offering.offersInSalon,
-    offersMobile: offering.offersMobile,
-    salonDurationMinutes: offering.salonDurationMinutes,
-    mobileDurationMinutes: offering.mobileDurationMinutes,
-    salonPriceStartingAt: offering.salonPriceStartingAt,
-    mobilePriceStartingAt: offering.mobilePriceStartingAt,
-    professionalTimeZone: offering.professional?.timeZone ?? null,
-  }
 }
 
 function nowMs(): number {

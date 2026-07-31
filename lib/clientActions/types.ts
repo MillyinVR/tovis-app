@@ -20,6 +20,7 @@ export const CLIENT_ACTION_TYPES = [
   'AFTERCARE_ACCESS',
   'CONSULTATION_ACTION',
   'DEPOSIT_PAYMENT',
+  'APPOINTMENT_CONFIRMATION',
 ] as const
 
 export type ClientActionType = (typeof CLIENT_ACTION_TYPES)[number]
@@ -38,6 +39,7 @@ export const CLIENT_ACTION_LINK_TARGETS = [
   'AFTERCARE',
   'CONSULTATION',
   'DEPOSIT',
+  'APPOINTMENT',
 ] as const
 
 export type ClientActionLinkTarget =

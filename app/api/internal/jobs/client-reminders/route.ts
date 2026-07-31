@@ -2,10 +2,13 @@
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import {
+  applyConfirmationAskToReminderContent,
   cancelDueAppointmentReminder,
   rescheduleDueAppointmentReminder,
   validateDueAppointmentReminder,
 } from '@/lib/notifications/appointmentReminders'
+import { clientConfirmationLoopEnabled } from '@/lib/booking/clientConfirmationLoop'
+import { armAppointmentConfirmationAsk } from '@/lib/booking/writeBoundary'
 import { validateDueReviewRequest } from '@/lib/notifications/reviewRequests'
 import { validateDueDepositReminder } from '@/lib/notifications/depositReminders'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
@@ -198,16 +201,45 @@ async function processReminder(args: {
         }
       }
 
+      // K12: an appointment reminder is where the confirmation ASK goes out.
+      // Arm it in the same transaction — stamp clientConfirmationRequestedAt
+      // (first ask only), mint the APPOINTMENT_CONFIRMATION token, and point
+      // the reminder at the public action page instead of the login-gated
+      // booking view (one href for every channel — whoever holds the message
+      // holds the token, by design, the card's accepted premise). Flag off,
+      // or a booking that is no longer askable, sends the reminder exactly as
+      // pre-K12.
+      let reminderHref = validation.href
+      let reminderContent = validation.notification
+
+      if (
+        args.eventKey === NotificationEventKey.APPOINTMENT_REMINDER &&
+        clientConfirmationLoopEnabled()
+      ) {
+        const armed = await armAppointmentConfirmationAsk({
+          tx,
+          bookingId: validation.bookingId,
+          now: args.now,
+        })
+
+        if (armed) {
+          reminderHref = armed.href
+          reminderContent = applyConfirmationAskToReminderContent(
+            reminderContent,
+          )
+        }
+      }
+
       await upsertClientNotification({
         tx,
         clientId: validation.clientId,
         bookingId: validation.bookingId,
         eventKey: args.eventKey,
-        title: validation.notification.title,
-        body: validation.notification.body,
+        title: reminderContent.title,
+        body: reminderContent.body,
         dedupeKey: validation.dedupeKey,
-        href: validation.href,
-        data: validation.notification.data,
+        href: reminderHref,
+        data: reminderContent.data,
       })
 
       const markedProcessed = await markReminderProcessedIfPending({

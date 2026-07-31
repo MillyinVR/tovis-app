@@ -57,10 +57,52 @@ if (!command) {
   process.exit(1)
 }
 
+/**
+ * Test-only PII keyring, mirroring what .github/workflows/integration.yml
+ * exports for the CI run.
+ *
+ * Without it every suite that snapshots an address through the AEAD envelope
+ * (a hold, a booking create, a reschedule) dies locally with
+ * `Missing required env PII_AEAD_KEYS_JSON` while CI stays green — so the
+ * local integration signal was permanently 16 tests short of the truth, and
+ * each suite that hit it grew its own `vi.hoisted` shim to work around it.
+ *
+ * Set here rather than in `.env.test.local` because that file is gitignored:
+ * a fix there would help one machine, this helps everyone. Never overrides an
+ * already-set value (CI's real generated keys win), and it can only ever apply
+ * to a process this wrapper launched against the local test database — the
+ * prod-project guard above has already refused anything else.
+ *
+ * The keys are DERIVED, not written down: a literal base64 key here is
+ * indistinguishable from a real one to a secret scanner (gitleaks flags it
+ * `generic-api-key`, correctly — a scanner that learns to ignore this file is
+ * worse than the inconvenience). Constructing them from a constant byte makes
+ * them obviously fake by construction, and matches the `vi.hoisted` shim the
+ * integration suites already use.
+ *
+ * These encrypt nothing but rows in a local `tovis_test` container.
+ */
+const testKeyBytes = (fill) => Buffer.alloc(32, fill).toString('base64')
+const TEST_AEAD_KEY = testKeyBytes(9)
+const TEST_HMAC_KEY = testKeyBytes(7)
+
+const testPiiKeyring = {
+  PII_AEAD_KEYS_JSON: JSON.stringify({
+    'address-aead-v1': TEST_AEAD_KEY,
+    'email-aead-v1': TEST_AEAD_KEY,
+    'phone-aead-v1': TEST_AEAD_KEY,
+    'notes-aead-v1': TEST_AEAD_KEY,
+  }),
+  PII_LOOKUP_HMAC_KEYS_JSON: JSON.stringify({ 1: TEST_HMAC_KEY }),
+}
+
 const child = spawnSync(command, args, {
   stdio: 'inherit',
   shell: process.platform === 'win32',
   env: {
+    // Defaults FIRST so a real environment value (CI's generated keyring)
+    // always wins; everything else about the child env is unchanged.
+    ...testPiiKeyring,
     ...process.env,
     DATABASE_URL: databaseUrl,
     DIRECT_URL: directUrl,

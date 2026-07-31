@@ -321,6 +321,44 @@ export function parseAppointmentReminderPayload(
   }
 }
 
+/**
+ * The pre-K12 closing nudge — what every reminder says when the confirmation
+ * loop is off (or the ask could not be armed): the href is the login-gated
+ * booking page.
+ */
+export const APPOINTMENT_REMINDER_MANAGE_NUDGE =
+  ' Need to change it? Tap to manage.'
+
+/**
+ * K12: the closing ask when the reminder carries an APPOINTMENT_CONFIRMATION
+ * token link — confirm is one tap on the page; cancel/reschedule sit behind
+ * their own confirmation screens there.
+ */
+export const APPOINTMENT_REMINDER_CONFIRMATION_ASK_NUDGE =
+  ' Can you make it? Tap to confirm — or reschedule if you need to.'
+
+/**
+ * Swap the reminder's closing nudge for the confirmation ask. String-replace on
+ * the exact canonical suffix so a body that (unexpectedly) doesn't end with it
+ * is passed through unchanged rather than double-nudged.
+ */
+export function applyConfirmationAskToReminderContent<
+  T extends { body: string },
+>(content: T): T {
+  if (!content.body.endsWith(APPOINTMENT_REMINDER_MANAGE_NUDGE)) {
+    return content
+  }
+
+  return {
+    ...content,
+    body:
+      content.body.slice(
+        0,
+        content.body.length - APPOINTMENT_REMINDER_MANAGE_NUDGE.length,
+      ) + APPOINTMENT_REMINDER_CONFIRMATION_ASK_NUDGE,
+  }
+}
+
 export function buildAppointmentReminderContent(
   payload: AppointmentReminderPayload,
 ): AppointmentReminderContent {
@@ -338,7 +376,7 @@ export function buildAppointmentReminderContent(
     : ''
   const timeLabel = formatTimeOnly(scheduledFor, payload.timeZone)
   const atTime = timeLabel ? ` at ${timeLabel}` : ''
-  const manageNudge = ' Need to change it? Tap to manage.'
+  const manageNudge = APPOINTMENT_REMINDER_MANAGE_NUDGE
 
   const { relativeWhen, isTomorrow } = humanizeLeadTime(payload.offsetMinutes)
 

@@ -31,6 +31,12 @@ export const AFTERCARE_ACCESS_TOKEN_EXPIRY_MS =
 export const DEPOSIT_PAYMENT_TOKEN_FALLBACK_EXPIRY_MS =
   1000 * 60 * 60 * 24 * 30 // 30 days
 
+// K12: fallback only — the mint site always passes an expiresAtOverride of the
+// appointment start (confirming/cancelling from a reminder link is meaningless
+// once the appointment has begun).
+export const APPOINTMENT_CONFIRMATION_TOKEN_FALLBACK_EXPIRY_MS =
+  1000 * 60 * 60 * 24 * 30 // 30 days
+
 const EMAIL_OR_SMS_CONTACT_METHODS: readonly ContactMethod[] = [
   ContactMethod.EMAIL,
   ContactMethod.SMS,
@@ -196,6 +202,43 @@ export const CLIENT_ACTION_REGISTRY: Record<
     link: {
       target: 'DEPOSIT',
       pathPrefix: '/client/deposit',
+      requiresToken: true,
+    },
+  },
+
+  APPOINTMENT_CONFIRMATION: {
+    type: 'APPOINTMENT_CONFIRMATION',
+    token: {
+      required: true,
+      kind: ClientActionTokenKind.APPOINTMENT_CONFIRMATION,
+      // NOT single-use: the client may confirm and later come back through the
+      // same message to cancel or reschedule; each action re-validates against
+      // the booking's own state, and the token dies at the appointment start.
+      singleUse: false,
+      expiresInMs: APPOINTMENT_CONFIRMATION_TOKEN_FALLBACK_EXPIRY_MS,
+      // Deliberately false, unlike DEPOSIT_PAYMENT: a booking with a 24h and a
+      // 2h reminder mints a token per ask, and revoking the earlier one would
+      // break the link in the SMS the client is most likely to still have open.
+      // All live tokens expire together at the appointment start.
+      revokeOutstandingOnResend: false,
+    },
+    delivery: {
+      /**
+       * The ask rides the APPOINTMENT_REMINDER notification rail (the reminder
+       * cron mints the token and swaps the reminder's href/copy) — it does NOT
+       * dispatch through enqueueClientActionDispatch. The event key is recorded
+       * here so the registry stays the one place that says which delivery
+       * carries which action link (the K10-B AFTERCARE split precedent).
+       */
+      allowedContactMethods: EMAIL_OR_SMS_CONTACT_METHODS,
+      preferredContactMethod: null,
+      notificationEventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+      notificationRecipientKind: NotificationRecipientKind.CLIENT,
+      createFreshDeliveryOnResend: false,
+    },
+    link: {
+      target: 'APPOINTMENT',
+      pathPrefix: '/client/appointment',
       requiresToken: true,
     },
   },

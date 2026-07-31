@@ -69,6 +69,9 @@ export type BookingErrorCode =
   | "AFTERCARE_TOKEN_INVALID"
   | "DEPOSIT_TOKEN_MISSING"
   | "DEPOSIT_TOKEN_INVALID"
+  | "APPOINTMENT_TOKEN_MISSING"
+  | "APPOINTMENT_TOKEN_INVALID"
+  | "APPOINTMENT_CONFIRMATION_UNAVAILABLE"
   | "AFTERCARE_NOT_COMPLETED"
   | "AFTERCARE_CLIENT_MISMATCH"
   | "AFTERCARE_OFFERING_MISMATCH"
@@ -670,6 +673,30 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Deposit payment token is invalid.",
     userMessage: "That payment link is invalid or expired.",
+  },
+  APPOINTMENT_TOKEN_MISSING: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Appointment confirmation token is missing.",
+    userMessage: "That appointment link is invalid or expired.",
+  },
+  APPOINTMENT_TOKEN_INVALID: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Appointment confirmation token is invalid.",
+    userMessage: "That appointment link is invalid or expired.",
+  },
+  // K12: the confirmation answer no longer applies — the booking is cancelled,
+  // finished, or already underway. 409, not 400: the link was real, the world
+  // moved.
+  APPOINTMENT_CONFIRMATION_UNAVAILABLE: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "This booking can no longer be confirmed or declined.",
+    userMessage: "This appointment can no longer be updated from this link.",
   },
   AFTERCARE_NOT_COMPLETED: {
     httpStatus: 409,

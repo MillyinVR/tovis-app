@@ -17,6 +17,7 @@ export type RateLimitBucket =
   | 'client:rebook:token'
   | 'client:checkout:token'
   | 'client:deposit:token'
+  | 'client:appointment:token'
   | 'pro:bookings:write'
   | 'pro:media:write'
   | 'pro:offerings:write'
@@ -179,6 +180,15 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 10,
     windowSeconds: 5 * 60,
     prefix: 'rl:client:deposit:token',
+    mode: 'redis-only',
+  },
+  // K12: the public appointment action link (confirm/decline/cancel/reschedule
+  // per tap, bounded per token+IP — the deposit token's shape, sized a little
+  // wider because one visit can legitimately answer, then reschedule).
+  'client:appointment:token': {
+    limit: 20,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:client:appointment:token',
     mode: 'redis-only',
   },
   'pro:bookings:write': {

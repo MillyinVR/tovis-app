@@ -1,6 +1,6 @@
 // app/api/v1/bookings/[id]/cancel/route.ts
 
-import { NoShowFeeReason, NoShowFeeStatus, Role, type Prisma } from '@prisma/client'
+import { Role, type Prisma } from '@prisma/client'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
@@ -16,14 +16,8 @@ import {
   bookingJsonFail,
 } from '@/app/api/_utils/bookingResponses'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
-import {
-  applyAutoCancelRefund,
-  applyDiscoveryDepositCancelRefund,
-  summarizeCancelRefund,
-  type CancelRefundSummary,
-} from '@/lib/booking/cancelRefund'
-import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
-import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { type CancelRefundSummary } from '@/lib/booking/cancelRefund'
+import { runCancelRefundOrchestration } from '@/lib/booking/cancelRefundOrchestration'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { safeError } from '@/lib/security/logging'
@@ -223,81 +217,21 @@ export async function POST(req: Request, ctx: RouteContext) {
         operation: 'POST /api/v1/bookings/[id]/cancel',
       },
       async () => {
-        const lateCancelFeeActive =
-          actor.kind === 'client' && noShowProtectionEnabled()
-
         const result = await cancelBooking({
           bookingId,
           actor,
         })
 
-        // Auto-refund per policy (pro/admin always; client only ≥24h out).
-        // Best-effort: never throws, so it can't fail the committed cancel.
-        const serviceRefund = await applyAutoCancelRefund({
+        // The post-cancel refund policy (service refund → discovery deposit →
+        // late-cancel fee → honest summary) lives in ONE place, shared with the
+        // K12 token-cancel route so the two can never drift.
+        const refund = await runCancelRefundOrchestration({
           bookingId,
           actorKind: actor.kind,
           actorUserId: user.id,
           cancelMutated: result.meta.mutated,
-        })
-
-        // New-client discovery deposit + fee refund per policy (pro/admin refund
-        // both; client ≥24h refunds deposit, keeps fee; client <24h forfeits).
-        const depositRefund = await applyDiscoveryDepositCancelRefund({
-          bookingId,
-          actorKind: actor.kind,
-          actorUserId: user.id,
-          cancelMutated: result.meta.mutated,
-        })
-
-        // M15 POLICY (Tori 2026-07-24): a forfeited discovery deposit IS the
-        // <24h cancellation penalty, so it SUPPRESSES the separate late-cancel
-        // fee — a client is never double-penalised for one cancel. The fee still
-        // applies when nothing was forfeited (no deposit, or a cancel outside the
-        // 24h forfeit line but inside a wider pro window, which refunds the
-        // deposit yet still owes the fee).
-        const depositForfeited = depositRefund.outcome === 'FORFEITED'
-
-        // Late-cancel fee (Phase 2 revenue protection). Only a CLIENT cancel can
-        // incur one, and only when the cancel actually mutated, no deposit was
-        // forfeited, and it lands inside the pro's window on a confirmed booking
-        // (enforced in assessAndChargeNoShowFee via priorStatus — now taken from
-        // the cancel's own locked transaction, retiring the separate pre-read
-        // TOCTOU, §18.4). Best-effort: a charge failure never blocks the
-        // committed cancellation. Inert unless ENABLE_NO_SHOW_PROTECTION is on.
-        let lateCancelFeeChargedCents = 0
-        if (lateCancelFeeActive && result.meta.mutated && !depositForfeited) {
-          const feeOutcome = await assessAndChargeNoShowFee({
-            bookingId,
-            reason: NoShowFeeReason.LATE_CANCEL,
-            priorStatus: result.priorStatus,
-          }).catch((error: unknown) => {
-            console.error(
-              'POST /api/v1/bookings/[id]/cancel late-cancel fee error',
-              safeError(error),
-            )
-            return null
-          })
-
-          // Only a freshly SUCCEEDED charge is money that left the card; surface
-          // it in the honest cancel summary (M6). A FAILED/SKIPPED fee moved no
-          // money, and an idempotent replay reports the subtotal, not the fee.
-          if (
-            feeOutcome?.kind === 'ATTEMPTED' &&
-            feeOutcome.status === NoShowFeeStatus.CHARGED &&
-            !feeOutcome.alreadyCharged
-          ) {
-            lateCancelFeeChargedCents = Math.round(
-              Number(feeOutcome.amount) * 100,
-            )
-          }
-        }
-
-        // Collapse the service + deposit refund outcomes and any late-cancel fee
-        // into one honest, client-facing summary (M6 / M15).
-        const refund = summarizeCancelRefund({
-          service: serviceRefund,
-          deposit: depositRefund,
-          lateCancelFeeChargedCents,
+          priorStatus: result.priorStatus,
+          operation: 'POST /api/v1/bookings/[id]/cancel',
         })
 
         return { status: 200, body: toCancelResponseBody(result, refund) }

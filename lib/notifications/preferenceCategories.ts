@@ -104,6 +104,8 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   // a client must not be able to have pre-silenced the secure pay link for a
   // deposit their pro requires (mirrors PRO_HANDLE_RESERVATION_EXPIRING).
   [NotificationEventKey.DEPOSIT_PAYMENT_LINK]: 'Deposit payment link',
+  [NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED]:
+    'Client can’t make it',
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: 'New look follower',
   [NotificationEventKey.CLIENT_FOLLOW]: 'New follower',
   [NotificationEventKey.LOOK_COMMENTED]: 'Comments on your looks',
@@ -148,6 +150,7 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
       NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
       NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
       NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
+      NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED,
       NotificationEventKey.CLIENT_CLAIM_INVITE,
       NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       NotificationEventKey.CONSULTATION_APPROVED,
