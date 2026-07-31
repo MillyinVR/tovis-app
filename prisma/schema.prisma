@@ -328,6 +328,11 @@ enum ClientActionTokenKind {
   // client is often UNCLAIMED (ClientProfile.userId null) and so can never pass
   // requireClient() on the authed deposit route.
   DEPOSIT_PAYMENT
+  // K12: the confirm/cancel/reschedule action link carried by appointment
+  // reminders (/client/appointment/<token>). Not single-use — the client may
+  // confirm and later come back to cancel or reschedule from the same message;
+  // the token expires at the appointment start instead.
+  APPOINTMENT_CONFIRMATION
 }
 
 enum NfcCardType {
@@ -648,6 +653,11 @@ enum NotificationEventKey {
   // EMAIL/SMS carrying the /client/deposit/<token> magic link, because the
   // client is often unclaimed and cannot use the login-gated deposit surface.
   DEPOSIT_PAYMENT_LINK
+  // K12: the client answered an appointment-confirmation ask with "can't make
+  // it" (Booking.clientConfirmationDeclinedAt). Pro-facing. The slot stays
+  // occupied — D5: an unconfirmed appointment NEVER auto-cancels; cancelling
+  // stays the pro's human decision, and this notification is how they learn.
+  APPOINTMENT_CONFIRMATION_DECLINED
   LOOK_FOLLOWER_NEW
   // Client→client follow ("started following you") — powers the activity feed.
   CLIENT_FOLLOW

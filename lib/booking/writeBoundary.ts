@@ -10,6 +10,7 @@ import {
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
+  ClientActionTokenKind,
   ClientAddressKind,
   ClientRelationshipLabel,
   ConsultationApprovalProofMethod,
@@ -222,9 +223,22 @@ import {
 } from '@/lib/notifications/paymentNotifications'
 import {
   consumeConsultationActionToken,
+  generateClientActionToken,
+  hashClientActionToken,
   resolveConsultationActionTokenTarget,
   revokeConsultationActionTokensForBooking,
 } from '@/lib/consultation/clientActionTokens'
+import { buildClientActionLinkForType } from '@/lib/clientActions/linkBuilders'
+import {
+  APPOINTMENT_CONFIRMATION_ANSWERABLE_STATUSES,
+  markAppointmentConfirmationTokenUsed,
+  resolveAppointmentConfirmationTokenForMutation,
+} from '@/lib/booking/appointmentConfirmationTokens'
+import {
+  CLIENT_CONFIRMATION_SELECT,
+  deriveClientConfirmationState,
+  type ClientConfirmationState,
+} from '@/lib/booking/clientConfirmation'
 import {
   buildConsultationApprovalProofSnapshot,
   createConsultationApprovalProof,
@@ -8661,10 +8675,26 @@ await enforceBookingOverlapPolicy({
         })
       : buildNullAddressSnapshotData()
 
+  // K12: a time move resets the client-confirmation loop. The client's answer
+  // was to the OLD instant — carrying "Client confirmed" (or "Declined") onto a
+  // different time would report an answer nobody gave. Cleared to NOT_REQUESTED
+  // (all three timestamps), so the re-synced reminder below re-asks for the new
+  // time. No-op when only location details changed.
+  const rescheduleMovedStart =
+    newStart.getTime() !==
+    normalizeToMinute(new Date(booking.scheduledFor)).getTime()
+
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
       scheduledFor: newStart,
+      ...(rescheduleMovedStart
+        ? {
+            clientConfirmationRequestedAt: null,
+            clientConfirmedAt: null,
+            clientConfirmationDeclinedAt: null,
+          }
+        : {}),
       locationType: validatedHold.value.locationType,
       bufferMinutes: locationContext.bufferMinutes,
       locationId: locationContext.locationId,
@@ -12147,6 +12177,16 @@ if (args.notifyClient) {
           ? { allowsOverlap: rescheduleAllowsOverlap }
           : {}),
         scheduledFor: finalStart,
+        // K12: a pro moving the time resets the client-confirmation loop — the
+        // client's answer was to the OLD instant (same rule as the client
+        // reschedule path). Duration/price-only edits leave it alone.
+        ...(finalStart.getTime() !== existingScheduledFor.getTime()
+          ? {
+              clientConfirmationRequestedAt: null,
+              clientConfirmedAt: null,
+              clientConfirmationDeclinedAt: null,
+            }
+          : {}),
         bufferMinutes: finalBuffer,
         totalDurationMinutes: finalDuration,
         subtotalSnapshot: checkoutRollup.subtotalSnapshot,
@@ -19049,6 +19089,269 @@ export async function cleanupAllExpiredHolds(args: {
  *
  * Caller must hold a transaction; the merge asserts the source is unclaimed first.
  */
+// ---------------------------------------------------------------------------
+// K12 — the client-confirmation loop's WRITERS (the K11 timestamps' only
+// mutation paths besides the reschedule resets above).
+// ---------------------------------------------------------------------------
+
+const ARM_CONFIRMATION_BOOKING_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  scheduledFor: true,
+  clientConfirmationRequestedAt: true,
+} satisfies Prisma.BookingSelect
+
+export type ArmAppointmentConfirmationAskResult = {
+  /** Relative public action link (/client/appointment/<token>). */
+  href: string
+  tokenId: string
+  /** True when THIS call stamped clientConfirmationRequestedAt (the first ask). */
+  requestedAtStamped: boolean
+}
+
+/**
+ * The ASK half of the loop, called by the client-reminders cron inside its own
+ * transaction at the moment an APPOINTMENT_REMINDER is processed — stamping
+ * clientConfirmationRequestedAt anywhere earlier would mark a booking
+ * "Awaiting client" before the client could possibly know (the K12 rule: the
+ * stamp lives where the ask goes out).
+ *
+ * Mints a fresh APPOINTMENT_CONFIRMATION token per ask (a booking with a 24h
+ * and a 2h reminder sends two); older tokens are deliberately NOT revoked —
+ * they all expire at the appointment start, and the link in the earlier SMS
+ * must keep working. requestedAt is stamped only when null, so the state
+ * records the FIRST ask and a later reminder cannot push "awaiting since"
+ * forward.
+ *
+ * Returns null (and writes nothing) when the booking is no longer askable —
+ * the caller then sends the reminder exactly as it did before K12.
+ */
+export async function armAppointmentConfirmationAsk(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  now: Date
+}): Promise<ArmAppointmentConfirmationAskResult | null> {
+  const booking = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: ARM_CONFIRMATION_BOOKING_SELECT,
+  })
+
+  if (!booking) return null
+  if (!APPOINTMENT_CONFIRMATION_ANSWERABLE_STATUSES.has(booking.status)) {
+    return null
+  }
+  if (booking.scheduledFor.getTime() <= args.now.getTime()) return null
+
+  let requestedAtStamped = false
+  if (!booking.clientConfirmationRequestedAt) {
+    const stamped = await args.tx.booking.updateMany({
+      where: { id: booking.id, clientConfirmationRequestedAt: null },
+      data: { clientConfirmationRequestedAt: args.now },
+    })
+    requestedAtStamped = stamped.count === 1
+  }
+
+  const rawToken = generateClientActionToken()
+  const tokenHash = hashClientActionToken(rawToken)
+
+  const created = await args.tx.clientActionToken.create({
+    data: {
+      kind: ClientActionTokenKind.APPOINTMENT_CONFIRMATION,
+      tokenHash,
+      singleUse: false,
+      bookingId: booking.id,
+      clientId: booking.clientId,
+      professionalId: booking.professionalId,
+      deliveryMethod: null,
+      issuedByUserId: null,
+      // Confirming/cancelling from a reminder link is meaningless once the
+      // appointment has begun; the token dies with the slot it asks about.
+      expiresAt: booking.scheduledFor,
+      metadata: {
+        source: 'appointmentReminder',
+        actionType: 'APPOINTMENT_CONFIRMATION',
+        bookingId: booking.id,
+        clientId: booking.clientId,
+        professionalId: booking.professionalId,
+      },
+    },
+    select: { id: true },
+  })
+
+  const link = buildClientActionLinkForType({
+    actionType: 'APPOINTMENT_CONFIRMATION',
+    rawToken,
+  })
+
+  return {
+    href: link.href,
+    tokenId: created.id,
+    requestedAtStamped,
+  }
+}
+
+export type AppointmentConfirmationAnswer = 'CONFIRM' | 'DECLINE'
+
+export type RecordAppointmentConfirmationAnswerResult = {
+  booking: {
+    id: string
+    status: BookingStatus
+    scheduledFor: Date
+  }
+  state: ClientConfirmationState
+  meta: MutationMeta
+}
+
+const ANSWER_CONFIRMATION_BOOKING_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  scheduledFor: true,
+  locationTimeZone: true,
+  ...CLIENT_CONFIRMATION_SELECT,
+  service: { select: { name: true } },
+  professional: { select: { timeZone: true } },
+  client: {
+    select: {
+      firstName: true, // pii-plaintext-read-ok: pro-facing client name in the decline notif (same as the cancel inbox row)
+      lastName: true, // pii-plaintext-read-ok: pro-facing client name in the decline notif (same as the cancel inbox row)
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+async function performLockedRecordAppointmentConfirmationAnswer(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  clientId: string
+  tokenId: string
+  answer: AppointmentConfirmationAnswer
+}): Promise<RecordAppointmentConfirmationAnswerResult> {
+  const booking = await args.tx.booking.findUnique({
+    where: { id: args.bookingId },
+    select: ANSWER_CONFIRMATION_BOOKING_SELECT,
+  })
+
+  if (!booking || booking.clientId !== args.clientId) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  // The answer is to "will you come to this appointment" — a cancelled,
+  // started or finished booking no longer asks it. D5 holds in the other
+  // direction too: refusing here never touches the slot.
+  if (!APPOINTMENT_CONFIRMATION_ANSWERABLE_STATUSES.has(booking.status)) {
+    throw bookingError('APPOINTMENT_CONFIRMATION_UNAVAILABLE')
+  }
+
+  if (booking.scheduledFor.getTime() <= args.now.getTime()) {
+    throw bookingError('APPOINTMENT_CONFIRMATION_UNAVAILABLE', {
+      message: 'Appointment has already started.',
+      userMessage: 'This appointment has already started.',
+    })
+  }
+
+  const priorState = deriveClientConfirmationState(booking)
+
+  // Always re-stamp the answered timestamp: the derivation's "latest answer
+  // wins" rule (K11) is built for exactly this write, and an idempotent
+  // re-confirm moving clientConfirmedAt forward keeps the tie-break honest.
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data:
+      args.answer === 'CONFIRM'
+        ? { clientConfirmedAt: args.now }
+        : { clientConfirmationDeclinedAt: args.now },
+    select: {
+      id: true,
+      status: true,
+      scheduledFor: true,
+      ...CLIENT_CONFIRMATION_SELECT,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  const state = deriveClientConfirmationState(updated)
+
+  // D5: declining NEVER cancels — the slot stays occupied and the pro decides.
+  // This notification is how they learn. Dedupe-keyed per booking, so a
+  // repeated tap refreshes one inbox row instead of stacking copies.
+  if (args.answer === 'DECLINE') {
+    const clientName = formatClientName(booking.client)
+    const serviceLabel = booking.service?.name?.trim() || 'the appointment'
+    const whenClause = formatBookingWhenClause(
+      booking.scheduledFor,
+      resolveBookingDisplayTimeZone(booking),
+    )
+
+    await createProNotification({
+      tx: args.tx,
+      professionalId: booking.professionalId,
+      eventKey: NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED,
+      priority: NotificationPriority.HIGH,
+      title: 'Client can’t make it',
+      body: `${clientName} said they can’t make ${serviceLabel}${whenClause}. The time stays booked until you cancel or reschedule it.`,
+      href: `/pro/bookings/${booking.id}`,
+      actorUserId: null,
+      bookingId: booking.id,
+      dedupeKey: `PRO_NOTIF:${NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED}:${booking.id}`,
+      data: {
+        bookingId: booking.id,
+        declinedAt: args.now.toISOString(),
+      },
+    })
+  }
+
+  // Not single-use — usage is recorded, never burned, and only after the
+  // answer wrote successfully inside this same transaction
+  // ([[single-use-token-consumed-before-tx]] in spirit: nothing irreversible
+  // happens before the write it accounts for).
+  await markAppointmentConfirmationTokenUsed({
+    tokenId: args.tokenId,
+    tx: args.tx,
+    now: args.now,
+  })
+
+  return {
+    booking: {
+      id: updated.id,
+      status: updated.status,
+      scheduledFor: updated.scheduledFor,
+    },
+    state,
+    meta: buildMeta(state !== priorState),
+  }
+}
+
+/**
+ * The one-tap confirm / "can't make it" decline behind the public
+ * /client/appointment/<token> page. Both are Booking writes → write boundary,
+ * under the client-owned booking lock the cancel path uses.
+ */
+export async function recordAppointmentConfirmationFromClientToken(args: {
+  rawToken: string
+  answer: AppointmentConfirmationAnswer
+}): Promise<RecordAppointmentConfirmationAnswerResult> {
+  const resolved = await resolveAppointmentConfirmationTokenForMutation({
+    rawToken: args.rawToken,
+  })
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: resolved.booking.id,
+    clientId: resolved.booking.clientId,
+    run: async ({ tx, now }) =>
+      performLockedRecordAppointmentConfirmationAnswer({
+        tx,
+        now,
+        bookingId: resolved.booking.id,
+        clientId: resolved.booking.clientId,
+        tokenId: resolved.token.id,
+        answer: args.answer,
+      }),
+  })
+}
+
 export async function reassignClientBookings(args: {
   tx: Prisma.TransactionClient
   fromClientId: string

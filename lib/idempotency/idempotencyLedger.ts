@@ -103,6 +103,10 @@ export function buildPublicDepositTokenActorKey(tokenId: string): string {
   return `public-deposit-token:${tokenId}`
 }
 
+export function buildPublicAppointmentTokenActorKey(tokenId: string): string {
+  return `public-appointment-token:${tokenId}`
+}
+
 export async function beginIdempotency<TBody>(args: {
   actor: IdempotencyActor
   route: IdempotencyRoute

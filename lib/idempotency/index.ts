@@ -1,6 +1,7 @@
 export {
   beginIdempotency,
   buildPublicAftercareTokenActorKey,
+  buildPublicAppointmentTokenActorKey,
   buildPublicConsultationTokenActorKey,
   buildPublicDepositTokenActorKey,
   completeIdempotency,

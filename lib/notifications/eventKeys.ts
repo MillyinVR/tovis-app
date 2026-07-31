@@ -20,6 +20,7 @@ export type NotificationTemplateKey =
   | 'review_received'
   | 'review_requested'
   | 'appointment_reminder'
+  | 'appointment_confirmation_declined'
   | 'aftercare_ready'
   | 'last_minute_opening_available'
   | 'waitlist_time_offered'
@@ -447,6 +448,23 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED]: {
+    key: NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: true,
+    // No quiet-hours bypass ON PURPOSE (K12): D5 means the slot stays occupied
+    // whether the pro reads this at 3am or 8am — nothing time-critical changes
+    // overnight, so the decline defers like any other non-urgent notice
+    // (unlike the cancel events, which are bypass:true because the slot has
+    // ALREADY been freed and may be resellable).
+    allowQuietHoursBypass: false,
+    templateKey: 'appointment_confirmation_declined',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -1013,6 +1031,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.CONSULTATION_REJECTED,
   NotificationEventKey.REVIEW_RECEIVED,
   NotificationEventKey.APPOINTMENT_REMINDER,
+  NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,

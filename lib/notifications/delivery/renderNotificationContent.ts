@@ -389,6 +389,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   review_received: 'View review',
   review_requested: 'Leave a review',
   appointment_reminder: 'View appointment',
+  appointment_confirmation_declined: 'View booking',
   aftercare_ready: 'View aftercare',
   last_minute_opening_available: 'View opening',
   waitlist_time_offered: 'Confirm your time',
@@ -434,6 +435,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   deposit_payment_link: buildStandardTemplateRenderer(
     templateCtaLabels.deposit_payment_link,
+  ),
+  appointment_confirmation_declined: buildStandardTemplateRenderer(
+    templateCtaLabels.appointment_confirmation_declined,
   ),
   booking_confirmed: buildStandardTemplateRenderer(
     templateCtaLabels.booking_confirmed,
