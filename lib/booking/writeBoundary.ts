@@ -9442,11 +9442,26 @@ async function performLockedFinalizeBookingFromHold(args: {
   // must keep returning itself: re-refusing a completed finalize because the
   // client later deleted their card would turn a successful booking into an
   // error on retry.
-  await assertClientCardOnFileSatisfied({
-    tx: args.tx,
-    professionalId: args.offering.professionalId,
-    clientId: args.clientId,
-  })
+  //
+  // 🔴 AFTERCARE is exempt, and this is not a loophole — it is the same rule the
+  // deposit already follows one floor down. `source: AFTERCARE` reaches this
+  // function ONLY through the unauthenticated aftercare-token branch of
+  // POST /api/v1/bookings/finalize (that branch refuses without a token), and a
+  // token-flow client has no session, so `POST /api/v1/client/payment-methods/
+  // setup-intent` — which calls requireClient() — 401s for them. Enforcing here
+  // would refuse the rebook and hand them an add-card step that cannot work:
+  // a requirement with no means of compliance
+  // ([[offered-option-must-be-an-accepted-write]]). `resolveDiscoveryFinalize`
+  // stamps no deposit on this same path for exactly this reason (K10-A-2); a pro
+  // who wants this client gated has `blockSelfServeBooking`, which DOES cover
+  // aftercare rebooks.
+  if (args.source !== BookingSource.AFTERCARE) {
+    await assertClientCardOnFileSatisfied({
+      tx: args.tx,
+      professionalId: args.offering.professionalId,
+      clientId: args.clientId,
+    })
+  }
 
   const hold = await args.tx.bookingHold.findUnique({
     where: { id: args.holdId },

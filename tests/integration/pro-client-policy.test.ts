@@ -504,9 +504,50 @@ describe('requireCardOnFile', () => {
     expect(booked.booking.id).toBeTruthy()
   })
 
+  // 🔴 AFTERCARE is exempt because that path is UNAUTHENTICATED. `source:
+  // AFTERCARE` reaches finalize only through the aftercare-token branch, and a
+  // token-flow client has no session, so the setup-intent route 401s for them —
+  // enforcing here would refuse the rebook and offer an add-card step that
+  // cannot work. Same reasoning that already keeps deposits off this path
+  // (K10-A-2). A pro who wants this client gated uses blockSelfServeBooking,
+  // which DOES cover aftercare rebooks.
+  it('8. does NOT refuse an aftercare rebook, which cannot save a card', async () => {
+    process.env.ENABLE_NO_SHOW_PROTECTION = '1'
+    await setPolicy({ requireCardOnFile: true })
+
+    const held = await holdIt({ start: nextStart() })
+
+    const discovery = await resolveDiscoveryFinalize({
+      clientId: fx.clientId,
+      clientUserId: null,
+      professionalId: fx.professionalId,
+      offeringId: fx.offeringId,
+      lookPostId: null,
+      mediaId: null,
+      source: BookingSource.AFTERCARE,
+      aftercare: true,
+    })
+
+    const booked = await finalizeBookingFromHold({
+      clientId: fx.clientId,
+      bookingEntryPoint: 'DIRECT_PROFILE',
+      holdId: held.hold.id,
+      openingId: null,
+      addOnIds: [],
+      locationType: ServiceLocationType.SALON,
+      source: BookingSource.AFTERCARE,
+      initialStatus: BookingStatus.PENDING,
+      rebookOfBookingId: null,
+      offering: holdOffering(),
+      discovery,
+    })
+
+    expect(booked.booking.id).toBeTruthy()
+  })
+
   // 🔴 The rail gate. With ENABLE_NO_SHOW_PROTECTION off, no client can save a
   // card at all, so enforcing the requirement would strand every booking.
-  it('8. is inert while the save-card rail is dark', async () => {
+  it('9. is inert while the save-card rail is dark', async () => {
     delete process.env.ENABLE_NO_SHOW_PROTECTION
     await setPolicy({ requireCardOnFile: true })
 
@@ -523,7 +564,7 @@ describe('requireDeposit / prepayScope', () => {
   // The fixture pro's scope is NEW_DISCOVERY_ONLY and this client is a DIRECT
   // booking with a prior relationship, so ONLY the policy can make them owe
   // anything up front. That is what makes this test about the policy.
-  it('9. a direct booking owes nothing up front without a policy', async () => {
+  it('10. a direct booking owes nothing up front without a policy', async () => {
     const directive = await resolveDiscoveryFinalize({
       clientId: fx.clientId,
       clientUserId: fx.clientUserId,
@@ -538,7 +579,7 @@ describe('requireDeposit / prepayScope', () => {
     expect(directive.depositRequirement.required).toBe(false)
   })
 
-  it('10. requireDeposit makes that same booking owe the deposit', async () => {
+  it('11. requireDeposit makes that same booking owe the deposit', async () => {
     await setPolicy({ requireDeposit: true })
 
     const directive = await resolveDiscoveryFinalize({
@@ -559,7 +600,7 @@ describe('requireDeposit / prepayScope', () => {
     expect(directive.feeEligible).toBe(false)
   })
 
-  it('11. and the stamped booking actually carries it', async () => {
+  it('12. and the stamped booking actually carries it', async () => {
     await setPolicy({ requireDeposit: true })
 
     const held = await holdIt({ start: nextStart() })
@@ -575,7 +616,7 @@ describe('requireDeposit / prepayScope', () => {
     expect(Number(row.depositAmount)).toBe(40)
   })
 
-  it('12. a per-client prepay requirement reaches the directive', async () => {
+  it('13. a per-client prepay requirement reaches the directive', async () => {
     await setPolicy({ prepayScope: OfferingPrepayScope.ENTIRE_BOOKING })
 
     const directive = await resolveDiscoveryFinalize({
@@ -597,7 +638,7 @@ describe('requireDeposit / prepayScope', () => {
 
   // The scope UNION: the offering asks for the service only, the client policy
   // asks for the whole booking — the wider one wins.
-  it('13. takes the WIDER of the offering and client prepay scopes', async () => {
+  it('14. takes the WIDER of the offering and client prepay scopes', async () => {
     await db.professionalServiceOffering.update({
       where: { id: fx.offeringId },
       data: { prepayScope: OfferingPrepayScope.SERVICE_ONLY },
@@ -629,7 +670,7 @@ describe('requireDeposit / prepayScope', () => {
 
   // 🔴 A prepaid booking must hold the BILL, not the bill plus a deposit. The
   // two money terms take max, never a sum (lib/booking/prepay.ts).
-  it('14. prepay + an account deposit collect the max, never the sum', async () => {
+  it('15. prepay + an account deposit collect the max, never the sum', async () => {
     await setPolicy({
       requireDeposit: true,
       prepayScope: OfferingPrepayScope.ENTIRE_BOOKING,
@@ -658,7 +699,7 @@ describe('requireDeposit / prepayScope', () => {
   // charge that does not exist, which the 24h release sweep would then cancel.
   // The requirement stands down instead, and the write route refuses to STORE
   // it in this state (`describeDepositRequirementBlocker`).
-  it('15. requireDeposit stands down when the pro has no deposit configured', async () => {
+  it('16. requireDeposit stands down when the pro has no deposit configured', async () => {
     await db.professionalPaymentSettings.update({
       where: { professionalId: fx.professionalId },
       data: { depositEnabled: false },
@@ -699,7 +740,7 @@ describe('requireDeposit / prepayScope', () => {
   // 🔴 PREPAY is the other half of that asymmetry: it DOES override the pro's
   // account-wide deposit switch, exactly as K10's per-service requirement does,
   // because it sizes itself from the bill and needs no configuration.
-  it('16. prepay still applies with the account deposit switched off', async () => {
+  it('17. prepay still applies with the account deposit switched off', async () => {
     await db.professionalPaymentSettings.update({
       where: { professionalId: fx.professionalId },
       data: { depositEnabled: false },
@@ -732,7 +773,7 @@ describe('requireDeposit / prepayScope', () => {
 // match the prediction written before running it (proof 2).
 //
 //  1. Drop the `if (!rescheduleBookingId)` guard in performLockedCreateHold, so
-//     the switch refuses every hold → 1 failed | 13 passed. Only test 4 fails.
+//     the switch refuses every hold → 1 failed | 16 passed. Only test 4 fails.
 //     🔴 Tests 1–3 stay GREEN, which is exactly why the exemption needs its own
 //     test: an implementation that blocks EVERYTHING passes every test that
 //     only asks whether the refusal happens.
@@ -747,14 +788,21 @@ describe('requireDeposit / prepayScope', () => {
 //     rather than being read as a code. Recorded as run, not as predicted.
 //
 //  3. Have resolveProClientPolicy ignore `cardOnFileRailEnabled` (return the
-//     stored boolean) → 1 failed | 15 passed. Test 8 fails with
+//     stored boolean) → 1 failed | 16 passed. Test 9 fails with
 //     "CARD_ON_FILE_REQUIRED" on a platform where no client can save a card.
 //
-//  4. Let the per-client deposit override `proDepositEnabled` the way prepay
+//  4. Remove the `source !== AFTERCARE` exemption from the card-on-file gate →
+//     1 failed | 16 passed. Test 8 fails, "CARD_ON_FILE_REQUIRED" on the one
+//     path whose client has no session and therefore no way to save a card.
+//     🔴 Found in review, not by a test: the first implementation had no
+//     exemption, and every other test stayed green because they all finalize as
+//     an authenticated client.
+//
+//  5. Let the per-client deposit override `proDepositEnabled` the way prepay
 //     does (`(enabled && matchesScope) || clientPolicyRequiresDeposit`) →
-//     1 failed | 15 passed. Test 15 fails, "expected true to be false": the
+//     1 failed | 16 passed. Test 16 fails, "expected true to be false": the
 //     directive reports a deposit REQUIRED for a pro whose configuration can
 //     only ever compute $0 — the stranded charge this design refuses to create.
-//     🔴 This proof needs test 15 specifically; against the fixture's
+//     🔴 This proof needs test 16 specifically; against the fixture's
 //     deposit-enabled pro the override changes nothing and the whole suite
 //     stays green.
