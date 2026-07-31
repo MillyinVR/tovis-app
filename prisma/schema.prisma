@@ -333,6 +333,18 @@ enum ClientActionTokenKind {
   // confirm and later come back to cancel or reschedule from the same message;
   // the token expires at the appointment start instead.
   APPOINTMENT_CONFIRMATION
+  // K15: the consent-signature link (/client/consent/<token>). Pins the exact
+  // ConsentFormVersion the client is shown at MINT time — publishing a new
+  // version between the send and the signature must not change which words the
+  // record attests to.
+  //
+  // NOT single-use, on the DEPOSIT_PAYMENT reasoning: completion is enforced by
+  // the STATE, not by burning the token — here the unique
+  // ClientConsentRecord.signatureTokenId, which makes a second signature
+  // impossible at the database. Burning it instead would answer a client who
+  // reopens the link to re-read what they agreed to with "invalid or expired",
+  // when the truth is "you signed this, here it is".
+  CONSENT_SIGNATURE
 }
 
 enum NfcCardType {
@@ -653,6 +665,11 @@ enum NotificationEventKey {
   // EMAIL/SMS carrying the /client/deposit/<token> magic link, because the
   // client is often unclaimed and cannot use the login-gated deposit surface.
   DEPOSIT_PAYMENT_LINK
+  // K15: the secure consent-signature link — EMAIL/SMS carrying
+  // /client/consent/<token> so a client (often unclaimed) can read and sign the
+  // waiver their pro's service requires. The link pins ONE ConsentFormVersion;
+  // the ask is per booking, because that is when the requirement becomes real.
+  CONSENT_SIGNATURE_REQUEST
   // K12: the client answered an appointment-confirmation ask with "can't make
   // it" (Booking.clientConfirmationDeclinedAt). Pro-facing. The slot stays
   // occupied — D5: an unconfirmed appointment NEVER auto-cancels; cancelling
@@ -1266,6 +1283,12 @@ model ClientActionToken {
   bookingId              String
   consultationApprovalId String?
   aftercareSummaryId     String?
+  // K15 — the exact consent text this signature link puts in front of the
+  // client, pinned when the link is MINTED. The signing route writes this same
+  // id onto the record, so publishing a new version between the send and the
+  // signature cannot change which words the record attests to. Resolving
+  // `max(version)` at signing time instead would silently re-point it.
+  consentFormVersionId   String?
   clientId               String
   professionalId         String
 
@@ -1288,6 +1311,8 @@ model ClientActionToken {
   booking              Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   consultationApproval ConsultationApproval? @relation(fields: [consultationApprovalId], references: [id], onDelete: Cascade)
   aftercareSummary     AftercareSummary?     @relation(fields: [aftercareSummaryId], references: [id], onDelete: Cascade)
+  consentFormVersion   ConsentFormVersion?   @relation("ConsentSignatureTokenVersion", fields: [consentFormVersionId], references: [id], onDelete: Cascade)
+  consentRecord        ClientConsentRecord?  @relation("ConsentSignatureTokenRecord")
   client               ClientProfile         @relation(fields: [clientId], references: [id], onDelete: Cascade)
   professional         ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
   issuedByUser         User?                 @relation("IssuedClientActionTokens", fields: [issuedByUserId], references: [id], onDelete: SetNull)
@@ -1304,6 +1329,7 @@ model ClientActionToken {
   @@index([clientId, kind, createdAt])
   @@index([professionalId, kind, createdAt])
   @@index([issuedByUserId, createdAt])
+  @@index([consentFormVersionId, kind, createdAt])
 }
 
 model ConsultationApprovalProof {
@@ -1422,11 +1448,11 @@ model User {
   // the user from verification-email retry sweeps.
   emailSendPermanentlyFailedAt DateTime?
 
-  lookLikes        LookLike[]
-  lookHides        LookHide[]
+  lookLikes                 LookLike[]
+  lookHides                 LookHide[]
   lookViewerImpressionStats LookViewerImpressionStat[]
-  lookComments     LookComment[]
-  lookCommentLikes LookCommentLike[]
+  lookComments              LookComment[]
+  lookCommentLikes          LookCommentLike[]
 
   lookPostReports    LookPostReport[]
   lookCommentReports LookCommentReport[]
@@ -2885,6 +2911,22 @@ model ProfessionalServiceOffering {
   /// deposit nobody can pay. See lib/booking/depositRequirement.ts.
   prepayScope OfferingPrepayScope?
 
+  /// K15: this service requires a signed consent form. Points at the FORM, not
+  /// a version — the version is resolved when the signature request is sent,
+  /// which is what makes K14's append-only model do its job: a pro who edits
+  /// the waiver changes what future clients sign, and changes nothing about
+  /// what past clients already signed.
+  ///
+  /// 🔴 v1 WARNS, it does not BLOCK. Nothing on the booking path consults this
+  /// column; it feeds the pro-facing "waiver not signed" marks on the calendar
+  /// card and at session start. Refusing bookings on an unsigned waiver would
+  /// strand real appointments the day a pro sets their first requirement.
+  ///
+  /// Restrict, not SetNull: a requirement that silently disappears when a form
+  /// is deleted stops clients being asked to sign, with nothing on any surface
+  /// to say so. Unbinding is the pro's explicit act.
+  consentFormId String?
+
   customImageUrl String?
 
   isActive  Boolean  @default(true)
@@ -2893,6 +2935,7 @@ model ProfessionalServiceOffering {
 
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
   service      Service             @relation(fields: [serviceId], references: [id])
+  consentForm  ConsentForm?        @relation("OfferingConsentRequirement", fields: [consentFormId], references: [id], onDelete: Restrict)
 
   bookings Booking[]
 
@@ -2913,6 +2956,8 @@ model ProfessionalServiceOffering {
 
   @@unique([professionalId, serviceId])
   @@index([professionalId, isActive])
+  // K15 — "which of my services require this form", and the FK's own lookups.
+  @@index([consentFormId])
 }
 
 /// Price-grace ramp for an offering whose price the pro set BELOW the catalog
@@ -3465,7 +3510,7 @@ model Booking {
   aftercareSummary             AftercareSummary?
   // Inverse of AftercareSummary.rebookedBooking: the summary whose BOOKED slot
   // created this appointment.
-  aftercareRebookedFromSummary AftercareSummary? @relation("AftercareRebookedBooking")
+  aftercareRebookedFromSummary AftercareSummary?             @relation("AftercareRebookedBooking")
   waitlistOffer                WaitlistOffer?
   clientNotifications          ClientNotification[]
   scheduledClientNotifications ScheduledClientNotification[]
@@ -4153,6 +4198,9 @@ model ConsentForm {
   adoptions      ConsentForm[]        @relation("ConsentFormTemplateAdoptions")
   versions       ConsentFormVersion[]
 
+  // K15 — the services that require this form to be signed.
+  requiredByOfferings ProfessionalServiceOffering[] @relation("OfferingConsentRequirement")
+
   @@index([professionalId, kind, isActive])
   @@index([sourceTemplateId])
 }
@@ -4192,6 +4240,8 @@ model ConsentFormVersion {
   sourceTemplateVersion ConsentFormVersion?   @relation("ConsentFormVersionTemplateSource", fields: [sourceTemplateVersionId], references: [id], onDelete: SetNull)
   derivedVersions       ConsentFormVersion[]  @relation("ConsentFormVersionTemplateSource")
   consentRecords        ClientConsentRecord[]
+  // K15 — the signature links minted against THIS version's words.
+  signatureTokens       ClientActionToken[]   @relation("ConsentSignatureTokenVersion")
 
   @@unique([formId, version])
   @@index([sourceTemplateVersionId])
@@ -4225,6 +4275,17 @@ model ClientConsentRecord {
   proofMethod ConsentProofMethod?
   proofRef    String?
 
+  // K15 — the signature link the CLIENT used, when this record was written by
+  // the platform rather than typed in by the pro. 🔴 UNIQUE: one signature per
+  // link, enforced by the database, so a double-submitted form cannot become
+  // two records attesting to the same act. Its presence is also what makes
+  // `proofMethod = CLIENT_TOKEN` truthful — the pro can no longer claim it by
+  // hand (K14-B), because only the signing route writes this pair.
+  //
+  // SetNull, never Cascade: deleting the link must not delete the signature.
+  // The record is the artifact; the token was only the doorway.
+  signatureTokenId String? @unique
+
   // Patch-test safety fields (travel to any pro with access).
   patchTestResult PatchTestResult?
   validUntil      DateTime?
@@ -4234,10 +4295,11 @@ model ClientConsentRecord {
 
   visibility ClientNoteVisibility @default(PRIVATE_TO_AUTHOR)
 
-  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
-  booking      Booking?            @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  formVersion  ConsentFormVersion? @relation(fields: [formVersionId], references: [id], onDelete: Restrict)
+  client         ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  booking        Booking?            @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  formVersion    ConsentFormVersion? @relation(fields: [formVersionId], references: [id], onDelete: Restrict)
+  signatureToken ClientActionToken?  @relation("ConsentSignatureTokenRecord", fields: [signatureTokenId], references: [id], onDelete: SetNull)
 
   @@index([professionalId, clientId, createdAt])
   @@index([clientId, kind, validUntil])
@@ -4606,33 +4668,33 @@ model LookPost {
   service           Service?            @relation(fields: [serviceId], references: [id], onDelete: SetNull)
   reviewedByUser    User?               @relation("LookPostReviewedByUser", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
 
-  assets           LookPostAsset[]
-  likes            LookLike[]
+  assets                LookPostAsset[]
+  likes                 LookLike[]
   // Per-viewer "not for me" hides (spec §2.2). An explicit, reversible negative
   // signal: a hidden look is excluded from that viewer's feeds, and repeated
   // hides in a category apply a decayed category-level suppression. See
   // lib/looks/hides.ts + lib/looks/personalizedFeed.ts.
-  hides            LookHide[]
-  comments         LookComment[]
-  reports          LookPostReport[]
-  boardItems       BoardItem[]
+  hides                 LookHide[]
+  comments              LookComment[]
+  reports               LookPostReport[]
+  boardItems            BoardItem[]
   // §6.0 visual embedding of the primary image (written by the
   // EMBED_LOOK_POST_IMAGE job; absent until the look is embedded).
-  embedding        LookPostEmbedding?
+  embedding             LookPostEmbedding?
   // §5.6 per-source, per-day impression aggregates (written by the
   // APPLY_LOOK_VIEWS job); the anti-gaming velocity-check denominator breakdown.
-  impressionStats  LookPostImpressionStat[]
+  impressionStats       LookPostImpressionStat[]
   // §4.6 per-viewer feed-exposure counts (written by the APPLY_LOOK_VIEWS job);
   // once a viewer has seen a look enough times it's capped out of their feed.
   viewerImpressionStats LookViewerImpressionStat[]
-  inspiredBookings Booking[]                @relation("LookInspiredBookings")
+  inspiredBookings      Booking[]                  @relation("LookInspiredBookings")
   // §4.2 per-look booking-conversion aggregate (written hourly by the
   // look-conversion-stats job; absent until the look has driven >=1 booking).
-  conversionStat   LookPostConversionStat?
+  conversionStat        LookPostConversionStat?
   // User-facing hashtags / style tags parsed from the caption at publish
   // (social-first D1). Implicit M2M; banned tags are dropped at publish and
   // their tag pages 404. See lib/looks/tags.ts.
-  tags             LookTag[]                @relation("LookPostTags")
+  tags                  LookTag[]                  @relation("LookPostTags")
 
   @@index([professionalId, publishedAt])
   @@index([serviceId, publishedAt])

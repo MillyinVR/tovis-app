@@ -18,6 +18,7 @@ export type RateLimitBucket =
   | 'client:checkout:token'
   | 'client:deposit:token'
   | 'client:appointment:token'
+  | 'client:consent:token'
   | 'client:appointment:answer'
   | 'pro:bookings:write'
   | 'pro:media:write'
@@ -190,6 +191,16 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 20,
     windowSeconds: 5 * 60,
     prefix: 'rl:client:appointment:token',
+    mode: 'redis-only',
+  },
+  // K15: the public consent-signature link. Tighter than the appointment
+  // bucket — signing is ONE act per link (the unique signatureTokenId makes a
+  // second impossible), so anything past a handful of attempts is a client
+  // fixing a typo in their name, not normal use.
+  'client:consent:token': {
+    limit: 10,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:client:consent:token',
     mode: 'redis-only',
   },
   // K13: the same answer from a signed-in client, in the app. Sized like the

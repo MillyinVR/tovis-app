@@ -168,7 +168,16 @@ function resolveRequestedChannels(
  */
 const UNVERIFIED_DESTINATION_ACTION_TYPES = new Set<
   EnqueueClientActionDispatchArgs['plan']['definition']['type']
->(['CLIENT_CLAIM_INVITE', 'CONSULTATION_ACTION', 'AFTERCARE_ACCESS', 'DEPOSIT_PAYMENT'])
+>([
+  'CLIENT_CLAIM_INVITE',
+  'CONSULTATION_ACTION',
+  'AFTERCARE_ACCESS',
+  'DEPOSIT_PAYMENT',
+  // K15: the consent-signature link is aimed at exactly this recipient — a
+  // pro-created, often unclaimed client with an unverified phone. Left out, the
+  // SMS is suppressed and the pro's "sent" is a lie.
+  'CONSENT_SIGNATURE',
+])
 
 export function resolveAllowUnverifiedDestination(
   args: Pick<EnqueueClientActionDispatchArgs, 'allowUnverifiedDestination' | 'plan'>,

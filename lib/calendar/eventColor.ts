@@ -11,10 +11,19 @@
 //   card fill + border  → booking STATUS      (app/pro/calendar/_utils/statusStyles.ts)
 //   4px accent stripe   → SERVICE swatch      (this file)
 //   text chips          → location (K3) · relationship (K5) · payment (K1)
+//                         · unsigned consent (K15)
 //   corner glyph        → client confirmation (K11, decision D3 — ✓ / ?, never a fill)
 //
 // 🔴 Anything new must CLAIM a channel or be refused. B5 added an eighth status
 // tone without anyone asking whether there was room; this table is that budget.
+//
+// K15 claims a TEXT CHIP, not a colour and not a second warning glyph. The
+// glyph channel is spoken for (K11), and the conflict triangle already owns the
+// "something is wrong here" shape — a second triangle would make both of them
+// mean "one of two things". A word needs no legend to decode and survives being
+// read by a colour-blind pro (the K3 LocationChip reasoning). It is the FIFTH
+// chip a card can carry, so its render is width-checked, not assumed: K13 found
+// on iOS that a fourth pill wrapped the row inside words.
 //
 // ── Why a resolver at all ────────────────────────────────────────────────────
 // The swatch lives on `ProfessionalServiceOffering` (the pro↔service join), NOT

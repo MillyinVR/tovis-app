@@ -33,6 +33,7 @@ import {
   type CalendarScopeMode,
 } from '@/lib/calendar/constants'
 import { parseClientConfirmationBadgeWire } from '@/lib/booking/clientConfirmation'
+import { parseConsentRequirementBadgeWire } from '@/lib/consentForms/requirement'
 import { parsePaymentBadgeWire } from '@/lib/booking/paymentBadge'
 import { parseRelationshipBadgeWire } from '@/lib/booking/relationshipLabel'
 import { parseCalendarSwatch } from '@/lib/calendar/eventColor'
@@ -452,6 +453,10 @@ function parseBookingEvent(
   const clientConfirmation = parseClientConfirmationBadgeWire(
     value.clientConfirmation,
   )
+  // K15 unsigned-consent mark — malformed → no chip, never an invented warning.
+  const consentRequirement = parseConsentRequirementBadgeWire(
+    value.consentRequirement,
+  )
 
   const event: BookingCalendarEvent = {
     kind: 'BOOKING',
@@ -485,6 +490,7 @@ function parseBookingEvent(
     ...(relationshipBadge ? { relationshipBadge } : {}),
     ...(serviceSwatch ? { serviceSwatch } : {}),
     ...(clientConfirmation ? { clientConfirmation } : {}),
+    ...(consentRequirement ? { consentRequirement } : {}),
     ...(clientProfileId ? { clientProfileId } : {}),
     ...(preferenceLabel ? { preferenceLabel } : {}),
     ...(offerHref ? { offerHref } : {}),

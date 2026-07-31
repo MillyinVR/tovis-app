@@ -60,6 +60,14 @@ import {
   loadOfferingSwatchesByServiceId,
   resolveBookingServiceSwatch,
 } from '@/lib/calendar/serviceSwatch'
+import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
+import {
+  collectBookingConsentRequirements,
+  deriveConsentRequirementBadge,
+  loadConsentRequirementsByServiceId,
+  loadSignedConsentFormIds,
+  type ConsentRequirement,
+} from '@/lib/consentForms/requirement'
 
 import {
   CALENDAR_MS_PER_DAY,
@@ -193,6 +201,9 @@ const bookingSelect = {
   ...RELATIONSHIP_BADGE_SELECT,
   // Client-confirmation inputs (K11): only the three loop timestamps.
   ...CLIENT_CONFIRMATION_SELECT,
+  // K15 consent-requirement inputs: `finishedAt` is how the badge knows an
+  // appointment is over (a warning nobody can act on is noise, not information).
+  finishedAt: true,
   client: {
     select: {
       id: true,
@@ -228,6 +239,9 @@ const bookingSelect = {
       id: true,
       itemType: true,
       sortOrder: true,
+      // K15: which SERVICE each item is, so the consent-requirement map (keyed
+      // by serviceId) can be read without a second join per row.
+      serviceId: true,
       durationMinutesSnapshot: true,
       priceSnapshot: true,
       service: {
@@ -640,12 +654,52 @@ function linkableClientProfileId(
   return clientId && visibleClientIds.has(clientId) ? clientId : null
 }
 
+/**
+ * K15 — one booking's unsigned-consent mark, or null.
+ *
+ * Kept beside `toBookingEvent` rather than inside it so the assembly (collect
+ * requirements → subtract what this client signed → derive) reads as one
+ * sentence, and so a second surface can call the same three helpers in the same
+ * order rather than inventing a fourth arrangement of them.
+ */
+function deriveBookingConsentBadge(args: {
+  booking: BookingRow
+  consentRequirementsByServiceId: ReadonlyMap<string, ConsentRequirement>
+  signedConsentFormIdsByClient: ReadonlyMap<string, ReadonlySet<string>>
+  now: Date
+}) {
+  if (args.consentRequirementsByServiceId.size === 0) return null
+
+  const required = collectBookingConsentRequirements(
+    args.booking,
+    args.consentRequirementsByServiceId,
+  )
+
+  if (required.length === 0) return null
+
+  const clientId = args.booking.client?.id ?? null
+  const signed = clientId
+    ? (args.signedConsentFormIdsByClient.get(clientId) ?? new Set<string>())
+    : new Set<string>()
+
+  return deriveConsentRequirementBadge({
+    unsigned: required.filter((requirement) => !signed.has(requirement.formId)),
+    finishedAt: args.booking.finishedAt,
+    scheduledFor: new Date(args.booking.scheduledFor),
+    now: args.now,
+  })
+}
+
 function toBookingEvent(args: {
   booking: BookingRow
   professionalTimeZone: string | null
   viewportTimeZone: string
   visibleClientIds: ReadonlySet<string>
   swatchByServiceId: ReadonlyMap<string, string>
+  /** K15 — empty when the pro has set no requirements, or the gate is off. */
+  consentRequirementsByServiceId: ReadonlyMap<string, ConsentRequirement>
+  signedConsentFormIdsByClient: ReadonlyMap<string, ReadonlySet<string>>
+  now: Date
 }): BookingEvent | null {
   const {
     booking,
@@ -653,6 +707,9 @@ function toBookingEvent(args: {
     viewportTimeZone,
     visibleClientIds,
     swatchByServiceId,
+    consentRequirementsByServiceId,
+    signedConsentFormIdsByClient,
+    now,
   } = args
 
   if (!booking.locationId) return null
@@ -692,6 +749,12 @@ function toBookingEvent(args: {
   const serviceName = getServiceName(booking)
   const serviceSwatch = resolveBookingServiceSwatch(booking, swatchByServiceId)
   const clientConfirmation = deriveClientConfirmationBadge(booking)
+  const consentRequirement = deriveBookingConsentBadge({
+    booking,
+    consentRequirementsByServiceId,
+    signedConsentFormIdsByClient,
+    now,
+  })
 
   return {
     id: booking.id,
@@ -719,6 +782,10 @@ function toBookingEvent(args: {
     // (every booking until K12 ships the writers), so today's payload — and
     // the card DOM — stays byte-identical to pre-K11.
     ...(clientConfirmation.significant ? { clientConfirmation } : {}),
+    // K15: same rule again — omitted unless there is genuinely an unsigned form
+    // on an appointment that has not happened yet, so a pro who has set no
+    // requirement sees a payload byte-identical to pre-K15.
+    ...(consentRequirement?.significant ? { consentRequirement } : {}),
     details: {
       serviceName,
       bufferMinutes,
@@ -1085,7 +1152,18 @@ export async function GET(req: Request) {
     // link to the pro-only client chart without leaking ids for anyone else.
     const visibleClientIds = await getVisibleClientIdSetForPro(professionalId)
 
-    const [bookings, blocks, holds, swatchByServiceId] = await Promise.all([
+    // K15's mark is pro-gated like every other technical-record surface, so an
+    // ungated pro's payload is byte-identical to pre-K15.
+    const consentRequirementsEnabled =
+      isClientTechnicalRecordEnabled(professionalId)
+
+    const [
+      bookings,
+      blocks,
+      holds,
+      swatchByServiceId,
+      consentRequirementsByServiceId,
+    ] = await Promise.all([
       prisma.booking.findMany({
         where: {
           professionalId,
@@ -1164,7 +1242,44 @@ export async function GET(req: Request) {
       // problem is a fetch waterfall, and a lookup narrowed to the bookings'
       // service ids would have had to wait for them.
       loadOfferingSwatchesByServiceId({ db: prisma, professionalId }),
+      // K15 consent requirements: keyed on the PRO alone for the same reason as
+      // the swatch map above, so it rides this Promise.all instead of adding a
+      // serial hop. Skipped entirely when the gate is off for this pro — the
+      // whole surface is dark then, and there is nothing to mark.
+      consentRequirementsEnabled
+        ? loadConsentRequirementsByServiceId({ db: prisma, professionalId })
+        : Promise.resolve(
+            new Map<string, ConsentRequirement>() as ReadonlyMap<
+              string,
+              ConsentRequirement
+            >,
+          ),
     ])
+
+    // 🔴 The ONE query in this route that genuinely has to wait for the
+    // bookings: "which of these clients already signed which of these forms".
+    // It is skipped whenever the pro has bound no forms — which today is every
+    // pro — so nobody pays for the feature until they use it, and the route's
+    // known fetch-waterfall problem does not grow by default.
+    const signedConsentFormIdsByClient = consentRequirementsByServiceId.size > 0
+      ? await loadSignedConsentFormIds({
+          db: prisma,
+          professionalId,
+          clientIds: [
+            ...new Set(
+              bookings
+                .map((booking) => booking.client?.id)
+                .filter((id): id is string => typeof id === 'string'),
+            ),
+          ],
+          formIds: [
+            ...new Set(
+              [...consentRequirementsByServiceId.values()].map((r) => r.formId),
+            ),
+          ],
+          now,
+        })
+      : new Map<string, ReadonlySet<string>>()
 
     const bookingEvents = bookings
       .map((booking) =>
@@ -1174,6 +1289,9 @@ export async function GET(req: Request) {
           viewportTimeZone,
           visibleClientIds,
           swatchByServiceId,
+          consentRequirementsByServiceId,
+          signedConsentFormIdsByClient,
+          now,
         }),
       )
       .filter((event): event is BookingEvent => event !== null)

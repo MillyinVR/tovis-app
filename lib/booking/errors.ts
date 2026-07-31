@@ -71,6 +71,8 @@ export type BookingErrorCode =
   | "DEPOSIT_TOKEN_INVALID"
   | "APPOINTMENT_TOKEN_MISSING"
   | "APPOINTMENT_TOKEN_INVALID"
+  | "CONSENT_TOKEN_MISSING"
+  | "CONSENT_TOKEN_INVALID"
   | "APPOINTMENT_CONFIRMATION_UNAVAILABLE"
   | "AFTERCARE_NOT_COMPLETED"
   | "AFTERCARE_CLIENT_MISMATCH"
@@ -687,6 +689,21 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Appointment confirmation token is invalid.",
     userMessage: "That appointment link is invalid or expired.",
+  },
+  // K15: the consent-signature link (/client/consent/<token>).
+  CONSENT_TOKEN_MISSING: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Consent signature token is missing.",
+    userMessage: "That consent link is invalid or expired.",
+  },
+  CONSENT_TOKEN_INVALID: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Consent signature token is invalid.",
+    userMessage: "That consent link is invalid or expired.",
   },
   // K12: the confirmation answer no longer applies — the booking is cancelled,
   // finished, or already underway. 409, not 400: the link was real, the world

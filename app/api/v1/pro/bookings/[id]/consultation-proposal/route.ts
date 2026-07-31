@@ -1,5 +1,6 @@
 // app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts
 import { prisma } from '@/lib/prisma'
+import { inferPreferredContactMethod } from '@/lib/notifications/contactMethod'
 import {
   formatProfessionalPublicDisplayName,
   professionalPublicDisplayNameSelect,
@@ -11,7 +12,6 @@ import {
   BookingServiceItemType,
   BookingStatus,
   ConsultationApprovalStatus,
-  ContactMethod,
   MediaPhase,
   NotificationEventKey,
   Prisma,
@@ -295,17 +295,6 @@ function pickFirstNonEmpty(
     if (normalized) return normalized
   }
 
-  return null
-}
-
-function inferPreferredContactMethod(args: {
-  email: string | null
-  phone: string | null
-  existingPreference: ContactMethod | null | undefined
-}): ContactMethod | null {
-  if (args.existingPreference) return args.existingPreference
-  if (args.email && !args.phone) return ContactMethod.EMAIL
-  if (args.phone && !args.email) return ContactMethod.SMS
   return null
 }
 

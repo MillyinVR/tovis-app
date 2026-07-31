@@ -22,6 +22,7 @@ import {
   parseCalendarSwatch,
   type CalendarSwatchId,
 } from '@/lib/calendar/eventColor'
+import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 
 export const dynamic = 'force-dynamic'
 
@@ -105,6 +106,20 @@ function pickPrepayScope(v: unknown): OfferingPrepayScope | null | undefined {
     trimmed === OfferingPrepayScope.ENTIRE_BOOKING
     ? trimmed
     : undefined
+}
+
+/**
+ * K15: the per-service consent requirement — a `ConsentForm` id, or null to
+ * clear it. Shape only; ownership/active/has-text are checked against the
+ * database inside the PATCH transaction, because those are facts about a row.
+ */
+function pickNullableConsentFormId(v: unknown): string | null | undefined {
+  if (v === null) return null
+  if (typeof v !== 'string') return undefined
+
+  const trimmed = v.trim()
+
+  return trimmed ? trimmed : null
 }
 
 function pickNullablePriceString(v: unknown): string | null | undefined {
@@ -214,6 +229,9 @@ function toDto(off: OfferingRow) {
 
     // K10: the per-service prepay requirement. Null = off.
     prepayScope: off.prepayScope,
+
+    // K15: the consent form this service requires. Null = none.
+    consentFormId: off.consentFormId,
 
     isActive: Boolean(off.isActive),
 
@@ -603,6 +621,78 @@ export async function PATCH(request: Request, ctx: RouteContext) {
 
       if (prepayScope !== undefined) {
         data.prepayScope = prepayScope
+      }
+
+      // K15: the per-service consent requirement. Validated against the DATABASE
+      // inside this transaction, not just shape-checked — the id names a row
+      // that must be this pro's own, active, and actually have text to sign.
+      if (Object.prototype.hasOwnProperty.call(body, 'consentFormId')) {
+        const consentFormId = pickNullableConsentFormId(body.consentFormId)
+
+        if (consentFormId === undefined) {
+          return {
+            kind: 'ERROR',
+            status: 400,
+            msg: 'consentFormId must be a form id, or null.',
+          }
+        }
+
+        // The kill switch reaches this CONTROL too: with the gate off the picker
+        // is not rendered, and the write is refused rather than quietly ignored.
+        if (consentFormId !== null && !isClientTechnicalRecordEnabled(professionalId)) {
+          return {
+            kind: 'ERROR',
+            status: 400,
+            msg: 'Consent form requirements are not available.',
+          }
+        }
+
+        if (consentFormId !== null) {
+          const form = await tx.consentForm.findFirst({
+            // Own forms only. A platform template is readable by every pro, but
+            // requiring one the pro never adopted would put the platform's words
+            // in front of their clients under their name.
+            where: { id: consentFormId, professionalId },
+            select: {
+              id: true,
+              isActive: true,
+              _count: { select: { versions: true } },
+            },
+          })
+
+          if (!form) {
+            return {
+              kind: 'ERROR',
+              status: 400,
+              msg: 'Consent form not found.',
+            }
+          }
+
+          if (!form.isActive) {
+            return {
+              kind: 'ERROR',
+              status: 400,
+              msg: 'That form is retired. Reactivate it before requiring it.',
+            }
+          }
+
+          // A requirement pointing at a form with no published text can never be
+          // satisfied: nothing can be sent, so nothing can be signed, and the
+          // service warns forever ([[offered-option-must-be-an-accepted-write]]).
+          if (form._count.versions === 0) {
+            return {
+              kind: 'ERROR',
+              status: 400,
+              msg: 'That form has no published text yet.',
+            }
+          }
+        }
+
+        // Through the RELATION, not the scalar: `data` is an UpdateInput, where
+        // a nullable FK is set with connect/disconnect.
+        data.consentForm = consentFormId
+          ? { connect: { id: consentFormId } }
+          : { disconnect: true }
       }
 
       if (typeof offersInSalonIn === 'boolean') {

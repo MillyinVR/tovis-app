@@ -37,6 +37,12 @@ export const DEPOSIT_PAYMENT_TOKEN_FALLBACK_EXPIRY_MS =
 export const APPOINTMENT_CONFIRMATION_TOKEN_FALLBACK_EXPIRY_MS =
   1000 * 60 * 60 * 24 * 30 // 30 days
 
+// K15: fallback only — the mint site always passes an expiresAtOverride derived
+// from the booking (max(scheduledFor, now) + 24h), so a signature link dies a
+// day after the appointment it was needed for.
+export const CONSENT_SIGNATURE_TOKEN_FALLBACK_EXPIRY_MS =
+  1000 * 60 * 60 * 24 * 30 // 30 days
+
 const EMAIL_OR_SMS_CONTACT_METHODS: readonly ContactMethod[] = [
   ContactMethod.EMAIL,
   ContactMethod.SMS,
@@ -239,6 +245,45 @@ export const CLIENT_ACTION_REGISTRY: Record<
     link: {
       target: 'APPOINTMENT',
       pathPrefix: '/client/appointment',
+      requiresToken: true,
+    },
+  },
+
+  CONSENT_SIGNATURE: {
+    type: 'CONSENT_SIGNATURE',
+    token: {
+      required: true,
+      kind: ClientActionTokenKind.CONSENT_SIGNATURE,
+      // NOT single-use, on the DEPOSIT_PAYMENT reasoning: completion is
+      // enforced by the STATE, not by burning the token — here the UNIQUE
+      // ClientConsentRecord.signatureTokenId, which makes a second signature
+      // impossible at the database. Burning it would answer a client who
+      // reopens the link to re-read what they agreed to with "invalid or
+      // expired", when the truth is "you signed this, here it is".
+      singleUse: false,
+      expiresInMs: CONSENT_SIGNATURE_TOKEN_FALLBACK_EXPIRY_MS,
+      // Like DEPOSIT_PAYMENT and unlike APPOINTMENT_CONFIRMATION: re-sending is
+      // the pro chasing ONE outstanding signature, and each fresh link pins the
+      // form version current at that moment. Leaving an older link live would
+      // let a client sign superseded text the pro has already replaced.
+      revokeOutstandingOnResend: true,
+    },
+    delivery: {
+      /**
+       * Email-preferred, SMS fallback. Phone-only (often unclaimed) clients
+       * receive the secure signing link via SMS — the same rail as the K10-B
+       * pay link, and for the same reason: the client this is aimed at usually
+       * cannot pass requireClient() on any authenticated surface.
+       */
+      allowedContactMethods: EMAIL_OR_SMS_CONTACT_METHODS,
+      preferredContactMethod: ContactMethod.EMAIL,
+      notificationEventKey: NotificationEventKey.CONSENT_SIGNATURE_REQUEST,
+      notificationRecipientKind: NotificationRecipientKind.CLIENT,
+      createFreshDeliveryOnResend: true,
+    },
+    link: {
+      target: 'CONSENT',
+      pathPrefix: '/client/consent',
       requiresToken: true,
     },
   },

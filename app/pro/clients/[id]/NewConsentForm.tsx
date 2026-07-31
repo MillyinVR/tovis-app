@@ -26,9 +26,25 @@ const inputStyle: React.CSSProperties = {
   background: 'rgb(var(--bg-primary))',
 }
 
-const PROOF_LABELS: Record<ConsentProofMethod, string> = {
+/**
+ * 🔴 K15 (closing K14-B): CLIENT_TOKEN is deliberately ABSENT.
+ *
+ * K14 shipped this control offering "Client link" with no link flow behind it,
+ * so a pro could record "the client signed via a link" when no link was ever
+ * sent — an [[existing-control-can-still-be-lying]], worse than the dormant enum
+ * the card described. K15 gives that proof method a real producer (the signing
+ * route behind /client/consent/<token>), and the price of it MEANING something
+ * is that only that route may write it. The pro's route now refuses it too, so
+ * this is not merely a hidden option.
+ *
+ * These two remain because a pro genuinely does witness them: a form signed in
+ * front of them, or a paper one already in the drawer.
+ */
+const PROOF_LABELS: Record<
+  Exclude<ConsentProofMethod, 'CLIENT_TOKEN'>,
+  string
+> = {
   IN_PERSON: 'In person',
-  CLIENT_TOKEN: 'Client link',
   PAPER_ON_FILE: 'Paper on file',
 }
 
@@ -142,9 +158,9 @@ export default function NewConsentForm({ clientId, forms }: Props) {
           aria-label="Proof method"
         >
           <option value="">Proof method…</option>
-          {(Object.keys(PROOF_LABELS) as ConsentProofMethod[]).map((m) => (
+          {Object.entries(PROOF_LABELS).map(([m, label]) => (
             <option key={m} value={m}>
-              {PROOF_LABELS[m]}
+              {label}
             </option>
           ))}
         </select>

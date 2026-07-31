@@ -214,6 +214,7 @@ import {
   syncBookingAppointmentReminders,
 } from '@/lib/notifications/appointmentReminders'
 import { createProNotification } from '@/lib/notifications/proNotifications'
+import { inferPreferredContactMethod } from '@/lib/notifications/contactMethod'
 import { scheduleReviewRequestOnCompletion } from '@/lib/notifications/reviewRequests'
 import {
   buildAuxRefundDiscriminator,
@@ -2723,17 +2724,6 @@ function pickFirstNonEmpty(
     const normalized = normalizeReason(value)
     if (normalized) return normalized
   }
-  return null
-}
-
-function inferPreferredContactMethod(args: {
-  email: string | null
-  phone: string | null
-  existingPreference: ContactMethod | null | undefined
-}): ContactMethod | null {
-  if (args.existingPreference) return args.existingPreference
-  if (args.email && !args.phone) return ContactMethod.EMAIL
-  if (args.phone && !args.email) return ContactMethod.SMS
   return null
 }
 
