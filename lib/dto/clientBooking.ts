@@ -9,6 +9,11 @@ import {
   type ProNameDisplay,
 } from '@prisma/client'
 import { moneyToString } from '@/lib/money'
+import {
+  deriveClientConfirmationBadge,
+  type ClientConfirmationBadge,
+  type ClientConfirmationBookingRow,
+} from '@/lib/booking/clientConfirmation'
 import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import {
   resolveApptTimeZone,
@@ -187,6 +192,17 @@ export type ClientBookingDTO = {
 
   items: ClientBookingItemDTO[]
   productSales: ClientBookingProductSaleDTO[]
+
+  /**
+   * K11's client-confirmation state, derived by the one helper
+   * (lib/booking/clientConfirmation.ts) and rendered VERBATIM — the client app
+   * never recomputes it. OPTIONAL and absent unless the pro's reminder actually
+   * asked: with the loop flag off (prod today) every booking reads
+   * NOT_REQUESTED, so this key never appears and the payload is byte-identical
+   * to pre-K13. Its presence is also the app's cue to offer the in-app answer
+   * (POST /api/v1/client/bookings/[id]/confirmation { answer }).
+   */
+  clientConfirmation?: ClientConfirmationBadge
 
   hasUnreadAftercare: boolean
   hasPendingConsultationApproval: boolean
@@ -447,6 +463,12 @@ type ClientBookingMediaConsentFields = {
   mediaUseConsentAt?: Date | null
 }
 
+// K11's three client-confirmation timestamps live on the Booking row but aren't
+// part of the canonical ClientBookingRow select. Optional so existing callers
+// compile unchanged; the list route + the booking-detail loader select them so
+// the client can see the ask their pro sent and answer it in the app (K13).
+type ClientBookingConfirmationFields = Partial<ClientConfirmationBookingRow>
+
 // The agreed cancellation-policy snapshot lives on the Booking row (M15) but isn't
 // part of the canonical select. Optional so existing callers compile unchanged; the
 // booking-detail loader selects it so the client can see the terms they agreed to.
@@ -472,6 +494,7 @@ export async function buildClientBookingDTO(input: {
     ClientBookingRebookFields &
     ClientBookingMediaConsentFields &
     ClientBookingCancellationPolicyFields &
+    ClientBookingConfirmationFields &
     ClientBookingRefundDisputeFields
   unreadAftercare: boolean
   hasPendingConsultationApproval: boolean
@@ -604,6 +627,15 @@ export async function buildClientBookingDTO(input: {
       }
     : null
 
+  // Normalised because the three columns are OPTIONAL on this input: a caller
+  // that never selected them must read as "nobody asked", not crash the
+  // derivation — and undefined and null mean the same thing to it.
+  const clientConfirmation = deriveClientConfirmationBadge({
+    clientConfirmationRequestedAt: b.clientConfirmationRequestedAt ?? null,
+    clientConfirmedAt: b.clientConfirmedAt ?? null,
+    clientConfirmationDeclinedAt: b.clientConfirmationDeclinedAt ?? null,
+  })
+
   return {
     id: String(b.id),
     status: b.status != null ? String(b.status) : null,
@@ -708,6 +740,14 @@ export async function buildClientBookingDTO(input: {
     })(),
 
     consultation,
+
+    // K13: the client's own view of K11's state — the same badge, from the same
+    // helper, that the pro sees. Present only when the pro's reminder actually
+    // asked (`significant`), so a booking nobody asked about serialises exactly
+    // as it did pre-K13 and the app draws no answer control it has no question
+    // for. A caller that didn't select the columns reads NOT_REQUESTED and is
+    // therefore also absent — the honest answer for "this payload can't say".
+    ...(clientConfirmation?.significant ? { clientConfirmation } : {}),
 
     paymentOptions: input.paymentOptions ?? null,
   }

@@ -46,6 +46,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import {
+  CLIENT_CONFIRMATION_SELECT,
+  deriveClientConfirmationBadge,
+} from '@/lib/booking/clientConfirmation'
+import {
   bookingErrorJsonFail,
   bookingJsonFail,
 } from '@/app/api/_utils/bookingResponses'
@@ -260,6 +264,12 @@ export async function GET(_req: Request, ctx: RouteContext) {
         // "Paid" once money has gone back (M11 display-truth).
         stripeAmountRefunded: true,
         stripeCurrency: true,
+        // K11's three client-confirmation timestamps. The pro booking-detail
+        // page derives this badge server-side from its own Prisma read
+        // (app/pro/bookings/[id]/page.tsx), so without these columns here the
+        // state existed on web and could not exist on device at all — the
+        // exact drift K6 found between the chart page and the chart API.
+        ...CLIENT_CONFIRMATION_SELECT,
         // Aftercare snapshot card.
         aftercareSummary: {
           select: {
@@ -349,11 +359,18 @@ export async function GET(_req: Request, ctx: RouteContext) {
       requireValid: false,
     })
 
+    // K13: the same badge the RSC page renders, from the same helper — the
+    // device never recomputes it. Emitted only when significant, so a booking
+    // nobody asked a confirmation for serialises byte-identically to pre-K13
+    // (NOT_REQUESTED is every booking while the loop flag is off).
+    const clientConfirmation = deriveClientConfirmationBadge(booking)
+
     return jsonOk(
       {
         booking: {
           id: booking.id,
           status: booking.status,
+          ...(clientConfirmation.significant ? { clientConfirmation } : {}),
           // Phase 2 revenue protection master switch, echoed onto the payload the
           // booking-detail action row consumes. Web resolves this server-side in
           // the RSC page and passes it to BookingActions as a prop

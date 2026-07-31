@@ -1126,7 +1126,7 @@ describe('PATCH /api/v1/pro/bookings/[id]', () => {
 // it. These drive the REAL `noShowProtectionEnabled()` through its env var
 // rather than mocking it: the whole point of the field is that it tracks the
 // flag, and a mocked flag would prove only that the mock was returned.
-describe('GET /api/v1/pro/bookings/[id] — noShowFeatureEnabled gate', () => {
+describe('GET /api/v1/pro/bookings/[id] — payload flags and derived state', () => {
   const ORIGINAL_FLAG = process.env.ENABLE_NO_SHOW_PROTECTION
 
   function bookingRow(clientOverrides: Record<string, unknown> = {}) {
@@ -1279,5 +1279,45 @@ describe('GET /api/v1/pro/bookings/[id] — noShowFeatureEnabled gate', () => {
     expect(client.canMessage).toBe(false)
     // The raw id must never reach the wire — presence is all the client needs.
     expect(client.userId).toBeUndefined()
+  })
+
+  // K13: the pro booking detail is one of the two surfaces the card names, and
+  // this route is how the DEVICE reaches it. The web page derives the same
+  // badge from its own Prisma read, so a missing field here is invisible on web
+  // and total on iOS.
+  it('omits clientConfirmation entirely when nobody asked (every booking, flag off)', async () => {
+    const payload = await getPayload()
+
+    expect(payload.clientConfirmation).toBeUndefined()
+  })
+
+  it('carries the derived badge once the ask went out', async () => {
+    mocks.bookingFindFirst.mockResolvedValue({
+      ...bookingRow(),
+      clientConfirmationRequestedAt: new Date('2026-03-16T13:00:00.000Z'),
+      clientConfirmedAt: null,
+      clientConfirmationDeclinedAt: null,
+    })
+
+    const payload = await getPayload()
+
+    expect(payload.clientConfirmation).toMatchObject({
+      kind: 'AWAITING_CLIENT',
+      label: 'Awaiting client',
+      significant: true,
+    })
+  })
+
+  it('reports the client’s answer, latest-wins, so the device never re-derives it', async () => {
+    mocks.bookingFindFirst.mockResolvedValue({
+      ...bookingRow(),
+      clientConfirmationRequestedAt: new Date('2026-03-16T13:00:00.000Z'),
+      clientConfirmedAt: new Date('2026-03-16T14:00:00.000Z'),
+      clientConfirmationDeclinedAt: new Date('2026-03-16T15:00:00.000Z'),
+    })
+
+    const payload = await getPayload()
+
+    expect(payload.clientConfirmation).toMatchObject({ kind: 'DECLINED' })
   })
 })

@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { CLIENT_CONFIRMATION_SELECT } from '@/lib/booking/clientConfirmation'
 import { deriveDepositCredit } from '@/lib/booking/depositCredit'
 import { loadProfessionalPaymentSettings } from './loadProfessionalPaymentSettings'
 
@@ -34,6 +35,10 @@ const bookingPageBookingSelect = {
   // The no-show/late-cancel fee terms the client agreed to at booking (M15) —
   // buildClientBookingDTO formats this into `cancellationPolicy` for the detail.
   cancellationPolicySnapshot: true,
+
+  // K11's confirmation state (K13) — buildClientBookingDTO derives the badge,
+  // and its presence is what puts the "Can you make it?" answer on this page.
+  ...CLIENT_CONFIRMATION_SELECT,
 
   subtotalSnapshot: true,
   serviceSubtotalSnapshot: true,

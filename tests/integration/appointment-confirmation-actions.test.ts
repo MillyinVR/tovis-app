@@ -67,6 +67,7 @@ import {
   resolveAppointmentConfirmationTokenForMutation,
 } from '@/lib/booking/appointmentConfirmationTokens'
 import { runCancelRefundOrchestration } from '@/lib/booking/cancelRefundOrchestration'
+import { loadClientBookingBuckets } from '@/lib/booking/clientBookingBuckets'
 import { deriveClientConfirmationState } from '@/lib/booking/clientConfirmation'
 import {
   HOLD_CREATE_OFFERING_SELECT,
@@ -76,6 +77,7 @@ import {
   armAppointmentConfirmationAsk,
   cancelBooking,
   createHold,
+  recordAppointmentConfirmationFromAuthedClient,
   recordAppointmentConfirmationFromClientToken,
   rescheduleBookingFromHold,
   updateProBooking,
@@ -542,6 +544,200 @@ describe('recordAppointmentConfirmationFromClientToken (the answers)', () => {
     await expect(
       resolveAppointmentConfirmationTokenForMutation({ rawToken }),
     ).rejects.toMatchObject({ code: 'APPOINTMENT_TOKEN_INVALID' })
+  })
+})
+
+describe('in-app answer parity with the link answer (the K13 DoD)', () => {
+  /**
+   * The whole point of K13's shared core: a client who answers in the app and a
+   * client who answers from the reminder link are saying the same thing, so the
+   * two must be indistinguishable in the database afterwards. Run side by side
+   * on two identical bookings — a single-path assertion would pass just as
+   * happily against two separate implementations that had drifted.
+   */
+  it('confirm: both paths leave identical stamps, status and derived state', async () => {
+    // An hour apart because `@@unique([professionalId, scheduledFor])` makes
+    // two bookings at the same instant impossible — the pair is otherwise
+    // identical, and both are the same distance from any policy window.
+    const viaLink = await seedBooking({
+      scheduledFor: futureWorkingInstant(48 * HOUR_MS),
+    })
+    const viaApp = await seedBooking({
+      scheduledFor: futureWorkingInstant(48 * HOUR_MS, 1),
+    })
+
+    const { rawToken } = await armAndExtractToken(viaLink)
+    // The in-app booking is armed too, so the ONLY difference between the two
+    // is which entry point recorded the answer.
+    await armAndExtractToken(viaApp)
+
+    const linkResult = await recordAppointmentConfirmationFromClientToken({
+      rawToken,
+      answer: 'CONFIRM',
+    })
+    const appResult = await recordAppointmentConfirmationFromAuthedClient({
+      bookingId: viaApp,
+      clientId: fx.clientId,
+      answer: 'CONFIRM',
+    })
+
+    expect(appResult.state).toBe(linkResult.state)
+    expect(appResult.meta.mutated).toBe(linkResult.meta.mutated)
+
+    const linkRow = await readConfirmationRow(viaLink)
+    const appRow = await readConfirmationRow(viaApp)
+
+    expect(appRow.status).toBe(linkRow.status)
+    expect(appRow.clientConfirmedAt).not.toBeNull()
+    expect(appRow.clientConfirmationDeclinedAt).toBeNull()
+    // Same SHAPE of row: which columns carry a value, not the instants.
+    expect({
+      requested: appRow.clientConfirmationRequestedAt != null,
+      confirmed: appRow.clientConfirmedAt != null,
+      declined: appRow.clientConfirmationDeclinedAt != null,
+    }).toEqual({
+      requested: linkRow.clientConfirmationRequestedAt != null,
+      confirmed: linkRow.clientConfirmedAt != null,
+      declined: linkRow.clientConfirmationDeclinedAt != null,
+    })
+    expect(deriveClientConfirmationState(appRow)).toBe(
+      deriveClientConfirmationState(linkRow),
+    )
+  })
+
+  it('decline: both paths keep the slot (D5) and both notify the pro', async () => {
+    const appScheduledFor = futureWorkingInstant(48 * HOUR_MS, 1)
+    const viaLink = await seedBooking({
+      scheduledFor: futureWorkingInstant(48 * HOUR_MS),
+    })
+    const viaApp = await seedBooking({ scheduledFor: appScheduledFor })
+
+    const { rawToken } = await armAndExtractToken(viaLink)
+    await armAndExtractToken(viaApp)
+
+    const linkResult = await recordAppointmentConfirmationFromClientToken({
+      rawToken,
+      answer: 'DECLINE',
+    })
+    const appResult = await recordAppointmentConfirmationFromAuthedClient({
+      bookingId: viaApp,
+      clientId: fx.clientId,
+      answer: 'DECLINE',
+    })
+
+    expect(appResult.state).toBe('DECLINED')
+    expect(appResult.state).toBe(linkResult.state)
+
+    const linkRow = await readConfirmationRow(viaLink)
+    const appRow = await readConfirmationRow(viaApp)
+
+    // D5 on BOTH paths: declining never frees the time.
+    expect(appRow.status).toBe(BookingStatus.ACCEPTED)
+    expect(linkRow.status).toBe(BookingStatus.ACCEPTED)
+    expect(appRow.scheduledFor.getTime()).toBe(appScheduledFor.getTime())
+    expect(appRow.clientConfirmationDeclinedAt).not.toBeNull()
+
+    // The pro hears about it either way — one row per booking, same event.
+    const declineNotifications = await db.notification.findMany({
+      where: {
+        professionalId: fx.professionalId,
+        eventKey: NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED,
+        bookingId: { in: [viaLink, viaApp] },
+      },
+      select: { bookingId: true },
+    })
+    expect(declineNotifications.map((n) => n.bookingId).sort()).toEqual(
+      [viaLink, viaApp].sort(),
+    )
+  })
+
+  it('the client’s own feed carries the ask — and carries nothing when nobody asked', async () => {
+    const asked = await seedBooking({
+      scheduledFor: futureWorkingInstant(48 * HOUR_MS),
+    })
+    const unasked = await seedBooking({
+      scheduledFor: futureWorkingInstant(48 * HOUR_MS, 1),
+    })
+    await armAndExtractToken(asked)
+
+    // The REAL feed the web list and the iOS client app both read — select,
+    // DTO and all. Asserting on the helper alone would prove the badge derives,
+    // not that it reaches the surface that has to draw the answer control.
+    const before = await loadClientBookingBuckets(fx.clientId)
+    const findIn = (
+      buckets: Awaited<ReturnType<typeof loadClientBookingBuckets>>,
+      id: string,
+    ) =>
+      [
+        ...buckets.buckets.upcoming,
+        ...buckets.buckets.pending,
+        ...buckets.buckets.prebooked,
+      ].find((b) => b.id === id)
+
+    expect(findIn(before, asked)?.clientConfirmation?.kind).toBe(
+      'AWAITING_CLIENT',
+    )
+    // Nobody asked about this one: the key is ABSENT, not a "not requested"
+    // badge the app would have to know to ignore.
+    expect(findIn(before, unasked)).toBeDefined()
+    expect(findIn(before, unasked)?.clientConfirmation).toBeUndefined()
+
+    await recordAppointmentConfirmationFromAuthedClient({
+      bookingId: asked,
+      clientId: fx.clientId,
+      answer: 'CONFIRM',
+    })
+
+    const after = await loadClientBookingBuckets(fx.clientId)
+    expect(findIn(after, asked)?.clientConfirmation?.kind).toBe(
+      'CLIENT_CONFIRMED',
+    )
+  })
+
+  it('refuses another client’s booking with the same uniform not-found as a missing one', async () => {
+    const bookingId = await seedBooking({
+      scheduledFor: futureWorkingInstant(48 * HOUR_MS),
+    })
+
+    await expect(
+      recordAppointmentConfirmationFromAuthedClient({
+        bookingId,
+        clientId: 'cli_not_the_owner',
+        answer: 'CONFIRM',
+      }),
+    ).rejects.toMatchObject({ code: 'BOOKING_NOT_FOUND' })
+
+    // Nothing was written on the way to the refusal.
+    const row = await readConfirmationRow(bookingId)
+    expect(row.clientConfirmedAt).toBeNull()
+    expect(row.clientConfirmationDeclinedAt).toBeNull()
+  })
+
+  it('applies the same refusals as the link path once the booking is cancelled or underway', async () => {
+    const cancelled = await seedBooking({
+      scheduledFor: futureWorkingInstant(48 * HOUR_MS),
+      status: BookingStatus.CANCELLED,
+    })
+
+    await expect(
+      recordAppointmentConfirmationFromAuthedClient({
+        bookingId: cancelled,
+        clientId: fx.clientId,
+        answer: 'CONFIRM',
+      }),
+    ).rejects.toMatchObject({ code: 'APPOINTMENT_CONFIRMATION_UNAVAILABLE' })
+
+    const started = await seedBooking({
+      scheduledFor: new Date(Date.now() - HOUR_MS),
+    })
+
+    await expect(
+      recordAppointmentConfirmationFromAuthedClient({
+        bookingId: started,
+        clientId: fx.clientId,
+        answer: 'CONFIRM',
+      }),
+    ).rejects.toMatchObject({ code: 'APPOINTMENT_CONFIRMATION_UNAVAILABLE' })
   })
 })
 

@@ -18,6 +18,7 @@ export type RateLimitBucket =
   | 'client:checkout:token'
   | 'client:deposit:token'
   | 'client:appointment:token'
+  | 'client:appointment:answer'
   | 'pro:bookings:write'
   | 'pro:media:write'
   | 'pro:offerings:write'
@@ -189,6 +190,16 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 20,
     windowSeconds: 5 * 60,
     prefix: 'rl:client:appointment:token',
+    mode: 'redis-only',
+  },
+  // K13: the same answer from a signed-in client, in the app. Sized like the
+  // token bucket's per-tap allowance rather than a write bucket — the answer
+  // is idempotent by design (K11's latest-answer-wins), so a client changing
+  // their mind twice is normal use, not abuse.
+  'client:appointment:answer': {
+    limit: 20,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:client:appointment:answer',
     mode: 'redis-only',
   },
   'pro:bookings:write': {

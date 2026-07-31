@@ -27,6 +27,7 @@ import MediaConsentCard from './MediaConsentCard'
 import AftercareRebookButton from './AftercareRebookButton'
 import AftercareStepper from './AftercareStepper'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
+import ClientConfirmationCard from './ClientConfirmationCard'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ReviewSection from './ReviewSection'
 import { loadClientBookingPage } from './_data/loadClientBookingPage'
@@ -1190,6 +1191,29 @@ export default async function ClientBookingPage(props: {
 
       {!consultApprovalMode ? (
         <>
+          {/*
+            K13: the in-app answer to K12's reminder ask. Rendered on every tab
+            of the booking, not just Overview — a pro waiting on "can you make
+            it?" should not depend on which tab the client happened to open —
+            and only when the DTO actually carries the state, which it does only
+            once the ask went out.
+          */}
+          {booking.clientConfirmation ? (
+            <div className="mt-4">
+              <SectionCard
+                title={booking.clientConfirmation.label}
+                subtitle={booking.clientConfirmation.description}
+              >
+                <ClientConfirmationCard
+                  bookingId={booking.id}
+                  state={booking.clientConfirmation.kind}
+                  professionalLabel={professionalLabel}
+                  whenLabel={whenLabel}
+                />
+              </SectionCard>
+            </div>
+          ) : null}
+
           {step !== 'aftercare' && booking.items.length > 0 ? (
             <div className="mt-4">
               <SectionCard

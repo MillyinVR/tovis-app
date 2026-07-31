@@ -696,7 +696,10 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     retryable: false,
     uiAction: "NONE",
     message: "This booking can no longer be confirmed or declined.",
-    userMessage: "This appointment can no longer be updated from this link.",
+    // K13: surface-neutral wording on purpose. The same refusal now reaches a
+    // signed-in client answering IN THE APP, where "from this link" would be a
+    // lie about how they got here.
+    userMessage: "This appointment can no longer be confirmed or declined.",
   },
   AFTERCARE_NOT_COMPLETED: {
     httpStatus: 409,
