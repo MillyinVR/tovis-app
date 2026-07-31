@@ -3279,6 +3279,10 @@
         "checkout": {
           "$ref": "#/definitions/ClientBookingCheckoutDTO"
         },
+        "clientConfirmation": {
+          "$ref": "#/definitions/ClientConfirmationBadge",
+          "description": "K11's client-confirmation state, derived by the one helper (lib/booking/clientConfirmation.ts) and rendered VERBATIM — the client app never recomputes it. OPTIONAL and absent unless the pro's reminder actually asked: with the loop flag off (prod today) every booking reads NOT_REQUESTED, so this key never appears and the payload is byte-identical to pre-K13. Its presence is the app's cue to offer the in-app answer (POST /api/v1/client/bookings/[id]/confirmation { answer }) — which is why it is suppressed outright while ENABLE_CLIENT_CONFIRMATION_LOOP is off, even for a row that carries stamps from an earlier trial: that route refuses, and a control the server will reject must not be drawn."
+        },
         "consultation": {
           "anyOf": [
             {

@@ -19205,7 +19205,15 @@ async function performLockedRecordAppointmentConfirmationAnswer(args: {
   now: Date
   bookingId: string
   clientId: string
-  tokenId: string
+  /**
+   * The APPOINTMENT_CONFIRMATION token the answer arrived on, or null when a
+   * signed-in client answered in the app (K13) — there is no token to account
+   * for on that path. Everything else about the two answers is identical, and
+   * deliberately so: they share this one core so an in-app confirm and a
+   * link confirm can never stamp different things or skip the pro's decline
+   * notification.
+   */
+  tokenId: string | null
   answer: AppointmentConfirmationAnswer
 }): Promise<RecordAppointmentConfirmationAnswerResult> {
   const booking = await args.tx.booking.findUnique({
@@ -19284,12 +19292,15 @@ async function performLockedRecordAppointmentConfirmationAnswer(args: {
   // Not single-use — usage is recorded, never burned, and only after the
   // answer wrote successfully inside this same transaction
   // ([[single-use-token-consumed-before-tx]] in spirit: nothing irreversible
-  // happens before the write it accounts for).
-  await markAppointmentConfirmationTokenUsed({
-    tokenId: args.tokenId,
-    tx: args.tx,
-    now: args.now,
-  })
+  // happens before the write it accounts for). An in-app answer carries no
+  // token, so there is nothing to record.
+  if (args.tokenId != null) {
+    await markAppointmentConfirmationTokenUsed({
+      tokenId: args.tokenId,
+      tx: args.tx,
+      now: args.now,
+    })
+  }
 
   return {
     booking: {
@@ -19325,6 +19336,40 @@ export async function recordAppointmentConfirmationFromClientToken(args: {
         bookingId: resolved.booking.id,
         clientId: resolved.booking.clientId,
         tokenId: resolved.token.id,
+        answer: args.answer,
+      }),
+  })
+}
+
+/**
+ * The same answer, from a client who is already signed in (K13's in-app
+ * action) — no token, because there is nothing to authenticate: the caller
+ * proved who they are with a session, and the lock helper below refuses a
+ * booking that is not theirs.
+ *
+ * 🔴 It shares `performLockedRecordAppointmentConfirmationAnswer` with the
+ * link path on purpose. Answering in the app and answering from the reminder
+ * are the same fact about the same appointment, so they must stamp the same
+ * column, run the same answerable-status and already-started refusals, and
+ * fire the same D5 decline notification to the pro. A second implementation is
+ * how "the client confirmed" would come to mean two different things depending
+ * on which surface they used.
+ */
+export async function recordAppointmentConfirmationFromAuthedClient(args: {
+  bookingId: string
+  clientId: string
+  answer: AppointmentConfirmationAnswer
+}): Promise<RecordAppointmentConfirmationAnswerResult> {
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    run: async ({ tx, now }) =>
+      performLockedRecordAppointmentConfirmationAnswer({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+        tokenId: null,
         answer: args.answer,
       }),
   })

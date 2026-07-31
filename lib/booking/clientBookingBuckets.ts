@@ -14,6 +14,7 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { CLIENT_CONFIRMATION_SELECT } from '@/lib/booking/clientConfirmation'
 import {
   buildClientBookingDTO,
   type ClientBookingDTO,
@@ -94,6 +95,12 @@ export const clientBookingListSelect = {
   // Client media-use consent (B3b) — lets the client see/toggle whether the pro
   // may feature this session's media publicly.
   mediaUseConsentAt: true,
+
+  // K11's confirmation state (K13). This is the feed the native client booking
+  // detail reads, so without these columns a client could be asked "can you
+  // make it?" by SMS and find nothing to answer in the app they already have
+  // open.
+  ...CLIENT_CONFIRMATION_SELECT,
 
   // Rebook-confirm state: the pro's proposed next appointment + whether it's been
   // confirmed (an active rebooked booking exists) so the CTA hides after confirm.
