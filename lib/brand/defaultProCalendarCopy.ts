@@ -207,6 +207,7 @@ export function defaultProCalendarCopy(
     // this copy swapping with them.
     fillChannel: 'Card colour · booking status',
     stripeChannel: 'Side stripe · service colour',
+    glyphChannel: 'Corner glyph · client confirmation',
   },
 
   emptyState: {

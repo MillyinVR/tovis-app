@@ -32,6 +32,7 @@ import {
   DEFAULT_HOLD_TITLE,
   type CalendarScopeMode,
 } from '@/lib/calendar/constants'
+import { parseClientConfirmationBadgeWire } from '@/lib/booking/clientConfirmation'
 import { parsePaymentBadgeWire } from '@/lib/booking/paymentBadge'
 import { parseRelationshipBadgeWire } from '@/lib/booking/relationshipLabel'
 import { parseCalendarSwatch } from '@/lib/calendar/eventColor'
@@ -445,6 +446,12 @@ function parseBookingEvent(
   // resolves to neutral (the stripe keeps its status tone) rather than to a
   // data-swatch attribute the stylesheet silently ignores.
   const serviceSwatch = parseCalendarSwatch(value.serviceSwatch)
+  // K11 confirmation state — unknown kind → no glyph, never a made-up
+  // attendance state. Absent (never requested, or a pre-K11 server) parses to
+  // null the same way.
+  const clientConfirmation = parseClientConfirmationBadgeWire(
+    value.clientConfirmation,
+  )
 
   const event: BookingCalendarEvent = {
     kind: 'BOOKING',
@@ -477,6 +484,7 @@ function parseBookingEvent(
     ...(paymentBadge ? { paymentBadge } : {}),
     ...(relationshipBadge ? { relationshipBadge } : {}),
     ...(serviceSwatch ? { serviceSwatch } : {}),
+    ...(clientConfirmation ? { clientConfirmation } : {}),
     ...(clientProfileId ? { clientProfileId } : {}),
     ...(preferenceLabel ? { preferenceLabel } : {}),
     ...(offerHref ? { offerHref } : {}),

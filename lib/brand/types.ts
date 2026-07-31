@@ -204,6 +204,12 @@ export type BrandProCalendarLegendCopy = {
    * the status tone, and a key claiming otherwise would be a lie.
    */
   stripeChannel: string
+  /**
+   * Names what the corner glyph means (K11 client confirmation). Same rule as
+   * the stripe: shown only while an event on the grid actually carries a
+   * confirmation state — until K12 ships the writers, none does.
+   */
+  glyphChannel: string
 }
 
 export type BrandProCalendarEmptyStateCopy = {

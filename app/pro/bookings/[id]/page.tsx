@@ -23,6 +23,7 @@ import {
   badgeToneForBookingStatus,
   labelForBookingStatus,
 } from '@/lib/booking/statusLabel'
+import { deriveClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 import { derivePaymentBadge } from '@/lib/booking/paymentBadge'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
@@ -253,6 +254,7 @@ export default async function ProBookingDetailPage(props: {
 
   const serviceName = booking.service?.name ?? 'Booking'
   const paymentBadge = derivePaymentBadge(booking)
+  const clientConfirmation = deriveClientConfirmationBadge(booking)
   const total =
     moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ?? '0.00'
   const dur = Math.round(Number(booking.totalDurationMinutes ?? 0)) || 0
@@ -419,6 +421,16 @@ export default async function ProBookingDetailPage(props: {
           <Badge tone={paymentBadge.tone} size="sm">
             {paymentBadge.label}
           </Badge>
+          {/* Client-confirmation state (K11) — the words behind the calendar
+              card's corner glyph. Significance-gated: "Not requested" (every
+              booking until K12 ships the writers) renders nothing. Never the
+              bare word "Confirmed" — B10 gave that to the ACCEPTED status chip
+              beside it. */}
+          {clientConfirmation.significant ? (
+            <Badge tone={clientConfirmation.tone} size="sm">
+              {clientConfirmation.label}
+            </Badge>
+          ) : null}
         </div>
       </div>
 

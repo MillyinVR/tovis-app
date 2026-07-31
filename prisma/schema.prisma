@@ -3397,6 +3397,21 @@ model Booking {
   cancellationPolicyAcceptedAt DateTime?
   cancellationPolicySnapshot   Json?
 
+  // Client-confirmation loop (K11). Whether the CLIENT has confirmed they're
+  // coming — the opposite direction from BookingStatus.PENDING, which tracks
+  // the PRO's acceptance. 🔴 Deliberately orthogonal timestamps, NEVER a
+  // BookingStatus value: that enum sits in the GIST overlap predicate,
+  // closeout, refunds and every write-boundary guard, and a client failing to
+  // confirm must never free the slot. Display state is derived in ONE place
+  // (lib/booking/clientConfirmation.ts): all null = not requested; requested
+  // only = awaiting client; confirmed/declined = the client's answer (latest
+  // timestamp wins if both are ever set). Writers land in K12 (the token
+  // actions) — as of K11 nothing stamps these, so every booking reads "not
+  // requested" and no surface renders anything.
+  clientConfirmationRequestedAt DateTime?
+  clientConfirmedAt             DateTime?
+  clientConfirmationDeclinedAt  DateTime?
+
   // Optional client-supplied idempotency key for booking-creation dedupe.
   // Combined with clientId in @@unique below so identical retries return
   // the existing booking instead of creating a duplicate.
