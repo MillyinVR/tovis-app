@@ -36,6 +36,7 @@ export type NotificationTemplateKey =
   | 'no_show_fee_charged'
   | 'no_show_deposit_kept'
   | 'deposit_reminder'
+  | 'deposit_payment_link'
   | 'look_follower_new'
   | 'client_follow'
   | 'look_commented'
@@ -728,6 +729,24 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.DEPOSIT_PAYMENT_LINK]: {
+    key: NotificationEventKey.DEPOSIT_PAYMENT_LINK,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: true,
+    // Pro-initiated at booking-create time, often with the client standing
+    // right there — the secure pay link must arrive immediately (mirrors
+    // CLIENT_CLAIM_INVITE / CONSULTATION_PROPOSAL_SENT).
+    allowQuietHoursBypass: true,
+    templateKey: 'deposit_payment_link',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // EMAIL/SMS only, like CLIENT_CLAIM_INVITE: snapshot-based delivery for
+      // often-unclaimed clients. Claimed clients already have the login-gated
+      // deposit surface via BOOKING_CONFIRMED's in-app row.
+      [NotificationRecipientKind.CLIENT]: CLIENT_EMAIL_SMS_CHANNELS,
     },
   },
 

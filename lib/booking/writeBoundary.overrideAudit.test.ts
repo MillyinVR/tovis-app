@@ -633,6 +633,7 @@ describe('lib/booking/writeBoundary override audit', () => {
       locationType: ServiceLocationType.SALON,
       clientAddressId: null,
       serviceName: 'Haircut',
+      deposit: null,
       meta: {
         mutated: true,
         noOp: false,

@@ -129,6 +129,12 @@ type ProBookingSuccessBody = {
     email: string | null
     claimStatus: ClientClaimStatus
   }
+  // K10-B: present when the pro requested the deposit step — what was stamped
+  // and when the unpaid hold auto-releases (the pay link went to the client).
+  deposit?: {
+    amount: string
+    dueAt: string
+  } | null
   invite?: Prisma.InputJsonValue
 }
 
@@ -242,6 +248,10 @@ function buildProBookingSuccessBody(args: {
     clientAddressId: string | null
     stepMinutes: number
     appointmentTimeZone: string
+    deposit: {
+      amount: Prisma.Decimal
+      dueAt: Date
+    } | null
   }
   client: {
     id: string
@@ -287,6 +297,14 @@ function buildProBookingSuccessBody(args: {
       email: args.client.email,
       claimStatus: args.client.claimStatus,
     },
+    deposit: args.bookingResult.deposit
+      ? {
+          amount:
+            moneyToString(args.bookingResult.deposit.amount) ??
+            args.bookingResult.deposit.amount.toString(),
+          dueAt: args.bookingResult.deposit.dueAt.toISOString(),
+        }
+      : null,
   }
 
   const normalizedInvite = normalizeJsonValue(args.invite)
@@ -341,6 +359,11 @@ export async function POST(req: Request) {
     const allowShortNotice = pickBool(body.allowShortNotice) ?? false
     const allowFarFuture = pickBool(body.allowFarFuture) ?? false
 
+    // K10-B: the pro asked for the deposit step. Amount is computed
+    // server-side in the write boundary; an impossible request is REFUSED
+    // there, never silently dropped.
+    const depositRequested = pickBool(body.depositRequested) ?? false
+
     if (!scheduledFor) {
       return bookingJsonFail('INVALID_SCHEDULED_FOR')
     }
@@ -387,6 +410,7 @@ export async function POST(req: Request) {
         allowOutsideWorkingHours,
         allowShortNotice,
         allowFarFuture,
+        depositRequested,
       },
     })
 
@@ -428,6 +452,7 @@ export async function POST(req: Request) {
       allowOutsideWorkingHours,
       allowShortNotice,
       allowFarFuture,
+      depositRequested,
       requestId,
       idempotencyKey,
     })

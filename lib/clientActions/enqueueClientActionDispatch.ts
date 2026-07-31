@@ -168,7 +168,7 @@ function resolveRequestedChannels(
  */
 const UNVERIFIED_DESTINATION_ACTION_TYPES = new Set<
   EnqueueClientActionDispatchArgs['plan']['definition']['type']
->(['CLIENT_CLAIM_INVITE', 'CONSULTATION_ACTION', 'AFTERCARE_ACCESS'])
+>(['CLIENT_CLAIM_INVITE', 'CONSULTATION_ACTION', 'AFTERCARE_ACCESS', 'DEPOSIT_PAYMENT'])
 
 export function resolveAllowUnverifiedDestination(
   args: Pick<EnqueueClientActionDispatchArgs, 'allowUnverifiedDestination' | 'plan'>,

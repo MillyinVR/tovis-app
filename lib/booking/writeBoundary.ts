@@ -47,7 +47,7 @@ import {
   buildAcceptedPaymentMethods,
 } from '@/lib/payments/acceptedMethods'
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
-import { parseMoney } from '@/lib/money'
+import { formatMoneyFromUnknown, parseMoney } from '@/lib/money'
 import {
   pickPublicTierPlan,
   pickRecipientTierPlan,
@@ -77,9 +77,16 @@ import {
 } from '@/lib/booking/workingHoursGuard'
 import {
   computeDiscoveryDepositPlan,
+  STRIPE_MIN_CHARGE_CENTS,
   type DepositSettings,
 } from '@/lib/booking/discoveryDepositPlan'
+import {
+  computeDiscoveryDepositDueAt,
+  computeProCreatedDepositDueAt,
+  depositProCreatedReminderLeadHours,
+} from '@/lib/booking/depositDeadline'
 import { computeUpfrontDepositCents } from '@/lib/booking/prepay'
+import { createDepositPaymentDelivery } from '@/lib/clientActions/createDepositPaymentDelivery'
 import {
   withLockedClientOwnedBookingTransaction,
   withLockedProfessionalScheduleByLookup,
@@ -615,6 +622,14 @@ type CreateProBookingArgs = {
   // decideBookingOverlapPermission's CALENDAR_IMPORT branch); the caller holds
   // the time as a calendar block instead. Defaults to a normal pro booking.
   importMode?: boolean
+  // K10-B: the pro asked for the deposit/prepay step on this booking. The
+  // amount is ALWAYS computed server-side from the pro's deposit settings and
+  // the offering's prepayScope — never client-supplied. Refused (never silently
+  // dropped) when the pro isn't Stripe-ready, the computed amount is zero, or
+  // the client has no deliverable contact for the pay link. Ignored on
+  // importMode (imported history must not text clients payment links);
+  // defaults to false, which keeps waitlist-offer confirms deposit-free.
+  depositRequested?: boolean
 }
 
 type CreateProBookingResult = {
@@ -632,6 +647,13 @@ type CreateProBookingResult = {
   locationType: ServiceLocationType
   clientAddressId: string | null
   serviceName: string
+  // K10-B: set when the pro requested the deposit step — what was stamped and
+  // when the unpaid hold releases. Null on skip/import/waitlist and on
+  // idempotency replays (the original response carried it).
+  deposit: {
+    amount: Prisma.Decimal
+    dueAt: Date
+  } | null
   meta: MutationMeta
 }
 
@@ -1733,6 +1755,19 @@ type TransitionBookingRecord = Prisma.BookingGetPayload<{
 
 const PRO_CREATE_CLIENT_SELECT = {
   id: true,
+  // K10-B: the deposit pay link is snapshot-delivered (EMAIL/SMS) because a
+  // pro-created client is often UNCLAIMED — same contact-resolution shape as
+  // the aftercare delivery above.
+  userId: true,
+  email: true,
+  phone: true,
+  preferredContactMethod: true,
+  user: {
+    select: {
+      email: true,
+      phone: true,
+    },
+  },
 } satisfies Prisma.ClientProfileSelect
 
 // Pro-create resolves the client's mobile service address through the shared
@@ -1742,6 +1777,8 @@ const PRO_CREATE_CLIENT_SELECT = {
 const PRO_CREATE_OFFERING_SELECT = {
   id: true,
   serviceId: true,
+  // K10-B: the per-service prepay requirement sizes the pro-requested deposit.
+  prepayScope: true,
   offersInSalon: true,
   offersMobile: true,
   salonPriceStartingAt: true,
@@ -2940,6 +2977,9 @@ async function tryHydrateProBookingByIdempotency(args: {
     locationType: existing.locationType,
     clientAddressId: existing.clientAddressId,
     serviceName: existing.service?.name || 'Appointment',
+    // Replay: the original response carried the deposit summary; the stamped
+    // truth lives on the booking row.
+    deposit: null,
     meta: buildMeta(false),
   }
 }
@@ -9753,6 +9793,12 @@ async function performLockedFinalizeBookingFromHold(args: {
         depositAmount: hasUpfrontCharge
           ? new Prisma.Decimal(discoveryPlan.depositCents).div(100)
           : null,
+        // K10-B: the release deadline is STAMPED at creation (same arithmetic
+        // the sweep used to run at sweep time), so a later env-knob change
+        // cannot move it under this booking.
+        depositDueAt: hasUpfrontCharge
+          ? computeDiscoveryDepositDueAt(new Date())
+          : null,
         discoveryFeeAmount: hasUpfrontCharge
           ? discoveryPlan.discoveryFeeCents
           : null,
@@ -9995,6 +10041,8 @@ async function performLockedCreateProBooking(args: {
   requestId?: string | null
   idempotencyKey?: string | null
   importMode?: boolean
+  // K10-B: see CreateProBookingArgs.depositRequested.
+  depositRequested?: boolean
   // A client confirming a pro-authored time (waitlist offer) is still a CLIENT
   // for overlap purposes: a conflict must refuse, never silently double-book.
   overlapActor?: BookingOverlapActor
@@ -10154,6 +10202,106 @@ async function performLockedCreateProBooking(args: {
     0,
   )
   const serviceSubtotal = chargedUnitPrice.add(addOnsPriceTotal)
+
+  // K10-B: the pro-requested deposit/prepay step. Resolved — and on any
+  // impossibility REFUSED, never silently dropped — before a single row is
+  // written: the pro asked for prepay, so creating a booking that cannot carry
+  // or deliver one would be an offer the app won't honor. Amount comes from
+  // the pro's own deposit settings + the offering's prepayScope through the
+  // same money path as discovery (max of the two terms, prepay capped at the
+  // bill), never from the request.
+  const depositRequested = !importMode && (args.depositRequested ?? false)
+  let requestedDeposit: { amount: Prisma.Decimal; dueAt: Date } | null = null
+  if (depositRequested) {
+    const depositRecipientEmail = pickFirstNonEmpty(
+      client.email,
+      client.user?.email ?? null,
+    )
+    const depositRecipientPhone = pickFirstNonEmpty(
+      client.phone,
+      client.user?.phone ?? null,
+    )
+
+    if (!depositRecipientEmail && !depositRecipientPhone) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'Deposit requested but the client has no email or phone to receive the pay link.',
+        userMessage:
+          'This client needs an email or phone number before a deposit can be requested.',
+      })
+    }
+
+    const paymentSettings =
+      await args.tx.professionalPaymentSettings.findUnique({
+        where: { professionalId: args.professionalId },
+        select: {
+          depositEnabled: true,
+          depositType: true,
+          depositFlatAmount: true,
+          depositPercent: true,
+          stripeAccountId: true,
+          stripeChargesEnabled: true,
+          stripePayoutsEnabled: true,
+        },
+      })
+
+    const proStripeReady = Boolean(
+      paymentSettings?.stripeAccountId &&
+        paymentSettings?.stripeChargesEnabled &&
+        paymentSettings?.stripePayoutsEnabled,
+    )
+
+    if (!paymentSettings || !proStripeReady) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Deposit requested but the pro cannot receive a deposit charge.',
+        userMessage:
+          'Deposits are available once your Stripe payouts are set up.',
+      })
+    }
+
+    const depositSettings: DepositSettings = {
+      depositEnabled: paymentSettings.depositEnabled,
+      depositType: paymentSettings.depositType,
+      depositFlatAmountCents:
+        paymentSettings.depositFlatAmount == null
+          ? null
+          : Math.round(Number(paymentSettings.depositFlatAmount) * 100),
+      depositPercent: paymentSettings.depositPercent ?? null,
+    }
+
+    const subtotalCents = Math.round(Number(serviceSubtotal) * 100)
+    const depositCents = computeUpfrontDepositCents({
+      // The pro's explicit request replaces the scope test (provenance rules
+      // are for self-serve flows): the account-wide term applies whenever the
+      // pro has one configured at all.
+      scopeDepositRequired: depositSettings.depositEnabled,
+      settings: depositSettings,
+      serviceSubtotalCents: subtotalCents,
+      prepayScope: offering.prepayScope,
+      baseServiceCents: Math.round(Number(chargedUnitPrice) * 100),
+      bookingTotalCents: subtotalCents,
+    })
+
+    // Below the Stripe minimum there is nothing chargeable — a pro with no
+    // deposit configuration and no prepay-required service has no amount to
+    // collect, and pretending otherwise strands the booking PENDING forever.
+    if (depositCents < STRIPE_MIN_CHARGE_CENTS) {
+      throw bookingError('FORBIDDEN', {
+        message:
+          'Deposit requested but the computed amount is below the chargeable minimum — no deposit settings or prepay requirement apply.',
+        userMessage:
+          'Set a deposit amount in your payment settings (or mark this service prepay-required) before requesting a deposit.',
+      })
+    }
+
+    requestedDeposit = {
+      amount: new Prisma.Decimal(depositCents).div(100),
+      dueAt: computeProCreatedDepositDueAt({
+        createdAt: args.now,
+        scheduledFor: requestedStart,
+      }),
+    }
+  }
 
   await assertMobileBookingWithinRadius({
     tx: args.tx,
@@ -10404,6 +10552,14 @@ async function performLockedCreateProBooking(args: {
         taxAmount: zeroMoney(),
         discountAmount: zeroMoney(),
         totalAmount: serviceSubtotal,
+        // K10-B: the pro-requested deposit rides the standard deposit rail
+        // (PENDING → paid via Stripe → credited at closeout). depositDueAt is
+        // the STAMPED release deadline the sweep keys on.
+        depositStatus: requestedDeposit
+          ? BookingDepositStatus.PENDING
+          : BookingDepositStatus.NONE,
+        depositAmount: requestedDeposit?.amount ?? null,
+        depositDueAt: requestedDeposit?.dueAt ?? null,
         checkoutStatus: BookingCheckoutStatus.NOT_READY,
         selectedPaymentMethod: null,
         paymentAuthorizedAt: null,
@@ -10526,6 +10682,52 @@ if (!importMode) {
     tx: args.tx,
     bookingId: booking.id,
   })
+
+  // K10-B: deliver the secure pay link (EMAIL/SMS — the client is often
+  // unclaimed and cannot use the login-gated deposit surface) and schedule the
+  // pre-release nudge. Both write rows on this tx, so a refused create can
+  // never have sent a pay link.
+  if (requestedDeposit) {
+    await scheduleDepositReminderOnBooking({
+      tx: args.tx,
+      bookingId: booking.id,
+      now: args.now,
+      reminderLeadHours: depositProCreatedReminderLeadHours(),
+    })
+
+    await createDepositPaymentDelivery({
+      tx: args.tx,
+      professionalId: args.professionalId,
+      clientId: args.clientId,
+      bookingId: booking.id,
+      depositAmountLabel: formatMoneyFromUnknown(requestedDeposit.amount),
+      payByLabel: formatDateTimeInTimeZone(
+        requestedDeposit.dueAt,
+        locationContext.timeZone,
+      ),
+      // The link stays payable through the appointment: when the appointment
+      // arrives before the deadline the sweep never fires, and the client can
+      // still settle the deposit up to (and at) the chair.
+      expiresAt: new Date(
+        Math.max(
+          requestedDeposit.dueAt.getTime(),
+          booking.scheduledFor.getTime(),
+        ),
+      ),
+      recipientEmail: pickFirstNonEmpty(client.email, client.user?.email ?? null),
+      recipientPhone: pickFirstNonEmpty(client.phone, client.user?.phone ?? null),
+      preferredContactMethod: inferPreferredContactMethod({
+        email: pickFirstNonEmpty(client.email, client.user?.email ?? null),
+        phone: pickFirstNonEmpty(client.phone, client.user?.phone ?? null),
+        existingPreference: client.preferredContactMethod,
+      }),
+      issuedByUserId: args.actorUserId,
+      recipientUserId: client.userId ?? null,
+      recipientTimeZone: locationContext.timeZone,
+      professionalName:
+        formatProfessionalPublicDisplayName(confirmMeta?.professional) || null,
+    })
+  }
 }
 
 if (schedulingDecision.appliedOverrides.length > 0) {
@@ -10567,6 +10769,7 @@ if (schedulingDecision.appliedOverrides.length > 0) {
         ? clientAddress.id
         : null,
     serviceName: offering.service.name || 'Appointment',
+    deposit: requestedDeposit,
     meta: buildMeta(true),
   }
 }
@@ -15523,6 +15726,7 @@ export async function createProBooking(
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
         importMode: args.importMode ?? false,
+        depositRequested: args.depositRequested ?? false,
       }),
   )
 }

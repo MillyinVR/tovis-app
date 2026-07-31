@@ -221,8 +221,6 @@ app/api/v1/pro/membership/portal/route.ts:direct property read:if (!sub?.stripeC
 app/api/v1/pro/membership/portal/route.ts:optional direct property read:if (!sub?.stripeCustomerId) {
 app/api/v1/pro/onboarding/location/route.ts:direct property read:const effectivePostalCode = geo.postalCode || postalCode
 app/api/v1/pro/onboarding/location/route.ts:direct property read:const postalCode = pickString(body.postalCode)
-app/api/v1/pro/openings/route.ts:Prisma select/include plaintext field:lat: true,
-app/api/v1/pro/openings/route.ts:Prisma select/include plaintext field:lng: true,
 app/api/v1/pro/payments/stripe/connect-account/route.ts:Prisma select/include plaintext field:stripeAccountId: true,
 app/api/v1/pro/payments/stripe/connect-account/route.ts:direct property read:const email = typeof user.email === 'string' ? user.email.trim() : ''
 app/api/v1/pro/payments/stripe/connect-account/route.ts:direct property read:if (existingSettings?.stripeAccountId) {
@@ -464,14 +462,22 @@ lib/booking/writeBoundary.ts:direct property read:args.booking.client.email,
 lib/booking/writeBoundary.ts:direct property read:args.booking.client.phone,
 lib/booking/writeBoundary.ts:direct property read:args.booking.client.user?.email ?? null,
 lib/booking/writeBoundary.ts:direct property read:args.booking.client.user?.phone ?? null,
+lib/booking/writeBoundary.ts:direct property read:client.email,
+lib/booking/writeBoundary.ts:direct property read:client.phone,
+lib/booking/writeBoundary.ts:direct property read:client.user?.email ?? null,
+lib/booking/writeBoundary.ts:direct property read:client.user?.phone ?? null,
 lib/booking/writeBoundary.ts:direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
 lib/booking/writeBoundary.ts:direct property read:if (!settings.stripeAccountId) {
 lib/booking/writeBoundary.ts:direct property read:if (args.email && !args.phone) return ContactMethod.EMAIL
 lib/booking/writeBoundary.ts:direct property read:if (args.phone && !args.email) return ContactMethod.SMS
+lib/booking/writeBoundary.ts:direct property read:paymentSettings?.stripeAccountId &&
 lib/booking/writeBoundary.ts:optional direct property read:`${(booking.client?.firstName ?? '').trim()} ${(booking.client?.lastName ?? '').trim()}`.trim()
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.email ?? null,
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.phone ?? null,
+lib/booking/writeBoundary.ts:optional direct property read:client.user?.email ?? null,
+lib/booking/writeBoundary.ts:optional direct property read:client.user?.phone ?? null,
 lib/booking/writeBoundary.ts:optional direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
+lib/booking/writeBoundary.ts:optional direct property read:paymentSettings?.stripeAccountId &&
 lib/calendar/bookingInvite.ts:Prisma select/include plaintext field:email: true,
 lib/calendar/bookingInvite.ts:Prisma select/include plaintext field:firstName: true,
 lib/calendar/bookingInvite.ts:Prisma select/include plaintext field:lastName: true,
@@ -512,8 +518,6 @@ lib/lastMinute/audience/buildTier3DiscoveryAudience.ts:Prisma select/include pla
 lib/lastMinute/audience/buildTier3DiscoveryAudience.ts:Prisma select/include plaintext field:lng: true,
 lib/lastMinute/audience/buildTier3DiscoveryAudience.ts:Prisma where/order plaintext field:lat: { not: null },
 lib/lastMinute/audience/buildTier3DiscoveryAudience.ts:Prisma where/order plaintext field:lng: { not: null },
-lib/lastMinute/commands/createLastMinuteOpening.ts:Prisma select/include plaintext field:lat: true,
-lib/lastMinute/commands/createLastMinuteOpening.ts:Prisma select/include plaintext field:lng: true,
 lib/lastMinute/openingSelect.ts:Prisma select/include plaintext field:lat: true,
 lib/lastMinute/openingSelect.ts:Prisma select/include plaintext field:lng: true,
 lib/looks/commentSelect.ts:Prisma select/include plaintext field:firstName: true,

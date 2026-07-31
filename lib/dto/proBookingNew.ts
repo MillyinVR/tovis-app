@@ -1,5 +1,5 @@
 // lib/dto/proBookingNew.ts
-import type { Prisma, Role } from '@prisma/client'
+import type { OfferingPrepayScope, Prisma, Role } from '@prisma/client'
 
 import { moneyToNumber } from '@/lib/money'
 
@@ -33,6 +33,8 @@ export type ProBookingNewOfferingDTO = {
   mobileDurationMinutes: number | null
   offersInSalon: boolean
   offersMobile: boolean
+  /** K10-B: per-service prepay requirement — sizes the pro-created deposit step. */
+  prepayScope: OfferingPrepayScope | null
   customImageUrl: string | null
   isActive: boolean
   createdAt: string
@@ -82,6 +84,7 @@ export type ProBookingNewOfferingRow = {
   mobileDurationMinutes: number | null
   offersInSalon: boolean
   offersMobile: boolean
+  prepayScope: OfferingPrepayScope | null
   customImageUrl: string | null
   isActive: boolean
   createdAt: Date
@@ -140,6 +143,7 @@ export function buildProBookingNewOfferingDTO(
     mobileDurationMinutes: row.mobileDurationMinutes ?? null,
     offersInSalon: row.offersInSalon,
     offersMobile: row.offersMobile,
+    prepayScope: row.prepayScope ?? null,
     customImageUrl: row.customImageUrl ?? null,
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),

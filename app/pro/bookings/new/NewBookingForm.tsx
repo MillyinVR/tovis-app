@@ -29,6 +29,11 @@ import {
   type PlacePrediction,
 } from '@/lib/clientAddresses/placesAutocomplete'
 import { moneyToString } from '@/lib/money'
+import type { DepositType } from '@prisma/client'
+import {
+  STRIPE_MIN_CHARGE_CENTS,
+} from '@/lib/booking/discoveryDepositPlan'
+import { computeUpfrontDepositCents } from '@/lib/booking/prepay'
 import {
   OVERLAP_CONFLICT_FETCH_WINDOW_MS,
   OVERLAP_FALLBACK_NAME,
@@ -42,6 +47,7 @@ import {
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import {
   datetimeLocalToUtcIsoStrict,
+  formatInTimeZone,
   formatSlotFullLabel,
   WALL_TIME_ERROR_MESSAGE,
 } from '@/lib/time'
@@ -79,12 +85,28 @@ type ClientSearchResult = {
   phone: string | null
 }
 
+// K10-B: everything the deposit step needs to size the amount and preview the
+// concrete auto-release datetime. Server-computed (env knobs live server-side);
+// the write boundary recomputes the amount authoritatively on submit.
+export type ProBookingDepositConfig = {
+  stripeReady: boolean
+  depositEnabled: boolean
+  depositType: DepositType | null
+  depositFlatAmountCents: number | null
+  depositPercent: number | null
+  /** Hours before the appointment the unpaid hold releases. */
+  releaseLeadHours: number
+  /** Minimum hours after creation the client always gets to pay. */
+  releaseFloorHours: number
+}
+
 type Props = {
   professionalId: string
   clients: ProBookingNewClientDTO[]
   offerings: ProBookingNewOfferingDTO[]
   locations: BookableLocationOption[]
   clientAddressesByClientId: Record<string, ClientServiceAddressOption[]>
+  depositConfig: ProBookingDepositConfig
   defaultClientId?: string
   defaultOfferingId?: string
   defaultLocationId?: string
@@ -509,6 +531,7 @@ export default function NewBookingForm({
   offerings,
   locations,
   clientAddressesByClientId,
+  depositConfig,
   defaultClientId,
   defaultOfferingId,
   defaultLocationId,
@@ -1105,6 +1128,70 @@ export default function NewBookingForm({
     return resolved.ok ? resolved.iso : null
   }, [timeMode, selectedSlot, scheduledAt, bookingTimeZone])
 
+  // K10-B: the deposit step. The preview amount reuses the SAME money helper
+  // the write boundary runs (account term vs prepay term, max not sum, prepay
+  // capped at the bill); the server recomputes authoritatively on submit, so a
+  // price-grace ramp can only make the real amount smaller, never larger.
+  const [depositSkipped, setDepositSkipped] = useState(false)
+
+  const depositAmountCents = useMemo(() => {
+    if (!selectedOffering) return 0
+
+    const baseCents = Math.round(
+      (Number(pickDisplayPrice(selectedOffering, locationType)) || 0) * 100,
+    )
+    const subtotalCents = baseCents + Math.round(addOnPriceTotal * 100)
+
+    return computeUpfrontDepositCents({
+      scopeDepositRequired: depositConfig.depositEnabled,
+      settings: {
+        depositEnabled: depositConfig.depositEnabled,
+        depositType: depositConfig.depositType ?? 'FLAT',
+        depositFlatAmountCents: depositConfig.depositFlatAmountCents,
+        depositPercent: depositConfig.depositPercent,
+      },
+      serviceSubtotalCents: subtotalCents,
+      prepayScope: selectedOffering.prepayScope,
+      baseServiceCents: baseCents,
+      bookingTotalCents: subtotalCents,
+    })
+  }, [selectedOffering, locationType, addOnPriceTotal, depositConfig])
+
+  // Offered only when there is something chargeable and somewhere for the
+  // charge to land. The client-contact requirement is enforced server-side
+  // (the create is REFUSED, and the refusal surfaces in the form error).
+  const depositAvailable =
+    depositConfig.stripeReady && depositAmountCents >= STRIPE_MIN_CHARGE_CENTS
+  const depositRequested = depositAvailable && !depositSkipped
+
+  // The concrete auto-release moment the pro is agreeing to:
+  // max(appointment − lead, now + floor), shown in the booking's timezone.
+  const depositReleasePreview = useMemo(() => {
+    if (!depositRequested || !proposedStartISO) return null
+
+    const start = new Date(proposedStartISO).getTime()
+    if (!Number.isFinite(start)) return null
+
+    const releaseAt = new Date(
+      Math.max(
+        start - depositConfig.releaseLeadHours * 60 * 60 * 1000,
+        Date.now() + depositConfig.releaseFloorHours * 60 * 60 * 1000,
+      ),
+    )
+
+    return formatInTimeZone(
+      releaseAt,
+      sanitizeTimeZone(bookingTimeZone, 'UTC'),
+      {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      },
+    )
+  }, [depositRequested, proposedStartISO, depositConfig, bookingTimeZone])
+
   // Clients the proposed time collides with (empty when clear). Fetched from the
   // pro calendar so it stays in lockstep with the grid's own overlap signal.
   const [overlapNames, setOverlapNames] = useState<string[]>([])
@@ -1377,6 +1464,7 @@ export default function NewBookingForm({
         scheduledFor: scheduledForISO,
         internalNotes: internalNotes.trim() || null,
         overrideReason: trimmedOverrideReason || null,
+        depositRequested,
         ...overrideBody,
       })
 
@@ -2276,6 +2364,56 @@ export default function NewBookingForm({
       </div>
           </FormCard>
 
+      {depositAvailable ? (
+        <FormCard step={4} title="Deposit">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={depositRequested}
+              disabled={loading}
+              onChange={(e) => setDepositSkipped(!e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-accentPrimary"
+            />
+            <span className="grid gap-1">
+              <span className={label}>
+                Require a{' '}
+                {moneyToString(depositAmountCents / 100)
+                  ? `$${moneyToString(depositAmountCents / 100)}`
+                  : ''}{' '}
+                deposit before the appointment
+              </span>
+              <span className="text-[12px] text-textSecondary">
+                The client gets a secure pay link by email or text — no account
+                needed. The deposit counts toward the final total.
+              </span>
+            </span>
+          </label>
+
+          {depositRequested ? (
+            <div className="rounded-card border border-toneWarn/30 bg-toneWarn/10 px-3 py-2 text-[12px] text-textPrimary">
+              {depositReleasePreview ? (
+                <>
+                  If unpaid by{' '}
+                  <span className="font-black">{depositReleasePreview}</span>,
+                  this booking cancels automatically and the time opens back up.
+                </>
+              ) : (
+                <>
+                  If the deposit stays unpaid, this booking cancels
+                  automatically before the appointment and the time opens back
+                  up. Pick a time to see the exact deadline.
+                </>
+              )}
+            </div>
+          ) : (
+            <div className={helper}>
+              No deposit will be requested — you can collect payment at the
+              appointment as usual.
+            </div>
+          )}
+        </FormCard>
+      ) : null}
+
       {overridePrompt ? (
         <BookingOverridePromptCard
           prompt={overridePrompt}
@@ -2325,6 +2463,16 @@ export default function NewBookingForm({
                 label="Duration"
                 value={summaryDuration ? `${summaryDuration} min` : ''}
               />
+              {depositAvailable ? (
+                <SummaryRow
+                  label="Deposit"
+                  value={
+                    depositRequested
+                      ? `$${moneyToString(depositAmountCents / 100) ?? ''}`
+                      : 'Skipped'
+                  }
+                />
+              ) : null}
             </div>
 
             <div className="mt-3.5 flex items-baseline justify-between border-t border-dashed border-white/10 pt-3.5">

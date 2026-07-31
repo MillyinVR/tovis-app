@@ -99,6 +99,10 @@ export function buildPublicAftercareTokenActorKey(tokenId: string): string {
   return `public-aftercare-token:${tokenId}`
 }
 
+export function buildPublicDepositTokenActorKey(tokenId: string): string {
+  return `public-deposit-token:${tokenId}`
+}
+
 export async function beginIdempotency<TBody>(args: {
   actor: IdempotencyActor
   route: IdempotencyRoute

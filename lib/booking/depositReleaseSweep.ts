@@ -80,6 +80,7 @@ const CANDIDATE_SELECT = {
   professionalId: true,
   clientId: true,
   createdAt: true,
+  depositDueAt: true,
   scheduledFor: true,
   status: true,
 } satisfies Prisma.BookingSelect
@@ -98,12 +99,21 @@ export async function releaseAbandonedDepositBookings(opts?: {
   // Only future-occupying holds: an appointment already in the past no longer
   // blocks availability (which is forward-looking), and a past unpaid booking is
   // stale-sessions' concern, not a slot to free.
+  //
+  // K10-B: rows created since the depositDueAt stamp exists key on the STAMP —
+  // frozen at creation, so an env-knob change never moves the deadline under an
+  // existing booking, and pro-created prepay (whose deadline anchors on the
+  // appointment, not on creation) needs no source discrimination here. Legacy
+  // rows with no stamp keep the original createdAt ageing.
   const candidates = await prisma.booking.findMany({
     where: {
       depositStatus: BookingDepositStatus.PENDING,
       status: { in: [BookingStatus.PENDING, BookingStatus.ACCEPTED] },
-      createdAt: { lte: cutoff },
       scheduledFor: { gt: now },
+      OR: [
+        { depositDueAt: { lte: now } },
+        { depositDueAt: null, createdAt: { lte: cutoff } },
+      ],
     },
     select: CANDIDATE_SELECT,
     orderBy: { createdAt: 'asc' },
@@ -153,6 +163,7 @@ export async function releaseAbandonedDepositBookings(opts?: {
           clientId: booking.clientId,
           previousStatus: outcome.previousStatus,
           createdAt: booking.createdAt.toISOString(),
+          depositDueAt: booking.depositDueAt?.toISOString() ?? null,
           scheduledFor: booking.scheduledFor.toISOString(),
           ageHours: Number(
             ((now.getTime() - booking.createdAt.getTime()) / 3_600_000).toFixed(2),

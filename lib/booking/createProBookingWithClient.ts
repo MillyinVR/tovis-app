@@ -75,6 +75,8 @@ export type CreateProBookingWithClientArgs = {
   allowOutsideWorkingHours: boolean
   allowShortNotice: boolean
   allowFarFuture: boolean
+  /** K10-B: the pro asked for the deposit step — see CreateProBookingArgs. */
+  depositRequested?: boolean
 }
 
 type CreateProBookingResult = Awaited<ReturnType<typeof createProBooking>>
@@ -445,6 +447,7 @@ export async function createProBookingWithClient(
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
     allowShortNotice: args.allowShortNotice,
     allowFarFuture: args.allowFarFuture,
+    depositRequested: args.depositRequested ?? false,
     requestId: args.requestId ?? null,
     idempotencyKey: args.idempotencyKey ?? null,
   })

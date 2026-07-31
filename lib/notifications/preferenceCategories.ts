@@ -100,6 +100,10 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.NO_SHOW_FEE_CHARGED]: 'No-show / late-cancel fee',
   [NotificationEventKey.NO_SHOW_DEPOSIT_KEPT]: 'No-show deposit kept',
   [NotificationEventKey.DEPOSIT_REMINDER]: 'Finish your deposit',
+  // K10-B: deliberately NOT in CLIENT_NOTIFICATION_EVENT_KEYS or any category —
+  // a client must not be able to have pre-silenced the secure pay link for a
+  // deposit their pro requires (mirrors PRO_HANDLE_RESERVATION_EXPIRING).
+  [NotificationEventKey.DEPOSIT_PAYMENT_LINK]: 'Deposit payment link',
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: 'New look follower',
   [NotificationEventKey.CLIENT_FOLLOW]: 'New follower',
   [NotificationEventKey.LOOK_COMMENTED]: 'Comments on your looks',

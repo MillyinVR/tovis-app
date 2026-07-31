@@ -241,6 +241,7 @@
         "NO_SHOW_FEE_CHARGED",
         "NO_SHOW_DEPOSIT_KEPT",
         "DEPOSIT_REMINDER",
+        "DEPOSIT_PAYMENT_LINK",
         "LOOK_FOLLOWER_NEW",
         "CLIENT_FOLLOW",
         "LOOK_COMMENTED",
@@ -262,6 +263,13 @@
         "ADMIN_VERIFICATION_REVIEW_NEEDED",
         "ADMIN_SUPPORT_TICKET_CREATED",
         "ADMIN_VIRAL_REQUEST_PENDING"
+      ],
+      "type": "string"
+    },
+    "$Enums.OfferingPrepayScope": {
+      "enum": [
+        "SERVICE_ONLY",
+        "ENTIRE_BOOKING"
       ],
       "type": "string"
     },
@@ -9183,6 +9191,9 @@
       ],
       "type": "object"
     },
+    "OfferingPrepayScope": {
+      "$ref": "#/definitions/%24Enums.OfferingPrepayScope"
+    },
     "OpeningServiceDto": {
       "properties": {
         "id": {
@@ -9933,6 +9944,17 @@
         "offersMobile": {
           "type": "boolean"
         },
+        "prepayScope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OfferingPrepayScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "K10-B: per-service prepay requirement — sizes the pro-created deposit step."
+        },
         "salonDurationMinutes": {
           "type": [
             "number",
@@ -10057,6 +10079,7 @@
         "mobileDurationMinutes",
         "offersInSalon",
         "offersMobile",
+        "prepayScope",
         "customImageUrl",
         "isActive",
         "createdAt",

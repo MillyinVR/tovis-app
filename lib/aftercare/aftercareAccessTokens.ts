@@ -3,6 +3,7 @@
 import { ClientActionTokenKind, Prisma } from '@prisma/client'
 
 import { bookingError } from '@/lib/booking/errors'
+import { markClientActionTokenUsed } from '@/lib/clientActions/tokenUsage'
 import { hashClientActionToken } from '@/lib/consultation/clientActionTokens'
 import { buildPublicAftercareTokenActorKey } from '@/lib/idempotency'
 import { prisma } from '@/lib/prisma'
@@ -338,42 +339,6 @@ async function getAftercareAccessTokenOrFail(args: {
   return token
 }
 
-async function refreshAftercareAccessTokenUsage(
-  db: DbClient,
-  tokenId: string,
-): Promise<AftercareAccessTokenUsage> {
-  const refreshed = await db.clientActionToken.findUnique({
-    where: { id: tokenId },
-    select: AFTERCARE_ACCESS_TOKEN_USAGE_SELECT,
-  })
-
-  if (!refreshed) {
-    throw invalidAftercareToken(
-      `Aftercare access token disappeared after usage update. tokenId=${tokenId}`,
-    )
-  }
-
-  return refreshed
-}
-
-async function getAftercareAccessTokenUsageOrFail(
-  db: DbClient,
-  tokenId: string,
-): Promise<AftercareAccessTokenUsage> {
-  const token = await db.clientActionToken.findUnique({
-    where: { id: tokenId },
-    select: AFTERCARE_ACCESS_TOKEN_USAGE_SELECT,
-  })
-
-  if (!token) {
-    throw invalidAftercareToken(
-      `Aftercare access token was not found. tokenId=${tokenId}`,
-    )
-  }
-
-  return token
-}
-
 /**
  * Validates a raw aftercare access token and returns its booking/aftercare
  * context without mutating token usage.
@@ -430,88 +395,20 @@ export async function resolveAftercareAccessTokenForMutation(
 export async function markAftercareAccessTokenUsed(
   args: MarkAftercareAccessTokenUsedArgs,
 ): Promise<AftercareAccessTokenUsage> {
-  const db = getDb(args.tx)
-  const now = args.now ?? new Date()
-
-  const token = await getAftercareAccessTokenUsageOrFail(db, args.tokenId)
-
-  if (token.expiresAt.getTime() <= now.getTime()) {
-    throw invalidAftercareToken(
-      `Aftercare access token expired. tokenId=${token.id}`,
-    )
-  }
-
-  if (token.singleUse) {
-    const updated = await db.clientActionToken.updateMany({
-      where: {
-        id: token.id,
-        kind: ClientActionTokenKind.AFTERCARE_ACCESS,
-        revokedAt: null,
-        expiresAt: { gt: now },
-        firstUsedAt: null,
-      },
-      data: {
-        firstUsedAt: now,
-        lastUsedAt: now,
-        useCount: {
-          increment: 1,
-        },
-      },
-    })
-
-    if (updated.count !== 1) {
-      throw invalidAftercareToken(
-        `Aftercare access token could not be consumed exactly once. tokenId=${token.id}`,
-        'That aftercare link is invalid or has already been used.',
-      )
-    }
-
-    return refreshAftercareAccessTokenUsage(db, token.id)
-  }
-
-  if (!token.firstUsedAt) {
-    const firstUseUpdate = await db.clientActionToken.updateMany({
-      where: {
-        id: token.id,
-        kind: ClientActionTokenKind.AFTERCARE_ACCESS,
-        revokedAt: null,
-        expiresAt: { gt: now },
-        firstUsedAt: null,
-      },
-      data: {
-        firstUsedAt: now,
-        lastUsedAt: now,
-        useCount: {
-          increment: 1,
-        },
-      },
-    })
-
-    if (firstUseUpdate.count === 1) {
-      return refreshAftercareAccessTokenUsage(db, token.id)
-    }
-  }
-
-  const repeatUseUpdate = await db.clientActionToken.updateMany({
-    where: {
-      id: token.id,
-      kind: ClientActionTokenKind.AFTERCARE_ACCESS,
-      revokedAt: null,
-      expiresAt: { gt: now },
-    },
-    data: {
-      lastUsedAt: now,
-      useCount: {
-        increment: 1,
-      },
-    },
+  // Shared usage-marking (lib/clientActions/tokenUsage.ts, K10-B) — the
+  // single-use/repeat-use branching is common to every token kind; only the
+  // kind guard and the error copy are aftercare's.
+  return markClientActionTokenUsed({
+    tokenId: args.tokenId,
+    kind: ClientActionTokenKind.AFTERCARE_ACCESS,
+    tx: args.tx,
+    now: args.now,
+    invalidError: (message, userMessage) =>
+      invalidAftercareToken(
+        message.replace('Client action token', 'Aftercare access token'),
+        userMessage,
+      ),
+    alreadyUsedUserMessage:
+      'That aftercare link is invalid or has already been used.',
   })
-
-  if (repeatUseUpdate.count !== 1) {
-    throw invalidAftercareToken(
-      `Aftercare access token usage update did not succeed. tokenId=${token.id}`,
-    )
-  }
-
-  return refreshAftercareAccessTokenUsage(db, token.id)
 }

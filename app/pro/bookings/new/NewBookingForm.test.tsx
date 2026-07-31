@@ -51,6 +51,7 @@ const offering: ProBookingNewOfferingDTO = {
   mobileDurationMinutes: null,
   offersInSalon: true,
   offersMobile: false,
+  prepayScope: null,
   customImageUrl: null,
   isActive: true,
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -75,6 +76,17 @@ const baseProps = {
   professionalId: 'pro_1',
   clients: [client],
   offerings: [offering],
+  // Deposits unavailable by default — these tests exercise the overlap
+  // warning, not the K10-B deposit step.
+  depositConfig: {
+    stripeReady: false,
+    depositEnabled: false,
+    depositType: null,
+    depositFlatAmountCents: null,
+    depositPercent: null,
+    releaseLeadHours: 72,
+    releaseFloorHours: 24,
+  },
   locations: [
     {
       id: 'loc_1',
