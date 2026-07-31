@@ -1,7 +1,11 @@
 // app/api/v1/pro/offerings/[id]/route.ts
 
 import { prisma } from '@/lib/prisma'
-import { Prisma, ProfessionalLocationType } from '@prisma/client'
+import {
+  OfferingPrepayScope,
+  Prisma,
+  ProfessionalLocationType,
+} from '@prisma/client'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
@@ -78,6 +82,29 @@ function pickCalendarSwatch(
   if (!trimmed) return null
 
   return parseCalendarSwatch(trimmed) ?? undefined
+}
+
+/**
+ * K10: the per-service prepay requirement.
+ *
+ * `null` (or a blank string, matching `trimOrNull`'s convention elsewhere in
+ * this route) turns prepay off. Anything outside the enum returns `undefined`,
+ * which the caller turns into a 400 rather than a silent clear — this decides
+ * whether a client is charged the whole bill before their appointment, so a
+ * typo must be heard, not swallowed.
+ */
+function pickPrepayScope(v: unknown): OfferingPrepayScope | null | undefined {
+  if (v === null) return null
+  if (typeof v !== 'string') return undefined
+
+  const trimmed = v.trim()
+
+  if (!trimmed) return null
+
+  return trimmed === OfferingPrepayScope.SERVICE_ONLY ||
+    trimmed === OfferingPrepayScope.ENTIRE_BOOKING
+    ? trimmed
+    : undefined
 }
 
 function pickNullablePriceString(v: unknown): string | null | undefined {
@@ -184,6 +211,9 @@ function toDto(off: OfferingRow) {
     // Narrowed on the way out too: a column value outside the current palette
     // reads as "no colour" on every surface, including the picker.
     calendarSwatch: parseCalendarSwatch(off.calendarSwatch),
+
+    // K10: the per-service prepay requirement. Null = off.
+    prepayScope: off.prepayScope,
 
     isActive: Boolean(off.isActive),
 
@@ -551,6 +581,28 @@ export async function PATCH(request: Request, ctx: RouteContext) {
 
       if (calendarSwatch !== undefined) {
         data.calendarSwatch = calendarSwatch
+      }
+
+      const prepayScope = Object.prototype.hasOwnProperty.call(
+        body,
+        'prepayScope',
+      )
+        ? pickPrepayScope(body.prepayScope)
+        : undefined
+
+      if (
+        Object.prototype.hasOwnProperty.call(body, 'prepayScope') &&
+        prepayScope === undefined
+      ) {
+        return {
+          kind: 'ERROR',
+          status: 400,
+          msg: 'prepayScope must be SERVICE_ONLY, ENTIRE_BOOKING, or null.',
+        }
+      }
+
+      if (prepayScope !== undefined) {
+        data.prepayScope = prepayScope
       }
 
       if (typeof offersInSalonIn === 'boolean') {

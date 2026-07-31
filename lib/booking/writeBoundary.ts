@@ -79,6 +79,7 @@ import {
   computeDiscoveryDepositPlan,
   type DepositSettings,
 } from '@/lib/booking/discoveryDepositPlan'
+import { computeUpfrontDepositCents } from '@/lib/booking/prepay'
 import {
   withLockedClientOwnedBookingTransaction,
   withLockedProfessionalScheduleByLookup,
@@ -9697,14 +9698,27 @@ async function performLockedFinalizeBookingFromHold(args: {
     args.discovery?.provenance ?? BookingDiscoveryProvenance.UNKNOWN
 
   // The deposit and the platform fee are two independent gates (K10-A): the
-  // deposit follows the pro's depositScope, the fee stays new-via-discovery
+  // deposit follows the pro's depositScope and — since K10 — the base
+  // offering's per-service prepay requirement; the fee stays new-via-discovery
   // only. A booking can owe one without the other.
+  //
+  // The prepay term is sized against `lastMinuteTotal`, the amount the client
+  // is actually billed, NOT the undiscounted subtotal the ordinary deposit uses:
+  // 100% has to mean exactly the bill, or `coversTotal` is false on every
+  // prepaid booking with a last-minute discount and closeout opens a session for
+  // the difference.
   const discoveryPlan =
-    args.discovery && (args.discovery.depositRequired || args.discovery.feeEligible)
+    args.discovery &&
+    (args.discovery.depositRequirement.required || args.discovery.feeEligible)
       ? computeDiscoveryDepositPlan({
-          settings: args.discovery.depositSettings,
-          servicePriceCents: Math.round(Number(subtotal) * 100),
-          depositRequired: args.discovery.depositRequired,
+          depositCents: computeUpfrontDepositCents({
+            scopeDepositRequired: args.discovery.depositRequirement.scopeRequired,
+            settings: args.discovery.depositSettings,
+            serviceSubtotalCents: Math.round(Number(subtotal) * 100),
+            prepayScope: args.discovery.depositRequirement.prepayScope,
+            baseServiceCents: Math.round(Number(chargedBasePrice) * 100),
+            bookingTotalCents: Math.round(Number(lastMinuteTotal) * 100),
+          }),
           feeEligible: args.discovery.feeEligible,
           discoveryFeeCents: args.discovery.discoveryFeeCents,
         })

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   messageThreadCount: vi.fn(),
   paymentSettingsFindUnique: vi.fn(),
   subscriptionFindUnique: vi.fn(),
+  offeringFindFirst: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -30,6 +31,7 @@ vi.mock('@/lib/prisma', () => ({
     messageThread: { count: mocks.messageThreadCount },
     professionalPaymentSettings: { findUnique: mocks.paymentSettingsFindUnique },
     professionalSubscription: { findUnique: mocks.subscriptionFindUnique },
+    professionalServiceOffering: { findFirst: mocks.offeringFindFirst },
   },
 }))
 
@@ -39,6 +41,7 @@ const BASE = {
   clientId: 'client_1',
   clientUserId: null,
   professionalId: 'pro_1',
+  offeringId: 'offering_1',
   source: BookingSource.DISCOVERY,
   aftercare: false,
 }

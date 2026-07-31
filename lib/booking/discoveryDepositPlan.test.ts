@@ -61,12 +61,14 @@ describe('computeDepositCents', () => {
 })
 
 describe('computeDiscoveryDepositPlan', () => {
+  // K10 moved the SIZING of the deposit out to lib/booking/prepay.ts (it now has
+  // two rules to combine), so this function's job is narrower: put an
+  // already-sized deposit together with the platform fee and refuse a combined
+  // charge Stripe cannot process.
   it('is all-zero when neither a deposit nor a fee applies', () => {
     expect(
       computeDiscoveryDepositPlan({
-        settings: FLAT_20,
-        servicePriceCents: 10000,
-        depositRequired: false,
+        depositCents: 0,
         feeEligible: false,
         discoveryFeeCents: 500,
       }),
@@ -76,9 +78,7 @@ describe('computeDiscoveryDepositPlan', () => {
   it('combines deposit + fee for an eligible new discovery client', () => {
     expect(
       computeDiscoveryDepositPlan({
-        settings: FLAT_20,
-        servicePriceCents: 10000,
-        depositRequired: true,
+        depositCents: 2000,
         feeEligible: true,
         discoveryFeeCents: 500,
       }),
@@ -88,9 +88,7 @@ describe('computeDiscoveryDepositPlan', () => {
   it('charges only the fee when the pro takes no deposit (fee clears the minimum)', () => {
     expect(
       computeDiscoveryDepositPlan({
-        settings: DISABLED,
-        servicePriceCents: 10000,
-        depositRequired: true,
+        depositCents: 0,
         feeEligible: true,
         discoveryFeeCents: 500,
       }),
@@ -100,9 +98,7 @@ describe('computeDiscoveryDepositPlan', () => {
   it('collects nothing when deposit + fee cannot clear the Stripe minimum', () => {
     expect(
       computeDiscoveryDepositPlan({
-        settings: DISABLED,
-        servicePriceCents: 10000,
-        depositRequired: true,
+        depositCents: 0,
         feeEligible: true,
         discoveryFeeCents: STRIPE_MIN_CHARGE_CENTS - 1,
       }),
@@ -114,9 +110,7 @@ describe('computeDiscoveryDepositPlan', () => {
   it('charges the deposit WITHOUT the fee for a scoped-in returning client', () => {
     expect(
       computeDiscoveryDepositPlan({
-        settings: FLAT_20,
-        servicePriceCents: 10000,
-        depositRequired: true,
+        depositCents: 2000,
         feeEligible: false,
         discoveryFeeCents: 500,
       }),
@@ -126,13 +120,29 @@ describe('computeDiscoveryDepositPlan', () => {
   it('charges the fee WITHOUT a deposit when the scope excludes this booking', () => {
     expect(
       computeDiscoveryDepositPlan({
-        settings: FLAT_20,
-        servicePriceCents: 10000,
-        depositRequired: false,
+        depositCents: 0,
         feeEligible: true,
         discoveryFeeCents: 500,
       }),
     ).toEqual({ depositCents: 0, discoveryFeeCents: 500, totalUpfrontCents: 500 })
+  })
+
+  it('never lets a negative or fractional deposit through', () => {
+    expect(
+      computeDiscoveryDepositPlan({
+        depositCents: -100,
+        feeEligible: true,
+        discoveryFeeCents: 500,
+      }).depositCents,
+    ).toBe(0)
+
+    expect(
+      computeDiscoveryDepositPlan({
+        depositCents: 2000.4,
+        feeEligible: false,
+        discoveryFeeCents: 0,
+      }).depositCents,
+    ).toBe(2000)
   })
 })
 

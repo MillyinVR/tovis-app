@@ -112,6 +112,36 @@ export function deriveDepositCredit(row: DepositCreditBookingRow): DepositCredit
 }
 
 /**
+ * Does this booking's deposit — once paid, or already paid — settle the whole
+ * bill? The question a K10 prepay surface asks.
+ *
+ * `deriveDepositCredit` deliberately cannot answer it for a deposit that has
+ * not landed: a PENDING deposit holds no money, so its credit is 0 and
+ * `coversTotal` is false. Correct for sizing a charge, wrong for describing
+ * one — a client staring at a prepay-required booking is about to pay for the
+ * appointment in full, and the surface asking for that money must say so rather
+ * than calling it a deposit that will be "credited later".
+ *
+ * The ONE thing this drops relative to `deriveNetDepositHeldCents` is the
+ * `depositStatus === PAID` gate. Refunds and disputes still apply: a prepay with
+ * $50 handed back does NOT cover the bill any more, and a card that says
+ * "Paid in full ✓ — nothing to pay on the day" over a $50 balance is exactly
+ * the display lie M11 exists to stop. False for a $0 total, matching
+ * `coversTotal`.
+ */
+export function depositWouldCoverTotal(row: DepositCreditBookingRow): boolean {
+  const totalCents = Math.max(0, decimalToCents(row.totalAmount) ?? 0)
+  if (totalCents <= 0) return false
+
+  if (row.depositDisputedAt != null) return false
+
+  const depositCents = decimalToCents(row.depositAmount)
+  if (depositCents == null) return false
+
+  return Math.max(0, depositCents - row.depositRefundedCents) >= totalCents
+}
+
+/**
  * Deposit money still held, before any cap against the bill. Exported so the
  * payment badge can print the net a pro still holds ("Deposit paid $40.00")
  * without re-deriving the refund/dispute rules that produce it.

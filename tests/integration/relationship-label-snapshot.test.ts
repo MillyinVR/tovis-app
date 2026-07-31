@@ -43,6 +43,7 @@ type Fixtures = {
   clientUserId: string
   professionalId: string
   serviceId: string
+  offeringId: string
   locationId: string
 }
 
@@ -114,6 +115,20 @@ async function seedFixtures(): Promise<Fixtures> {
     select: { id: true },
   })
 
+  // K10 reads this offering's `prepayScope` inside the resolver. It carries
+  // none, so every assertion below is about the relationship label alone.
+  const offering = await db.professionalServiceOffering.create({
+    data: {
+      professionalId: professional.id,
+      serviceId: service.id,
+      salonPriceStartingAt: new Prisma.Decimal('100.00'),
+      salonDurationMinutes: 60,
+      offersInSalon: true,
+      isActive: true,
+    },
+    select: { id: true },
+  })
+
   const location = await db.professionalLocation.create({
     data: {
       professionalId: professional.id,
@@ -149,6 +164,7 @@ async function seedFixtures(): Promise<Fixtures> {
     clientUserId: clientUser.id,
     professionalId: professional.id,
     serviceId: service.id,
+    offeringId: offering.id,
     locationId: location.id,
   }
 }
@@ -197,6 +213,7 @@ function resolveLabelFor(source: BookingSource) {
     clientId: fx.clientId,
     clientUserId: fx.clientUserId,
     professionalId: fx.professionalId,
+    offeringId: fx.offeringId,
     lookPostId: null,
     mediaId: null,
     source,
@@ -227,6 +244,7 @@ describe('resolver derivation (real DB, both axes)', () => {
         clientId: fx.clientId,
         clientUserId: fx.clientUserId,
         professionalId: fx.professionalId,
+        offeringId: fx.offeringId,
         lookPostId: null,
         mediaId: null,
         source: BookingSource.AFTERCARE,

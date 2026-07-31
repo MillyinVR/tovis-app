@@ -460,6 +460,21 @@ enum DepositScope {
   ALL_CLIENTS // every booking
 }
 
+/// K10 (D4 = per-service): what a prepay-required service collects up front.
+/// Prepay is NOT a second payment rail — it is a 100% deposit, so it reuses the
+/// deposit PaymentIntent, the credit-to-total (lib/booking/depositCredit.ts),
+/// partial-refund accounting, the dispute freeze and the release sweep.
+///
+/// A booking carries several `BookingServiceItem`s but only its BASE offering
+/// can demand prepay (add-ons hang off an OfferingAddOn and own no offering
+/// row), so this value answers the mixed-booking question Tori settled on
+/// 2026-07-30: the PRO decides, per service, rather than the system imposing a
+/// rule. Null on the offering = no prepay, the pre-K10 behaviour exactly.
+enum OfferingPrepayScope {
+  SERVICE_ONLY // collect 100% of THIS service's price; add-ons stay on the final bill
+  ENTIRE_BOOKING // collect 100% of the whole booking total, add-ons included
+}
+
 // How a client arrived at the pro for a given booking. Server-validated at hold
 // creation and copied to the Booking at finalize — it is a TRUST BOUNDARY and is
 // never taken from client input, because LOOKS_FEED / DISCOVERY_SEARCH gate the
@@ -2839,6 +2854,17 @@ model ProfessionalServiceOffering {
   /// Read through `parseCalendarSwatch`, never raw: a value outside the current
   /// palette must degrade to "no colour", not to a broken attribute.
   calendarSwatch String?
+
+  /// K10: this service must be PAID IN FULL up front (D4 = per-service). Null =
+  /// no prepay requirement, and the booking follows the pro's account-wide
+  /// `ProfessionalPaymentSettings.depositScope` exactly as before.
+  ///
+  /// 🔴 A non-null value OVERRIDES the account-wide `depositEnabled` switch
+  /// (Tori, 2026-07-30): a pro with deposits off who marks one service
+  /// prepay-required gets prepay on it. The Stripe-ready gate still applies —
+  /// a pro who cannot receive a charge would only strand the booking with a
+  /// deposit nobody can pay. See lib/booking/depositRequirement.ts.
+  prepayScope OfferingPrepayScope?
 
   customImageUrl String?
 

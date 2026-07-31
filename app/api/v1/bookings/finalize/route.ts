@@ -744,6 +744,7 @@ export async function POST(request: Request) {
       clientId: ownership.clientId,
       clientUserId: ownership.actorUserId,
       professionalId: offering.professionalId,
+      offeringId: offering.id,
       lookPostId: body.lookPostId,
       mediaId: body.mediaId,
       source: body.source,
