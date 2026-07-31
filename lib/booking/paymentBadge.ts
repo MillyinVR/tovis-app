@@ -33,7 +33,11 @@ import {
 import type { Prisma } from '@prisma/client'
 
 import type { BadgeTone } from '@/app/_components/ui'
-import { decimalToCents, formatCents } from '@/lib/money'
+import {
+  DEPOSIT_CREDIT_SELECT,
+  deriveDepositCredit,
+} from '@/lib/booking/depositCredit'
+import { formatCents } from '@/lib/money'
 
 /**
  * The exact Booking columns the badge derives from. Spread this into any
@@ -41,16 +45,15 @@ import { decimalToCents, formatCents } from '@/lib/money'
  * about their inputs.
  */
 export const PAYMENT_BADGE_SELECT = {
+  // The deposit axis's columns come from the credit helper rather than being
+  // restated here, so widening what the credit reads cannot leave the badge
+  // deriving from a narrower row than the charge it describes.
+  ...DEPOSIT_CREDIT_SELECT,
   checkoutStatus: true,
   paymentCollectedAt: true,
   stripePaymentStatus: true,
   stripeAmountTotal: true,
   stripeAmountRefunded: true,
-  totalAmount: true,
-  depositStatus: true,
-  depositAmount: true,
-  depositRefundedCents: true,
-  depositDisputedAt: true,
 } satisfies Prisma.BookingSelect
 
 export type PaymentBadgeBookingRow = Prisma.BookingGetPayload<{
@@ -191,21 +194,15 @@ export function derivePaymentBadge(row: PaymentBadgeBookingRow): PaymentBadge {
     return badgeOf('PARTIALLY_PAID')
   }
 
-  // 3 — no final-bill story yet: the deposit axis.
+  // 3 — no final-bill story yet: the deposit axis. The net-held and
+  // covers-the-total math lives in lib/booking/depositCredit.ts, which is also
+  // what the client's final-bill charge and the zero-due closeout read — so the
+  // badge that says "Prepaid in full" and the checkout that asks for $0 can
+  // never disagree about which it is.
   if (row.depositStatus === BookingDepositStatus.PAID) {
-    const depositCents = decimalToCents(row.depositAmount)
-    const netHeldCents =
-      depositCents != null
-        ? Math.max(0, depositCents - row.depositRefundedCents)
-        : null
-    const totalCents = decimalToCents(row.totalAmount)
+    const credit = deriveDepositCredit(row)
 
-    if (
-      netHeldCents != null &&
-      totalCents != null &&
-      totalCents > 0 &&
-      netHeldCents >= totalCents
-    ) {
+    if (credit.coversTotal) {
       return badgeOf('PREPAID_IN_FULL')
     }
 
@@ -213,8 +210,8 @@ export function derivePaymentBadge(row: PaymentBadgeBookingRow): PaymentBadge {
     // ("Deposit paid $40.00" after refunding $20 of $60), never as untouched.
     return badgeOf(
       'DEPOSIT_PAID',
-      netHeldCents != null && netHeldCents > 0
-        ? `${PAYMENT_BADGE_LABELS.DEPOSIT_PAID} ${formatCents(netHeldCents)}`
+      credit.netDepositHeldCents > 0
+        ? `${PAYMENT_BADGE_LABELS.DEPOSIT_PAID} ${formatCents(credit.netDepositHeldCents)}`
         : PAYMENT_BADGE_LABELS.DEPOSIT_PAID,
     )
   }

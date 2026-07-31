@@ -106,11 +106,31 @@ export function isNewDiscoveryClient(signals: DiscoveryClientSignals): boolean {
   if (!signals.proDepositEnabled) return false
   if (!signals.proStripeReady) return false
 
-  const hasPriorRelationship =
+  return !hasPriorRelationship(signals)
+}
+
+/**
+ * Whether this (client, pro) pair has ANY prior relationship signal — a
+ * non-reset booking, an accepted roster invite, a message thread, or an NFC
+ * tap. "New client" everywhere in the app means this returning false.
+ *
+ * Extracted so the deposit-scope policy (lib/booking/depositRequirement.ts) and
+ * the platform-fee gate answer "is this client new?" from ONE definition. They
+ * differ on WHICH new clients owe money, never on who counts as new.
+ */
+export function hasPriorRelationship(
+  signals: Pick<
+    DiscoveryClientSignals,
+    | 'establishedBookingCount'
+    | 'acceptedInviteCount'
+    | 'threadCount'
+    | 'arrivedViaProNfc'
+  >,
+): boolean {
+  return (
     signals.establishedBookingCount > 0 ||
     signals.acceptedInviteCount > 0 ||
     signals.threadCount > 0 ||
     signals.arrivedViaProNfc
-
-  return !hasPriorRelationship
+  )
 }

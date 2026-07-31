@@ -58,6 +58,11 @@ import {
 } from '@/lib/tenant/bookingAttribution'
 import { upper } from '@/lib/booking/guards'
 import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
+import {
+  DEPOSIT_CREDIT_SELECT,
+  deriveDepositCredit,
+} from '@/lib/booking/depositCredit'
+import type { FinalizeDiscoveryDirective } from '@/lib/booking/resolveDiscoveryFinalize'
 import { clientCheckoutProductsEditBlockReason } from '@/lib/booking/checkoutProductsEditable'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import {
@@ -535,20 +540,12 @@ type FinalizeBookingFromHoldArgs = {
   fallbackTimeZone?: string
   requestId?: string | null
   idempotencyKey?: string | null
-  // Server-validated discovery context (see lib/booking/resolveDiscoveryFinalize).
-  // Provenance is always stamped; when feeEligible, the deposit + one-time platform
-  // fee are computed from the service subtotal and recorded on the booking.
-  discovery?: {
-    provenance: BookingDiscoveryProvenance
-    // NR/NNR/RR/RNR mark to snapshot (K5) — derived by the resolver from the
-    // validated source axis + the same established-booking count the fee uses.
-    relationshipLabel: ClientRelationshipLabel
-    feeEligible: boolean
-    depositSettings: DepositSettings
-    discoveryFeeCents: number
-    // Validated LookPost this booking started from (remix attribution), or null.
-    sourceLookPostId?: string | null
-  } | null
+  // Server-validated discovery context. The shape is the resolver's own
+  // `FinalizeDiscoveryDirective` rather than a hand-copy: this was a restated
+  // duplicate that had to be edited in lockstep with the resolver, and K10-A's
+  // new `depositRequired` gate is exactly the kind of field a copy silently
+  // fails to grow (drifted-duplicate-is-a-bug-report).
+  discovery?: FinalizeDiscoveryDirective | null
   // Cancellation-policy consent (M15). Set only when an interactive client agreed
   // to a chargeable no-show/late-cancel policy at the confirm step; recorded on
   // the booking so the fee is later charged from the agreed snapshot. Both null
@@ -760,29 +757,59 @@ type PrepareClientStripeCheckoutSessionArgs = {
   idempotencyKey?: string | null
 }
 
-type PrepareClientStripeCheckoutSessionResult = {
-  booking: {
-    id: string
-    professionalId: string
-    serviceSubtotalSnapshot: Prisma.Decimal | null
-    productSubtotalSnapshot: Prisma.Decimal | null
-    subtotalSnapshot: Prisma.Decimal | null
-    tipAmount: Prisma.Decimal | null
-    taxAmount: Prisma.Decimal | null
-    discountAmount: Prisma.Decimal | null
-    totalAmount: Prisma.Decimal | null
-    checkoutStatus: BookingCheckoutStatus
-    selectedPaymentMethod: PaymentMethod | null
-    paymentProvider: PaymentProvider
-  }
-  stripe: {
-    amountCents: number
-    currency: string
-    lineItemDescription: string
-    connectedAccountId: string
-  }
-  meta: MutationMeta
+type PreparedClientCheckoutBooking = {
+  id: string
+  professionalId: string
+  serviceSubtotalSnapshot: Prisma.Decimal | null
+  productSubtotalSnapshot: Prisma.Decimal | null
+  subtotalSnapshot: Prisma.Decimal | null
+  tipAmount: Prisma.Decimal | null
+  taxAmount: Prisma.Decimal | null
+  discountAmount: Prisma.Decimal | null
+  totalAmount: Prisma.Decimal | null
+  checkoutStatus: BookingCheckoutStatus
+  selectedPaymentMethod: PaymentMethod | null
+  paymentProvider: PaymentProvider
 }
+
+/**
+ * A discriminated union, not an optional `stripe` block, so a caller physically
+ * cannot read a charge amount on the branch where there is nothing to charge.
+ * The zero-due branch is reachable whenever a paid deposit covers the whole
+ * bill (K10-A closeout-at-zero). Before the deposit credit existed this state
+ * did NOT refuse — it opened a Stripe session for the ENTIRE total on a booking
+ * the client had already paid in full, which is the double charge at its worst.
+ */
+type PrepareClientStripeCheckoutSessionResult =
+  | {
+      outcome: 'STRIPE_SESSION'
+      booking: PreparedClientCheckoutBooking
+      stripe: {
+        /**
+         * What to actually charge: the bill MINUS the deposit already held.
+         * Never the raw total — charging that collects the deposit twice.
+         */
+        amountCents: number
+        currency: string
+        lineItemDescription: string
+        connectedAccountId: string
+      }
+      /** Deposit money this charge already accounts for (0 when there is none). */
+      depositCreditCents: number
+      meta: MutationMeta
+    }
+  | {
+      /**
+       * The deposit covered the entire bill: checkout was settled PAID inside
+       * this same locked transaction and NO Stripe session may be opened.
+       * Charging $0 is not a thing Stripe will do, and charging the total would
+       * bill the client a second time.
+       */
+      outcome: 'SETTLED_BY_DEPOSIT'
+      booking: PreparedClientCheckoutBooking
+      depositCreditCents: number
+      meta: MutationMeta
+    }
 
 type RecordStripeCheckoutSessionAttachedArgs = {
   bookingId: string
@@ -2079,6 +2106,11 @@ type ClientBookingCheckoutRecord = Prisma.BookingGetPayload<{
 }>
 
 const CLIENT_STRIPE_CHECKOUT_BOOKING_SELECT = {
+  // The deposit columns the credit reads, so the final bill can be charged NET
+  // of a deposit the client already paid (K10-A). `depositCreditedAt` rides
+  // along so the zero-due settle never re-stamps an already-consumed credit.
+  ...DEPOSIT_CREDIT_SELECT,
+  depositCreditedAt: true,
   id: true,
   clientId: true,
   professionalId: true,
@@ -9664,14 +9696,19 @@ async function performLockedFinalizeBookingFromHold(args: {
   const discoveryProvenance =
     args.discovery?.provenance ?? BookingDiscoveryProvenance.UNKNOWN
 
-  const discoveryPlan = args.discovery?.feeEligible
-    ? computeDiscoveryDepositPlan({
-        settings: args.discovery.depositSettings,
-        servicePriceCents: Math.round(Number(subtotal) * 100),
-        isNewDiscoveryClient: true,
-        discoveryFeeCents: args.discovery.discoveryFeeCents,
-      })
-    : null
+  // The deposit and the platform fee are two independent gates (K10-A): the
+  // deposit follows the pro's depositScope, the fee stays new-via-discovery
+  // only. A booking can owe one without the other.
+  const discoveryPlan =
+    args.discovery && (args.discovery.depositRequired || args.discovery.feeEligible)
+      ? computeDiscoveryDepositPlan({
+          settings: args.discovery.depositSettings,
+          servicePriceCents: Math.round(Number(subtotal) * 100),
+          depositRequired: args.discovery.depositRequired,
+          feeEligible: args.discovery.feeEligible,
+          discoveryFeeCents: args.discovery.discoveryFeeCents,
+        })
+      : null
 
   const hasUpfrontCharge =
     discoveryPlan != null && discoveryPlan.totalUpfrontCents > 0
@@ -17023,7 +17060,35 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
     nextTipAmount,
   })
 
-  const amountCents = decimalToCents(rollup.totalAmount)
+  // K10-A: the deposit the client already paid comes OFF this bill. Derived
+  // against the ROLLUP's total, not the stored one — products and tip may have
+  // just changed it, and a credit sized from a stale total would either
+  // over-charge or settle a bill that is no longer covered.
+  const depositCredit = deriveDepositCredit({
+    depositStatus: booking.depositStatus,
+    depositAmount: booking.depositAmount,
+    depositRefundedCents: booking.depositRefundedCents,
+    depositDisputedAt: booking.depositDisputedAt,
+    totalAmount: rollup.totalAmount,
+  })
+
+  const amountCents = depositCredit.amountDueCents
+
+  // Closeout at zero. `coversTotal` is false for a zero/absent total, so a bill
+  // with nothing on it still falls through to the refusal below rather than
+  // closing itself out.
+  if (depositCredit.coversTotal) {
+    return settleClientCheckoutCoveredByDeposit({
+      tx: args.tx,
+      now: args.now,
+      booking,
+      rollup,
+      depositCredit,
+      requestId: args.requestId ?? null,
+      idempotencyKey: args.idempotencyKey ?? null,
+    })
+  }
+
   if (amountCents <= 0) {
     throw bookingError('FORBIDDEN', {
       message: 'Stripe checkout requires a positive total.',
@@ -17111,6 +17176,7 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
   const mutated = !areAuditValuesEqual(oldState, newState)
 
   return {
+    outcome: 'STRIPE_SESSION',
     booking: {
       id: updated.id,
       professionalId: updated.professionalId,
@@ -17134,7 +17200,132 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
       }),
       connectedAccountId: paymentSettings.stripeAccountId,
     },
+    depositCreditCents: depositCredit.creditCents,
     meta: buildMeta(mutated),
+  }
+}
+
+/**
+ * Closeout at zero (K10-A): the client's paid deposit covers the entire final
+ * bill, so there is nothing left to charge. Settles the checkout PAID in the
+ * SAME locked transaction that discovered it, stamping `depositCreditedAt` —
+ * the column whose schema comment ("when the deposit was applied against the
+ * final total") described a write that did not exist until now.
+ *
+ * 🔴 No Stripe session is created and no PaymentIntent is touched. The deposit
+ * charge already settled to the pro on its own PaymentIntent; the money has
+ * moved, and this is the bookkeeping that records it against the bill. Because
+ * the final-bill PI captures nothing on this path, `stripeAmountTotal` stays
+ * null and the refund rail's over-refund guard (captured − reserved) has
+ * nothing to give back here — a refund correctly has to go through the DEPOSIT
+ * PI's own guard instead.
+ *
+ * `paymentProvider`/`selectedPaymentMethod` are deliberately NOT stamped
+ * STRIPE_CARD: the client did not present a card for this bill. Leaving them
+ * alone keeps M2's abandoned-checkout residual rule intact.
+ */
+async function settleClientCheckoutCoveredByDeposit(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  booking: ClientStripeCheckoutBookingRecord
+  rollup: Awaited<ReturnType<typeof buildBookingCheckoutRollupUpdate>>
+  depositCredit: ReturnType<typeof deriveDepositCredit>
+  requestId: string | null
+  idempotencyKey: string | null
+}): Promise<PrepareClientStripeCheckoutSessionResult> {
+  const { booking, rollup } = args
+
+  const oldState = buildCheckoutAuditSnapshot({
+    checkoutStatus: booking.checkoutStatus,
+    selectedPaymentMethod: booking.selectedPaymentMethod,
+    serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: booking.productSubtotalSnapshot,
+    subtotalSnapshot: booking.subtotalSnapshot,
+    tipAmount: booking.tipAmount,
+    taxAmount: booking.taxAmount,
+    discountAmount: booking.discountAmount,
+    totalAmount: booking.totalAmount,
+    paymentAuthorizedAt: booking.paymentAuthorizedAt,
+    paymentCollectedAt: booking.paymentCollectedAt,
+  })
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      serviceSubtotalSnapshot: rollup.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: rollup.productSubtotalSnapshot,
+      subtotalSnapshot: rollup.subtotalSnapshot,
+      tipAmount: rollup.tipAmount,
+      taxAmount: rollup.taxAmount,
+      discountAmount: rollup.discountAmount,
+      totalAmount: rollup.totalAmount,
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      paymentAuthorizedAt: booking.paymentAuthorizedAt ?? args.now,
+      paymentCollectedAt: args.now,
+      depositCreditedAt: booking.depositCreditedAt ?? args.now,
+    },
+    select: {
+      id: true,
+      professionalId: true,
+      serviceSubtotalSnapshot: true,
+      productSubtotalSnapshot: true,
+      subtotalSnapshot: true,
+      tipAmount: true,
+      taxAmount: true,
+      discountAmount: true,
+      totalAmount: true,
+      checkoutStatus: true,
+      selectedPaymentMethod: true,
+      paymentProvider: true,
+      paymentAuthorizedAt: true,
+      paymentCollectedAt: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  const newState = buildCheckoutAuditSnapshot({
+    checkoutStatus: updated.checkoutStatus,
+    selectedPaymentMethod: updated.selectedPaymentMethod,
+    serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: updated.productSubtotalSnapshot,
+    subtotalSnapshot: updated.subtotalSnapshot,
+    tipAmount: updated.tipAmount,
+    taxAmount: updated.taxAmount,
+    discountAmount: updated.discountAmount,
+    totalAmount: updated.totalAmount,
+    paymentAuthorizedAt: updated.paymentAuthorizedAt,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  })
+
+  await createCheckoutAuditLogs({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: booking.professionalId,
+    route:
+      'lib/booking/writeBoundary.ts:settleClientCheckoutCoveredByDeposit',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldState,
+    newState,
+  })
+
+  return {
+    outcome: 'SETTLED_BY_DEPOSIT',
+    booking: {
+      id: updated.id,
+      professionalId: updated.professionalId,
+      serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: updated.productSubtotalSnapshot,
+      subtotalSnapshot: updated.subtotalSnapshot,
+      tipAmount: updated.tipAmount,
+      taxAmount: updated.taxAmount,
+      discountAmount: updated.discountAmount,
+      totalAmount: updated.totalAmount,
+      checkoutStatus: updated.checkoutStatus,
+      selectedPaymentMethod: updated.selectedPaymentMethod,
+      paymentProvider: updated.paymentProvider,
+    },
+    depositCreditCents: args.depositCredit.creditCents,
+    meta: buildMeta(!areAuditValuesEqual(oldState, newState)),
   }
 }
 

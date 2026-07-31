@@ -59,23 +59,33 @@ export function computeDepositCents(args: {
 }
 
 /**
- * Full up-front plan for a booking. Returns an all-zero plan when the booking is
- * not a fee-eligible new discovery client, or when the combined deposit + fee can't
- * clear Stripe's minimum charge.
+ * Full up-front plan for a booking. Returns an all-zero plan when nothing is
+ * owed up front, or when the combined deposit + fee can't clear Stripe's
+ * minimum charge.
+ *
+ * 🔴 The two flags are SEPARATE decisions and must stay that way (K10-A):
+ * `depositRequired` follows the pro's `depositScope`
+ * (lib/booking/depositRequirement.ts) and can be true for a returning client;
+ * `feeEligible` is the platform's new-via-discovery gate
+ * (lib/booking/discoveryFee.ts) and never widens with it. Collapsing them back
+ * into one boolean is how the pro's scope setting came to have no reader.
  */
 export function computeDiscoveryDepositPlan(args: {
   settings: DepositSettings
   servicePriceCents: number
-  isNewDiscoveryClient: boolean
+  depositRequired: boolean
+  feeEligible: boolean
   discoveryFeeCents: number
 }): DiscoveryDepositPlan {
-  if (!args.isNewDiscoveryClient) return EMPTY_PLAN
-
-  const depositCents = computeDepositCents({
-    settings: args.settings,
-    servicePriceCents: args.servicePriceCents,
-  })
-  const discoveryFeeCents = Math.max(0, Math.round(args.discoveryFeeCents))
+  const depositCents = args.depositRequired
+    ? computeDepositCents({
+        settings: args.settings,
+        servicePriceCents: args.servicePriceCents,
+      })
+    : 0
+  const discoveryFeeCents = args.feeEligible
+    ? Math.max(0, Math.round(args.discoveryFeeCents))
+    : 0
   const totalUpfrontCents = depositCents + discoveryFeeCents
 
   // One combined charge — if it can't clear the Stripe minimum, collect nothing.
