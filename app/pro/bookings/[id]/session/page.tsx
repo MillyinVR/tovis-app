@@ -50,7 +50,11 @@ import {
   resolveEffectiveSessionStep,
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
-import { moneyToFixed2String, type MoneyInput } from '@/lib/money'
+import { formatCents, moneyToFixed2String, type MoneyInput } from '@/lib/money'
+import {
+  DEPOSIT_CREDIT_SELECT,
+  deriveDepositCredit,
+} from '@/lib/booking/depositCredit'
 import { fullName } from '@/lib/names'
 import { buildProSessionCloseoutChecklist } from '@/lib/proSession/closeoutChecklist'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
@@ -1153,6 +1157,8 @@ function WrapUpView({
   paidByStripeCard,
   hasConsultationApproved,
   markPaidMethods,
+  amountDueLabel,
+  depositCreditLabel,
   timeZone,
 }: {
   bookingId: string
@@ -1170,6 +1176,10 @@ function WrapUpView({
   paidByStripeCard: boolean
   hasConsultationApproved: boolean
   markPaidMethods: ManualCollectablePaymentMethod[]
+  /** Left to collect once the paid deposit is credited; null when none applies. */
+  amountDueLabel: string | null
+  /** The deposit already paid; null when none applies. */
+  depositCreditLabel: string | null
   timeZone: string
 }) {
   const checklist = buildProSessionCloseoutChecklist({
@@ -1272,6 +1282,16 @@ function WrapUpView({
                   ? COPY.proBookingCheckout.awaitingConfirmationBody
                   : (paymentItem?.subtitle ?? 'not collected')}
               </div>
+              {!hasPaymentCollected && amountDueLabel && depositCreditLabel ? (
+                // 🔴 What to actually COLLECT. The client already paid part of
+                // this bill up front; without this line a pro taking cash reads
+                // the total off the header and charges the deposit twice
+                // (K10-A-1). The bill itself stays whole elsewhere — this says
+                // what is owed, not what the service cost.
+                <div className="mt-1 text-[12px] font-semibold text-textPrimary">
+                  {`Deposit paid −${depositCreditLabel} · ${amountDueLabel} to collect`}
+                </div>
+              ) : null}
               {awaitingPaymentConfirmation ? (
                 <div className="mt-2 flex flex-col gap-1">
                   <ConfirmPaymentReceivedButton bookingId={bookingId} size="xs" />
@@ -1554,7 +1574,11 @@ export default async function ProBookingSessionPage(props: PageProps) {
       sessionStep: true,
       totalDurationMinutes: true,
       subtotalSnapshot: true,
-      totalAmount: true,
+      // Sizes the deposit credit (K10-A-1) so the pro is told what to COLLECT,
+      // not just what the service cost. Without it a pro taking cash on a
+      // deposited booking asks for the whole total and collects the deposit
+      // twice — the same bug the client surfaces just stopped doing.
+      ...DEPOSIT_CREDIT_SELECT,
       checkoutStatus: true,
       paymentCollectedAt: true,
       // Gates the "undo" (reopen) control: a live Stripe capture reverses via a
@@ -1666,6 +1690,18 @@ export default async function ProBookingSessionPage(props: PageProps) {
       booking.totalAmount,
       booking.subtotalSnapshot,
     ) || '—'
+
+  // What the client has ALREADY paid up front, and what is therefore left to
+  // collect (K10-A-1). Derived from the same helper the client's checkout and
+  // the write boundary's charge read, so the pro's screen and the client's can
+  // never quote different numbers. Rendered ALONGSIDE the total, never instead
+  // of it: the total is what the service cost, and the pro's earnings view must
+  // keep saying so.
+  const depositCredit = deriveDepositCredit(booking)
+  const amountDueLabel =
+    depositCredit.creditCents > 0 ? formatCents(depositCredit.amountDueCents) : null
+  const depositCreditLabel =
+    depositCredit.creditCents > 0 ? formatCents(depositCredit.creditCents) : null
 
   const initialPrice = firstMoneyText(
     booking.consultationApproval?.proposedTotal,
@@ -1911,6 +1947,8 @@ export default async function ProBookingSessionPage(props: PageProps) {
         paidByStripeCard={paidByStripeCard}
         hasConsultationApproved={hasConsultationApproved}
         markPaidMethods={markPaidMethods}
+        amountDueLabel={amountDueLabel}
+        depositCreditLabel={depositCreditLabel}
         timeZone={appointmentTimeZone}
       />
     )
