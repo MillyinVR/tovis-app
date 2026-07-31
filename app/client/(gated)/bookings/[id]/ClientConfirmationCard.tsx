@@ -16,7 +16,7 @@
 // off this page is byte-identical to pre-K13.
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 
 import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
@@ -56,12 +56,22 @@ export default function ClientConfirmationCard(props: Props) {
   const router = useRouter()
   const [busy, setBusy] = useState<Answer | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 🔴 `router.refresh()` is not instantaneous — this card's state lives on the
+  // server, so between the POST resolving and the new RSC payload committing
+  // there is a window where the OLD card is still on screen. Without a
+  // transition the buttons re-enable in that window and the card reads as
+  // dead: the client taps "Yes, I'll be there", nothing visibly happens, and
+  // they tap again. Driving it locally, that window was several seconds.
+  // `isPending` stays true until React commits the refreshed tree.
+  const [isRefreshing, startTransition] = useTransition()
 
   const confirmed = props.state === 'CLIENT_CONFIRMED'
   const declined = props.state === 'DECLINED'
 
+  const pending = busy != null || isRefreshing
+
   async function answer(value: Answer) {
-    if (busy) return
+    if (pending) return
     setError(null)
     setBusy(value)
 
@@ -81,7 +91,9 @@ export default function ClientConfirmationCard(props: Props) {
       // The state lives on the server row — re-read it rather than guessing
       // locally, so a refusal the route made (already started, cancelled) can
       // never leave this card claiming an answer the booking doesn't carry.
-      router.refresh()
+      startTransition(() => {
+        router.refresh()
+      })
     } catch (err: unknown) {
       setError(
         err instanceof Error
@@ -136,10 +148,14 @@ export default function ClientConfirmationCard(props: Props) {
           <button
             type="button"
             className={PRIMARY_BUTTON}
-            disabled={busy != null}
+            disabled={pending}
             onClick={() => void answer('CONFIRM')}
           >
-            {busy === 'CONFIRM' ? 'Confirming…' : 'Yes, I’ll be there'}
+            {busy === 'CONFIRM'
+              ? 'Confirming…'
+              : isRefreshing
+                ? 'Updating…'
+                : 'Yes, I’ll be there'}
           </button>
         )}
 
@@ -147,14 +163,16 @@ export default function ClientConfirmationCard(props: Props) {
           <button
             type="button"
             className={SECONDARY_BUTTON}
-            disabled={busy != null}
+            disabled={pending}
             onClick={() => void answer('DECLINE')}
           >
             {busy === 'DECLINE'
               ? 'One moment…'
-              : confirmed
-                ? 'Actually, I can’t make it'
-                : 'I can’t make it'}
+              : isRefreshing
+                ? 'Updating…'
+                : confirmed
+                  ? 'Actually, I can’t make it'
+                  : 'I can’t make it'}
           </button>
         )}
       </div>

@@ -14,6 +14,7 @@ import {
   type ClientConfirmationBadge,
   type ClientConfirmationBookingRow,
 } from '@/lib/booking/clientConfirmation'
+import { clientConfirmationLoopEnabled } from '@/lib/booking/clientConfirmationLoop'
 import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import {
   resolveApptTimeZone,
@@ -199,8 +200,11 @@ export type ClientBookingDTO = {
    * never recomputes it. OPTIONAL and absent unless the pro's reminder actually
    * asked: with the loop flag off (prod today) every booking reads
    * NOT_REQUESTED, so this key never appears and the payload is byte-identical
-   * to pre-K13. Its presence is also the app's cue to offer the in-app answer
-   * (POST /api/v1/client/bookings/[id]/confirmation { answer }).
+   * to pre-K13. Its presence is the app's cue to offer the in-app answer
+   * (POST /api/v1/client/bookings/[id]/confirmation { answer }) — which is why
+   * it is suppressed outright while ENABLE_CLIENT_CONFIRMATION_LOOP is off,
+   * even for a row that carries stamps from an earlier trial: that route
+   * refuses, and a control the server will reject must not be drawn.
    */
   clientConfirmation?: ClientConfirmationBadge
 
@@ -630,11 +634,23 @@ export async function buildClientBookingDTO(input: {
   // Normalised because the three columns are OPTIONAL on this input: a caller
   // that never selected them must read as "nobody asked", not crash the
   // derivation — and undefined and null mean the same thing to it.
-  const clientConfirmation = deriveClientConfirmationBadge({
-    clientConfirmationRequestedAt: b.clientConfirmationRequestedAt ?? null,
-    clientConfirmedAt: b.clientConfirmedAt ?? null,
-    clientConfirmationDeclinedAt: b.clientConfirmationDeclinedAt ?? null,
-  })
+  //
+  // 🔴 Gated on the loop flag as well, and this is the CLIENT-side field's whole
+  // meaning: its presence is what tells web and iOS to draw an answer control.
+  // With the loop off, every answer route refuses — so a surface still offering
+  // the buttons would be promising an action the server will reject. Prod never
+  // stamps these columns while the flag is off, but flipping it back off after a
+  // trial would otherwise strand exactly the rows that were mid-loop. The PRO's
+  // own badge (calendar, list, booking detail) is deliberately NOT gated: it
+  // reports what happened, and history doesn't stop being true when a switch
+  // moves.
+  const clientConfirmation = clientConfirmationLoopEnabled()
+    ? deriveClientConfirmationBadge({
+        clientConfirmationRequestedAt: b.clientConfirmationRequestedAt ?? null,
+        clientConfirmedAt: b.clientConfirmedAt ?? null,
+        clientConfirmationDeclinedAt: b.clientConfirmationDeclinedAt ?? null,
+      })
+    : null
 
   return {
     id: String(b.id),

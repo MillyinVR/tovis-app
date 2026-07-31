@@ -651,7 +651,21 @@ describe('in-app answer parity with the link answer (the K13 DoD)', () => {
     )
   })
 
-  it('the client’s own feed carries the ask — and carries nothing when nobody asked', async () => {
+  it('the client’s own feed carries the ask — and carries nothing when nobody asked, or when the loop is off', async () => {
+    const ORIGINAL_FLAG = process.env.ENABLE_CLIENT_CONFIRMATION_LOOP
+    process.env.ENABLE_CLIENT_CONFIRMATION_LOOP = '1'
+    try {
+      await driveTheFeed()
+    } finally {
+      if (ORIGINAL_FLAG === undefined) {
+        delete process.env.ENABLE_CLIENT_CONFIRMATION_LOOP
+      } else {
+        process.env.ENABLE_CLIENT_CONFIRMATION_LOOP = ORIGINAL_FLAG
+      }
+    }
+  })
+
+  async function driveTheFeed() {
     const asked = await seedBooking({
       scheduledFor: futureWorkingInstant(48 * HOUR_MS),
     })
@@ -692,7 +706,16 @@ describe('in-app answer parity with the link answer (the K13 DoD)', () => {
     expect(findIn(after, asked)?.clientConfirmation?.kind).toBe(
       'CLIENT_CONFIRMED',
     )
-  })
+
+    // 🔴 The kill switch reaches the CONTROL, not just the writes. Turn the
+    // loop off with the stamps still on the row — the state the flag being
+    // flipped back mid-trial would leave — and the client's feed must stop
+    // offering an answer, because every answer route now refuses.
+    delete process.env.ENABLE_CLIENT_CONFIRMATION_LOOP
+    const dark = await loadClientBookingBuckets(fx.clientId)
+    expect(findIn(dark, asked)).toBeDefined()
+    expect(findIn(dark, asked)?.clientConfirmation).toBeUndefined()
+  }
 
   it('refuses another client’s booking with the same uniform not-found as a missing one', async () => {
     const bookingId = await seedBooking({
