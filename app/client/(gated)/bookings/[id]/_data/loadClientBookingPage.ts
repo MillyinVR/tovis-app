@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { deriveDepositCredit } from '@/lib/booking/depositCredit'
 import { loadProfessionalPaymentSettings } from './loadProfessionalPaymentSettings'
 
 type CurrentUserResult = Awaited<ReturnType<typeof getCurrentUser>>
@@ -54,6 +55,10 @@ const bookingPageBookingSelect = {
   stripeAmountTotal: true,
   stripeAmountRefunded: true,
   depositDisputedAt: true,
+  // Sizes the deposit CREDIT against this bill (K10-A): a partially-refunded
+  // deposit credits only the net still held, so the client is quoted what they
+  // actually owe rather than the whole total.
+  depositRefundedCents: true,
 
   totalDurationMinutes: true,
   bufferMinutes: true,
@@ -416,6 +421,12 @@ export async function loadClientBookingPage(bookingId: string) {
         }
       : null
 
+  // The deposit already paid, as a credit against this bill. Derived HERE, from
+  // the same helper the write boundary charges from, so the amount the client is
+  // quoted (and the amount pre-filled into a Venmo/Zelle hand-off) cannot drift
+  // from the amount the server actually collects.
+  const depositCredit = deriveDepositCredit(raw)
+
   return {
     user,
     raw,
@@ -424,6 +435,7 @@ export async function loadClientBookingPage(bookingId: string) {
     media,
     paymentSettings,
     rebookedNextBooking,
+    depositCredit,
     checkoutProductItems: raw.checkoutProductItems,
   }
 }

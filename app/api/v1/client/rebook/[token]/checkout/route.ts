@@ -175,6 +175,30 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
           idempotencyKey: idem.idempotencyKey,
         })
 
+        // K10-A closeout at zero: a paid deposit already covered this bill, so
+        // the write boundary settled it PAID and there is nothing to charge.
+        // Same branch as the authenticated checkout route — this token flow
+        // reaches the identical write boundary and must not open a session.
+        if (prepared.outcome === 'SETTLED_BY_DEPOSIT') {
+          const settledBody: JsonObjectPayload = {
+            booking: {
+              id: prepared.booking.id,
+              checkoutStatus: prepared.booking.checkoutStatus,
+              stripeCheckoutSessionId: null,
+              stripePaymentIntentId: null,
+              stripePaymentStatus: null,
+              stripeAmountTotal: null,
+              stripeCurrency: null,
+              totalAmount: prepared.booking.totalAmount?.toString() ?? null,
+            },
+            stripeCheckout: { sessionId: null, url: null },
+            settledByDeposit: true,
+            depositCreditCents: prepared.depositCreditCents,
+          }
+
+          return { status: 200, body: settledBody }
+        }
+
         const stripe = getStripe()
 
         const stripeApiIdempotencyKey = buildStripeApiIdempotencyKey({
@@ -261,6 +285,8 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
             sessionId: session.id,
             url: nullableString(session.url),
           },
+          settledByDeposit: false,
+          depositCreditCents: prepared.depositCreditCents,
         }
 
         return { status: 200, body: responseBody }

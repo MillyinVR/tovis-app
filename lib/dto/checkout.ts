@@ -40,6 +40,17 @@ export type DepositStripeSessionResponseDTO = {
   stripeCheckout: StripeCheckoutSessionDTO
 }
 
+/**
+ * The final bill's session, which — unlike the deposit's — may legitimately not
+ * exist: when a paid deposit covers the whole total there is nothing to charge
+ * and no session is created. Kept separate from `StripeCheckoutSessionDTO` so
+ * the deposit route's non-null contract is not weakened for every consumer.
+ */
+export type CheckoutStripeSessionOrSettledDTO = {
+  sessionId: string | null
+  url: string | null
+}
+
 // POST /api/v1/client/bookings/[id]/checkout/stripe-session — post-service card
 // checkout. The booking echo mirrors the freshly-attached Stripe columns.
 export type CheckoutStripeSessionResponseDTO = {
@@ -57,7 +68,20 @@ export type CheckoutStripeSessionResponseDTO = {
     tipAmount: string | null
     totalAmount: string | null
   }
-  stripeCheckout: StripeCheckoutSessionDTO
+  stripeCheckout: CheckoutStripeSessionOrSettledDTO
+  /**
+   * The deposit covered the entire bill: checkout is already PAID, no session
+   * was created, and the client owes nothing. `stripeCheckout.url` is null on
+   * this branch — a client that only reads the url still behaves correctly
+   * (it has nowhere to send them) rather than charging a stale amount.
+   */
+  settledByDeposit: boolean
+  /**
+   * Deposit money credited against this bill, in cents. On the charge branch
+   * this is what was subtracted from the total to get the amount charged; 0
+   * when no deposit applies.
+   */
+  depositCreditCents: number
 }
 
 // POST /api/v1/client/bookings/[id]/checkout — confirm a non-card payment

@@ -299,3 +299,125 @@ describe('ClientCheckoutCard — live total tracks the tip (CHK-tip-live)', () =
     expect(mocks.refresh).not.toHaveBeenCalled()
   })
 })
+
+// K10-A — a deposit the client already paid must come off everything they are
+// SHOWN or HANDED, not just off the Stripe charge. The off-platform deep link
+// is the sharp edge: it pre-fills an amount the client sends by hand, and there
+// is no charge object to correct afterwards if it quotes the whole bill.
+describe('ClientCheckoutCard — the paid deposit comes off the amount due', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  function rowValue(label: string): string {
+    return screen.getByText(label).nextElementSibling?.textContent ?? ''
+  }
+
+  it('quotes the balance, not the bill, in the Venmo hand-off and the CTA', () => {
+    render(
+      <ClientCheckoutCard
+        bookingId="booking_1"
+        checkoutStatus="READY"
+        paymentCollectedAt={null}
+        selectedPaymentMethod="VENMO"
+        serviceSubtotalSnapshot="200.00"
+        totalAmount="200.00"
+        // $60 already paid up front.
+        depositCreditCents={6_000}
+        acceptedMethods={[{ key: 'venmo', label: 'Venmo', handle: 'tovispro' }]}
+      />,
+    )
+
+    // The bill still reads $200 — that is what the service cost.
+    expect(rowValue('Total')).toBe('$200.00')
+    // ...but the deposit is shown coming off it, and the balance is named.
+    expect(rowValue('Deposit already paid')).toBe('−$60.00')
+    expect(rowValue('Amount due')).toBe('$140.00')
+
+    // 🔴 The bug: pre-K10-A this said amount=200.00 and the client sent the
+    // deposit a second time, by hand, with no way to claw it back.
+    const venmoHref = (
+      screen.getByRole('link', { name: /with Venmo/i }) as HTMLAnchorElement
+    ).getAttribute('href')
+    expect(venmoHref).toContain('amount=140.00')
+    expect(venmoHref).not.toContain('amount=200.00')
+
+    expect(
+      screen.getByRole('button', { name: /confirm payment of \$140\.00/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('adds the tip to the BALANCE, not to the full bill', () => {
+    render(
+      <ClientCheckoutCard
+        bookingId="booking_1"
+        checkoutStatus="READY"
+        paymentCollectedAt={null}
+        selectedPaymentMethod="VENMO"
+        serviceSubtotalSnapshot="200.00"
+        totalAmount="200.00"
+        depositCreditCents={6_000}
+        acceptedMethods={[{ key: 'venmo', label: 'Venmo', handle: 'tovispro' }]}
+      />,
+    )
+
+    // 20% of the $200 service = $40 tip. Bill $240, less the $60 deposit = $180.
+    fireEvent.click(screen.getByRole('button', { name: /20%/ }))
+
+    expect(rowValue('Total')).toBe('$240.00')
+    expect(rowValue('Amount due')).toBe('$180.00')
+    expect(
+      (
+        screen.getByRole('link', { name: /with Venmo/i }) as HTMLAnchorElement
+      ).getAttribute('href'),
+    ).toContain('amount=180.00')
+  })
+
+  it('shows no deposit rows and charges the full bill when there is no deposit', () => {
+    render(
+      <ClientCheckoutCard
+        bookingId="booking_1"
+        checkoutStatus="READY"
+        paymentCollectedAt={null}
+        selectedPaymentMethod="VENMO"
+        serviceSubtotalSnapshot="200.00"
+        totalAmount="200.00"
+        depositCreditCents={0}
+        acceptedMethods={[{ key: 'venmo', label: 'Venmo', handle: 'tovispro' }]}
+      />,
+    )
+
+    expect(rowValue('Total')).toBe('$200.00')
+    expect(screen.queryByText('Deposit already paid')).toBeNull()
+    expect(screen.queryByText('Amount due')).toBeNull()
+    expect(
+      (
+        screen.getByRole('link', { name: /with Venmo/i }) as HTMLAnchorElement
+      ).getAttribute('href'),
+    ).toContain('amount=200.00')
+  })
+
+  it('quotes nothing due when the deposit covers the whole bill', () => {
+    render(
+      <ClientCheckoutCard
+        bookingId="booking_1"
+        checkoutStatus="READY"
+        paymentCollectedAt={null}
+        selectedPaymentMethod="VENMO"
+        serviceSubtotalSnapshot="200.00"
+        totalAmount="200.00"
+        depositCreditCents={20_000}
+        acceptedMethods={[{ key: 'venmo', label: 'Venmo', handle: 'tovispro' }]}
+      />,
+    )
+
+    expect(rowValue('Amount due')).toBe('$0.00')
+    // buildPaymentDeepLink refuses a non-positive amount, so a prepaid client
+    // is never handed a "send $0" link at all.
+    expect(screen.queryByRole('link', { name: /with Venmo/i })).toBeNull()
+  })
+})

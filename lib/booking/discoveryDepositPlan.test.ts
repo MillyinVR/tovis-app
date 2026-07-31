@@ -61,12 +61,13 @@ describe('computeDepositCents', () => {
 })
 
 describe('computeDiscoveryDepositPlan', () => {
-  it('is all-zero when not a fee-eligible new discovery client', () => {
+  it('is all-zero when neither a deposit nor a fee applies', () => {
     expect(
       computeDiscoveryDepositPlan({
         settings: FLAT_20,
         servicePriceCents: 10000,
-        isNewDiscoveryClient: false,
+        depositRequired: false,
+        feeEligible: false,
         discoveryFeeCents: 500,
       }),
     ).toEqual({ depositCents: 0, discoveryFeeCents: 0, totalUpfrontCents: 0 })
@@ -77,7 +78,8 @@ describe('computeDiscoveryDepositPlan', () => {
       computeDiscoveryDepositPlan({
         settings: FLAT_20,
         servicePriceCents: 10000,
-        isNewDiscoveryClient: true,
+        depositRequired: true,
+        feeEligible: true,
         discoveryFeeCents: 500,
       }),
     ).toEqual({ depositCents: 2000, discoveryFeeCents: 500, totalUpfrontCents: 2500 })
@@ -88,7 +90,8 @@ describe('computeDiscoveryDepositPlan', () => {
       computeDiscoveryDepositPlan({
         settings: DISABLED,
         servicePriceCents: 10000,
-        isNewDiscoveryClient: true,
+        depositRequired: true,
+        feeEligible: true,
         discoveryFeeCents: 500,
       }),
     ).toEqual({ depositCents: 0, discoveryFeeCents: 500, totalUpfrontCents: 500 })
@@ -99,10 +102,37 @@ describe('computeDiscoveryDepositPlan', () => {
       computeDiscoveryDepositPlan({
         settings: DISABLED,
         servicePriceCents: 10000,
-        isNewDiscoveryClient: true,
+        depositRequired: true,
+        feeEligible: true,
         discoveryFeeCents: STRIPE_MIN_CHARGE_CENTS - 1,
       }),
     ).toEqual({ depositCents: 0, discoveryFeeCents: 0, totalUpfrontCents: 0 })
+  })
+
+  // K10-A: the pro's depositScope can require a deposit from a returning client
+  // the platform never matched. The platform's fee must NOT ride along.
+  it('charges the deposit WITHOUT the fee for a scoped-in returning client', () => {
+    expect(
+      computeDiscoveryDepositPlan({
+        settings: FLAT_20,
+        servicePriceCents: 10000,
+        depositRequired: true,
+        feeEligible: false,
+        discoveryFeeCents: 500,
+      }),
+    ).toEqual({ depositCents: 2000, discoveryFeeCents: 0, totalUpfrontCents: 2000 })
+  })
+
+  it('charges the fee WITHOUT a deposit when the scope excludes this booking', () => {
+    expect(
+      computeDiscoveryDepositPlan({
+        settings: FLAT_20,
+        servicePriceCents: 10000,
+        depositRequired: false,
+        feeEligible: true,
+        discoveryFeeCents: 500,
+      }),
+    ).toEqual({ depositCents: 0, discoveryFeeCents: 500, totalUpfrontCents: 500 })
   })
 })
 

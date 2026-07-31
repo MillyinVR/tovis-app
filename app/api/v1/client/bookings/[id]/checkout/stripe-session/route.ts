@@ -152,6 +152,36 @@ export async function POST(req: NextRequest, props: RouteContext) {
           idempotencyKey: idem.idempotencyKey,
         })
 
+        // K10-A closeout at zero: the client's deposit already covered the
+        // whole bill, so the write boundary settled the checkout PAID and there
+        // is nothing to charge. Opening a Stripe session here would either fail
+        // (Stripe has no $0 charge) or bill the deposit a second time.
+        if (prepared.outcome === 'SETTLED_BY_DEPOSIT') {
+          const settledBody: JsonObjectPayload = {
+            booking: {
+              id: prepared.booking.id,
+              checkoutStatus: prepared.booking.checkoutStatus,
+              selectedPaymentMethod: prepared.booking.selectedPaymentMethod,
+              paymentProvider: prepared.booking.paymentProvider,
+              stripeCheckoutSessionId: null,
+              stripePaymentIntentId: null,
+              stripeCheckoutSessionStatus: null,
+              stripePaymentStatus: null,
+              stripeAmountTotal: null,
+              stripeCurrency: null,
+              tipAmount: prepared.booking.tipAmount?.toString() ?? null,
+              totalAmount: prepared.booking.totalAmount?.toString() ?? null,
+            },
+            // No session to send the client to — the null url is the signal to
+            // every client (web and iOS) that there is nothing left to pay.
+            stripeCheckout: { sessionId: null, url: null },
+            settledByDeposit: true,
+            depositCreditCents: prepared.depositCreditCents,
+          } satisfies CheckoutStripeSessionResponseDTO
+
+          return { status: 200, body: settledBody }
+        }
+
         const stripe = getStripe()
 
         const stripeApiIdempotencyKey = buildStripeApiIdempotencyKey({
@@ -253,6 +283,8 @@ export async function POST(req: NextRequest, props: RouteContext) {
             sessionId: session.id,
             url: nullableString(session.url),
           },
+          settledByDeposit: false,
+          depositCreditCents: prepared.depositCreditCents,
         } satisfies CheckoutStripeSessionResponseDTO
 
         return { status: 200, body: responseBody }

@@ -779,6 +779,7 @@ export default async function ClientBookingPage(props: {
     media,
     paymentSettings,
     rebookedNextBooking,
+    depositCredit,
     checkoutProductItems,
   } = await loadClientBookingPage(bookingId)
 
@@ -1609,6 +1610,7 @@ export default async function ClientBookingPage(props: {
                               taxAmount={booking.checkout.taxAmount}
                               discountAmount={booking.checkout.discountAmount}
                               totalAmount={booking.checkout.totalAmount}
+                              depositCreditCents={depositCredit.creditCents}
                               acceptedMethods={acceptedMethods}
                               tipsEnabled={paymentSettings?.tipsEnabled ?? true}
                               allowCustomTip={paymentSettings?.allowCustomTip ?? true}

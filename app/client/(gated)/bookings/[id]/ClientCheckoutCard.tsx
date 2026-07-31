@@ -61,6 +61,13 @@ type Props = {
   taxAmount?: string | number | null
   discountAmount?: string | number | null
   totalAmount?: string | number | null
+  /**
+   * Deposit money already paid that comes off this bill, in CENTS. Derived
+   * server-side by lib/booking/depositCredit.ts — the same helper the write
+   * boundary charges from, so what the client is quoted here and what the
+   * server collects cannot drift. 0 when no deposit applies.
+   */
+  depositCreditCents?: number | null
 
   acceptedMethods: AcceptedMethod[]
 
@@ -490,11 +497,22 @@ export default function ClientCheckoutCard(props: Props) {
     return serviceSubtotal + productSubtotal + tipAmount + taxAmount - discountAmount
   }, [serviceSubtotal, productSubtotal, tipAmount, taxAmount, discountAmount])
 
-  // One-tap "pay the pro" action for the selected off-platform method. Uses the
-  // live full amount due so the pre-filled amount tracks the tip the instant it
-  // changes — no "Save tip" round-trip. Null for cash / Stripe / methods without
-  // a stored handle.
-  const amountDue = livePreviewTotal
+  // A deposit the client already paid, in dollars. Server-derived (K10-A).
+  const depositCredit = useMemo(
+    () => Math.max(0, (props.depositCreditCents ?? 0) / 100),
+    [props.depositCreditCents],
+  )
+
+  // 🔴 What the client actually still owes. Everything the client is shown or
+  // handed — the Amount-due row, the CTA, and the pre-filled Venmo/Zelle
+  // deep-link amount — reads THIS, never `livePreviewTotal`. Quoting the full
+  // total on an off-platform hand-off would tell a client who already paid a
+  // deposit to send it a second time, and there is no charge object to correct
+  // it afterwards: they just send the money.
+  const amountDue = useMemo(
+    () => Math.max(0, livePreviewTotal - depositCredit),
+    [livePreviewTotal, depositCredit],
+  )
   const payAction = useMemo(
     () =>
       selectedMethod
@@ -663,11 +681,13 @@ export default function ClientCheckoutCard(props: Props) {
       return selectedMethodIsStripe ? 'Opening Stripe…' : 'Confirming…'
     }
     if (!selectedMethod) return 'Choose a payment method'
-    const total = formatMoneyFromUnknown(livePreviewTotal)
+    // The amount still owed, not the bill — a client with a deposit on this
+    // booking must never be asked to "Pay $200" for a $140 balance.
+    const due = formatMoneyFromUnknown(amountDue)
     if (selectedMethodIsStripe) {
-      return total ? `Pay ${total} with card` : 'Pay with card'
+      return due ? `Pay ${due} with card` : 'Pay with card'
     }
-    return total ? `Confirm payment of ${total}` : 'Confirm payment'
+    return due ? `Confirm payment of ${due}` : 'Confirm payment'
   })()
 
   return (
@@ -731,6 +751,18 @@ export default function ClientCheckoutCard(props: Props) {
             label={totalSnapshot != null ? 'Total' : 'Preview total'}
             value={formatMoneyFromUnknown(livePreviewTotal) || '$0.00'}
           />
+          {depositCredit > 0 ? (
+            <>
+              <SummaryRow
+                label="Deposit already paid"
+                value={`−${formatMoneyFromUnknown(depositCredit) || '$0.00'}`}
+              />
+              <SummaryRow
+                label="Amount due"
+                value={formatMoneyFromUnknown(amountDue) || '$0.00'}
+              />
+            </>
+          ) : null}
         </div>
       </div>
 

@@ -2067,6 +2067,28 @@
       ],
       "type": "object"
     },
+    "CheckoutStripeSessionOrSettledDTO": {
+      "description": "The final bill's session, which — unlike the deposit's — may legitimately not exist: when a paid deposit covers the whole total there is nothing to charge and no session is created. Kept separate from `StripeCheckoutSessionDTO` so the deposit route's non-null contract is not weakened for every consumer.",
+      "properties": {
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "url"
+      ],
+      "type": "object"
+    },
     "CheckoutStripeSessionResponseDTO": {
       "properties": {
         "booking": {
@@ -2163,13 +2185,23 @@
           ],
           "type": "object"
         },
+        "depositCreditCents": {
+          "description": "Deposit money credited against this bill, in cents. On the charge branch this is what was subtracted from the total to get the amount charged; 0 when no deposit applies.",
+          "type": "number"
+        },
+        "settledByDeposit": {
+          "description": "The deposit covered the entire bill: checkout is already PAID, no session was created, and the client owes nothing. `stripeCheckout.url` is null on this branch — a client that only reads the url still behaves correctly (it has nowhere to send them) rather than charging a stale amount.",
+          "type": "boolean"
+        },
         "stripeCheckout": {
-          "$ref": "#/definitions/StripeCheckoutSessionDTO"
+          "$ref": "#/definitions/CheckoutStripeSessionOrSettledDTO"
         }
       },
       "required": [
         "booking",
-        "stripeCheckout"
+        "stripeCheckout",
+        "settledByDeposit",
+        "depositCreditCents"
       ],
       "type": "object"
     },

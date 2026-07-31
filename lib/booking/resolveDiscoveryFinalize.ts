@@ -17,6 +17,7 @@ import {
   BookingSource,
   BookingStatus,
   ClientRelationshipLabel,
+  DepositScope,
   LookPostStatus,
   ModerationStatus,
   ProClientInviteStatus,
@@ -26,9 +27,11 @@ import { prisma } from '@/lib/prisma'
 import { resolveDiscoveryProvenance } from '@/lib/booking/discoveryProvenance'
 import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
 import {
+  hasPriorRelationship,
   isNewDiscoveryClient,
   resolveDiscoveryFeeCents,
 } from '@/lib/booking/discoveryFee'
+import { isDepositRequired } from '@/lib/booking/depositRequirement'
 import type { DepositSettings } from '@/lib/booking/discoveryDepositPlan'
 import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import { resolveEffectiveEntitlements } from '@/lib/pro/entitlements'
@@ -57,8 +60,19 @@ export type FinalizeDiscoveryDirective = Readonly<{
    * is "new". Stamped once by the write boundary, never re-derived at read time.
    */
   relationshipLabel: ClientRelationshipLabel
-  /** New-via-discovery client + deposit-enabled, Stripe-ready pro => deposit + fee apply. */
+  /**
+   * New-via-discovery client + deposit-enabled, Stripe-ready pro => the ONE-TIME
+   * PLATFORM FEE applies. 🔴 No longer also the deposit gate: since K10-A the
+   * deposit follows the pro's `depositScope` (see `depositRequired`), which can
+   * be true for a returning client the platform never matched.
+   */
   feeEligible: boolean
+  /**
+   * The pro's `depositScope` calls for a deposit on this booking
+   * (lib/booking/depositRequirement.ts). Under the default NEW_DISCOVERY_ONLY
+   * this equals `feeEligible`; under ALL_NEW_CLIENTS / ALL_CLIENTS it is wider.
+   */
+  depositRequired: boolean
   depositSettings: DepositSettings
   discoveryFeeCents: number
   /**
@@ -91,10 +105,12 @@ export async function resolveDiscoveryFinalize(args: {
     feeEligible: boolean,
     depositSettings: DepositSettings,
     sourceLookPostId: string | null = null,
+    depositRequired: boolean = feeEligible,
   ): FinalizeDiscoveryDirective => ({
     provenance,
     relationshipLabel,
     feeEligible,
+    depositRequired,
     depositSettings,
     discoveryFeeCents: feeCents,
     sourceLookPostId,
@@ -110,6 +126,14 @@ export async function resolveDiscoveryFinalize(args: {
   // Aftercare short-circuits: it's a rebook of an existing relationship, never a fee.
   // The label is RR by definition (returning + rebooked this pro by name), so no
   // history count is needed before the early return.
+  //
+  // 🔴 And never a DEPOSIT either, even under depositScope ALL_CLIENTS (K10-A).
+  // The aftercare rebook is a TOKEN flow: the deposit checkout route
+  // (POST /api/v1/client/bookings/[id]/deposit/stripe-session) requires an
+  // authenticated client, so a deposit stamped here would leave the booking
+  // PENDING with no surface that can pay it — a hold nobody can clear
+  // (reserving-a-slot-needs-a-surface). Widening this needs a deposit step in
+  // the token flow first; logged as a follow-up, not silently half-shipped.
   if (args.aftercare || args.source === BookingSource.AFTERCARE) {
     return baseDirective(
       BookingDiscoveryProvenance.AFTERCARE,
@@ -192,6 +216,7 @@ export async function resolveDiscoveryFinalize(args: {
         depositType: true,
         depositFlatAmount: true,
         depositPercent: true,
+        depositScope: true,
         stripeChargesEnabled: true,
         stripePayoutsEnabled: true,
       },
@@ -232,14 +257,30 @@ export async function resolveDiscoveryFinalize(args: {
       paymentSettings?.stripePayoutsEnabled,
   )
 
-  const feeEligible = isNewDiscoveryClient({
-    provenance,
-    proDepositEnabled: depositSettings.depositEnabled,
-    proStripeReady,
+  const relationshipSignals = {
     establishedBookingCount,
     acceptedInviteCount,
     threadCount,
     arrivedViaProNfc,
+  }
+
+  // The PLATFORM FEE gate — deliberately unchanged by depositScope.
+  const feeEligible = isNewDiscoveryClient({
+    provenance,
+    proDepositEnabled: depositSettings.depositEnabled,
+    proStripeReady,
+    ...relationshipSignals,
+  })
+
+  // The DEPOSIT gate — the pro's own scope setting, read here for the first
+  // time since it shipped (K10-A). Under the default NEW_DISCOVERY_ONLY this
+  // resolves identically to `feeEligible`.
+  const depositRequired = isDepositRequired({
+    scope: paymentSettings?.depositScope ?? DepositScope.NEW_DISCOVERY_ONLY,
+    proDepositEnabled: depositSettings.depositEnabled,
+    proStripeReady,
+    provenance,
+    hasPriorRelationship: hasPriorRelationship(relationshipSignals),
   })
 
   const directive = baseDirective(
@@ -252,6 +293,7 @@ export async function resolveDiscoveryFinalize(args: {
     feeEligible,
     depositSettings,
     validLookPost.sourceLookPostId,
+    depositRequired,
   )
 
   // Membership perk (client-paid-fee model, Option 1): a subscribed pro's new
