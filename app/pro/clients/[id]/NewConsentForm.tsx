@@ -8,7 +8,13 @@ import {
   PatchTestResult,
 } from '@prisma/client'
 
-type Props = { clientId: string }
+import type { ConsentFormOption } from '@/lib/consentForms/loader'
+import {
+  CONSENT_KINDS,
+  CONSENT_KIND_LABELS,
+} from '@/lib/consentForms/kindLabels'
+
+type Props = { clientId: string; forms: ConsentFormOption[] }
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -20,23 +26,18 @@ const inputStyle: React.CSSProperties = {
   background: 'rgb(var(--bg-primary))',
 }
 
-const CONSENT_KIND_LABELS: Record<ClientConsentKind, string> = {
-  GENERAL_CONSENT: 'General consent',
-  SERVICE_WAIVER: 'Service waiver',
-  PATCH_TEST: 'Patch test',
-}
-
 const PROOF_LABELS: Record<ConsentProofMethod, string> = {
   IN_PERSON: 'In person',
   CLIENT_TOKEN: 'Client link',
   PAPER_ON_FILE: 'Paper on file',
 }
 
-export default function NewConsentForm({ clientId }: Props) {
+export default function NewConsentForm({ clientId, forms }: Props) {
   const router = useRouter()
   const [kind, setKind] = useState<ClientConsentKind>(
     ClientConsentKind.GENERAL_CONSENT,
   )
+  const [formVersionId, setFormVersionId] = useState('')
   const [serviceScope, setServiceScope] = useState('')
   const [proofMethod, setProofMethod] = useState<ConsentProofMethod | ''>('')
   const [signedAt, setSignedAt] = useState('')
@@ -47,6 +48,10 @@ export default function NewConsentForm({ clientId }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   const isPatch = kind === ClientConsentKind.PATCH_TEST
+
+  // A form's kind is part of what it says, and the write route refuses a
+  // mismatch — so only ever offer the forms that fit the record being written.
+  const availableForms = forms.filter((f) => f.kind === kind)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -59,6 +64,7 @@ export default function NewConsentForm({ clientId }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           kind,
+          formVersionId: formVersionId || null,
           serviceScope: serviceScope.trim() || null,
           proofMethod: proofMethod || null,
           signedAt: signedAt || null,
@@ -72,6 +78,7 @@ export default function NewConsentForm({ clientId }: Props) {
         setError((data as { error?: string }).error || 'Failed to save.')
         return
       }
+      setFormVersionId('')
       setServiceScope('')
       setProofMethod('')
       setSignedAt('')
@@ -103,11 +110,16 @@ export default function NewConsentForm({ clientId }: Props) {
         <select
           value={kind}
           disabled={loading}
-          onChange={(e) => setKind(e.target.value as ClientConsentKind)}
+          onChange={(e) => {
+            setKind(e.target.value as ClientConsentKind)
+            // The chosen form belonged to the OLD kind; keeping it selected
+            // would post a pairing the route refuses.
+            setFormVersionId('')
+          }}
           style={inputStyle}
           aria-label="Consent kind"
         >
-          {(Object.keys(CONSENT_KIND_LABELS) as ClientConsentKind[]).map((k) => (
+          {CONSENT_KINDS.map((k) => (
             <option key={k} value={k}>
               {CONSENT_KIND_LABELS[k]}
             </option>
@@ -145,6 +157,27 @@ export default function NewConsentForm({ clientId }: Props) {
           style={inputStyle}
         />
       </div>
+
+      {availableForms.length > 0 ? (
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, color: 'rgb(var(--text-secondary))' }}>
+            Form signed (optional — pins this record to that exact text)
+          </span>
+          <select
+            value={formVersionId}
+            disabled={loading}
+            onChange={(e) => setFormVersionId(e.target.value)}
+            style={inputStyle}
+          >
+            <option value="">No form (free-text record)</option>
+            {availableForms.map((f) => (
+              <option key={f.versionId} value={f.versionId}>
+                {f.title} (v{f.version})
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       {isPatch ? (
         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' }}>

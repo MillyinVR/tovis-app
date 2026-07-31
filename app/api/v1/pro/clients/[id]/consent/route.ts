@@ -79,6 +79,29 @@ export async function POST(req: Request, context: RouteContext) {
     const validUntil =
       kind === ClientConsentKind.PATCH_TEST ? parseDate(body.validUntil) : null
 
+    // K14 — pin the record to the exact form text put in front of the client.
+    // Optional: a pro recording a paper waiver they hold has nothing to point at,
+    // and that record must still be writable.
+    const formVersionId = pickString(body.formVersionId)
+    if (formVersionId) {
+      const version = await prisma.consentFormVersion.findFirst({
+        // Own forms only. A platform template is readable by everyone, but
+        // attaching one the pro never adopted would attribute the platform's
+        // text to a record in their name.
+        // No isActive check on purpose: the picker only OFFERS active forms,
+        // but recording a signature a client really gave against a form since
+        // retired is a truthful record, and refusing it would lose history.
+        where: { id: formVersionId, form: { professionalId } },
+        select: { id: true, form: { select: { kind: true } } },
+      })
+      if (!version) return jsonFail(400, 'Form version not found.')
+      if (version.form.kind !== kind) {
+        // A record labelled PATCH_TEST pointing at a colour-waiver's words is
+        // worse than no form at all: it reads as proof of something it isn't.
+        return jsonFail(400, 'That form is for a different kind of consent.')
+      }
+    }
+
     const bookingId = pickString(body.bookingId)
     if (bookingId) {
       const booking = await prisma.booking.findFirst({
@@ -95,6 +118,7 @@ export async function POST(req: Request, context: RouteContext) {
         bookingId: bookingId || null,
         kind,
         serviceScope,
+        formVersionId: formVersionId || null,
         signedAt,
         proofMethod,
         proofRef,

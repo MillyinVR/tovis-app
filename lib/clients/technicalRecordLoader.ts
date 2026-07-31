@@ -15,6 +15,14 @@ import {
   filterFormulaEntriesForViewer,
   scopeConsentRecordsForViewer,
 } from '@/lib/clients/technicalRecord'
+import {
+  describeConsentFormOrigin,
+  resolveConsentFormOrigin,
+} from '@/lib/consentForms/origin'
+import {
+  loadConsentFormOptions,
+  type ConsentFormOption,
+} from '@/lib/consentForms/loader'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 
 // Technical record (PR4 — flagged). Queried only when the flag is on.
@@ -48,6 +56,19 @@ const CONSENT_SELECT = {
   patchTestResult: true,
   validUntil: true,
   notesEncrypted: true,
+  // K14 — the exact text this record attests to. Immutable: the pro can publish
+  // a newer version of the form, and this row keeps resolving the one that was
+  // actually put in front of the client.
+  formVersion: {
+    select: {
+      id: true,
+      version: true,
+      title: true,
+      body: true,
+      verbatimFromTemplate: true,
+      form: { select: { professionalId: true, sourceTemplateId: true } },
+    },
+  },
   professional: {
     select: { businessName: true, firstName: true, lastName: true },
   },
@@ -80,6 +101,19 @@ export type FormulaView = {
   resultNotes: string | null
 }
 
+/**
+ * K14 — the form version a record attests to, resolved as it was signed. Null on
+ * every pre-K14 row (free-text records, which stay readable) and on any record a
+ * pro chose not to attach a form to.
+ */
+export type ConsentFormVersionAttestation = {
+  id: string
+  version: number
+  title: string
+  body: string
+  originLabel: string
+}
+
 export type ConsentView = {
   id: string
   scope: 'full' | 'safety'
@@ -94,12 +128,20 @@ export type ConsentView = {
   validUntil: Date | null
   notes: string | null
   byName: string | null
+  formVersion: ConsentFormVersionAttestation | null
 }
 
 export type TechnicalRecordData = {
   formula: FormulaView[]
   consents: ConsentView[]
   photoReleaseStatus: PhotoReleaseStatus
+  /**
+   * K14 — the pro's active consent forms, so the record-entry surface can pin a
+   * new record to real text. Loaded HERE rather than in the page so the native
+   * read route offers the same choices; a picker that exists on one platform
+   * only is how a record ends up form-less on the other.
+   */
+  consentForms: ConsentFormOption[]
 }
 
 function toFormulaView(row: FormulaRow): FormulaView {
@@ -133,6 +175,22 @@ function toConsentView(row: ConsentRow, scope: 'full' | 'safety'): ConsentView {
     patchTestResult: row.patchTestResult,
     validUntil: row.validUntil,
     notes: full ? readEncryptedNoteOrFallback(row.notesEncrypted, null) : null,
+    // The signed text is part of the artifact, so it travels with the proof
+    // fields — author only. A patch test's SAFETY fields reaching another pro
+    // never means that pro gets to read the waiver text.
+    formVersion:
+      full && row.formVersion
+        ? {
+            id: row.formVersion.id,
+            version: row.formVersion.version,
+            title: row.formVersion.title,
+            body: row.formVersion.body,
+            originLabel: describeConsentFormOrigin({
+              origin: resolveConsentFormOrigin(row.formVersion.form),
+              verbatim: row.formVersion.verbatimFromTemplate,
+            }),
+          }
+        : null,
     byName: full
       ? null
       : formatPublicProfileDisplayName({
@@ -150,7 +208,7 @@ export async function loadTechnicalRecord(
   clientId: string,
   proId: string,
 ): Promise<TechnicalRecordData> {
-  const [formulaRows, consentRows, client] = await Promise.all([
+  const [formulaRows, consentRows, client, consentForms] = await Promise.all([
     prisma.clientFormulaEntry.findMany({
       where: { clientId, professionalId: proId },
       orderBy: { createdAt: 'desc' },
@@ -168,6 +226,7 @@ export async function loadTechnicalRecord(
       where: { id: clientId },
       select: { photoReleaseStatus: true },
     }),
+    loadConsentFormOptions(proId),
   ])
 
   const formula = filterFormulaEntriesForViewer(formulaRows, proId).map(
@@ -181,5 +240,6 @@ export async function loadTechnicalRecord(
     formula,
     consents,
     photoReleaseStatus: client?.photoReleaseStatus ?? 'NOT_SET',
+    consentForms,
   }
 }

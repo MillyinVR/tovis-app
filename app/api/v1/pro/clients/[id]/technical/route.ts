@@ -69,8 +69,15 @@ export async function GET(_req: Request, ctx: RouteContext) {
         validUntil: iso(c.validUntil),
         notes: c.notes,
         byName: c.byName,
+        // K14 — the exact text this record attests to (author scope only, like
+        // the proof fields). Absent on every pre-K14 record and on any record
+        // whose pro attached no form.
+        formVersion: c.formVersion,
       })),
       photoReleaseStatus: data.photoReleaseStatus,
+      // K14 — the pro's active forms, so the native record-entry surface (K17)
+      // offers the same choices the web one does.
+      consentForms: data.consentForms,
     })
   } catch (e) {
     console.error('GET /api/v1/pro/clients/[id]/technical error:', e)

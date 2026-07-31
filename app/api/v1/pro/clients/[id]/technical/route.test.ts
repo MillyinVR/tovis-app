@@ -97,6 +97,14 @@ describe('GET /api/v1/pro/clients/[id]/technical', () => {
           validUntil: null,
           notes: 'Signed on paper', // full scope: notes travel
           byName: null,
+          // K14 — the exact text the record attests to.
+          formVersion: {
+            id: 'cfv_1',
+            version: 1,
+            title: 'Corrective colour waiver',
+            body: 'I understand.',
+            originLabel: 'Written by you',
+          },
         },
         {
           id: 'cn_safety',
@@ -112,9 +120,19 @@ describe('GET /api/v1/pro/clients/[id]/technical', () => {
           validUntil: new Date('2026-12-10T00:00:00Z'),
           notes: null, // redacted
           byName: 'Glow Studio',
+          formVersion: null, // K14: signed text never travels to another pro
         },
       ],
       photoReleaseStatus: 'GRANTED',
+      consentForms: [
+        {
+          formId: 'cf_1',
+          versionId: 'cfv_1',
+          version: 1,
+          kind: 'SERVICE_WAIVER',
+          title: 'Corrective colour waiver',
+        },
+      ],
     })
 
     const res = await GET(new Request('http://x'), ctx())
@@ -138,6 +156,27 @@ describe('GET /api/v1/pro/clients/[id]/technical', () => {
     expect(safety.patchTestResult).toBe('PASS')
     expect(safety.validUntil).toBe('2026-12-10T00:00:00.000Z')
     expect(safety.byName).toBe('Glow Studio')
+
+    // K14 — the route hand-maps every consent field, so a new one only reaches
+    // the device if it is listed here. This is the drift K13-web had to fix on
+    // the pro booking-detail route; assert it rather than assume it.
+    expect(full.formVersion).toEqual({
+      id: 'cfv_1',
+      version: 1,
+      title: 'Corrective colour waiver',
+      body: 'I understand.',
+      originLabel: 'Written by you',
+    })
+    expect(safety.formVersion).toBeNull()
+    expect(body.consentForms).toEqual([
+      {
+        formId: 'cf_1',
+        versionId: 'cfv_1',
+        version: 1,
+        kind: 'SERVICE_WAIVER',
+        title: 'Corrective colour waiver',
+      },
+    ])
 
     expect(body.photoReleaseStatus).toBe('GRANTED')
   })

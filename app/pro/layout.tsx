@@ -10,6 +10,7 @@ import '@/lib/brand/proOverview.css'
 import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate'
 import { isProMigrationEnabled } from '@/lib/migration/featureFlag'
+import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { buildWorkspaceOptions, workspaceCapabilityOf } from '@/lib/auth/workspaces'
 import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
@@ -108,6 +109,7 @@ export default async function ProRootLayout({
         subtitle={pro.handle ? `@${pro.handle}` : null}
         publicUrl={publicUrl}
         migrationEnabled={isProMigrationEnabled()}
+        formsEnabled={isClientTechnicalRecordEnabled(pro.id)}
         workspaceOptions={workspaceOptions}
       />
       <ProComplianceBanner />
