@@ -16444,7 +16444,7 @@ export async function cancelBookingSeriesOccurrences(
     async ({ tx, now }) => {
       const series = await tx.bookingSeries.findFirst({
         where: { id: args.seriesId, professionalId: args.professionalId },
-        select: { id: true },
+        select: { id: true, status: true },
       })
 
       // A missing series and someone else's series answer the SAME 404 — a
@@ -16526,16 +16526,33 @@ export async function cancelBookingSeriesOccurrences(
         })
       }
 
-      const updatedSeries = await tx.bookingSeries.update({
-        where: { id: series.id },
-        data: { status: BookingSeriesStatus.CANCELLED },
-        select: { status: true },
-      })
+      // Stamping CANCELLED is what stops K20's roll-forward, so any call that
+      // actually cancelled something ends the series, and so does any call
+      // against a still-ACTIVE one (the pro asked it to stop, even if there
+      // happened to be nothing left to take).
+      //
+      // A series that had already run its course is left ENDED. Overwriting
+      // that with CANCELLED would rewrite "ran to its planned total" as "the
+      // pro stopped it" on the strength of a call that changed nothing —
+      // unreachable from the UI (the buttons hide once nothing is cancellable)
+      // but reachable from the route, and the record should not depend on which.
+      const shouldEndSeries =
+        cancelled.length > 0 || series.status === BookingSeriesStatus.ACTIVE
+
+      const seriesStatus = shouldEndSeries
+        ? (
+            await tx.bookingSeries.update({
+              where: { id: series.id },
+              data: { status: BookingSeriesStatus.CANCELLED },
+              select: { status: true },
+            })
+          ).status
+        : series.status
 
       return {
         seriesId: series.id,
         scope: args.scope,
-        seriesStatus: updatedSeries.status,
+        seriesStatus,
         cancelled,
         untouched,
       }

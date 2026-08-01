@@ -399,6 +399,70 @@ describe('cancelBookingSeriesOccurrences — scope ALL', () => {
     expect(after.cancelledAt).toBeNull()
   }, 60_000)
 
+  // The largest scope the materializer can produce. One transaction has to
+  // carry all twelve cancels plus twelve notifications inside the 20s schedule
+  // budget (SCHEDULE_TX_TIMEOUT_MS) — measured rather than assumed, because
+  // "twelve is probably fine" is exactly the claim that turns out to be false.
+  it('cancels a full-horizon 12-occurrence series in one transaction', async () => {
+    const created = await series({ occurrenceCount: 12 })
+    expect(created.occurrences).toHaveLength(12)
+
+    const startedAt = Date.now()
+    const result = await cancelBookingSeriesOccurrences({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      seriesId: created.seriesId,
+      scope: 'ALL',
+      fromOccurrenceIndex: null,
+      reason: null,
+    })
+    const elapsedMs = Date.now() - startedAt
+
+    expect(result.cancelled).toHaveLength(12)
+    expect(result.untouched).toEqual([])
+
+    const rows = await readOccurrences(created.seriesId)
+    expect(rows).toHaveLength(12)
+    for (const row of rows) {
+      expect(row.status).toBe(BookingStatus.CANCELLED)
+    }
+
+    // Deliberately generous: this is a budget guard, not a benchmark. It fails
+    // only if the whole scope stops fitting in the transaction it runs in.
+    expect(elapsedMs).toBeLessThan(15_000)
+    console.info(`[K19] 12-occurrence ALL cancel took ${elapsedMs}ms`)
+  }, 120_000)
+
+  // Stamping CANCELLED is what stops K20's roll-forward. A call that changed
+  // nothing against a series that already ran its course must not rewrite "ran
+  // to its planned total" as "the pro stopped it".
+  it('leaves an already-ENDED series ENDED when it cancels nothing', async () => {
+    const created = await series({ occurrenceCount: 2 })
+
+    await db.booking.updateMany({
+      where: { seriesId: created.seriesId },
+      data: { status: BookingStatus.COMPLETED, finishedAt: new Date() },
+    })
+
+    const result = await cancelBookingSeriesOccurrences({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      seriesId: created.seriesId,
+      scope: 'ALL',
+      fromOccurrenceIndex: null,
+      reason: null,
+    })
+
+    expect(result.cancelled).toEqual([])
+    expect(result.seriesStatus).toBe(BookingSeriesStatus.ENDED)
+
+    const seriesRow = await db.bookingSeries.findUniqueOrThrow({
+      where: { id: created.seriesId },
+      select: { status: true },
+    })
+    expect(seriesRow.status).toBe(BookingSeriesStatus.ENDED)
+  }, 60_000)
+
   it('leaves a past occurrence alone', async () => {
     const created = await series({ occurrenceCount: 3 })
     const rowsBefore = await readOccurrences(created.seriesId)
