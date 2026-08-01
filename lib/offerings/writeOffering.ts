@@ -88,6 +88,16 @@ export async function ensureLocationsForOffering(args: {
     where: { professionalId, archivedAt: null },
   })
 
+  // W6 note: these placeholders are the pro's to-do marker, not a capability
+  // claim — they are written `isBookable: false`, and BOTH the placement
+  // candidate query and `loadProLocationCapability` require `isBookable: true`,
+  // so neither one ever makes a pro look hostable in a mode they cannot host.
+  // The audit proposed deleting the salon placeholder on the theory that it was
+  // what made a mobile-only pro look salon-capable; it was not — the model's old
+  // `offersInSalon @default(true)` was. Deleting it would only remove the pro's
+  // one cue to go and set the address, so it stays. What changed is that
+  // `offersInSalon` now reaches here only when a pro (or their real locations)
+  // actually chose salon, so the row is no longer written on nobody's behalf.
   if (offersInSalon && !hasSalonCapableLocation) {
     await tx.professionalLocation.create({
       data: {

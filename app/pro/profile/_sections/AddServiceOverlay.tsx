@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import ServicePicker from '@/app/pro/services/ServicePicker'
+import type { ProLocationCapability } from '@/lib/offerings/locationCapability'
 import { zClass } from '@/lib/zIndex'
 
 type ServiceDTO = {
@@ -34,8 +35,9 @@ export default function AddServiceOverlay(props: {
   onClose: () => void
   categories: CategoryDTO[]
   offerings: OfferingDTO[]
+  locationCapability: ProLocationCapability
 }) {
-  const { open, onClose, categories, offerings } = props
+  const { open, onClose, categories, offerings, locationCapability } = props
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   const footerSpacePx = useMemo(() => {
@@ -184,7 +186,11 @@ export default function AddServiceOverlay(props: {
                 <div className="p-4">
                   {/* Inner frame = boutique card */}
                   <div className="rounded-[22px] border border-white/12 bg-bgPrimary/25 p-3 shadow-[inset_0_1px_0_rgb(255_255_255/0.10)]">
-                    <ServicePicker categories={categories} offerings={offerings} />
+                    <ServicePicker
+                      categories={categories}
+                      offerings={offerings}
+                      locationCapability={locationCapability}
+                    />
                   </div>
                 </div>
               </div>

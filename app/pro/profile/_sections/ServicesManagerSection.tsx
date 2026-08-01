@@ -9,6 +9,7 @@ import { parseCalendarSwatch } from '@/lib/calendar/eventColor'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { CONSENT_KIND_LABELS } from '@/lib/consentForms/kindLabels'
 import { loadConsentFormOptions } from '@/lib/consentForms/loader'
+import { loadProLocationCapability } from '@/lib/offerings/locationCapability'
 
 import OfferingManager from '@/app/pro/services/OfferingManager'
 import ServicesManagerSectionClient from './ServicesManagerSectionClient'
@@ -85,6 +86,12 @@ export default async function ServicesManagerSection({
       },
     },
   })
+
+  // W6: which modes this pro can actually host, so the "add a service" form
+  // pre-selects what is true of them rather than pre-checking Salon for
+  // everyone. A pre-checked toggle a mobile-only pro never unticks is how prod
+  // ended up with offerings claiming in-salon that nobody chose.
+  const locationCapability = await loadProLocationCapability(profId)
 
   const offerings = await prisma.professionalServiceOffering.findMany({
     where: { professionalId: profId, isActive: true },
@@ -237,7 +244,11 @@ export default async function ServicesManagerSection({
       )}
 
       {/* ✅ Client controller: reads ?add=1 and opens overlay */}
-      <ServicesManagerSectionClient categories={categoryPayload} offerings={offeringsPayload} />
+      <ServicesManagerSectionClient
+        categories={categoryPayload}
+        offerings={offeringsPayload}
+        locationCapability={locationCapability}
+      />
 
       {/* Offerings manager */}
       <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">

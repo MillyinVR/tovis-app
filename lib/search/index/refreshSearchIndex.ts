@@ -24,6 +24,10 @@ import {
   type VerificationStatus,
 } from '@prisma/client'
 
+import {
+  loadProLocationCapability,
+  narrowOfferingModes,
+} from '@/lib/offerings/locationCapability'
 import { prisma } from '@/lib/prisma'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
@@ -179,12 +183,24 @@ async function loadProRollups(
     }),
   ])
 
+  // W6: this rollup is what Discover and `/api/v1/search/pros` filter on, so an
+  // offering claiming a mode the pro has no bookable location for would make
+  // them show up in an in-salon search they can never serve. Narrow with the
+  // same predicate the booking drawer's read boundary uses — the index is a
+  // cache of a truth, and it has to cache the narrowed one.
+  const capability = await loadProLocationCapability(professionalId, client)
+
   const summary = summarizeDiscoveryOfferingsForProfessional({
     professionalId,
     offerings: offerings.map((offering) => ({
       professionalId: offering.professionalId,
-      offersInSalon: offering.offersInSalon,
-      offersMobile: offering.offersMobile,
+      ...narrowOfferingModes(
+        {
+          offersInSalon: offering.offersInSalon,
+          offersMobile: offering.offersMobile,
+        },
+        capability,
+      ),
       salonPriceStartingAt: offering.salonPriceStartingAt,
       mobilePriceStartingAt: offering.mobilePriceStartingAt,
       categoryId: offering.service.categoryId,
