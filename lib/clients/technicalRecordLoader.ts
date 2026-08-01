@@ -7,7 +7,7 @@
 // decrypt + access-matrix logic instead of duplicating it. Only invoke when the
 // technical-record flag is on for the viewing pro.
 import { Prisma } from '@prisma/client'
-import type { PhotoReleaseStatus } from '@prisma/client'
+import type { ClientConsentKind, PhotoReleaseStatus } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { readEncryptedNoteOrFallback } from '@/lib/security/notesPrivacy'
@@ -117,7 +117,8 @@ export type ConsentFormVersionAttestation = {
 export type ConsentView = {
   id: string
   scope: 'full' | 'safety'
-  kind: string
+  /** The Prisma enum, not a widened string — it is the wire value verbatim. */
+  kind: ClientConsentKind
   when: Date | null
   whenLocationTimeZone: string | null
   serviceScope: string | null
