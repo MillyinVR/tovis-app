@@ -3,11 +3,15 @@ import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
-import { broadcastLive, liveChannelForUser } from '@/lib/live/broadcast'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { notifyNewMessageRecipients } from '@/lib/messages/notifyNewMessage'
 import { THREAD_MESSAGE_PAGE_SIZE, nextOlderCursor } from '@/lib/messages/paging'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import {
+  appendMessageToThread,
+  broadcastThreadMessage,
+  buildMessagePreview,
+} from '@/lib/messages/appendMessage'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -32,7 +36,6 @@ function trimId(v: unknown) {
 }
 
 /** Inbox preview label for a message that carries only an image, no text. */
-const ATTACHMENT_ONLY_PREVIEW = '📷 Photo'
 
 type AttachmentRow = {
   id: string
@@ -276,21 +279,16 @@ export async function POST(req: Request, ctx: RouteContext) {
       if (!thread) return { ok: false as const, status: 404, error: 'Thread not found.' }
       if (!thread.participants.length) return { ok: false as const, status: 403, error: 'Forbidden.' }
 
-      const msg = await tx.message.create({
-        data: {
-          threadId,
-          senderUserId: userId,
-          body: text || null,
-          attachments: attachmentPaths.length
-            ? {
-                create: attachmentPaths.map((path) => ({
-                  storageBucket: MESSAGE_ATTACHMENT_BUCKET,
-                  storagePath: path,
-                  mediaType: 'IMAGE' as MediaType,
-                })),
-              }
-            : undefined,
-        },
+      const msg = await appendMessageToThread({
+        tx,
+        threadId,
+        senderUserId: userId,
+        body: text,
+        attachments: attachmentPaths.map((path) => ({
+          storageBucket: MESSAGE_ATTACHMENT_BUCKET,
+          storagePath: path,
+          mediaType: 'IMAGE' as MediaType,
+        })),
         select: {
           id: true,
           body: true,
@@ -298,19 +296,6 @@ export async function POST(req: Request, ctx: RouteContext) {
           senderUserId: true,
           attachments: { select: ATTACHMENT_SELECT },
         },
-      })
-
-      // Inbox preview: the text, or a short label for an attachment-only message.
-      const preview = text ? text.slice(0, 140) : ATTACHMENT_ONLY_PREVIEW
-
-      await tx.messageThread.update({
-        where: { id: threadId },
-        data: { lastMessageAt: msg.createdAt, lastMessagePreview: preview },
-      })
-
-      await tx.messageThreadParticipant.update({
-        where: { threadId_userId: { threadId, userId } },
-        data: { lastReadAt: msg.createdAt },
       })
 
       return { ok: true as const, msg }
@@ -322,14 +307,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     // Live-sync: ping the OTHER participants' devices so the new message lands
     // without a reload (the sender already has it).
-    const recipients = await prisma.messageThreadParticipant.findMany({
-      where: { threadId, userId: { not: userId } },
-      select: { userId: true },
-    })
-    await broadcastLive(
-      recipients.map((participant) => liveChannelForUser(participant.userId)),
-      'messages',
-    )
+    await broadcastThreadMessage({ threadId, senderUserId: userId })
 
     // Notify the other participant(s) of the new message (in-app + push,
     // debounced per thread). Best-effort — a notification failure must never
@@ -338,7 +316,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     await notifyNewMessageRecipients({
       threadId,
       senderUserId: userId,
-      preview: text ? text.slice(0, 140) : ATTACHMENT_ONLY_PREVIEW,
+      preview: buildMessagePreview(text, attachmentPaths.length),
     }).catch((err: unknown) => {
       console.error('notifyNewMessageRecipients', {
         debugId,
