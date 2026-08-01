@@ -530,6 +530,31 @@ describe('cancelBookingSeriesOccurrences — scope THIS_AND_FUTURE', () => {
     ])
   }, 60_000)
 
+  // Index 0 is a perfectly ordinary choice — "stop the whole thing, starting
+  // with the first one" — and it is exactly where a falsy-zero bug hides: a
+  // `!fromOccurrenceIndex` guard anywhere in the chain (route parse, boundary
+  // validation, classifier comparison) would read it as "absent" and refuse.
+  it('accepts occurrence 0 as the starting point, not as a missing one', async () => {
+    const created = await series({ occurrenceCount: 3 })
+
+    const result = await cancelBookingSeriesOccurrences({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      seriesId: created.seriesId,
+      scope: 'THIS_AND_FUTURE',
+      fromOccurrenceIndex: 0,
+      reason: null,
+    })
+
+    expect(result.cancelled.map((row) => row.index)).toEqual([0, 1, 2])
+    expect(result.untouched).toEqual([])
+
+    const rows = await readOccurrences(created.seriesId)
+    for (const row of rows) {
+      expect(row.status).toBe(BookingStatus.CANCELLED)
+    }
+  }, 60_000)
+
   it('refuses without an occurrence index rather than widening to ALL', async () => {
     const created = await series({ occurrenceCount: 3 })
 
