@@ -25,6 +25,7 @@ export type ExportedUserData = {
     bookingsAsClient: unknown[]
     bookingsAsProfessional: unknown[]
     bookingHolds: unknown[]
+    bookingSeries: unknown[]
     clientActionTokens: unknown[]
     aftercareSummaries: unknown[]
     clientConsentRecords: unknown[]
@@ -188,6 +189,33 @@ const bookingHoldExportSelect = {
   endsAtSnapshot: true,
   createdAt: true,
 } satisfies Prisma.BookingHoldSelect
+
+// K18 recurring appointments. Both sides of the arrangement are subjects, so
+// one select serves both — and it omits `internalNotes` / `overrideReason` for
+// the same reason the booking select omits `internalNotes`: those are the pro's
+// private free text about the appointment, not a fact about the client.
+const bookingSeriesExportSelect = {
+  id: true,
+  professionalId: true,
+  clientId: true,
+  offeringId: true,
+  locationId: true,
+  locationType: true,
+  clientAddressId: true,
+  addOnIds: true,
+  timeZone: true,
+  anchorAt: true,
+  intervalWeeks: true,
+  occurrenceCount: true,
+  status: true,
+  nextOccurrenceIndex: true,
+  depositRequested: true,
+  depositPerOccurrence: true,
+  requestedBufferMinutes: true,
+  requestedTotalDurationMinutes: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.BookingSeriesSelect
 
 const clientActionTokenExportSelect = {
   id: true,
@@ -427,6 +455,7 @@ export async function exportUserData(
     bookingsAsClient,
     bookingsAsProfessional,
     bookingHolds,
+    bookingSeries,
     clientActionTokens,
     aftercareSummaries,
     clientConsentRecords,
@@ -447,6 +476,7 @@ export async function exportUserData(
     findBookingsAsClient(input.db, clientProfileId),
     findBookingsAsProfessional(input.db, professionalProfileId),
     findBookingHolds(input.db, clientProfileId, professionalProfileId),
+    findBookingSeries(input.db, clientProfileId, professionalProfileId),
     findClientActionTokens(input.db, clientProfileId),
     findAftercareSummaries(input.db, clientProfileId, professionalProfileId),
     findClientConsentRecords(input.db, clientProfileId, professionalProfileId),
@@ -513,6 +543,7 @@ export async function exportUserData(
       bookingsAsClient: normalizeJsonArray(bookingsAsClient),
       bookingsAsProfessional: normalizeJsonArray(bookingsAsProfessional),
       bookingHolds: normalizeJsonArray(bookingHolds),
+      bookingSeries: normalizeJsonArray(bookingSeries),
       clientActionTokens: normalizeJsonArray(clientActionTokens),
       aftercareSummaries: normalizeJsonArray(aftercareSummaries),
       clientConsentRecords: normalizeJsonArray(clientConsentRecords),
@@ -619,6 +650,25 @@ async function findBookingHolds(
     },
     orderBy: { createdAt: 'asc' },
     select: bookingHoldExportSelect,
+  })
+}
+
+async function findBookingSeries(
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+  professionalProfileId: string | null,
+): Promise<unknown[]> {
+  if (!clientProfileId && !professionalProfileId) return []
+
+  return db.bookingSeries.findMany({
+    where: {
+      OR: compactWhere([
+        clientProfileId ? { clientId: clientProfileId } : null,
+        professionalProfileId ? { professionalId: professionalProfileId } : null,
+      ]),
+    },
+    orderBy: { createdAt: 'asc' },
+    select: bookingSeriesExportSelect,
   })
 }
 

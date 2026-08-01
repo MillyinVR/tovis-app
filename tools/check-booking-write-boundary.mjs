@@ -92,8 +92,14 @@ const IGNORE_FILE_SUFFIXES = [
 // is irrelevant: the write verb on the model is what the boundary owns.
 // `upsert` and the *AndReturn variants are included even though nothing uses
 // them today — they create/update rows just the same.
+// K18 adds `bookingSeries` + `bookingSeriesException`: a series row is a
+// standing instruction to CREATE BOOKINGS, and its exception rows are what makes
+// re-materialization idempotent. Writing either outside the boundary could
+// produce a series with no appointments, re-book a slot the materializer already
+// lost, or move an occurrence's cursor past a date nobody booked — all of which
+// are booking writes wearing a different table name.
 const FORBIDDEN_PATTERN =
-  /\.(booking|bookingHold)\.(create|update|delete|createMany|updateMany|deleteMany|upsert|createManyAndReturn|updateManyAndReturn)\s*\(/g
+  /\.(booking|bookingHold|bookingSeries|bookingSeriesException)\.(create|update|delete|createMany|updateMany|deleteMany|upsert|createManyAndReturn|updateManyAndReturn)\s*\(/g
 
 function normalize(filePath) {
   return filePath.split(path.sep).join('/')

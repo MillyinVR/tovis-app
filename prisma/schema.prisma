@@ -1506,6 +1506,7 @@ model User {
   bookingOverridePermissionsAsActor BookingOverridePermission[] @relation("BookingOverridePermissionActor")
 
   bookingCloseoutAuditLogs BookingCloseoutAuditLog[] @relation("BookingCloseoutActor")
+  createdBookingSeries     BookingSeries[]
   idempotencyKeys          IdempotencyKey[]          @relation("UserIdempotencyKeys")
 
   // NFC attribution events
@@ -1733,7 +1734,8 @@ model ClientProfile {
 
   // Global visual taste vector (personalization spec §6.0) — decayed,
   // signal-weighted average of the embeddings of what this client liked/saved.
-  tasteVector ClientTasteVector?
+  tasteVector   ClientTasteVector?
+  bookingSeries BookingSeries[]
 
   @@index([claimStatus])
   @@index([emailHashKeyVersion])
@@ -1810,6 +1812,7 @@ model ClientAddress {
   bookings             Booking[]
   bookingHolds         BookingHold[]
   aftercareRebookSlots AftercareRebookSlot[]
+  bookingSeries        BookingSeries[]
 
   @@index([clientId, kind])
   @@index([clientId, isDefault])
@@ -1943,6 +1946,7 @@ model ProfessionalProfile {
 
   clientNotes                 ClientProfessionalNote[]
   clientPolicies              ProClientPolicy[]
+  bookingSeries               BookingSeries[]
   clientFormulaEntries        ClientFormulaEntry[]
   clientConsentRecords        ClientConsentRecord[]
   consentForms                ConsentForm[]
@@ -2476,6 +2480,7 @@ model ProfessionalLocation {
 
   aftercareRebookSlots AftercareRebookSlot[]
   waitlistOffers       WaitlistOffer[]
+  bookingSeries        BookingSeries[]
 
   @@index([placeId])
   @@index([professionalId])
@@ -2955,6 +2960,7 @@ model ProfessionalServiceOffering {
 
   lastMinuteOpeningServices LastMinuteOpeningService[]
   priceRamps                OfferingPriceRamp[]
+  bookingSeries             BookingSeries[]
 
   @@unique([professionalId, serviceId])
   @@index([professionalId, isActive])
@@ -3470,6 +3476,18 @@ model Booking {
   clientConfirmedAt             DateTime?
   clientConfirmationDeclinedAt  DateTime?
 
+  // Recurring-appointment membership (K18). 🔴 Deliberately its OWN columns,
+  // never a BookingStatus value: that enum sits in the GIST overlap predicate,
+  // closeout, refunds and every write guard, and a series occurrence must be an
+  // ordinary appointment in every one of those paths — that is the whole reason
+  // occurrences are materialized as real rows instead of virtual RRULE dates.
+  // seriesOccurrenceIndex is 0-based and stable: index 0 is the slot the pro
+  // picked, and the unique pair below is what makes re-materialization (K20's
+  // roll-forward cron) idempotent. SetNull so removing a series can never take
+  // real appointments with it.
+  seriesId              String?
+  seriesOccurrenceIndex Int?
+
   // Optional client-supplied idempotency key for booking-creation dedupe.
   // Combined with clientId in @@unique below so identical retries return
   // the existing booking instead of creating a duplicate.
@@ -3552,8 +3570,14 @@ model Booking {
   // cascades so a deleted booking cannot leave a reservation behind.
   rescheduleHolds BookingHold[] @relation("BookingHoldRescheduleTarget")
 
+  series BookingSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+
   @@unique([professionalId, scheduledFor])
   @@unique([clientId, creationIdempotencyKey])
+  /// One booking per occurrence index. This is the idempotency key of the
+  /// materializer: re-running it can never double-book an index it already
+  /// filled, whatever the app-level bookkeeping says.
+  @@unique([seriesId, seriesOccurrenceIndex])
   @@index([professionalId, scheduledFor])
   @@index([clientId, scheduledFor])
   @@index([locationId, scheduledFor])
@@ -3569,6 +3593,156 @@ model Booking {
   @@index([proTenantId, scheduledFor])
   @@index([clientHomeTenantId])
   @@index([sourceLookPostId])
+  @@index([seriesId])
+}
+
+enum BookingSeriesStatus {
+  ACTIVE // still materializing / rolling forward
+  ENDED // ran to its occurrenceCount; nothing further to materialize
+  CANCELLED // the pro stopped the series (K19 owns the edit/cancel scope)
+}
+
+enum BookingSeriesExceptionReason {
+  /// The occurrence's slot was already taken — a booking, a live hold or
+  /// blocked time. `detail` carries the exact BookingErrorCode.
+  SLOT_UNAVAILABLE
+  /// The recurring wall-clock time does not exist on that local date (a DST
+  /// spring-forward gap). Never silently shifted by an hour: an appointment the
+  /// client agreed to at 2:30am is not the same appointment at 3:30am.
+  NONEXISTENT_LOCAL_TIME
+  /// Any other refusal from the booking write boundary (outside working hours,
+  /// past the booking horizon, an add-on that no longer exists, …).
+  /// `detail` carries the BookingErrorCode.
+  REFUSED
+}
+
+/// A recurring appointment (K18). The series is the RULE; the appointments it
+/// produces are ordinary `Booking` rows carrying `seriesId` +
+/// `seriesOccurrenceIndex`.
+///
+/// 🔴 Occurrences are MATERIALIZED, never virtual. A computed/RRULE occurrence
+/// is invisible to `Booking_no_active_professional_overlap`, to holds, deposits,
+/// reminders and closeout — it would not block a double-booking, which defeats
+/// the entire point of a standing appointment.
+///
+/// Bounded horizon: `SERIES_MATERIALIZE_HORIZON` occurrences are created at a
+/// time (K20's cron advances the window). Every column here exists because
+/// re-materializing a later occurrence needs the same inputs the first one had,
+/// months after the pro closed the form.
+model BookingSeries {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professionalId  String
+  clientId        String
+  offeringId      String
+  locationId      String
+  locationType    ServiceLocationType
+  /// Mobile destination, mirroring `Booking.clientAddressId`. SetNull so
+  /// deleting the address doesn't delete the series — the next occurrence is
+  /// refused and recorded as an exception, which is visible, unlike a silent
+  /// relocation.
+  clientAddressId String?
+
+  /// Add-ons selected for every occurrence, as ids. Re-resolved (and re-priced)
+  /// by the write boundary at each materialization, exactly like a hand-created
+  /// booking — so this is the pro's CHOICE, never a price snapshot.
+  addOnIds String[]
+
+  /// The recurrence anchor: occurrence 0's UTC instant, plus the zone whose
+  /// CALENDAR weeks the pattern steps through.
+  ///
+  /// 🔴 Occurrence i is anchor's local date + 7·intervalWeeks·i days at
+  /// anchor's local time-of-day, resolved back to UTC in this zone — never
+  /// anchor + i·7·24h. Across a DST boundary those differ by an hour, and
+  /// "every Friday at 9am" means 9am on both sides of it.
+  timeZone String   @db.VarChar(64)
+  anchorAt DateTime
+
+  intervalWeeks   Int
+  /// Total planned occurrences, or null for open-ended. Until K20's roll-forward
+  /// cron exists, an open-ended series simply stops at the materialization
+  /// horizon; it never silently promises appointments nobody will create.
+  occurrenceCount Int?
+
+  status BookingSeriesStatus @default(ACTIVE)
+
+  /// The next index the materializer should attempt. Bookkeeping only — the
+  /// durable idempotency is `Booking @@unique([seriesId, seriesOccurrenceIndex])`
+  /// plus this series' own exception rows.
+  nextOccurrenceIndex Int @default(0)
+
+  /// D7 (settled by Tori): does a recurring occurrence charge a deposit each
+  /// time? Pro-configurable, chosen at creation. `depositRequested` is the gate;
+  /// `depositPerOccurrence` picks first-occurrence-only vs every-occurrence.
+  /// Two columns encode two independent facts here (unlike ProClientPolicy's
+  /// single scope column): a series can collect nothing at all.
+  depositRequested     Boolean @default(false)
+  depositPerOccurrence Boolean @default(false)
+
+  requestedBufferMinutes        Int?
+  requestedTotalDurationMinutes Int?
+
+  /// The booking-rule overrides the pro authorized when creating the series.
+  /// Stored rather than re-decided per occurrence so K20's unattended cron
+  /// cannot grant an override the pro never asked for.
+  allowOutsideWorkingHours Boolean @default(false)
+  allowShortNotice         Boolean @default(false)
+  allowFarFuture           Boolean @default(false)
+  overrideReason           String?
+
+  internalNotes String?
+
+  createdByUserId String
+
+  professional  ProfessionalProfile         @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  client        ClientProfile               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  offering      ProfessionalServiceOffering @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+  location      ProfessionalLocation        @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  clientAddress ClientAddress?              @relation(fields: [clientAddressId], references: [id], onDelete: SetNull)
+  createdBy     User                        @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  bookings   Booking[]
+  exceptions BookingSeriesException[]
+
+  @@index([professionalId, status])
+  @@index([clientId])
+  @@index([offeringId])
+  @@index([locationId])
+  @@index([clientAddressId])
+  @@index([createdByUserId])
+  @@index([status, nextOccurrenceIndex])
+}
+
+/// An occurrence the materializer did NOT create, and why.
+///
+/// 🔴 The conflict policy, decided in K18: a collision SKIPS that occurrence and
+/// records it here — it never aborts the rest of the series, and it never
+/// silently double-books. Occurrence 5 landing on an existing appointment must
+/// still leave 6…12 standing, which is why each occurrence is materialized in
+/// its own transaction.
+model BookingSeriesException {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  seriesId        String
+  occurrenceIndex Int
+
+  /// The UTC instant the occurrence would have taken. Null only for
+  /// NONEXISTENT_LOCAL_TIME, where there is no such instant — `detail` carries
+  /// the wall-clock time that does not exist.
+  intendedStart DateTime?
+
+  reason BookingSeriesExceptionReason
+  detail String?                      @db.VarChar(500)
+
+  series BookingSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  /// One outcome per index: an occurrence is either a Booking or an exception,
+  /// never both and never twice.
+  @@unique([seriesId, occurrenceIndex])
+  @@index([seriesId, createdAt])
 }
 
 // A single refund issued against a booking's captured Stripe payment. Multiple

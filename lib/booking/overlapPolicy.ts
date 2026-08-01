@@ -68,6 +68,9 @@ export type BookingOverlapSource =
       kind: 'CALENDAR_IMPORT'
     }
   | {
+      kind: 'SERIES_MATERIALIZATION'
+    }
+  | {
       kind: 'AFTERCARE_REBOOK'
       aftercareSummaryId: string
       clientActionTokenId: string
@@ -82,6 +85,7 @@ export type BookingOverlapAllowedMode =
 export type BookingOverlapBlockedCode =
   | 'CLIENT_OVERLAP_NOT_ALLOWED'
   | 'IMPORT_OVERLAP_NOT_ALLOWED'
+  | 'SERIES_OVERLAP_NOT_ALLOWED'
   | 'AFTERCARE_PRESELECTED_SLOT_REQUIRED'
   | 'AFTERCARE_PRESELECTED_SLOT_MISMATCH'
   | 'INVALID_BOOKING_WINDOW'
@@ -156,6 +160,30 @@ export function decideBookingOverlapPermission(args: {
       code: 'IMPORT_OVERLAP_NOT_ALLOWED',
       userMessage:
         'That time is already booked. The imported appointment was held as blocked time for you to review.',
+      conflicts,
+    }
+  }
+
+  // K18: a recurring occurrence is materialized unattended — the pro chose a
+  // PATTERN months ago, not this slot on this date, and K20's cron re-runs the
+  // same code with nobody at the keyboard at all. So a conflict here is never an
+  // authorized overlap even though the actor is the pro, for exactly the reason
+  // CALENDAR_IMPORT is refused above: it is a property of the SOURCE, not of who
+  // is holding the pen. The materializer catches this, records the occurrence as
+  // a skipped exception and carries on with the rest of the series — it never
+  // drops the series, and it never silently stacks a standing appointment on top
+  // of a real one.
+  //
+  // 🔴 Without this branch the PRO branch below returns PRO_AUTHORIZED_OVERLAP,
+  // which sets Booking.allowsOverlap and exempts the row from the DB overlap
+  // constraint. Every collision in a twelve-week series would double-book in
+  // silence, and the "skip + notify" policy would have no way to fire.
+  if (args.source.kind === 'SERIES_MATERIALIZATION') {
+    return {
+      ok: false,
+      code: 'SERIES_OVERLAP_NOT_ALLOWED',
+      userMessage:
+        'That time is already booked, so this appointment in the series was skipped.',
       conflicts,
     }
   }

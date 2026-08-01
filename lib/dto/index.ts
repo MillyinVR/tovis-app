@@ -411,6 +411,17 @@ export type {
   ProClientPolicyResponseDTO,
 } from '@/lib/dto/proClientPolicy'
 
+// ── Pro recurring appointments ────────────────────────────────────────────────
+// POST /api/v1/pro/booking-series (K18, Phase 8). The route's payload is
+// `satisfies`-checked against the response type. 🔴 `skipped` is part of the
+// contract, not an error path: a series that collided with one existing
+// appointment still returns 201 with the other occurrences booked.
+export type {
+  ProBookingSeriesOccurrenceDTO,
+  ProBookingSeriesSkippedOccurrenceDTO,
+  ProBookingSeriesCreateResponseDTO,
+} from '@/lib/dto/proBookingSeries'
+
 // ── Pro client technical record ───────────────────────────────────────────────
 // GET /api/v1/pro/clients/{id}/technical. Undeclared since PR4, which is why
 // K14's `formVersion` + `consentForms` (#809) reached the wire with no contract

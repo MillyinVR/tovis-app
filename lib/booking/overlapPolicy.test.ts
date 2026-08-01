@@ -181,6 +181,73 @@ describe('decideBookingOverlapPermission', () => {
     expect(decision.code).toBe('IMPORT_OVERLAP_NOT_ALLOWED')
   })
 
+  // K18. A series occurrence is materialized unattended: the pro chose a
+  // PATTERN, and K20's cron re-runs this with nobody at the keyboard. Same rule
+  // as CALENDAR_IMPORT, same reason — a property of the SOURCE.
+  it('refuses a series occurrence that overlaps, despite the PRO actor', () => {
+    const decision = decideBookingOverlapPermission({
+      actor: proActor,
+      source: { kind: 'SERIES_MATERIALIZATION' },
+      requestedWindow,
+      conflicts: [conflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('SERIES_OVERLAP_NOT_ALLOWED')
+    expect(decision.conflicts).toEqual([conflict])
+  })
+
+  it('refuses a series occurrence that overlaps a HOLD, not just a booking', () => {
+    const holdConflict: SchedulingConflict = {
+      ...conflict,
+      kind: 'HOLD',
+      id: 'hold_conflict_series',
+    }
+
+    const decision = decideBookingOverlapPermission({
+      actor: proActor,
+      source: { kind: 'SERIES_MATERIALIZATION' },
+      requestedWindow,
+      conflicts: [holdConflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('SERIES_OVERLAP_NOT_ALLOWED')
+  })
+
+  it('refuses a series occurrence even for an ADMIN actor', () => {
+    const decision = decideBookingOverlapPermission({
+      actor: adminActor,
+      source: { kind: 'SERIES_MATERIALIZATION' },
+      requestedWindow,
+      conflicts: [conflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('SERIES_OVERLAP_NOT_ALLOWED')
+  })
+
+  // The refusal is scoped to conflicts only. A clean occurrence books normally
+  // AND stays bound by the DB overlap constraint (allowsOverlap false), which is
+  // the point of materializing real rows in the first place.
+  it('allows a series occurrence when there is no conflict', () => {
+    const decision = decideBookingOverlapPermission({
+      actor: proActor,
+      source: { kind: 'SERIES_MATERIALIZATION' },
+      requestedWindow,
+      conflicts: [],
+    })
+
+    expect(decision).toEqual({
+      ok: true,
+      mode: 'NO_OVERLAP',
+      conflicts: [],
+    })
+  })
+
   it('allows an admin override overlapping booking', () => {
     const decision = decideBookingOverlapPermission({
       actor: adminActor,
