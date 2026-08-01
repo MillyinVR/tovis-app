@@ -16,6 +16,7 @@ import {
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { loadTechnicalRecord } from '@/lib/clients/technicalRecordLoader'
+import type { ProClientTechnicalRecordResponseDTO } from '@/lib/dto/proClientTechnicalRecord'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +44,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     const data = await loadTechnicalRecord(clientId, proId)
 
-    return jsonOk({
+    // `satisfies` on the literal, so an added field is an excess-property error
+    // rather than an undeclared one the generated schema never sees.
+    const body = {
       formula: data.formula.map((f) => ({
         id: f.id,
         when: iso(f.when),
@@ -78,7 +81,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
       // K14 — the pro's active forms, so the native record-entry surface (K17)
       // offers the same choices the web one does.
       consentForms: data.consentForms,
-    })
+    } satisfies ProClientTechnicalRecordResponseDTO
+
+    return jsonOk(body)
   } catch (e) {
     console.error('GET /api/v1/pro/clients/[id]/technical error:', e)
     return jsonFail(500, 'Failed to load the technical record.')

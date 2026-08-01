@@ -64,6 +64,14 @@
       ],
       "type": "string"
     },
+    "$Enums.ClientConsentKind": {
+      "enum": [
+        "GENERAL_CONSENT",
+        "SERVICE_WAIVER",
+        "PATCH_TEST"
+      ],
+      "type": "string"
+    },
     "$Enums.ClientRelationshipLabel": {
       "enum": [
         "UNKNOWN",
@@ -315,6 +323,14 @@
       "enum": [
         "MANUAL",
         "STRIPE"
+      ],
+      "type": "string"
+    },
+    "$Enums.PhotoReleaseStatus": {
+      "enum": [
+        "NOT_SET",
+        "GRANTED",
+        "DECLINED"
       ],
       "type": "string"
     },
@@ -3850,6 +3866,9 @@
       ],
       "type": "string"
     },
+    "ClientConsentKind": {
+      "$ref": "#/definitions/%24Enums.ClientConsentKind"
+    },
     "ClientHomeActionDTO": {
       "anyOf": [
         {
@@ -6308,6 +6327,62 @@
         "setupIntentId",
         "customerId",
         "publishableKey"
+      ],
+      "type": "object"
+    },
+    "ConsentFormOption": {
+      "description": "The choices a pro has when recording a consent record: their ACTIVE forms, each resolved to the version that would be signed today. Retired forms are absent — a form a pro has stopped using should not keep being attached to new records, while records already pointing at it keep resolving their own version.",
+      "properties": {
+        "formId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ClientConsentKind"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        },
+        "versionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "formId",
+        "versionId",
+        "version",
+        "kind",
+        "title"
+      ],
+      "type": "object"
+    },
+    "ConsentFormVersionAttestation": {
+      "description": "K14 — the form version a record attests to, resolved as it was signed. Null on every pre-K14 row (free-text records, which stay readable) and on any record a pro chose not to attach a form to.",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "originLabel": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "title",
+        "body",
+        "originLabel"
       ],
       "type": "object"
     },
@@ -9559,6 +9634,9 @@
     "PaymentProvider": {
       "$ref": "#/definitions/%24Enums.PaymentProvider"
     },
+    "PhotoReleaseStatus": {
+      "$ref": "#/definitions/%24Enums.PhotoReleaseStatus"
+    },
     "PickedPlace": {
       "properties": {
         "city": {
@@ -10964,6 +11042,188 @@
       ],
       "type": "object"
     },
+    "ProClientConsentRecordDTO": {
+      "description": "A consent / patch-test record, ALREADY REDACTED by scope.\n\n`scope` is the redaction that produced this row, not a display hint: `'full'` means the reading pro authored it and gets the proof fields, the notes and the form text; `'safety'` means it is another pro's patch test, reaching this pro only so they don't skin-test over someone else's result — result and validity travel, everything else is already null and `byName` names the other pro.",
+      "properties": {
+        "byName": {
+          "description": "Safety scope only — the pro whose record this is.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "formVersion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProConsentFormVersionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "K14 — null on every pre-K14 record, on any record whose pro attached no form, and on every safety-scoped row."
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ClientConsentKind"
+        },
+        "notes": {
+          "description": "Full scope only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "patchTestResult": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proofMethod": {
+          "description": "Full scope only — `IN_PERSON` | `CLIENT_TOKEN` | `PAPER_ON_FILE`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proofRef": {
+          "description": "Full scope only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "full",
+            "safety"
+          ],
+          "type": "string"
+        },
+        "serviceScope": {
+          "description": "Full scope only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signedAt": {
+          "description": "Full scope only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "validUntil": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "kind",
+        "when",
+        "timeZone",
+        "serviceScope",
+        "signedAt",
+        "proofMethod",
+        "proofRef",
+        "patchTestResult",
+        "validUntil",
+        "notes",
+        "byName",
+        "formVersion"
+      ],
+      "type": "object"
+    },
+    "ProClientFormulaEntryDTO": {
+      "description": "A formula entry, author-scoped — free text is decrypted for its author only.",
+      "properties": {
+        "brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "developer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "processingTimeMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ratio": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resultNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeZone": {
+          "description": "IANA zone of that booking's location — render `when` in it, never the device's.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when": {
+          "description": "ISO instant of the booking this was recorded against, else its createdAt.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "when",
+        "timeZone",
+        "serviceName",
+        "brand",
+        "developer",
+        "ratio",
+        "processingTimeMinutes",
+        "resultNotes"
+      ],
+      "type": "object"
+    },
     "ProClientPolicyDTO": {
       "description": "The four switches, exactly as stored. `null` for the whole object means the pro has set no policy for this client — which is a different fact from four falses, and the write route preserves the difference by DELETING the row rather than storing an all-false one.",
       "properties": {
@@ -11022,6 +11282,46 @@
         "cardOnFileRailEnabled"
       ],
       "type": "object"
+    },
+    "ProClientTechnicalRecordResponseDTO": {
+      "properties": {
+        "consentForms": {
+          "items": {
+            "$ref": "#/definitions/ProConsentFormOptionDTO"
+          },
+          "type": "array"
+        },
+        "consents": {
+          "items": {
+            "$ref": "#/definitions/ProClientConsentRecordDTO"
+          },
+          "type": "array"
+        },
+        "formula": {
+          "items": {
+            "$ref": "#/definitions/ProClientFormulaEntryDTO"
+          },
+          "type": "array"
+        },
+        "photoReleaseStatus": {
+          "$ref": "#/definitions/PhotoReleaseStatus"
+        }
+      },
+      "required": [
+        "formula",
+        "consents",
+        "photoReleaseStatus",
+        "consentForms"
+      ],
+      "type": "object"
+    },
+    "ProConsentFormOptionDTO": {
+      "$ref": "#/definitions/ConsentFormOption",
+      "description": "K14 — one of the pro's ACTIVE consent forms, resolved to the version that would be signed today. This list is what lets a native record-entry surface offer the same choices web does; a picker that exists on one platform only is how a record ends up form-less on the other."
+    },
+    "ProConsentFormVersionDTO": {
+      "$ref": "#/definitions/ConsentFormVersionAttestation",
+      "description": "K14 — the exact form text a consent record attests to, resolved as it was signed. Author scope only: it travels with the proof fields, so a patch test's safety fields reaching another pro never carries the waiver text with them."
     },
     "ProFinanceBlock": {
       "properties": {

@@ -411,6 +411,18 @@ export type {
   ProClientPolicyResponseDTO,
 } from '@/lib/dto/proClientPolicy'
 
+// ── Pro client technical record ───────────────────────────────────────────────
+// GET /api/v1/pro/clients/{id}/technical. Undeclared since PR4, which is why
+// K14's `formVersion` + `consentForms` (#809) reached the wire with no contract
+// coverage at all — the generated schema had no definition to gain a field on.
+export type {
+  ProConsentFormVersionDTO,
+  ProConsentFormOptionDTO,
+  ProClientFormulaEntryDTO,
+  ProClientConsentRecordDTO,
+  ProClientTechnicalRecordResponseDTO,
+} from '@/lib/dto/proClientTechnicalRecord'
+
 // ── Pro bookings list ─────────────────────────────────────────────────────────
 // The native pro bookings list (GET /api/v1/pro/bookings). Exported so the iOS
 // contract validator can check its fixture against the real shape — until now
