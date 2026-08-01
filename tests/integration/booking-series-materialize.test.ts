@@ -420,6 +420,29 @@ describe('createBookingSeries — materialization', () => {
     expect(seriesRow.nextOccurrenceIndex).toBe(12)
   }, 120_000)
 
+  it('handles the degenerate one-occurrence series without looping or hanging', async () => {
+    // Reachable through the route (occurrenceCount >= 1), and the arithmetic
+    // that decides how many indices are left is the easiest thing here to get
+    // off by one.
+    const result = await series({ occurrenceCount: 1 })
+
+    expect(result.occurrences.map((o) => o.index)).toEqual([0])
+    expect(result.skipped).toEqual([])
+    expect(result.nextOccurrenceIndex).toBe(1)
+
+    const rows = await readOccurrences(result.seriesId)
+    expect(rows).toHaveLength(1)
+
+    const seriesRow = await db.bookingSeries.findUniqueOrThrow({
+      where: { id: result.seriesId },
+      select: { status: true, nextOccurrenceIndex: true },
+    })
+    expect(seriesRow).toEqual({
+      status: BookingSeriesStatus.ENDED,
+      nextOccurrenceIndex: 1,
+    })
+  }, 60_000)
+
   it('steps fortnightly when intervalWeeks is 2', async () => {
     const result = await series({ intervalWeeks: 2, occurrenceCount: 3 })
 
