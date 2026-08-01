@@ -58,6 +58,15 @@ const UNTOUCHED_COPY: Record<ProBookingSeriesUntouchedReason, string> = {
   OUT_OF_SCOPE: 'Earlier than this one',
 }
 
+/**
+ * Reasons worth printing on an occurrence ROW. The other three restate the
+ * status badge sitting next to them. (`OUT_OF_SCOPE` cannot reach a row — the
+ * loader classifies at scope ALL — but it is listed because it is a scope fact,
+ * not a status one, and would be worth showing if it ever did.)
+ */
+const REASON_NOT_IMPLIED_BY_STATUS: ReadonlySet<ProBookingSeriesUntouchedReason> =
+  new Set(['IN_PAST', 'OUT_OF_SCOPE'])
+
 function errorFromResponse(res: Response, data: unknown): string {
   const root = isRecord(data) ? data : null
   const error =
@@ -239,7 +248,14 @@ export default function SeriesCancelControls({
                   {occurrence.depositHeldCents > 0
                     ? ` · ${formatCents(occurrence.depositHeldCents)} deposit held`
                     : ''}
-                  {!occurrence.cancellable && occurrence.untouchedReason
+                  {/* Only the reasons the status badge does NOT already carry.
+                      ALREADY_CANCELLED beside a "Cancelled" badge (and the same
+                      for ALREADY_HAPPENED / IN_PROGRESS) says one thing twice;
+                      IN_PAST is the only one that adds anything, because the row
+                      still reads "Confirmed". */}
+                  {!occurrence.cancellable &&
+                  occurrence.untouchedReason &&
+                  REASON_NOT_IMPLIED_BY_STATUS.has(occurrence.untouchedReason)
                     ? ` · ${UNTOUCHED_COPY[occurrence.untouchedReason]}`
                     : ''}
                 </div>

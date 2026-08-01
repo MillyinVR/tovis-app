@@ -197,8 +197,35 @@ describe('SeriesCancelControls', () => {
     expect(
       screen.queryByTestId('series-cancel-from-0'),
     ).not.toBeInTheDocument()
-    expect(screen.getByTestId('series-occurrence-0')).toHaveTextContent(
-      /Already cancelled/,
+
+    // The status badge already says it. Printing "· Already cancelled" beside a
+    // "Cancelled" badge is the same fact twice.
+    const row = screen.getByTestId('series-occurrence-0')
+    expect(row).toHaveTextContent(/Cancelled/)
+    expect(row).not.toHaveTextContent(/Already cancelled/)
+  })
+
+  // IN_PAST is the one reason the badge cannot carry: the row still reads
+  // "Confirmed", and without the note a pro would wonder why it has no button.
+  it('does print the reason a past occurrence has no cancel button', () => {
+    render(
+      <SeriesCancelControls
+        series={detail({
+          occurrences: [
+            occurrence(0, {
+              scheduledFor: new Date(
+                NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+              ).toISOString(),
+              cancellable: false,
+              untouchedReason: 'IN_PAST',
+            }),
+          ],
+        })}
+      />,
     )
+
+    const row = screen.getByTestId('series-occurrence-0')
+    expect(row).toHaveTextContent(/Confirmed/)
+    expect(row).toHaveTextContent(/In the past/)
   })
 })
