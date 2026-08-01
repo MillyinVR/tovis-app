@@ -114,6 +114,14 @@ type Props = {
   defaultScheduledAt?: string
   cancelHref?: string
   cancelMode?: CancelMode
+  /**
+   * K19: the server's `recurringAppointmentsEnabled()`. 🔴 The kill switch has
+   * to reach the CONTROL, not just the route — an unflagged "Repeats" step
+   * would offer an option `POST /api/v1/pro/booking-series` answers 404 to
+   * ([[kill-switch-must-reach-the-control]]). Default false so a caller that
+   * forgets to pass it gets the dark behaviour, never the lit one.
+   */
+  recurringEnabled?: boolean
 }
 
 type NewClientFormState = {
@@ -136,6 +144,42 @@ type ServiceAddressFormState = {
   lat: number | null
   lng: number | null
   isDefault: boolean
+}
+
+// K19 — what the "repeats" step offers.
+//
+// 🔴 Two deliberate omissions, both recorded as decisions rather than gaps:
+//
+//  - NO open-ended option. `BookingSeries.occurrenceCount` accepts null and the
+//    boundary honours it, but an open-ended series simply stops at the
+//    materialization horizon until K20's roll-forward cron exists (K18-B). An
+//    option whose operator has not been built is an offer the app cannot keep
+//    ([[verifiable-rail-still-needs-an-operator]]), so the pro picks a number.
+//
+//  - NO per-occurrence deposit option. `depositPerOccurrence` works, but every
+//    occurrence's pay link is delivered AT CREATION, so a client would get a
+//    dozen "pay for your appointment" messages in one burst (K18-A). Staggering
+//    them needs a scheduled deposit-request rail that does not exist yet. A
+//    deposit on a repeating booking is therefore the FIRST occurrence's only —
+//    which is what the boundary does when `depositPerOccurrence` is false.
+//
+// The counts stay inside the boundary's own MIN/MAX (1…12 occurrences, 1…12
+// week interval); the server re-validates, so this list is the offer, not the
+// rule.
+const REPEAT_INTERVAL_WEEKS_OPTIONS = [1, 2, 3, 4, 6, 8, 12] as const
+const REPEAT_COUNT_OPTIONS = [2, 3, 4, 5, 6, 8, 10, 12] as const
+const REPEAT_INTERVAL_DEFAULT = 4
+const REPEAT_COUNT_DEFAULT = 6
+
+function repeatIntervalLabel(weeks: number): string {
+  if (weeks === 1) return 'Every week'
+  return `Every ${weeks} weeks`
+}
+
+function readSeriesId(data: unknown): string | null {
+  if (!isRecord(data)) return null
+  const value = data.seriesId
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function currentPathWithQuery() {
@@ -539,6 +583,7 @@ export default function NewBookingForm({
   defaultScheduledAt,
   cancelHref = '/pro/bookings',
   cancelMode = 'href',
+  recurringEnabled = false,
 }: Props) {
   const router = useRouter()
 
@@ -1192,6 +1237,34 @@ export default function NewBookingForm({
     )
   }, [depositRequested, proposedStartISO, depositConfig, bookingTimeZone])
 
+  // ── K19: the "repeats" step ────────────────────────────────────────────────
+  //
+  // Turning this on sends the whole form to POST /api/v1/pro/booking-series
+  // instead of POST /api/v1/pro/bookings. The series route takes an EXISTING
+  // client id and an EXISTING saved service address — it has no inline
+  // create-a-client or create-an-address payload — so the control is withheld
+  // (and force-reset) whenever the form is in one of those modes, rather than
+  // being offered and then refused on submit.
+  const [repeats, setRepeats] = useState(false)
+  const [intervalWeeks, setIntervalWeeks] = useState(REPEAT_INTERVAL_DEFAULT)
+  const [occurrenceCount, setOccurrenceCount] = useState(REPEAT_COUNT_DEFAULT)
+
+  const repeatBlockedReason: string | null =
+    clientMode === 'new'
+      ? 'Repeating appointments need a saved client. Create this client first, then book the series.'
+      : locationType === 'MOBILE' && addressMode === 'new'
+        ? 'Repeating appointments need a saved service address. Save the address with this booking first, then book the series.'
+        : null
+
+  const repeatAvailable = recurringEnabled && repeatBlockedReason === null
+
+  // A pro who picks "new client" AFTER switching repeats on must not silently
+  // submit a series request the route will refuse — the toggle goes back off
+  // with the reason still on screen.
+  useEffect(() => {
+    if (!repeatAvailable && repeats) setRepeats(false)
+  }, [repeatAvailable, repeats])
+
   // Clients the proposed time collides with (empty when clear). Fetched from the
   // pro calendar so it stays in lockstep with the grid's own overlap signal.
   const [overlapNames, setOverlapNames] = useState<string[]>([])
@@ -1448,32 +1521,59 @@ export default function NewBookingForm({
 
     setLoading(true)
 
+    // K19: a repeating booking is a different resource, not a flag on this one.
+    // `submitAsSeries` re-derives `repeatAvailable` rather than trusting the
+    // `repeats` state alone, so a mode switch that raced the effect above still
+    // posts the single booking the route can actually accept.
+    const submitAsSeries = repeats && repeatAvailable
+
     try {
-      const bodyJson = JSON.stringify({
-        clientId: clientMode === 'existing' ? clientId : null,
-        client: clientPayload,
-        offeringId: selectedOffering.id,
-        addOnIds: selectedAddOnIds,
-        locationType,
-        locationId,
-        clientAddressId:
-          locationType === 'MOBILE' && addressMode === 'existing'
-            ? clientAddressId
-            : null,
-        serviceAddress: serviceAddressPayload,
-        scheduledFor: scheduledForISO,
-        internalNotes: internalNotes.trim() || null,
-        overrideReason: trimmedOverrideReason || null,
-        depositRequested,
-        ...overrideBody,
-      })
+      const bodyJson = submitAsSeries
+        ? JSON.stringify({
+            clientId,
+            offeringId: selectedOffering.id,
+            addOnIds: selectedAddOnIds,
+            locationType,
+            locationId,
+            clientAddressId:
+              locationType === 'MOBILE' ? clientAddressId || null : null,
+            firstOccurrenceAt: scheduledForISO,
+            intervalWeeks,
+            occurrenceCount,
+            internalNotes: internalNotes.trim() || null,
+            overrideReason: trimmedOverrideReason || null,
+            depositRequested,
+            // First occurrence only — see REPEAT_* above (K18-A).
+            depositPerOccurrence: false,
+            ...overrideBody,
+          })
+        : JSON.stringify({
+            clientId: clientMode === 'existing' ? clientId : null,
+            client: clientPayload,
+            offeringId: selectedOffering.id,
+            addOnIds: selectedAddOnIds,
+            locationType,
+            locationId,
+            clientAddressId:
+              locationType === 'MOBILE' && addressMode === 'existing'
+                ? clientAddressId
+                : null,
+            serviceAddress: serviceAddressPayload,
+            scheduledFor: scheduledForISO,
+            internalNotes: internalNotes.trim() || null,
+            overrideReason: trimmedOverrideReason || null,
+            depositRequested,
+            ...overrideBody,
+          })
 
       const cached = submitIdempotencyKeyRef.current
       const idempotencyKey =
         cached && cached.bodyJson === bodyJson
           ? cached.key
           : buildClientIdempotencyKey({
-              scope: 'pro-booking-create',
+              scope: submitAsSeries
+                ? 'pro-booking-series-create'
+                : 'pro-booking-create',
               entityId: selectedOffering.id,
               action: 'create',
               nonce: bodyJson,
@@ -1481,14 +1581,17 @@ export default function NewBookingForm({
 
       submitIdempotencyKeyRef.current = { key: idempotencyKey, bodyJson }
 
-  const res = await fetch('/api/v1/pro/bookings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...idempotencyHeaders(idempotencyKey),
+  const res = await fetch(
+    submitAsSeries ? '/api/v1/pro/booking-series' : '/api/v1/pro/bookings',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...idempotencyHeaders(idempotencyKey),
+      },
+      body: bodyJson,
     },
-    body: bodyJson,
-  })
+  )
 
   if (res.status === 401) {
     submitIdempotencyKeyRef.current = null
@@ -1518,12 +1621,25 @@ export default function NewBookingForm({
 
   submitIdempotencyKeyRef.current = null
 
-  const nextBookingId = readBookingId(data)
+  // 🔴 A series lands on the SERIES page, never on occurrence 0's booking page.
+  // The 201 can carry eleven bookings and one skip, and the booking page has
+  // nowhere to say so — a pro who asked for twelve would be shown one
+  // appointment and no hint that a date is missing
+  // ([[an-always-empty-key-looks-like-an-export]]).
+  const nextSeriesId = submitAsSeries ? readSeriesId(data) : null
 
-  if (nextBookingId) {
-    router.push(`/pro/bookings/${encodeURIComponent(nextBookingId)}`)
+  if (nextSeriesId) {
+    router.push(
+      `/pro/bookings/series/${encodeURIComponent(nextSeriesId)}`,
+    )
   } else {
-    router.push('/pro/bookings')
+    const nextBookingId = readBookingId(data)
+
+    if (nextBookingId) {
+      router.push(`/pro/bookings/${encodeURIComponent(nextBookingId)}`)
+    } else {
+      router.push('/pro/bookings')
+    }
   }
 
   router.refresh()
@@ -2414,6 +2530,88 @@ export default function NewBookingForm({
         </FormCard>
       ) : null}
 
+      {/* K19 — the repeats step. Rendered ONLY when the server says the feature
+          is on: the kill switch has to reach the control, or the pro is offered
+          a form the route answers 404 to. */}
+      {recurringEnabled ? (
+        <FormCard step={depositAvailable ? 5 : 4} title="Repeats">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={repeats}
+              disabled={loading || !repeatAvailable}
+              onChange={(e) => setRepeats(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-accentPrimary"
+              data-testid="repeats-toggle"
+            />
+            <span className="grid gap-1">
+              <span className={label}>Repeat this appointment</span>
+              <span className="text-[12px] text-textSecondary">
+                Books the whole run now, so the time is held on your calendar.
+              </span>
+            </span>
+          </label>
+
+          {repeatBlockedReason ? (
+            <div className={helper} data-testid="repeats-blocked">
+              {repeatBlockedReason}
+            </div>
+          ) : null}
+
+          {repeats && repeatAvailable ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <label className={label} htmlFor="repeat-interval">
+                  How often
+                </label>
+                <select
+                  id="repeat-interval"
+                  className={field}
+                  value={intervalWeeks}
+                  disabled={loading}
+                  onChange={(e) => setIntervalWeeks(Number(e.target.value))}
+                >
+                  {REPEAT_INTERVAL_WEEKS_OPTIONS.map((weeks) => (
+                    <option key={weeks} value={weeks}>
+                      {repeatIntervalLabel(weeks)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-2">
+                <label className={label} htmlFor="repeat-count">
+                  How many appointments
+                </label>
+                <select
+                  id="repeat-count"
+                  className={field}
+                  value={occurrenceCount}
+                  disabled={loading}
+                  onChange={(e) => setOccurrenceCount(Number(e.target.value))}
+                >
+                  {REPEAT_COUNT_OPTIONS.map((count) => (
+                    <option key={count} value={count}>
+                      {count} appointments
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ) : null}
+
+          {repeats && repeatAvailable ? (
+            <div className="rounded-card border border-toneInfo/30 bg-toneInfo/10 px-3 py-2 text-[12px] text-textPrimary">
+              A date already taken by another appointment is skipped, not
+              double-booked — you will see exactly which ones on the next screen.
+              {depositRequested
+                ? ' The deposit is requested once, for the first appointment.'
+                : ''}
+            </div>
+          ) : null}
+        </FormCard>
+      ) : null}
+
       {overridePrompt ? (
         <BookingOverridePromptCard
           prompt={overridePrompt}
@@ -2473,6 +2671,12 @@ export default function NewBookingForm({
                   }
                 />
               ) : null}
+              {recurringEnabled && repeats && repeatAvailable ? (
+                <SummaryRow
+                  label="Repeats"
+                  value={`${repeatIntervalLabel(intervalWeeks)} · ${occurrenceCount} appointments`}
+                />
+              ) : null}
             </div>
 
             <div className="mt-3.5 flex items-baseline justify-between border-t border-dashed border-white/10 pt-3.5">
@@ -2489,7 +2693,11 @@ export default function NewBookingForm({
               disabled={submitDisabled}
               className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-accentPrimary text-[14px] font-black text-bgPrimary transition hover:bg-accentPrimaryHover disabled:opacity-60"
             >
-              {loading ? 'Creating…' : 'Create booking'}
+              {loading
+                ? 'Creating…'
+                : repeats && repeatAvailable
+                  ? 'Create recurring booking'
+                  : 'Create booking'}
             </button>
 
             <button

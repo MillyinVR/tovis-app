@@ -8,6 +8,11 @@ export const IDEMPOTENCY_ROUTES = {
   // double-submit is expensive even though the second attempt would refuse at
   // occurrence 0 (the series overlap rule takes the first one's slot).
   PRO_BOOKING_SERIES_CREATE: 'POST /api/v1/pro/booking-series',
+  // K19: a scoped series cancel transitions up to a dozen bookings and sends a
+  // notification for each. A replayed double-submit would be a no-op on the
+  // rows (they are CANCELLED already) but would re-run the refund appliers, so
+  // it gets a key like every other multi-row write.
+  PRO_BOOKING_SERIES_CANCEL: 'POST /api/v1/pro/booking-series/[id]/cancel',
   PRO_BOOKING_UPDATE: 'PATCH /api/v1/pro/bookings/[id]',
   PRO_BOOKING_CANCEL: 'PATCH /api/v1/pro/bookings/[id]/cancel',
   PRO_BOOKING_NO_SHOW: 'POST /api/v1/pro/bookings/[id]/no-show',
