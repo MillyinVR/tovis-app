@@ -1,0 +1,315 @@
+// lib/privacy/exportBoundary.ts
+
+import { Prisma } from '@prisma/client'
+
+import type { ExportedUserData } from '@/lib/privacy/exportUserData'
+
+/**
+ * Privacy export completeness boundary.
+ *
+ * `exportUserData` tells maintainers to "update this boundary and its
+ * schema-completeness test" when the schema grows a user-linked model. Until
+ * K16-A that test did not exist, so 70+ models drifted outside the export with
+ * nobody recording whether that was a decision or an oversight.
+ *
+ * This module is the decision record. Every model that carries a foreign key to
+ * a subject model (User / ClientProfile / ProfessionalProfile) must appear in
+ * `EXPORT_BOUNDARY` as one of:
+ *
+ * - `EXPORTED`  — assembled into the payload under `keys`
+ * - `OMITTED`   — deliberately left out, with the reason it is left out
+ * - `PENDING`   — not yet settled; counted against a baseline that may shrink
+ *                 but never grow
+ *
+ * The registry is derived against the generated Prisma client (`Prisma.dmmf`),
+ * never a hand-maintained model list, so a new model cannot join the schema
+ * without failing the guard.
+ *
+ * ⚠️ Known limitation: detection is DIRECT foreign keys only. A model that
+ * reaches the subject transitively is invisible to it — `AftercareSummary`
+ * (via `Booking`) and `NotificationDelivery` (via `NotificationDispatch`) are
+ * both exported today yet would never be demanded by this guard. So the guard
+ * proves "no directly-linked model drifted out unrecorded"; it does not prove
+ * the export is complete. Widening it to transitive links means choosing a hop
+ * limit, which is a bigger decision than K16-A.
+ *
+ * Deletion (`lib/privacy/deleteUserData.ts`) is a separate, deliberately
+ * narrower boundary that documents its own limitations. It could adopt this
+ * registry later; K16-A does not change it.
+ */
+
+export const SUBJECT_MODELS = [
+  'User',
+  'ClientProfile',
+  'ProfessionalProfile',
+] as const
+
+type ExportedDataKey = keyof ExportedUserData['data']
+
+export type ExportDisposition =
+  | {
+      readonly status: 'EXPORTED'
+      /** One model may land under several keys (Booking → client + pro sides). */
+      readonly keys: readonly ExportedDataKey[]
+    }
+  | { readonly status: 'OMITTED'; readonly reason: string }
+  | { readonly status: 'PENDING'; readonly note: string }
+
+/**
+ * Scalar `String` fields whose names look like a subject foreign key but are
+ * not one. Kept explicit rather than pattern-excluded: a silent skip here is
+ * how a real link would hide.
+ */
+const NON_SUBJECT_ID_FIELDS: ReadonlySet<string> = new Set([
+  // Apple/Google Sign-In subject identifiers — external IdP ids, not our users.
+  'User.appleUserId',
+  'User.googleUserId',
+])
+
+const SUBJECT_FK_SUFFIXES = ['userid', 'clientid', 'professionalid'] as const
+
+function isSubjectForeignKeyName(modelName: string, fieldName: string): boolean {
+  if (NON_SUBJECT_ID_FIELDS.has(`${modelName}.${fieldName}`)) return false
+
+  const normalized = fieldName.toLowerCase()
+  return SUBJECT_FK_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
+}
+
+/**
+ * True when `model` itself carries a link to a subject model.
+ *
+ * Two signals, because either one alone has a hole:
+ *
+ * 1. An owned relation field — non-list, with `relationFromFields` set, so the
+ *    FK lives on THIS model. List relations are excluded: `Tenant.homePros` is
+ *    a back-reference where the professional holds the key, and treating it as
+ *    a link would file `Tenant` as user data.
+ * 2. A subject-shaped scalar `String` with no relation declared at all.
+ *    `ConsultationApproval.clientId` and `UploadSession.clientId` are real
+ *    undeclared foreign keys — a relation-only guard misses them completely,
+ *    which is a hole exactly the shape of the thing this guard exists to catch.
+ */
+function isSubjectLinked(model: Prisma.DMMF.Model): boolean {
+  if ((SUBJECT_MODELS as readonly string[]).includes(model.name)) return true
+
+  const ownedRelationFields = model.fields.filter(
+    (field) =>
+      field.kind === 'object' &&
+      (SUBJECT_MODELS as readonly string[]).includes(field.type) &&
+      !field.isList &&
+      (field.relationFromFields?.length ?? 0) > 0,
+  )
+
+  if (ownedRelationFields.length > 0) return true
+
+  // Reached only when no owned relation to a subject exists, so every
+  // subject-shaped scalar here is by definition an undeclared foreign key.
+  return model.fields.some(
+    (field) =>
+      field.kind === 'scalar' &&
+      field.type === 'String' &&
+      isSubjectForeignKeyName(model.name, field.name),
+  )
+}
+
+/** Every model in the live schema that links to the export subject. */
+export function subjectLinkedModelNames(): string[] {
+  return Prisma.dmmf.datamodel.models
+    .filter(isSubjectLinked)
+    .map((model) => model.name)
+    .sort()
+}
+
+const PENDING_NOTE =
+  'Undecided: links to the subject but has never been assessed for disclosure. Settle as EXPORTED or OMITTED before relying on the export for a subject-access request.'
+
+const OMITTED_PRO_AUTHORED_FEEDBACK =
+  'Pro-authored feedback about a client is never disclosed to that client (Tori, 2026-07-31). Handled as a manual/legal workflow, not a self-serve export.'
+
+export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
+  // ---------------------------------------------------------------- exported
+  User: { status: 'EXPORTED', keys: ['user'] },
+  ClientProfile: { status: 'EXPORTED', keys: ['clientProfile'] },
+  ProfessionalProfile: { status: 'EXPORTED', keys: ['professionalProfile'] },
+  ClientAddress: { status: 'EXPORTED', keys: ['clientAddresses'] },
+  ProfessionalLocation: { status: 'EXPORTED', keys: ['professionalLocations'] },
+  Booking: {
+    status: 'EXPORTED',
+    keys: ['bookingsAsClient', 'bookingsAsProfessional'],
+  },
+  BookingHold: { status: 'EXPORTED', keys: ['bookingHolds'] },
+  ClientActionToken: { status: 'EXPORTED', keys: ['clientActionTokens'] },
+  AftercareSummary: { status: 'EXPORTED', keys: ['aftercareSummaries'] },
+  MediaAsset: { status: 'EXPORTED', keys: ['mediaAssets'] },
+  Message: { status: 'EXPORTED', keys: ['messages'] },
+  Notification: { status: 'EXPORTED', keys: ['notifications'] },
+  ClientNotification: { status: 'EXPORTED', keys: ['clientNotifications'] },
+  ScheduledClientNotification: {
+    status: 'EXPORTED',
+    keys: ['scheduledClientNotifications'],
+  },
+  NotificationDispatch: { status: 'EXPORTED', keys: ['notificationDispatches'] },
+  NotificationDelivery: { status: 'EXPORTED', keys: ['notificationDeliveries'] },
+  TapIntent: { status: 'EXPORTED', keys: ['tapIntents'] },
+
+  // ⚠️ These two have a payload key that is ALWAYS an empty array — their
+  // finders return [] unconditionally. The key's presence makes them look
+  // exported; the disposition is what tells the truth.
+  AttributionEvent: {
+    status: 'OMITTED',
+    reason:
+      'Omitted pending a disclosure decision and a safe projection: attribution rows carry cross-user/admin-adjacent context. `attributionEvents` remains in the payload as an empty array for shape stability.',
+  },
+  AdminActionLog: {
+    status: 'OMITTED',
+    reason:
+      'Internal operational/security record; disclosed only through an approved legal/support workflow. `adminActionLogs` remains in the payload as an empty array for shape stability.',
+  },
+
+  // K16-A — settled this phase.
+  ClientConsentRecord: { status: 'EXPORTED', keys: ['clientConsentRecords'] },
+  ClientAllergy: { status: 'EXPORTED', keys: ['clientAllergies'] },
+
+  // ----------------------------------------------------- omitted, on purpose
+  // K16-A — the K14–K16 chart/consent family, settled by Tori 2026-07-31.
+  ClientProfessionalNote: {
+    status: 'OMITTED',
+    reason: OMITTED_PRO_AUTHORED_FEEDBACK,
+  },
+  ClientFormulaEntry: {
+    status: 'OMITTED',
+    reason: `${OMITTED_PRO_AUTHORED_FEEDBACK} ClientFormulaEntry is always PRIVATE_TO_AUTHOR by schema and never public.`,
+  },
+  ProClientPolicy: {
+    status: 'OMITTED',
+    reason:
+      'K16 requires per-client booking requirements to be NEUTRAL to the client by construction — they feel the requirement, they never learn a policy row exists about them. Exporting it to the client would contradict the rule the feature was built on.',
+  },
+
+  // Pre-existing omissions, previously undocumented outside `limitations`.
+  PasswordResetToken: {
+    status: 'OMITTED',
+    reason: 'Single-use auth credential; never disclosed.',
+  },
+  EmailVerificationToken: {
+    status: 'OMITTED',
+    reason: 'Single-use auth credential; never disclosed.',
+  },
+  PhoneVerification: {
+    status: 'OMITTED',
+    reason: 'Single-use auth credential; never disclosed.',
+  },
+  DeviceSessionRevocation: {
+    status: 'OMITTED',
+    reason: 'Session-security record, not subject data.',
+  },
+  IdempotencyKey: {
+    status: 'OMITTED',
+    reason: 'Request-dedupe infrastructure; holds no subject data of its own.',
+  },
+  ProfessionalSearchIndex: {
+    status: 'OMITTED',
+    reason: 'Derived search projection; every field originates in an exported model.',
+  },
+  ProfessionalBadgeStat: {
+    status: 'OMITTED',
+    reason: 'Derived aggregate over exported bookings/reviews.',
+  },
+  ProfessionalAvailabilityStat: {
+    status: 'OMITTED',
+    reason: 'Derived aggregate over exported bookings.',
+  },
+  ProfessionalMonthlyAnalytics: {
+    status: 'OMITTED',
+    reason: 'Derived aggregate over exported bookings/payments.',
+  },
+  LookViewerImpressionStat: {
+    status: 'OMITTED',
+    reason: 'Derived aggregate; no free text or contact data.',
+  },
+  ClientTasteVector: {
+    status: 'OMITTED',
+    reason: 'Derived embedding over exported interactions; not human-readable subject data.',
+  },
+
+  // ------------------------------------------------- undecided (K16-A backlog)
+  // Recorded, not resolved. Each of these links to the subject and is neither
+  // exported nor deliberately omitted — before K16-A they were simply absent,
+  // which read as "handled". Settle them by moving entries up.
+  AdminNotification: { status: 'PENDING', note: PENDING_NOTE },
+  AdminPermission: { status: 'PENDING', note: PENDING_NOTE },
+  AftercareRebookSlot: { status: 'PENDING', note: PENDING_NOTE },
+  Board: { status: 'PENDING', note: PENDING_NOTE },
+  BookingCloseoutAuditLog: { status: 'PENDING', note: PENDING_NOTE },
+  BookingOverrideAuditLog: { status: 'PENDING', note: PENDING_NOTE },
+  BookingOverridePermission: { status: 'PENDING', note: PENDING_NOTE },
+  BookingRefund: { status: 'PENDING', note: PENDING_NOTE },
+  CalendarBlock: { status: 'PENDING', note: PENDING_NOTE },
+  CalendarFeedSubscription: { status: 'PENDING', note: PENDING_NOTE },
+  ClientFollow: { status: 'PENDING', note: PENDING_NOTE },
+  ClientIntentEvent: { status: 'PENDING', note: PENDING_NOTE },
+  ClientNotificationPreference: { status: 'PENDING', note: PENDING_NOTE },
+  ClientNotificationSettings: { status: 'PENDING', note: PENDING_NOTE },
+  ClientPaymentMethod: { status: 'PENDING', note: PENDING_NOTE },
+  ConsentForm: { status: 'PENDING', note: PENDING_NOTE },
+  ConsentFormVersion: { status: 'PENDING', note: PENDING_NOTE },
+  ConsultationApproval: { status: 'PENDING', note: PENDING_NOTE },
+  ConsultationApprovalProof: { status: 'PENDING', note: PENDING_NOTE },
+  DeviceToken: { status: 'PENDING', note: PENDING_NOTE },
+  LastMinuteOpening: { status: 'PENDING', note: PENDING_NOTE },
+  LastMinuteRecipient: { status: 'PENDING', note: PENDING_NOTE },
+  LastMinuteSettings: { status: 'PENDING', note: PENDING_NOTE },
+  LookComment: { status: 'PENDING', note: PENDING_NOTE },
+  LookCommentLike: { status: 'PENDING', note: PENDING_NOTE },
+  LookCommentReport: { status: 'PENDING', note: PENDING_NOTE },
+  LookHide: { status: 'PENDING', note: PENDING_NOTE },
+  LookLike: { status: 'PENDING', note: PENDING_NOTE },
+  LookPost: { status: 'PENDING', note: PENDING_NOTE },
+  LookPostReport: { status: 'PENDING', note: PENDING_NOTE },
+  MediaComment: { status: 'PENDING', note: PENDING_NOTE },
+  MediaLike: { status: 'PENDING', note: PENDING_NOTE },
+  MessageThread: { status: 'PENDING', note: PENDING_NOTE },
+  MessageThreadParticipant: { status: 'PENDING', note: PENDING_NOTE },
+  NfcCard: { status: 'PENDING', note: PENDING_NOTE },
+  ProClientInvite: { status: 'PENDING', note: PENDING_NOTE },
+  ProFollow: { status: 'PENDING', note: PENDING_NOTE },
+  ProNoShowSettings: { status: 'PENDING', note: PENDING_NOTE },
+  ProReminderSettings: { status: 'PENDING', note: PENDING_NOTE },
+  ProductSale: { status: 'PENDING', note: PENDING_NOTE },
+  ProfessionalExpense: { status: 'PENDING', note: PENDING_NOTE },
+  ProfessionalFavorite: { status: 'PENDING', note: PENDING_NOTE },
+  ProfessionalNotificationPreference: { status: 'PENDING', note: PENDING_NOTE },
+  ProfessionalPaymentSettings: { status: 'PENDING', note: PENDING_NOTE },
+  ProfessionalReceiptInbox: { status: 'PENDING', note: PENDING_NOTE },
+  ProfessionalServiceOffering: { status: 'PENDING', note: PENDING_NOTE },
+  ProfessionalSubscription: { status: 'PENDING', note: PENDING_NOTE },
+  Referral: { status: 'PENDING', note: PENDING_NOTE },
+  Reminder: { status: 'PENDING', note: PENDING_NOTE },
+  Review: { status: 'PENDING', note: PENDING_NOTE },
+  ReviewHelpful: { status: 'PENDING', note: PENDING_NOTE },
+  ServiceFavorite: { status: 'PENDING', note: PENDING_NOTE },
+  SupportTicket: { status: 'PENDING', note: PENDING_NOTE },
+  UploadSession: { status: 'PENDING', note: PENDING_NOTE },
+  VerificationDocument: { status: 'PENDING', note: PENDING_NOTE },
+  ViralRequestApprovalFanOut: { status: 'PENDING', note: PENDING_NOTE },
+  ViralServiceRequest: { status: 'PENDING', note: PENDING_NOTE },
+  ViralServiceRequestReport: { status: 'PENDING', note: PENDING_NOTE },
+  WaitlistEntry: { status: 'PENDING', note: PENDING_NOTE },
+  WaitlistOffer: { status: 'PENDING', note: PENDING_NOTE },
+}
+
+/**
+ * Models that link to a subject but have no disposition yet.
+ *
+ * Baseline-tracked in the same spirit as `check:no-type-escape`: the guard
+ * fails if this count GROWS, so a new model must be dispositioned rather than
+ * silently joining the backlog. Shrink it by settling entries above.
+ */
+export const PENDING_DISPOSITION_BASELINE = 60
+
+export function pendingModelNames(): string[] {
+  return subjectLinkedModelNames().filter(
+    (name) => EXPORT_BOUNDARY[name]?.status !== 'EXPORTED' &&
+      EXPORT_BOUNDARY[name]?.status !== 'OMITTED',
+  )
+}
