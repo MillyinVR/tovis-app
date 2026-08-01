@@ -762,6 +762,71 @@ describe('createBookingSeries — conflict policy', () => {
   }, 60_000)
 })
 
+describe('createBookingSeries — concurrency', () => {
+  // Two series created at the same moment for the SAME pro, on overlapping
+  // slots. The per-professional advisory lock serialises them one occurrence at
+  // a time, and the loser's occurrences hit the series overlap rule — so the
+  // outcome must be "one booked, one skipped", never two appointments in one
+  // window. Asserted rather than reasoned about, because "the lock probably
+  // handles it" is exactly the kind of claim that turns out to be false.
+  it('two series racing for the same slots never double-book', async () => {
+    const outcomes = await Promise.allSettled([
+      series({ occurrenceCount: 3, firstOccurrenceAt: FRIDAY_9AM }),
+      series({
+        occurrenceCount: 3,
+        // 30 minutes into the other series' occurrences: overlapping, but a
+        // different instant, so only the overlap policy can refuse it.
+        firstOccurrenceAt: new Date(FRIDAY_9AM.getTime() + 30 * 60_000),
+      }),
+    ])
+
+    // 🔴 Exactly one wins, and the loser refuses WHOLESALE — its occurrence 0
+    // shares the atomic transaction with its series row, so a taken first slot
+    // leaves no half-series behind. That is stronger than "skip the collisions":
+    // a standing appointment whose own start time is unavailable is not a
+    // standing appointment.
+    const won = outcomes.filter((o) => o.status === 'fulfilled')
+    const lost = outcomes.filter((o) => o.status === 'rejected')
+    expect(won).toHaveLength(1)
+    expect(lost).toHaveLength(1)
+
+    const rejection = lost[0]
+    if (rejection?.status !== 'rejected') throw new Error('expected a rejection')
+    expect(isBookingError(rejection.reason)).toBe(true)
+    expect((rejection.reason as { code?: string }).code).toBe('TIME_BOOKED')
+
+    // One series row, not two — the loser wrote nothing at all.
+    expect(
+      await db.bookingSeries.count({
+        where: { professionalId: fx.professionalId },
+      }),
+    ).toBe(1)
+
+    // And no two ACTIVE appointments share a window.
+    const rows = await db.booking.findMany({
+      where: {
+        professionalId: fx.professionalId,
+        status: { in: [BookingStatus.PENDING, BookingStatus.ACCEPTED] },
+      },
+      orderBy: { scheduledFor: 'asc' },
+      select: { scheduledFor: true, totalDurationMinutes: true, bufferMinutes: true, allowsOverlap: true },
+    })
+
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1]
+      const cur = rows[i]
+      if (!prev || !cur) throw new Error('unexpected sparse rows')
+      const prevEnd =
+        prev.scheduledFor.getTime() +
+        (prev.totalDurationMinutes + prev.bufferMinutes) * 60_000
+      expect(cur.scheduledFor.getTime()).toBeGreaterThanOrEqual(prevEnd)
+    }
+
+    // And nothing claimed the overlap exemption on its way through.
+    expect(rows.every((r) => r.allowsOverlap === false)).toBe(true)
+  }, 120_000)
+})
+
 describe('createBookingSeries — D7 deposits', () => {
   async function enableFlatDeposit() {
     await db.professionalPaymentSettings.update({
