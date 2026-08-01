@@ -6,6 +6,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { chartRefusal } from '@/lib/clients/chartAccessCopy'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { encryptedNoteInput } from '@/lib/security/notesPrivacy'
 import {
@@ -30,7 +31,10 @@ export async function POST(req: Request, context: RouteContext) {
 
     // ✅ single source of truth visibility gate
     const gate = await assertProCanViewClient(professionalId, clientId)
-    if (!gate.ok) return jsonFail(403, 'Forbidden.')
+    if (!gate.ok) {
+      const refusal = chartRefusal(gate.visibility, 403)
+      return jsonFail(refusal.status, refusal.message, { code: refusal.code })
+    }
 
     const body = await readJsonRecord(req)
 
