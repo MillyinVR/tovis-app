@@ -2,6 +2,7 @@
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 import type {
   ProBookingNewClientDTO,
@@ -236,6 +237,149 @@ describe('NewBookingForm passive double-book warning', () => {
     })
     await waitFor(() => {
       expect(screen.queryByText(/This overlaps/i)).not.toBeInTheDocument()
+    })
+  })
+})
+
+// ── K19: the "repeats" step ───────────────────────────────────────────────────
+//
+// Three things worth pinning, all of them about the control rather than the
+// recurrence maths (which lives in lib/booking/series/schedule.test.ts):
+//
+//  1. the kill switch reaches the CONTROL — with the flag off there is no step
+//     at all, so the pro is never offered a form the route answers 404 to;
+//  2. it withholds itself when the form is in a mode the series route cannot
+//     accept (inline new client), instead of offering and then failing;
+//  3. turning it on changes WHICH RESOURCE is created — a different endpoint
+//     and a different landing page, because the create response carries skips
+//     that the booking page has nowhere to show.
+describe('NewBookingForm repeats step (K19)', () => {
+  const push = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useRouter.mockReturnValue({
+      push,
+      replace: vi.fn(),
+      back: vi.fn(),
+      refresh: vi.fn(),
+    })
+    vi.stubGlobal('fetch', vi.fn())
+    vi.mocked(fetch).mockImplementation(routeFetch({ events: [] }))
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('renders no repeats step at all while the feature is off', () => {
+    // `recurringEnabled` defaults to false, which is the point: a caller that
+    // forgets to pass the server flag gets the dark behaviour.
+    render(<NewBookingForm {...baseProps} />)
+
+    expect(screen.queryByText('Repeats')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('repeats-toggle')).not.toBeInTheDocument()
+  })
+
+  it('offers the step when the feature is on', () => {
+    render(<NewBookingForm {...baseProps} recurringEnabled />)
+
+    expect(screen.getByTestId('repeats-toggle')).toBeEnabled()
+    expect(screen.queryByTestId('repeats-blocked')).not.toBeInTheDocument()
+  })
+
+  // The series route takes an existing client id; it has no inline
+  // create-a-client payload. Offering the toggle here would be an offer the
+  // server refuses.
+  it('withholds the toggle for an inline new client, and says why', () => {
+    render(
+      <NewBookingForm
+        {...baseProps}
+        recurringEnabled
+        defaultClientId={undefined}
+        clients={[]}
+      />,
+    )
+
+    expect(screen.getByTestId('repeats-toggle')).toBeDisabled()
+    expect(screen.getByTestId('repeats-blocked')).toHaveTextContent(
+      /saved client/i,
+    )
+  })
+
+  it('posts to the SERIES route and lands on the series page', async () => {
+    const user = userEvent.setup()
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url === '/api/v1/pro/booking-series') {
+        return Promise.resolve(
+          jsonResponse(201, {
+            seriesId: 'ser_1',
+            timeZone: 'America/New_York',
+            nextOccurrenceIndex: 6,
+            occurrences: [],
+            skipped: [],
+          }),
+        )
+      }
+      return routeFetch({ events: [] })(input)
+    })
+
+    render(<NewBookingForm {...baseProps} recurringEnabled />)
+
+    await user.click(screen.getByTestId('repeats-toggle'))
+    await user.click(
+      screen.getByRole('button', { name: /create recurring booking/i }),
+    )
+
+    await waitFor(() => {
+      const calls = vi.mocked(fetch).mock.calls.map((call) => String(call[0]))
+      expect(calls).toContain('/api/v1/pro/booking-series')
+      expect(calls).not.toContain('/api/v1/pro/bookings')
+    })
+
+    const seriesCall = vi
+      .mocked(fetch)
+      .mock.calls.find((call) => String(call[0]) === '/api/v1/pro/booking-series')
+    const body: unknown = JSON.parse(String(seriesCall?.[1]?.body ?? '{}'))
+    expect(body).toMatchObject({
+      clientId: 'cli_1',
+      offeringId: 'off_1',
+      intervalWeeks: 4,
+      occurrenceCount: 6,
+      // K18-A: the deposit is the FIRST occurrence's only until K20 can
+      // stagger the pay links. The form never sends true.
+      depositPerOccurrence: false,
+    })
+
+    // 🔴 The series page, never occurrence 0's booking page — the 201 can carry
+    // eleven bookings and one skip, and only the series page renders the skip.
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith('/pro/bookings/series/ser_1')
+    })
+  })
+
+  it('still posts a single booking when repeats is left off', async () => {
+    const user = userEvent.setup()
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url === '/api/v1/pro/bookings') {
+        return Promise.resolve(jsonResponse(201, { booking: { id: 'bkg_1' } }))
+      }
+      return routeFetch({ events: [] })(input)
+    })
+
+    render(<NewBookingForm {...baseProps} recurringEnabled />)
+
+    await user.click(screen.getByRole('button', { name: /^create booking$/i }))
+
+    await waitFor(() => {
+      const calls = vi.mocked(fetch).mock.calls.map((call) => String(call[0]))
+      expect(calls).toContain('/api/v1/pro/bookings')
+      expect(calls).not.toContain('/api/v1/pro/booking-series')
     })
   })
 })

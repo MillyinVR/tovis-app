@@ -10,6 +10,7 @@ import {
   depositProCreatedLeadHours,
   depositUnpaidDeadlineHours,
 } from '@/lib/booking/depositDeadline'
+import { recurringAppointmentsEnabled } from '@/lib/booking/series/flag'
 import { getCurrentUser } from '@/lib/currentUser'
 import {
   buildProBookingNewClientDTO,
@@ -381,6 +382,10 @@ export default async function BookingCreateContent(props: {
       defaultScheduledAt={defaultScheduledAt}
       cancelHref="/pro/bookings"
       cancelMode={isModal ? 'back' : 'href'}
+      // K19: read on the SERVER so the kill switch reaches the control. The
+      // series route gates on the same helper, so the form can never offer a
+      // repeat the server would refuse ([[kill-switch-must-reach-the-control]]).
+      recurringEnabled={recurringAppointmentsEnabled()}
     />
   )
 }

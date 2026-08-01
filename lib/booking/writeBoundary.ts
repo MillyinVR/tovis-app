@@ -64,6 +64,7 @@ import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
 import {
   DEPOSIT_CREDIT_SELECT,
   deriveDepositCredit,
+  deriveNetDepositHeldCents,
 } from '@/lib/booking/depositCredit'
 import type { FinalizeDiscoveryDirective } from '@/lib/booking/resolveDiscoveryFinalize'
 import { clientCheckoutProductsEditBlockReason } from '@/lib/booking/checkoutProductsEditable'
@@ -140,7 +141,12 @@ import {
   pickTimeZoneOrNull,
   sanitizeTimeZone,
 } from '@/lib/time'
+import { classifySeriesOccurrenceCancel } from '@/lib/booking/series/cancelScope'
 import { recurringAppointmentsEnabled } from '@/lib/booking/series/flag'
+import type {
+  ProBookingSeriesCancelScope,
+  ProBookingSeriesUntouchedReason,
+} from '@/lib/dto/proBookingSeries'
 import {
   computeSeriesOccurrenceInstants,
   countOccurrencesToMaterialize,
@@ -16349,6 +16355,209 @@ export async function createBookingSeries(
     occurrences,
     skipped,
   }
+}
+
+export type CancelBookingSeriesOccurrencesArgs = {
+  professionalId: string
+  actorUserId: string
+  seriesId: string
+  scope: ProBookingSeriesCancelScope
+  /**
+   * The occurrence the pro acted from. Required for THIS_AND_FUTURE, ignored
+   * for ALL — which is why it is not folded into `scope` as a single number.
+   */
+  fromOccurrenceIndex: number | null
+  reason: string | null
+}
+
+export type CancelBookingSeriesOccurrencesResult = {
+  seriesId: string
+  scope: ProBookingSeriesCancelScope
+  seriesStatus: BookingSeriesStatus
+  cancelled: Array<{
+    index: number
+    bookingId: string
+    scheduledFor: Date
+    depositHeldCents: number
+  }>
+  untouched: Array<{
+    index: number
+    bookingId: string
+    scheduledFor: Date
+    status: BookingStatus
+    reason: ProBookingSeriesUntouchedReason
+  }>
+}
+
+/**
+ * K19 (Phase 8) — stop a standing appointment, at a chosen scope.
+ *
+ * 🔴 NOT flag-gated, deliberately, and this is the one place in Phase 8 where
+ * that is correct. `recurringAppointmentsEnabled()` guards CREATION: while it is
+ * off, no new series can exist. Guarding the stop as well would mean that
+ * turning the switch off after a series had been created leaves live
+ * appointments on the pro's calendar with no way to end them — a kill switch
+ * that traps its user is worse than the feature it was meant to disable. The
+ * surface is data-gated instead: with no series there is nothing to address, so
+ * every request 404s anyway.
+ *
+ * ONE locked transaction for the whole scope, unlike `createBookingSeries`'s
+ * one-per-occurrence. The reasons invert: a create must let occurrence 5's
+ * collision leave 6…11 standing, so 5 needs its own transaction to roll back; a
+ * cancel has nothing to skip past — candidates are classified under the SAME
+ * advisory lock that then cancels them, so nothing can change status underneath
+ * and a partially-stopped series is never a state anyone has to reason about.
+ *
+ * Both scopes END the series. "This and future" is not a smaller "all" — it is
+ * the same decision (stop the pattern) taken from a later point, and leaving
+ * `status = ACTIVE` behind either one would hand K20's roll-forward a series it
+ * would dutifully carry on materializing.
+ */
+export async function cancelBookingSeriesOccurrences(
+  args: CancelBookingSeriesOccurrencesArgs,
+): Promise<CancelBookingSeriesOccurrencesResult> {
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+
+  if (!args.seriesId || !args.seriesId.trim()) {
+    throw bookingError('BOOKING_NOT_FOUND', {
+      message: 'seriesId is required.',
+      userMessage: 'That recurring appointment could not be found.',
+    })
+  }
+
+  if (
+    args.scope === 'THIS_AND_FUTURE' &&
+    (args.fromOccurrenceIndex == null ||
+      !Number.isInteger(args.fromOccurrenceIndex) ||
+      args.fromOccurrenceIndex < 0)
+  ) {
+    throw bookingError('INVALID_SERIES_RECURRENCE', {
+      message:
+        'fromOccurrenceIndex must be a non-negative whole number for a THIS_AND_FUTURE cancel.',
+      userMessage: 'Pick which appointment to cancel from.',
+    })
+  }
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) => {
+      const series = await tx.bookingSeries.findFirst({
+        where: { id: args.seriesId, professionalId: args.professionalId },
+        select: { id: true, status: true },
+      })
+
+      // A missing series and someone else's series answer the SAME 404 — a
+      // foreign id must not be usable to probe for existence.
+      if (!series) {
+        throw bookingError('BOOKING_NOT_FOUND', {
+          message: 'Booking series not found for this professional.',
+          userMessage: 'That recurring appointment could not be found.',
+        })
+      }
+
+      const bookings = await tx.booking.findMany({
+        where: { seriesId: series.id },
+        select: {
+          id: true,
+          seriesOccurrenceIndex: true,
+          scheduledFor: true,
+          status: true,
+          startedAt: true,
+          ...DEPOSIT_CREDIT_SELECT,
+        },
+        orderBy: { seriesOccurrenceIndex: 'asc' },
+      })
+
+      const cancelled: CancelBookingSeriesOccurrencesResult['cancelled'] = []
+      const untouched: CancelBookingSeriesOccurrencesResult['untouched'] = []
+
+      for (const booking of bookings) {
+        // -1 for a row with no index keeps it out of every scope. Defaulting to
+        // 0 would put it inside every THIS_AND_FUTURE cancel instead.
+        const index = booking.seriesOccurrenceIndex ?? -1
+
+        const verdict = classifySeriesOccurrenceCancel(
+          {
+            occurrenceIndex: index,
+            status: booking.status,
+            startedAt: booking.startedAt,
+            scheduledFor: booking.scheduledFor,
+          },
+          {
+            scope: args.scope,
+            fromOccurrenceIndex: args.fromOccurrenceIndex,
+            now,
+          },
+        )
+
+        if (!verdict.cancellable) {
+          untouched.push({
+            index,
+            bookingId: booking.id,
+            scheduledFor: booking.scheduledFor,
+            status: booking.status,
+            reason: verdict.reason,
+          })
+          continue
+        }
+
+        // The ordinary per-booking cancel, verbatim — same lifecycle contract,
+        // same notification, same allowed from-states. A series does not get its
+        // own cancel semantics; it gets the same one, N times.
+        await performLockedCancel({
+          tx,
+          bookingId: booking.id,
+          actor: { kind: 'pro', professionalId: args.professionalId },
+          // Every cancelled occurrence notifies. Noisy on a long series, and
+          // that noise is the honest trade: each notification names its own
+          // date, and a client whose appointments vanished silently turns up at
+          // the salon. K20's cron is where staggering belongs (cf. K18-A).
+          notifyClient: true,
+          reason: args.reason,
+          allowedStatuses: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
+        })
+
+        cancelled.push({
+          index,
+          bookingId: booking.id,
+          scheduledFor: booking.scheduledFor,
+          depositHeldCents: deriveNetDepositHeldCents(booking),
+        })
+      }
+
+      // Stamping CANCELLED is what stops K20's roll-forward, so any call that
+      // actually cancelled something ends the series, and so does any call
+      // against a still-ACTIVE one (the pro asked it to stop, even if there
+      // happened to be nothing left to take).
+      //
+      // A series that had already run its course is left ENDED. Overwriting
+      // that with CANCELLED would rewrite "ran to its planned total" as "the
+      // pro stopped it" on the strength of a call that changed nothing —
+      // unreachable from the UI (the buttons hide once nothing is cancellable)
+      // but reachable from the route, and the record should not depend on which.
+      const shouldEndSeries =
+        cancelled.length > 0 || series.status === BookingSeriesStatus.ACTIVE
+
+      const seriesStatus = shouldEndSeries
+        ? (
+            await tx.bookingSeries.update({
+              where: { id: series.id },
+              data: { status: BookingSeriesStatus.CANCELLED },
+              select: { status: true },
+            })
+          ).status
+        : series.status
+
+      return {
+        seriesId: series.id,
+        scope: args.scope,
+        seriesStatus,
+        cancelled,
+        untouched,
+      }
+    },
+  )
 }
 
 /**

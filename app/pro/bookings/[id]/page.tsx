@@ -554,6 +554,32 @@ export default async function ProBookingDetailPage(props: {
         </div>
       </section>
 
+      {/* K19: this appointment is one occurrence of a standing appointment. The
+          card is DATA-gated, not flag-gated — a `seriesId` can only exist if the
+          feature ran, and hiding the link after the switch went off would strand
+          the pro on a booking whose siblings they cannot see or stop. Cancelling
+          just THIS one is the existing Cancel action above; the other two scopes
+          live on the series page. */}
+      {booking.seriesId ? (
+        <section className="tovis-glass mb-3.5 rounded-card border border-white/10 bg-bgSecondary p-4">
+          <h2 className="font-display text-[14px] font-bold text-textPrimary">
+            Part of a recurring appointment
+          </h2>
+          <div className="mt-1 text-[12.5px] text-textSecondary">
+            {booking.seriesOccurrenceIndex != null
+              ? `This is appointment #${booking.seriesOccurrenceIndex + 1} in the run. `
+              : ''}
+            Cancelling here cancels this one only.
+          </div>
+          <Link
+            href={`/pro/bookings/series/${encodeURIComponent(booking.seriesId)}`}
+            className="mt-3 inline-flex rounded-xl border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-white/20"
+          >
+            Manage the whole series
+          </Link>
+        </section>
+      ) : null}
+
       {/* coupled next appointment — pending until the previous payment is confirmed */}
       {coupledSourceBookingId ? (
         <section className="tovis-glass mb-3.5 rounded-card border border-accentPrimary/30 bg-accentPrimary/10 p-4">

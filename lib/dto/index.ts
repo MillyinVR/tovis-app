@@ -416,10 +416,21 @@ export type {
 // `satisfies`-checked against the response type. 🔴 `skipped` is part of the
 // contract, not an error path: a series that collided with one existing
 // appointment still returns 201 with the other occurrences booked.
+// K19 adds the READ side (GET /api/v1/pro/booking-series/{id}) and the scoped
+// cancel (POST …/{id}/cancel), whose `untouched` list is the same kind of
+// first-class honesty as `skipped`.
 export type {
   ProBookingSeriesOccurrenceDTO,
   ProBookingSeriesSkippedOccurrenceDTO,
   ProBookingSeriesCreateResponseDTO,
+  ProBookingSeriesUntouchedReason,
+  ProBookingSeriesOccurrenceDetailDTO,
+  ProBookingSeriesPricingDTO,
+  ProBookingSeriesDetailDTO,
+  ProBookingSeriesCancelScope,
+  ProBookingSeriesCancelledOccurrenceDTO,
+  ProBookingSeriesUntouchedOccurrenceDTO,
+  ProBookingSeriesCancelResponseDTO,
 } from '@/lib/dto/proBookingSeries'
 
 // ── Pro client technical record ───────────────────────────────────────────────

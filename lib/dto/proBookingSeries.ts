@@ -12,7 +12,11 @@
 // A client that renders only `occurrences` is quietly telling the pro they got
 // twelve appointments when they got eleven.
 
-import type { BookingSeriesExceptionReason } from '@prisma/client'
+import type {
+  BookingSeriesExceptionReason,
+  BookingSeriesStatus,
+  BookingStatus,
+} from '@prisma/client'
 
 /** One appointment the materializer actually created. */
 export type ProBookingSeriesOccurrenceDTO = {
@@ -55,4 +59,145 @@ export type ProBookingSeriesCreateResponseDTO = {
   nextOccurrenceIndex: number
   occurrences: ProBookingSeriesOccurrenceDTO[]
   skipped: ProBookingSeriesSkippedOccurrenceDTO[]
+}
+
+// ── K19: reading a series back, and stopping it ───────────────────────────────
+//
+// The create response above is WRITE-ONLY — it describes what one call did. The
+// pro needs the standing state: which dates are still booked, which were skipped
+// (the exception rows, the durable form of the same `skipped` list), and what a
+// scoped cancel would actually touch.
+
+/**
+ * Why a scoped cancel left an occurrence alone. The list is the point: "cancel
+ * all" cannot mean the same thing for a visit that already happened as for an
+ * untouched future one, so every untouched row says which it was.
+ */
+export type ProBookingSeriesUntouchedReason =
+  /** Already cancelled — nothing to do. */
+  | 'ALREADY_CANCELLED'
+  /** The appointment happened (COMPLETED / NO_SHOW). History, not a plan. */
+  | 'ALREADY_HAPPENED'
+  /** The session has been started. Cancelling mid-visit is not a bulk action. */
+  | 'IN_PROGRESS'
+  /** Scheduled in the past and never started. Left as the record it is. */
+  | 'IN_PAST'
+  /** Outside the chosen scope (an earlier occurrence under THIS_AND_FUTURE). */
+  | 'OUT_OF_SCOPE'
+
+export type ProBookingSeriesOccurrenceDetailDTO = {
+  index: number
+  bookingId: string
+  /** UTC instant, ISO-8601. Render it in the series `timeZone`. */
+  scheduledFor: string
+  status: BookingStatus
+  startedAt: string | null
+  /**
+   * The service subtotal this occurrence was actually booked at, in cents —
+   * `Booking.subtotalSnapshot`. Occurrence 0's value is the series' PINNED
+   * price; a later occurrence that disagrees is price drift the pro is owed a
+   * sight of, not a rounding detail.
+   */
+  bookedTotalCents: number | null
+  /**
+   * Deposit money actually still held for this occurrence, in cents
+   * (`deriveNetDepositHeldCents` — net of refunds, zero while disputed). NOT a
+   * bill: a future occurrence has no final total yet. It is here because a
+   * scoped cancel does not refund, so the pro must see what they are holding
+   * before they cancel it away.
+   */
+  depositHeldCents: number
+  /**
+   * True when a scoped cancel would transition this row. False rows carry
+   * `untouchedReason`.
+   */
+  cancellable: boolean
+  untouchedReason: ProBookingSeriesUntouchedReason | null
+}
+
+/**
+ * Price pinning (plan §Phase 8): the series is priced by what occurrence 0 was
+ * booked at, and drift is SURFACED rather than silently applied.
+ */
+export type ProBookingSeriesPricingDTO = {
+  /** Occurrence 0's booked service subtotal, in cents. The pin. */
+  pinnedTotalCents: number | null
+  /**
+   * The pro's CURRENT list price for this offering in this location mode plus
+   * the series' add-ons, in cents. Deliberately the catalog figure and labelled
+   * as such: what a given client is actually charged can differ (a price-grace
+   * ramp), so this is a comparison the pro can act on, never a prediction of
+   * the client's next bill.
+   */
+  currentListTotalCents: number | null
+  /** True when a materialized occurrence disagrees with the pin. */
+  occurrencesDisagree: boolean
+  /** True when `currentListTotalCents` differs from `pinnedTotalCents`. */
+  listPriceMoved: boolean
+}
+
+export type ProBookingSeriesDetailDTO = {
+  seriesId: string
+  status: BookingSeriesStatus
+  /** The zone the pattern steps through — the LOCATION's. */
+  timeZone: string
+  /** Occurrence 0's UTC instant, ISO-8601. */
+  anchorAt: string
+  intervalWeeks: number
+  /** Planned total, or null for an open-ended series. */
+  occurrenceCount: number | null
+  nextOccurrenceIndex: number
+  depositRequested: boolean
+  depositPerOccurrence: boolean
+  clientId: string
+  clientName: string
+  offeringId: string
+  serviceName: string
+  locationId: string
+  locationLabel: string
+  locationType: 'SALON' | 'MOBILE'
+  addOnNames: string[]
+  internalNotes: string | null
+  pricing: ProBookingSeriesPricingDTO
+  occurrences: ProBookingSeriesOccurrenceDetailDTO[]
+  /** The durable skips — `BookingSeriesException` rows, oldest index first. */
+  skipped: ProBookingSeriesSkippedOccurrenceDTO[]
+}
+
+/**
+ * Cancel scope. "This one" is deliberately ABSENT: it is the ordinary
+ * per-booking cancel (`PATCH /api/v1/pro/bookings/{id}`) and routing it through
+ * a series-shaped endpoint would fork one behaviour into two implementations.
+ */
+export type ProBookingSeriesCancelScope = 'THIS_AND_FUTURE' | 'ALL'
+
+export type ProBookingSeriesCancelledOccurrenceDTO = {
+  index: number
+  bookingId: string
+  scheduledFor: string
+  /** Deposit money held against it. Cancelling does NOT refund it. */
+  depositHeldCents: number
+}
+
+export type ProBookingSeriesUntouchedOccurrenceDTO = {
+  index: number
+  bookingId: string
+  scheduledFor: string
+  status: BookingStatus
+  reason: ProBookingSeriesUntouchedReason
+}
+
+export type ProBookingSeriesCancelResponseDTO = {
+  seriesId: string
+  scope: ProBookingSeriesCancelScope
+  seriesStatus: BookingSeriesStatus
+  /** Rows this call transitioned to CANCELLED. */
+  cancelled: ProBookingSeriesCancelledOccurrenceDTO[]
+  /**
+   * Rows it deliberately did NOT touch, each with the reason. Reported on the
+   * SUCCESS body for the same reason `skipped` is on the create body: a caller
+   * that renders only `cancelled` tells the pro the series is gone when part of
+   * it is still standing.
+   */
+  untouched: ProBookingSeriesUntouchedOccurrenceDTO[]
 }

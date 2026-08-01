@@ -47,6 +47,14 @@
       ],
       "type": "string"
     },
+    "$Enums.BookingSeriesStatus": {
+      "enum": [
+        "ACTIVE",
+        "ENDED",
+        "CANCELLED"
+      ],
+      "type": "string"
+    },
     "$Enums.BookingServiceItemType": {
       "enum": [
         "BASE",
@@ -2070,6 +2078,9 @@
     },
     "BookingSeriesExceptionReason": {
       "$ref": "#/definitions/%24Enums.BookingSeriesExceptionReason"
+    },
+    "BookingSeriesStatus": {
+      "$ref": "#/definitions/%24Enums.BookingSeriesStatus"
     },
     "BookingServiceItemType": {
       "$ref": "#/definitions/%24Enums.BookingServiceItemType"
@@ -10288,6 +10299,73 @@
       ],
       "type": "object"
     },
+    "ProBookingSeriesCancelResponseDTO": {
+      "properties": {
+        "cancelled": {
+          "description": "Rows this call transitioned to CANCELLED.",
+          "items": {
+            "$ref": "#/definitions/ProBookingSeriesCancelledOccurrenceDTO"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "$ref": "#/definitions/ProBookingSeriesCancelScope"
+        },
+        "seriesId": {
+          "type": "string"
+        },
+        "seriesStatus": {
+          "$ref": "#/definitions/BookingSeriesStatus"
+        },
+        "untouched": {
+          "description": "Rows it deliberately did NOT touch, each with the reason. Reported on the SUCCESS body for the same reason `skipped` is on the create body: a caller that renders only `cancelled` tells the pro the series is gone when part of it is still standing.",
+          "items": {
+            "$ref": "#/definitions/ProBookingSeriesUntouchedOccurrenceDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "seriesId",
+        "scope",
+        "seriesStatus",
+        "cancelled",
+        "untouched"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesCancelScope": {
+      "description": "Cancel scope. \"This one\" is deliberately ABSENT: it is the ordinary per-booking cancel (`PATCH /api/v1/pro/bookings/{id}`) and routing it through a series-shaped endpoint would fork one behaviour into two implementations.",
+      "enum": [
+        "THIS_AND_FUTURE",
+        "ALL"
+      ],
+      "type": "string"
+    },
+    "ProBookingSeriesCancelledOccurrenceDTO": {
+      "properties": {
+        "bookingId": {
+          "type": "string"
+        },
+        "depositHeldCents": {
+          "description": "Deposit money held against it. Cancelling does NOT refund it.",
+          "type": "number"
+        },
+        "index": {
+          "type": "number"
+        },
+        "scheduledFor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "bookingId",
+        "scheduledFor",
+        "depositHeldCents"
+      ],
+      "type": "object"
+    },
     "ProBookingSeriesCreateResponseDTO": {
       "properties": {
         "nextOccurrenceIndex": {
@@ -10323,6 +10401,120 @@
       ],
       "type": "object"
     },
+    "ProBookingSeriesDetailDTO": {
+      "properties": {
+        "addOnNames": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "anchorAt": {
+          "description": "Occurrence 0's UTC instant, ISO-8601.",
+          "type": "string"
+        },
+        "clientId": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "depositPerOccurrence": {
+          "type": "boolean"
+        },
+        "depositRequested": {
+          "type": "boolean"
+        },
+        "internalNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "intervalWeeks": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationLabel": {
+          "type": "string"
+        },
+        "locationType": {
+          "enum": [
+            "SALON",
+            "MOBILE"
+          ],
+          "type": "string"
+        },
+        "nextOccurrenceIndex": {
+          "type": "number"
+        },
+        "occurrenceCount": {
+          "description": "Planned total, or null for an open-ended series.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "occurrences": {
+          "items": {
+            "$ref": "#/definitions/ProBookingSeriesOccurrenceDetailDTO"
+          },
+          "type": "array"
+        },
+        "offeringId": {
+          "type": "string"
+        },
+        "pricing": {
+          "$ref": "#/definitions/ProBookingSeriesPricingDTO"
+        },
+        "seriesId": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "skipped": {
+          "description": "The durable skips — `BookingSeriesException` rows, oldest index first.",
+          "items": {
+            "$ref": "#/definitions/ProBookingSeriesSkippedOccurrenceDTO"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/definitions/BookingSeriesStatus"
+        },
+        "timeZone": {
+          "description": "The zone the pattern steps through — the LOCATION's.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seriesId",
+        "status",
+        "timeZone",
+        "anchorAt",
+        "intervalWeeks",
+        "occurrenceCount",
+        "nextOccurrenceIndex",
+        "depositRequested",
+        "depositPerOccurrence",
+        "clientId",
+        "clientName",
+        "offeringId",
+        "serviceName",
+        "locationId",
+        "locationLabel",
+        "locationType",
+        "addOnNames",
+        "internalNotes",
+        "pricing",
+        "occurrences",
+        "skipped"
+      ],
+      "type": "object"
+    },
     "ProBookingSeriesOccurrenceDTO": {
       "description": "One appointment the materializer actually created.",
       "properties": {
@@ -10342,6 +10534,100 @@
         "index",
         "bookingId",
         "scheduledFor"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesOccurrenceDetailDTO": {
+      "properties": {
+        "bookedTotalCents": {
+          "description": "The service subtotal this occurrence was actually booked at, in cents — `Booking.subtotalSnapshot`. Occurrence 0's value is the series' PINNED price; a later occurrence that disagrees is price drift the pro is owed a sight of, not a rounding detail.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bookingId": {
+          "type": "string"
+        },
+        "cancellable": {
+          "description": "True when a scoped cancel would transition this row. False rows carry `untouchedReason`.",
+          "type": "boolean"
+        },
+        "depositHeldCents": {
+          "description": "Deposit money actually still held for this occurrence, in cents (`deriveNetDepositHeldCents` — net of refunds, zero while disputed). NOT a bill: a future occurrence has no final total yet. It is here because a scoped cancel does not refund, so the pro must see what they are holding before they cancel it away.",
+          "type": "number"
+        },
+        "index": {
+          "type": "number"
+        },
+        "scheduledFor": {
+          "description": "UTC instant, ISO-8601. Render it in the series `timeZone`.",
+          "type": "string"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/BookingStatus"
+        },
+        "untouchedReason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProBookingSeriesUntouchedReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "bookingId",
+        "scheduledFor",
+        "status",
+        "startedAt",
+        "bookedTotalCents",
+        "depositHeldCents",
+        "cancellable",
+        "untouchedReason"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesPricingDTO": {
+      "description": "Price pinning (plan §Phase 8): the series is priced by what occurrence 0 was booked at, and drift is SURFACED rather than silently applied.",
+      "properties": {
+        "currentListTotalCents": {
+          "description": "The pro's CURRENT list price for this offering in this location mode plus the series' add-ons, in cents. Deliberately the catalog figure and labelled as such: what a given client is actually charged can differ (a price-grace ramp), so this is a comparison the pro can act on, never a prediction of the client's next bill.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "listPriceMoved": {
+          "description": "True when `currentListTotalCents` differs from `pinnedTotalCents`.",
+          "type": "boolean"
+        },
+        "occurrencesDisagree": {
+          "description": "True when a materialized occurrence disagrees with the pin.",
+          "type": "boolean"
+        },
+        "pinnedTotalCents": {
+          "description": "Occurrence 0's booked service subtotal, in cents. The pin.",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "pinnedTotalCents",
+        "currentListTotalCents",
+        "occurrencesDisagree",
+        "listPriceMoved"
       ],
       "type": "object"
     },
@@ -10376,6 +10662,44 @@
         "detail"
       ],
       "type": "object"
+    },
+    "ProBookingSeriesUntouchedOccurrenceDTO": {
+      "properties": {
+        "bookingId": {
+          "type": "string"
+        },
+        "index": {
+          "type": "number"
+        },
+        "reason": {
+          "$ref": "#/definitions/ProBookingSeriesUntouchedReason"
+        },
+        "scheduledFor": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/BookingStatus"
+        }
+      },
+      "required": [
+        "index",
+        "bookingId",
+        "scheduledFor",
+        "status",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesUntouchedReason": {
+      "description": "Why a scoped cancel left an occurrence alone. The list is the point: \"cancel all\" cannot mean the same thing for a visit that already happened as for an untouched future one, so every untouched row says which it was.",
+      "enum": [
+        "ALREADY_CANCELLED",
+        "ALREADY_HAPPENED",
+        "IN_PROGRESS",
+        "IN_PAST",
+        "OUT_OF_SCOPE"
+      ],
+      "type": "string"
     },
     "ProBookingsListResponse": {
       "properties": {
