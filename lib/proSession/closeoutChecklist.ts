@@ -73,8 +73,11 @@ export function buildProSessionCloseoutChecklist(
       {
         key: 'afterPhotos',
         title: 'After photos',
+        // Pluralised on the count. ONE after photo is what the session
+        // requires, so it is the normal case — not an edge one — and the
+        // hard-coded plural rendered it "1 photos captured".
         subtitle: input.hasAfterPhoto
-          ? `${input.afterCount} photos captured`
+          ? `${input.afterCount} photo${input.afterCount === 1 ? '' : 's'} captured`
           : 'Missing',
         done: input.hasAfterPhoto,
       },
