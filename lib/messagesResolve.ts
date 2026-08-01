@@ -5,7 +5,7 @@
 // through resolveMessageThread, so context auth checks and thread creation
 // never fork into separate implementations.
 
-import { MessageThreadContextType, Role } from '@prisma/client'
+import { MessageThreadContextType, Prisma, Role } from '@prisma/client'
 
 import { prisma } from './prisma'
 import { clientCanBeMessaged } from './messages/clientThreadEligibility'
@@ -475,20 +475,50 @@ export async function resolveMessageThread(
     })
   }
 
-  const existingThread = await prisma.messageThread.findUnique({
-    where: {
-      clientId_professionalId_contextType_contextId: {
-        clientId: seed.clientId,
-        professionalId: seed.professionalId,
-        contextType: seed.contextType,
-        contextId: seed.contextId,
-      },
-    },
-    select: { id: true },
+  // W8: ONE thread per pro↔client pair.
+  //
+  // Threads used to be keyed by (clientId, professionalId, contextType,
+  // contextId), so every context forked a new conversation. A client who
+  // messaged from a pro's profile got a PRO_PROFILE thread; joining that same
+  // pro's waitlist resolved a WAITLIST context and therefore a SECOND thread —
+  // "it started a new message in their inbox instead of continuing in the
+  // message thread the client already started with the pro". BOOKING, SERVICE
+  // and OFFERING fork the same way.
+  //
+  // The pair is now the identity. The exact-context row is still preferred when
+  // one exists — that keeps every legacy thread reachable by the key it was
+  // created under — but when it does not, any EXISTING thread for the pair is
+  // returned rather than a new one being minted.
+  //
+  // 🔴 Deliberately a resolve-time change with NO schema change and NO data
+  // migration. Merging the threads that already forked is irreversible, touches
+  // live conversations, and is gated on Tori reviewing the row counts
+  // (scripts/w8-thread-merge.mjs). This stops the bleeding without that: from
+  // here on no pair gains a second thread, and the counts that script reports
+  // can only shrink.
+  const existingThread = await findPairThread({
+    clientId: seed.clientId,
+    professionalId: seed.professionalId,
+    contextType: seed.contextType,
+    contextId: seed.contextId,
   })
 
   if (!existingThread && !input.createIfMissing) {
     return { ok: true, thread: null }
+  }
+
+  // An existing thread for this pair is THE thread, whatever context it was
+  // created under. Return it directly: routing it back through the upsert below
+  // would look it up by the REQUESTED context key and mint the second thread
+  // this change exists to prevent.
+  if (existingThread) {
+    await ensureThreadParticipants({
+      threadId: existingThread.id,
+      clientUserId,
+      professionalUserId,
+    })
+
+    return { ok: true, thread: { id: existingThread.id } }
   }
 
   const thread = await prisma.$transaction(async (tx) => {
@@ -515,27 +545,84 @@ export async function resolveMessageThread(
       select: { id: true },
     })
 
-    const participants = buildParticipants(clientUserId, professionalUserId)
-
-    for (const participant of participants) {
-      await tx.messageThreadParticipant.upsert({
-        where: {
-          threadId_userId: {
-            threadId: resolvedThread.id,
-            userId: participant.userId,
-          },
-        },
-        update: {},
-        create: {
-          threadId: resolvedThread.id,
-          userId: participant.userId,
-          role: participant.role,
-        },
-      })
-    }
+    await ensureThreadParticipants({
+      threadId: resolvedThread.id,
+      clientUserId,
+      professionalUserId,
+      tx,
+    })
 
     return resolvedThread
   })
 
   return { ok: true, thread: { id: thread.id } }
+}
+
+/**
+ * W8: the pair's thread.
+ *
+ * Prefers the row matching the requested context exactly, so a thread created
+ * under a given key stays reachable by it. Falls back to the pair's OLDEST
+ * thread — "the message thread the client already started with the pro" is the
+ * one the report asks us to continue, and oldest-wins is stable regardless of
+ * which surface asks.
+ */
+async function findPairThread(args: {
+  clientId: string
+  professionalId: string
+  contextType: MessageThreadContextType
+  contextId: string
+}): Promise<{ id: string } | null> {
+  const exact = await prisma.messageThread.findUnique({
+    where: {
+      clientId_professionalId_contextType_contextId: {
+        clientId: args.clientId,
+        professionalId: args.professionalId,
+        contextType: args.contextType,
+        contextId: args.contextId,
+      },
+    },
+    select: { id: true },
+  })
+
+  if (exact) return exact
+
+  return prisma.messageThread.findFirst({
+    where: { clientId: args.clientId, professionalId: args.professionalId },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  })
+}
+
+/**
+ * Both sides are participants of the thread, whichever context it was created
+ * under. Idempotent — a legacy thread that predates a participant row gets one
+ * on the next resolve, which matters now that an old thread can be returned for
+ * a context it was not created for.
+ */
+async function ensureThreadParticipants(args: {
+  threadId: string
+  clientUserId: string
+  professionalUserId: string
+  tx?: Prisma.TransactionClient
+}): Promise<void> {
+  const db = args.tx ?? prisma
+  const participants = buildParticipants(args.clientUserId, args.professionalUserId)
+
+  for (const participant of participants) {
+    await db.messageThreadParticipant.upsert({
+      where: {
+        threadId_userId: {
+          threadId: args.threadId,
+          userId: participant.userId,
+        },
+      },
+      update: {},
+      create: {
+        threadId: args.threadId,
+        userId: participant.userId,
+        role: participant.role,
+      },
+    })
+  }
 }
