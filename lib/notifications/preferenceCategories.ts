@@ -86,6 +86,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.AFTERCARE_READY]: 'Aftercare ready',
   [NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE]: 'Last-minute opening',
   [NotificationEventKey.WAITLIST_TIME_OFFERED]: 'Waitlist time offered',
+  [NotificationEventKey.WAITLIST_JOINED]: 'Someone joined your waitlist',
   [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED]:
     'Openings for looks you saved',
   [NotificationEventKey.EVENT_DATE_COUNTDOWN]: 'Event countdown reminders',
@@ -189,6 +190,10 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     eventKeys: [
       NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
       NotificationEventKey.WAITLIST_TIME_OFFERED,
+      // W2 — the pro side of the same surface. The category is audience-filtered
+      // (`allowed`), so a client never sees this row and a pro never sees the
+      // two client-facing ones.
+      NotificationEventKey.WAITLIST_JOINED,
     ],
   },
   {

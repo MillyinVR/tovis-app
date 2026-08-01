@@ -16,6 +16,12 @@ const mocks = vi.hoisted(() => ({
   enforceRateLimit: vi.fn(),
   clientRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+  clientProfileFindUnique: vi.fn(),
+  participantFindMany: vi.fn(),
+  broadcastLive: vi.fn(),
+  liveChannelForUser: vi.fn((userId: string) => `user:${userId}`),
+  createProNotification: vi.fn(),
+  kickNotificationDrain: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -28,9 +34,13 @@ vi.mock('@/lib/prisma', () => ({
     service: {
       findUnique: mocks.serviceFindUnique,
     },
+    clientProfile: { findUnique: mocks.clientProfileFindUnique },
     message: { create: mocks.messageCreate },
     messageThread: { update: mocks.messageThreadUpdate },
-    messageThreadParticipant: { update: mocks.participantUpdate },
+    messageThreadParticipant: {
+      update: mocks.participantUpdate,
+      findMany: mocks.participantFindMany,
+    },
     $transaction: mocks.transaction,
   },
 }))
@@ -74,6 +84,19 @@ vi.mock('@/lib/rateLimit/identity', () => ({
 
 vi.mock('@/lib/rateLimit/response', () => ({
   rateLimitExceededResponse: mocks.rateLimitExceededResponse,
+}))
+
+vi.mock('@/lib/live/broadcast', () => ({
+  broadcastLive: mocks.broadcastLive,
+  liveChannelForUser: mocks.liveChannelForUser,
+}))
+
+vi.mock('@/lib/notifications/proNotifications', () => ({
+  createProNotification: mocks.createProNotification,
+}))
+
+vi.mock('@/lib/notifications/delivery/kickNotificationDrain', () => ({
+  kickNotificationDrain: mocks.kickNotificationDrain,
 }))
 
 import { DELETE, PATCH, POST } from './route'
@@ -148,6 +171,13 @@ describe('POST /api/v1/waitlist', () => {
         messageThreadParticipant: { update: mocks.participantUpdate },
       }),
     )
+    mocks.participantFindMany.mockResolvedValue([{ userId: 'pro-user-1' }])
+    mocks.clientProfileFindUnique.mockResolvedValue({
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+    })
+    mocks.broadcastLive.mockResolvedValue(undefined)
+    mocks.createProNotification.mockResolvedValue({ id: 'notif-1' })
     mocks.enforceRateLimit.mockResolvedValue(ALLOWED)
     mocks.clientRateLimitKey.mockReturnValue(
       'user:user-1|client:client-1|ip:unknown-ip',
@@ -202,6 +232,110 @@ describe('POST /api/v1/waitlist', () => {
     expect(res.status).toBe(201)
     expect(body.entry.id).toBe('wl-1')
     expect(mocks.messageCreate).not.toHaveBeenCalled()
+  })
+
+  // W2 — before this, joining a waitlist produced NO notification of any kind.
+  // The seed message above was written with raw Prisma and never reached the
+  // notification engine, so the pro's only signal was an unread inbox dot they
+  // had to already be in the app to see.
+  describe('WAITLIST_JOINED notification', () => {
+    it('notifies the pro, deep-linked to the thread, deduped per entry', async () => {
+      const res = await POST(
+        postRequest({
+          professionalId: 'pro-1',
+          serviceId: 'svc-1',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      expect(res.status).toBe(201)
+      expect(mocks.createProNotification).toHaveBeenCalledTimes(1)
+      expect(mocks.createProNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          professionalId: 'pro-1',
+          eventKey: 'WAITLIST_JOINED',
+          title: 'Ada Lovelace joined your waitlist',
+          href: '/messages/thread/thread-1',
+          // Per ENTRY: a client re-submitting their preferences refreshes this
+          // row instead of stacking another one on the pro.
+          dedupeKey: 'waitlist-joined:wl-1',
+        }),
+      )
+
+      // Without the kick, the push/email waits for the next cron tick.
+      expect(mocks.kickNotificationDrain).toHaveBeenCalled()
+    })
+
+    it('broadcasts live so an open pro inbox updates without a reload', async () => {
+      await POST(
+        postRequest({
+          professionalId: 'pro-1',
+          serviceId: 'svc-1',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      expect(mocks.broadcastLive).toHaveBeenCalledWith(
+        ['user:pro-user-1'],
+        'messages',
+      )
+    })
+
+    // The pro performed ONE act's worth of attention. WAITLIST_JOINED already
+    // carries in-app + push + EMAIL and opens the same thread, so also firing
+    // MESSAGE_RECEIVED for the seed message would just notify them twice.
+    it('does not also fire a message notification for the seed message', async () => {
+      await POST(
+        postRequest({
+          professionalId: 'pro-1',
+          serviceId: 'svc-1',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      const eventKeys = mocks.createProNotification.mock.calls.map(
+        (call) => (call[0] as { eventKey: string }).eventKey,
+      )
+      expect(eventKeys).toEqual(['WAITLIST_JOINED'])
+    })
+
+    // The join has already committed. A notification problem must not turn a
+    // successful join into a 500 the client retries.
+    it('still returns 201 when the notification throws', async () => {
+      mocks.createProNotification.mockRejectedValue(new Error('engine down'))
+
+      const res = await POST(
+        postRequest({
+          professionalId: 'pro-1',
+          serviceId: 'svc-1',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      expect(res.status).toBe(201)
+    })
+
+    // Seeding is best-effort, but the pro must still be TOLD someone joined —
+    // it just points at the waitlist instead of a thread that does not exist.
+    it('still notifies, falling back to /pro/waitlist, when thread seeding fails', async () => {
+      mocks.resolveMessageThread.mockRejectedValue(new Error('messaging down'))
+
+      const res = await POST(
+        postRequest({
+          professionalId: 'pro-1',
+          serviceId: 'svc-1',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      expect(res.status).toBe(201)
+      expect(mocks.createProNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventKey: 'WAITLIST_JOINED',
+          href: '/pro/waitlist',
+        }),
+      )
+    })
   })
 
   it('refuses over the waitlist:write ceiling BEFORE any DB read, keyed per client', async () => {
