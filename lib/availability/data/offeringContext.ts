@@ -16,13 +16,21 @@ import {
   type CachedPlacement,
 } from '@/lib/availability/core/placement'
 import { type BookingErrorCode } from '@/lib/booking/errors'
+import {
+  loadProLocationCapability,
+  narrowOfferingModes,
+} from '@/lib/offerings/locationCapability'
 import { prisma } from '@/lib/prisma'
 import type { AvailabilityOffering } from '@/app/(main)/booking/AvailabilityDrawer/types'
 
 type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
 
 const TTL_PLACEMENT_SECONDS = 300
-const AVAILABILITY_PLACEMENT_CACHE_VERSION = 'phase2'
+// Bumped for W6: cached placements written before the location-capability
+// narrowing hold the offering's RAW `offersInSalon`, so a stale entry would keep
+// serving the In-salon toggle to a mobile-only pro's clients for the whole TTL.
+// A cache is a third query — it has to be invalidated with the rule it caches.
+const AVAILABILITY_PLACEMENT_CACHE_VERSION = 'phase3-mode-capability'
 
 export type AvailabilityOfferingPayload = {
   id: string
@@ -456,6 +464,16 @@ async function loadFreshAvailabilitySource(args: {
     }
   }
 
+  // W6 read boundary: an offering may CLAIM a mode the pro cannot host. Salon
+  // was `@default(true)` on the model and pre-checked in the pro's form, so prod
+  // holds mobile-only pros whose every offering says in-salon — which is what
+  // put an In-salon toggle, and the salon waitlist panel under it, in front of a
+  // client booking a pro who only travels. Narrow to the modes the pro has a
+  // BOOKABLE location for; this is the same predicate placement uses to find
+  // somewhere to put the appointment, so the drawer can no longer offer a mode
+  // placement would then fail to fill.
+  const capability = await loadProLocationCapability(args.professionalId, client)
+
   return {
     ok: true,
     value: {
@@ -466,8 +484,13 @@ async function loadFreshAvailabilitySource(args: {
       },
       offering: {
         id: offering.id,
-        offersInSalon: offering.offersInSalon,
-        offersMobile: offering.offersMobile,
+        ...narrowOfferingModes(
+          {
+            offersInSalon: offering.offersInSalon,
+            offersMobile: offering.offersMobile,
+          },
+          capability,
+        ),
         salonDurationMinutes: offering.salonDurationMinutes,
         mobileDurationMinutes: offering.mobileDurationMinutes,
         salonPriceStartingAt: offering.salonPriceStartingAt,

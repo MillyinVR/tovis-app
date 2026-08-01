@@ -1,5 +1,5 @@
 // lib/discovery/nearby.ts
-import { Prisma, ProfessionType } from '@prisma/client'
+import { Prisma, ProfessionType, ProfessionalLocationType } from '@prisma/client'
 
 import { clampFloat } from '@/lib/queryParams'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
@@ -17,6 +17,15 @@ export type DiscoveryLocationDto = {
   lng: number | null
   isPrimary: boolean
   workingHours: unknown
+  /**
+   * W7: whether the pro chose to publish this address. Carried on the DTO so a
+   * public consumer can tell a REDACTED location from a published one — before
+   * this, it could not, which is how Discover ended up rendering a Navigate
+   * button over a coarsened point.
+   */
+  isAddressPublic: boolean
+  /** W7: SALON / SUITE / MOBILE_BASE — a mobile base is never navigable. */
+  locationType: ProfessionalLocationType | null
 }
 
 export type ClosestDiscoveryLocationMatch = {
@@ -202,6 +211,8 @@ export function mapProfessionalLocation(input: {
   lng: Prisma.Decimal | number | string | null
   isPrimary: boolean
   workingHours: unknown
+  isAddressPublic?: boolean | null
+  locationType?: ProfessionalLocationType | null
 }): DiscoveryLocationDto {
   return {
     id: input.id,
@@ -214,6 +225,10 @@ export function mapProfessionalLocation(input: {
     lng: toFiniteNumber(input.lng),
     isPrimary: Boolean(input.isPrimary),
     workingHours: input.workingHours,
+    // Absent input means "not published". A publish flag must fail CLOSED: a
+    // caller that forgets to select the column should redact, never leak.
+    isAddressPublic: input.isAddressPublic === true,
+    locationType: input.locationType ?? null,
   }
 }
 

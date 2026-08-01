@@ -2431,6 +2431,22 @@ model ProfessionalLocation {
   isPrimary  Boolean                  @default(false)
   isBookable Boolean                  @default(true)
 
+  /// W7: may this location's EXACT address be published to an unauthenticated
+  /// audience — Discover, `/api/v1/search/pros`, `/api/v1/pros/nearby`?
+  ///
+  /// Default OFF for every location type, SALON included. A pro whose "salon" is
+  /// really a home studio must never be exposed by an inference about their
+  /// location type; publishing an address is an act, not a side effect of
+  /// picking SALON in a dropdown.
+  ///
+  /// When false (or when the location has no address, or isn't bookable), the
+  /// public preview keeps today's redaction: `formattedAddress` and `placeId`
+  /// null, coordinates coarsened to ~1.1km. That redaction is why Discover's
+  /// Navigate button routed to a fuzzed point and "snapped to the nearest
+  /// building" — the button was built on deliberately-inaccurate data. Navigate
+  /// now renders only when this flag let a real address through.
+  isAddressPublic Boolean @default(false)
+
   // Address (SALON/SUITE required; MOBILE_BASE optional)
   formattedAddress String?
   addressLine1     String?
@@ -2896,8 +2912,17 @@ model ProfessionalServiceOffering {
   mobilePriceStartingAt Decimal? @db.Decimal(10, 2)
   mobileDurationMinutes Int?
 
-  // Mode flags per service
-  offersInSalon Boolean @default(true)
+  // Mode flags per service.
+  //
+  // W6: `offersInSalon` used to be `@default(true)`. A mode the pro never chose
+  // is not a fact about their business — it advertised in-salon booking (and the
+  // salon waitlist) for pros who only travel, and made
+  // `ensureLocationsForOffering` auto-write a "Set salon address" placeholder
+  // location to back the claim up. Both modes now default OFF; every writer
+  // states the modes explicitly, and the client-facing read boundary
+  // (lib/offerings/locationCapability.ts) narrows them to what the pro has a
+  // bookable location for.
+  offersInSalon Boolean @default(false)
   offersMobile  Boolean @default(false)
 
   // Typical rebook interval for this offering, in days, set by the pro. When

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import AddServiceOverlay from './AddServiceOverlay'
+import type { ProLocationCapability } from '@/lib/offerings/locationCapability'
 
 type ServiceDTO = {
   id: string
@@ -27,8 +28,12 @@ type OfferingDTO = {
   serviceId: string
 }
 
-export default function ServicesManagerSectionClient(props: { categories: CategoryDTO[]; offerings: OfferingDTO[] }) {
-  const { categories, offerings } = props
+export default function ServicesManagerSectionClient(props: {
+  categories: CategoryDTO[]
+  offerings: OfferingDTO[]
+  locationCapability: ProLocationCapability
+}) {
+  const { categories, offerings, locationCapability } = props
   const searchParams = useSearchParams()
   const pathname = usePathname()
   const router = useRouter()
@@ -74,7 +79,13 @@ export default function ServicesManagerSectionClient(props: { categories: Catego
         </div>
       </section>
 
-      <AddServiceOverlay open={open} onClose={closeOverlay} categories={categories} offerings={offerings} />
+      <AddServiceOverlay
+        open={open}
+        onClose={closeOverlay}
+        categories={categories}
+        offerings={offerings}
+        locationCapability={locationCapability}
+      />
     </>
   )
 }

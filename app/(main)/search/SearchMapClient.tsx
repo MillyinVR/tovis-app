@@ -4,7 +4,7 @@
 import dynamic from 'next/dynamic'
 import { ChevronDown, MapPin, Search, SlidersHorizontal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { directionsHrefFromLocation, mapsHrefFromLocation } from '@/lib/maps'
+import { directionsHrefFromLocation } from '@/lib/maps'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { useMediaQuery } from '@/lib/ui/useMediaQuery'
 import { MEDIA } from '@/lib/ui/breakpoints'
@@ -105,7 +105,14 @@ function isLocationPreview(value: unknown): value is ApiLocationPreview | null {
     isNullableString(value.placeId) &&
     isNullableNumber(value.lat) &&
     isNullableNumber(value.lng) &&
-    typeof value.isPrimary === 'boolean'
+    typeof value.isPrimary === 'boolean' &&
+    // W7: required, not optional. This flag is the ONLY thing distinguishing a
+    // real coordinate from one coarsened to a ~1.1km grid, so a response that
+    // omits it is a response this client cannot safely render a Navigate button
+    // from. Server and client ship in the same build — if this ever fails, the
+    // wire drifted and the loud failure is the point.
+    typeof value.isAddressPublic === 'boolean' &&
+    isNullableString(value.locationType)
   )
 }
 
@@ -1010,25 +1017,21 @@ export default function SearchMapClient() {
 
     const location = preferredProLocation(activePro)
 
+    // W7: only offer directions when the API actually PUBLISHED this address.
+    // This surface is unauthenticated, so every other location comes back
+    // redacted — address null, coordinates coarsened to a ~1.1km grid. Building
+    // a directions link on that sent Maps to whatever building was nearest the
+    // fuzzed point, which is the "navigating to a random address" in the report.
+    //
+    // Branch on the flag, not on "is there a lat/lng": a coarsened coordinate is
+    // still a coordinate, and that is exactly how this shipped broken.
+    if (!location?.isAddressPublic) return null
+
     return directionsHrefFromLocation({
-      lat: location?.lat ?? null,
-      lng: location?.lng ?? null,
-      placeId: location?.placeId ?? null,
-      formattedAddress: location?.formattedAddress ?? null,
-      name: activePro.displayName,
-    })
-  }, [activePro])
-
-  const activeOpenHref = useMemo(() => {
-    if (!activePro) return null
-
-    const location = preferredProLocation(activePro)
-
-    return mapsHrefFromLocation({
-      lat: location?.lat ?? null,
-      lng: location?.lng ?? null,
-      placeId: location?.placeId ?? null,
-      formattedAddress: location?.formattedAddress ?? null,
+      lat: location.lat,
+      lng: location.lng,
+      placeId: location.placeId,
+      formattedAddress: location.formattedAddress,
       name: activePro.displayName,
     })
   }, [activePro])
@@ -1529,7 +1532,7 @@ export default function SearchMapClient() {
             ) : (
               <>
                 {activePro ? (
-                  <DiscoverActiveProCard pro={activePro} openHref={activeOpenHref} navHref={activeNavHref} />
+                  <DiscoverActiveProCard pro={activePro} navHref={activeNavHref} />
                 ) : null}
 
                 <DiscoverProRows
@@ -1601,7 +1604,7 @@ export default function SearchMapClient() {
                 <>
                   {activePro ? (
                     <div className="mb-3">
-                      <DiscoverActiveProCard pro={activePro} openHref={activeOpenHref} navHref={activeNavHref} />
+                      <DiscoverActiveProCard pro={activePro} navHref={activeNavHref} />
                     </div>
                   ) : null}
 

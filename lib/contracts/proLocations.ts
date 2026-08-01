@@ -13,6 +13,8 @@ export type ProLocation = {
   name: string | null
   isPrimary: boolean
   isBookable: boolean
+  /** W7: the pro published this address to the public discovery surfaces. */
+  isAddressPublic: boolean
 
   formattedAddress: string | null
   city: string | null
@@ -105,6 +107,7 @@ export function parseProLocationsPayload(v: unknown): ProLocation[] {
       name: readNullableString(item.name),
       isPrimary: readBool(item.isPrimary),
       isBookable: readBool(item.isBookable),
+      isAddressPublic: readBool(item.isAddressPublic),
 
       formattedAddress: readNullableString(item.formattedAddress),
       city: readNullableString(item.city),

@@ -8,9 +8,17 @@ import type { ApiPro } from '../_lib/discoverProTypes'
 
 interface DiscoverActiveProCardProps {
   pro: ApiPro
-  // External map links resolved by SearchMapClient via mapsHrefFromLocation /
-  // directionsHrefFromLocation — passed straight through, never rebuilt here.
-  openHref: string | null
+  /**
+   * Directions link, resolved by SearchMapClient via directionsHrefFromLocation
+   * — passed straight through, never rebuilt here.
+   *
+   * ⚠️ Null unless the pro PUBLISHED that location's address (W7). It used to be
+   * built from the redacted preview every pro gets on this unauthenticated
+   * surface, so Maps received a coordinate coarsened to a ~1.1km grid with no
+   * address and snapped to the nearest building — the reported "navigating to a
+   * random address". For a mobile-only pro the only location with coordinates is
+   * their mobile base, so it pointed at a fuzzed version of their home.
+   */
   navHref: string | null
 }
 
@@ -25,7 +33,7 @@ function buildStatLine(pro: ApiPro): string | null {
   return parts.length ? parts.join(' · ') : null
 }
 
-export default function DiscoverActiveProCard({ pro, openHref, navHref }: DiscoverActiveProCardProps) {
+export default function DiscoverActiveProCard({ pro, navHref }: DiscoverActiveProCardProps) {
   const statLine = buildStatLine(pro)
 
   return (
@@ -82,16 +90,18 @@ export default function DiscoverActiveProCard({ pro, openHref, navHref }: Discov
           View
         </Link>
 
-        {openHref ? (
-          <a
-            href={openHref}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-white/10"
-          >
-            Open
-          </a>
-        ) : null}
+        {/*
+          Was "Open", which opened the same maps pin as Navigate — two buttons
+          doing one thing, and that thing was the wrong thing. Messaging is what
+          a client actually wants from a pro they just found, and it is the one
+          action that works for a mobile pro too.
+        */}
+        <Link
+          href={`/messages/start?kind=PRO&professionalId=${encodeURIComponent(pro.id)}`}
+          className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-white/10"
+        >
+          Message
+        </Link>
 
         {navHref ? (
           <a

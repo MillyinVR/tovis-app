@@ -111,6 +111,15 @@ beforeEach(() => {
   mocks.executeRaw.mockResolvedValue(1)
   mocks.indexDeleteMany.mockResolvedValue({ count: 0 })
 
+  // W6: the rollup narrows an offering's modes to the ones the pro has a
+  // BOOKABLE location for. The fixture pro advertises both salon and mobile, so
+  // give them a bookable location of each — otherwise every rollup assertion
+  // below would be measuring the narrowing rather than the rollup.
+  mocks.locationFindMany.mockResolvedValue([
+    { type: 'SALON' },
+    { type: 'MOBILE_BASE' },
+  ])
+
   mocks.checkProReadinessWithDb.mockResolvedValue({
     ok: true,
     liveModes: ['SALON'],
@@ -160,6 +169,33 @@ describe('refreshLocation', () => {
 
     // refreshSource passed through.
     expect(values).toContain('location.create')
+  })
+
+  // W6: the founder's four offerings all said offersInSalon:true while her only
+  // bookable location was a MOBILE_BASE. Indexing that verbatim puts a
+  // mobile-only pro into in-salon search results — and gives her a minSalonPrice
+  // for a service she cannot perform in a salon.
+  it('does not index a salon rollup for a pro with no bookable salon location', async () => {
+    mocks.locationFindUnique.mockResolvedValue({
+      ...baseLocation,
+      type: 'MOBILE_BASE',
+    })
+    mocks.locationFindMany.mockResolvedValue([{ type: 'MOBILE_BASE' }])
+    mocks.offeringFindMany.mockResolvedValue(defaultOfferings())
+    mocks.reviewGroupBy.mockResolvedValue(defaultRatings())
+
+    await refreshLocation('loc_a', 'location.create')
+
+    const [, ...values] = mocks.executeRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ]
+
+    // 45 is the salon-only offering's price. It is the unambiguous tell that a
+    // salon rollup was written: no other positional value in this row is 45.
+    expect(values).not.toContain(45)
+    // Mobile survives — narrowing only ever removes a mode, never adds one.
+    expect(values).toContain(80) // minMobilePrice AND minAnyPrice
   })
 
   it('deletes the index row when the location is not bookable', async () => {

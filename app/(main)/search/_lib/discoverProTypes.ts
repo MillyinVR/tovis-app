@@ -15,6 +15,17 @@ export type ApiLocationPreview = {
   lat: number | null
   lng: number | null
   isPrimary: boolean
+  /**
+   * W7: true when `formattedAddress`/`placeId`/`lat`/`lng` above are the pro's
+   * REAL ones, because they chose to publish this address. False means the
+   * preview is redacted — address null, coordinates coarsened to a ~1.1km grid.
+   *
+   * Anything that routes a client somewhere must branch on this, never on "is
+   * there a coordinate": a coarsened coordinate is still a coordinate.
+   */
+  isAddressPublic: boolean
+  /** W7: SALON / SUITE / MOBILE_BASE. */
+  locationType: string | null
 }
 
 export type ApiPro = {

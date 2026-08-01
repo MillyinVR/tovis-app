@@ -112,14 +112,39 @@ function resolveContextFromSearchParams(sp: SearchParamsShape): ResolvedContext 
   return null
 }
 
+/**
+ * The path to come back to after signing in — INCLUDING the params.
+ *
+ * `/messages/start` is nothing but a resolver over its query string: without
+ * the params it resolves no context and bounces to `/messages`. So a bare
+ * `from=/messages/start` sends the user back to a page that immediately forgets
+ * who they wanted to message.
+ *
+ * That was survivable while every entry point was already behind auth. W7 puts
+ * a **Message** button on Discover — a public, unauthenticated surface — so a
+ * signed-out visitor tapping it is now the common case, not the edge one.
+ */
+function startPathWithParams(sp: SearchParamsShape): string {
+  const params = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(sp)) {
+    const single = pickOne(value)
+    if (single) params.set(key, single)
+  }
+
+  const query = params.toString()
+  return query ? `/messages/start?${query}` : '/messages/start'
+}
+
 export default async function MessagesStartPage(props: PageProps) {
   const user = await getCurrentUser().catch(() => null)
 
+  const sp = await Promise.resolve(props.searchParams ?? {})
+
   if (!user) {
-    redirect('/login?from=/messages/start')
+    redirect(`/login?from=${encodeURIComponent(startPathWithParams(sp))}`)
   }
 
-  const sp = await Promise.resolve(props.searchParams ?? {})
   const resolvedContext = resolveContextFromSearchParams(sp)
 
   if (!resolvedContext) {

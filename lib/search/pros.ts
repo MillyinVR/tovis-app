@@ -26,7 +26,12 @@
 // hooks; the 1-5s replica lag is in the same noise band as a hook
 // failure-and-recovery cycle, so the read replica is the right default.
 
-import { Prisma, type ProfessionType, type VerificationStatus } from '@prisma/client'
+import {
+  Prisma,
+  type ProfessionType,
+  type ProfessionalLocationType,
+  type VerificationStatus,
+} from '@prisma/client'
 
 import {
   buildDiscoveryLocationLabel,
@@ -34,7 +39,10 @@ import {
   isOpenNowAtLocation,
   type DiscoveryLocationDto,
 } from '@/lib/discovery/nearby'
-import { coarsenPublicCoordinate } from '@/lib/discovery/publicCoordinates'
+import {
+  isLocationAddressPublishable,
+  toPublicAddressView,
+} from '@/lib/discovery/publicAddress'
 import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import { entitledStatuses, planKeysGranting } from '@/lib/pro/entitlements'
 import { prismaRead } from '@/lib/prisma'
@@ -141,26 +149,36 @@ export function parseSearchProsParams(
   }
 }
 
-// `/api/v1/search/pros` is unauthenticated, so the location preview must be redacted
-// to neighborhood precision — same posture as `/api/v1/pros/nearby`. The exact
-// street address (formattedAddress/placeId) is stripped and coordinates coarsened;
-// distanceMiles is computed in SQL from exact coords before this mapping, so the
-// displayed distance stays accurate while the map pin is approximate.
+// `/api/v1/search/pros` is unauthenticated, so the location preview is redacted
+// to neighborhood precision — same posture, and now the same code, as
+// `/api/v1/pros/nearby`. The exact street address (formattedAddress/placeId) is
+// stripped and coordinates coarsened; distanceMiles is computed in SQL from
+// exact coords before this mapping, so the displayed distance stays accurate
+// while the map pin is approximate.
+//
+// W7: a pro may publish a specific location's address, and then it goes out
+// exactly. `isAddressPublic` rides the preview so the client can tell which of
+// the two it received — without it, a coarsened point is indistinguishable from
+// a real one, which is what put a Navigate button over a fuzzed address.
 function mapLocationPreview(
   location: DiscoveryLocationDto | null,
 ): SearchProLocationPreviewDto | null {
   if (!location) return null
 
+  const view = toPublicAddressView(location)
+
   return {
-    id: location.id,
-    formattedAddress: null,
-    city: location.city,
-    state: location.state,
-    timeZone: location.timeZone,
-    placeId: null,
-    lat: coarsenPublicCoordinate(location.lat),
-    lng: coarsenPublicCoordinate(location.lng),
-    isPrimary: location.isPrimary,
+    id: view.id,
+    formattedAddress: view.formattedAddress,
+    city: view.city,
+    state: view.state,
+    timeZone: view.timeZone,
+    placeId: view.placeId,
+    lat: view.lat,
+    lng: view.lng,
+    isPrimary: view.isPrimary,
+    isAddressPublic: isLocationAddressPublishable(location),
+    locationType: view.locationType,
   }
 }
 
@@ -179,6 +197,8 @@ type CandidateRow = {
   state: string | null
   timeZone: string | null
   placeId: string | null
+  isAddressPublic: boolean
+  locationType: ProfessionalLocationType | null
   lat: number | null
   lng: number | null
   isPrimary: boolean
@@ -204,6 +224,8 @@ type PrimaryLocationRow = {
   state: string | null
   timeZone: string | null
   placeId: string | null
+  isAddressPublic: boolean
+  locationType: ProfessionalLocationType | null
   lat: number | null
   lng: number | null
   isPrimary: boolean
@@ -415,6 +437,8 @@ export async function fetchProSearchCandidates(
         psi."state",
         psi."timeZone",
         pl."placeId",
+        pl."isAddressPublic",
+        pl."type" AS "locationType",
         psi."lat"::float AS "lat",
         psi."lng"::float AS "lng",
         psi."isPrimary",
@@ -453,6 +477,8 @@ export async function fetchProSearchCandidates(
             psi."state",
             psi."timeZone",
             pl."placeId",
+            pl."isAddressPublic",
+            pl."type" AS "locationType",
             psi."lat"::float AS "lat",
             psi."lng"::float AS "lng",
             psi."isPrimary",
@@ -472,6 +498,8 @@ export async function fetchProSearchCandidates(
       state: row.state,
       timeZone: row.timeZone,
       placeId: row.placeId,
+      isAddressPublic: row.isAddressPublic,
+      locationType: row.locationType,
       lat: row.lat,
       lng: row.lng,
       isPrimary: row.isPrimary,
@@ -487,6 +515,8 @@ export async function fetchProSearchCandidates(
       state: row.state,
       timeZone: row.timeZone,
       placeId: row.placeId,
+      isAddressPublic: row.isAddressPublic,
+      locationType: row.locationType,
       lat: row.lat,
       lng: row.lng,
       isPrimary: row.isPrimary,

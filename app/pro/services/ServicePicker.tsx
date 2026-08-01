@@ -9,6 +9,7 @@ import { pickStringOrEmpty } from '@/lib/pick'
 import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import type { ProLocationCapability } from '@/lib/offerings/locationCapability'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type ServiceDTO = {
@@ -42,9 +43,15 @@ type OfferingDTO = {
 type Props = {
   categories: CategoryDTO[]
   offerings: OfferingDTO[]
+  /** W6: the modes this pro can actually host, from their bookable locations. */
+  locationCapability: ProLocationCapability
 }
 
-export default function ServicePicker({ categories, offerings }: Props) {
+export default function ServicePicker({
+  categories,
+  offerings,
+  locationCapability,
+}: Props) {
   const router = useRouter()
 
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
@@ -52,8 +59,20 @@ export default function ServicePicker({ categories, offerings }: Props) {
   const [selectedServiceId, setSelectedServiceId] = useState('')
 
   const [description, setDescription] = useState('')
-  const [offersInSalon, setOffersInSalon] = useState(true)
-  const [offersMobile, setOffersMobile] = useState(false)
+  // W6: seed both toggles from the locations the pro actually has, not from a
+  // blanket "Salon". This form pre-checked Salon for everyone, and a mobile-only
+  // pro who never unticked it published four services as in-salon — which is
+  // what offered their clients an In-salon toggle and a salon waitlist.
+  //
+  // A pro with neither capability yet (no bookable location at all) still gets
+  // Salon, because the form refuses to submit with both modes off and the read
+  // boundary narrows an unhostable mode back off before any client sees it.
+  const [offersInSalon, setOffersInSalon] = useState(
+    locationCapability.salon || !locationCapability.mobile,
+  )
+  const [offersMobile, setOffersMobile] = useState(
+    !locationCapability.salon && locationCapability.mobile,
+  )
 
   const [salonPrice, setSalonPrice] = useState('')
   const [salonDuration, setSalonDuration] = useState('')

@@ -14,6 +14,7 @@ import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { isRecord } from '@/lib/guards'
 import { parseMoney, moneyToString } from '@/lib/money'
+import { loadProLocationCapability } from '@/lib/offerings/locationCapability'
 import {
   OfferingAlreadyActiveError,
   offeringToDto,
@@ -199,11 +200,33 @@ export async function POST(request: Request) {
       return jsonFail(400, 'offersMobile must be boolean.')
     }
 
+    // W6: when the caller does not state a mode, DERIVE it from the locations
+    // the pro actually has instead of assuming salon. Assuming salon is how a
+    // mobile-only pro ended up with every offering claiming in-salon.
+    //
+    // The legacy `true` survives as a last resort for a pro with no bookable
+    // location at all: without it, a caller that omits both flags would newly
+    // trip the "Enable at least Salon or Mobile" 400 below. That fallback is
+    // safe because the read boundary (loadProLocationCapability in
+    // lib/availability/data/offeringContext.ts) narrows an unhostable mode back
+    // off before any client sees it.
+    //
+    // Only pay for the capability query when a mode was actually left unstated —
+    // the pro's own forms always send both, so the common path is unchanged.
+    const capability =
+      typeof offersInSalonIn === 'boolean' && typeof offersMobileIn === 'boolean'
+        ? { salon: false, mobile: false }
+        : await loadProLocationCapability(professionalId)
+
     const offersInSalon =
-      typeof offersInSalonIn === 'boolean' ? offersInSalonIn : true
+      typeof offersInSalonIn === 'boolean'
+        ? offersInSalonIn
+        : capability.salon || !capability.mobile
 
     const offersMobile =
-      typeof offersMobileIn === 'boolean' ? offersMobileIn : false
+      typeof offersMobileIn === 'boolean'
+        ? offersMobileIn
+        : !capability.salon && capability.mobile
 
     if (!offersInSalon && !offersMobile) {
       return jsonFail(400, 'Enable at least Salon or Mobile.')

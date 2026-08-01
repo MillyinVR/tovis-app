@@ -148,7 +148,11 @@ describe('MessagesStartPage', () => {
     expect(mocks.prisma.booking.findUnique).not.toHaveBeenCalled()
   })
 
-  it('sends signed-out viewers to login', async () => {
+  // W7 put a Message button on Discover, a PUBLIC surface, so a signed-out
+  // viewer landing here is now the common case. `/messages/start` is nothing but
+  // a resolver over its query string — coming back without the params resolves
+  // no context and bounces to /messages, losing the pro they wanted to message.
+  it('sends signed-out viewers to login, keeping the params to come back to', async () => {
     mockGetCurrentUser.mockResolvedValue(null)
 
     await expect(
@@ -158,7 +162,29 @@ describe('MessagesStartPage', () => {
           contextId: 'booking_1',
         },
       }),
-    ).rejects.toThrow('NEXT_REDIRECT:/login?from=/messages/start')
+    ).rejects.toThrow(
+      `NEXT_REDIRECT:/login?from=${encodeURIComponent('/messages/start?contextType=BOOKING&contextId=booking_1')}`,
+    )
+  })
+
+  it('keeps the Discover Message button params through login', async () => {
+    mockGetCurrentUser.mockResolvedValue(null)
+
+    await expect(
+      MessagesStartPage({
+        searchParams: { kind: 'PRO', professionalId: 'pro_1' },
+      }),
+    ).rejects.toThrow(
+      `NEXT_REDIRECT:/login?from=${encodeURIComponent('/messages/start?kind=PRO&professionalId=pro_1')}`,
+    )
+  })
+
+  it('falls back to the bare path when there are no params to keep', async () => {
+    mockGetCurrentUser.mockResolvedValue(null)
+
+    await expect(MessagesStartPage({})).rejects.toThrow(
+      `NEXT_REDIRECT:/login?from=${encodeURIComponent('/messages/start')}`,
+    )
   })
 
   it('passes professionalId through for SERVICE contexts', async () => {

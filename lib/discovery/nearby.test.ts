@@ -47,6 +47,8 @@ function makeLocation(
     lat: pickDefined(overrides.lat, 32.7157),
     lng: pickDefined(overrides.lng, -117.1611),
     isPrimary: pickDefined(overrides.isPrimary, false),
+    isAddressPublic: pickDefined(overrides.isAddressPublic, false),
+    locationType: pickDefined(overrides.locationType, null),
     workingHours: pickDefined(overrides.workingHours, {
       mon: { enabled: true, start: '09:00', end: '17:00' },
     }),
@@ -201,7 +203,32 @@ describe('lib/discovery/nearby.ts', () => {
         lng: -117.1611,
         isPrimary: true,
         workingHours: { mon: { enabled: true, start: '09:00', end: '17:00' } },
+        // W7: the caller above did not select the publish columns, and the
+        // mapper fails CLOSED. A publish flag that defaulted to `true` on an
+        // absent input would leak every address a caller forgot to select.
+        isAddressPublic: false,
+        locationType: null,
       })
+    })
+
+    it('fails closed when the publish flag is absent or falsy', () => {
+      for (const input of [undefined, null, false] as const) {
+        const location = mapProfessionalLocation({
+          id: 'loc_1',
+          formattedAddress: '123 Main St',
+          city: null,
+          state: null,
+          timeZone: null,
+          placeId: 'place_1',
+          lat: null,
+          lng: null,
+          isPrimary: false,
+          workingHours: null,
+          isAddressPublic: input,
+        })
+
+        expect(location.isAddressPublic).toBe(false)
+      }
     })
   })
 

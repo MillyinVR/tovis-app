@@ -1,5 +1,5 @@
 // lib/search/contracts.ts
-import type { ProfessionType } from '@prisma/client'
+import type { ProfessionType, ProfessionalLocationType } from '@prisma/client'
 
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
@@ -128,6 +128,18 @@ export type SearchProLocationPreviewDto = {
   lat: number | null
   lng: number | null
   isPrimary: boolean
+  /**
+   * W7: true when `formattedAddress`/`placeId`/coordinates on THIS preview are
+   * the pro's real ones because they chose to publish them. False means the
+   * preview is redacted — address null, coordinates coarsened to a ~1.1km grid.
+   *
+   * Consumers must branch on this rather than on "is lat/lng present": a
+   * coarsened coordinate is still a coordinate, which is exactly how Discover
+   * came to render a Navigate button over a fuzzed point.
+   */
+  isAddressPublic: boolean
+  /** W7: SALON / SUITE / MOBILE_BASE. A mobile base is never a destination. */
+  locationType: ProfessionalLocationType | null
 }
 
 export type SearchProItemDto = {

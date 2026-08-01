@@ -10,7 +10,7 @@ import {
   matchesDiscoveryOfferingFilters,
   type DiscoveryLocationDto,
 } from '@/lib/discovery/nearby'
-import { coarsenPublicCoordinate } from '@/lib/discovery/publicCoordinates'
+import { toPublicAddressView } from '@/lib/discovery/publicAddress'
 import { prisma } from '@/lib/prisma'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
@@ -26,6 +26,12 @@ const LOCATION_SELECT = {
   state: true,
   timeZone: true,
   placeId: true,
+  // W7: both are needed to decide whether this location's address may be
+  // published to the unauthenticated audience. Omitting them does not leak —
+  // `mapProfessionalLocation` fails closed to "not published" — but it would
+  // silently redact every address a pro DID choose to publish.
+  isAddressPublic: true,
+  type: true,
   lat: true,
   lng: true,
   isPrimary: true,
@@ -72,29 +78,19 @@ export type NearbyProCard = {
   primaryLocation: DiscoveryLocationDto
 }
 
-function toPublicDiscoveryLocation(
-  location: DiscoveryLocationDto,
-): DiscoveryLocationDto {
-  return {
-    ...location,
-    formattedAddress: null,
-    placeId: null,
-    lat: coarsenPublicCoordinate(location.lat),
-    lng: coarsenPublicCoordinate(location.lng),
-  }
-}
-
 /**
- * Redact a nearby card for an UNAUTHENTICATED audience: strip the exact street
- * address + place id and coarsen coordinates to a neighborhood grid on both the
- * closest and primary location. Apply this at the public route boundary — never
- * inside `loadNearbyPros`, whose exact output also feeds the search index.
+ * Redact a nearby card for an UNAUTHENTICATED audience — unless the pro
+ * explicitly published that location's address (W7), in which case the exact
+ * address, placeId and true coordinates go out.
+ *
+ * Apply this at the public route boundary — never inside `loadNearbyPros`,
+ * whose exact output also feeds the search index.
  */
 export function toPublicNearbyProCard(card: NearbyProCard): NearbyProCard {
   return {
     ...card,
-    closestLocation: toPublicDiscoveryLocation(card.closestLocation),
-    primaryLocation: toPublicDiscoveryLocation(card.primaryLocation),
+    closestLocation: toPublicAddressView(card.closestLocation),
+    primaryLocation: toPublicAddressView(card.primaryLocation),
   }
 }
 
@@ -249,6 +245,8 @@ async function loadNearbyProsLegacy(
       state: row.state ?? null,
       timeZone: row.timeZone ?? null,
       placeId: row.placeId ?? null,
+      isAddressPublic: row.isAddressPublic,
+      locationType: row.type,
       lat: row.lat,
       lng: row.lng,
       isPrimary: Boolean(row.isPrimary),
