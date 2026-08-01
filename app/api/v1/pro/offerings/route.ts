@@ -210,6 +210,7 @@ export async function POST(request: Request) {
     // safe because the read boundary (loadProLocationCapability in
     // lib/availability/data/offeringContext.ts) narrows an unhostable mode back
     // off before any client sees it.
+    //
     // Only pay for the capability query when a mode was actually left unstated —
     // the pro's own forms always send both, so the common path is unchanged.
     const capability =
