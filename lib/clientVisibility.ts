@@ -1,6 +1,6 @@
 // lib/clientVisibility.ts
 import { prisma } from '@/lib/prisma'
-import { BookingStatus, Prisma } from '@prisma/client'
+import { BookingStatus, ClientChartShareStatus, Prisma } from '@prisma/client'
 import {
   EMPTY_CLIENT_LINK_VIEWER,
   type ClientLinkViewer,
@@ -11,16 +11,42 @@ export type ClientVisibilityReason =
   | 'PENDING_BOOKING'
   | 'UPCOMING_ACCEPTED'
   | 'RECENT_COMPLETED'
+  /** W5: the client explicitly granted this pro chart access (ClientChartShare). */
+  | 'CHART_SHARE_GRANTED'
+  /**
+   * W5: a message thread and nothing else. This is now the CONTACT_ONLY tier —
+   * it grants the pro the client's display name, avatar and the thread, and
+   * NOTHING clinical.
+   */
   | 'ACTIVE_THREAD'
   | 'NONE'
 
 export type ClientVisibilityResult = {
+  /**
+   * Full chart: notes, allergies, formulas, consent records, photo release, the
+   * technical record, service addresses, do-not-rebook, policy, date of birth.
+   *
+   * 🔴 W5: a bare message thread NO LONGER sets this. It used to, open-ended,
+   * and no consumer branched on `reason` — so one message (or merely joining a
+   * waitlist, which auto-creates a thread) handed over read AND write access to
+   * a client's whole medical record.
+   */
   canViewClient: boolean
+  /**
+   * W5 CONTACT_ONLY tier: may this pro see who the client IS — display name,
+   * avatar — and hold a conversation with them? True whenever `canViewClient`
+   * is, plus for a thread-only relationship.
+   *
+   * Kept as its own field rather than derived from `reason` at each call site,
+   * because "which reasons count as contact" is precisely the judgement that
+   * gets copied wrong.
+   */
+  canContactClient: boolean
   reason: ClientVisibilityReason
   /**
    * When access is time-bounded (RECENT_COMPLETED), the moment it closes — for
-   * the UI to render a countdown. Open-ended access (active/pending/upcoming)
-   * returns null.
+   * the UI to render a countdown. Open-ended access (active/pending/upcoming/
+   * granted share) returns null.
    */
   accessUntil: Date | null
 }
@@ -93,7 +119,8 @@ const REASON_RANK: Record<Exclude<ClientVisibilityReason, 'NONE'>, number> = {
   PENDING_BOOKING: 1,
   UPCOMING_ACCEPTED: 2,
   RECENT_COMPLETED: 3,
-  ACTIVE_THREAD: 4,
+  CHART_SHARE_GRANTED: 4,
+  ACTIVE_THREAD: 5,
 }
 
 /**
@@ -170,19 +197,53 @@ export async function getProClientVisibility(
       }
     }
 
-    return { canViewClient: true, reason: bestReason, accessUntil }
+    return {
+      canViewClient: true,
+      canContactClient: true,
+      reason: bestReason,
+      accessUntil,
+    }
   }
 
-  // No qualifying booking. A message thread between this pro and client is a
-  // real relationship (e.g. a pre-booking inquiry), so it also opens chart
-  // access — open-ended while the thread exists. This is the gate only; the
-  // clients LIST stays booking-based, so inquiry-only contacts don't flood the
-  // CRM until there's a booking.
+  // No qualifying booking. Two things can still be true, and W5's whole point is
+  // that they are DIFFERENT things.
+
+  // 1. The client explicitly granted this pro chart access. Consent is as good a
+  //    reason as a booking, and open-ended until they revoke it.
+  if (await hasGrantedChartShare(proId, clientId)) {
+    return {
+      canViewClient: true,
+      canContactClient: true,
+      reason: 'CHART_SHARE_GRANTED',
+      accessUntil: null,
+    }
+  }
+
+  // 2. A message thread and nothing else — CONTACT ONLY.
+  //
+  // 🔴 This used to return `canViewClient: true` with `accessUntil: null`, and
+  // no consumer branched on `reason`, so it granted read AND WRITE access to the
+  // client's whole chart, forever. Joining a waitlist triggered it too, because
+  // `seedWaitlistThread` auto-creates a thread — so a client who never messaged
+  // anyone handed over their record by tapping "notify me".
+  //
+  // The pro keeps the conversation and the client's name. Everything clinical
+  // now needs the client to say yes (case 1) or a real booking (above).
   if (await hasProClientThread(proId, clientId)) {
-    return { canViewClient: true, reason: 'ACTIVE_THREAD', accessUntil: null }
+    return {
+      canViewClient: false,
+      canContactClient: true,
+      reason: 'ACTIVE_THREAD',
+      accessUntil: null,
+    }
   }
 
-  return { canViewClient: false, reason: 'NONE', accessUntil: null }
+  return {
+    canViewClient: false,
+    canContactClient: false,
+    reason: 'NONE',
+    accessUntil: null,
+  }
 }
 
 /** Whether a message thread links this pro and client (any context). */
@@ -195,6 +256,26 @@ async function hasProClientThread(
     select: { id: true },
   })
   return thread !== null
+}
+
+/**
+ * W5: whether the client has an active GRANTED chart share with this pro.
+ *
+ * Only GRANTED counts. REQUESTED is a pro asking and grants nothing; DECLINED
+ * and REVOKED are the client's answer and must not be readable as "no row yet".
+ */
+async function hasGrantedChartShare(
+  proId: string,
+  clientId: string,
+): Promise<boolean> {
+  const share = await prisma.clientChartShare.findUnique({
+    where: {
+      clientId_professionalId: { clientId, professionalId: proId },
+    },
+    select: { status: true },
+  })
+
+  return share?.status === ClientChartShareStatus.GRANTED
 }
 
 /**
@@ -230,12 +311,31 @@ export async function getVisibleClientIdSetForPro(proId: string): Promise<Set<st
 }
 
 /**
- * Use this in server pages/routes to hard-gate access.
- * Returns a result so the page can choose redirect vs notFound.
+ * Hard-gate for the CHART — everything clinical. Use this in server pages and
+ * API routes. Returns a result so the page can choose redirect vs notFound.
+ *
+ * 🔴 W5: this is the gate that a bare message thread no longer passes. Its ~23
+ * call sites did not need editing — the policy change lands here, which is
+ * exactly why the rule was funnelled through one function in the first place.
  */
 export async function assertProCanViewClient(proId: string, clientId: string) {
   const visibility = await getProClientVisibility(proId, clientId)
   return visibility.canViewClient ? { ok: true as const, visibility } : { ok: false as const, visibility }
+}
+
+/**
+ * Hard-gate for CONTACT — the client's display name, avatar, and the
+ * conversation. Strictly weaker than {@link assertProCanViewClient}.
+ *
+ * Use this on messaging surfaces. Gating those on the chart assert would trap
+ * the pro in the opposite failure: a client who messaged them, and whose chart
+ * they correctly cannot see, would also become unanswerable.
+ */
+export async function assertProCanContactClient(proId: string, clientId: string) {
+  const visibility = await getProClientVisibility(proId, clientId)
+  return visibility.canContactClient
+    ? { ok: true as const, visibility }
+    : { ok: false as const, visibility }
 }
 
 /**

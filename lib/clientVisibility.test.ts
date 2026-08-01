@@ -6,6 +6,7 @@ import { BookingStatus } from '@prisma/client'
 
 const findMany = vi.fn()
 const findThread = vi.fn()
+const findChartShare = vi.fn()
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -14,6 +15,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     messageThread: {
       findFirst: (...args: unknown[]) => findThread(...args),
+    },
+    clientChartShare: {
+      findUnique: (...args: unknown[]) => findChartShare(...args),
     },
   },
 }))
@@ -43,6 +47,8 @@ beforeEach(() => {
   // Default: no message thread. Thread-access tests override this.
   findThread.mockReset()
   findThread.mockResolvedValue(null)
+  findChartShare.mockReset()
+  findChartShare.mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -104,6 +110,7 @@ describe('getProClientVisibility', () => {
     findMany.mockResolvedValue([])
     const result = await getProClientVisibility('pro1', 'client1')
     expect(result.canViewClient).toBe(false)
+    expect(result.canContactClient).toBe(false)
     expect(result.reason).toBe('NONE')
     expect(result.accessUntil).toBeNull()
   })
@@ -113,6 +120,7 @@ describe('getProClientVisibility', () => {
     findMany.mockResolvedValue([])
     const result = await getProClientVisibility('pro1', 'client1')
     expect(result.canViewClient).toBe(false)
+    expect(result.canContactClient).toBe(false)
     expect(result.reason).toBe('NONE')
     // Sanity: the where clause it queried with never references CANCELLED.
     expect(JSON.stringify(findMany.mock.calls[0]?.[0])).not.toContain('CANCELLED')
@@ -162,16 +170,85 @@ describe('getProClientVisibility', () => {
     expect(result.accessUntil).toEqual(daysFromNow(27))
   })
 
-  it('grants open-ended ACTIVE_THREAD access when a thread exists but no booking qualifies', async () => {
+  // 🔴 W5 — THE headline change. This test asserted `canViewClient: true` and
+  // was green through the whole defect: a bare message thread granted read AND
+  // WRITE access to the client's entire chart, open-ended. Joining a waitlist
+  // triggered it too, because `seedWaitlistThread` auto-creates the thread.
+  it('a thread ALONE is CONTACT ONLY — it does not open the chart', async () => {
     findMany.mockResolvedValue([])
     findThread.mockResolvedValue({ id: 'thread1' })
     const result = await getProClientVisibility('pro1', 'client1')
-    expect(result.canViewClient).toBe(true)
+
+    expect(result.canViewClient).toBe(false)
+    expect(result.canContactClient).toBe(true)
     expect(result.reason).toBe('ACTIVE_THREAD')
     expect(result.accessUntil).toBeNull()
     // Scoped to this exact pro↔client pair.
     expect(findThread.mock.calls[0]?.[0]).toMatchObject({
       where: { professionalId: 'pro1', clientId: 'client1' },
+    })
+  })
+
+  describe('W5 chart share', () => {
+    it('a GRANTED share opens the chart with no booking at all', async () => {
+      findMany.mockResolvedValue([])
+      findThread.mockResolvedValue(null)
+      findChartShare.mockResolvedValue({ status: 'GRANTED' })
+
+      const result = await getProClientVisibility('pro1', 'client1')
+
+      expect(result.canViewClient).toBe(true)
+      expect(result.canContactClient).toBe(true)
+      expect(result.reason).toBe('CHART_SHARE_GRANTED')
+      expect(result.accessUntil).toBeNull()
+      expect(findChartShare.mock.calls[0]?.[0]).toMatchObject({
+        where: {
+          clientId_professionalId: {
+            clientId: 'client1',
+            professionalId: 'pro1',
+          },
+        },
+      })
+    })
+
+    // Every non-GRANTED status must read as "no". A pro ASKING must not be
+    // enough, and a client's "no" must not be indistinguishable from silence.
+    for (const status of ['REQUESTED', 'DECLINED', 'REVOKED'] as const) {
+      it(`a ${status} share does NOT open the chart`, async () => {
+        findMany.mockResolvedValue([])
+        findThread.mockResolvedValue({ id: 'thread1' })
+        findChartShare.mockResolvedValue({ status })
+
+        const result = await getProClientVisibility('pro1', 'client1')
+
+        expect(result.canViewClient).toBe(false)
+        expect(result.reason).toBe('ACTIVE_THREAD')
+      })
+    }
+
+    // Revoking must drop the pro back to contact-only, not lock them out of a
+    // conversation the client is still having with them.
+    it('a REVOKED share leaves the thread reachable', async () => {
+      findMany.mockResolvedValue([])
+      findThread.mockResolvedValue({ id: 'thread1' })
+      findChartShare.mockResolvedValue({ status: 'REVOKED' })
+
+      const result = await getProClientVisibility('pro1', 'client1')
+
+      expect(result.canViewClient).toBe(false)
+      expect(result.canContactClient).toBe(true)
+    })
+
+    // A booking is its own consent — a client who books has agreed to be
+    // treated. A share is never needed to reach a client the pro is seeing.
+    it('a booking wins without ever querying the share', async () => {
+      findMany.mockResolvedValue([row({ status: BookingStatus.PENDING })])
+
+      const result = await getProClientVisibility('pro1', 'client1')
+
+      expect(result.canViewClient).toBe(true)
+      expect(result.reason).toBe('PENDING_BOOKING')
+      expect(findChartShare).not.toHaveBeenCalled()
     })
   })
 
@@ -183,11 +260,13 @@ describe('getProClientVisibility', () => {
     expect(findThread).not.toHaveBeenCalled()
   })
 
-  it('no booking and no thread is NONE', async () => {
+  it('no booking, no share and no thread is NONE', async () => {
     findMany.mockResolvedValue([])
     findThread.mockResolvedValue(null)
+    findChartShare.mockResolvedValue(null)
     const result = await getProClientVisibility('pro1', 'client1')
     expect(result.canViewClient).toBe(false)
+    expect(result.canContactClient).toBe(false)
     expect(result.reason).toBe('NONE')
   })
 })
@@ -209,7 +288,11 @@ describe('getVisibleClientIdSetForPro is deliberately NARROWER than the per-clie
     findThread.mockResolvedValue({ id: 'thread1', clientId: 'threadOnly' })
 
     const single = await getProClientVisibility('pro1', 'threadOnly')
-    expect(single.canViewClient).toBe(true)
+    // W5: contactable, NOT viewable. The divergence this block exists to protect
+    // survives the consent change — it just moved from `canViewClient` to
+    // `canContactClient`, which is the field the outreach flow actually needs.
+    expect(single.canViewClient).toBe(false)
+    expect(single.canContactClient).toBe(true)
     expect(single.reason).toBe('ACTIVE_THREAD')
 
     findThread.mockClear()

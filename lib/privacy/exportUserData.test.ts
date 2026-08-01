@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => ({
     bookingSeries: {
       findMany: vi.fn(),
     },
+    clientChartShare: {
+      findMany: vi.fn(),
+    },
     clientActionToken: {
       findMany: vi.fn(),
     },
@@ -139,6 +142,7 @@ function resetFindManyMocks() {
   mocks.db.booking.findMany.mockResolvedValue([])
   mocks.db.bookingHold.findMany.mockResolvedValue([])
   mocks.db.bookingSeries.findMany.mockResolvedValue([])
+  mocks.db.clientChartShare.findMany.mockResolvedValue([])
   mocks.db.clientActionToken.findMany.mockResolvedValue([])
   mocks.db.aftercareSummary.findMany.mockResolvedValue([])
   mocks.db.clientConsentRecord.findMany.mockResolvedValue([])
@@ -553,6 +557,7 @@ describe('exportUserData', () => {
           },
         ],
         bookingSeries: [],
+        clientChartShares: [],
         clientActionTokens: [
           {
             id: 'token_1',
@@ -807,6 +812,16 @@ describe('exportUserData', () => {
       select: expect.any(Object),
     })
 
+    // W5: a chart share is an agreement BETWEEN the two, so like a series it is
+    // scoped to either side rather than to one.
+    expect(mocks.db.clientChartShare.findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [{ clientId: 'client_1' }, { professionalId: 'pro_1' }],
+      },
+      orderBy: { createdAt: 'asc' },
+      select: expect.any(Object),
+    })
+
     expect(mocks.db.clientActionToken.findMany).toHaveBeenCalledWith({
       where: { clientId: 'client_1' },
       orderBy: { createdAt: 'asc' },
@@ -922,6 +937,7 @@ describe('exportUserData', () => {
     expect(result.data.bookingsAsProfessional).toEqual([])
     expect(result.data.bookingHolds).toEqual([])
     expect(result.data.bookingSeries).toEqual([])
+    expect(result.data.clientChartShares).toEqual([])
     expect(result.data.clientActionTokens).toEqual([])
 
     expect(result.data.clientNotifications).toEqual([])
@@ -932,6 +948,7 @@ describe('exportUserData', () => {
     expect(mocks.db.booking.findMany).not.toHaveBeenCalled()
     expect(mocks.db.bookingHold.findMany).not.toHaveBeenCalled()
     expect(mocks.db.bookingSeries.findMany).not.toHaveBeenCalled()
+    expect(mocks.db.clientChartShare.findMany).not.toHaveBeenCalled()
     expect(mocks.db.clientActionToken.findMany).not.toHaveBeenCalled()
 
     expect(mocks.db.mediaAsset.findMany).toHaveBeenCalledWith(

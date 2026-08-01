@@ -1713,6 +1713,7 @@ model ClientProfile {
   bookingHolds           BookingHold[]
   notes                  ClientProfessionalNote[]
   proPolicies            ProClientPolicy[]
+  chartShares            ClientChartShare[]
   formulaEntries         ClientFormulaEntry[]
   consentRecords         ClientConsentRecord[]
   allergies              ClientAllergy[]
@@ -1952,6 +1953,7 @@ model ProfessionalProfile {
 
   clientNotes                 ClientProfessionalNote[]
   clientPolicies              ProClientPolicy[]
+  clientChartShares           ClientChartShare[]
   bookingSeries               BookingSeries[]
   clientFormulaEntries        ClientFormulaEntry[]
   clientConsentRecords        ClientConsentRecord[]
@@ -4281,6 +4283,67 @@ model VerificationDocument {
 /// A row exists only when the pro set something. Absent row == every default,
 /// which is why the resolver takes `ProClientPolicy | null` and never requires
 /// callers to create one first.
+/// W5 — the client's CONSENT to a professional seeing their chart.
+///
+/// Before this, `lib/clientVisibility.ts` treated a bare MessageThread as a
+/// reason to open the whole chart, open-ended (`accessUntil: null`), and no
+/// consumer branched on the reason — so a single message granted byte-identical
+/// read AND write access to notes, allergies, formulas, consent records, photo
+/// release, the technical record, service addresses, do-not-rebook, policy and
+/// date of birth. Joining a waitlist did it too, because `seedWaitlistThread`
+/// auto-creates a thread: a client who never messaged anyone handed over their
+/// whole chart by tapping "notify me".
+///
+/// A thread now grants CONTACT only. Full chart access needs either a
+/// qualifying booking (unchanged — a client who books has consented to being
+/// treated) or a GRANTED row here.
+///
+/// 🔴 The state machine is deliberately one row per pair, not an append-only
+/// log: the question "may this pro see this chart right now" must have exactly
+/// one answer. `revokedAt`/`respondedAt`/`requestedAt` keep the history that
+/// matters on the row itself.
+model ClientChartShare {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientId       String
+  professionalId String
+
+  status ClientChartShareStatus
+
+  /// When the PRO asked. Null when the client granted unprompted.
+  requestedAt DateTime?
+  /// When the client answered — granted or declined.
+  respondedAt DateTime?
+  /// When the client took it back. Kept alongside GRANTED history so a revoke
+  /// is legible as an act, not just an absence.
+  revokedAt   DateTime?
+
+  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  /// One share per (client, pro). A second row would make "is it shared"
+  /// ambiguous on a path that reads a medical record.
+  @@unique([clientId, professionalId])
+  /// The pro's side: "who has granted me access", and their open requests.
+  @@index([professionalId, status])
+  /// The client's side: the revoke list in /client/settings.
+  @@index([clientId, status])
+}
+
+enum ClientChartShareStatus {
+  /// The pro asked; the client has not answered. Grants NOTHING.
+  REQUESTED
+  /// The client said yes. This is the only value that opens the chart.
+  GRANTED
+  /// The client said no. Distinct from REVOKED so a pro cannot re-ask by
+  /// waiting out an absent row, and so "declined" is not read as "never asked".
+  DECLINED
+  /// The client granted, then took it back.
+  REVOKED
+}
+
 model ProClientPolicy {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())

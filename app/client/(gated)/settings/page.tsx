@@ -6,6 +6,7 @@ import ClientSelfProfileSettings from './ClientSelfProfileSettings'
 import ClientLocationSettings from './ClientLocationSettings'
 import ClientAddressesSettings from './ClientAddressesSettings'
 import ClientPaymentMethodsSettings from './ClientPaymentMethodsSettings'
+import ClientChartSharingSettings from './ClientChartSharingSettings'
 import NotificationPreferencesForm from '@/app/_components/NotificationPreferencesForm'
 import { getBrandConfig } from '@/lib/brand'
 import ThemeToggle from '@/lib/brand/ThemeToggle'
@@ -118,6 +119,19 @@ export default function ClientSettingsPage() {
           <ClientPaymentMethodsSettings />
         </section>
       ) : null}
+
+      {/*
+        W5: the client's own control over who can read their chart. An API-only
+        revoke is a capability the client has and cannot reach.
+      */}
+      <section className="brand-glass p-5 sm:p-6" id="chart-sharing">
+        <SectionIntro
+          title="Who can see your chart"
+          description="Your chart is the private record a pro keeps about you — allergies, formulas, notes, consent forms. Pros you book with can see the record of the work they do for you. Anyone else has to ask, and you can turn it off at any time."
+        />
+
+        <ClientChartSharingSettings />
+      </section>
 
       <section className="brand-glass p-5 sm:p-6">
         <SectionIntro
