@@ -190,6 +190,30 @@ export default async function ProBookingSeriesPage(props: {
             ))}
           </ul>
         ) : null}
+
+        {/* K20 — the roll-forward, stated. Until this step a series simply
+            stopped at the horizon, so "12 of 12 booked" was the whole truth;
+            now a longer or open-ended run has dates nobody has been shown yet,
+            and the pro is owed the fact that something will create them. The
+            flag state is baked into `willContinue`, so this cannot promise an
+            operator that is switched off. */}
+        {series.rollForward.willContinue ? (
+          <p
+            className="mt-3 rounded-xl border border-toneInfo/35 bg-bgPrimary p-3 text-[12px] text-textSecondary"
+            data-testid="series-roll-forward"
+          >
+            {series.rollForward.pendingCount == null
+              ? 'This series is open-ended. '
+              : `${series.rollForward.pendingCount} more ${
+                  series.rollForward.pendingCount === 1
+                    ? 'appointment is'
+                    : 'appointments are'
+                } still to come. `}
+            Dates are added to your calendar automatically, about{' '}
+            {series.rollForward.leadDays} days ahead — you do not need to do
+            anything.
+          </p>
+        ) : null}
       </section>
 
       {/* Price pinning (plan §Phase 8): what the client agreed to, and whether
@@ -212,9 +236,17 @@ export default async function ProBookingSeriesPage(props: {
         </p>
         <p className="mt-1 text-[12px] text-textSecondary">
           Every appointment in this series is booked at the price the client
-          agreed to when it was set up.
+          agreed to when it was set up
+          {series.rollForward.willContinue
+            ? ', including the dates still to be added'
+            : ''}
+          .
         </p>
 
+        {/* K20 settled the question K19 left open: the pin wins, so a moved list
+            price is a gap the pro can act on, never a prediction of the next
+            bill. The copy has to say which number the client is charged — the
+            whole point of the decision is that nothing is repriced quietly. */}
         {series.pricing.listPriceMoved &&
         series.pricing.currentListTotalCents != null ? (
           <p className="mt-2.5 rounded-xl border border-toneInfo/35 bg-bgPrimary p-3 text-[12px] text-textSecondary">
@@ -223,7 +255,11 @@ export default async function ProBookingSeriesPage(props: {
               {formatCents(series.pricing.currentListTotalCents)}
             </span>
             . These appointments keep their agreed price — nothing has been
-            repriced.
+            repriced
+            {series.rollForward.willContinue
+              ? ', and new dates will be booked at the agreed price too. To move this client to your current price, end this series and start a new one'
+              : ''}
+            .
           </p>
         ) : null}
 

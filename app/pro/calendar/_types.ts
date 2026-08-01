@@ -4,6 +4,7 @@ import type { IanaTimeZone } from '@/lib/timeZone'
 import type { ClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 import type { ConsentRequirementBadge } from '@/lib/consentForms/requirement'
 import type { PaymentBadge } from '@/lib/booking/paymentBadge'
+import type { RecurringMark } from '@/lib/booking/recurringMark'
 import type { RelationshipBadge } from '@/lib/booking/relationshipLabel'
 import type { CalendarScopeMode } from '@/lib/calendar/constants'
 import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
@@ -214,6 +215,17 @@ export type BookingCalendarEvent = CalendarEventBase & {
    * 🔴 It WARNS. Nothing about the booking path consults it.
    */
   consentRequirement?: ConsentRequirementBadge
+
+  /**
+   * Recurring-appointment mark (K19-C), derived server-side by
+   * lib/booking/recurringMark.ts and rendered in the card's TIME ROW beside the
+   * location chip — deliberately NOT a sixth top-row chip and NOT a second
+   * corner glyph. See that file for the channel call.
+   *
+   * Absent for every booking that is not part of a series, and when the wire
+   * value carries no seriesId.
+   */
+  recurring?: RecurringMark
 
   /**
    * ClientProfile id, present only when the viewing pro may open this client's

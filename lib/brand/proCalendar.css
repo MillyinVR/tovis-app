@@ -1928,6 +1928,35 @@
   }
 }
 
+/* Recurring-appointment mark (K19-C) — the TIME ROW, beside the location chip.
+   The channel call and its reasoning live in lib/booking/recurringMark.ts: the
+   top chip row is where a card runs out of width first, and "this repeats" is
+   the least urgent fact on the card, so it goes where "when and where" already
+   live rather than where the warnings are.
+
+   NO tone token, deliberately. Every other mark on this card carries a tone
+   because it reports a STATE (money owed, a form unsigned, a client who has not
+   answered); recurrence reports a fact, and painting it would give the pro a
+   fourth colour to decode for no decision it helps them make. It inherits the
+   time row's muted text colour, which respects [data-mode] like everything
+   else. Same ≥768px density gate as the other marks — on the narrowest grids
+   the card has room for the time and nothing else, and the accessible name
+   still carries the words. */
+.brand-pro-calendar-event-recurring {
+  display: none;
+  flex-shrink: 0;
+  margin-left: 6px;
+  align-items: center;
+  color: rgb(var(--text-muted));
+  vertical-align: middle;
+}
+
+@media (min-width: 768px) {
+  .brand-pro-calendar-event-recurring {
+    display: inline-flex;
+  }
+}
+
 .brand-pro-calendar-event-completed-check {
   display: none;
   flex-shrink: 0;

@@ -75,6 +75,7 @@ function detail(
       occurrencesDisagree: false,
       listPriceMoved: false,
     },
+    rollForward: { willContinue: false, pendingCount: 0, leadDays: 90 },
     occurrences: [occurrence(0), occurrence(1), occurrence(2), occurrence(3)],
     skipped: [],
     ...overrides,

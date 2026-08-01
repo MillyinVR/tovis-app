@@ -155,6 +155,7 @@ import {
   MIN_SERIES_INTERVAL_WEEKS,
   SERIES_MATERIALIZE_HORIZON,
 } from '@/lib/booking/series/schedule'
+import { loadSeriesPinnedPrices } from '@/lib/booking/series/pinnedPrice'
 import { clampInt } from '@/lib/pick'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
@@ -10340,9 +10341,22 @@ async function performLockedCreateProBooking(args: {
   // edits them). Otherwise honor a price-grace ramp: existing clients of a
   // migrated offering keep their lower ramped price; new clients pay the catalog
   // minimum (the stored price).
+  //
+  // K20: a LATER occurrence of a standing appointment is booked at what
+  // occurrence 0 was booked at, not at today's catalog — see
+  // lib/booking/series/pinnedPrice.ts for the decision and its cost. Derived
+  // from occurrence 0's own line items inside this transaction, so no caller can
+  // inject a price. Null (no occurrence 0 to read) falls back to resolution.
+  const seriesPinnedPrices =
+    !importMode && isSeriesFollowOnOccurrence && seriesId != null
+      ? await loadSeriesPinnedPrices({ tx: args.tx, seriesId })
+      : null
+
   let chargedUnitPrice: Prisma.Decimal
   if (importMode) {
     chargedUnitPrice = zeroMoney()
+  } else if (seriesPinnedPrices) {
+    chargedUnitPrice = seriesPinnedPrices.baseUnitPrice
   } else {
     const offeringRampForMode = pickOfferingModeRamp(
       offering.priceRamps,
@@ -10362,13 +10376,25 @@ async function performLockedCreateProBooking(args: {
   // subtotal and their duration into the appointment length below; each persists
   // as an ADD_ON line item under the base. The availability slot the pro picked
   // already reserved this same folded duration. Imports/waitlist reuse pass none.
-  const resolvedAddOns = await resolveBookingAddOns({
+  const currentAddOns = await resolveBookingAddOns({
     client: args.tx,
     professionalId: args.professionalId,
     offeringId: offering.id,
     addOnIds: args.addOnIds ?? [],
     locationType: args.locationType,
   })
+  // K20: the pin covers the add-on lines too — a series priced at $120 must not
+  // become $140 because one add-on's catalog price moved. DURATION is never
+  // pinned: it comes from today's resolution because the reserved window and the
+  // persisted length have to agree with the calendar, not with a promise.
+  const resolvedAddOns = seriesPinnedPrices
+    ? currentAddOns.map((addOn) => {
+        const pinned = seriesPinnedPrices.addOnPriceByLinkId.get(
+          addOn.offeringAddOnId,
+        )
+        return pinned ? { ...addOn, priceSnapshot: pinned } : addOn
+      })
+    : currentAddOns
   const addOnsPriceTotal = resolvedAddOns.reduce(
     (acc, addOn) => acc.add(addOn.priceSnapshot),
     new Prisma.Decimal(0),
@@ -16049,6 +16075,13 @@ export type CreateBookingSeriesResult = {
   nextOccurrenceIndex: number
   occurrences: BookingSeriesMaterializedOccurrence[]
   skipped: BookingSeriesSkippedOccurrence[]
+  /**
+   * K20: set when creation stopped SHORT of the pro's requested run for a reason
+   * that is not a refusal — today, dates past the pro's own booking horizon. The
+   * remaining occurrences are not lost and are not skips; the roll-forward cron
+   * books them as they come into range.
+   */
+  deferred: SeriesMaterializationDeferral | null
 }
 
 /**
@@ -16222,31 +16255,182 @@ export async function createBookingSeries(
     horizon: SERIES_MATERIALIZE_HORIZON - 1,
   })
 
-  const instants = computeSeriesOccurrenceInstants({
-    recurrence: {
+  // The SAME loop K20's cron runs (see materializeSeriesOccurrenceRange). One
+  // implementation, so a rolled-forward occurrence and a created one cannot
+  // disagree about conflicts, DST, deposits or price.
+  const pass = await materializeSeriesOccurrenceRange({
+    plan: {
+      seriesId: created.seriesId,
+      professionalId: args.professionalId,
+      actorUserId: args.actorUserId,
+      clientId: args.clientId,
+      offeringId: args.offeringId,
+      addOnIds,
+      locationId: location.id,
+      locationType: args.locationType,
+      clientAddressId: args.clientAddressId,
+      internalNotes: args.internalNotes,
+      overrideReason: args.overrideReason,
+      requestedBufferMinutes: args.requestedBufferMinutes,
+      requestedTotalDurationMinutes: args.requestedTotalDurationMinutes,
+      allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+      allowShortNotice: args.allowShortNotice,
+      allowFarFuture: args.allowFarFuture,
+      depositPerOccurrence,
       anchorAt: args.firstOccurrenceAt,
       timeZone,
       intervalWeeks: args.intervalWeeks,
+      requestId: args.requestId ?? null,
     },
     fromIndex: 1,
     count: remaining,
+    notLaterThan: null,
   })
 
-  let nextOccurrenceIndex = 1
+  occurrences.push(...pass.occurrences)
+  skipped.push(...pass.skipped)
+
+  const nextOccurrenceIndex = pass.nextOccurrenceIndex
+
+  await endBookingSeriesIfExhausted({
+    seriesId: created.seriesId,
+    occurrenceCount: args.occurrenceCount,
+    nextOccurrenceIndex,
+  })
+
+  // No schedule-version bump here: performLockedCreateProBooking already bumps
+  // on every occurrence it creates, and a series that materialized nothing
+  // cannot exist (occurrence 0 either books or refuses the whole call).
+
+  return {
+    seriesId: created.seriesId,
+    timeZone,
+    nextOccurrenceIndex,
+    occurrences,
+    skipped,
+    deferred: pass.deferred,
+  }
+}
+
+/**
+ * Everything one occurrence needs, resolved once. Read from the SERIES row (not
+ * from a request) whenever the cron is the caller, which is what stops an
+ * unattended pass from granting an override the pro never asked for.
+ */
+export type SeriesMaterializationPlan = {
+  seriesId: string
+  professionalId: string
+  actorUserId: string
+  clientId: string
+  offeringId: string
+  addOnIds: string[]
+  locationId: string
+  locationType: ServiceLocationType
+  clientAddressId: string | null
+  internalNotes: string | null
+  overrideReason: string | null
+  requestedBufferMinutes: number | null
+  requestedTotalDurationMinutes: number | null
+  allowOutsideWorkingHours: boolean
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  depositPerOccurrence: boolean
+  anchorAt: Date
+  timeZone: string
+  intervalWeeks: number
+  requestId: string | null
+}
+
+/**
+ * Why a pass STOPPED without exhausting its range — a "not yet", never a "no".
+ *
+ * 🔴 The distinction K20 exists to draw. A `BookingSeriesException` is
+ * PERMANENT: it is unique per (series, index), so the roll-forward will never
+ * retry that index again. That is right for a slot somebody else has taken and
+ * catastrophic for a refusal that only means "not from here yet" — a date past
+ * the pro's booking horizon, or a pro whose account is momentarily not
+ * booking-ready. Recording those would punch permanent holes in every long
+ * series the first time either was true. They defer instead: no row is written,
+ * `nextOccurrenceIndex` does not advance past them, and the next pass tries
+ * again.
+ */
+export type SeriesMaterializationDeferral = {
+  index: number
+  intendedStart: Date | null
+  /** `BEYOND_WINDOW` = outside this pass's lead window, not a refusal at all. */
+  code: BookingErrorCode | 'BEYOND_WINDOW'
+}
+
+export type SeriesMaterializationPassResult = {
+  occurrences: BookingSeriesMaterializedOccurrence[]
+  skipped: BookingSeriesSkippedOccurrence[]
+  /** Where the NEXT pass resumes. Never past a deferred index. */
+  nextOccurrenceIndex: number
+  deferred: SeriesMaterializationDeferral | null
+}
+
+/**
+ * Refusals that describe a condition which will plausibly change, and which are
+ * not about this slot being taken. See `SeriesMaterializationDeferral`.
+ *
+ * `MAX_DAYS_AHEAD_EXCEEDED` is the load-bearing member: a series longer than the
+ * pro's booking window reaches it by construction, and before K20 every one of
+ * those occurrences became a permanent `REFUSED` exception the roll-forward
+ * could never undo.
+ */
+const DEFERRABLE_SERIES_REFUSALS: ReadonlySet<BookingErrorCode> = new Set([
+  'MAX_DAYS_AHEAD_EXCEEDED',
+  'PRO_NOT_READY',
+])
+
+/**
+ * Materialize occurrence indices [fromIndex, fromIndex + count) for a series
+ * that already exists.
+ *
+ * ONE locked transaction PER OCCURRENCE — the K18 rule, and the reason a
+ * collision on index 5 still leaves 6…11 standing: in Postgres a statement
+ * error poisons its whole transaction, so 5 must have had one of its own to
+ * roll back.
+ *
+ * `notLaterThan` bounds the pass in TIME rather than in count. Creation passes
+ * null (it materializes K18's count-based horizon in one go); the roll-forward
+ * cron passes `now + lead`, which is what makes it a rolling window rather than
+ * an attempt to book a standing appointment out to infinity on its first tick.
+ */
+async function materializeSeriesOccurrenceRange(args: {
+  plan: SeriesMaterializationPlan
+  fromIndex: number
+  count: number
+  notLaterThan: Date | null
+}): Promise<SeriesMaterializationPassResult> {
+  const { plan } = args
+  const occurrences: BookingSeriesMaterializedOccurrence[] = []
+  const skipped: BookingSeriesSkippedOccurrence[] = []
+  let nextOccurrenceIndex = args.fromIndex
+  let deferred: SeriesMaterializationDeferral | null = null
+
+  const instants = computeSeriesOccurrenceInstants({
+    recurrence: {
+      anchorAt: plan.anchorAt,
+      timeZone: plan.timeZone,
+      intervalWeeks: plan.intervalWeeks,
+    },
+    fromIndex: args.fromIndex,
+    count: args.count,
+  })
 
   for (const instant of instants) {
-    nextOccurrenceIndex = instant.index + 1
-
     if (instant.kind === 'NONEXISTENT') {
       // The recurring wall time does not exist on that local date. Recorded,
-      // never shifted — see lib/booking/series/schedule.ts.
+      // never shifted — see lib/booking/series/schedule.ts. Genuinely
+      // permanent: that clock time will not exist on that date next week either.
       await recordBookingSeriesException({
-        seriesId: created.seriesId,
+        seriesId: plan.seriesId,
         index: instant.index,
         intendedStart: null,
         reason: BookingSeriesExceptionReason.NONEXISTENT_LOCAL_TIME,
         detail: instant.localWallTime,
-        nextOccurrenceIndex,
+        nextOccurrenceIndex: instant.index + 1,
       })
       skipped.push({
         index: instant.index,
@@ -16254,45 +16438,57 @@ export async function createBookingSeries(
         reason: BookingSeriesExceptionReason.NONEXISTENT_LOCAL_TIME,
         detail: instant.localWallTime,
       })
+      nextOccurrenceIndex = instant.index + 1
       continue
+    }
+
+    // Past the pass's lead window. Occurrence instants increase with the index,
+    // so everything after this one is too — stop rather than continue.
+    if (args.notLaterThan != null && instant.at.getTime() > args.notLaterThan.getTime()) {
+      deferred = {
+        index: instant.index,
+        intendedStart: instant.at,
+        code: 'BEYOND_WINDOW',
+      }
+      break
     }
 
     try {
       // Its own transaction — see the header. A refusal below rolls back only
       // this occurrence.
       const result = await withLockedProfessionalTransaction(
-        args.professionalId,
+        plan.professionalId,
         async ({ tx, now }) => {
           const booking = await performLockedCreateProBooking({
             tx,
             now,
-            professionalId: args.professionalId,
-            clientId: args.clientId,
-            offeringId: args.offeringId,
-            addOnIds,
-            locationId: location.id,
-            locationType: args.locationType,
+            professionalId: plan.professionalId,
+            clientId: plan.clientId,
+            offeringId: plan.offeringId,
+            addOnIds: plan.addOnIds,
+            locationId: plan.locationId,
+            locationType: plan.locationType,
             scheduledFor: instant.at,
-            clientAddressId: args.clientAddressId,
-            internalNotes: args.internalNotes,
-            requestedBufferMinutes: args.requestedBufferMinutes,
-            requestedTotalDurationMinutes: args.requestedTotalDurationMinutes,
-            allowOutsideWorkingHours: args.allowOutsideWorkingHours,
-            allowShortNotice: args.allowShortNotice,
-            allowFarFuture: args.allowFarFuture,
-            actorUserId: args.actorUserId,
-            overrideReason: args.overrideReason,
-            requestId: args.requestId ?? null,
+            clientAddressId: plan.clientAddressId,
+            internalNotes: plan.internalNotes,
+            requestedBufferMinutes: plan.requestedBufferMinutes,
+            requestedTotalDurationMinutes: plan.requestedTotalDurationMinutes,
+            allowOutsideWorkingHours: plan.allowOutsideWorkingHours,
+            allowShortNotice: plan.allowShortNotice,
+            allowFarFuture: plan.allowFarFuture,
+            actorUserId: plan.actorUserId,
+            overrideReason: plan.overrideReason,
+            requestId: plan.requestId,
             idempotencyKey: null,
             // D7: every occurrence pays only when the pro chose
             // per-occurrence. Otherwise the deposit is occurrence 0's alone.
-            depositRequested: depositPerOccurrence,
-            seriesId: created.seriesId,
+            depositRequested: plan.depositPerOccurrence,
+            seriesId: plan.seriesId,
             seriesOccurrenceIndex: instant.index,
           })
 
           await tx.bookingSeries.update({
-            where: { id: created.seriesId },
+            where: { id: plan.seriesId },
             data: { nextOccurrenceIndex: instant.index + 1 },
           })
 
@@ -16305,6 +16501,7 @@ export async function createBookingSeries(
         bookingId: result.booking.id,
         scheduledFor: result.booking.scheduledFor,
       })
+      nextOccurrenceIndex = instant.index + 1
     } catch (error: unknown) {
       // 🔴 Only a KNOWN booking refusal becomes a skip. An unexpected error (a
       // dropped connection, a bug) must not be recorded as "that slot was
@@ -16312,15 +16509,25 @@ export async function createBookingSeries(
       // the roll-forward will never retry.
       if (!isBookingError(error)) throw error
 
+      // …and a refusal that only means "not yet" must not become one either.
+      if (DEFERRABLE_SERIES_REFUSALS.has(error.code)) {
+        deferred = {
+          index: instant.index,
+          intendedStart: instant.at,
+          code: error.code,
+        }
+        break
+      }
+
       const reason = classifySeriesRefusal(error.code)
 
       await recordBookingSeriesException({
-        seriesId: created.seriesId,
+        seriesId: plan.seriesId,
         index: instant.index,
         intendedStart: instant.at,
         reason,
         detail: error.code,
-        nextOccurrenceIndex,
+        nextOccurrenceIndex: instant.index + 1,
       })
 
       skipped.push({
@@ -16329,31 +16536,193 @@ export async function createBookingSeries(
         reason,
         detail: error.code,
       })
+      nextOccurrenceIndex = instant.index + 1
     }
   }
 
-  // An exhausted series has nothing left to roll forward; K20's cron sweeps on
-  // status, so say so now rather than leaving it looking live forever.
+  return { occurrences, skipped, nextOccurrenceIndex, deferred }
+}
+
+/**
+ * Stamp a series ENDED once it has attempted every occurrence it planned.
+ *
+ * An exhausted series has nothing left to roll forward, and the cron sweeps on
+ * `status` — so saying so is what keeps it out of every future pass rather than
+ * being re-examined forever. An open-ended series (`occurrenceCount == null`)
+ * never ends here; the pro ends it.
+ */
+async function endBookingSeriesIfExhausted(args: {
+  seriesId: string
+  occurrenceCount: number | null
+  nextOccurrenceIndex: number
+}): Promise<boolean> {
   if (
-    args.occurrenceCount != null &&
-    nextOccurrenceIndex >= args.occurrenceCount
+    args.occurrenceCount == null ||
+    args.nextOccurrenceIndex < args.occurrenceCount
   ) {
-    await prisma.bookingSeries.update({
-      where: { id: created.seriesId },
-      data: { status: BookingSeriesStatus.ENDED },
+    return false
+  }
+
+  await prisma.bookingSeries.update({
+    where: { id: args.seriesId },
+    data: { status: BookingSeriesStatus.ENDED },
+  })
+  return true
+}
+
+export type AdvanceBookingSeriesResult = {
+  seriesId: string
+  /** ACTIVE unless this pass exhausted the plan. */
+  seriesStatus: BookingSeriesStatus
+  nextOccurrenceIndex: number
+  occurrences: BookingSeriesMaterializedOccurrence[]
+  skipped: BookingSeriesSkippedOccurrence[]
+  deferred: SeriesMaterializationDeferral | null
+}
+
+/**
+ * K20 (Phase 8) — roll ONE series forward.
+ *
+ * The operator K18-B's open-ended option had been waiting for: a series that
+ * materializes 12 occurrences at creation and then dead-stops is not a standing
+ * appointment, it is a batch. This advances the window, unattended.
+ *
+ * Everything it books comes from the SERIES ROW — the pattern, the location, the
+ * add-ons, and in particular the pro's override grants, which K18 stored for
+ * exactly this reason. The cron decides nothing; it re-applies what the pro
+ * already authorized, at the price they already agreed (see
+ * lib/booking/series/pinnedPrice.ts).
+ *
+ * Idempotent by construction, not by care: `Booking @@unique([seriesId,
+ * seriesOccurrenceIndex])` and `BookingSeriesException @@unique([seriesId,
+ * occurrenceIndex])` mean a repeated pass over the same indices cannot produce a
+ * second row of either kind.
+ *
+ * 🔴 Gated on `recurringAppointmentsEnabled()`, unlike K19's read and cancel.
+ * The asymmetry is deliberate and is the right way round: the kill switch exists
+ * to stop the feature CREATING things, and an unattended writer is the first
+ * thing it must stop. Nothing is stranded by that — every already-materialized
+ * appointment stands, and the (ungated) series cancel still ends a series while
+ * the switch is off.
+ *
+ * Returns null when the series does not exist or is not ACTIVE.
+ */
+export async function advanceBookingSeries(args: {
+  seriesId: string
+  /** Materialize nothing scheduled later than this. */
+  notLaterThan: Date
+  /** Cap on indices ATTEMPTED in this pass. */
+  maxOccurrences: number
+}): Promise<AdvanceBookingSeriesResult | null> {
+  if (!recurringAppointmentsEnabled()) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Recurring appointments are not enabled.',
+      userMessage: 'Recurring appointments are not available yet.',
     })
   }
 
-  // No schedule-version bump here: performLockedCreateProBooking already bumps
-  // on every occurrence it creates, and a series that materialized nothing
-  // cannot exist (occurrence 0 either books or refuses the whole call).
+  const series = await prisma.bookingSeries.findUnique({
+    where: { id: args.seriesId },
+    select: {
+      id: true,
+      status: true,
+      professionalId: true,
+      clientId: true,
+      offeringId: true,
+      locationId: true,
+      locationType: true,
+      clientAddressId: true,
+      addOnIds: true,
+      timeZone: true,
+      anchorAt: true,
+      intervalWeeks: true,
+      occurrenceCount: true,
+      nextOccurrenceIndex: true,
+      depositRequested: true,
+      depositPerOccurrence: true,
+      requestedBufferMinutes: true,
+      requestedTotalDurationMinutes: true,
+      allowOutsideWorkingHours: true,
+      allowShortNotice: true,
+      allowFarFuture: true,
+      overrideReason: true,
+      internalNotes: true,
+      createdByUserId: true,
+    },
+  })
+
+  if (!series || series.status !== BookingSeriesStatus.ACTIVE) return null
+
+  const count = countOccurrencesToMaterialize({
+    nextOccurrenceIndex: series.nextOccurrenceIndex,
+    occurrenceCount: series.occurrenceCount,
+    horizon: args.maxOccurrences,
+  })
+
+  if (count <= 0) {
+    // Nothing left to attempt: the plan is exhausted but the row still says
+    // ACTIVE (a pass that ended mid-range, or a series written before this
+    // stamp existed). Settle it rather than re-reading it every tick.
+    const ended = await endBookingSeriesIfExhausted({
+      seriesId: series.id,
+      occurrenceCount: series.occurrenceCount,
+      nextOccurrenceIndex: series.nextOccurrenceIndex,
+    })
+    return {
+      seriesId: series.id,
+      seriesStatus: ended ? BookingSeriesStatus.ENDED : series.status,
+      nextOccurrenceIndex: series.nextOccurrenceIndex,
+      occurrences: [],
+      skipped: [],
+      deferred: null,
+    }
+  }
+
+  const pass = await materializeSeriesOccurrenceRange({
+    plan: {
+      seriesId: series.id,
+      professionalId: series.professionalId,
+      // The pro who created the series stays the actor. A cron is not a person,
+      // and stamping these bookings with a system identity would break every
+      // audit trail that asks "who booked this".
+      actorUserId: series.createdByUserId,
+      clientId: series.clientId,
+      offeringId: series.offeringId,
+      addOnIds: series.addOnIds,
+      locationId: series.locationId,
+      locationType: series.locationType,
+      clientAddressId: series.clientAddressId,
+      internalNotes: series.internalNotes,
+      overrideReason: series.overrideReason,
+      requestedBufferMinutes: series.requestedBufferMinutes,
+      requestedTotalDurationMinutes: series.requestedTotalDurationMinutes,
+      allowOutsideWorkingHours: series.allowOutsideWorkingHours,
+      allowShortNotice: series.allowShortNotice,
+      allowFarFuture: series.allowFarFuture,
+      depositPerOccurrence: series.depositPerOccurrence,
+      anchorAt: series.anchorAt,
+      timeZone: series.timeZone,
+      intervalWeeks: series.intervalWeeks,
+      requestId: null,
+    },
+    fromIndex: series.nextOccurrenceIndex,
+    count,
+    notLaterThan: args.notLaterThan,
+  })
+
+  const ended = await endBookingSeriesIfExhausted({
+    seriesId: series.id,
+    occurrenceCount: series.occurrenceCount,
+    nextOccurrenceIndex: pass.nextOccurrenceIndex,
+  })
 
   return {
-    seriesId: created.seriesId,
-    timeZone,
-    nextOccurrenceIndex,
-    occurrences,
-    skipped,
+    seriesId: series.id,
+    seriesStatus: ended ? BookingSeriesStatus.ENDED : BookingSeriesStatus.ACTIVE,
+    nextOccurrenceIndex: pass.nextOccurrenceIndex,
+    occurrences: pass.occurrences,
+    skipped: pass.skipped,
+    deferred: pass.deferred,
   }
 }
 

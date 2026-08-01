@@ -21,6 +21,7 @@ import type {
 
 import type { ClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 import type { PaymentBadge } from '@/lib/booking/paymentBadge'
+import type { RecurringMark } from '@/lib/booking/recurringMark'
 import type { RelationshipBadge } from '@/lib/booking/relationshipLabel'
 import type { TimeZoneTruthSource } from '@/lib/booking/timeZoneTruth'
 import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
@@ -120,6 +121,26 @@ export type ProCalendarBookingEventDTO = {
    * be declared HERE first, or `gen:api-schema` never sees it.
    */
   consentRequirement?: ConsentRequirementBadge
+  /**
+   * Recurring-appointment mark (K19-C, shipped in K20) — this booking is one
+   * occurrence of a `BookingSeries`. Derived by the one helper
+   * (lib/booking/recurringMark.ts) and rendered in the card's TIME ROW beside
+   * the location chip, NOT as a sixth top-row chip and NOT as a second corner
+   * glyph: see that file for the channel call and why the crowded row was the
+   * wrong place for the least urgent fact on the card.
+   *
+   * OPTIONAL, and absent on every booking that is not part of a series — which
+   * is all of them while `ENABLE_RECURRING_APPOINTMENTS` is unset, so today's
+   * payload is byte-identical to pre-K20.
+   *
+   * 🔴 Declared HERE **first**, before the route ever set it — which is the
+   * actual fix for the K15 gap above. The route adds it with the same
+   * conditional spread every other optional field uses (that is what keeps an
+   * absent mark byte-identical on the wire), and a spread is invisible to
+   * excess-property checking; so the declaration in this file, not the route,
+   * is what makes `gen:api-schema` and the iOS contract job see the field.
+   */
+  recurring?: RecurringMark
   details: ProCalendarEventDetailsDTO
 }
 

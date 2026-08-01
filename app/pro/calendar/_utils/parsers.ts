@@ -34,6 +34,7 @@ import {
 } from '@/lib/calendar/constants'
 import { parseClientConfirmationBadgeWire } from '@/lib/booking/clientConfirmation'
 import { parseConsentRequirementBadgeWire } from '@/lib/consentForms/requirement'
+import { parseRecurringMarkWire } from '@/lib/booking/recurringMark'
 import { parsePaymentBadgeWire } from '@/lib/booking/paymentBadge'
 import { parseRelationshipBadgeWire } from '@/lib/booking/relationshipLabel'
 import { parseCalendarSwatch } from '@/lib/calendar/eventColor'
@@ -457,6 +458,9 @@ function parseBookingEvent(
   const consentRequirement = parseConsentRequirementBadgeWire(
     value.consentRequirement,
   )
+  // K19-C recurring mark — no seriesId → no mark, because the mark's whole job
+  // is to point at the series.
+  const recurring = parseRecurringMarkWire(value.recurring)
 
   const event: BookingCalendarEvent = {
     kind: 'BOOKING',
@@ -491,6 +495,7 @@ function parseBookingEvent(
     ...(serviceSwatch ? { serviceSwatch } : {}),
     ...(clientConfirmation ? { clientConfirmation } : {}),
     ...(consentRequirement ? { consentRequirement } : {}),
+    ...(recurring ? { recurring } : {}),
     ...(clientProfileId ? { clientProfileId } : {}),
     ...(preferenceLabel ? { preferenceLabel } : {}),
     ...(offerHref ? { offerHref } : {}),

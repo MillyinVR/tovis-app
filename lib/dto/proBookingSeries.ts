@@ -44,6 +44,24 @@ export type ProBookingSeriesSkippedOccurrenceDTO = {
   detail: string | null
 }
 
+/**
+ * K20 — why creation stopped SHORT of the requested run, when it did.
+ *
+ * 🔴 Not a skip. A skip is permanent (`BookingSeriesException` is unique per
+ * index, so the roll-forward never retries it); this is a "not yet" that leaves
+ * no row behind and WILL be retried — today, a date past the pro's own booking
+ * horizon. Before K20 those became permanent `REFUSED` exceptions, which quietly
+ * made every series longer than the pro's booking window permanently short.
+ */
+export type ProBookingSeriesDeferralDTO = {
+  /** The first index this pass did not attempt. */
+  index: number
+  /** The instant it would have taken, ISO-8601. */
+  intendedStart: string | null
+  /** `BEYOND_WINDOW`, or the BookingErrorCode that deferred it. Diagnostic. */
+  code: string
+}
+
 export type ProBookingSeriesCreateResponseDTO = {
   seriesId: string
   /**
@@ -59,6 +77,13 @@ export type ProBookingSeriesCreateResponseDTO = {
   nextOccurrenceIndex: number
   occurrences: ProBookingSeriesOccurrenceDTO[]
   skipped: ProBookingSeriesSkippedOccurrenceDTO[]
+  /**
+   * Set when creation stopped before the requested run was exhausted. Null means
+   * it attempted everything this pass was asked to attempt. The remaining dates
+   * are neither booked nor lost — the roll-forward adds them as they come into
+   * range.
+   */
+  deferred: ProBookingSeriesDeferralDTO | null
 }
 
 // ── K19: reading a series back, and stopping it ───────────────────────────────
@@ -132,8 +157,46 @@ export type ProBookingSeriesPricingDTO = {
   currentListTotalCents: number | null
   /** True when a materialized occurrence disagrees with the pin. */
   occurrencesDisagree: boolean
-  /** True when `currentListTotalCents` differs from `pinnedTotalCents`. */
+  /**
+   * True when `currentListTotalCents` differs from `pinnedTotalCents`.
+   *
+   * 🔴 K20 settled what this MEANS, and it is not "your next occurrence will
+   * cost this": the roll-forward books every later occurrence at
+   * `pinnedTotalCents`, so a moved list price is information about the gap, and
+   * the pro's remedy is to end the series and start a new one. See
+   * lib/booking/series/pinnedPrice.ts. Any surface rendering this must say which
+   * of the two numbers the client will actually be charged.
+   */
   listPriceMoved: boolean
+}
+
+/**
+ * K20 — whether this series still grows, and how far ahead.
+ *
+ * A standing appointment that stops producing dates is the failure K18-B named
+ * and K19 refused to sell. This is the honest statement of the opposite: the
+ * dates the pro has NOT been shown yet, and the fact that something will create
+ * them.
+ */
+export type ProBookingSeriesRollForwardDTO = {
+  /**
+   * True when the roll-forward will add more dates to this series.
+   *
+   * 🔴 False whenever the roll-forward cannot actually run — an ENDED or
+   * CANCELLED series, a plan with nothing left, and (the one that is easy to
+   * miss) the recurring-appointments feature being switched off. A surface that
+   * promised "new dates are added automatically" while the operator was dark
+   * would be the exact defect K19 refused to ship
+   * ([[verifiable-rail-still-needs-an-operator]]).
+   */
+  willContinue: boolean
+  /**
+   * Planned occurrences not yet attempted, or null for an open-ended series
+   * (which has no total to count down from).
+   */
+  pendingCount: number | null
+  /** How far ahead of today the roll-forward keeps a series booked, in days. */
+  leadDays: number
 }
 
 export type ProBookingSeriesDetailDTO = {
@@ -159,6 +222,7 @@ export type ProBookingSeriesDetailDTO = {
   addOnNames: string[]
   internalNotes: string | null
   pricing: ProBookingSeriesPricingDTO
+  rollForward: ProBookingSeriesRollForwardDTO
   occurrences: ProBookingSeriesOccurrenceDetailDTO[]
   /** The durable skips — `BookingSeriesException` rows, oldest index first. */
   skipped: ProBookingSeriesSkippedOccurrenceDTO[]
