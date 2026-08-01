@@ -13,7 +13,8 @@ import { isRecord } from '@/lib/guards'
  * The dot reads `GET /api/v1/client/notifications?unread=true&take=1` — the
  * presence of a single unread item — so it covers every event type (the bucketed
  * `/summary` only counts booking/consult/aftercare/reminder). Polls gently and
- * refreshes on focus/visibility, matching the messages InboxBell behaviour.
+ * refreshes on focus/visibility, matching the useUnreadBadge behaviour behind
+ * the footer's Inbox badge.
  */
 export default function NotificationsBell() {
   const [hasUnread, setHasUnread] = useState(false)

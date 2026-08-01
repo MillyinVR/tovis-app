@@ -88,7 +88,7 @@ export default function ClientWaitlistStrip({
             place here.
           </p>
           <Link
-            href="/discover"
+            href="/search"
             className="mt-3 inline-flex rounded-[12px] border border-textPrimary/16 px-4 py-2 text-[11.5px] font-bold text-textSecondary transition hover:border-terra/30 hover:text-terra"
           >
             Find services →

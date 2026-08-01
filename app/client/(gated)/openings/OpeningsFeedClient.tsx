@@ -279,7 +279,7 @@ export default function OpeningsFeedClient() {
                 No last-minute openings right now. We&apos;ll ping you the moment a pro frees up a spot you&apos;re waiting on.
               </p>
               <Link
-                href="/discover"
+                href="/search"
                 className="mt-4 inline-flex rounded-full border border-textPrimary/15 px-4 py-2 text-[12px] font-bold text-textSecondary transition hover:border-accentPrimary/40 hover:text-accentPrimary"
               >
                 Browse pros →

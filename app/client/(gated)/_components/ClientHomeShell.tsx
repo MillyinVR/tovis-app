@@ -4,7 +4,6 @@ import type { ClientHomeData } from '../_data/getClientHomeData'
 import ClientGreeting from './ClientGreeting'
 import UpcomingAppointmentCard from './UpcomingAppointmentCard'
 import ClientActionCard from './ClientActionCard'
-import InboxBell from './InboxBell'
 import NotificationsBell from './NotificationsBell'
 import ClientLastMinuteInvites from './ClientLastMinuteInvites'
 import ClientWaitlistStrip from './ClientWaitlistStrip'
@@ -74,10 +73,14 @@ export default function ClientHomeShell({
           </h1>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <NotificationsBell />
-          <InboxBell />
-        </div>
+        {/*
+          One bell only. The inbox previously had a second bell here that read
+          useUnreadBadge — the exact hook and endpoint the footer Inbox tab
+          already uses for its badge (see CLIENT_TABS.hasBadge), so it was a
+          duplicate signal, not an extra one. Notifications keep a bell because
+          the footer has no tab for /client/notifications.
+        */}
+        <NotificationsBell />
       </header>
 
       {/* Main grid. grid-cols-1 (= minmax(0,1fr)) so single-column mobile/tablet

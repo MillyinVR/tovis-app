@@ -2,16 +2,43 @@
 //
 // Config-reader tests for the APNs + FCM push providers.
 
+import { generateKeyPairSync } from 'node:crypto'
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { NotificationChannel, NotificationProvider } from '@prisma/client'
 
 import {
   isNotificationProviderConfigError,
+  isPushProviderConfigured,
+  isUsableApnsAuthKey,
+  normalizeApnsAuthKey,
   readApnsConfig,
+  readApnsConfigOutcome,
   readFcmConfig,
   requireApnsConfig,
   requireFcmConfig,
+  resetApnsAuthKeyCacheForTests,
 } from './config'
+
+/**
+ * A REAL EC P-256 key, generated per run. The previous fixture here was the
+ * string '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----', which
+ * looks like a PEM and can never sign anything — so these tests passed happily
+ * through a production outage in which every APNs push failed on exactly that
+ * distinction. Only a key that genuinely parses can prove the reader works.
+ */
+const REAL_P256_PEM = generateKeyPairSync('ec', {
+  namedCurve: 'prime256v1',
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+}).privateKey.trim()
+
+function setApnsEnv(authKey: string) {
+  process.env.APNS_AUTH_KEY = authKey
+  process.env.APNS_KEY_ID = 'KEY123'
+  process.env.APNS_TEAM_ID = 'TEAM456'
+  process.env.APNS_BUNDLE_ID = 'com.tovis.app'
+}
 
 const APNS_VARS = [
   'APNS_AUTH_KEY',
@@ -32,6 +59,7 @@ function clearPushEnv() {
   for (const name of [...APNS_VARS, ...FCM_VARS]) {
     delete process.env[name]
   }
+  resetApnsAuthKeyCacheForTests()
 }
 
 beforeEach(clearPushEnv)
@@ -39,17 +67,12 @@ afterEach(clearPushEnv)
 
 describe('readApnsConfig', () => {
   it('reads a full APNs config (production by default)', () => {
-    process.env.APNS_AUTH_KEY = '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----'
-    process.env.APNS_KEY_ID = 'KEY123'
-    process.env.APNS_TEAM_ID = 'TEAM456'
-    process.env.APNS_BUNDLE_ID = 'com.tovis.app'
+    setApnsEnv(REAL_P256_PEM)
 
-    const config = readApnsConfig()
-
-    expect(config).toEqual({
+    expect(readApnsConfig()).toEqual({
       provider: NotificationProvider.APNS,
       channel: NotificationChannel.PUSH,
-      authKey: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----',
+      authKey: REAL_P256_PEM,
       keyId: 'KEY123',
       teamId: 'TEAM456',
       bundleId: 'com.tovis.app',
@@ -58,21 +81,19 @@ describe('readApnsConfig', () => {
   })
 
   it('routes to sandbox when APNS_ENV === sandbox', () => {
-    process.env.APNS_AUTH_KEY = 'key'
-    process.env.APNS_KEY_ID = 'KEY123'
-    process.env.APNS_TEAM_ID = 'TEAM456'
-    process.env.APNS_BUNDLE_ID = 'com.tovis.app'
+    setApnsEnv(REAL_P256_PEM)
     process.env.APNS_ENV = 'sandbox'
 
     expect(readApnsConfig()?.production).toBe(false)
   })
 
   it('returns null when any APNs var is missing', () => {
-    process.env.APNS_AUTH_KEY = 'key'
+    process.env.APNS_AUTH_KEY = REAL_P256_PEM
     process.env.APNS_KEY_ID = 'KEY123'
     process.env.APNS_TEAM_ID = 'TEAM456'
     // no bundle id
     expect(readApnsConfig()).toBeNull()
+    expect(readApnsConfigOutcome().problem).toBe('NOT_CONFIGURED')
   })
 
   it('requireApnsConfig throws a config error when unconfigured', () => {
@@ -81,6 +102,97 @@ describe('readApnsConfig', () => {
       expect.unreachable('should have thrown')
     } catch (error) {
       expect(isNotificationProviderConfigError(error)).toBe(true)
+    }
+  })
+})
+
+describe('APNs auth key transport mangling', () => {
+  // The SAME key, delivered three ways an env var actually mangles it. Each must
+  // normalise back to byte-identical PEM — that is the A/B proof: only the
+  // transport differs, so a pass cannot come from anything else.
+  const cases: { name: string; encode: (pem: string) => string }[] = [
+    { name: 'raw PEM', encode: (pem) => pem },
+    { name: 'escaped newlines', encode: (pem) => pem.replace(/\n/g, '\\n') },
+    {
+      name: 'base64-wrapped PEM',
+      encode: (pem) => Buffer.from(pem, 'utf8').toString('base64'),
+    },
+    { name: 'wrapped in double quotes', encode: (pem) => `"${pem}"` },
+    {
+      name: 'escaped newlines inside quotes',
+      encode: (pem) => `"${pem.replace(/\n/g, '\\n')}"`,
+    },
+    { name: 'CRLF line endings', encode: (pem) => pem.replace(/\n/g, '\r\n') },
+  ]
+
+  for (const { name, encode } of cases) {
+    it(`normalises ${name} back to usable PEM`, () => {
+      const normalized = normalizeApnsAuthKey(encode(REAL_P256_PEM))
+
+      expect(normalized).toBe(REAL_P256_PEM)
+      expect(isUsableApnsAuthKey(normalized)).toBe(true)
+    })
+
+    it(`readApnsConfig accepts ${name}`, () => {
+      setApnsEnv(encode(REAL_P256_PEM))
+
+      expect(readApnsConfig()?.authKey).toBe(REAL_P256_PEM)
+    })
+  }
+})
+
+describe('APNs invalid private key', () => {
+  // The production failure: all four vars present, key unusable. Every push was
+  // enqueued, failed at the ES256 signer, and retried until it died — silently.
+  const unusable = [
+    { name: 'PEM-shaped but not a key', value: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----' },
+    { name: 'arbitrary string', value: 'not-a-key' },
+    { name: 'truncated PEM', value: REAL_P256_PEM.slice(0, 60) },
+  ]
+
+  for (const { name, value } of unusable) {
+    it(`rejects ${name}`, () => {
+      setApnsEnv(value)
+
+      expect(readApnsConfig()).toBeNull()
+      expect(readApnsConfigOutcome().problem).toBe('INVALID_PRIVATE_KEY')
+    })
+  }
+
+  it('rejects an RSA key — APNs requires EC/ES256', () => {
+    const rsa = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    }).privateKey
+
+    expect(isUsableApnsAuthKey(rsa)).toBe(false)
+  })
+
+  it('reports push as UNCONFIGURED so no un-sendable rows are enqueued', () => {
+    setApnsEnv('-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----')
+
+    // The whole point: a broken key must not look like a working provider.
+    expect(isPushProviderConfigured()).toBe(false)
+  })
+
+  it('reports push as configured once the key is real', () => {
+    setApnsEnv(REAL_P256_PEM)
+
+    expect(isPushProviderConfigured()).toBe(true)
+  })
+
+  it('requireApnsConfig throws APNS_INVALID_PRIVATE_KEY, not NOT_CONFIGURED', () => {
+    setApnsEnv('not-a-key')
+
+    try {
+      requireApnsConfig()
+      expect.unreachable('should have thrown')
+    } catch (error) {
+      expect(isNotificationProviderConfigError(error)).toBe(true)
+      expect(
+        isNotificationProviderConfigError(error) ? error.code : null,
+      ).toBe('APNS_INVALID_PRIVATE_KEY')
     }
   })
 })

@@ -204,9 +204,11 @@ describe('AppointmentsList', () => {
     render(<AppointmentsList buckets={makeBuckets()} />)
 
     expect(screen.getByText('No appointments yet')).toBeInTheDocument()
+    // /discover has never existed as a route — this assertion pinned a 404.
+    // Discovery lives at /search (see CLIENT_TABS in app/config/clientNav.ts).
     expect(screen.getByRole('link', { name: /Find a pro/ })).toHaveAttribute(
       'href',
-      '/discover',
+      '/search',
     )
   })
 })

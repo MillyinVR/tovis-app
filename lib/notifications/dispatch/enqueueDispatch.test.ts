@@ -1,3 +1,5 @@
+import { generateKeyPairSync } from 'node:crypto'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NotificationChannel,
@@ -23,6 +25,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
 }))
 
+import { resetApnsAuthKeyCacheForTests } from '../config'
 import { enqueueDispatch } from './enqueueDispatch'
 
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
@@ -842,8 +845,17 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
   })
 
   describe('PUSH per-device fan-out', () => {
+    // A REAL EC P-256 key. 'p8_key' used to be enough here because the provider
+    // gate only checked that the var was non-empty — the same blind spot that
+    // let production run for weeks with an unusable key while every push failed.
+    // isPushProviderConfigured() now requires a key that actually parses, so the
+    // fixture has to be a key that actually parses.
     const APNS_ENV = {
-      APNS_AUTH_KEY: 'p8_key',
+      APNS_AUTH_KEY: generateKeyPairSync('ec', {
+        namedCurve: 'prime256v1',
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      }).privateKey,
       APNS_KEY_ID: 'key_id',
       APNS_TEAM_ID: 'team_id',
       APNS_BUNDLE_ID: 'me.tovis.app',
@@ -859,6 +871,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       for (const name of Object.keys(APNS_ENV)) {
         delete process.env[name]
       }
+      resetApnsAuthKeyCacheForTests()
     }
 
     afterEach(() => {
