@@ -109,6 +109,27 @@ describe('buildProSessionCloseoutChecklist', () => {
     })
   })
 
+  // One after photo is all a session requires, so the singular is the NORMAL
+  // reading of this row — it used to say "1 photos captured".
+  it('says one photo in the singular', () => {
+    const checklist = buildProSessionCloseoutChecklist({
+      afterCount: 1,
+      hasAfterPhoto: true,
+      hasAftercareDraft: true,
+      hasFinalizedAftercare: true,
+      hasPaymentCollected: true,
+      hasCheckoutClosed: true,
+      hasConsultationApproved: true,
+    })
+
+    expect(
+      checklist.items.find((item) => item.key === 'afterPhotos'),
+    ).toMatchObject({
+      subtitle: '1 photo captured',
+      done: true,
+    })
+  })
+
   it.each([
     ['after photo missing', { hasAfterPhoto: false }],
     ['aftercare not finalized', { hasFinalizedAftercare: false }],
