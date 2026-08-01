@@ -7,7 +7,10 @@ import { isBookingError } from '@/lib/booking/errors'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { clientRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
-import { broadcastLive, liveChannelForUser } from '@/lib/live/broadcast'
+import {
+  appendMessageToThread,
+  broadcastThreadMessage,
+} from '@/lib/messages/appendMessage'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import { messageThreadHref } from '@/lib/messages/notifyNewMessage'
 import { resolveMessageThread } from '@/lib/messagesResolve'
@@ -156,32 +159,25 @@ async function seedWaitlistThread(args: {
       `Joined your waitlist for ${serviceName}. Preferred: ${args.preferenceSummary}.` +
       (args.notes ? ` Notes: ${args.notes}` : '')
 
+    // Appending a message is three writes, not one — the message, the thread's
+    // inbox pointers, and the sender's own read receipt. Shared with the send
+    // route so the inbox preview cannot drift between the two (it already had).
     await prisma.$transaction(async (tx) => {
-      const msg = await tx.message.create({
-        data: { threadId, senderUserId: args.senderUserId, body },
-        select: { id: true, createdAt: true },
-      })
-      await tx.messageThread.update({
-        where: { id: threadId },
-        data: { lastMessageAt: msg.createdAt, lastMessagePreview: body.slice(0, 140) },
-      })
-      await tx.messageThreadParticipant.update({
-        where: { threadId_userId: { threadId, userId: args.senderUserId } },
-        data: { lastReadAt: msg.createdAt },
+      await appendMessageToThread({
+        tx,
+        threadId,
+        senderUserId: args.senderUserId,
+        body,
       })
     })
 
     // W2: the live-sync the send route does and this path never did, so a pro
     // with the inbox already open sees the waitlister appear instead of having
     // to reload. Not a notification — that is notifyWaitlistJoined's job.
-    const recipients = await prisma.messageThreadParticipant.findMany({
-      where: { threadId, userId: { not: args.senderUserId } },
-      select: { userId: true },
+    await broadcastThreadMessage({
+      threadId,
+      senderUserId: args.senderUserId,
     })
-    await broadcastLive(
-      recipients.map((participant) => liveChannelForUser(participant.userId)),
-      'messages',
-    )
 
     return { threadId, serviceName }
   } catch (err) {
