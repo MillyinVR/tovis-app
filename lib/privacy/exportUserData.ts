@@ -27,6 +27,8 @@ export type ExportedUserData = {
     bookingHolds: unknown[]
     clientActionTokens: unknown[]
     aftercareSummaries: unknown[]
+    clientConsentRecords: unknown[]
+    clientAllergies: unknown[]
     mediaAssets: unknown[]
     messages: unknown[]
     notifications: unknown[]
@@ -349,6 +351,52 @@ const aftercareSummaryExportSelect = {
 } satisfies Prisma.AftercareSummarySelect
 
 /**
+ * The client's own signature on a consent form.
+ *
+ * Deliberately excluded:
+ * - `notesEncrypted` — pro-authored free text; never disclosed to the client
+ *   (same rule that keeps `ClientProfessionalNote` out entirely).
+ * - `proofRef` — author-scoped snapshot id, not surfaced even to other pros.
+ * - `signatureTokenId` — a single-use credential id; `exportSafety` would
+ *   reject it on the `/token/i` key pattern anyway.
+ */
+const clientConsentRecordExportSelect = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  bookingId: true,
+  kind: true,
+  serviceScope: true,
+  formVersionId: true,
+  signedAt: true,
+  proofMethod: true,
+  patchTestResult: true,
+  validUntil: true,
+  visibility: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ClientConsentRecordSelect
+
+/**
+ * The client's own health disclosure.
+ *
+ * ⚠️ Reads the PLAINTEXT `label`/`description` columns, which are mid
+ * expand→contract dual-write (docs/security/ticket-encrypt-tier3-health-notes.md).
+ * When the contract migration drops them this export goes silently empty —
+ * it must switch to decrypting `labelEncrypted`/`descriptionEncrypted` then.
+ * The raw AEAD envelopes are NOT exported: ciphertext is not disclosure.
+ */
+const clientAllergyExportSelect = {
+  id: true,
+  clientId: true,
+  label: true,
+  description: true,
+  severity: true,
+  recordedByProfessionalId: true,
+  createdAt: true,
+} satisfies Prisma.ClientAllergySelect
+
+/**
  * Canonical user data export boundary.
  *
  * This function should be the only place that assembles a user-level privacy
@@ -381,6 +429,8 @@ export async function exportUserData(
     bookingHolds,
     clientActionTokens,
     aftercareSummaries,
+    clientConsentRecords,
+    clientAllergies,
     mediaAssets,
     messages,
     notifications,
@@ -399,6 +449,8 @@ export async function exportUserData(
     findBookingHolds(input.db, clientProfileId, professionalProfileId),
     findClientActionTokens(input.db, clientProfileId),
     findAftercareSummaries(input.db, clientProfileId, professionalProfileId),
+    findClientConsentRecords(input.db, clientProfileId, professionalProfileId),
+    findClientAllergies(input.db, clientProfileId),
     findMediaAssets(
       input.db,
       input.userId,
@@ -463,6 +515,8 @@ export async function exportUserData(
       bookingHolds: normalizeJsonArray(bookingHolds),
       clientActionTokens: normalizeJsonArray(clientActionTokens),
       aftercareSummaries: normalizeJsonArray(aftercareSummaries),
+      clientConsentRecords: normalizeJsonArray(clientConsentRecords),
+      clientAllergies: normalizeJsonArray(clientAllergies),
       mediaAssets: normalizeJsonArray(mediaAssets),
       messages: normalizeJsonArray(messages),
       notifications: normalizeJsonArray(notifications),
@@ -479,7 +533,12 @@ export async function exportUserData(
     limitations: [
       'This export covers user-linked records known to the privacy export boundary.',
       'Tenant-level exports, aggregate analytics, provider-side records, and storage object bytes are separate workflows.',
-      'If Prisma schema adds new user-linked models, update this boundary and its schema-completeness test.',
+      'If Prisma schema adds new user-linked models, update this boundary and its schema-completeness test (lib/privacy/exportBoundary.ts, enforced by exportBoundary.test.ts).',
+      'Every model linking to the subject carries a recorded disposition in lib/privacy/exportBoundary.ts: exported, deliberately omitted with a reason, or an undecided backlog entry that cannot grow.',
+      'Professional-authored records about a client (ClientProfessionalNote, ClientFormulaEntry) are omitted: pro feedback is never disclosed to the client it describes.',
+      'Per-client booking requirements (ProClientPolicy) are omitted because the feature requires the client-facing experience to stay neutral — the client feels a requirement without learning a policy record exists about them.',
+      'ClientConsentRecord export covers the signature and its scope but excludes professional-authored notes, the author-scoped proof reference, and the single-use signature token id.',
+      'ClientAllergy export reads the plaintext columns that are mid encryption dual-write; it must move to the encrypted envelopes before those columns are dropped.',
       'MediaAsset export includes product-facing URLs and metadata but excludes storage bucket/path internals.',
       'Notification exports include safe inbox/schedule/dispatch/delivery fields and exclude recipient contact snapshots, structured payload/data fields, provider payloads, lease tokens, destination snapshots, provider message details, dedupe keys, and delivery error details.',
       'AttributionEvent export is omitted pending a disclosure decision for attribution/admin-adjacent records.',
@@ -594,6 +653,40 @@ async function findAftercareSummaries(
     },
     orderBy: { createdAt: 'asc' },
     select: aftercareSummaryExportSelect,
+  })
+}
+
+async function findClientConsentRecords(
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+  professionalProfileId: string | null,
+): Promise<unknown[]> {
+  if (!clientProfileId && !professionalProfileId) return []
+
+  return db.clientConsentRecord.findMany({
+    where: {
+      OR: compactWhere<Prisma.ClientConsentRecordWhereInput>([
+        clientProfileId ? { clientId: clientProfileId } : null,
+        professionalProfileId
+          ? { professionalId: professionalProfileId }
+          : null,
+      ]),
+    },
+    orderBy: { createdAt: 'asc' },
+    select: clientConsentRecordExportSelect,
+  })
+}
+
+async function findClientAllergies(
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+): Promise<unknown[]> {
+  if (!clientProfileId) return []
+
+  return db.clientAllergy.findMany({
+    where: { clientId: clientProfileId },
+    orderBy: { createdAt: 'asc' },
+    select: clientAllergyExportSelect,
   })
 }
 

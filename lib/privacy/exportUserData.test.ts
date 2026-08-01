@@ -29,6 +29,12 @@ const mocks = vi.hoisted(() => ({
     aftercareSummary: {
       findMany: vi.fn(),
     },
+    clientConsentRecord: {
+      findMany: vi.fn(),
+    },
+    clientAllergy: {
+      findMany: vi.fn(),
+    },
     mediaAsset: {
       findMany: vi.fn(),
     },
@@ -131,6 +137,8 @@ function resetFindManyMocks() {
   mocks.db.bookingHold.findMany.mockResolvedValue([])
   mocks.db.clientActionToken.findMany.mockResolvedValue([])
   mocks.db.aftercareSummary.findMany.mockResolvedValue([])
+  mocks.db.clientConsentRecord.findMany.mockResolvedValue([])
+  mocks.db.clientAllergy.findMany.mockResolvedValue([])
   mocks.db.mediaAsset.findMany.mockResolvedValue([])
   mocks.db.message.findMany.mockResolvedValue([])
   mocks.db.notification.findMany.mockResolvedValue([])
@@ -655,17 +663,85 @@ describe('exportUserData', () => {
           },
         ],
         adminActionLogs: [],
+        clientConsentRecords: [],
+        clientAllergies: [],
       },
       limitations: [
         'This export covers user-linked records known to the privacy export boundary.',
         'Tenant-level exports, aggregate analytics, provider-side records, and storage object bytes are separate workflows.',
-        'If Prisma schema adds new user-linked models, update this boundary and its schema-completeness test.',
+        'If Prisma schema adds new user-linked models, update this boundary and its schema-completeness test (lib/privacy/exportBoundary.ts, enforced by exportBoundary.test.ts).',
+        'Every model linking to the subject carries a recorded disposition in lib/privacy/exportBoundary.ts: exported, deliberately omitted with a reason, or an undecided backlog entry that cannot grow.',
+        'Professional-authored records about a client (ClientProfessionalNote, ClientFormulaEntry) are omitted: pro feedback is never disclosed to the client it describes.',
+        'Per-client booking requirements (ProClientPolicy) are omitted because the feature requires the client-facing experience to stay neutral — the client feels a requirement without learning a policy record exists about them.',
+        'ClientConsentRecord export covers the signature and its scope but excludes professional-authored notes, the author-scoped proof reference, and the single-use signature token id.',
+        'ClientAllergy export reads the plaintext columns that are mid encryption dual-write; it must move to the encrypted envelopes before those columns are dropped.',
         'MediaAsset export includes product-facing URLs and metadata but excludes storage bucket/path internals.',
         'Notification exports include safe inbox/schedule/dispatch/delivery fields and exclude recipient contact snapshots, structured payload/data fields, provider payloads, lease tokens, destination snapshots, provider message details, dedupe keys, and delivery error details.',
         'AttributionEvent export is omitted pending a disclosure decision for attribution/admin-adjacent records.',
         'AdminActionLog export is omitted from the default user export because it is an internal security/operational record.',
       ],
     })
+  })
+
+  it('exports the consent signature without the professional-authored parts of it', async () => {
+    mocks.db.user.findUnique.mockResolvedValueOnce(makeUser({ id: 'user_1' }))
+
+    await exportUserData({ db: mocks.db as never, userId: 'user_1' })
+
+    const [call] = mocks.db.clientConsentRecord.findMany.mock.calls
+    const select = call?.[0]?.select ?? {}
+
+    // The client's own signature and what it attests to.
+    expect(select).toMatchObject({
+      id: true,
+      kind: true,
+      serviceScope: true,
+      formVersionId: true,
+      signedAt: true,
+      proofMethod: true,
+      patchTestResult: true,
+      validUntil: true,
+    })
+
+    // Never the pro's prose, their author-scoped proof pointer, or the
+    // single-use signature credential.
+    expect(select).not.toHaveProperty('notesEncrypted')
+    expect(select).not.toHaveProperty('proofRef')
+    expect(select).not.toHaveProperty('signatureTokenId')
+
+    // Scoped to the subject on either side of the record.
+    expect(call?.[0]?.where).toEqual({
+      OR: [{ clientId: 'client_1' }, { professionalId: 'pro_1' }],
+    })
+  })
+
+  it('exports the client allergy record without raw encryption envelopes', async () => {
+    mocks.db.user.findUnique.mockResolvedValueOnce(makeUser({ id: 'user_1' }))
+
+    await exportUserData({ db: mocks.db as never, userId: 'user_1' })
+
+    const [call] = mocks.db.clientAllergy.findMany.mock.calls
+    const select = call?.[0]?.select ?? {}
+
+    expect(select).toMatchObject({ label: true, description: true, severity: true })
+
+    // Ciphertext is not disclosure — exporting an AEAD envelope would look
+    // like data while being unreadable to the subject.
+    expect(select).not.toHaveProperty('labelEncrypted')
+    expect(select).not.toHaveProperty('descriptionEncrypted')
+
+    expect(call?.[0]?.where).toEqual({ clientId: 'client_1' })
+  })
+
+  it('does not query consent or allergy records for a user with no profiles', async () => {
+    mocks.db.user.findUnique.mockResolvedValueOnce(
+      makeUser({ id: 'user_1', clientProfile: null, professionalProfile: null }),
+    )
+
+    await exportUserData({ db: mocks.db as never, userId: 'user_1' })
+
+    expect(mocks.db.clientConsentRecord.findMany).not.toHaveBeenCalled()
+    expect(mocks.db.clientAllergy.findMany).not.toHaveBeenCalled()
   })
 
   it('queries all supported user-linked models with explicit scoped filters', async () => {
