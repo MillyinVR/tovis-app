@@ -6,6 +6,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { chartRefusal } from '@/lib/clients/chartAccessCopy'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,10 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     // ✅ single source of truth visibility gate
     const gate = await assertProCanViewClient(professionalId, clientId)
-    if (!gate.ok) return jsonFail(403, 'Forbidden.')
+    if (!gate.ok) {
+      const refusal = chartRefusal(gate.visibility, 403)
+      return jsonFail(refusal.status, refusal.message, { code: refusal.code })
+    }
 
     const body = (await req.json().catch(() => ({}))) as { alertBanner?: unknown }
 

@@ -12,6 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { chartRefusal } from '@/lib/clients/chartAccessCopy'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { readEncryptedNoteOrFallback } from '@/lib/security/notesPrivacy'
 import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
@@ -124,7 +125,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
     if (!clientId) return jsonFail(400, 'Missing client id.')
 
     const gate = await assertProCanViewClient(proId, clientId)
-    if (!gate.ok) return jsonFail(404, 'Client not found.')
+    if (!gate.ok) {
+      const refusal = chartRefusal(gate.visibility, 404)
+      return jsonFail(refusal.status, refusal.message, { code: refusal.code })
+    }
 
     const technicalEnabled = isClientTechnicalRecordEnabled(proId)
 

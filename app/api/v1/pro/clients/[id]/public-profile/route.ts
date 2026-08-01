@@ -16,6 +16,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { chartRefusal } from '@/lib/clients/chartAccessCopy'
 import { loadPublicClientProfileByClientId } from '@/app/u/[handle]/_data/loadPublicClientProfile'
 
 export const dynamic = 'force-dynamic'
@@ -32,7 +33,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     // Don't reveal existence to a pro who can't currently view this client.
     const gate = await assertProCanViewClient(proId, clientId)
-    if (!gate.ok) return jsonFail(404, 'Client not found.')
+    if (!gate.ok) {
+      const refusal = chartRefusal(gate.visibility, 404)
+      return jsonFail(refusal.status, refusal.message, { code: refusal.code })
+    }
 
     // No viewer options: the pro is a neutral read-only viewer (follow hidden),
     // matching the web page's `followMode="hidden"`. `null` when the client has

@@ -14,6 +14,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { chartRefusal } from '@/lib/clients/chartAccessCopy'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { loadTechnicalRecord } from '@/lib/clients/technicalRecordLoader'
 import type { ProClientTechnicalRecordResponseDTO } from '@/lib/dto/proClientTechnicalRecord'
@@ -40,7 +41,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     // Read-sibling privacy choice: don't reveal existence to a pro who can't view.
     const gate = await assertProCanViewClient(proId, clientId)
-    if (!gate.ok) return jsonFail(404, 'Client not found.')
+    if (!gate.ok) {
+      const refusal = chartRefusal(gate.visibility, 404)
+      return jsonFail(refusal.status, refusal.message, { code: refusal.code })
+    }
 
     const data = await loadTechnicalRecord(clientId, proId)
 
