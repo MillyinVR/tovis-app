@@ -144,6 +144,10 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   // picture. The select omits the pro's private free text (internalNotes,
   // overrideReason), mirroring the booking select.
   BookingSeries: { status: 'EXPORTED', keys: ['bookingSeries'] },
+  // W5: the client's consent record. Exporting it is the whole point — it is the
+  // durable answer to "who did I let read my chart, and when did I take it
+  // back". Both parties are subjects; there is no private free text to withhold.
+  ClientChartShare: { status: 'EXPORTED', keys: ['clientChartShares'] },
   ClientActionToken: { status: 'EXPORTED', keys: ['clientActionTokens'] },
   AftercareSummary: { status: 'EXPORTED', keys: ['aftercareSummaries'] },
   MediaAsset: { status: 'EXPORTED', keys: ['mediaAssets'] },

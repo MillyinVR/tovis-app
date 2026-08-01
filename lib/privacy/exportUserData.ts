@@ -26,6 +26,7 @@ export type ExportedUserData = {
     bookingsAsProfessional: unknown[]
     bookingHolds: unknown[]
     bookingSeries: unknown[]
+    clientChartShares: unknown[]
     clientActionTokens: unknown[]
     aftercareSummaries: unknown[]
     clientConsentRecords: unknown[]
@@ -456,6 +457,7 @@ export async function exportUserData(
     bookingsAsProfessional,
     bookingHolds,
     bookingSeries,
+    clientChartShares,
     clientActionTokens,
     aftercareSummaries,
     clientConsentRecords,
@@ -477,6 +479,7 @@ export async function exportUserData(
     findBookingsAsProfessional(input.db, professionalProfileId),
     findBookingHolds(input.db, clientProfileId, professionalProfileId),
     findBookingSeries(input.db, clientProfileId, professionalProfileId),
+    findClientChartShares(input.db, clientProfileId, professionalProfileId),
     findClientActionTokens(input.db, clientProfileId),
     findAftercareSummaries(input.db, clientProfileId, professionalProfileId),
     findClientConsentRecords(input.db, clientProfileId, professionalProfileId),
@@ -544,6 +547,7 @@ export async function exportUserData(
       bookingsAsProfessional: normalizeJsonArray(bookingsAsProfessional),
       bookingHolds: normalizeJsonArray(bookingHolds),
       bookingSeries: normalizeJsonArray(bookingSeries),
+      clientChartShares: normalizeJsonArray(clientChartShares),
       clientActionTokens: normalizeJsonArray(clientActionTokens),
       aftercareSummaries: normalizeJsonArray(aftercareSummaries),
       clientConsentRecords: normalizeJsonArray(clientConsentRecords),
@@ -669,6 +673,41 @@ async function findBookingSeries(
     },
     orderBy: { createdAt: 'asc' },
     select: bookingSeriesExportSelect,
+  })
+}
+
+// W5 chart consent. Exported to BOTH sides, and there is no private free text
+// to withhold — the row is nothing but the fact of the grant and its timestamps.
+//
+// For the CLIENT this is the point of the whole feature: the durable answer to
+// "who did I let read my chart, and when did I take it back". For the PRO it is
+// the record of an access they were given, which they are equally entitled to.
+async function findClientChartShares(
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+  professionalProfileId: string | null,
+): Promise<unknown[]> {
+  if (!clientProfileId && !professionalProfileId) return []
+
+  return db.clientChartShare.findMany({
+    where: {
+      OR: compactWhere([
+        clientProfileId ? { clientId: clientProfileId } : null,
+        professionalProfileId ? { professionalId: professionalProfileId } : null,
+      ]),
+    },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      clientId: true,
+      professionalId: true,
+      status: true,
+      requestedAt: true,
+      respondedAt: true,
+      revokedAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   })
 }
 

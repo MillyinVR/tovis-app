@@ -323,10 +323,22 @@ export default async function BookingCreateContent(props: {
         requestedClient.id,
       )
 
-      if (visibility.canViewClient) {
+      // W5: two different tiers in one block.
+      //
+      // Pre-filling WHO the appointment is for is contact-tier — it needs the
+      // client's name, which a pro they are already messaging can see. Gating it
+      // on the chart tier would delete the "message a waitlister, then offer
+      // them a time" flow that `clientVisibility.test.ts` calls out as
+      // load-bearing: the deep link would land on an empty form.
+      //
+      // Their SERVICE ADDRESSES are their home. That stays chart-tier, behind
+      // a booking or the client's explicit consent.
+      if (visibility.canContactClient) {
         clients = [buildProBookingNewClientDTO(requestedClient)]
         validClientId = requestedClient.id
+      }
 
+      if (visibility.canViewClient) {
         const clientAddressesRaw = await prisma.clientAddress.findMany({
           where: {
             clientId: requestedClient.id,
