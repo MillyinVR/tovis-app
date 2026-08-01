@@ -35,6 +35,12 @@ const mocks = vi.hoisted(() => {
       },
       messageThread: {
         findUnique: vi.fn(),
+        // W8: the pair fallback — any existing thread for this pro↔client pair,
+        // whatever context created it.
+        findFirst: vi.fn(),
+      },
+      messageThreadParticipant: {
+        upsert: vi.fn(),
       },
       $transaction: vi.fn(async (fn: (innerTx: typeof tx) => Promise<unknown>) =>
         fn(tx),
@@ -67,6 +73,10 @@ describe('resolveMessageThread', () => {
     mocks.prisma.$transaction.mockImplementation(
       async (fn: (innerTx: typeof mocks.tx) => Promise<unknown>) => fn(mocks.tx),
     )
+    // W8 default: the pair has no thread yet, so every pre-existing test keeps
+    // exercising the CREATE path it was written for.
+    mocks.prisma.messageThread.findFirst.mockResolvedValue(null)
+    mocks.prisma.messageThreadParticipant.upsert.mockResolvedValue({ id: 'p_1' })
   })
 
   it('creates a BOOKING thread with both participants for the booking client', async () => {
@@ -194,6 +204,136 @@ describe('resolveMessageThread', () => {
 
     expect(outcome).toEqual({ ok: true, thread: null })
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  // W8 — one thread per pro↔client pair.
+  //
+  // Reported: "it started a new message in their inbox instead of continuing in
+  // the message thread the client already started with the pro." Threads were
+  // keyed by (client, pro, contextType, contextId), so a client who messaged
+  // from the pro's profile and then joined that pro's waitlist got TWO threads.
+  describe('one thread per pair', () => {
+    function setUpPair() {
+      mocks.prisma.booking.findUnique.mockResolvedValue(bookingRow)
+      mocks.prisma.clientProfile.findUnique.mockResolvedValue({
+        id: 'client_1',
+        userId: 'user_client',
+      })
+      mocks.prisma.professionalProfile.findUnique.mockResolvedValue({
+        id: 'pro_1',
+        userId: 'user_pro',
+      })
+    }
+
+    it('continues the pair thread instead of forking a new one', async () => {
+      setUpPair()
+      // Nothing under the REQUESTED context key…
+      mocks.prisma.messageThread.findUnique.mockResolvedValue(null)
+      // …but the pair already has a thread from another context.
+      mocks.prisma.messageThread.findFirst.mockResolvedValue({
+        id: 'thread_pro_profile',
+      })
+
+      const outcome = await resolveMessageThread({
+        viewer: clientViewer,
+        input: {
+          contextType: MessageThreadContextType.BOOKING,
+          contextId: 'booking_1',
+          createIfMissing: true,
+        },
+      })
+
+      expect(outcome).toEqual({
+        ok: true,
+        thread: { id: 'thread_pro_profile' },
+      })
+      // 🔴 The whole point: no second thread is minted.
+      expect(mocks.tx.messageThread.upsert).not.toHaveBeenCalled()
+    })
+
+    it('scopes the pair lookup to this exact pro and client, oldest first', async () => {
+      setUpPair()
+      mocks.prisma.messageThread.findUnique.mockResolvedValue(null)
+      mocks.prisma.messageThread.findFirst.mockResolvedValue({ id: 'thread_a' })
+
+      await resolveMessageThread({
+        viewer: clientViewer,
+        input: {
+          contextType: MessageThreadContextType.BOOKING,
+          contextId: 'booking_1',
+          createIfMissing: true,
+        },
+      })
+
+      expect(mocks.prisma.messageThread.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { clientId: 'client_1', professionalId: 'pro_1' },
+          // "The thread the client ALREADY started" — oldest wins, and it is
+          // stable regardless of which surface asks.
+          orderBy: { createdAt: 'asc' },
+        }),
+      )
+    })
+
+    it('backfills participants on a legacy thread it did not create', async () => {
+      setUpPair()
+      mocks.prisma.messageThread.findUnique.mockResolvedValue(null)
+      mocks.prisma.messageThread.findFirst.mockResolvedValue({ id: 'thread_old' })
+
+      await resolveMessageThread({
+        viewer: clientViewer,
+        input: {
+          contextType: MessageThreadContextType.BOOKING,
+          contextId: 'booking_1',
+          createIfMissing: true,
+        },
+      })
+
+      // Returning an old thread for a new context means both sides must be
+      // participants of it — otherwise the pro opens a thread they cannot read.
+      expect(mocks.prisma.messageThreadParticipant.upsert).toHaveBeenCalledTimes(2)
+    })
+
+    // The exact-context row still wins, so every thread stays reachable by the
+    // key it was created under and no existing deep link changes meaning.
+    it('prefers the exact-context thread when one exists', async () => {
+      setUpPair()
+      mocks.prisma.messageThread.findUnique.mockResolvedValue({ id: 'thread_exact' })
+      mocks.prisma.messageThread.findFirst.mockResolvedValue({ id: 'thread_other' })
+
+      const outcome = await resolveMessageThread({
+        viewer: clientViewer,
+        input: {
+          contextType: MessageThreadContextType.BOOKING,
+          contextId: 'booking_1',
+          createIfMissing: true,
+        },
+      })
+
+      expect(outcome).toEqual({ ok: true, thread: { id: 'thread_exact' } })
+      expect(mocks.prisma.messageThread.findFirst).not.toHaveBeenCalled()
+    })
+
+    // createIfMissing:false must stay a pure read. A pair thread is still a
+    // thread, so it IS returned — but nothing is created either way.
+    it('returns the pair thread under createIfMissing:false without creating', async () => {
+      setUpPair()
+      mocks.prisma.messageThread.findUnique.mockResolvedValue(null)
+      mocks.prisma.messageThread.findFirst.mockResolvedValue({ id: 'thread_pair' })
+
+      const outcome = await resolveMessageThread({
+        viewer: clientViewer,
+        input: {
+          contextType: MessageThreadContextType.BOOKING,
+          contextId: 'booking_1',
+          createIfMissing: false,
+        },
+      })
+
+      expect(outcome).toEqual({ ok: true, thread: { id: 'thread_pair' } })
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.tx.messageThread.upsert).not.toHaveBeenCalled()
+    })
   })
 
   it('returns 409 CLIENT_UNCLAIMED when the client profile has no user', async () => {

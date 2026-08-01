@@ -47,6 +47,11 @@ const mocks = vi.hoisted(() => {
       },
       messageThread: {
         findUnique: vi.fn(),
+        // W8: the pair fallback.
+        findFirst: vi.fn(),
+      },
+      messageThreadParticipant: {
+        upsert: vi.fn(),
       },
       $transaction: vi.fn(async (fn: (innerTx: typeof tx) => Promise<unknown>) =>
         fn(tx),
@@ -99,6 +104,7 @@ describe('MessagesStartPage', () => {
       userId: 'user_pro',
     })
     mocks.prisma.messageThread.findUnique.mockResolvedValue(null)
+    mocks.prisma.messageThread.findFirst.mockResolvedValue(null)
     mocks.tx.messageThread.upsert.mockResolvedValue({ id: 'thread_1' })
 
     await expect(
@@ -166,6 +172,7 @@ describe('MessagesStartPage', () => {
       userId: 'user_client',
     })
     mocks.prisma.messageThread.findUnique.mockResolvedValue(null)
+    mocks.prisma.messageThread.findFirst.mockResolvedValue(null)
     mocks.tx.messageThread.upsert.mockResolvedValue({ id: 'thread_2' })
 
     await expect(
