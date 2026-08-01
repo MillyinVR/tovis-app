@@ -10368,6 +10368,17 @@
     },
     "ProBookingSeriesCreateResponseDTO": {
       "properties": {
+        "deferred": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProBookingSeriesDeferralDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when creation stopped before the requested run was exhausted. Null means it attempted everything this pass was asked to attempt. The remaining dates are neither booked nor lost — the roll-forward adds them as they come into range."
+        },
         "nextOccurrenceIndex": {
           "description": "Where K20's roll-forward resumes. Also the honest count of occurrences ATTEMPTED so far: occurrences.length + skipped.length.",
           "type": "number"
@@ -10397,7 +10408,34 @@
         "timeZone",
         "nextOccurrenceIndex",
         "occurrences",
-        "skipped"
+        "skipped",
+        "deferred"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesDeferralDTO": {
+      "description": "K20 — why creation stopped SHORT of the requested run, when it did.\n\n🔴 Not a skip. A skip is permanent (`BookingSeriesException` is unique per index, so the roll-forward never retries it); this is a \"not yet\" that leaves no row behind and WILL be retried — today, a date past the pro's own booking horizon. Before K20 those became permanent `REFUSED` exceptions, which quietly made every series longer than the pro's booking window permanently short.",
+      "properties": {
+        "code": {
+          "description": "`BEYOND_WINDOW`, or the BookingErrorCode that deferred it. Diagnostic.",
+          "type": "string"
+        },
+        "index": {
+          "description": "The first index this pass did not attempt.",
+          "type": "number"
+        },
+        "intendedStart": {
+          "description": "The instant it would have taken, ISO-8601.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "intendedStart",
+        "code"
       ],
       "type": "object"
     },
@@ -10469,6 +10507,9 @@
         "pricing": {
           "$ref": "#/definitions/ProBookingSeriesPricingDTO"
         },
+        "rollForward": {
+          "$ref": "#/definitions/ProBookingSeriesRollForwardDTO"
+        },
         "seriesId": {
           "type": "string"
         },
@@ -10510,6 +10551,7 @@
         "addOnNames",
         "internalNotes",
         "pricing",
+        "rollForward",
         "occurrences",
         "skipped"
       ],
@@ -10608,7 +10650,7 @@
           ]
         },
         "listPriceMoved": {
-          "description": "True when `currentListTotalCents` differs from `pinnedTotalCents`.",
+          "description": "True when `currentListTotalCents` differs from `pinnedTotalCents`.\n\n🔴 K20 settled what this MEANS, and it is not \"your next occurrence will cost this\": the roll-forward books every later occurrence at `pinnedTotalCents`, so a moved list price is information about the gap, and the pro's remedy is to end the series and start a new one. See lib/booking/series/pinnedPrice.ts. Any surface rendering this must say which of the two numbers the client will actually be charged.",
           "type": "boolean"
         },
         "occurrencesDisagree": {
@@ -10628,6 +10670,32 @@
         "currentListTotalCents",
         "occurrencesDisagree",
         "listPriceMoved"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesRollForwardDTO": {
+      "description": "K20 — whether this series still grows, and how far ahead.\n\nA standing appointment that stops producing dates is the failure K18-B named and K19 refused to sell. This is the honest statement of the opposite: the dates the pro has NOT been shown yet, and the fact that something will create them.",
+      "properties": {
+        "leadDays": {
+          "description": "How far ahead of today the roll-forward keeps a series booked, in days.",
+          "type": "number"
+        },
+        "pendingCount": {
+          "description": "Planned occurrences not yet attempted, or null for an open-ended series (which has no total to count down from).",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "willContinue": {
+          "description": "True when the roll-forward will add more dates to this series.\n\n🔴 False whenever the roll-forward cannot actually run — an ENDED or CANCELLED series, a plan with nothing left, and (the one that is easy to miss) the recurring-appointments feature being switched off. A surface that promised \"new dates are added automatically\" while the operator was dark would be the exact defect K19 refused to ship ([[verifiable-rail-still-needs-an-operator]]).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "willContinue",
+        "pendingCount",
+        "leadDays"
       ],
       "type": "object"
     },
@@ -10924,6 +10992,10 @@
         "paymentBadge": {
           "$ref": "#/definitions/PaymentBadge",
           "description": "At-a-glance payment state (deposit / paid / disputed …), derived by THE one helper (lib/booking/paymentBadge.ts) so this card, the bookings list and iOS can never disagree about what the money is doing (K1)."
+        },
+        "recurring": {
+          "$ref": "#/definitions/RecurringMark",
+          "description": "Recurring-appointment mark (K19-C, shipped in K20) — this booking is one occurrence of a `BookingSeries`. Derived by the one helper (lib/booking/recurringMark.ts) and rendered in the card's TIME ROW beside the location chip, NOT as a sixth top-row chip and NOT as a second corner glyph: see that file for the channel call and why the crowded row was the wrong place for the least urgent fact on the card.\n\nOPTIONAL, and absent on every booking that is not part of a series — which is all of them while `ENABLE_RECURRING_APPOINTMENTS` is unset, so today's payload is byte-identical to pre-K20.\n\n🔴 Declared HERE **first**, before the route ever set it — which is the actual fix for the K15 gap above. The route adds it with the same conditional spread every other optional field uses (that is what keeps an absent mark byte-identical on the wire), and a spread is invisible to excess-property checking; so the declaration in this file, not the route, is what makes `gen:api-schema` and the iOS contract job see the field."
         },
         "relationshipBadge": {
           "$ref": "#/definitions/RelationshipBadge",
@@ -14611,6 +14683,28 @@
     },
     "ReceiptSource": {
       "$ref": "#/definitions/%24Enums.ReceiptSource"
+    },
+    "RecurringMark": {
+      "description": "The recurring mark for one booking. Absent (null) for every booking that is not part of a series, which is all of them until a pro creates one.",
+      "properties": {
+        "description": {
+          "description": "Plain words for the accessible name and the iOS label. The mark itself is a shape; screen readers do not get shapes (K5's rule), and iOS renders this verbatim rather than rebuilding the sentence (K6's rule).",
+          "type": "string"
+        },
+        "occurrenceNumber": {
+          "description": "1-based for humans. `Booking.seriesOccurrenceIndex` is 0-based and stays that way everywhere it is a KEY (the unique constraint, the cancel scope, the exception rows); this is the only place it becomes an ordinal, because \"appointment 0 of 12\" is not a thing anyone says.",
+          "type": "number"
+        },
+        "seriesId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seriesId",
+        "occurrenceNumber",
+        "description"
+      ],
+      "type": "object"
     },
     "RelationshipBadge": {
       "properties": {

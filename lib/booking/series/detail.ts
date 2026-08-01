@@ -15,9 +15,11 @@
 // "you got eleven, not twelve" a fact about the series rather than a message the
 // pro had one chance to read ([[an-always-empty-key-looks-like-an-export]]).
 
-import { Prisma, ServiceLocationType } from '@prisma/client'
+import { BookingSeriesStatus, Prisma, ServiceLocationType } from '@prisma/client'
 
 import { resolveBookingAddOns } from '@/lib/booking/addOnResolution'
+import { recurringAppointmentsEnabled } from '@/lib/booking/series/flag'
+import { SERIES_ROLL_FORWARD_LEAD_DAYS } from '@/lib/booking/series/schedule'
 import {
   DEPOSIT_CREDIT_SELECT,
   deriveNetDepositHeldCents,
@@ -28,6 +30,7 @@ import type {
   ProBookingSeriesDetailDTO,
   ProBookingSeriesOccurrenceDetailDTO,
   ProBookingSeriesPricingDTO,
+  ProBookingSeriesRollForwardDTO,
   ProBookingSeriesSkippedOccurrenceDTO,
 } from '@/lib/dto/proBookingSeries'
 import { decimalToCents } from '@/lib/money'
@@ -248,6 +251,24 @@ export async function loadProBookingSeriesDetail(args: {
       currentListTotalCents !== pinnedTotalCents,
   }
 
+  // K20: does this series still grow? `willContinue` reads the FEATURE flag as
+  // well as the series' own state — the roll-forward is gated on it, so a page
+  // that promised more dates while it was off would be promising something
+  // nothing would deliver.
+  const pendingCount =
+    series.occurrenceCount == null
+      ? null
+      : Math.max(0, series.occurrenceCount - series.nextOccurrenceIndex)
+
+  const rollForward: ProBookingSeriesRollForwardDTO = {
+    willContinue:
+      recurringAppointmentsEnabled() &&
+      series.status === BookingSeriesStatus.ACTIVE &&
+      (pendingCount == null || pendingCount > 0),
+    pendingCount,
+    leadDays: SERIES_ROLL_FORWARD_LEAD_DAYS,
+  }
+
   const addOnNames = series.addOnIds.length
     ? await loadAddOnNames({
         professionalId: args.professionalId,
@@ -281,6 +302,7 @@ export async function loadProBookingSeriesDetail(args: {
     addOnNames,
     internalNotes: series.internalNotes,
     pricing,
+    rollForward,
     occurrences,
     skipped,
   }

@@ -47,6 +47,17 @@ import {
  */
 export const SERIES_MATERIALIZE_HORIZON = 12
 
+/**
+ * How far ahead K20's roll-forward keeps an ACTIVE series booked.
+ *
+ * Chosen to match what creation already does rather than invented: the
+ * count-based horizon above is ~84 days at the commonest cadence (weekly), so 90
+ * days keeps a weekly series at the depth the pro saw on day one and adds one
+ * appointment a week thereafter. Lives here, beside the horizon it mirrors, so
+ * the read side can state it without importing the write boundary.
+ */
+export const SERIES_ROLL_FORWARD_LEAD_DAYS = 90
+
 /** Smallest / largest cadence a series may use, in calendar weeks. */
 export const MIN_SERIES_INTERVAL_WEEKS = 1
 export const MAX_SERIES_INTERVAL_WEEKS = 8

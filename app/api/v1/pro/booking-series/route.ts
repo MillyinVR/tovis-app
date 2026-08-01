@@ -220,6 +220,14 @@ export async function POST(req: Request) {
         reason: skip.reason,
         detail: skip.detail,
       })),
+      // K20: a "not yet", distinct from a skip. Null when nothing was deferred.
+      deferred: result.deferred
+        ? {
+            index: result.deferred.index,
+            intendedStart: result.deferred.intendedStart?.toISOString() ?? null,
+            code: result.deferred.code,
+          }
+        : null,
     } satisfies ProBookingSeriesCreateResponseDTO
 
     await completeIdempotency({

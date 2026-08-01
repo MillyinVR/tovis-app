@@ -28,6 +28,10 @@ import {
   derivePaymentBadge,
 } from '@/lib/booking/paymentBadge'
 import {
+  RECURRING_MARK_SELECT,
+  deriveRecurringMark,
+} from '@/lib/booking/recurringMark'
+import {
   RELATIONSHIP_BADGE_SELECT,
   deriveRelationshipBadge,
 } from '@/lib/booking/relationshipLabel'
@@ -204,6 +208,8 @@ const bookingSelect = {
   // K15 consent-requirement inputs: `finishedAt` is how the badge knows an
   // appointment is over (a warning nobody can act on is noise, not information).
   finishedAt: true,
+  // K19-C recurring-mark inputs: the series id + this occurrence's index.
+  ...RECURRING_MARK_SELECT,
   client: {
     select: {
       id: true,
@@ -749,6 +755,7 @@ function toBookingEvent(args: {
   const serviceName = getServiceName(booking)
   const serviceSwatch = resolveBookingServiceSwatch(booking, swatchByServiceId)
   const clientConfirmation = deriveClientConfirmationBadge(booking)
+  const recurring = deriveRecurringMark(booking)
   const consentRequirement = deriveBookingConsentBadge({
     booking,
     consentRequirementsByServiceId,
@@ -786,6 +793,11 @@ function toBookingEvent(args: {
     // on an appointment that has not happened yet, so a pro who has set no
     // requirement sees a payload byte-identical to pre-K15.
     ...(consentRequirement?.significant ? { consentRequirement } : {}),
+    // K19-C: absent unless the booking is genuinely part of a series, so a pro
+    // who has never made a standing appointment sees a payload byte-identical
+    // to pre-K20. No `significant` gate — recurrence is a fact, not a warning
+    // that goes stale (see lib/booking/recurringMark.ts).
+    ...(recurring ? { recurring } : {}),
     details: {
       serviceName,
       bufferMinutes,

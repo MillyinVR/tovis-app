@@ -66,6 +66,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/internal/jobs/booking-series/roll-forward",
+      "schedule": "20 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/handle-reservations",
       "schedule": "0 9 * * *"
     },

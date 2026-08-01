@@ -146,28 +146,32 @@ type ServiceAddressFormState = {
   isDefault: boolean
 }
 
-// K19 — what the "repeats" step offers.
+// K19/K20 — what the "repeats" step offers.
 //
-// 🔴 Two deliberate omissions, both recorded as decisions rather than gaps:
+//  - ✅ OPEN-ENDED, as of K20. K19 withheld it because a series with no end
+//    simply stopped dead at the materialization horizon (K18-B) — an option
+//    whose operator had not been built is an offer the app cannot keep
+//    ([[verifiable-rail-still-needs-an-operator]]). K20 built the operator: the
+//    roll-forward cron keeps every ACTIVE series booked ~90 days ahead, so
+//    "keep going" is now a promise the app can hold. It sends
+//    `occurrenceCount: null`, which the boundary has accepted since K18.
 //
-//  - NO open-ended option. `BookingSeries.occurrenceCount` accepts null and the
-//    boundary honours it, but an open-ended series simply stops at the
-//    materialization horizon until K20's roll-forward cron exists (K18-B). An
-//    option whose operator has not been built is an offer the app cannot keep
-//    ([[verifiable-rail-still-needs-an-operator]]), so the pro picks a number.
+//  - 🔴 STILL NO per-occurrence deposit option. `depositPerOccurrence` works,
+//    but every occurrence's pay link is delivered AT CREATION, so a client would
+//    get a dozen "pay for your appointment" messages in one burst (K18-A).
+//    Staggering them needs a scheduled deposit-REQUEST rail that still does not
+//    exist — the roll-forward creates bookings, not payment requests, so K20 did
+//    NOT dissolve this one. A deposit on a repeating booking is therefore the
+//    FIRST occurrence's only, which is what the boundary does when
+//    `depositPerOccurrence` is false.
 //
-//  - NO per-occurrence deposit option. `depositPerOccurrence` works, but every
-//    occurrence's pay link is delivered AT CREATION, so a client would get a
-//    dozen "pay for your appointment" messages in one burst (K18-A). Staggering
-//    them needs a scheduled deposit-request rail that does not exist yet. A
-//    deposit on a repeating booking is therefore the FIRST occurrence's only —
-//    which is what the boundary does when `depositPerOccurrence` is false.
-//
-// The counts stay inside the boundary's own MIN/MAX (1…12 occurrences, 1…12
+// The counts stay inside the boundary's own MIN/MAX (1…104 occurrences, 1…8
 // week interval); the server re-validates, so this list is the offer, not the
 // rule.
-const REPEAT_INTERVAL_WEEKS_OPTIONS = [1, 2, 3, 4, 6, 8, 12] as const
+const REPEAT_INTERVAL_WEEKS_OPTIONS = [1, 2, 3, 4, 6, 8] as const
 const REPEAT_COUNT_OPTIONS = [2, 3, 4, 5, 6, 8, 10, 12] as const
+/** Select value standing for `occurrenceCount: null`. */
+const REPEAT_COUNT_OPEN_ENDED = 'open'
 const REPEAT_INTERVAL_DEFAULT = 4
 const REPEAT_COUNT_DEFAULT = 6
 
@@ -1247,7 +1251,11 @@ export default function NewBookingForm({
   // being offered and then refused on submit.
   const [repeats, setRepeats] = useState(false)
   const [intervalWeeks, setIntervalWeeks] = useState(REPEAT_INTERVAL_DEFAULT)
-  const [occurrenceCount, setOccurrenceCount] = useState(REPEAT_COUNT_DEFAULT)
+  // null = open-ended (K20). The boundary has accepted null since K18; what it
+  // was missing until K20 was something to advance the window.
+  const [occurrenceCount, setOccurrenceCount] = useState<number | null>(
+    REPEAT_COUNT_DEFAULT,
+  )
 
   const repeatBlockedReason: string | null =
     clientMode === 'new'
@@ -2586,15 +2594,24 @@ export default function NewBookingForm({
                 <select
                   id="repeat-count"
                   className={field}
-                  value={occurrenceCount}
+                  value={occurrenceCount ?? REPEAT_COUNT_OPEN_ENDED}
                   disabled={loading}
-                  onChange={(e) => setOccurrenceCount(Number(e.target.value))}
+                  onChange={(e) =>
+                    setOccurrenceCount(
+                      e.target.value === REPEAT_COUNT_OPEN_ENDED
+                        ? null
+                        : Number(e.target.value),
+                    )
+                  }
                 >
                   {REPEAT_COUNT_OPTIONS.map((count) => (
                     <option key={count} value={count}>
                       {count} appointments
                     </option>
                   ))}
+                  <option value={REPEAT_COUNT_OPEN_ENDED}>
+                    Keep going until I stop it
+                  </option>
                 </select>
               </div>
             </div>
@@ -2604,6 +2621,9 @@ export default function NewBookingForm({
             <div className="rounded-card border border-toneInfo/30 bg-toneInfo/10 px-3 py-2 text-[12px] text-textPrimary">
               A date already taken by another appointment is skipped, not
               double-booked — you will see exactly which ones on the next screen.
+              {occurrenceCount == null
+                ? ' An open-ended series books the next few months now and adds further dates automatically until you end it.'
+                : ''}
               {depositRequested
                 ? ' The deposit is requested once, for the first appointment.'
                 : ''}
@@ -2674,7 +2694,11 @@ export default function NewBookingForm({
               {recurringEnabled && repeats && repeatAvailable ? (
                 <SummaryRow
                   label="Repeats"
-                  value={`${repeatIntervalLabel(intervalWeeks)} · ${occurrenceCount} appointments`}
+                  value={`${repeatIntervalLabel(intervalWeeks)} · ${
+                    occurrenceCount == null
+                      ? 'open-ended'
+                      : `${occurrenceCount} appointments`
+                  }`}
                 />
               ) : null}
             </div>

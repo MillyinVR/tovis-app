@@ -269,6 +269,46 @@ function LocationChip(props: { label: string }) {
 }
 
 /**
+ * Recurring-appointment mark (K19-C) — the card's TIME ROW, beside the location
+ * chip, and the reasoning for that lives in lib/booking/recurringMark.ts.
+ *
+ * A repeat arrow, not a triangle and not a circled glyph: those two shapes are
+ * spoken for (the conflict warning and K11's confirmation family), and a third
+ * mark borrowing either would make both mean "one of two things". No colour
+ * either — the mark inherits the row's muted text tone, because "this repeats"
+ * is a fact, not a state worth painting.
+ *
+ * `aria-hidden`, with the words on the card's accessible name (K5's rule:
+ * screen readers do not get shapes). `title` gives the mouse the same sentence.
+ */
+function RecurringMarkGlyph(props: { description: string }) {
+  return (
+    <span
+      className="brand-pro-calendar-event-recurring"
+      title={props.description}
+      aria-hidden="true"
+      data-testid="event-recurring-mark"
+    >
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <polyline points="17 1 21 5 17 9" />
+        <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+        <polyline points="7 23 3 19 7 15" />
+        <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+      </svg>
+    </span>
+  )
+}
+
+/**
  * Unsigned consent form (K15) — the FIFTH text chip a card can carry.
  *
  * A word, not a colour and not a second warning glyph: the glyph channel is
@@ -480,6 +520,10 @@ export function EventCard(props: EventCardProps) {
       ? ev.consentRequirement
       : null
 
+  // K19-C: the recurring mark. No significance gate — recurrence is a fact, not
+  // a warning that goes stale, so a completed occurrence still says it was one.
+  const recurring = ev.kind === 'BOOKING' ? (ev.recurring ?? null) : null
+
   const canDragOrResize = apiId !== null
   const baseLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
   // The accessible name spells the mark out ("Returning client · requested
@@ -507,9 +551,14 @@ export function EventCard(props: EventCardProps) {
   const withLocation = locationLabel
     ? `${withConsent}, ${locationLabel}`
     : withConsent
-  const accessibleLabel = conflict
-    ? `${withLocation}, ${copy.labels.overlapWarning}`
+  // The mark itself is aria-hidden (a shape); the sentence lives here, like
+  // every other glyph on this card.
+  const withRecurring = recurring
+    ? `${withLocation}, ${recurring.description}`
     : withLocation
+  const accessibleLabel = conflict
+    ? `${withRecurring}, ${copy.labels.overlapWarning}`
+    : withRecurring
 
   return (
     <div
@@ -666,6 +715,9 @@ export function EventCard(props: EventCardProps) {
             <p className="brand-pro-calendar-event-time">
               {timeLabel}
               {locationLabel ? <LocationChip label={locationLabel} /> : null}
+              {recurring ? (
+                <RecurringMarkGlyph description={recurring.description} />
+              ) : null}
             </p>
           </>
         )}
