@@ -263,6 +263,50 @@ export default function LocationsClient({
     }
   }
 
+  // W7: publish/unpublish this location's exact address on the public discovery
+  // surfaces. Default is OFF for every location, so nothing here is undoing a
+  // state the pro is already in — it is the first time they are asked.
+  async function setAddressPublic(id: string, nextValue: boolean) {
+    setBusy(true)
+    setBusyId(id)
+    setError(null)
+
+    setLocations((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, isAddressPublic: nextValue } : l)),
+    )
+
+    try {
+      const res = await fetch(`/api/v1/pro/locations/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ isAddressPublic: nextValue }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) {
+        throw new Error(
+          readErrorMessage(data) ?? `Failed to update address visibility (${res.status}).`,
+        )
+      }
+
+      showToast({
+        tone: 'success',
+        title: nextValue ? 'Address is public' : 'Address is hidden',
+        body: nextValue
+          ? 'Clients can see this address and get directions to it.'
+          : 'Clients see only your neighborhood, and no directions.',
+      })
+      await refresh()
+    } catch (e: unknown) {
+      const msg = errorMessageFromUnknown(e, 'Failed to update address visibility.')
+      setError(msg)
+      showToast({ tone: 'error', title: 'Couldn’t update visibility', body: msg })
+      await refresh()
+    } finally {
+      setBusy(false)
+      setBusyId(null)
+    }
+  }
+
   async function setPrimaryLocation(id: string) {
     setBusy(true)
     setBusyId(id)
@@ -1021,6 +1065,39 @@ async function updateAdvanceNotice(
                           {busyId === l.id ? 'Saving…' : 'Save changes'}
                         </Button>
                       </div>
+                    </div>
+                  ) : null}
+
+                  {/*
+                    W7 — the pro's explicit choice to publish this address.
+                    Offered only on a location clients actually travel TO, and
+                    only once a real address is saved. A MOBILE_BASE is where
+                    the pro starts from (usually home), so it is never offered
+                    here and the API refuses it too.
+                  */}
+                  {l.type !== 'MOBILE_BASE' ? (
+                    <div className="mt-3 rounded-inner border border-white/10 bg-bgPrimary/20 p-3">
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={l.isAddressPublic}
+                          disabled={busy || !l.formattedAddress}
+                          onChange={(e) => void setAddressPublic(l.id, e.target.checked)}
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-accentPrimary"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-[13px] font-black text-textPrimary">
+                            Show this address publicly
+                          </span>
+                          <span className="mt-0.5 block text-[12px] font-semibold text-textSecondary">
+                            {l.formattedAddress
+                              ? l.isAddressPublic
+                                ? 'Anyone browsing can see this address and get directions to it.'
+                                : 'Off — clients see only your city, and no directions. Turn on if this is a place clients come to.'
+                              : 'Save an address for this location first.'}
+                          </span>
+                        </span>
+                      </label>
                     </div>
                   ) : null}
 

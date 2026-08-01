@@ -1,6 +1,10 @@
 // lib/discovery/nearbyPros.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Prisma, ProfessionType } from '@prisma/client'
+import {
+  Prisma,
+  ProfessionType,
+  ProfessionalLocationType,
+} from '@prisma/client'
 
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { rootTenantContext, whiteLabelTenantContext } from '@/lib/tenant/context'
@@ -39,6 +43,7 @@ vi.mock('@/lib/search/pros', () => ({
 
 import { loadNearbyPros, toPublicNearbyProCard } from './nearbyPros'
 import type { NearbyProCard } from './nearbyPros'
+import type { DiscoveryLocationDto } from './nearby'
 
 const DEFAULT_WORKING_HOURS = {
   mon: { enabled: true, start: '09:00', end: '17:00' },
@@ -542,8 +547,10 @@ describe('lib/discovery/nearbyPros.ts', () => {
 })
 
 describe('toPublicNearbyProCard', () => {
-  function makeCard(): NearbyProCard {
-    const location = {
+  function makeCard(
+    locationOverrides: Partial<DiscoveryLocationDto> = {},
+  ): NearbyProCard {
+    const location: DiscoveryLocationDto = {
       id: 'loc_1',
       formattedAddress: '742 Evergreen Terrace',
       city: 'Springfield',
@@ -554,6 +561,10 @@ describe('toPublicNearbyProCard', () => {
       lng: -123.0220456,
       isPrimary: true,
       workingHours: {},
+      // W7 default posture: nothing is public unless the pro published it.
+      isAddressPublic: false,
+      locationType: ProfessionalLocationType.SALON,
+      ...locationOverrides,
     }
 
     return {
@@ -589,6 +600,50 @@ describe('toPublicNearbyProCard', () => {
 
     // Distance is computed upstream from exact coords and is left untouched.
     expect(publicCard.distanceMiles).toBe(1.4)
+  })
+
+  // W7 — the pro's explicit publish toggle.
+  it('publishes the exact address when the pro turned the toggle on', () => {
+    const publicCard = toPublicNearbyProCard(
+      makeCard({ isAddressPublic: true, locationType: ProfessionalLocationType.SALON }),
+    )
+
+    for (const loc of [publicCard.closestLocation, publicCard.primaryLocation]) {
+      expect(loc.formattedAddress).toBe('742 Evergreen Terrace')
+      expect(loc.placeId).toBe('place_home')
+      // Rooftop precision preserved — this is what makes Navigate correct.
+      expect(loc.lat).toBe(44.0462123)
+      expect(loc.lng).toBe(-123.0220456)
+    }
+  })
+
+  it('never publishes a MOBILE_BASE, even with the flag set', () => {
+    // A mobile base is where the pro STARTS FROM — usually their home. The pro
+    // control is not offered on one, so a flag here can only be a mistake or a
+    // direct write; the read boundary refuses it either way. This is the exact
+    // location that made Navigate route to a fuzzed version of the founder's
+    // home, so it must never become the location that routes there exactly.
+    const publicCard = toPublicNearbyProCard(
+      makeCard({
+        isAddressPublic: true,
+        locationType: ProfessionalLocationType.MOBILE_BASE,
+      }),
+    )
+
+    for (const loc of [publicCard.closestLocation, publicCard.primaryLocation]) {
+      expect(loc.formattedAddress).toBeNull()
+      expect(loc.placeId).toBeNull()
+      expect(loc.lat).toBe(44.05)
+    }
+  })
+
+  it('redacts when the flag is on but there is no address to publish', () => {
+    const publicCard = toPublicNearbyProCard(
+      makeCard({ isAddressPublic: true, formattedAddress: null }),
+    )
+
+    expect(publicCard.closestLocation.placeId).toBeNull()
+    expect(publicCard.closestLocation.lat).toBe(44.05)
   })
 
   it('passes null coordinates through unchanged', () => {

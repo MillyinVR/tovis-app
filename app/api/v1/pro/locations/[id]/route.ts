@@ -1,6 +1,6 @@
 // app/api/v1/pro/locations/[id]/route.ts
 
-import { type Prisma } from '@prisma/client'
+import { ProfessionalLocationType, type Prisma } from '@prisma/client'
 import { NextRequest } from 'next/server'
 
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
@@ -159,6 +159,46 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       data.isBookable = parsedBookable
     }
 
+    // W7: publish this location's exact address to the unauthenticated
+    // discovery surfaces. Refused on a MOBILE_BASE — that is where the pro
+    // STARTS FROM, usually their home, and it is never a destination a client
+    // navigates to. Refuse the CLAIM here, not just the control in the UI:
+    // hiding a toggle leaves it one curl away.
+    if (hasOwn(body, 'isAddressPublic')) {
+      const parsedAddressPublic = pickBool(body.isAddressPublic)
+
+      if (parsedAddressPublic === null) {
+        return jsonFail(400, 'isAddressPublic must be boolean')
+      }
+
+      if (parsedAddressPublic) {
+        if (existing.type === ProfessionalLocationType.MOBILE_BASE) {
+          return jsonFail(
+            400,
+            'A mobile base address cannot be published — clients travel to you, not to it.',
+            { code: 'MOBILE_BASE_NOT_PUBLISHABLE' },
+          )
+        }
+
+        // Publishing nothing is not publishing. Without this a pro could arm
+        // the flag on an empty location and have it start leaking the moment
+        // they saved an address, without ever seeing the consequence stated.
+        const nextFormattedAddress =
+          pickNullablePatchString(body, 'formattedAddress') ??
+          existing.formattedAddress
+
+        if (nextFormattedAddress == null) {
+          return jsonFail(
+            400,
+            'Save an address for this location before publishing it.',
+            { code: 'NO_ADDRESS_TO_PUBLISH' },
+          )
+        }
+      }
+
+      data.isAddressPublic = parsedAddressPublic
+    }
+
     const placeIdIn = pickNullablePatchString(body, 'placeId')
     const formattedAddressIn = pickNullablePatchString(body, 'formattedAddress')
     const addressLine1In = pickNullablePatchString(body, 'addressLine1')
@@ -170,6 +210,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     if (placeIdIn !== undefined) data.placeId = placeIdIn
     if (formattedAddressIn !== undefined) data.formattedAddress = formattedAddressIn
+
+    // W7: clearing the address disarms publishing. The read boundary already
+    // refuses to publish a null address, so nothing leaks either way — but a
+    // flag left armed would silently re-publish the moment the pro saved a NEW
+    // address, without them ever being asked about that one.
+    if (formattedAddressIn === null) {
+      data.isAddressPublic = false
+    }
     if (addressLine1In !== undefined) data.addressLine1 = addressLine1In // pii-plaintext-read-ok: pro location patch writes plaintext legacy address column during expand-phase encryption sync
     if (addressLine2In !== undefined) data.addressLine2 = addressLine2In // pii-plaintext-read-ok: pro location patch writes plaintext legacy address column during expand-phase encryption sync
     if (cityIn !== undefined) data.city = cityIn

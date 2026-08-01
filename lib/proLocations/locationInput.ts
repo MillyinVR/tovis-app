@@ -25,6 +25,9 @@ export const PROFESSIONAL_LOCATION_SELECT = {
   name: true,
   isPrimary: true,
   isBookable: true,
+  // W7: the pro's own surface must show the publish state so they can see and
+  // change it. Public consumers get it via lib/discovery/publicAddress.ts.
+  isAddressPublic: true,
 
   formattedAddress: true,
   addressLine1: true,

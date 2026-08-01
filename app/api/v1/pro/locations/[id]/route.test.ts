@@ -206,6 +206,7 @@ function makeExistingLocation(
     name: string | null
     isPrimary: boolean
     isBookable: boolean
+    isAddressPublic: boolean
     timeZone: string | null
     placeId: string | null
     formattedAddress: string | null
@@ -232,6 +233,7 @@ function makeExistingLocation(
     name: 'Studio',
     isPrimary: false,
     isBookable: false,
+    isAddressPublic: false,
     timeZone: 'America/Los_Angeles',
     placeId: 'place_123',
     formattedAddress: '123 Main St, San Diego, CA',
@@ -261,6 +263,7 @@ function makeUpdatedLocation(
     name: string | null
     isPrimary: boolean
     isBookable: boolean
+    isAddressPublic: boolean
     timeZone: string | null
     placeId: string | null
     formattedAddress: string | null
@@ -287,6 +290,7 @@ function makeUpdatedLocation(
     name: 'Studio',
     isPrimary: false,
     isBookable: false,
+    isAddressPublic: false,
     timeZone: 'America/Los_Angeles',
     placeId: 'place_123',
     formattedAddress: '123 Main St, San Diego, CA',
@@ -439,6 +443,7 @@ describe('app/api/v1/pro/locations/[id]/route.ts', () => {
           name: true,
           isPrimary: true,
           isBookable: true,
+          isAddressPublic: true,
           formattedAddress: true,
           addressLine1: true,
           addressLine2: true,
@@ -462,6 +467,95 @@ describe('app/api/v1/pro/locations/[id]/route.ts', () => {
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
       expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+    })
+
+    // W7 — publishing a location's exact address is the pro's explicit act, and
+    // the API is what owns the rule. Hiding the control in LocationsClient would
+    // leave it one curl away, so each refusal is proved here at the layer that
+    // actually enforces it.
+    describe('isAddressPublic', () => {
+      it('publishes a salon address the pro asked to publish', async () => {
+        const result = await PATCH(
+          makePatchRequest({ isAddressPublic: true }),
+          makeCtx(),
+        )
+
+        expect(result.status).toBe(200)
+        expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ isAddressPublic: true }),
+          }),
+        )
+      })
+
+      it('refuses to publish a MOBILE_BASE address', async () => {
+        mocks.professionalLocation.findFirst.mockResolvedValue(
+          makeExistingLocation({ type: ProfessionalLocationType.MOBILE_BASE }),
+        )
+
+        const result = await PATCH(
+          makePatchRequest({ isAddressPublic: true }),
+          makeCtx(),
+        )
+
+        expect(result.status).toBe(400)
+        expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
+      })
+
+      it('refuses to publish a location with no address saved', async () => {
+        mocks.professionalLocation.findFirst.mockResolvedValue(
+          makeExistingLocation({ formattedAddress: null }),
+        )
+
+        const result = await PATCH(
+          makePatchRequest({ isAddressPublic: true }),
+          makeCtx(),
+        )
+
+        expect(result.status).toBe(400)
+        expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
+      })
+
+      // Otherwise the flag stays armed and silently re-publishes the NEXT
+      // address the pro saves, which they were never asked about.
+      it('disarms publishing when the address is cleared', async () => {
+        mocks.professionalLocation.findFirst.mockResolvedValue(
+          makeExistingLocation({ isAddressPublic: true }),
+        )
+
+        const result = await PATCH(
+          makePatchRequest({ formattedAddress: null }),
+          makeCtx(),
+        )
+
+        expect(result.status).toBe(200)
+        expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ isAddressPublic: false }),
+          }),
+        )
+      })
+
+      it('unpublishing is always allowed', async () => {
+        mocks.professionalLocation.findFirst.mockResolvedValue(
+          makeExistingLocation({
+            isAddressPublic: true,
+            type: ProfessionalLocationType.MOBILE_BASE,
+          }),
+        )
+
+        const result = await PATCH(
+          makePatchRequest({ isAddressPublic: false }),
+          makeCtx(),
+        )
+
+        expect(result.status).toBe(200)
+        expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ isAddressPublic: false }),
+          }),
+        )
+      })
     })
 
     it('rejects publishing a draft location through PATCH and points callers to schedule publish', async () => {

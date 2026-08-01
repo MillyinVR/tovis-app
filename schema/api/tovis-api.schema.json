@@ -12220,6 +12220,10 @@
         "id": {
           "type": "string"
         },
+        "isAddressPublic": {
+          "description": "W7: the pro published this address to the public discovery surfaces.",
+          "type": "boolean"
+        },
         "isBookable": {
           "type": "boolean"
         },
@@ -12278,6 +12282,7 @@
         "name",
         "isPrimary",
         "isBookable",
+        "isAddressPublic",
         "formattedAddress",
         "city",
         "state",
@@ -14957,6 +14962,10 @@
         "id": {
           "type": "string"
         },
+        "isAddressPublic": {
+          "description": "W7: true when `formattedAddress`/`placeId`/coordinates on THIS preview are the pro's real ones because they chose to publish them. False means the preview is redacted — address null, coordinates coarsened to a ~1.1km grid.\n\nConsumers must branch on this rather than on \"is lat/lng present\": a coarsened coordinate is still a coordinate, which is exactly how Discover came to render a Navigate button over a fuzzed point.",
+          "type": "boolean"
+        },
         "isPrimary": {
           "type": "boolean"
         },
@@ -14971,6 +14980,17 @@
             "number",
             "null"
           ]
+        },
+        "locationType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProfessionalLocationType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "W7: SALON / SUITE / MOBILE_BASE. A mobile base is never a destination."
         },
         "placeId": {
           "type": [
@@ -15000,7 +15020,9 @@
         "placeId",
         "lat",
         "lng",
-        "isPrimary"
+        "isPrimary",
+        "isAddressPublic",
+        "locationType"
       ],
       "type": "object"
     },

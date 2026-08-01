@@ -2423,6 +2423,22 @@ model ProfessionalLocation {
   isPrimary  Boolean                  @default(false)
   isBookable Boolean                  @default(true)
 
+  /// W7: may this location's EXACT address be published to an unauthenticated
+  /// audience — Discover, `/api/v1/search/pros`, `/api/v1/pros/nearby`?
+  ///
+  /// Default OFF for every location type, SALON included. A pro whose "salon" is
+  /// really a home studio must never be exposed by an inference about their
+  /// location type; publishing an address is an act, not a side effect of
+  /// picking SALON in a dropdown.
+  ///
+  /// When false (or when the location has no address, or isn't bookable), the
+  /// public preview keeps today's redaction: `formattedAddress` and `placeId`
+  /// null, coordinates coarsened to ~1.1km. That redaction is why Discover's
+  /// Navigate button routed to a fuzzed point and "snapped to the nearest
+  /// building" — the button was built on deliberately-inaccurate data. Navigate
+  /// now renders only when this flag let a real address through.
+  isAddressPublic Boolean @default(false)
+
   // Address (SALON/SUITE required; MOBILE_BASE optional)
   formattedAddress String?
   addressLine1     String?

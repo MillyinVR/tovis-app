@@ -11,7 +11,7 @@
 // the postgis test container.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ProfessionType } from '@prisma/client'
+import { ProfessionalLocationType, ProfessionType } from '@prisma/client'
 
 import { SearchRequestError, encodeIdCursor } from './contracts'
 
@@ -129,6 +129,8 @@ type SyntheticCandidate = {
   state: string | null
   timeZone: string | null
   placeId: string | null
+  isAddressPublic: boolean
+  locationType: ProfessionalLocationType | null
   lat: number | null
   lng: number | null
   isPrimary: boolean
@@ -149,6 +151,8 @@ type SyntheticPrimary = {
   state: string | null
   timeZone: string | null
   placeId: string | null
+  isAddressPublic: boolean
+  locationType: ProfessionalLocationType | null
   lat: number | null
   lng: number | null
   isPrimary: boolean
@@ -170,6 +174,10 @@ function makeCandidate(
     state: 'CA',
     timeZone: 'America/Los_Angeles',
     placeId: 'place_1',
+    // W7 default posture: not published. Tests that want a published address
+    // opt in explicitly, which is the same way a pro does.
+    isAddressPublic: false,
+    locationType: ProfessionalLocationType.SALON,
     lat: 32.7157,
     lng: -117.1611,
     isPrimary: true,
@@ -196,6 +204,8 @@ function makePrimaryRow(
     state: 'CA',
     timeZone: 'America/Los_Angeles',
     placeId: 'place_1',
+    isAddressPublic: false,
+    locationType: ProfessionalLocationType.SALON,
     lat: 32.7157,
     lng: -117.1611,
     isPrimary: true,
@@ -370,6 +380,8 @@ describe('lib/search/pros.ts', () => {
               lat: 32.72,
               lng: -117.16,
               isPrimary: true,
+              isAddressPublic: false,
+              locationType: ProfessionalLocationType.SALON,
             },
             primaryLocation: {
               id: 'loc_primary',
@@ -381,6 +393,8 @@ describe('lib/search/pros.ts', () => {
               lat: 32.72,
               lng: -117.16,
               isPrimary: true,
+              isAddressPublic: false,
+              locationType: ProfessionalLocationType.SALON,
             },
           },
         ],
@@ -389,6 +403,82 @@ describe('lib/search/pros.ts', () => {
 
       expect(result.items[0]?.closestLocation).not.toHaveProperty('workingHours')
       expect(result.items[0]?.primaryLocation).not.toHaveProperty('workingHours')
+    })
+
+    // W7 — the pro's explicit per-location publish toggle.
+    describe('address publishing', () => {
+      it('returns the exact address and true coordinates once the pro publishes', async () => {
+        mockSearchRows(
+          [
+            makeCandidate({
+              professionalId: 'pro_1',
+              isAddressPublic: true,
+              locationType: ProfessionalLocationType.SALON,
+            }),
+          ],
+          [
+            makePrimaryRow({
+              professionalId: 'pro_1',
+              isAddressPublic: true,
+              locationType: ProfessionalLocationType.SALON,
+            }),
+          ],
+        )
+
+        const result = await searchPros(DEFAULT_PARAMS, ROOT_CTX)
+        const location = result.items[0]?.closestLocation
+
+        expect(location?.formattedAddress).toBe('123 Main St')
+        expect(location?.placeId).toBe('place_1')
+        // Rooftop precision — this is what makes Navigate go to the real door.
+        expect(location?.lat).toBe(32.7157)
+        expect(location?.lng).toBe(-117.1611)
+        expect(location?.isAddressPublic).toBe(true)
+      })
+
+      // The guard the audit asked for: the unauthenticated response must never
+      // contain an address for a location whose flag is off. Asserted over the
+      // WHOLE serialized response, not field by field — a leak that appears in a
+      // field this test forgot to name is exactly the leak worth catching.
+      it('never emits an address anywhere in the response when the flag is off', async () => {
+        mockSearchRows(
+          [makeCandidate({ professionalId: 'pro_1', isAddressPublic: false })],
+          [makePrimaryRow({ professionalId: 'pro_1', isAddressPublic: false })],
+        )
+
+        const result = await searchPros(DEFAULT_PARAMS, ROOT_CTX)
+
+        expect(JSON.stringify(result)).not.toContain('123 Main St')
+        expect(JSON.stringify(result)).not.toContain('place_1')
+        expect(JSON.stringify(result)).not.toContain('32.7157')
+      })
+
+      it('refuses to publish a MOBILE_BASE even when the flag is set', async () => {
+        mockSearchRows(
+          [
+            makeCandidate({
+              professionalId: 'pro_1',
+              isAddressPublic: true,
+              locationType: ProfessionalLocationType.MOBILE_BASE,
+            }),
+          ],
+          [
+            makePrimaryRow({
+              professionalId: 'pro_1',
+              isAddressPublic: true,
+              locationType: ProfessionalLocationType.MOBILE_BASE,
+            }),
+          ],
+        )
+
+        const result = await searchPros(DEFAULT_PARAMS, ROOT_CTX)
+        const location = result.items[0]?.closestLocation
+
+        expect(location?.formattedAddress).toBeNull()
+        expect(location?.lat).toBe(32.72)
+        // …and it says so, so no consumer renders a Navigate button over it.
+        expect(location?.isAddressPublic).toBe(false)
+      })
     })
 
     it('runs only the candidates query when no pros match (skips primary lookup)', async () => {
