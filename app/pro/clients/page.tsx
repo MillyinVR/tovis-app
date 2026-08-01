@@ -7,6 +7,10 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { proClientVisibilityWhere } from '@/lib/clientVisibility'
 import { formatLastBookingLabel } from '@/lib/clients/lastBookingLabel'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
+import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { PRO_CLIENT_POLICY_SELECT } from '@/lib/proClientPolicy/load'
+import { summarizeProClientPolicy } from '@/lib/proClientPolicy/summary'
 
 import NewClientForm from './NewClientForm'
 import ClientsList, { type ProClientRow } from './ClientsList'
@@ -72,6 +76,39 @@ export default async function ProClientsPage() {
     },
   })
 
+  // K16-B — the booking requirements this pro has set, for the whole roster in
+  // one query (the model carries @@index([professionalId, updatedAt]) for it).
+  //
+  // Gated on the SAME flag as the control that sets them: while the
+  // technical-record gate is off the chart page never renders the policy form,
+  // so a roster badge would surface a requirement the pro has no way to reach.
+  // Off ⇒ no query at all, not an empty render.
+  //
+  // 🔴 Reads the STORED switches, not `loadProClientPolicy` — the resolver
+  // applies the card-on-file rail gate, and a client the pro restricted must
+  // not read as unrestricted on the roster. The rail flag is passed to the
+  // summary separately so that one requirement can be marked inactive instead.
+  const technicalEnabled = isClientTechnicalRecordEnabled(proId)
+
+  // Bounded by the roster above (which takes 500), not by the pro's whole
+  // policy history — the rows for clients this pro can no longer see would be
+  // fetched and then dropped.
+  const policyRows =
+    technicalEnabled && clients.length > 0
+      ? await prisma.proClientPolicy.findMany({
+          where: {
+            professionalId: proId,
+            clientId: { in: clients.map((client) => client.id) },
+          },
+          select: { clientId: true, ...PRO_CLIENT_POLICY_SELECT },
+        })
+      : []
+
+  const cardOnFileRailEnabled = noShowProtectionEnabled()
+  const policyByClientId = new Map(
+    policyRows.map(({ clientId, ...policy }) => [clientId, policy]),
+  )
+
   // Flatten to serializable display + search strings here (server-side) so the
   // client search list carries no raw PII fields and needs no extra fetch. The
   // last-booking label + message href are resolved in the pro's timezone.
@@ -92,6 +129,10 @@ export default async function ProClientsPage() {
         scheduleTz,
       ),
       messageHref: buildProToClientMessageHref({ proId, clientId: client.id }),
+      requirements: summarizeProClientPolicy({
+        policy: policyByClientId.get(client.id) ?? null,
+        cardOnFileRailEnabled,
+      }),
     }
   })
 

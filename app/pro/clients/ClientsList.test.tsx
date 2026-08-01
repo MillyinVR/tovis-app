@@ -9,6 +9,7 @@ function row(args: {
   displayName: string
   email?: string
   phone?: string
+  requirements?: ProClientRow['requirements']
 }): ProClientRow {
   const email = args.email ?? ''
   const phone = args.phone ?? ''
@@ -19,6 +20,7 @@ function row(args: {
     searchText: `${args.displayName} ${email} ${phone}`.toLowerCase().trim(),
     lastBookingLabel: 'No bookings yet',
     messageHref: '/messages/start',
+    requirements: args.requirements ?? [],
   }
 }
 
@@ -94,5 +96,96 @@ describe('ClientsList', () => {
     ).toBeInTheDocument()
     // No search box when the list is empty.
     expect(screen.queryByPlaceholderText(/Search by name/i)).toBeNull()
+  })
+
+  // ─── K16-B: booking requirements on the roster ─────────────────────────────
+
+  const withRequirements: ProClientRow[] = [
+    row({
+      id: 'c1',
+      displayName: 'Ada Lovelace',
+      requirements: [
+        { key: 'deposit', label: 'Deposit', inactive: false },
+        { key: 'noOnlineBooking', label: 'No online booking', inactive: false },
+      ],
+    }),
+    row({ id: 'c2', displayName: 'Grace Hopper' }),
+    row({
+      id: 'c3',
+      displayName: 'Katherine Johnson',
+      requirements: [
+        { key: 'cardOnFile', label: 'Card on file', inactive: true },
+      ],
+    }),
+  ]
+
+  it('shows each requirement the pro set, on the client it belongs to', () => {
+    render(<ClientsList clients={withRequirements} />)
+
+    expect(screen.getByText('Deposit')).toBeInTheDocument()
+    expect(screen.getByText('No online booking')).toBeInTheDocument()
+  })
+
+  it('marks a requirement the pro set but the server will not enforce', () => {
+    render(<ClientsList clients={withRequirements} />)
+
+    // Card-on-file stored ON while the save-card rail is dark: it must still
+    // appear (the pro DID restrict this client) and must not read as active.
+    expect(screen.getByText(/Card on file \(not active\)/)).toBeInTheDocument()
+  })
+
+  it('offers a requirements-only filter counting just the restricted clients', () => {
+    render(<ClientsList clients={withRequirements} />)
+
+    const filter = screen.getByLabelText(
+      /Only clients with booking requirements \(2\)/,
+    )
+    expect(filter).toBeInTheDocument()
+
+    fireEvent.click(filter)
+
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument()
+    expect(screen.getByText('Katherine Johnson')).toBeInTheDocument()
+    expect(screen.queryByText('Grace Hopper')).not.toBeInTheDocument()
+  })
+
+  it('moves the header count when the requirements filter narrows the list', () => {
+    // Caught by loading the page, not by a test: the count keyed only off the
+    // search box, so it read "3 visible" above a two-row list.
+    render(<ClientsList clients={withRequirements} />)
+
+    expect(screen.getByText('3 visible')).toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByLabelText(/Only clients with booking requirements/),
+    )
+
+    expect(screen.getByText('2 of 3')).toBeInTheDocument()
+    expect(screen.queryByText('3 visible')).not.toBeInTheDocument()
+  })
+
+  it('hides the filter entirely when no client has requirements', () => {
+    // Also the technical-record-gate-off case: the page sends empty
+    // requirements for every client, so nothing about the feature appears.
+    render(<ClientsList clients={clients} />)
+
+    expect(
+      screen.queryByLabelText(/Only clients with booking requirements/),
+    ).toBeNull()
+  })
+
+  it('combines the filter with the search rather than replacing it', () => {
+    render(<ClientsList clients={withRequirements} />)
+
+    fireEvent.click(
+      screen.getByLabelText(/Only clients with booking requirements/),
+    )
+    fireEvent.change(screen.getByPlaceholderText(/Search by name/i), {
+      target: { value: 'grace' },
+    })
+
+    // Grace matches the search but has no requirements, so both filters apply.
+    expect(screen.queryByText('Grace Hopper')).not.toBeInTheDocument()
+    expect(screen.getByText(/No clients match/i)).toBeInTheDocument()
   })
 })

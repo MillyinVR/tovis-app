@@ -6,7 +6,9 @@ import Link from 'next/link'
 
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import Badge from '@/app/_components/ui/Badge'
 import { Card, buttonClassName } from '@/app/_components/ui'
+import type { ProClientRequirement } from '@/lib/proClientPolicy/summary'
 
 // One already-visible client, flattened server-side into display + search
 // strings so this client component can filter the loaded list without any extra
@@ -20,6 +22,12 @@ export type ProClientRow = {
   searchText: string
   lastBookingLabel: string
   messageHref: string
+  /**
+   * K16-B — the booking requirements this pro has set for this client, from
+   * `summarizeProClientPolicy`. Empty for every client when the technical-record
+   * gate is off, because the control that sets them is gated the same way.
+   */
+  requirements: ProClientRequirement[]
 }
 
 function matchesQuery(client: ProClientRow, query: string): boolean {
@@ -35,11 +43,25 @@ function matchesQuery(client: ProClientRow, query: string): boolean {
 
 export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
   const [query, setQuery] = useState('')
+  const [onlyWithRequirements, setOnlyWithRequirements] = useState(false)
 
   const trimmedQuery = query.trim()
+
+  // K16-B — how many clients carry booking requirements. Zero when the
+  // technical-record gate is off, which also hides the filter entirely.
+  const withRequirementsCount = useMemo(
+    () => clients.filter((client) => client.requirements.length > 0).length,
+    [clients],
+  )
+
   const filtered = useMemo(
-    () => clients.filter((client) => matchesQuery(client, trimmedQuery)),
-    [clients, trimmedQuery],
+    () =>
+      clients.filter(
+        (client) =>
+          matchesQuery(client, trimmedQuery) &&
+          (!onlyWithRequirements || client.requirements.length > 0),
+      ),
+    [clients, trimmedQuery, onlyWithRequirements],
   )
 
   const field =
@@ -59,7 +81,9 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
 
         <div className="text-[12px] font-semibold text-textSecondary">
           {clients.length
-            ? trimmedQuery
+            ? // Any narrowing — search OR the requirements filter — must move
+              // this count, or the header contradicts the list under it.
+              trimmedQuery || onlyWithRequirements
               ? `${filtered.length} of ${clients.length}`
               : `${clients.length} visible`
             : ''}
@@ -87,8 +111,23 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
             autoComplete="off"
           />
 
+          {withRequirementsCount > 0 ? (
+            <label className="flex items-center gap-2 text-[12px] font-semibold text-textSecondary">
+              <input
+                type="checkbox"
+                checked={onlyWithRequirements}
+                onChange={(e) => setOnlyWithRequirements(e.target.checked)}
+                className="size-4 accent-accentPrimary"
+              />
+              Only clients with booking requirements ({withRequirementsCount})
+            </label>
+          ) : null}
+
           {filtered.length === 0 ? (
             <div className="rounded-card border border-white/10 bg-bgSecondary px-4 py-6 text-center text-[13px] font-semibold text-textSecondary">
+              {/* Always query-driven: the requirements filter only renders when
+                  at least one client has them, so it cannot empty the list on
+                  its own. */}
               No clients match “{trimmedQuery}”.
             </div>
           ) : (
@@ -110,6 +149,26 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
                       <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
                         {client.lastBookingLabel}
                       </div>
+
+                      {client.requirements.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {client.requirements.map((requirement) => (
+                            <Badge
+                              key={requirement.key}
+                              tone={requirement.inactive ? 'neutral' : 'warn'}
+                              size="sm"
+                              title={
+                                requirement.inactive
+                                  ? `${requirement.label} — set, but not enforced yet`
+                                  : requirement.label
+                              }
+                            >
+                              {requirement.label}
+                              {requirement.inactive ? ' (not active)' : ''}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="shrink-0">
