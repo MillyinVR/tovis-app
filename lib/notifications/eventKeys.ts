@@ -51,6 +51,7 @@ export type NotificationTemplateKey =
   | 'referral_confirmed'
   | 'referral_converted'
   | 'message_received'
+  | 'waitlist_joined'
   | 'pro_handle_reservation_expiring'
   | 'admin_verification_review_needed'
   | 'admin_support_ticket_created'
@@ -998,6 +999,27 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  // W2: a client JOINED this pro's waitlist. In-app + PUSH + EMAIL — Tori's
+  // call, and the reason is the asymmetry with MESSAGE_RECEIVED above: a chat
+  // message is chatter the inbox already keeps, whereas a new waitlister is a
+  // LEAD, and email is what survives a missed push and a pro who was not in the
+  // app. Non-transactional and honors quiet hours: somebody joining a list at
+  // 2am is not worth waking a pro for.
+  //
+  // Deduped per waitlist ENTRY at the call site, so a client who edits or
+  // re-submits their preferences refreshes one inbox row instead of stacking.
+  [NotificationEventKey.WAITLIST_JOINED]: {
+    key: NotificationEventKey.WAITLIST_JOINED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'waitlist_joined',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
   // Admin operational alerts. Tier B (in-app + email; never SMS). Transactional
   // so they are durable inbox records, but no quiet-hours bypass — admins are an
   // internal audience and these are not time-critical pages.
@@ -1062,6 +1084,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_SAVED,
   NotificationEventKey.LOOK_MILESTONE_REACHED,
   NotificationEventKey.MESSAGE_RECEIVED,
+  NotificationEventKey.WAITLIST_JOINED,
 ]
 
 export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [

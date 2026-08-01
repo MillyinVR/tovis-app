@@ -1,0 +1,14 @@
+-- W2: a pro is told when a client joins their waitlist.
+--
+-- There was no notification for this at all. `NotificationEventKey` had exactly
+-- one waitlist value, WAITLIST_TIME_OFFERED, and it runs the other direction
+-- (pro → client). The waitlist POST wrote its seed message with raw Prisma
+-- rather than through `notifyNewMessageRecipients`, so it bypassed the message
+-- notification too — the only signal the pro ever got was an unread inbox dot,
+-- and only while they happened to have the app open. That is what "the only
+-- notifications I got were when I was signed in as pro and on the app" was.
+--
+-- Additive enum value. Postgres cannot add a value to an enum inside a
+-- transaction block that later uses it, but nothing here uses it — Prisma runs
+-- each migration file in its own transaction and this is the only statement.
+ALTER TYPE "NotificationEventKey" ADD VALUE IF NOT EXISTS 'WAITLIST_JOINED';

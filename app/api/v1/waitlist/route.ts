@@ -7,9 +7,15 @@ import { isBookingError } from '@/lib/booking/errors'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { clientRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
+import { broadcastLive, liveChannelForUser } from '@/lib/live/broadcast'
+import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
+import { messageThreadHref } from '@/lib/messages/notifyNewMessage'
 import { resolveMessageThread } from '@/lib/messagesResolve'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
+import { createProNotification } from '@/lib/notifications/proNotifications'
 import {
   MessageThreadContextType,
+  NotificationEventKey,
   WaitlistPreferenceType,
   WaitlistStatus,
   WaitlistTimeOfDay,
@@ -50,9 +56,74 @@ function formatWaitlistPreferenceSummary(pref: {
 }
 
 /**
+ * W2: tell the pro a client joined their waitlist.
+ *
+ * There was no notification for this at all — the seed message below wrote raw
+ * Prisma rows and never went near the notification engine, so the pro's only
+ * signal was an unread inbox dot, visible only while they were in the app. That
+ * is exactly the reported "the only notifications I got were when I was signed
+ * in as pro and on the app."
+ *
+ * ONE notification, not two. The seed message deliberately does NOT also fire
+ * MESSAGE_RECEIVED: WAITLIST_JOINED is strictly richer for the same event
+ * (in-app + push + EMAIL vs in-app + push) and opens the same thread, so
+ * emitting both would just double-notify the pro about a single act.
+ *
+ * Deduped per waitlist ENTRY, so a client editing their preferences refreshes
+ * the pro's existing row instead of stacking new ones.
+ *
+ * Best-effort: the waitlist join has already committed and must never be failed
+ * by a notification problem.
+ */
+async function notifyWaitlistJoined(args: {
+  professionalId: string
+  clientId: string
+  entryId: string
+  threadId: string | null
+  serviceName: string
+  preferenceSummary: string
+}): Promise<void> {
+  try {
+    const client = await prisma.clientProfile.findUnique({
+      where: { id: args.clientId },
+      select: { firstName: true, lastName: true, avatarUrl: true },
+    })
+
+    // Name resolution stays inside the shared counterparty helper — the same one
+    // the inbox and MESSAGE_RECEIVED use — rather than reading the plaintext
+    // name columns here. `viewerIsThreadPro: true` because the PRO is who reads
+    // this notification, so the counterparty is the client.
+    const { title: resolvedClientName } = resolveThreadCounterparty({
+      viewerIsThreadPro: true,
+      client,
+      professional: null,
+    })
+
+    const clientName = resolvedClientName === 'Client' ? 'Someone' : resolvedClientName
+
+    await createProNotification({
+      professionalId: args.professionalId,
+      eventKey: NotificationEventKey.WAITLIST_JOINED,
+      title: `${clientName} joined your waitlist`,
+      body: `${args.serviceName} · prefers ${args.preferenceSummary}. Offer them a time when one opens up.`,
+      href: args.threadId ? messageThreadHref(args.threadId) : '/pro/waitlist',
+      dedupeKey: `waitlist-joined:${args.entryId}`,
+    })
+
+    kickNotificationDrain()
+  } catch (err) {
+    console.error('POST /api/v1/waitlist: waitlist join notification failed', err)
+  }
+}
+
+/**
  * Best-effort: materialize the WAITLIST message thread and seed it with one message so the
  * waitlister surfaces in the pro inbox (the inbox requires lastMessageAt != null). Failures
  * here must NEVER fail the waitlist join — they are swallowed and logged.
+ *
+ * Returns the thread id so the join notification can deep-link to it, and null
+ * when seeding failed (the notification then falls back to /pro/waitlist rather
+ * than not being sent at all).
  */
 async function seedWaitlistThread(args: {
   clientId: string
@@ -61,7 +132,7 @@ async function seedWaitlistThread(args: {
   serviceId: string
   notes: string | null
   preferenceSummary: string
-}): Promise<void> {
+}): Promise<{ threadId: string; serviceName: string } | null> {
   try {
     const resolved = await resolveMessageThread({
       viewer: { clientProfile: { id: args.clientId } },
@@ -72,7 +143,7 @@ async function seedWaitlistThread(args: {
       },
     })
 
-    if (!resolved.ok || !resolved.thread) return
+    if (!resolved.ok || !resolved.thread) return null
 
     const threadId = resolved.thread.id
     const service = await prisma.service.findUnique({
@@ -99,9 +170,24 @@ async function seedWaitlistThread(args: {
         data: { lastReadAt: msg.createdAt },
       })
     })
+
+    // W2: the live-sync the send route does and this path never did, so a pro
+    // with the inbox already open sees the waitlister appear instead of having
+    // to reload. Not a notification — that is notifyWaitlistJoined's job.
+    const recipients = await prisma.messageThreadParticipant.findMany({
+      where: { threadId, userId: { not: args.senderUserId } },
+      select: { userId: true },
+    })
+    await broadcastLive(
+      recipients.map((participant) => liveChannelForUser(participant.userId)),
+      'messages',
+    )
+
+    return { threadId, serviceName }
   } catch (err) {
     console.error('POST /api/v1/waitlist: waitlist thread seed failed', err)
     // Swallow — the waitlist join already succeeded.
+    return null
   }
 }
 
@@ -347,13 +433,25 @@ export async function POST(req: Request) {
       },
     })
 
-    await seedWaitlistThread({
+    const preferenceSummary = formatWaitlistPreferenceSummary(parsedPreference)
+
+    const seeded = await seedWaitlistThread({
       clientId: auth.clientId,
       senderUserId: auth.user.id,
       entryId: entry.id,
       serviceId,
       notes: notes ?? null,
-      preferenceSummary: formatWaitlistPreferenceSummary(parsedPreference),
+      preferenceSummary,
+    })
+
+    // W2 — post-commit and best-effort, the same shape as the message send path.
+    await notifyWaitlistJoined({
+      professionalId,
+      clientId: auth.clientId,
+      entryId: entry.id,
+      threadId: seeded?.threadId ?? null,
+      serviceName: seeded?.serviceName ?? 'a service',
+      preferenceSummary,
     })
 
     return jsonOk({ entry }, 201)

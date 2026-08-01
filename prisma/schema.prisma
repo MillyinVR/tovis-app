@@ -639,6 +639,12 @@ enum NotificationEventKey {
   // A pro proposed a specific appointment time to a waitlisted client; the
   // client must Confirm before it books (see WaitlistOffer).
   WAITLIST_TIME_OFFERED
+  // W2: a client JOINED a pro's waitlist — the other direction. Before this
+  // there was no notification at all: the waitlist POST wrote a seed message
+  // with raw Prisma, so the only signal a pro ever got was an unread inbox dot,
+  // and only while they happened to be in the app. A new waitlister is a lead,
+  // so this one carries email as well as in-app + push.
+  WAITLIST_JOINED
   VIRAL_REQUEST_APPROVED
   PAYMENT_COLLECTED
   PAYMENT_ACTION_REQUIRED
