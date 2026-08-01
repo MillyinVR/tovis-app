@@ -3,7 +3,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { Bell } from 'lucide-react'
+import { Bell, Settings } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
@@ -681,6 +681,23 @@ export default function ClientMeDashboard({
                   ) : null}
                 </Link>
               ) : null}
+              {/*
+                UNCONDITIONAL by design. Settings used to be reachable only via
+                the "Set up public profile" prompt further down, which is
+                replaced by "View public profile" the moment a client goes
+                public — locking them out of payment methods, addresses,
+                notification preferences AND the switch back to private. An
+                entry point to account settings must never depend on profile
+                state. Covered by ClientMeDashboard.test.tsx.
+              */}
+              <Link
+                href="/client/settings"
+                aria-label="Settings"
+                data-testid="client-settings-link"
+                className="grid h-9 w-9 place-items-center rounded-full border border-textPrimary/10 bg-bgSecondary text-textPrimary transition hover:border-textPrimary/25"
+              >
+                <Settings className="h-[18px] w-[18px]" strokeWidth={2.2} />
+              </Link>
               <WorkspaceSwitcher options={workspaces} />
               <LogoutButton />
             </div>

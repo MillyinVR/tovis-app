@@ -43,8 +43,10 @@ async function runJob(req: Request) {
         windowMinutes: health.windowMinutes,
         stuckCount: health.stuckCount,
         failedFinalCount: health.failedFinalCount,
+        failedRetryableCount: health.failedRetryableCount,
         countsByStatus: health.countsByStatus,
         topErrorCodes: health.topErrorCodes,
+        providerConfigIssues: health.providerConfigIssues,
         reasons: health.reasons,
       })
       Sentry.captureMessage('Notification delivery health degraded')

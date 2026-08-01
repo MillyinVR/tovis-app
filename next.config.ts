@@ -55,6 +55,19 @@ const nextConfig: NextConfig = {
         destination: '/media/:id',
         permanent: true,
       },
+      {
+        // `/discover` was never a route. Seven client surfaces linked to it
+        // anyway (favourite pros, waitlist strip, last-minute invites, upcoming
+        // appointment, appointments empty state, openings feed), so every
+        // "find a pro" affordance on the client home 404'd — and the 404's Home
+        // button then dropped a signed-in client on the marketing page.
+        //
+        // The links now point at /search directly; this redirect exists for the
+        // URLs already bookmarked, shared or sitting in someone's history.
+        source: '/discover',
+        destination: '/search',
+        permanent: true,
+      },
     ]
   },
   async headers() {

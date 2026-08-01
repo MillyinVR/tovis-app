@@ -47,7 +47,7 @@ function EmptyUpcomingCard() {
         When a pro approves your booking, it&apos;ll show up here.
       </p>
       <Link
-        href="/discover"
+        href="/search"
         className={buttonClassName({
           variant: 'ghost',
           size: 'sm',

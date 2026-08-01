@@ -25,7 +25,7 @@ function EmptyProsCard() {
         Favorite pros from Looks or Discover and they&apos;ll show up here.
       </p>
       <Link
-        href="/discover"
+        href="/search"
         className={buttonClassName({
           variant: 'ghost',
           size: 'sm',
@@ -104,7 +104,7 @@ export default function FavoriteProsRow({
           Favorite pros · {favoritePros.length}
         </span>
         <Link
-          href="/discover"
+          href="/search"
           className="font-display text-[12.5px] font-semibold text-terra transition hover:opacity-80"
         >
           Manage

@@ -6,6 +6,10 @@
 import { NotificationDeliveryStatus } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import {
+  APNS_INVALID_PRIVATE_KEY_MESSAGE,
+  readApnsConfigOutcome,
+} from '@/lib/notifications/config'
 
 // A delivery still PENDING/PROCESSING this long past its nextAttemptAt means the
 // worker isn't draining (the cron runs every minute, so nothing should be this
@@ -16,6 +20,23 @@ export const STUCK_OVERDUE_MINUTES = 15
 export const HEALTH_WINDOW_MINUTES = 60
 export const FAILED_FINAL_ALERT_THRESHOLD = 10
 
+/**
+ * FAILED_RETRYABLE spike threshold.
+ *
+ * This exists because the two checks above were BLIND to a total push outage:
+ * every failing delivery was FAILED_RETRYABLE (never terminal, so
+ * failedFinalCount stayed 0) and none were PENDING/PROCESSING (so stuckCount
+ * stayed 0). Push was dead for weeks and this probe reported healthy the entire
+ * time.
+ *
+ * Threshold derived from 30 days of production, not guessed: 17 retryable
+ * failures total across 5 distinct hours — a normal hour sees 1–2 — while the
+ * outage hour produced 11. Five per window sits clear of the noise and would
+ * have caught it. Revisit as real volume grows; at higher throughput this wants
+ * to become a rate rather than a count.
+ */
+export const FAILED_RETRYABLE_ALERT_THRESHOLD = 5
+
 export type NotificationDeliveryHealth = {
   healthy: boolean
   generatedAt: string
@@ -23,8 +44,26 @@ export type NotificationDeliveryHealth = {
   countsByStatus: Record<string, number>
   stuckCount: number
   failedFinalCount: number
+  failedRetryableCount: number
   topErrorCodes: { code: string; count: number }[]
+  /** Provider credentials that are present but unusable. */
+  providerConfigIssues: string[]
   reasons: string[]
+}
+
+/**
+ * Credentials that are set but cannot work. Distinct from "not configured":
+ * an absent provider is a deliberate state, whereas a present-but-broken one
+ * silently swallows every notification routed to it.
+ */
+function collectProviderConfigIssues(): string[] {
+  const issues: string[] = []
+
+  if (readApnsConfigOutcome().problem === 'INVALID_PRIVATE_KEY') {
+    issues.push(APNS_INVALID_PRIVATE_KEY_MESSAGE)
+  }
+
+  return issues
 }
 
 export async function evaluateNotificationDeliveryHealth(args?: {
@@ -81,6 +120,8 @@ export async function evaluateNotificationDeliveryHealth(args?: {
 
   const failedFinalCount =
     countsByStatus[NotificationDeliveryStatus.FAILED_FINAL] ?? 0
+  const failedRetryableCount =
+    countsByStatus[NotificationDeliveryStatus.FAILED_RETRYABLE] ?? 0
 
   const topErrorCodes = errorGroups
     .map((row) => ({
@@ -88,6 +129,8 @@ export async function evaluateNotificationDeliveryHealth(args?: {
       count: row._count._all,
     }))
     .filter((row) => row.count > 0)
+
+  const providerConfigIssues = collectProviderConfigIssues()
 
   const reasons: string[] = []
   if (stuckCount > 0) {
@@ -100,6 +143,14 @@ export async function evaluateNotificationDeliveryHealth(args?: {
       `${failedFinalCount} terminal failures in the last ${windowMinutes}m`,
     )
   }
+  if (failedRetryableCount > FAILED_RETRYABLE_ALERT_THRESHOLD) {
+    reasons.push(
+      `${failedRetryableCount} retryable failures in the last ${windowMinutes}m (a provider is failing every send)`,
+    )
+  }
+  for (const issue of providerConfigIssues) {
+    reasons.push(issue)
+  }
 
   return {
     healthy: reasons.length === 0,
@@ -108,7 +159,9 @@ export async function evaluateNotificationDeliveryHealth(args?: {
     countsByStatus,
     stuckCount,
     failedFinalCount,
+    failedRetryableCount,
     topErrorCodes,
+    providerConfigIssues,
     reasons,
   }
 }

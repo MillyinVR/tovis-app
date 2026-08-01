@@ -176,7 +176,7 @@ export default function AppointmentsList({
             Once you book, your appointments show up here.
           </p>
           <Link
-            href="/discover"
+            href="/search"
             className="mt-4 inline-block font-display text-[13px] font-semibold text-accentPrimary transition hover:opacity-80"
           >
             Find a pro →
