@@ -7,6 +7,8 @@ import {
   BookingDiscoveryProvenance,
   BookingOverrideAction,
   BookingOverrideRule,
+  BookingSeriesExceptionReason,
+  BookingSeriesStatus,
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
@@ -97,7 +99,11 @@ import {
   withLockedProfessionalScheduleByLookup,
   withLockedProfessionalTransaction,
 } from '@/lib/booking/scheduleTransaction'
-import { bookingError, type BookingErrorCode } from '@/lib/booking/errors'
+import {
+  bookingError,
+  isBookingError,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
 import {
   BOOKING_OVERLAP_CONSTRAINT_NAME,
   HOLD_MINUTES,
@@ -131,8 +137,18 @@ import {
   DEFAULT_TIME_ZONE,
   formatDatedAppointmentWhen,
   isValidIanaTimeZone,
+  pickTimeZoneOrNull,
   sanitizeTimeZone,
 } from '@/lib/time'
+import { recurringAppointmentsEnabled } from '@/lib/booking/series/flag'
+import {
+  computeSeriesOccurrenceInstants,
+  countOccurrencesToMaterialize,
+  MAX_SERIES_INTERVAL_WEEKS,
+  MAX_SERIES_OCCURRENCE_COUNT,
+  MIN_SERIES_INTERVAL_WEEKS,
+  SERIES_MATERIALIZE_HORIZON,
+} from '@/lib/booking/series/schedule'
 import { clampInt } from '@/lib/pick'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
@@ -5285,6 +5301,8 @@ function mapBookingOverlapBlockedCodeToBookingError(
       return 'TIME_BOOKED'
     case 'IMPORT_OVERLAP_NOT_ALLOWED':
       return 'TIME_BOOKED'
+    case 'SERIES_OVERLAP_NOT_ALLOWED':
+      return 'TIME_BOOKED'
     case 'AFTERCARE_PRESELECTED_SLOT_REQUIRED':
       return 'TIME_BOOKED'
     case 'AFTERCARE_PRESELECTED_SLOT_MISMATCH':
@@ -10181,11 +10199,25 @@ async function performLockedCreateProBooking(args: {
   importMode?: boolean
   // K10-B: see CreateProBookingArgs.depositRequested.
   depositRequested?: boolean
+  // K18 recurring appointments. Set ONLY by the series materializer. Their
+  // presence is what makes the occurrence unattended for overlap purposes — see
+  // the source derivation below — so they are deliberately not two independent
+  // knobs a caller can half-set.
+  seriesId?: string | null
+  seriesOccurrenceIndex?: number | null
   // A client confirming a pro-authored time (waitlist offer) is still a CLIENT
   // for overlap purposes: a conflict must refuse, never silently double-book.
   overlapActor?: BookingOverlapActor
 }): Promise<CreateProBookingResult> {
   const importMode = args.importMode ?? false
+
+  // K18: a series occurrence is materialized with nobody looking at this slot —
+  // the pro chose a PATTERN, and K20's cron re-runs it unattended. That changes
+  // the overlap verdict (see the source derivation below) and suppresses the
+  // per-occurrence "you're booked" notification for the follow-on appointments.
+  const seriesId = args.seriesId ?? null
+  const seriesOccurrenceIndex = seriesId == null ? null : args.seriesOccurrenceIndex ?? 0
+  const isSeriesFollowOnOccurrence = seriesId != null && (seriesOccurrenceIndex ?? 0) > 0
 
     assertNonEmptyUserId(args.actorUserId)
 
@@ -10567,7 +10599,17 @@ async function performLockedCreateProBooking(args: {
     // inherit the pro's authority to double-book (see
     // decideBookingOverlapPermission). importMode is already threaded here, so
     // the source is derived rather than plumbed through another parameter.
-    source: importMode ? { kind: 'CALENDAR_IMPORT' } : { kind: 'PRO_CREATED' },
+    //
+    // K18 rides the same rule for the same reason: a recurring occurrence has no
+    // human at THIS slot on THIS date either, so it is refused on a conflict and
+    // the materializer records a skip. Derived from seriesId rather than passed
+    // in, so a caller cannot ask for a series booking that keeps the pro's
+    // authority to double-book.
+    source: importMode
+      ? { kind: 'CALENDAR_IMPORT' }
+      : seriesId != null
+        ? { kind: 'SERIES_MATERIALIZATION' }
+        : { kind: 'PRO_CREATED' },
     requestedWindow: {
       professionalId: args.professionalId,
       startsAt: requestedStart,
@@ -10641,6 +10683,12 @@ async function performLockedCreateProBooking(args: {
           proCreated: !importMode,
         }),
         creationIdempotencyKey: args.idempotencyKey ?? null,
+
+        // K18: series membership. Null for every ordinary booking, so the
+        // unique (seriesId, seriesOccurrenceIndex) pair constrains only
+        // occurrences.
+        seriesId,
+        seriesOccurrenceIndex,
 
         locationType: args.locationType,
         locationId: locationContext.locationId,
@@ -10780,7 +10828,8 @@ async function performLockedCreateProBooking(args: {
 // don't send a confirmation or schedule appointment reminders.
 if (!importMode) {
   // §12 NC1 #3+4: unified "you're booked with {pro} for {service} on {date} at
-  // {time}" copy, shared with every other confirm path.
+  // {time}" copy, shared with every other confirm path. Read unconditionally —
+  // the deposit pay-link block below also names the professional from it.
   const confirmMeta = await args.tx.booking.findUnique({
     where: { id: booking.id },
     select: {
@@ -10792,29 +10841,38 @@ if (!importMode) {
       },
     },
   })
-  const confirmedCopy = buildBookingConfirmedClientCopy({
-    proName: formatProfessionalPublicDisplayName(confirmMeta?.professional),
-    serviceName: confirmMeta?.service?.name ?? offering.service.name,
-    scheduledFor: confirmMeta?.scheduledFor ?? null,
-    timeZone: confirmMeta
-      ? resolveBookingDisplayTimeZone(confirmMeta)
-      : DEFAULT_TIME_ZONE,
-  })
-  await createUpdateClientNotification({
-    tx: args.tx,
-    clientId: args.clientId,
-    bookingId: booking.id,
-    eventKey: NotificationEventKey.BOOKING_CONFIRMED,
-    title: confirmedCopy.title,
-    body: confirmedCopy.body,
-    dedupeKey: `BOOKING_CONFIRMED:${booking.id}`,
-    href: `/client/bookings/${booking.id}?step=overview`,
-    data: {
+
+  // K18: creating a standing appointment is ONE act of booking, so the client
+  // gets one confirmation — the first occurrence's — not twelve identical
+  // "you're booked" pushes inside a second. Every occurrence still schedules its
+  // own appointment reminders below and appears in the client's own list, so
+  // nothing is hidden; only the duplicate announcement is suppressed. K19 owns
+  // the series-level copy that names the pattern ("every other Friday, 9am").
+  if (!isSeriesFollowOnOccurrence) {
+    const confirmedCopy = buildBookingConfirmedClientCopy({
+      proName: formatProfessionalPublicDisplayName(confirmMeta?.professional),
+      serviceName: confirmMeta?.service?.name ?? offering.service.name,
+      scheduledFor: confirmMeta?.scheduledFor ?? null,
+      timeZone: confirmMeta
+        ? resolveBookingDisplayTimeZone(confirmMeta)
+        : DEFAULT_TIME_ZONE,
+    })
+    await createUpdateClientNotification({
+      tx: args.tx,
+      clientId: args.clientId,
       bookingId: booking.id,
-      notificationReason: 'BOOKING_CONFIRMED',
-      bookingReason: 'PRO_BOOKED_APPOINTMENT',
-    },
-  })
+      eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+      title: confirmedCopy.title,
+      body: confirmedCopy.body,
+      dedupeKey: `BOOKING_CONFIRMED:${booking.id}`,
+      href: `/client/bookings/${booking.id}?step=overview`,
+      data: {
+        bookingId: booking.id,
+        notificationReason: 'BOOKING_CONFIRMED',
+        bookingReason: 'PRO_BOOKED_APPOINTMENT',
+      },
+    })
+  }
 
   await syncBookingAppointmentReminders({
     tx: args.tx,
@@ -15889,6 +15947,450 @@ export async function createProBooking(
         depositRequested: args.depositRequested ?? false,
       }),
   )
+}
+
+/**
+ * K18 — create a recurring appointment (a `BookingSeries`) and MATERIALIZE its
+ * first window of occurrences as real `Booking` rows.
+ *
+ * 🔴 Why real rows, and not an RRULE the calendar expands at read time: a
+ * virtual occurrence is invisible to `Booking_no_active_professional_overlap`,
+ * to holds, to deposits, to reminders and to closeout. It would not block a
+ * double-booking — which is the entire point of a standing appointment — and it
+ * would never be reminded, charged or closed out. Every occurrence here is an
+ * ordinary booking that happens to carry a `seriesId`.
+ *
+ * ## Transaction shape (this is the load-bearing part)
+ *
+ * The series row and occurrence 0 are created in ONE locked transaction: the
+ * slot the pro actually picked must either book or refuse, and a series with no
+ * appointments is not a thing anybody wants. Every LATER occurrence gets its
+ * OWN locked transaction.
+ *
+ * That is not a style choice. A refused occurrence throws — from the app-level
+ * conflict gate, or from the DB overlap constraint — and in Postgres a statement
+ * error poisons the whole transaction: every subsequent statement fails with
+ * "current transaction is aborted". Catching a conflict on occurrence 5 and
+ * carrying on to 6…12 is only possible if 5 had a transaction of its own to roll
+ * back. The plan's requirement that "a collision must not abort the
+ * roll-forward" IS this design.
+ *
+ * ## Conflict policy (decided here, per the build plan)
+ *
+ * SKIP + RECORD. A colliding occurrence is not created, and a
+ * `BookingSeriesException` row records the index, the instant it wanted and the
+ * refusal code. It is durable (so K20's roll-forward is idempotent and never
+ * retries a slot it already lost), queryable (so K19 can show the pro "we
+ * couldn't book 12 Feb"), and it is the honest alternative to the two bad
+ * options: silently double-booking, or abandoning the rest of the series.
+ * Actively notifying the pro belongs to K19/K20, which own a surface — K18 is
+ * dark and returns the skips to its caller.
+ *
+ * ## D7 — deposits (settled by Tori)
+ *
+ * `depositRequested` is the gate; `depositPerOccurrence` chooses
+ * first-occurrence-only or every-occurrence. A SKIPPED occurrence never became a
+ * booking, so it never carries a deposit and there is nothing to refund. Under
+ * first-occurrence-only the deposit-bearing occurrence is index 0, which cannot
+ * be skipped — it refuses the whole series instead — so a series can never end
+ * up collecting nothing when the pro asked for a deposit.
+ */
+export type CreateBookingSeriesArgs = {
+  professionalId: string
+  actorUserId: string
+  clientId: string
+  offeringId: string
+  addOnIds?: string[]
+  locationId: string
+  locationType: ServiceLocationType
+  clientAddressId: string | null
+  /** Occurrence 0 — the slot the pro picked. */
+  firstOccurrenceAt: Date
+  /** Cadence in CALENDAR weeks. */
+  intervalWeeks: number
+  /** Total planned occurrences, or null for open-ended. */
+  occurrenceCount: number | null
+  depositRequested?: boolean
+  depositPerOccurrence?: boolean
+  internalNotes: string | null
+  overrideReason: string | null
+  requestedBufferMinutes: number | null
+  requestedTotalDurationMinutes: number | null
+  allowOutsideWorkingHours: boolean
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+export type BookingSeriesMaterializedOccurrence = {
+  index: number
+  bookingId: string
+  scheduledFor: Date
+}
+
+export type BookingSeriesSkippedOccurrence = {
+  index: number
+  intendedStart: Date | null
+  reason: BookingSeriesExceptionReason
+  detail: string | null
+}
+
+export type CreateBookingSeriesResult = {
+  seriesId: string
+  timeZone: string
+  /** Where K20's roll-forward should resume. */
+  nextOccurrenceIndex: number
+  occurrences: BookingSeriesMaterializedOccurrence[]
+  skipped: BookingSeriesSkippedOccurrence[]
+}
+
+/**
+ * Classify a booking-boundary refusal into the reason recorded on the
+ * exception row. "Slot unavailable" is the family that means somebody else has
+ * the time; everything else keeps its own code in `detail` rather than being
+ * flattened into a lie about availability.
+ */
+function classifySeriesRefusal(
+  code: BookingErrorCode,
+): BookingSeriesExceptionReason {
+  switch (code) {
+    case 'TIME_BOOKED':
+    case 'TIME_HELD':
+    case 'TIME_BLOCKED':
+    case 'TIME_NOT_AVAILABLE':
+      return BookingSeriesExceptionReason.SLOT_UNAVAILABLE
+    default:
+      return BookingSeriesExceptionReason.REFUSED
+  }
+}
+
+export async function createBookingSeries(
+  args: CreateBookingSeriesArgs,
+): Promise<CreateBookingSeriesResult> {
+  // 🔴 The kill switch is checked at the WRITE, not only at the route. A dark
+  // feature that any other caller can reach is not dark
+  // ([[refuse-the-claim-not-just-the-control]]).
+  if (!recurringAppointmentsEnabled()) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Recurring appointments are not enabled.',
+      userMessage: 'Recurring appointments are not available yet.',
+    })
+  }
+
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+  assertNonEmptyClientId(args.clientId)
+  assertNonEmptyOfferingId(args.offeringId)
+  assertNonEmptyLocationId(args.locationId)
+  assertValidRequestedStart(args.firstOccurrenceAt)
+
+  if (
+    !Number.isInteger(args.intervalWeeks) ||
+    args.intervalWeeks < MIN_SERIES_INTERVAL_WEEKS ||
+    args.intervalWeeks > MAX_SERIES_INTERVAL_WEEKS
+  ) {
+    throw bookingError('INVALID_SERIES_RECURRENCE', {
+      message: `intervalWeeks must be an integer between ${MIN_SERIES_INTERVAL_WEEKS} and ${MAX_SERIES_INTERVAL_WEEKS}.`,
+    })
+  }
+
+  if (
+    args.occurrenceCount != null &&
+    (!Number.isInteger(args.occurrenceCount) ||
+      args.occurrenceCount < 1 ||
+      args.occurrenceCount > MAX_SERIES_OCCURRENCE_COUNT)
+  ) {
+    throw bookingError('INVALID_SERIES_RECURRENCE', {
+      message: `occurrenceCount must be an integer between 1 and ${MAX_SERIES_OCCURRENCE_COUNT}, or omitted for an open-ended series.`,
+    })
+  }
+
+  // The zone whose CALENDAR weeks the pattern steps through is the LOCATION's,
+  // read here (scoped to the pro, so a foreign location id cannot be used to
+  // borrow a timezone) rather than taken from the request. Occurrence
+  // scheduling is not a display concern.
+  const location = await prisma.professionalLocation.findFirst({
+    where: { id: args.locationId, professionalId: args.professionalId },
+    select: { id: true, timeZone: true },
+  })
+
+  if (!location) {
+    throw bookingError('LOCATION_NOT_FOUND')
+  }
+
+  const timeZone = pickTimeZoneOrNull(location.timeZone)
+  if (!timeZone) {
+    throw bookingError('TIMEZONE_REQUIRED')
+  }
+
+  const addOnIds = args.addOnIds ?? []
+
+  // `depositPerOccurrence` is meaningless without `depositRequested`, and a
+  // stored row reading "charge every occurrence" beside "collect nothing" is a
+  // row that lies to whoever reads it next (K19's edit form, K20's cron). It is
+  // normalized here, at the one place that decides.
+  const depositRequested = args.depositRequested ?? false
+  const depositPerOccurrence = depositRequested && (args.depositPerOccurrence ?? false)
+
+  // Occurrence 0 + the series row, atomically. A refusal here (the slot is
+  // taken, the pro isn't booking-ready, the deposit can't be delivered) leaves
+  // NO series behind — the pro asked for a standing appointment starting at a
+  // time that doesn't work, and half of that is not an answer.
+  const created = await withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) => {
+      const series = await tx.bookingSeries.create({
+        data: {
+          professionalId: args.professionalId,
+          clientId: args.clientId,
+          offeringId: args.offeringId,
+          locationId: location.id,
+          locationType: args.locationType,
+          clientAddressId: args.clientAddressId,
+          addOnIds,
+          timeZone,
+          anchorAt: args.firstOccurrenceAt,
+          intervalWeeks: args.intervalWeeks,
+          occurrenceCount: args.occurrenceCount,
+          depositRequested,
+          depositPerOccurrence,
+          requestedBufferMinutes: args.requestedBufferMinutes,
+          requestedTotalDurationMinutes: args.requestedTotalDurationMinutes,
+          allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+          allowShortNotice: args.allowShortNotice,
+          allowFarFuture: args.allowFarFuture,
+          overrideReason: args.overrideReason,
+          internalNotes: args.internalNotes,
+          createdByUserId: args.actorUserId,
+          nextOccurrenceIndex: 1,
+        },
+        select: { id: true },
+      })
+
+      const first = await performLockedCreateProBooking({
+        tx,
+        now,
+        professionalId: args.professionalId,
+        clientId: args.clientId,
+        offeringId: args.offeringId,
+        addOnIds,
+        locationId: location.id,
+        locationType: args.locationType,
+        scheduledFor: args.firstOccurrenceAt,
+        clientAddressId: args.clientAddressId,
+        internalNotes: args.internalNotes,
+        requestedBufferMinutes: args.requestedBufferMinutes,
+        requestedTotalDurationMinutes: args.requestedTotalDurationMinutes,
+        allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+        allowShortNotice: args.allowShortNotice,
+        allowFarFuture: args.allowFarFuture,
+        actorUserId: args.actorUserId,
+        overrideReason: args.overrideReason,
+        requestId: args.requestId ?? null,
+        // 🔴 NOT args.idempotencyKey. That key belongs to the SERIES request;
+        // reusing it on occurrence 0 would make the (clientId, key) uniqueness
+        // replay this booking for any later series the same key ever reaches.
+        idempotencyKey: null,
+        depositRequested,
+        seriesId: series.id,
+        seriesOccurrenceIndex: 0,
+      })
+
+      return { seriesId: series.id, first }
+    },
+  )
+
+  const occurrences: BookingSeriesMaterializedOccurrence[] = [
+    {
+      index: 0,
+      bookingId: created.first.booking.id,
+      scheduledFor: created.first.booking.scheduledFor,
+    },
+  ]
+  const skipped: BookingSeriesSkippedOccurrence[] = []
+
+  const remaining = countOccurrencesToMaterialize({
+    nextOccurrenceIndex: 1,
+    occurrenceCount: args.occurrenceCount,
+    horizon: SERIES_MATERIALIZE_HORIZON - 1,
+  })
+
+  const instants = computeSeriesOccurrenceInstants({
+    recurrence: {
+      anchorAt: args.firstOccurrenceAt,
+      timeZone,
+      intervalWeeks: args.intervalWeeks,
+    },
+    fromIndex: 1,
+    count: remaining,
+  })
+
+  let nextOccurrenceIndex = 1
+
+  for (const instant of instants) {
+    nextOccurrenceIndex = instant.index + 1
+
+    if (instant.kind === 'NONEXISTENT') {
+      // The recurring wall time does not exist on that local date. Recorded,
+      // never shifted — see lib/booking/series/schedule.ts.
+      await recordBookingSeriesException({
+        seriesId: created.seriesId,
+        index: instant.index,
+        intendedStart: null,
+        reason: BookingSeriesExceptionReason.NONEXISTENT_LOCAL_TIME,
+        detail: instant.localWallTime,
+        nextOccurrenceIndex,
+      })
+      skipped.push({
+        index: instant.index,
+        intendedStart: null,
+        reason: BookingSeriesExceptionReason.NONEXISTENT_LOCAL_TIME,
+        detail: instant.localWallTime,
+      })
+      continue
+    }
+
+    try {
+      // Its own transaction — see the header. A refusal below rolls back only
+      // this occurrence.
+      const result = await withLockedProfessionalTransaction(
+        args.professionalId,
+        async ({ tx, now }) => {
+          const booking = await performLockedCreateProBooking({
+            tx,
+            now,
+            professionalId: args.professionalId,
+            clientId: args.clientId,
+            offeringId: args.offeringId,
+            addOnIds,
+            locationId: location.id,
+            locationType: args.locationType,
+            scheduledFor: instant.at,
+            clientAddressId: args.clientAddressId,
+            internalNotes: args.internalNotes,
+            requestedBufferMinutes: args.requestedBufferMinutes,
+            requestedTotalDurationMinutes: args.requestedTotalDurationMinutes,
+            allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+            allowShortNotice: args.allowShortNotice,
+            allowFarFuture: args.allowFarFuture,
+            actorUserId: args.actorUserId,
+            overrideReason: args.overrideReason,
+            requestId: args.requestId ?? null,
+            idempotencyKey: null,
+            // D7: every occurrence pays only when the pro chose
+            // per-occurrence. Otherwise the deposit is occurrence 0's alone.
+            depositRequested: depositPerOccurrence,
+            seriesId: created.seriesId,
+            seriesOccurrenceIndex: instant.index,
+          })
+
+          await tx.bookingSeries.update({
+            where: { id: created.seriesId },
+            data: { nextOccurrenceIndex: instant.index + 1 },
+          })
+
+          return booking
+        },
+      )
+
+      occurrences.push({
+        index: instant.index,
+        bookingId: result.booking.id,
+        scheduledFor: result.booking.scheduledFor,
+      })
+    } catch (error: unknown) {
+      // 🔴 Only a KNOWN booking refusal becomes a skip. An unexpected error (a
+      // dropped connection, a bug) must not be recorded as "that slot was
+      // taken" — that would turn an outage into twelve silent, permanent skips
+      // the roll-forward will never retry.
+      if (!isBookingError(error)) throw error
+
+      const reason = classifySeriesRefusal(error.code)
+
+      await recordBookingSeriesException({
+        seriesId: created.seriesId,
+        index: instant.index,
+        intendedStart: instant.at,
+        reason,
+        detail: error.code,
+        nextOccurrenceIndex,
+      })
+
+      skipped.push({
+        index: instant.index,
+        intendedStart: instant.at,
+        reason,
+        detail: error.code,
+      })
+    }
+  }
+
+  // An exhausted series has nothing left to roll forward; K20's cron sweeps on
+  // status, so say so now rather than leaving it looking live forever.
+  if (
+    args.occurrenceCount != null &&
+    nextOccurrenceIndex >= args.occurrenceCount
+  ) {
+    await prisma.bookingSeries.update({
+      where: { id: created.seriesId },
+      data: { status: BookingSeriesStatus.ENDED },
+    })
+  }
+
+  // No schedule-version bump here: performLockedCreateProBooking already bumps
+  // on every occurrence it creates, and a series that materialized nothing
+  // cannot exist (occurrence 0 either books or refuses the whole call).
+
+  return {
+    seriesId: created.seriesId,
+    timeZone,
+    nextOccurrenceIndex,
+    occurrences,
+    skipped,
+  }
+}
+
+/**
+ * Record one skipped occurrence and advance the series' bookkeeping cursor.
+ *
+ * Runs OUTSIDE the failed occurrence's transaction (that one is rolled back and
+ * unusable). Idempotent on (seriesId, occurrenceIndex): a re-run that loses the
+ * race simply finds the row already there, which is what makes K20's
+ * roll-forward safe to repeat.
+ */
+async function recordBookingSeriesException(args: {
+  seriesId: string
+  index: number
+  intendedStart: Date | null
+  reason: BookingSeriesExceptionReason
+  detail: string | null
+  nextOccurrenceIndex: number
+}): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.bookingSeriesException.upsert({
+      where: {
+        seriesId_occurrenceIndex: {
+          seriesId: args.seriesId,
+          occurrenceIndex: args.index,
+        },
+      },
+      create: {
+        seriesId: args.seriesId,
+        occurrenceIndex: args.index,
+        intendedStart: args.intendedStart,
+        reason: args.reason,
+        detail: args.detail,
+      },
+      update: {},
+      select: { id: true },
+    })
+
+    await tx.bookingSeries.update({
+      where: { id: args.seriesId },
+      data: { nextOccurrenceIndex: args.nextOccurrenceIndex },
+    })
+  })
 }
 
 /**

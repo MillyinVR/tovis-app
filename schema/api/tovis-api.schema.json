@@ -39,6 +39,14 @@
       ],
       "type": "string"
     },
+    "$Enums.BookingSeriesExceptionReason": {
+      "enum": [
+        "SLOT_UNAVAILABLE",
+        "NONEXISTENT_LOCAL_TIME",
+        "REFUSED"
+      ],
+      "type": "string"
+    },
     "$Enums.BookingServiceItemType": {
       "enum": [
         "BASE",
@@ -2059,6 +2067,9 @@
         "isMobile"
       ],
       "type": "object"
+    },
+    "BookingSeriesExceptionReason": {
+      "$ref": "#/definitions/%24Enums.BookingSeriesExceptionReason"
     },
     "BookingServiceItemType": {
       "$ref": "#/definitions/%24Enums.BookingServiceItemType"
@@ -10274,6 +10285,95 @@
         "createdAt",
         "updatedAt",
         "service"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesCreateResponseDTO": {
+      "properties": {
+        "nextOccurrenceIndex": {
+          "description": "Where K20's roll-forward resumes. Also the honest count of occurrences ATTEMPTED so far: occurrences.length + skipped.length.",
+          "type": "number"
+        },
+        "occurrences": {
+          "items": {
+            "$ref": "#/definitions/ProBookingSeriesOccurrenceDTO"
+          },
+          "type": "array"
+        },
+        "seriesId": {
+          "type": "string"
+        },
+        "skipped": {
+          "items": {
+            "$ref": "#/definitions/ProBookingSeriesSkippedOccurrenceDTO"
+          },
+          "type": "array"
+        },
+        "timeZone": {
+          "description": "The zone the pattern steps through — the LOCATION's, not the viewer's. \"Every Friday 9am\" is 9am there, so every date above must be rendered in this zone or the pro reads a different day near midnight.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seriesId",
+        "timeZone",
+        "nextOccurrenceIndex",
+        "occurrences",
+        "skipped"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesOccurrenceDTO": {
+      "description": "One appointment the materializer actually created.",
+      "properties": {
+        "bookingId": {
+          "type": "string"
+        },
+        "index": {
+          "description": "0-based and stable. Index 0 is the slot the pro picked.",
+          "type": "number"
+        },
+        "scheduledFor": {
+          "description": "UTC instant, ISO-8601. Render it in `timeZone`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "bookingId",
+        "scheduledFor"
+      ],
+      "type": "object"
+    },
+    "ProBookingSeriesSkippedOccurrenceDTO": {
+      "description": "One occurrence the materializer did NOT create, and why.",
+      "properties": {
+        "detail": {
+          "description": "The BookingErrorCode that refused it, or the impossible wall-clock time. Diagnostic, not user copy.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "index": {
+          "type": "number"
+        },
+        "intendedStart": {
+          "description": "The instant the occurrence wanted, ISO-8601 — or null for NONEXISTENT_LOCAL_TIME, where no such instant exists (a DST gap). `detail` then carries the wall clock that does not exist.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "$ref": "#/definitions/BookingSeriesExceptionReason"
+        }
+      },
+      "required": [
+        "index",
+        "intendedStart",
+        "reason",
+        "detail"
       ],
       "type": "object"
     },

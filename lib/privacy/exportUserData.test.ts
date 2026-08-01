@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
     bookingHold: {
       findMany: vi.fn(),
     },
+    bookingSeries: {
+      findMany: vi.fn(),
+    },
     clientActionToken: {
       findMany: vi.fn(),
     },
@@ -135,6 +138,7 @@ function resetFindManyMocks() {
   mocks.db.professionalLocation.findMany.mockResolvedValue([])
   mocks.db.booking.findMany.mockResolvedValue([])
   mocks.db.bookingHold.findMany.mockResolvedValue([])
+  mocks.db.bookingSeries.findMany.mockResolvedValue([])
   mocks.db.clientActionToken.findMany.mockResolvedValue([])
   mocks.db.aftercareSummary.findMany.mockResolvedValue([])
   mocks.db.clientConsentRecord.findMany.mockResolvedValue([])
@@ -548,6 +552,7 @@ describe('exportUserData', () => {
             createdAt: '2026-04-05T00:00:00.000Z',
           },
         ],
+        bookingSeries: [],
         clientActionTokens: [
           {
             id: 'token_1',
@@ -792,6 +797,16 @@ describe('exportUserData', () => {
       select: expect.any(Object),
     })
 
+    // K18: a series belongs to BOTH subjects, so it is scoped like a booking
+    // hold rather than to one side.
+    expect(mocks.db.bookingSeries.findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [{ clientId: 'client_1' }, { professionalId: 'pro_1' }],
+      },
+      orderBy: { createdAt: 'asc' },
+      select: expect.any(Object),
+    })
+
     expect(mocks.db.clientActionToken.findMany).toHaveBeenCalledWith({
       where: { clientId: 'client_1' },
       orderBy: { createdAt: 'asc' },
@@ -906,6 +921,7 @@ describe('exportUserData', () => {
     expect(result.data.bookingsAsClient).toEqual([])
     expect(result.data.bookingsAsProfessional).toEqual([])
     expect(result.data.bookingHolds).toEqual([])
+    expect(result.data.bookingSeries).toEqual([])
     expect(result.data.clientActionTokens).toEqual([])
 
     expect(result.data.clientNotifications).toEqual([])
@@ -915,6 +931,7 @@ describe('exportUserData', () => {
     expect(mocks.db.professionalLocation.findMany).not.toHaveBeenCalled()
     expect(mocks.db.booking.findMany).not.toHaveBeenCalled()
     expect(mocks.db.bookingHold.findMany).not.toHaveBeenCalled()
+    expect(mocks.db.bookingSeries.findMany).not.toHaveBeenCalled()
     expect(mocks.db.clientActionToken.findMany).not.toHaveBeenCalled()
 
     expect(mocks.db.mediaAsset.findMany).toHaveBeenCalledWith(

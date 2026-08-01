@@ -4,6 +4,10 @@ export const IDEMPOTENCY_ROUTES = {
   BOOKING_FINALIZE: 'POST /api/v1/bookings/finalize',
 
   PRO_BOOKING_CREATE: 'POST /api/v1/pro/bookings',
+  // K18: creating a series materializes up to a dozen bookings, so a
+  // double-submit is expensive even though the second attempt would refuse at
+  // occurrence 0 (the series overlap rule takes the first one's slot).
+  PRO_BOOKING_SERIES_CREATE: 'POST /api/v1/pro/booking-series',
   PRO_BOOKING_UPDATE: 'PATCH /api/v1/pro/bookings/[id]',
   PRO_BOOKING_CANCEL: 'PATCH /api/v1/pro/bookings/[id]/cancel',
   PRO_BOOKING_NO_SHOW: 'POST /api/v1/pro/bookings/[id]/no-show',

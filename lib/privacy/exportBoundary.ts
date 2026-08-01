@@ -138,6 +138,12 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     keys: ['bookingsAsClient', 'bookingsAsProfessional'],
   },
   BookingHold: { status: 'EXPORTED', keys: ['bookingHolds'] },
+  // K18: the client's standing appointment is their arrangement as much as the
+  // pro's, and every occurrence it produced is already exported as a Booking —
+  // so exporting the rule that produced them costs nothing and completes the
+  // picture. The select omits the pro's private free text (internalNotes,
+  // overrideReason), mirroring the booking select.
+  BookingSeries: { status: 'EXPORTED', keys: ['bookingSeries'] },
   ClientActionToken: { status: 'EXPORTED', keys: ['clientActionTokens'] },
   AftercareSummary: { status: 'EXPORTED', keys: ['aftercareSummaries'] },
   MediaAsset: { status: 'EXPORTED', keys: ['mediaAssets'] },

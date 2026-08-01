@@ -47,6 +47,7 @@ export type BookingErrorCode =
   | "TIME_HELD"
   | "TIME_NOT_AVAILABLE"
   | "ADDONS_INVALID"
+  | "INVALID_SERIES_RECURRENCE"
   | "CLIENT_NOT_FOUND"
   | "MISSING_MEDIA_ID"
   | "OPENING_NOT_AVAILABLE"
@@ -484,6 +485,18 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "One or more add-ons are invalid.",
     userMessage: "One or more add-ons are invalid for this booking.",
+  },
+
+  // K18: the recurrence itself is malformed (cadence or total occurrences out of
+  // range). Distinct from INVALID_SCHEDULED_FOR, which is about the one instant
+  // the pro picked — this is about the PATTERN, and the remedy is a different
+  // form field.
+  INVALID_SERIES_RECURRENCE: {
+    httpStatus: 400,
+    retryable: false,
+    uiAction: "NONE",
+    message: "The recurring appointment pattern is invalid.",
+    userMessage: "That repeat pattern isn't valid. Please choose another.",
   },
 
   CLIENT_NOT_FOUND: {
