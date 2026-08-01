@@ -74,6 +74,28 @@
       ],
       "type": "string"
     },
+    "$Enums.ConsultationApprovalProofMethod": {
+      "enum": [
+        "REMOTE_SECURE_LINK",
+        "IN_PERSON_PRO_DEVICE"
+      ],
+      "type": "string"
+    },
+    "$Enums.ConsultationApprovalStatus": {
+      "enum": [
+        "PENDING",
+        "APPROVED",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
+    "$Enums.ConsultationDecision": {
+      "enum": [
+        "APPROVED",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
     "$Enums.DevicePlatform": {
       "enum": [
         "IOS",
@@ -6320,6 +6342,15 @@
       ],
       "type": "object"
     },
+    "ConsultationApprovalProofMethod": {
+      "$ref": "#/definitions/%24Enums.ConsultationApprovalProofMethod"
+    },
+    "ConsultationApprovalStatus": {
+      "$ref": "#/definitions/%24Enums.ConsultationApprovalStatus"
+    },
+    "ConsultationDecision": {
+      "$ref": "#/definitions/%24Enums.ConsultationDecision"
+    },
     "CreateMessageResponseDTO": {
       "properties": {
         "message": {
@@ -12536,6 +12567,224 @@
         "center"
       ],
       "type": "object"
+    },
+    "ProSessionState": {
+      "properties": {
+        "aftercare": {
+          "anyOf": [
+            {
+              "properties": {
+                "draftSavedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "sentToClientAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "version": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "draftSavedAt",
+                "sentToClientAt",
+                "version"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bookingId": {
+          "type": "string"
+        },
+        "bookingUpdatedAt": {
+          "type": "string"
+        },
+        "checkout": {
+          "properties": {
+            "paymentAuthorizedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "paymentCollectedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "selectedPaymentMethod": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PaymentMethod"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "status": {
+              "$ref": "#/definitions/BookingCheckoutStatus"
+            },
+            "stripePaymentStatus": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StripePaymentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "selectedPaymentMethod",
+            "paymentCollectedAt",
+            "paymentAuthorizedAt",
+            "stripePaymentStatus"
+          ],
+          "type": "object"
+        },
+        "consultation": {
+          "anyOf": [
+            {
+              "properties": {
+                "approvedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "proof": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "actedAt": {
+                          "type": "string"
+                        },
+                        "decision": {
+                          "$ref": "#/definitions/ConsultationDecision"
+                        },
+                        "method": {
+                          "$ref": "#/definitions/ConsultationApprovalProofMethod"
+                        }
+                      },
+                      "required": [
+                        "decision",
+                        "method",
+                        "actedAt"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "rejectedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "$ref": "#/definitions/ConsultationApprovalStatus"
+                },
+                "updatedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "approvedAt",
+                "rejectedAt",
+                "updatedAt",
+                "proof"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effectiveSessionStep": {
+          "$ref": "#/definitions/SessionStep"
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionStep": {
+          "$ref": "#/definitions/SessionStep"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/BookingStatus"
+        },
+        "terminal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bookingId",
+        "status",
+        "sessionStep",
+        "effectiveSessionStep",
+        "terminal",
+        "startedAt",
+        "finishedAt",
+        "consultation",
+        "checkout",
+        "aftercare",
+        "bookingUpdatedAt"
+      ],
+      "type": "object"
+    },
+    "ProSessionStateResponseDTO": {
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/ProSessionState",
+          "description": "The hashable snapshot — unchanged by K17-A."
+        },
+        "stateHash": {
+          "description": "sha256 of `state`, and of `state` alone.",
+          "type": "string"
+        },
+        "unsignedConsentForms": {
+          "description": "Forms outstanding for THIS booking, omitted entirely when there are none or when the technical-record gate is off — so a pro who has bound no form gets a payload byte-identical to pre-K17-A.\n\nDeclared HERE rather than added at the route, because a field the route adds with a conditional spread never reaches `gen:api-schema` and crosses to the device with zero contract coverage — which is exactly how K15's calendar mark shipped uncovered (#812's first finding).",
+          "items": {
+            "$ref": "#/definitions/ProSessionUnsignedConsentFormDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "state",
+        "stateHash"
+      ],
+      "type": "object"
+    },
+    "ProSessionUnsignedConsentFormDTO": {
+      "$ref": "#/definitions/UnsignedConsentForm",
+      "description": "One consent form this appointment needs and this client has not signed."
     },
     "ProStrandedBookingDTO": {
       "description": "One booking that no longer fits the hours the pro just saved.\n\nReported, never acted on: B8's ruling (Tori, 2026-07-25) is warn-and-list — the save always succeeds and the bookings are left exactly as they are.",

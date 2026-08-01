@@ -393,6 +393,15 @@ export type {
 } from '@/lib/proSession/types'
 export type { UnsignedConsentForm } from '@/lib/consentForms/requirement'
 
+// GET /api/v1/pro/bookings/{id}/session/state — the spine the native session hub
+// polls. K17-A adds the unsigned-form list here too: the footer payload above is
+// keyed to whichever booking the footer is acting on, so it cannot answer for a
+// hub opened from a booking detail.
+export type {
+  ProSessionUnsignedConsentFormDTO,
+  ProSessionStateResponseDTO,
+} from '@/lib/dto/proSessionState'
+
 // ── Pro per-client booking requirements ───────────────────────────────────────
 // GET/PUT/DELETE /api/v1/pro/clients/{id}/policy (K16's switches, K17-web's read
 // path). All three handlers are `satisfies`-checked against the response type,
