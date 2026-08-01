@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
   pickString: vi.fn(),
   bookingFindFirst: vi.fn(),
+  offeringFindMany: vi.fn(),
+  consentRecordFindMany: vi.fn(),
+  isClientTechnicalRecordEnabled: vi.fn(),
   safeError: vi.fn(),
 }))
 
@@ -30,12 +33,25 @@ vi.mock('@/app/api/_utils', () => ({
   pickString: mocks.pickString,
 }))
 
+// Only the DATABASE is mocked — `loadUnsignedConsentFormsForBooking` and the
+// whole K15 resolution chain underneath it run for real, so these tests measure
+// the rule rather than a stub of it (the shape `app/api/v1/pro/session` uses).
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
       findFirst: mocks.bookingFindFirst,
     },
+    professionalServiceOffering: {
+      findMany: mocks.offeringFindMany,
+    },
+    clientConsentRecord: {
+      findMany: mocks.consentRecordFindMany,
+    },
   },
+}))
+
+vi.mock('@/lib/clients/technicalRecord', () => ({
+  isClientTechnicalRecordEnabled: mocks.isClientTechnicalRecordEnabled,
 }))
 
 vi.mock('@/lib/security/logging', () => ({
@@ -113,6 +129,10 @@ beforeEach(() => {
     status,
     message,
   }))
+
+  mocks.isClientTechnicalRecordEnabled.mockReturnValue(false)
+  mocks.offeringFindMany.mockResolvedValue([])
+  mocks.consentRecordFindMany.mockResolvedValue([])
 })
 
 describe('GET /api/v1/pro/bookings/[id]/session/state', () => {
@@ -193,6 +213,185 @@ describe('GET /api/v1/pro/bookings/[id]/session/state', () => {
       }),
       200,
     )
+  })
+
+  // ── K17-A: the unsigned-consent list the native session hub renders ────────
+  //
+  // The hub is a PER-BOOKING screen and this route is its spine. #812 put the
+  // same list on `GET /api/v1/pro/session`, but that payload answers for
+  // whichever booking the footer is acting on — open a session from the booking
+  // detail instead and the warning had no path to the screen.
+  describe('unsigned consent forms', () => {
+    const FORM_ID = 'form_1'
+    const VERSION_ID = 'version_1'
+
+    /** The pro requires a waiver on the booking's own service. */
+    function bindRequirement() {
+      mocks.isClientTechnicalRecordEnabled.mockReturnValue(true)
+      mocks.offeringFindMany.mockResolvedValue([
+        {
+          serviceId: 'service_base',
+          consentFormId: FORM_ID,
+          consentForm: {
+            id: FORM_ID,
+            kind: 'SERVICE_WAIVER',
+            isActive: true,
+            versions: [{ id: VERSION_ID, title: 'Corrective colour waiver' }],
+          },
+        },
+      ])
+    }
+
+    /** The state query, then the consent query — in the order the route makes them. */
+    function respondWith(consentRow: unknown) {
+      mocks.bookingFindFirst
+        .mockResolvedValueOnce(makeBookingRow())
+        .mockResolvedValueOnce(consentRow)
+    }
+
+    const ownConsentRow = {
+      id: 'booking_1',
+      clientId: 'client_1',
+      serviceId: 'service_base',
+      serviceItems: [],
+    }
+
+    it('carries the outstanding form for this booking', async () => {
+      bindRequirement()
+      respondWith(ownConsentRow)
+
+      await GET(makeRequest(), makeCtx())
+
+      expect(mocks.jsonOk).toHaveBeenCalledWith(
+        expect.objectContaining({
+          unsignedConsentForms: [
+            {
+              formId: FORM_ID,
+              title: 'Corrective colour waiver',
+              kindLabel: 'Service waiver',
+            },
+          ],
+        }),
+        200,
+      )
+    })
+
+    it('finds a waiver bound to a SECOND service of a multi-service visit', async () => {
+      // The booking's own service carries nothing; the requirement hangs off an
+      // item. This is the axis #812's `take: 1` removal opened up, and the reason
+      // the consent query selects `serviceItems` at all.
+      mocks.isClientTechnicalRecordEnabled.mockReturnValue(true)
+      mocks.offeringFindMany.mockResolvedValue([
+        {
+          serviceId: 'service_addon',
+          consentFormId: FORM_ID,
+          consentForm: {
+            id: FORM_ID,
+            kind: 'PATCH_TEST',
+            isActive: true,
+            versions: [{ id: VERSION_ID, title: 'Patch test record' }],
+          },
+        },
+      ])
+      respondWith({
+        ...ownConsentRow,
+        serviceId: 'service_other',
+        serviceItems: [{ serviceId: 'service_addon' }],
+      })
+
+      await GET(makeRequest(), makeCtx())
+
+      expect(mocks.jsonOk).toHaveBeenCalledWith(
+        expect.objectContaining({
+          unsignedConsentForms: [
+            expect.objectContaining({ title: 'Patch test record' }),
+          ],
+        }),
+        200,
+      )
+    })
+
+    it('omits the key once the client has signed', async () => {
+      bindRequirement()
+      mocks.consentRecordFindMany.mockResolvedValue([
+        { clientId: 'client_1', formVersion: { formId: FORM_ID } },
+      ])
+      respondWith(ownConsentRow)
+
+      await GET(makeRequest(), makeCtx())
+
+      const [payload] = mocks.jsonOk.mock.calls[0] ?? []
+      expect(payload).not.toHaveProperty('unsignedConsentForms')
+    })
+
+    it('is NOT suppressed for an appointment whose time has arrived', async () => {
+      // 🔴 The point of the whole field. The calendar badge goes quiet once
+      // `scheduledFor <= now`, which at session start is true by definition — a
+      // hub that reused that gate would blank the warning exactly when the pro
+      // is standing in front of the client.
+      bindRequirement()
+      respondWith(ownConsentRow)
+
+      await GET(makeRequest(), makeCtx())
+
+      expect(mocks.jsonOk).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({ startedAt: expect.any(String) }),
+          unsignedConsentForms: expect.arrayContaining([
+            expect.objectContaining({ formId: FORM_ID }),
+          ]),
+        }),
+        200,
+      )
+    })
+
+    it('leaves the hash to `state` alone', async () => {
+      // The list must not enter the poll hash: it would put two DB round trips
+      // on every tick and refresh web's server-rendered page on a signature.
+      bindRequirement()
+      respondWith(ownConsentRow)
+
+      await GET(makeRequest(), makeCtx())
+
+      const [payload] = mocks.jsonOk.mock.calls[0] ?? []
+      const withForms = payload as {
+        state: Parameters<typeof computeProSessionStateHash>[0]
+        stateHash: string
+      }
+      expect(withForms.stateHash).toBe(
+        computeProSessionStateHash(buildProSessionState(makeBookingRow())),
+      )
+    })
+
+    it('issues NO consent query at all while the gate is off', async () => {
+      // The kill switch reaches the QUERY, not just the payload — this route is
+      // POLLED, so an ungated pro must pay nothing for a feature they cannot see.
+      bindRequirement()
+      mocks.isClientTechnicalRecordEnabled.mockReturnValue(false)
+      respondWith(ownConsentRow)
+
+      await GET(makeRequest(), makeCtx())
+
+      const [payload] = mocks.jsonOk.mock.calls[0] ?? []
+      expect(payload).not.toHaveProperty('unsignedConsentForms')
+      expect(mocks.offeringFindMany).not.toHaveBeenCalled()
+      // And not even the row read: one query, exactly as before K17-A.
+      expect(mocks.bookingFindFirst).toHaveBeenCalledTimes(1)
+    })
+
+    it('scopes the consent read to the authed pro', async () => {
+      bindRequirement()
+      respondWith(ownConsentRow)
+
+      await GET(makeRequest(), makeCtx())
+
+      expect(mocks.bookingFindFirst).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: { id: 'booking_1', professionalId: PRO_ID },
+        }),
+      )
+    })
   })
 
   it('fails with 500 when the database read throws', async () => {
