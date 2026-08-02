@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ProProfileLink from '@/app/_components/ProProfileLink'
 import Button from '@/app/_components/ui/Button'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage, safeJson } from '@/lib/http'
@@ -143,21 +144,31 @@ export default function ClientChartSharingSettings() {
           className="flex flex-wrap items-center justify-between gap-3 rounded-inner border border-white/10 bg-bgPrimary/20 p-3"
         >
           <div className="flex min-w-0 items-center gap-3">
-            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full bg-bgPrimary/45">
-              {share.avatarUrl ? (
-                <RemoteImage
-                  src={share.avatarUrl}
-                  alt=""
-                  width={36}
-                  height={36}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                />
-              ) : null}
-            </div>
+            <ProProfileLink
+              proId={share.professionalId}
+              label={share.professionalName}
+              underline={false}
+              className="shrink-0 rounded-full"
+            >
+              <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full bg-bgPrimary/45">
+                {share.avatarUrl ? (
+                  <RemoteImage
+                    src={share.avatarUrl}
+                    alt=""
+                    width={36}
+                    height={36}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                ) : null}
+              </div>
+            </ProProfileLink>
             <div className="min-w-0">
               <div className="truncate text-[13px] font-black text-textPrimary">
-                {share.professionalName}
+                <ProProfileLink
+                  proId={share.professionalId}
+                  label={share.professionalName}
+                />
               </div>
               <div className="text-[12px] font-semibold text-textSecondary">
                 {STATUS_COPY[share.status]}

@@ -200,6 +200,77 @@ describe('AppointmentsList', () => {
     expect(within(section).getByText('Review')).toBeInTheDocument()
   })
 
+  // Tori, live-testing as a client: "the pro's name isn't clickable". Every row
+  // that names a pro has to reach that pro's profile — including the rows whose
+  // card already links somewhere else (the booking).
+  it('links the pro name AND avatar to the pro profile on a booking row', () => {
+    render(
+      <AppointmentsList
+        buckets={makeBuckets({ upcoming: [makeBooking({ id: 'up_1' })] })}
+      />,
+    )
+
+    const proLinks = screen
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('href') === '/professionals/pro_1')
+
+    // Two: the avatar and the name.
+    expect(proLinks).toHaveLength(2)
+    expect(
+      screen.getByRole('link', { name: 'Glow Studio' }),
+    ).toBeInTheDocument()
+  })
+
+  it('links the pro name AND avatar to the pro profile on a waitlist row', () => {
+    render(
+      <AppointmentsList buckets={makeBuckets({ waitlist: [makeWaitlist()] })} />,
+    )
+
+    const proLinks = screen
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('href') === '/professionals/pro_1')
+
+    expect(proLinks).toHaveLength(2)
+  })
+
+  // The row still opens the booking — but as an overlay, never as an <a> WRAPPING
+  // the pro links. Nested anchors are invalid HTML: the browser un-nests them and
+  // the inner link silently stops working, which is the exact bug this fixes.
+  it('keeps the booking link and the pro links un-nested', () => {
+    const { container } = render(
+      <AppointmentsList
+        buckets={makeBuckets({ upcoming: [makeBooking({ id: 'up_1' })] })}
+      />,
+    )
+
+    expect(container.querySelector('a a')).toBeNull()
+
+    const bookingLink = screen.getByRole('link', {
+      name: /Balayage with Glow Studio/,
+    })
+    expect(bookingLink).toHaveAttribute('href', '/client/bookings/up_1')
+  })
+
+  it('renders the pro name as inert text when the booking has no professional', () => {
+    render(
+      <AppointmentsList
+        buckets={makeBuckets({
+          upcoming: [makeBooking({ id: 'up_1', professional: null })],
+        })}
+      />,
+    )
+
+    expect(
+      screen.queryByRole('link', { name: /professionals/ }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getAllByRole('link').every((link) => {
+        const href = link.getAttribute('href') ?? ''
+        return !href.startsWith('/professionals/')
+      }),
+    ).toBe(true)
+  })
+
   it('renders an empty state when there are no appointments', () => {
     render(<AppointmentsList buckets={makeBuckets()} />)
 

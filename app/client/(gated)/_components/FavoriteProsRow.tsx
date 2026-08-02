@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
 import { Avatar, Card, buttonClassName } from '@/app/_components/ui'
+import ProProfileLink from '@/app/_components/ProProfileLink'
 
 import type { ClientHomeFavoritePro } from '../_data/getClientHomeData'
 import { professionalName } from './homeVisuals'
@@ -66,17 +67,26 @@ function FavoriteProCard({
         </button>
       </form>
 
-      <Avatar
-        name={name}
-        src={professional.avatarUrl}
-        index={index}
-        size="md"
-        className="mb-2.5"
-      />
+      <ProProfileLink
+        proId={professional.id}
+        label={name}
+        underline={false}
+        className="mb-2.5 block w-fit rounded-full"
+      >
+        <Avatar
+          name={name}
+          src={professional.avatarUrl}
+          index={index}
+          size="md"
+        />
+      </ProProfileLink>
 
-      <div className="truncate font-display text-[13.5px] font-semibold tracking-[-0.01em] text-textPrimary">
-        {name}
-      </div>
+      <ProProfileLink
+        proId={professional.id}
+        label={name}
+        underline={false}
+        className="block truncate font-display text-[13.5px] font-semibold tracking-[-0.01em] text-textPrimary transition hover:opacity-80"
+      />
       <div className="mt-0.5 truncate text-[11px] text-textMuted">{craft}</div>
 
       <Link

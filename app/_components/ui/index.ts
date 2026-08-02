@@ -22,6 +22,9 @@ export type {
 export { default as Avatar } from './Avatar'
 export type { AvatarProps, AvatarSize, AvatarFill } from './Avatar'
 
+export { default as CardLinkOverlay } from './CardLinkOverlay'
+export type { CardLinkOverlayProps } from './CardLinkOverlay'
+
 export { default as Badge, badgeClassName } from './Badge'
 export type {
   BadgeProps,

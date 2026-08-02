@@ -117,6 +117,8 @@ export default async function ClientMePage() {
     ? {
         id: data.upcomingNotificationBooking.id,
         title: data.upcomingNotificationBooking.display.title,
+        professionalId:
+          data.upcomingNotificationBooking.professional?.id ?? null,
         professionalName: formatProfessionalPublicDisplayName(
           data.upcomingNotificationBooking.professional,
         ),

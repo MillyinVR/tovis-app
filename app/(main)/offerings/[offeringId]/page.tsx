@@ -5,6 +5,7 @@
 // opening, shows it priced with its incentive, and hands off to ClaimClient (hold → finalize).
 import Link from 'next/link'
 
+import ProProfileLink from '@/app/_components/ProProfileLink'
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildLoginHref } from '@/lib/profiles/publicProfileFormatting'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
@@ -120,7 +121,7 @@ export default async function ClaimOpeningPage(props: PageProps) {
         {serviceName}
       </h1>
       <div className="mt-2 text-[14px] text-textMuted">
-        {proName} · {profession}
+        <ProProfileLink proId={professionalId} label={proName} /> · {profession}
       </div>
 
       {/*

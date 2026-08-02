@@ -5,6 +5,8 @@ import {
   MediaType,
   MessageThreadContextType,
 } from '@prisma/client'
+import ProProfileLink from '@/app/_components/ProProfileLink'
+import { Avatar } from '@/app/_components/ui'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { liveChannelForUser } from '@/lib/live/broadcast'
@@ -208,11 +210,19 @@ export default async function MessageThreadPage(props: PageProps) {
     thread.professional?.userId != null &&
     thread.professional.userId === user.id
 
-  const { title } = resolveThreadCounterparty({
+  const { title, avatarUrl } = resolveThreadCounterparty({
     viewerIsThreadPro,
     client: thread.client,
     professional: thread.professional,
   })
+
+  // The counterparty's name/avatar tap through to their public profile whenever
+  // the counterparty is the PRO — i.e. the viewer is the client. When the viewer
+  // is the pro the counterparty is a client, whose equivalent destination is the
+  // chart, which is already offered below as `clientChartHref` (and is gated).
+  const counterpartyProId = viewerIsThreadPro
+    ? null
+    : thread.professional?.id ?? null
 
   // Seed the sender's read receipt so it doesn't flash in on the first poll.
   const initialCounterpartyLastReadAt =
@@ -260,9 +270,25 @@ export default async function MessageThreadPage(props: PageProps) {
               {contextEyebrow.eyebrow}
             </div>
 
-            <h1 className="mt-[9px] truncate font-display text-[24px] font-bold leading-[1.05] tracking-[-0.02em] md:text-[26px] lg:text-[28px]">
-              {title}
-            </h1>
+            <div className="mt-[9px] flex min-w-0 items-center gap-3">
+              <ProProfileLink
+                proId={counterpartyProId}
+                label={title}
+                underline={false}
+                className="shrink-0 rounded-full"
+              >
+                <Avatar name={title} src={avatarUrl} size="lg" />
+              </ProProfileLink>
+
+              <h1 className="min-w-0 truncate font-display text-[24px] font-bold leading-[1.05] tracking-[-0.02em] md:text-[26px] lg:text-[28px]">
+                <ProProfileLink
+                  proId={counterpartyProId}
+                  label={title}
+                  underline={false}
+                  className="block truncate transition hover:opacity-80"
+                />
+              </h1>
+            </div>
 
             {contextNavMeta.href && contextNavMeta.cta ? (
               <div className="mt-2">

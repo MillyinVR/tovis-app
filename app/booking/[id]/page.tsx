@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { Prisma } from '@prisma/client'
+import ProProfileLink from '@/app/_components/ProProfileLink'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
@@ -322,7 +323,8 @@ export default async function BookingReceiptPage(props: PageProps) {
           <div className="text-[12px] font-black text-textSecondary">Booking receipt</div>
 
           <h1 className="mt-1 text-[26px] font-black">
-            {serviceName} with {proName}
+            {serviceName} with{' '}
+            <ProProfileLink proId={professional?.id ?? null} label={proName} />
           </h1>
 
           <div className="mt-1 text-[13px]">
