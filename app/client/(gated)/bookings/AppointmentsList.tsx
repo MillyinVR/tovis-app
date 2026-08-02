@@ -16,7 +16,8 @@ import {
   badgeToneForBookingStatus,
   labelForBookingStatus,
 } from '@/lib/booking/statusLabel'
-import { Avatar, Badge, Card } from '@/app/_components/ui'
+import { Avatar, Badge, Card, CardLinkOverlay } from '@/app/_components/ui'
+import ProProfileLink from '@/app/_components/ProProfileLink'
 
 import {
   formatDateTime,
@@ -51,52 +52,70 @@ function BookingRow({ booking }: { booking: ClientBookingDTO }) {
   const when = formatDateTime(new Date(booking.scheduledFor), timeZone)
   const duration = formatDuration(booking.totalDurationMinutes)
   const status = String(booking.status ?? '')
+  const proId = booking.professional?.id ?? null
 
+  // The row still opens the booking, but as a full-bleed overlay rather than a
+  // wrapping <Link> — so the pro's avatar and name can be their own links to the
+  // pro's profile without nesting anchors (which would kill the inner click).
   return (
-    <Link
-      href={`/client/bookings/${encodeURIComponent(booking.id)}`}
-      className="block rounded-card outline-none transition focus-visible:ring-2 focus-visible:ring-accentPrimary/40"
+    <Card
+      padding="sm"
+      className="relative transition hover:border-textPrimary/20"
     >
-      <Card padding="sm" className="transition hover:border-textPrimary/20">
-        <div className="flex items-center gap-3">
+      <CardLinkOverlay
+        href={`/client/bookings/${encodeURIComponent(booking.id)}`}
+        label={`${booking.display.title} with ${proName}, ${when}`}
+      />
+
+      <div className="pointer-events-none relative z-10 flex items-center gap-3">
+        <ProProfileLink
+          proId={proId}
+          label={proName}
+          underline={false}
+          className="pointer-events-auto shrink-0 rounded-full"
+        >
           <Avatar name={proName} size="md" />
+        </ProProfileLink>
 
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[14.5px] font-semibold text-textPrimary">
-              {booking.display.title}
-            </div>
-            <div className="mt-0.5 truncate text-[12.5px] text-textSecondary">
-              {when}
-              {duration ? (
-                <span className="text-textMuted"> · {duration}</span>
-              ) : null}
-            </div>
-            <div className="mt-0.5 truncate text-[12px] text-textMuted">
-              {proName}
-            </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14.5px] font-semibold text-textPrimary">
+            {booking.display.title}
           </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {booking.hasUnreadAftercare ? (
-              <span
-                className="h-2 w-2 rounded-full bg-accentPrimary"
-                aria-label="Aftercare ready"
-              />
+          <div className="mt-0.5 truncate text-[12.5px] text-textSecondary">
+            {when}
+            {duration ? (
+              <span className="text-textMuted"> · {duration}</span>
             ) : null}
-            {booking.hasPendingConsultationApproval ? (
-              <Badge tone="warn" size="sm">
-                Review
-              </Badge>
-            ) : status ? (
-              <Badge tone={badgeToneForBookingStatus(status)} size="sm">
-                {labelForBookingStatus(status)}
-              </Badge>
-            ) : null}
-            <ChevronRight />
+          </div>
+          <div className="mt-0.5 truncate text-[12px] text-textMuted">
+            <ProProfileLink
+              proId={proId}
+              label={proName}
+              className="pointer-events-auto"
+            />
           </div>
         </div>
-      </Card>
-    </Link>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {booking.hasUnreadAftercare ? (
+            <span
+              className="h-2 w-2 rounded-full bg-accentPrimary"
+              aria-label="Aftercare ready"
+            />
+          ) : null}
+          {booking.hasPendingConsultationApproval ? (
+            <Badge tone="warn" size="sm">
+              Review
+            </Badge>
+          ) : status ? (
+            <Badge tone={badgeToneForBookingStatus(status)} size="sm">
+              {labelForBookingStatus(status)}
+            </Badge>
+          ) : null}
+          <ChevronRight />
+        </div>
+      </div>
+    </Card>
   )
 }
 
@@ -105,16 +124,25 @@ function WaitlistRow({ entry }: { entry: ClientBookingWaitlistRow }) {
     ? professionalName(entry.professional)
     : 'Professional'
 
+  const proId = entry.professional?.id ?? null
+
   return (
     <Card padding="sm">
       <div className="flex items-center gap-3">
-        <Avatar name={proName} size="md" />
+        <ProProfileLink
+          proId={proId}
+          label={proName}
+          underline={false}
+          className="shrink-0 rounded-full"
+        >
+          <Avatar name={proName} size="md" />
+        </ProProfileLink>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[14.5px] font-semibold text-textPrimary">
             {entry.service?.name ?? 'Any service'}
           </div>
           <div className="mt-0.5 truncate text-[12.5px] text-textSecondary">
-            {proName}
+            <ProProfileLink proId={proId} label={proName} />
           </div>
         </div>
         <Badge tone="info" size="sm">

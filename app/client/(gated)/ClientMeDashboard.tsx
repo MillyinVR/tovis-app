@@ -10,6 +10,8 @@ import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/ti
 import type { ClientLookRemix } from '@/lib/creator/creatorProfileStats'
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ProProfileLink from '@/app/_components/ProProfileLink'
+import { CardLinkOverlay } from '@/app/_components/ui'
 import LogoutButton from './components/LogoutButton'
 import FollowSuggestionsRail from './_components/FollowSuggestionsRail'
 import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
@@ -34,6 +36,7 @@ type CreatorInfo = {
 type UpcomingNotificationBooking = {
   id: string
   title: string
+  professionalId: string | null
   professionalName: string | null
   scheduledFor: string
   timeZone: string | null
@@ -232,37 +235,62 @@ function UpcomingCard(props: {
   booking: NonNullable<UpcomingNotificationBooking>
 }) {
   const { booking } = props
+  const proName = booking.professionalName ?? 'Professional'
 
+  // Card-wide link is an overlay, not a wrapper, so the pro's avatar and name can
+  // link to their profile without nesting anchors. See CardLinkOverlay.
   return (
-    <Link
-      href={`/client/bookings/${encodeURIComponent(booking.id)}?step=overview`}
+    <div
       className={cn(
-        'block rounded-[24px] border border-accentPrimary/25 bg-accentPrimary/6 px-4 py-4 transition',
+        'relative rounded-[24px] border border-accentPrimary/25 bg-accentPrimary/6 px-4 py-4 transition',
         'hover:border-accentPrimary/40 hover:bg-accentPrimary/10',
       )}
     >
-      <div className="mb-3 flex items-center gap-2 text-[11px] font-black tracking-[0.18em] text-accentPrimary">
-        <span className="h-1.5 w-1.5 rounded-full bg-accentPrimary" />
-        <span>UPCOMING</span>
-        <span>·</span>
-        <span>{formatUpcomingDate(booking.scheduledFor, booking.timeZone)}</span>
-      </div>
+      <CardLinkOverlay
+        href={`/client/bookings/${encodeURIComponent(booking.id)}?step=overview`}
+        label={`${booking.title} with ${proName}, ${formatUpcomingDate(
+          booking.scheduledFor,
+          booking.timeZone,
+        )}`}
+      />
 
-      <div className="flex gap-3">
-        <div className="h-[58px] w-[58px] shrink-0 rounded-[16px] border border-textPrimary/10 bg-bgSecondary" />
+      <div className="pointer-events-none relative z-10">
+        <div className="mb-3 flex items-center gap-2 text-[11px] font-black tracking-[0.18em] text-accentPrimary">
+          <span className="h-1.5 w-1.5 rounded-full bg-accentPrimary" />
+          <span>UPCOMING</span>
+          <span>·</span>
+          <span>
+            {formatUpcomingDate(booking.scheduledFor, booking.timeZone)}
+          </span>
+        </div>
 
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[15px] font-black text-textPrimary">
-            {booking.title}
-          </div>
-          <div className="mt-1 text-[13px] text-textSecondary">
-            {booking.professionalName ?? 'Professional'} ·{' '}
-            {formatUpcomingTime(booking.scheduledFor, booking.timeZone)}
-            {booking.totalLabel ? ` · ${booking.totalLabel}` : ''}
+        <div className="flex gap-3">
+          <ProProfileLink
+            proId={booking.professionalId}
+            label={proName}
+            underline={false}
+            className="pointer-events-auto shrink-0 rounded-[16px]"
+          >
+            <div className="h-[58px] w-[58px] shrink-0 rounded-[16px] border border-textPrimary/10 bg-bgSecondary" />
+          </ProProfileLink>
+
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[15px] font-black text-textPrimary">
+              {booking.title}
+            </div>
+            <div className="mt-1 text-[13px] text-textSecondary">
+              <ProProfileLink
+                proId={booking.professionalId}
+                label={proName}
+                className="pointer-events-auto"
+              />{' '}
+              · {formatUpcomingTime(booking.scheduledFor, booking.timeZone)}
+              {booking.totalLabel ? ` · ${booking.totalLabel}` : ''}
+            </div>
           </div>
         </div>
       </div>
-    </Link>
+    </div>
   )
 }
 

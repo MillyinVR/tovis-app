@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ProProfileLink from '@/app/_components/ProProfileLink'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { asTrimmedString, isRecord } from '@/lib/guards'
@@ -256,7 +257,10 @@ export default function LooksBookableGrid({
 
                   <div className="p-2.5">
                     <div className="truncate text-[12px] font-black text-textPrimary">
-                      {proName ?? 'Pro'}
+                      <ProProfileLink
+                        proId={look.professional?.id ?? null}
+                        label={proName ?? 'Pro'}
+                      />
                     </div>
 
                     {serviceLabel ? (

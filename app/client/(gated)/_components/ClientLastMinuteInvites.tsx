@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ProProfileLink from '@/app/_components/ProProfileLink'
 import { formatInTimeZone } from '@/lib/time'
 import { incentiveLabel } from '@/lib/lastMinute/openingDto'
 import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
@@ -88,6 +89,7 @@ function InviteRow({
   const href = inviteHref(invite)
   const proName = professionalName(invite.opening.professional)
   const proFirst = firstWord(proName)
+  const proId = invite.opening.professional.id
   const time = formatTime(invite.opening.startAt, invite.opening.timeZone)
   const day = relativeDay(invite.opening.startAt)
   const title = inviteTitle(invite)
@@ -118,26 +120,40 @@ function InviteRow({
         showDivider ? ' border-b border-textPrimary/10' : ''
       }`}
     >
-      <div
-        className="grid h-[38px] w-[38px] shrink-0 place-items-center overflow-hidden rounded-[11px] text-[10px] font-bold text-onCta"
-        style={{ background: gradientAvatar(index) }}
+      <ProProfileLink
+        proId={proId}
+        label={proName}
+        underline={false}
+        className="shrink-0 rounded-[11px]"
       >
-        {invite.opening.professional.avatarUrl ? (
-          <RemoteImage
-            src={invite.opening.professional.avatarUrl}
-            alt={proName}
-            className="h-full w-full object-cover"
-            width={38}
-            height={38}
-          />
-        ) : (
-          initialsForName(proName)
-        )}
-      </div>
+        <div
+          className="grid h-[38px] w-[38px] shrink-0 place-items-center overflow-hidden rounded-[11px] text-[10px] font-bold text-onCta"
+          style={{ background: gradientAvatar(index) }}
+        >
+          {invite.opening.professional.avatarUrl ? (
+            <RemoteImage
+              src={invite.opening.professional.avatarUrl}
+              alt={proName}
+              className="h-full w-full object-cover"
+              width={38}
+              height={38}
+            />
+          ) : (
+            initialsForName(proName)
+          )}
+        </div>
+      </ProProfileLink>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate font-display text-[13.5px] font-semibold text-textPrimary">
-            {proFirst} · {title}
+            <ProProfileLink
+              proId={proId}
+              label={proName}
+              title={`View ${proName}'s profile`}
+            >
+              {proFirst}
+            </ProProfileLink>{' '}
+            · {title}
           </span>
           {/*
             The offer sits right beside the service, bigger and bolder than the

@@ -2,6 +2,7 @@
 import Link from 'next/link'
 
 import { Card, buttonClassName } from '@/app/_components/ui'
+import ProProfileLink from '@/app/_components/ProProfileLink'
 
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import type {
@@ -47,7 +48,10 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
         </div>
 
         <h3 className="mb-1.5 font-display text-[18px] font-semibold tracking-[-0.015em] text-textPrimary">
-          {proFirst} sent a consultation to review
+          <ProProfileLink proId={booking.professional.id} label={proName}>
+            {proFirst}
+          </ProProfileLink>{' '}
+          sent a consultation to review
         </h3>
         <p className="mb-3.5 text-[13.5px] leading-relaxed text-textSecondary">
           {notes ??
@@ -150,14 +154,25 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
 
         <div className="mb-3.5 flex items-center gap-3 rounded-[13px] border border-textPrimary/10 bg-[rgb(var(--surface-glass)/0.05)] px-3.5 py-[11px]">
           {hasBeforeAfter ? null : (
-            <div
-              className="h-[38px] w-[38px] shrink-0 rounded-[11px]"
-              style={{ background: gradientAvatar(0) }}
-            />
+            <ProProfileLink
+              proId={booking.professional.id}
+              label={proName}
+              underline={false}
+              className="shrink-0 rounded-[11px]"
+            >
+              <div
+                className="h-[38px] w-[38px] shrink-0 rounded-[11px]"
+                style={{ background: gradientAvatar(0) }}
+              />
+            </ProProfileLink>
           )}
           <div className="min-w-0">
             <div className="truncate font-display text-[14px] font-semibold text-textPrimary">
-              {title} with {proName}
+              {title} with{' '}
+              <ProProfileLink
+                proId={booking.professional.id}
+                label={proName}
+              />
             </div>
             {when ? (
               <div className="mt-0.5 truncate font-mono text-[10.5px] tracking-[0.04em] text-textMuted">

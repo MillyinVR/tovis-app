@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { asTrimmedString } from '@/lib/guards'
 import { Avatar, Card, buttonClassName } from '@/app/_components/ui'
+import ProProfileLink from '@/app/_components/ProProfileLink'
 
 import type { ClientHomeBooking } from '../_data/getClientHomeData'
 import { bookingTitle } from './bookingDisplay'
@@ -94,18 +95,25 @@ export default function UpcomingAppointmentCard({
       </div>
 
       <div className="mb-3.5 flex items-center gap-3">
-        <Avatar
-          name={proName}
-          src={booking.professional.avatarUrl}
-          size="lg"
-        />
+        <ProProfileLink
+          proId={booking.professional.id}
+          label={proName}
+          underline={false}
+          className="shrink-0 rounded-full transition hover:opacity-80"
+        >
+          <Avatar
+            name={proName}
+            src={booking.professional.avatarUrl}
+            size="lg"
+          />
+        </ProProfileLink>
         <div className="min-w-0">
-          <Link
-            href={`/professionals/${encodeURIComponent(booking.professional.id)}`}
+          <ProProfileLink
+            proId={booking.professional.id}
+            label={proName}
+            underline={false}
             className="block truncate font-display text-[17px] font-semibold tracking-[-0.01em] text-textPrimary transition hover:opacity-80"
-          >
-            {proName}
-          </Link>
+          />
           {location ? (
             <div className="mt-0.5 truncate text-[12.5px] text-textMuted">
               {location}

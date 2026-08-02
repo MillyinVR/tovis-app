@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 
+import ProProfileLink from '@/app/_components/ProProfileLink'
 import { isRecord } from '@/lib/guards'
 import { moneyToString } from '@/lib/money'
 import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
@@ -20,7 +21,9 @@ type FeedCard = {
   professionalId: string | null
   serviceId: string | null
   serviceName: string
-  meta: string
+  proName: string
+  /** Everything in the meta line AFTER the pro's (linked) name. */
+  metaRest: string | null
   whenLabel: string
   priceLabel: string | null
   wasLabel: string | null
@@ -103,8 +106,9 @@ function parseCard(notification: unknown): FeedCard | null {
   const professional = isRecord(opening.professional) ? opening.professional : null
   const proName =
     str(professional?.displayName) ?? str(professional?.businessName) ?? 'Your pro'
+  // The pro's name renders as its own link, so it stays a separate field —
+  // pre-joining it into one meta string is what made it un-clickable.
   const place = str(professional?.locationLabel)
-  const meta = [proName, place].filter(Boolean).join(' · ')
 
   const professionalId = str(professional?.id)
   const serviceId = str(primary.serviceId) ?? str(service?.id)
@@ -150,7 +154,8 @@ function parseCard(notification: unknown): FeedCard | null {
     professionalId,
     serviceId,
     serviceName,
-    meta,
+    proName,
+    metaRest: place,
     whenLabel,
     priceLabel,
     wasLabel,
@@ -311,15 +316,28 @@ export default function OpeningsFeedClient() {
                   ) : null}
 
                   <div className="flex items-start gap-[13px]">
-                    <div
-                      className="h-[50px] w-[50px] shrink-0 rounded-[14px]"
-                      style={gradientStyle(card.seed)}
-                    />
+                    <ProProfileLink
+                      proId={card.professionalId}
+                      label={card.proName}
+                      underline={false}
+                      className="shrink-0 rounded-[14px]"
+                    >
+                      <div
+                        className="h-[50px] w-[50px] shrink-0 rounded-[14px]"
+                        style={gradientStyle(card.seed)}
+                      />
+                    </ProProfileLink>
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-display text-[16px] font-semibold tracking-[-0.01em]">
                         {card.serviceName}
                       </div>
-                      <div className="mt-0.5 truncate text-[12.5px] text-textMuted">{card.meta}</div>
+                      <div className="mt-0.5 truncate text-[12.5px] text-textMuted">
+                        <ProProfileLink
+                          proId={card.professionalId}
+                          label={card.proName}
+                        />
+                        {card.metaRest ? ` · ${card.metaRest}` : null}
+                      </div>
                       {card.whenLabel ? (
                         <span className="mt-2.5 inline-flex items-center gap-1.5 rounded-[7px] bg-gold/12 px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.04em] text-gold">
                           {card.whenLabel}
