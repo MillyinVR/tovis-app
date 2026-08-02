@@ -6,8 +6,9 @@
 // current user (handles a device that switched accounts) rather than leaving a
 // stale row pointed at the previous user.
 //
-// This is the foundation only — the notification engine does not yet fan PUSH
-// deliveries out to these tokens (wired in a later phase).
+// These rows are the PUSH fan-out target: enqueueDispatch creates one PUSH
+// delivery per active token, so an active row that no longer belongs to a live
+// install costs a wasted provider send on every single notification.
 import type { DevicePlatform } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
@@ -23,7 +24,7 @@ export async function registerDeviceToken(args: RegisterDeviceTokenArgs) {
   const deviceId = args.deviceId?.trim() || null
   const now = new Date()
 
-  return prisma.deviceToken.upsert({
+  const upsert = prisma.deviceToken.upsert({
     where: { platform_token: { platform: args.platform, token: args.token } },
     create: {
       userId: args.userId,
@@ -42,6 +43,36 @@ export async function registerDeviceToken(args: RegisterDeviceTokenArgs) {
       lastSeenAt: now,
     },
   })
+
+  // One install holds exactly ONE live push token: APNs/FCM rotate it and the
+  // old value is dead the moment the new one is issued. Nothing ever retired the
+  // superseded row, so each install accumulated a new active token per rotation —
+  // in production one user reached 13 active tokens (up to 5 per install) and
+  // every notification fanned out to all 13. Retire the predecessors in the same
+  // transaction that installs the new token, so the two can't disagree.
+  //
+  // Only possible when the client sent a stable deviceId; without one there is
+  // nothing that identifies "the same install", and guessing would deactivate a
+  // user's OTHER phones.
+  if (!deviceId) {
+    return upsert
+  }
+
+  const [row] = await prisma.$transaction([
+    upsert,
+    prisma.deviceToken.updateMany({
+      where: {
+        userId: args.userId,
+        platform: args.platform,
+        deviceId,
+        token: { not: args.token },
+        isActive: true,
+      },
+      data: { isActive: false },
+    }),
+  ])
+
+  return row
 }
 
 export type DeactivateDeviceTokenArgs = {

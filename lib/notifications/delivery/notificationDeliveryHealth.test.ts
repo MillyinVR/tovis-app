@@ -17,6 +17,7 @@ vi.mock('@/lib/prisma', () => ({
 
 import { resetApnsAuthKeyCacheForTests } from '../config'
 import {
+  APNS_CREDENTIAL_REJECTED_ERROR_CODES,
   evaluateNotificationDeliveryHealth,
   FAILED_FINAL_ALERT_THRESHOLD,
   FAILED_RETRYABLE_ALERT_THRESHOLD,
@@ -46,6 +47,7 @@ function setup(opts: {
   byStatus?: StatusRow[]
   errors?: ErrorRow[]
   stuck?: number
+  credentialRejected?: number
 }) {
   mocks.groupBy.mockImplementation(
     async (args: { by: readonly string[] }) => {
@@ -54,7 +56,14 @@ function setup(opts: {
       return []
     },
   )
-  mocks.count.mockResolvedValue(opts.stuck ?? 0)
+  // Two different count() queries now share this mock — discriminate on the
+  // where clause so a "stuck" fixture can't leak into the credential count.
+  mocks.count.mockImplementation(
+    async (args: { where?: { lastErrorCode?: { in?: string[] } } }) => {
+      if (args.where?.lastErrorCode?.in) return opts.credentialRejected ?? 0
+      return opts.stuck ?? 0
+    },
+  )
 }
 
 describe('evaluateNotificationDeliveryHealth', () => {
@@ -178,6 +187,82 @@ describe('evaluateNotificationDeliveryHealth', () => {
     expect(h.healthy).toBe(false)
     expect(h.providerConfigIssues).toHaveLength(1)
     expect(h.providerConfigIssues[0]).toMatch(/APNS_AUTH_KEY/)
+  })
+
+  // Production, 2026-08-01: the .p8 parsed (so the env-side check above was
+  // clean) and APNs answered 403 InvalidProviderToken to every send. Nothing in
+  // the probe could see that — the volume thresholds were the only thing that
+  // would have fired, and only because one phone carried 13 stale device tokens.
+  it('is UNHEALTHY on a SINGLE credential rejection, with zero stuck and no failure spike', async () => {
+    setup({
+      byStatus: [
+        {
+          status: NotificationDeliveryStatus.FAILED_FINAL,
+          _count: { _all: 1 },
+        },
+      ],
+      stuck: 0,
+      credentialRejected: 1,
+    })
+
+    const h = await evaluateNotificationDeliveryHealth({ now: NOW })
+
+    expect(h.credentialRejectedCount).toBe(1)
+    expect(h.healthy).toBe(false)
+    // Well under both volume thresholds — the rejection alone must carry it.
+    expect(h.failedFinalCount).toBeLessThan(FAILED_FINAL_ALERT_THRESHOLD)
+    expect(h.stuckCount).toBe(0)
+    expect(h.providerConfigIssues).toHaveLength(1)
+    expect(h.providerConfigIssues[0]).toMatch(/InvalidProviderToken/)
+    // The message must name the knobs to check, not just the symptom.
+    expect(h.providerConfigIssues[0]).toMatch(/APNS_KEY_ID/)
+    expect(h.providerConfigIssues[0]).toMatch(/APNS_TEAM_ID/)
+    expect(h.reasons).toContain(h.providerConfigIssues[0])
+  })
+
+  it('asks the credential query for every rejection code, over the health window', async () => {
+    setup({ stuck: 0, credentialRejected: 0 })
+
+    await evaluateNotificationDeliveryHealth({ now: NOW, windowMinutes: 30 })
+
+    const call = mocks.count.mock.calls.find(
+      (c) => (c[0] as { where?: { lastErrorCode?: unknown } }).where
+        ?.lastErrorCode,
+    )?.[0] as {
+      where: { createdAt: { gte: Date }; lastErrorCode: { in: string[] } }
+    }
+
+    expect(call.where.createdAt.gte).toEqual(
+      new Date(NOW.getTime() - 30 * 60_000),
+    )
+    expect(call.where.lastErrorCode.in).toEqual([
+      ...APNS_CREDENTIAL_REJECTED_ERROR_CODES,
+    ])
+    // The reason apns2 already self-heals must NOT be in the set, or every
+    // routine token refresh would page.
+    expect(call.where.lastErrorCode.in).not.toContain('ExpiredProviderToken')
+    expect(call.where.lastErrorCode.in).toContain('InvalidProviderToken')
+  })
+
+  // A/B against the test above: byte-identical fixture except credentialRejected
+  // 1 → 0, so `healthy` can only have flipped on the credential signal.
+  it('stays healthy when no delivery was refused for credentials', async () => {
+    setup({
+      byStatus: [
+        {
+          status: NotificationDeliveryStatus.FAILED_FINAL,
+          _count: { _all: 1 },
+        },
+      ],
+      stuck: 0,
+      credentialRejected: 0,
+    })
+
+    const h = await evaluateNotificationDeliveryHealth({ now: NOW })
+
+    expect(h.credentialRejectedCount).toBe(0)
+    expect(h.providerConfigIssues).toEqual([])
+    expect(h.healthy).toBe(true)
   })
 
   it('reports no provider issue when APNs is simply absent', async () => {

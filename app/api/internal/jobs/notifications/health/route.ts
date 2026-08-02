@@ -44,6 +44,7 @@ async function runJob(req: Request) {
         stuckCount: health.stuckCount,
         failedFinalCount: health.failedFinalCount,
         failedRetryableCount: health.failedRetryableCount,
+        credentialRejectedCount: health.credentialRejectedCount,
         countsByStatus: health.countsByStatus,
         topErrorCodes: health.topErrorCodes,
         providerConfigIssues: health.providerConfigIssues,
