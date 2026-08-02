@@ -1,16 +1,14 @@
 // app/messages/thread/[id]/page.tsx
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import {
-  MediaType,
-  MessageThreadContextType,
-} from '@prisma/client'
+import { MediaType } from '@prisma/client'
 import ProProfileLink from '@/app/_components/ProProfileLink'
 import { Avatar } from '@/app/_components/ui'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { liveChannelForUser } from '@/lib/live/broadcast'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { resolveThreadContextNav } from '@/lib/messages/contextNav'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import { THREAD_MESSAGE_PAGE_SIZE, nextOlderCursor } from '@/lib/messages/paging'
 import {
@@ -43,34 +41,6 @@ type InitialMessage = {
 function toInitialMessageMediaType(mediaType: MediaType): InitialMessageAttachment['mediaType'] {
   if (mediaType === MediaType.VIDEO) return 'VIDEO'
   return 'IMAGE'
-}
-
-/**
- * The header's deep link into the thread's context (booking / pro profile) when
- * one exists. Pure — derived from the thread's own context ids, no lookup. The
- * eyebrow *copy* comes from the shared resolveInboxEyebrow so the header label
- * never drifts from the inbox row that opened this thread.
- */
-function contextNav(thread: {
-  contextType: MessageThreadContextType
-  contextId: string
-  bookingId: string | null
-}): { href: string | null; cta: string | null } {
-  if (thread.contextType === MessageThreadContextType.BOOKING && thread.bookingId) {
-    return {
-      href: `/booking/${encodeURIComponent(thread.bookingId)}`,
-      cta: 'View booking',
-    }
-  }
-
-  if (thread.contextType === MessageThreadContextType.PRO_PROFILE && thread.contextId) {
-    return {
-      href: `/professionals/${encodeURIComponent(thread.contextId)}`,
-      cta: 'View profile',
-    }
-  }
-
-  return { href: null, cta: null }
 }
 
 export default async function MessageThreadPage(props: PageProps) {
@@ -242,7 +212,8 @@ export default async function MessageThreadPage(props: PageProps) {
 
   // Header eyebrow uses the SAME resolver as the inbox rows so the label a user
   // tapped never changes shape once the thread opens. Navigation (deep link into
-  // the booking / pro profile) is a separate, thread-page-only affordance.
+  // the booking / pro profile) is a separate, thread-page-only affordance —
+  // viewer-dependent, so it takes `viewerIsThreadPro` (see resolveThreadContextNav).
   const contextEyebrow = await resolveInboxEyebrow({
     id: thread.id,
     contextType: thread.contextType,
@@ -251,10 +222,11 @@ export default async function MessageThreadPage(props: PageProps) {
     offeringId: thread.offeringId,
     waitlistEntryId: thread.waitlistEntryId,
   })
-  const contextNavMeta = contextNav({
+  const contextNavMeta = resolveThreadContextNav({
     contextType: thread.contextType,
     contextId: thread.contextId,
     bookingId: thread.bookingId,
+    viewerIsThreadPro,
   })
 
   return (
