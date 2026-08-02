@@ -396,6 +396,16 @@ export default function ThreadClient(props: ThreadClientProps) {
 
       void markRead()
       setErr(null)
+    } catch {
+      // A transient network failure (Safari reports `TypeError: Load failed`
+      // when a request never completes — e.g. the tab was suspended and the
+      // `focus` handler below refires this on wake). Every call site invokes
+      // this as a bare `void fetchLatest()`, so without this catch the
+      // rejection escaped as an UNHANDLED one: Sentry noise, and the thread
+      // silently stopped refreshing with nothing shown to the user, because
+      // only the `!res.ok` path above ever set an error. `markRead` and
+      // `loadOlder` on either side of this already guard the same way.
+      setErr('Could not refresh messages.')
     } finally {
       inFlightRef.current = false
       setLoading(false)
