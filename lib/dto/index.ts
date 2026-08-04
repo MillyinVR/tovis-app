@@ -254,6 +254,12 @@ export type {
   ProNoShowSettingsUpdateRequestDTO,
 } from '@/lib/dto/noShowSettings'
 
+// ── Flag-held pro features that are live (GET /api/v1/pro/capabilities) ──────
+export type {
+  ProCapabilitiesDTO,
+  ProCapabilitiesResponseDTO,
+} from '@/lib/dto/proCapabilities'
+
 // ── Pro appointment-reminder cadence (Phase 2.3 configurable reminders) ───────
 export type {
   ProReminderSettingsDTO,
