@@ -8,6 +8,7 @@ import {
   handleFormatMessage,
   normalizeHandle,
 } from '@/lib/handles'
+import { claimHandle, releaseHandle } from '@/lib/handles/registry'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
   normalizeSocialHandle,
@@ -250,10 +251,24 @@ export async function PATCH(req: Request) {
     }
 
     try {
-      const updated = await prisma.professionalProfile.update({
-        where: { id: proProfileId },
-        data,
-        select: PRO_PROFILE_SELECT,
+      // Claim + profile write in one transaction — see the client twin. The
+      // registry is what makes this collide with a CLIENT holding the handle;
+      // this table's own unique index never could.
+      const updated = await prisma.$transaction(async (tx) => {
+        if (handleActuallyChanges) {
+          const owner = { kind: 'PRO' as const, professionalId: proProfileId }
+          if (nextHandleNormalized) {
+            await claimHandle(tx, nextHandleNormalized, owner)
+          } else {
+            await releaseHandle(tx, owner)
+          }
+        }
+
+        return tx.professionalProfile.update({
+          where: { id: proProfileId },
+          data,
+          select: PRO_PROFILE_SELECT,
+        })
       })
 
       return jsonOk({ ok: true, profile: updated }, 200)

@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => ({
   readJsonRecord: vi.fn(),
   findUnique: vi.fn(),
   update: vi.fn(),
+  registryFindUnique: vi.fn(),
+  registryDeleteMany: vi.fn(),
+  registryCreate: vi.fn(),
+  transaction: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -20,9 +24,19 @@ vi.mock('@/app/api/_utils/readJsonRecord', () => ({
   readJsonRecord: mocks.readJsonRecord,
 }))
 
+// PATCH now writes the handle claim and the profile in ONE transaction, so the
+// mock exposes $transaction and the registry the claim goes through. Built
+// inside the factory: a top-level const would be referenced before
+// initialization, because vi.mock is hoisted above it.
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     clientProfile: { findUnique: mocks.findUnique, update: mocks.update },
+    handleRegistration: {
+      findUnique: mocks.registryFindUnique,
+      deleteMany: mocks.registryDeleteMany,
+      create: mocks.registryCreate,
+    },
+    $transaction: mocks.transaction,
   },
 }))
 
@@ -32,6 +46,20 @@ type Res = { status: number; message?: string; body?: unknown }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Run the transaction body against the same mock client, so the handle claim
+  // inside it is exercised rather than skipped.
+  mocks.transaction.mockImplementation(
+    async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        clientProfile: { findUnique: mocks.findUnique, update: mocks.update },
+        handleRegistration: {
+          findUnique: mocks.registryFindUnique,
+          deleteMany: mocks.registryDeleteMany,
+          create: mocks.registryCreate,
+        },
+      }),
+  )
+  mocks.registryFindUnique.mockResolvedValue(null)
   mocks.requireClient.mockResolvedValue({
     ok: true,
     clientId: 'client_1',

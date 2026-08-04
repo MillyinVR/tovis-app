@@ -106,22 +106,45 @@ async function warnExpiringReservations(args: {
   return warned
 }
 
-/** Reclaim handles whose reservation has passed the full grace window. */
+/**
+ * Reclaim handles whose reservation has passed the full grace window.
+ *
+ * The registry rows must go with them: a released handle that stayed registered
+ * would be free on the profile and locked in the namespace, so nobody — not the
+ * original pro, not anyone else — could ever claim it again. Ids are selected
+ * first because `updateMany` cannot tell us which rows it touched.
+ */
 async function releaseExpiredReservations(args: {
   releaseCutoff: Date
 }): Promise<number> {
-  const result = await prisma.professionalProfile.updateMany({
-    where: {
-      isPremium: false,
-      handleNormalized: { not: null },
-      handleReservedAt: { lte: args.releaseCutoff },
-    },
-    data: {
-      handle: null,
-      handleNormalized: null,
-      handleReservedAt: null,
-    },
+  const where = {
+    isPremium: false,
+    handleNormalized: { not: null },
+    handleReservedAt: { lte: args.releaseCutoff },
+  } as const
+
+  const expiring = await prisma.professionalProfile.findMany({
+    where,
+    select: { id: true },
   })
 
-  return result.count
+  if (expiring.length === 0) return 0
+
+  const ids = expiring.map((pro) => pro.id)
+
+  await prisma.$transaction([
+    prisma.professionalProfile.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        handle: null,
+        handleNormalized: null,
+        handleReservedAt: null,
+      },
+    }),
+    prisma.handleRegistration.deleteMany({
+      where: { professionalId: { in: ids } },
+    }),
+  ])
+
+  return ids.length
 }

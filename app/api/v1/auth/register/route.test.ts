@@ -53,6 +53,11 @@ const mockPrisma = vi.hoisted(() => ({
   professionalProfile: {
     findFirst: vi.fn(),
   },
+  // Pro signup checks the GLOBAL handle namespace (a client can hold one too),
+  // then locks it inside the signup transaction.
+  handleRegistration: {
+    findUnique: vi.fn(),
+  },
   $transaction: vi.fn(),
 }))
 
@@ -309,6 +314,24 @@ function makeProMobileSignupBody() {
   }
 }
 
+/**
+ * The slice of the transaction client the handle claim touches: it resolves the
+ * just-created ProfessionalProfile, then writes the registry row that locks the
+ * handle against pros AND clients alike.
+ */
+function makeHandleClaimTxSurface(professionalId = 'pro_profile_1') {
+  return {
+    professionalProfile: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ id: professionalId }),
+    },
+    handleRegistration: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      create: vi.fn().mockResolvedValue({}),
+    },
+  }
+}
+
 function makeSuccessfulRegisterTx(args: {
   userId: string
   email: string
@@ -324,6 +347,7 @@ function makeSuccessfulRegisterTx(args: {
         authVersion: 1,
       }),
     },
+    ...makeHandleClaimTxSurface(),
   }
 }
 
@@ -445,6 +469,7 @@ describe('app/api/v1/auth/register/route', () => {
 
     resetMockGroup(mockPrisma.user)
     resetMockGroup(mockPrisma.professionalProfile)
+    resetMockGroup(mockPrisma.handleRegistration)
     mockPrisma.$transaction.mockReset()
 
     mockHashPassword.mockReset()
@@ -554,6 +579,7 @@ describe('app/api/v1/auth/register/route', () => {
 
     mockPrisma.user.findFirst.mockResolvedValue(null)
     mockPrisma.professionalProfile.findFirst.mockResolvedValue(null)
+    mockPrisma.handleRegistration.findUnique.mockResolvedValue(null)
 
     mockStartTwilioVerifyPhoneVerification.mockResolvedValue({
       ok: true,
@@ -1080,6 +1106,7 @@ describe('app/api/v1/auth/register/route', () => {
           authVersion: 1,
         }),
       },
+      ...makeHandleClaimTxSurface(),
     }
 
     mockPrisma.$transaction.mockImplementation(
@@ -1094,9 +1121,22 @@ describe('app/api/v1/auth/register/route', () => {
     expect(result.status).toBe(201)
     expect(body.ok).toBe(true)
 
-    expect(mockPrisma.professionalProfile.findFirst).toHaveBeenCalledWith({
+    // Availability is answered by the GLOBAL namespace, not by
+    // ProfessionalProfile: a handle a CLIENT holds is taken too.
+    expect(mockPrisma.handleRegistration.findUnique).toHaveBeenCalledWith({
       where: { handleNormalized: 'jane-smith' },
-      select: { id: true },
+      select: { professionalId: true, clientProfileId: true },
+    })
+
+    // ...and the claim is LOCKED inside the same transaction that creates the
+    // profile, so a handle taken between the check and the write rolls the
+    // whole signup back instead of half-creating an account.
+    expect(tx.handleRegistration.create).toHaveBeenCalledWith({
+      data: {
+        handleNormalized: 'jane-smith',
+        professionalId: 'pro_profile_1',
+        clientProfileId: null,
+      },
     })
 
     expect(tx.user.create).toHaveBeenCalledWith({

@@ -131,6 +131,16 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   User: { status: 'EXPORTED', keys: ['user'] },
   ClientProfile: { status: 'EXPORTED', keys: ['clientProfile'] },
   ProfessionalProfile: { status: 'EXPORTED', keys: ['professionalProfile'] },
+  // The global @handle lock (lib/handles/registry.ts). It holds no personal
+  // data of its own — just "this handle belongs to this profile" — and the
+  // handle itself is already disclosed on ClientProfile/ProfessionalProfile,
+  // which ARE exported. Exporting the lock row would repeat that one string
+  // under a second, more confusing name.
+  HandleRegistration: {
+    status: 'OMITTED',
+    reason:
+      'Uniqueness lock only; carries no data beyond the handle, which is already exported on ClientProfile/ProfessionalProfile.',
+  },
   ClientAddress: { status: 'EXPORTED', keys: ['clientAddresses'] },
   ProfessionalLocation: { status: 'EXPORTED', keys: ['professionalLocations'] },
   Booking: {

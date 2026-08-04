@@ -1,9 +1,15 @@
 // app/api/v1/pro/profile/handle-available/route.ts
 //
 // Live availability check for a pro vanity handle. Fast feedback for the claim UI;
-// the PATCH /api/v1/pro/profile route stays the authoritative writer (race-safe via the
-// handleNormalized unique constraint). Shares format/reserved rules with lib/handles.
-import { prisma } from '@/lib/prisma'
+// PATCH /api/v1/pro/profile stays the authoritative writer (race-safe via the
+// HandleRegistration primary key). Shares format/reserved rules with lib/handles.
+//
+// Reads HandleRegistration, not ProfessionalProfile: handles are one namespace
+// shared with ClientProfile (see lib/handles/registry.ts), so a handle a CLIENT
+// holds is taken, and telling a pro it was "available" here would only hand them
+// a 409 on save. The registry is inherently platform-wide — it has no tenant
+// column — which is the same intentional cross-tenant read this route always
+// made, now expressed by the table itself.
 import { jsonOk, requirePro } from '@/app/api/_utils'
 import {
   handleFormatError,
@@ -11,7 +17,8 @@ import {
   normalizeHandle,
   suggestHandles,
 } from '@/lib/handles'
-import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
+import { filterAvailableHandles, isHandleAvailable } from '@/lib/handles/registry'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,12 +44,12 @@ export async function GET(req: Request) {
     })
   }
 
-  const existing = await prisma.professionalProfile.findUnique({
+  const existing = await prisma.handleRegistration.findUnique({
     where: { handleNormalized: normalized },
-    select: { id: true },
+    select: { professionalId: true },
   })
 
-  if (existing && existing.id === auth.professionalId) {
+  if (existing && existing.professionalId === auth.professionalId) {
     return jsonOk({
       ok: true,
       handle: normalized,
@@ -61,11 +68,20 @@ export async function GET(req: Request) {
     })
   }
 
+  // Defensive: a handle with no registry row is free. Kept as an explicit call
+  // so this route and the writer agree on one definition of "available".
+  const available = await isHandleAvailable(normalized, {
+    kind: 'PRO',
+    professionalId: auth.professionalId,
+  })
+
   return jsonOk({
     ok: true,
     handle: normalized,
-    status: 'available' satisfies HandleStatus,
-    message: `${normalized}.tovis.me is available.`,
+    status: (available ? 'available' : 'taken') satisfies HandleStatus,
+    message: available
+      ? `${normalized}.tovis.me is available.`
+      : 'That handle is taken.',
   })
 }
 
@@ -74,16 +90,6 @@ async function filterAvailableSuggestions(base: string): Promise<string[]> {
   const candidates = suggestHandles(base)
   if (candidates.length === 0) return []
 
-  const taken = await prisma.professionalProfile.findMany({
-    // Handles are globally unique across the whole platform (they map to subdomains),
-    // so availability is an intentional cross-tenant read, not a discovery surface.
-    where: {
-      ...platformCrossTenantProVisibilityFilter(),
-      handleNormalized: { in: candidates },
-    },
-    select: { handleNormalized: true },
-  })
-  const takenSet = new Set(taken.map((row) => row.handleNormalized))
-
-  return candidates.filter((c) => !takenSet.has(c)).slice(0, 3)
+  const free = await filterAvailableHandles(candidates)
+  return free.slice(0, 3)
 }

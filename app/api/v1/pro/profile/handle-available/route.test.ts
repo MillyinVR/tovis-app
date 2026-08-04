@@ -11,8 +11,10 @@ const mocks = vi.hoisted(() => {
 
   const requirePro = vi.fn()
 
+  // The route reads the GLOBAL handle namespace (HandleRegistration), not
+  // ProfessionalProfile — a handle a CLIENT holds is taken too.
   const prisma = {
-    professionalProfile: {
+    handleRegistration: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
     },
@@ -49,8 +51,8 @@ describe('GET /api/v1/pro/profile/handle-available', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
-    mocks.prisma.professionalProfile.findUnique.mockResolvedValue(null)
-    mocks.prisma.professionalProfile.findMany.mockResolvedValue([])
+    mocks.prisma.handleRegistration.findUnique.mockResolvedValue(null)
+    mocks.prisma.handleRegistration.findMany.mockResolvedValue([])
   })
 
   it('401s when not an authed pro', async () => {
@@ -65,7 +67,7 @@ describe('GET /api/v1/pro/profile/handle-available', () => {
   it('returns invalid for a format-bad handle without hitting the DB', async () => {
     const body = await call('ab')
     expect(body.status).toBe('invalid')
-    expect(mocks.prisma.professionalProfile.findUnique).not.toHaveBeenCalled()
+    expect(mocks.prisma.handleRegistration.findUnique).not.toHaveBeenCalled()
   })
 
   it('returns reserved for a reserved word', async () => {
@@ -79,15 +81,30 @@ describe('GET /api/v1/pro/profile/handle-available', () => {
   })
 
   it('returns yours when the handle is the caller’s own', async () => {
-    mocks.prisma.professionalProfile.findUnique.mockResolvedValue({ id: 'pro_1' })
+    mocks.prisma.handleRegistration.findUnique.mockResolvedValue({
+      professionalId: 'pro_1',
+    })
     const body = await call('janesmith')
     expect(body.status).toBe('yours')
   })
 
   it('returns taken (with suggestions) when another pro owns it', async () => {
-    mocks.prisma.professionalProfile.findUnique.mockResolvedValue({ id: 'pro_2' })
+    mocks.prisma.handleRegistration.findUnique.mockResolvedValue({
+      professionalId: 'pro_2',
+    })
     const body = await call('janesmith')
     expect(body.status).toBe('taken')
     expect(Array.isArray(body.suggestions)).toBe(true)
+  })
+
+  it('returns taken when a CLIENT owns it', async () => {
+    // The whole point of the registry: before it, this route only ever looked
+    // at ProfessionalProfile, so a handle a client held read as "available" and
+    // then 409'd on save.
+    mocks.prisma.handleRegistration.findUnique.mockResolvedValue({
+      professionalId: null,
+    })
+    const body = await call('janesmith')
+    expect(body.status).toBe('taken')
   })
 })
