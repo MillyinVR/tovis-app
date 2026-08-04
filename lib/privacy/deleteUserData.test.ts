@@ -111,6 +111,17 @@ function makeUser(args?: {
 
 let harness: ReturnType<typeof makeMockDb>
 
+/**
+ * The proxy materializes delegates on access, so every model is present at
+ * runtime; the index signature just cannot say so. This narrows once instead of
+ * scattering non-null assertions through the assertions.
+ */
+function delegate(model: string): MockDelegate {
+  const found = harness.db[model]
+  if (!found) throw new Error(`mock delegate missing: ${model}`)
+  return found
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-05-27T12:00:00.000Z'))
@@ -118,7 +129,7 @@ beforeEach(() => {
   harness.db.$transaction.mockImplementation(
     async (callback: (tx: unknown) => Promise<unknown>) => callback(harness.db),
   )
-  harness.db.user.findUnique.mockResolvedValue(makeUser())
+  delegate('user').findUnique.mockResolvedValue(makeUser())
 })
 
 afterEach(() => {
@@ -131,7 +142,7 @@ describe('deleteUserData', () => {
   })
 
   it('throws when the subject user does not exist', async () => {
-    harness.db.user.findUnique.mockResolvedValueOnce(null)
+    delegate('user').findUnique.mockResolvedValueOnce(null)
 
     await expect(
       deleteUserData({
@@ -143,7 +154,7 @@ describe('deleteUserData', () => {
       }),
     ).rejects.toThrow('Cannot delete user data: user not found (missing_user)')
 
-    expect(harness.db.user.update).not.toHaveBeenCalled()
+    expect(delegate('user').update).not.toHaveBeenCalled()
   })
 
   it('reports an action for every rule plus the three subject rows', async () => {
@@ -190,7 +201,7 @@ describe('deleteUserData', () => {
   })
 
   it('skips profile-scoped rules when the user has neither profile', async () => {
-    harness.db.user.findUnique.mockResolvedValue(
+    delegate('user').findUnique.mockResolvedValue(
       makeUser({ clientProfile: null, professionalProfile: null }),
     )
 
@@ -252,7 +263,7 @@ describe('deleteUserData', () => {
       reason: 'privacy request',
     })
 
-    const call = harness.db.user.update.mock.calls.at(0)
+    const call = delegate('user').update.mock.calls.at(0)
     expect(call).toBeDefined()
     const data = call?.[0]?.data
 

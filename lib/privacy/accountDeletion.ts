@@ -249,6 +249,34 @@ export type RequestAccountDeletionResult =
   | { ok: true; request: AccountDeletionRequestView }
   | { ok: false; code: 'BLOCKED'; blockers: readonly AccountDeletionBlocker[] }
   | { ok: false; code: 'ALREADY_PENDING'; request: AccountDeletionRequestView }
+  | { ok: false; code: 'CONFIRMATION_MISMATCH' }
+
+/**
+ * Does the text the user typed match the address on their account?
+ *
+ * Lives here rather than in the route so the account email is read inside an
+ * approved privacy helper — the `check:pii-plaintext-reads` guard exists to
+ * keep exactly this comparison from spreading into handlers.
+ *
+ * Re-confirmation is typed email, deliberately NOT a password: Apple and Google
+ * sign-in accounts are created with a random password the user never learns
+ * (lib/auth/findOrCreateAppleUser.ts), so a password gate would make deletion
+ * impossible for precisely the users whose app store requires it.
+ */
+async function confirmationMatchesAccount(args: {
+  db: Db
+  userId: string
+  typed: string
+}): Promise<boolean> {
+  const user = await args.db.user.findUnique({
+    where: { id: args.userId },
+    select: { email: true },
+  })
+
+  if (!user) return false
+
+  return user.email.trim().toLowerCase() === args.typed.trim().toLowerCase()
+}
 
 /**
  * Open a deletion window.
@@ -260,10 +288,21 @@ export type RequestAccountDeletionResult =
 export async function requestAccountDeletion(args: {
   db: PrismaClient
   userId: string
+  /** The address the user typed to confirm. Omitted only by tests/internals. */
+  confirmEmail?: string
   reason?: string | null
   now?: Date
 }): Promise<RequestAccountDeletionResult> {
   const now = args.now ?? new Date()
+
+  if (args.confirmEmail !== undefined) {
+    const matches = await confirmationMatchesAccount({
+      db: args.db,
+      userId: args.userId,
+      typed: args.confirmEmail,
+    })
+    if (!matches) return { ok: false, code: 'CONFIRMATION_MISMATCH' }
+  }
 
   const eligibility = await evaluateAccountDeletionEligibility({
     db: args.db,

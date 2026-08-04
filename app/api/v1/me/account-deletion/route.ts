@@ -72,29 +72,27 @@ export async function POST(request: Request) {
     const body = await readBody(request)
     const confirmEmail = readString(body.confirmEmail)
 
-    // Re-confirmation is the user typing their own email address.
-    //
-    // Deliberately NOT a password check: Apple and Google sign-in accounts are
-    // created with a random password the user never learns
-    // (lib/auth/findOrCreateAppleUser.ts), so a password gate would make
-    // deletion impossible for exactly the users whose store requires it.
+    // Re-confirmation is the user typing their own email address. The
+    // comparison itself lives in lib/privacy/accountDeletion.ts so the account
+    // email is never read here — see that helper for why it is not a password.
     if (!confirmEmail) {
       return jsonFail(400, 'Type your email address to confirm.', {
         code: 'CONFIRMATION_REQUIRED',
       })
     }
 
-    if (confirmEmail.toLowerCase() !== auth.user.email.toLowerCase()) {
+    const result = await requestAccountDeletion({
+      db: prisma,
+      userId: auth.user.id,
+      confirmEmail,
+      reason: readString(body.reason),
+    })
+
+    if (!result.ok && result.code === 'CONFIRMATION_MISMATCH') {
       return jsonFail(400, 'That email address does not match your account.', {
         code: 'CONFIRMATION_MISMATCH',
       })
     }
-
-    const result = await requestAccountDeletion({
-      db: prisma,
-      userId: auth.user.id,
-      reason: readString(body.reason),
-    })
 
     if (!result.ok && result.code === 'BLOCKED') {
       return jsonFail(409, 'Your account still has things to settle first.', {

@@ -114,7 +114,7 @@ function anonymizeRule<W, D>(args: {
 }
 
 /** Drop the `null` arms of an OR so an absent profile never widens the match. */
-function anyOf<T>(...items: Array<T | null>): T[] {
+function orArms<T>(...items: Array<T | null>): T[] {
   return items.filter((item): item is T => item !== null)
 }
 
@@ -142,7 +142,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     model: 'ClientActionToken',
     delegate: (db) => db.clientActionToken,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -172,7 +172,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     notes: 'Releases the global @handle so it can be claimed again.',
     delegate: (db) => db.handleRegistration,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
           : null,
@@ -201,7 +201,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     model: 'BookingHold',
     delegate: (db) => db.bookingHold,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -230,7 +230,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     model: 'WaitlistOffer',
     delegate: (db) => db.waitlistOffer,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -243,7 +243,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     model: 'WaitlistEntry',
     delegate: (db) => db.waitlistEntry,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -354,7 +354,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
       'Carries recipient contact PII. Cascades to NotificationDelivery rows.',
     delegate: (db) => db.notificationDispatch,
     where: (s) => {
-      const or = anyOf<Prisma.NotificationDispatchWhereInput>(
+      const or = orArms<Prisma.NotificationDispatchWhereInput>(
         { userId: s.userId },
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
@@ -368,7 +368,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     model: 'Reminder',
     delegate: (db) => db.reminder,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -384,7 +384,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     notes: STORAGE_BYTES_NOTE,
     delegate: (db) => db.mediaAsset,
     where: (s) => ({
-      OR: anyOf<Prisma.MediaAssetWhereInput>(
+      OR: orArms<Prisma.MediaAssetWhereInput>(
         { uploadedByUserId: s.userId },
         s.clientProfileId ? { booking: { clientId: s.clientProfileId } } : null,
         s.professionalProfileId
@@ -399,7 +399,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
       await db.clientIntentEvent.deleteMany({
         where: {
           media: {
-            OR: anyOf<Prisma.MediaAssetWhereInput>(
+            OR: orArms<Prisma.MediaAssetWhereInput>(
               { uploadedByUserId: subject.userId },
               subject.clientProfileId
                 ? { booking: { clientId: subject.clientProfileId } }
@@ -426,7 +426,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     model: 'UploadSession',
     delegate: (db) => db.uploadSession,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -443,7 +443,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
       'Public content must not stay published against a deleted account. Cascades to its assets, likes and comments.',
     delegate: (db) => db.lookPost,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
           : null,
@@ -503,7 +503,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
       "Both directions: the subject's favourites, and other users' favourites OF the subject.",
     delegate: (db) => db.professionalFavorite,
     where: (s) => ({
-      OR: anyOf<Prisma.ProfessionalFavoriteWhereInput>(
+      OR: orArms<Prisma.ProfessionalFavoriteWhereInput>(
         { userId: s.userId },
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -516,7 +516,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     notes: 'Both directions, as with ProfessionalFavorite.',
     delegate: (db) => db.proFollow,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -583,7 +583,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     notes: 'Revokes chart access by removing the grant.',
     delegate: (db) => db.clientChartShare,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -674,7 +674,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
       'Cancelled so it stops materializing future appointments for a deleted account.',
     delegate: (db) => db.bookingSeries,
     where: (s) => {
-      const or = anyOf(
+      const or = orArms(
         s.clientProfileId ? { clientId: s.clientProfileId } : null,
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
@@ -695,7 +695,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     notes: 'Unclaimed so the physical card can be reissued.',
     delegate: (db) => db.nfcCard,
     where: (s) => {
-      const or = anyOf<Prisma.NfcCardWhereInput>(
+      const or = orArms<Prisma.NfcCardWhereInput>(
         { claimedByUserId: s.userId },
         s.professionalProfileId
           ? { professionalId: s.professionalProfileId }
