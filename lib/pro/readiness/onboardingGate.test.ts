@@ -54,6 +54,16 @@ describe('onboardingGate', () => {
       expect(canAccessProPathWhileUnready('/pro/settings')).toBe(true)
     })
 
+    it('always allows account deletion, however unready the pro is', () => {
+      // Found by driving the real page: /pro/account/delete was missing from
+      // the allowlist, so a pro who stopped half-way through onboarding was
+      // redirected to onboarding and could never reach the delete screen —
+      // the feature dead-ending at its entry point. App Store guideline
+      // 5.1.1(v) requires the path to be reachable from inside the app.
+      expect(canAccessProPathWhileUnready('/pro/account')).toBe(true)
+      expect(canAccessProPathWhileUnready('/pro/account/delete')).toBe(true)
+    })
+
     it('allows the calendar while unready because working hours are edited there', () => {
       expect(canAccessProPathWhileUnready('/pro/calendar')).toBe(true)
       expect(canAccessProPathWhileUnready('/pro/calendar#week')).toBe(true)
