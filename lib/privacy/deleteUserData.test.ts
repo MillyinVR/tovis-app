@@ -38,6 +38,10 @@ const mocks = vi.hoisted(() => ({
       count: vi.fn(),
       deleteMany: vi.fn(),
     },
+    practiceShot: {
+      count: vi.fn(),
+      deleteMany: vi.fn(),
+    },
   },
 }))
 
@@ -98,6 +102,7 @@ function setupCounts(counts?: {
   bookingHold?: number
   clientActionToken?: number
   mediaAsset?: number
+  practiceShot?: number
 }) {
   mocks.db.clientAddress.count.mockResolvedValue(counts?.clientAddress ?? 2)
   mocks.db.professionalLocation.count.mockResolvedValue(
@@ -108,6 +113,7 @@ function setupCounts(counts?: {
     counts?.clientActionToken ?? 5,
   )
   mocks.db.mediaAsset.count.mockResolvedValue(counts?.mediaAsset ?? 6)
+  mocks.db.practiceShot.count.mockResolvedValue(counts?.practiceShot ?? 7)
 }
 
 function setupDeleteManyResults(counts?: {
@@ -116,6 +122,7 @@ function setupDeleteManyResults(counts?: {
   bookingHold?: number
   clientActionToken?: number
   mediaAsset?: number
+  practiceShot?: number
 }) {
   mocks.db.clientAddress.deleteMany.mockResolvedValue({
     count: counts?.clientAddress ?? 2,
@@ -131,6 +138,9 @@ function setupDeleteManyResults(counts?: {
   })
   mocks.db.mediaAsset.deleteMany.mockResolvedValue({
     count: counts?.mediaAsset ?? 6,
+  })
+  mocks.db.practiceShot.deleteMany.mockResolvedValue({
+    count: counts?.practiceShot ?? 7,
   })
 }
 
@@ -248,6 +258,12 @@ describe('deleteUserData', () => {
             'Deletes DB rows only. Storage object deletion must run through the media/storage write boundary.',
         },
         {
+          model: 'PracticeShot',
+          action: 'SKIPPED',
+          count: 0,
+          notes: 'No professional profile.',
+        },
+        {
           model: 'ClientProfile',
           action: 'WOULD_ANONYMIZE',
           count: 1,
@@ -359,6 +375,13 @@ describe('deleteUserData', () => {
             'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
         },
         {
+          model: 'PracticeShot',
+          action: 'DELETED',
+          count: 7,
+          notes:
+            'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
+        },
+        {
           model: 'ClientProfile',
           action: 'ANONYMIZED',
           count: 1,
@@ -402,6 +425,13 @@ describe('deleteUserData', () => {
           { professionalId: 'pro_1' },
         ],
       },
+    })
+
+    // ⚠️ Explicit, not left to PracticeShot's onDelete: Cascade — this routine
+    // ANONYMIZES the ProfessionalProfile rather than deleting it, so the cascade
+    // never fires and the shots would outlive the deletion request.
+    expect(mocks.db.practiceShot.deleteMany).toHaveBeenCalledWith({
+      where: { professionalId: 'pro_1' },
     })
 
     expect(mocks.db.clientProfile.update).toHaveBeenCalledWith({
@@ -497,6 +527,12 @@ describe('deleteUserData', () => {
         count: 6,
         notes:
           'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
+      },
+      {
+        model: 'PracticeShot',
+        action: 'SKIPPED',
+        count: 0,
+        notes: 'No professional profile.',
       },
       {
         model: 'ClientProfile',

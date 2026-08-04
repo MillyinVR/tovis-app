@@ -45,6 +45,9 @@ type UploadKind =
   | 'AFTERCARE_PRIVATE'
   | 'VERIFY_PRIVATE'
   | 'CONSULT_PRIVATE'
+  // A pro shooting outside a session (the standalone camera). Private bucket,
+  // no booking; produces a PracticeShot, not a MediaAsset.
+  | 'PRACTICE_PRIVATE'
 
 type BookingPhase = 'BEFORE' | 'AFTER' | 'OTHER'
 
@@ -69,6 +72,7 @@ function parseKind(v: unknown): UploadKind | null {
   if (s === 'AFTERCARE_PRIVATE') return 'AFTERCARE_PRIVATE'
   if (s === 'VERIFY_PRIVATE') return 'VERIFY_PRIVATE'
   if (s === 'CONSULT_PRIVATE') return 'CONSULT_PRIVATE'
+  if (s === 'PRACTICE_PRIVATE') return 'PRACTICE_PRIVATE'
   return null
 }
 

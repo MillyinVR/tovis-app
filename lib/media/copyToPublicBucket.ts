@@ -12,6 +12,12 @@
 // independent (cross-bucket `copy` support varies by storage-js version). The
 // destination path is server-minted and namespaced to the client, mirroring the
 // signing routes — never derived from client input.
+//
+// `copyStorageObject` below is the generic form (any bucket → any bucket, with a
+// caller-supplied path builder); `copyToPublicBucket` is the client-look wrapper
+// that was here first. The practice-shot attach path (a pro promoting a shot
+// taken outside a session into a booking's private media or a public look) uses
+// the generic one — same download+upload, different namespace.
 
 import { extensionForContentType } from '@/lib/media/contentType'
 import { BUCKETS } from '@/lib/storageBuckets'
@@ -37,15 +43,18 @@ function buildPublicLookPath(clientId: string, ext: string): string {
 }
 
 /**
- * Duplicates a source object (typically in media-private) into media-public under
- * a fresh, client-namespaced path. Returns the new bucket/path/contentType to feed
- * into buildMediaAssetCreateData. Throws {@link StorageCopyError} on any failure so
- * the caller's transaction rolls back.
+ * Duplicates a source object into `destBucket` under a server-minted path.
+ *
+ * `buildDestPath` receives the source object's resolved file extension and
+ * returns the destination path — it is the caller's namespace, and like the
+ * signing routes it must never be derived from client input. Throws
+ * {@link StorageCopyError} on any failure so the caller's transaction rolls back.
  */
-export async function copyToPublicBucket(args: {
+export async function copyStorageObject(args: {
   sourceBucket: string
   sourcePath: string
-  clientId: string
+  destBucket: string
+  buildDestPath: (ext: string) => string
 }): Promise<CopiedObjectPointer> {
   const admin = getSupabaseAdmin()
 
@@ -60,22 +69,40 @@ export async function copyToPublicBucket(args: {
   }
 
   const contentType = blob.type || 'application/octet-stream'
-  const ext = extensionForContentType(contentType)
-  const destPath = buildPublicLookPath(args.clientId, ext)
+  const destPath = args.buildDestPath(extensionForContentType(contentType))
 
   const { error: uploadError } = await admin.storage
-    .from(BUCKETS.mediaPublic)
+    .from(args.destBucket)
     .upload(destPath, blob, { contentType, upsert: false })
 
   if (uploadError) {
     throw new StorageCopyError(
-      `Failed to write public copy: ${uploadError.message}`,
+      `Failed to write copy: ${uploadError.message}`,
     )
   }
 
   return {
-    storageBucket: BUCKETS.mediaPublic,
+    storageBucket: args.destBucket,
     storagePath: destPath,
     contentType,
   }
+}
+
+/**
+ * Duplicates a source object (typically in media-private) into media-public under
+ * a fresh, client-namespaced path. Returns the new bucket/path/contentType to feed
+ * into buildMediaAssetCreateData. Throws {@link StorageCopyError} on any failure so
+ * the caller's transaction rolls back.
+ */
+export async function copyToPublicBucket(args: {
+  sourceBucket: string
+  sourcePath: string
+  clientId: string
+}): Promise<CopiedObjectPointer> {
+  return copyStorageObject({
+    sourceBucket: args.sourceBucket,
+    sourcePath: args.sourcePath,
+    destBucket: BUCKETS.mediaPublic,
+    buildDestPath: (ext) => buildPublicLookPath(args.clientId, ext),
+  })
 }

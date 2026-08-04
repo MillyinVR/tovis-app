@@ -161,6 +161,10 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   ClientActionToken: { status: 'EXPORTED', keys: ['clientActionTokens'] },
   AftercareSummary: { status: 'EXPORTED', keys: ['aftercareSummaries'] },
   MediaAsset: { status: 'EXPORTED', keys: ['mediaAssets'] },
+  // The pro's own out-of-session camera shots. Single-subject by construction —
+  // a practice shot has no booking and no client — so there is nothing to
+  // withhold from the pro whose photos they are.
+  PracticeShot: { status: 'EXPORTED', keys: ['practiceShots'] },
   Message: { status: 'EXPORTED', keys: ['messages'] },
   Notification: { status: 'EXPORTED', keys: ['notifications'] },
   ClientNotification: { status: 'EXPORTED', keys: ['clientNotifications'] },
