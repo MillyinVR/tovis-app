@@ -11539,6 +11539,36 @@
       ],
       "type": "object"
     },
+    "ProCapabilitiesDTO": {
+      "description": "Deployment-level switches for pro features that are built but held.\n\nEach key is a capability the client may *offer*, not a per-pro entitlement: `true` means the endpoints behind it answer instead of 404ing. A client that cannot read this (offline, error) must treat every capability as `false` — hiding a live feature is recoverable, offering a dead one is not.",
+      "properties": {
+        "importFromAnotherApp": {
+          "description": "`ENABLE_PRO_MIGRATION` — the guided import wizard (services, clients, calendar) for a pro coming from another booking app.",
+          "type": "boolean"
+        },
+        "noShowFees": {
+          "description": "`ENABLE_NO_SHOW_PROTECTION` — the pro's no-show / late-cancel fee policy settings, the client card-on-file rail, and real fee charging.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "noShowFees",
+        "importFromAnotherApp"
+      ],
+      "type": "object"
+    },
+    "ProCapabilitiesResponseDTO": {
+      "description": "Response for GET /api/v1/pro/capabilities.",
+      "properties": {
+        "capabilities": {
+          "$ref": "#/definitions/ProCapabilitiesDTO"
+        }
+      },
+      "required": [
+        "capabilities"
+      ],
+      "type": "object"
+    },
     "ProClientConsentRecordDTO": {
       "description": "A consent / patch-test record, ALREADY REDACTED by scope.\n\n`scope` is the redaction that produced this row, not a display hint: `'full'` means the reading pro authored it and gets the proof fields, the notes and the form text; `'safety'` means it is another pro's patch test, reaching this pro only so they don't skin-test over someone else's result — result and validity travel, everything else is already null and `byName` names the other pro.",
       "properties": {
