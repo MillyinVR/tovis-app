@@ -163,7 +163,7 @@ function buildPrivacyDeleteAuditMetadata(args: {
     deleteVersion: DELETE_AUDIT_METADATA_VERSION,
     version: DELETE_AUDIT_METADATA_VERSION,
     actionCount: args.result.actions.length,
-    limitations: args.result.limitations,
+    limitations: [...args.result.limitations],
     limitationsCount: args.result.limitations.length,
     requiresManualFollowUp: args.result.limitations.length > 0,
     clientProfileId: args.result.subject.clientProfileId,

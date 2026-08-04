@@ -1516,6 +1516,8 @@ model User {
   createdBookingSeries     BookingSeries[]
   idempotencyKeys          IdempotencyKey[]          @relation("UserIdempotencyKeys")
 
+  accountDeletionRequests AccountDeletionRequest[] @relation("UserAccountDeletionRequests")
+
   // NFC attribution events
   attributionActorEvents    AttributionEvent[] @relation("AttributionActor")
   attributionCreditedEvents AttributionEvent[] @relation("AttributionCredited")
@@ -6190,4 +6192,57 @@ model HandleRegistration {
 
   professional  ProfessionalProfile? @relation(fields: [professionalId], references: [id], onDelete: Cascade)
   clientProfile ClientProfile?       @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
+}
+
+/// A user's own request to delete their account (App Store guideline 5.1.1(v)).
+///
+/// The request is a ROW, not a flag on User, for two reasons: it must survive
+/// the deletion it caused — otherwise nothing evidences that the request was
+/// honoured — and a cancelled request is history worth keeping when the same
+/// account asks again.
+///
+/// Exactly one PENDING request per user is enforced by a PARTIAL UNIQUE INDEX
+/// created in the migration (Prisma cannot express `WHERE status = 'PENDING'`),
+/// so a double-tap cannot open two windows even under a race.
+model AccountDeletionRequest {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserAccountDeletionRequests", fields: [userId], references: [id], onDelete: Cascade)
+
+  status AccountDeletionRequestStatus @default(PENDING)
+
+  requestedAt  DateTime @default(now())
+  /// Earliest instant the sweep may execute this request: requestedAt plus the
+  /// grace window. The window is the user's chance to change their mind.
+  scheduledFor DateTime
+
+  cancelledAt DateTime?
+  completedAt DateTime?
+
+  /// Optional free text the user gave for leaving. Never rendered to a pro.
+  reason String? @db.VarChar(500)
+
+  /// Summary of what the executed deletion actually did, for the audit trail.
+  resultJson Json?
+
+  failureCount       Int       @default(0)
+  lastFailureAt      DateTime?
+  lastFailureMessage String?   @db.VarChar(500)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, scheduledFor])
+  @@index([userId, status])
+}
+
+enum AccountDeletionRequestStatus {
+  /// Inside the grace window; the user can still cancel.
+  PENDING
+  /// The user changed their mind before the window closed.
+  CANCELLED
+  /// Executed: deleteUserData ran to completion.
+  COMPLETED
+  /// Execution errored. Left for an operator rather than retried forever.
+  FAILED
 }

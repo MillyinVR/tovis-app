@@ -141,6 +141,16 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     reason:
       'Uniqueness lock only; carries no data beyond the handle, which is already exported on ClientProfile/ProfessionalProfile.',
   },
+  // The user's own request to delete their account. Deliberately not in the
+  // export: the app shows the live request (status + scheduled date) directly
+  // on the deletion screen, and the row's purpose is to EVIDENCE that a request
+  // was made and honoured, not to describe the person. See
+  // lib/privacy/deleteBoundary.ts, which retains it for the same reason.
+  AccountDeletionRequest: {
+    status: 'OMITTED',
+    reason:
+      'Surfaced live in the app on the account-deletion screen; the row exists as evidence the request was honoured rather than as a description of the user.',
+  },
   ClientAddress: { status: 'EXPORTED', keys: ['clientAddresses'] },
   ProfessionalLocation: { status: 'EXPORTED', keys: ['professionalLocations'] },
   Booking: {

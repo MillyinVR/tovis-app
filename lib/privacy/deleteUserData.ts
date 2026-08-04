@@ -2,6 +2,12 @@
 
 import { Prisma, type PrismaClient } from '@prisma/client'
 
+import {
+  DELETE_RULES,
+  type DeleteSubject,
+  type PrivacyDb,
+} from '@/lib/privacy/deleteRules'
+
 export type DeleteUserDataMode = 'DRY_RUN' | 'ANONYMIZE'
 
 export type DeleteUserDataInput = {
@@ -23,7 +29,7 @@ export type DeleteUserDataResult = {
   requestedByUserId: string
   reason: string
   actions: DeleteUserDataActionResult[]
-  limitations: string[]
+  limitations: readonly string[]
 }
 
 export type DeleteUserDataActionResult = {
@@ -92,30 +98,22 @@ async function executeDeleteUserData(
 
   const clientProfileId = user.clientProfile?.id ?? null
   const professionalProfileId = user.professionalProfile?.id ?? null
+  const subject: DeleteSubject = {
+    userId: input.userId,
+    clientProfileId,
+    professionalProfileId,
+  }
   const actions: DeleteUserDataActionResult[] = []
 
+  // The rule table first, in declaration order: pre-steps inside a rule clear
+  // the rows that would otherwise raise a foreign-key violation, so the order
+  // within `DELETE_RULES` is load-bearing and must not be sorted.
+  for (const rule of DELETE_RULES) {
+    actions.push(await runRule(rule, input.db, subject, input.mode))
+  }
+
+  // Then the three subject rows, whose replacement values depend on the row.
   actions.push(
-    await deleteClientAddresses(input.db, input.mode, clientProfileId),
-    await deleteProfessionalLocations(
-      input.db,
-      input.mode,
-      professionalProfileId,
-    ),
-    await deleteBookingHolds(
-      input.db,
-      input.mode,
-      clientProfileId,
-      professionalProfileId,
-    ),
-    await deleteClientActionTokens(input.db, input.mode, clientProfileId),
-    await deleteMediaAssets(
-      input.db,
-      input.mode,
-      input.userId,
-      clientProfileId,
-      professionalProfileId,
-    ),
-    await deletePracticeShots(input.db, input.mode, professionalProfileId),
     await anonymizeClientProfile(input.db, input.mode, user),
     await anonymizeProfessionalProfile(input.db, input.mode, user),
     await anonymizeUser(input.db, input.mode, user),
@@ -132,218 +130,47 @@ async function executeDeleteUserData(
     requestedByUserId: input.requestedByUserId,
     reason: input.reason,
     actions,
-    limitations: [
-      'Bookings are not hard-deleted because they are financial/operational records; implement booking-level anonymization after legal retention policy is finalized.',
-      'Messages are not deleted in this first boundary because conversation ownership and retention policy need explicit product/legal review.',
-      'Notifications and notification deliveries are not deleted until their real recipient relation is wired into this boundary.',
-      'AftercareSummary export/delete is temporarily omitted until wired through the real Booking/Aftercare relation.',
-      'AttributionEvent export/delete is temporarily omitted until wired through the real attribution identity fields.',
-      'AdminActionLog export/delete is temporarily omitted until wired through the real admin audit schema fields.',
-      'Storage object bytes are not deleted here; MediaAsset DB rows are handled, but Supabase object deletion requires a separate storage write boundary.',
-      'Tenant-level deletion/export is a separate workflow.',
-    ],
-  }
-}
-
-async function deleteClientAddresses(
-  db: PrismaClient | Prisma.TransactionClient,
-  mode: DeleteUserDataMode,
-  clientProfileId: string | null,
-): Promise<DeleteUserDataActionResult> {
-  if (!clientProfileId) {
-    return skipped('ClientAddress', 'No client profile.')
-  }
-
-  const where = { clientId: clientProfileId }
-  const count = await db.clientAddress.count({ where })
-
-  if (mode === 'DRY_RUN') {
-    return {
-      model: 'ClientAddress',
-      action: 'WOULD_DELETE',
-      count,
-    }
-  }
-
-  const result = await db.clientAddress.deleteMany({ where })
-
-  return {
-    model: 'ClientAddress',
-    action: 'DELETED',
-    count: result.count,
-  }
-}
-
-async function deleteProfessionalLocations(
-  db: PrismaClient | Prisma.TransactionClient,
-  mode: DeleteUserDataMode,
-  professionalProfileId: string | null,
-): Promise<DeleteUserDataActionResult> {
-  if (!professionalProfileId) {
-    return skipped('ProfessionalLocation', 'No professional profile.')
-  }
-
-  const where = { professionalId: professionalProfileId }
-  const count = await db.professionalLocation.count({ where })
-
-  if (mode === 'DRY_RUN') {
-    return {
-      model: 'ProfessionalLocation',
-      action: 'WOULD_DELETE',
-      count,
-    }
-  }
-
-  const result = await db.professionalLocation.deleteMany({ where })
-
-  return {
-    model: 'ProfessionalLocation',
-    action: 'DELETED',
-    count: result.count,
-  }
-}
-
-async function deleteBookingHolds(
-  db: PrismaClient | Prisma.TransactionClient,
-  mode: DeleteUserDataMode,
-  clientProfileId: string | null,
-  professionalProfileId: string | null,
-): Promise<DeleteUserDataActionResult> {
-  const where = {
-    OR: compactWhere([
-      clientProfileId ? { clientId: clientProfileId } : null,
-      professionalProfileId ? { professionalId: professionalProfileId } : null,
-    ]),
-  }
-
-  if (where.OR.length === 0) {
-    return skipped('BookingHold', 'No client/professional profile.')
-  }
-
-  const count = await db.bookingHold.count({ where })
-
-  if (mode === 'DRY_RUN') {
-    return {
-      model: 'BookingHold',
-      action: 'WOULD_DELETE',
-      count,
-    }
-  }
-
-  const result = await db.bookingHold.deleteMany({ where })
-
-  return {
-    model: 'BookingHold',
-    action: 'DELETED',
-    count: result.count,
-  }
-}
-
-async function deleteClientActionTokens(
-  db: PrismaClient | Prisma.TransactionClient,
-  mode: DeleteUserDataMode,
-  clientProfileId: string | null,
-): Promise<DeleteUserDataActionResult> {
-  if (!clientProfileId) {
-    return skipped('ClientActionToken', 'No client profile.')
-  }
-
-  const where = { clientId: clientProfileId }
-  const count = await db.clientActionToken.count({ where })
-
-  if (mode === 'DRY_RUN') {
-    return {
-      model: 'ClientActionToken',
-      action: 'WOULD_DELETE',
-      count,
-    }
-  }
-
-  const result = await db.clientActionToken.deleteMany({ where })
-
-  return {
-    model: 'ClientActionToken',
-    action: 'DELETED',
-    count: result.count,
-  }
-}
-
-async function deleteMediaAssets(
-  db: PrismaClient | Prisma.TransactionClient,
-  mode: DeleteUserDataMode,
-  userId: string,
-  clientProfileId: string | null,
-  professionalProfileId: string | null,
-): Promise<DeleteUserDataActionResult> {
-  const where = {
-    OR: compactWhere([
-      { uploadedByUserId: userId },
-      clientProfileId ? { booking: { clientId: clientProfileId } } : null,
-      professionalProfileId ? { professionalId: professionalProfileId } : null,
-    ]),
-  }
-
-  const count = await db.mediaAsset.count({ where })
-
-  if (mode === 'DRY_RUN') {
-    return {
-      model: 'MediaAsset',
-      action: 'WOULD_DELETE',
-      count,
-      notes:
-        'Deletes DB rows only. Storage object deletion must run through the media/storage write boundary.',
-    }
-  }
-
-  const result = await db.mediaAsset.deleteMany({ where })
-
-  return {
-    model: 'MediaAsset',
-    action: 'DELETED',
-    count: result.count,
-    notes:
-      'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
+    limitations: DELETE_USER_DATA_LIMITATIONS,
   }
 }
 
 /**
- * The pro's out-of-session camera shots.
+ * Run one table rule in the requested mode.
  *
- * ⚠️ This is deliberately explicit rather than left to `PracticeShot`'s
- * `onDelete: Cascade`. Deletion here ANONYMIZES the ProfessionalProfile — it
- * never deletes the row — so that cascade would never fire, and the shots would
- * outlive the deletion request. Same reasoning as `deleteMediaAssets`.
+ * A rule whose `where` builder returns null does not apply to this subject —
+ * a client-only model when the subject has no client profile, say — and is
+ * reported SKIPPED rather than counted as zero, so "nothing to delete" stays
+ * distinguishable from "not looked at".
  */
-async function deletePracticeShots(
-  db: PrismaClient | Prisma.TransactionClient,
+async function runRule(
+  rule: (typeof DELETE_RULES)[number],
+  db: PrivacyDb,
+  subject: DeleteSubject,
   mode: DeleteUserDataMode,
-  professionalProfileId: string | null,
 ): Promise<DeleteUserDataActionResult> {
-  if (!professionalProfileId) {
-    return skipped('PracticeShot', 'No professional profile.')
-  }
-
-  const where = { professionalId: professionalProfileId }
-  const count = await db.practiceShot.count({ where })
-
   if (mode === 'DRY_RUN') {
+    const count = await rule.count(db, subject)
+    if (count === null) {
+      return skipped(rule.model, 'Not applicable to this subject.')
+    }
     return {
-      model: 'PracticeShot',
-      action: 'WOULD_DELETE',
+      model: rule.model,
+      action: rule.action === 'DELETE' ? 'WOULD_DELETE' : 'WOULD_ANONYMIZE',
       count,
-      notes:
-        'Deletes DB rows only. Storage object deletion must run through the media/storage write boundary.',
+      ...(rule.notes ? { notes: rule.notes } : {}),
     }
   }
 
-  const result = await db.practiceShot.deleteMany({ where })
+  const count = await rule.apply(db, subject)
+  if (count === null) {
+    return skipped(rule.model, 'Not applicable to this subject.')
+  }
 
   return {
-    model: 'PracticeShot',
-    action: 'DELETED',
-    count: result.count,
-    notes:
-      'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
+    model: rule.model,
+    action: rule.action === 'DELETE' ? 'DELETED' : 'ANONYMIZED',
+    count,
+    ...(rule.notes ? { notes: rule.notes } : {}),
   }
 }
 
@@ -464,9 +291,21 @@ function deletedEmail(userId: string): string {
   return `deleted-${userId}@deleted.tovis.local`
 }
 
-function compactWhere<T>(items: Array<T | null>): T[] {
-  return items.filter((item): item is T => item !== null)
-}
+/**
+ * What a completed deletion still does NOT do.
+ *
+ * Every entry here is a decision recorded in `lib/privacy/deleteBoundary.ts`,
+ * not an oversight — read that registry for the per-model reasoning.
+ */
+export const DELETE_USER_DATA_LIMITATIONS: readonly string[] = [
+  'Bookings, refunds, product sales and payout settings are RETAINED as financial records; the subject is de-identified through the User/profile anonymization rather than by deleting them. Booking-level field anonymization (address snapshots, free-text notes) is still deferred.',
+  'Messages and conversation threads are RETAINED for the other participant; the departed participant is de-identified. Message body deletion is deferred pending a product/legal call.',
+  'Verification documents are RETAINED pending an explicit product decision, so licence/ID imagery outlives a self-serve deletion.',
+  'Storage object bytes are not deleted here. MediaAsset and PracticeShot DB rows are removed, but Supabase object deletion requires a separate storage write boundary.',
+  'Payment methods are removed from our database, but detaching them at Stripe is a separate provider-side boundary.',
+  'Audit, admin and moderation records are RETAINED by design.',
+  'Tenant-level deletion/export is a separate workflow.',
+]
 
 function canRunTransaction(
   db: PrismaClient | Prisma.TransactionClient,
