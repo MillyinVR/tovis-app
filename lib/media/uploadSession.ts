@@ -271,6 +271,8 @@ export function uploadSurfaceForKind(kind: string): UploadSurface | null {
     // bucket (media-private) and resulting visibility (PRO_CLIENT) differ.
     case 'PORTFOLIO_PRIVATE':
       return UploadSurface.PRO_PORTFOLIO
+    case 'PRACTICE_PRIVATE':
+      return UploadSurface.PRO_PRACTICE
     case 'REVIEW_PUBLIC':
       return UploadSurface.CLIENT_REVIEW
     case 'LOOK_PUBLIC':

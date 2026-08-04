@@ -109,6 +109,16 @@ export type {
   ClientReviewMediaCreateResponseDTO,
 } from '@/lib/dto/mediaAttach'
 
+// ── Pro practice library (the standalone, out-of-session camera) ────────────
+//    GET/POST /api/v1/pro/practice, DELETE + attach on /api/v1/pro/practice/[id]
+export type {
+  ProPracticeShotDTO,
+  ProPracticeCreateResponseDTO,
+  ProPracticeListResponseDTO,
+  ProPracticeAttachTarget,
+  ProPracticeAttachResponseDTO,
+} from '@/lib/dto/proPractice'
+
 // `lookPublication` on the pro/media response — already a JSON-safe DTO.
 export type { ProLookPublicationResultDto } from '@/lib/looks/publication/contracts'
 

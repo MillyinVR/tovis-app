@@ -13085,6 +13085,123 @@
       ],
       "type": "string"
     },
+    "ProPracticeAttachResponseDTO": {
+      "properties": {
+        "bookingMedia": {
+          "$ref": "#/definitions/ProBookingMediaItemDTO"
+        },
+        "lookPublication": {
+          "$ref": "#/definitions/ProLookPublicationResultDto"
+        },
+        "media": {
+          "$ref": "#/definitions/ProMediaCreatedDTO"
+        },
+        "shot": {
+          "$ref": "#/definitions/ProPracticeShotDTO"
+        },
+        "target": {
+          "$ref": "#/definitions/ProPracticeAttachTarget"
+        }
+      },
+      "required": [
+        "target",
+        "shot"
+      ],
+      "type": "object"
+    },
+    "ProPracticeAttachTarget": {
+      "enum": [
+        "BOOKING",
+        "LOOK"
+      ],
+      "type": "string"
+    },
+    "ProPracticeCreateResponseDTO": {
+      "properties": {
+        "shot": {
+          "$ref": "#/definitions/ProPracticeShotDTO"
+        }
+      },
+      "required": [
+        "shot"
+      ],
+      "type": "object"
+    },
+    "ProPracticeListResponseDTO": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ProPracticeShotDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "ProPracticeShotDTO": {
+      "properties": {
+        "attachedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attachedMediaId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "focalX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "renderUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "caption",
+        "createdAt",
+        "focalX",
+        "focalY",
+        "attachedMediaId",
+        "attachedAt",
+        "renderUrl"
+      ],
+      "type": "object"
+    },
     "ProPublicProfileDto": {
       "properties": {
         "acceptedPayments": {

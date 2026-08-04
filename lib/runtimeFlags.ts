@@ -6,9 +6,14 @@ import { getRedis, requireRedis } from '@/lib/redis'
 // legacy bounding-box path) so the unproven search-index path can be enabled
 // per-environment after staging EXPLAIN + parity verification, and reverted
 // instantly. See docs/performance/ticket-consolidate-nearby-onto-search-index.md.
+// `pro_practice_disabled` is the kill switch for the standalone (out-of-session)
+// pro camera and its Practice library — new, additive, pro-only surface with no
+// existing caller, so it ships ON and can be revoked instantly if the native
+// build misbehaves in the field. See app/api/v1/pro/practice/.
 export const RUNTIME_FLAG_NAMES = [
   'signup_disabled',
   'sms_disabled',
+  'pro_practice_disabled',
   'nearby_search_index_enabled',
 ] as const
 
@@ -24,6 +29,7 @@ function defaultFlags(): Record<RuntimeFlagName, boolean> {
   return {
     signup_disabled: false,
     sms_disabled: false,
+    pro_practice_disabled: false,
     nearby_search_index_enabled: false,
   }
 }
@@ -51,6 +57,7 @@ export async function getRuntimeFlags(): Promise<RuntimeFlagsSnapshot> {
     return {
       signup_disabled: normalizeStoredBoolean(raw?.signup_disabled),
       sms_disabled: normalizeStoredBoolean(raw?.sms_disabled),
+      pro_practice_disabled: normalizeStoredBoolean(raw?.pro_practice_disabled),
       nearby_search_index_enabled: normalizeStoredBoolean(
         raw?.nearby_search_index_enabled,
       ),

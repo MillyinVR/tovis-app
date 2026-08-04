@@ -1423,6 +1423,7 @@ model Tenant {
   clientBookings Booking[]             @relation("TenantClientHomeBookings")
   nfcCards       NfcCard[]             @relation("TenantNfcCards")
   mediaAssets    MediaAsset[]          @relation("TenantMediaAssets")
+  practiceShots  PracticeShot[]        @relation("TenantPracticeShots")
   notifications  Notification[]        @relation("TenantNotifications")
 
   @@index([isActive])
@@ -1932,6 +1933,7 @@ model ProfessionalProfile {
   intentEvents    ClientIntentEvent[]
   messageThreads  MessageThread[]        @relation("ProThreads")
   mediaAssets     MediaAsset[]
+  practiceShots   PracticeShot[]
   waitlistEntries WaitlistEntry[]
 
   lookPosts LookPost[]
@@ -4804,6 +4806,10 @@ model MediaAsset {
   review                    Review?               @relation(fields: [reviewId], references: [id])
   beforeAsset               MediaAsset?           @relation("MediaBeforeAfterPair", fields: [beforeAssetId], references: [id], onDelete: SetNull)
   pairedAsAfter             MediaAsset[]          @relation("MediaBeforeAfterPair")
+  // Back-relation for a practice shot that was later attached (promoted) into
+  // this asset. onDelete SetNull on the owning side, so deleting the attached
+  // media leaves the practice shot in the library rather than cascading.
+  attachedFromPractice      PracticeShot[]        @relation("PracticeShotAttachedMedia")
   // Back-relations for the aftercare "featured pair" (which before/after this
   // asset is the pro-chosen primary of, per AftercareSummary). Aftercare-only,
   // stays PRO_CLIENT — never touches portfolio featuring/visibility.
@@ -4866,6 +4872,11 @@ enum UploadSurface {
   // land in media-public (the client consents to a public-intent look asset),
   // optionally carrying a BEFORE/AFTER phase.
   CLIENT_LOOK
+  // A pro shooting OUTSIDE a session (the standalone camera). Lands in
+  // media-private and produces a PracticeShot, not a MediaAsset — a practice
+  // shot has no booking and no service anchor, so it is deliberately not a
+  // MediaAsset until the pro attaches it to one.
+  PRO_PRACTICE
 }
 
 enum UploadSessionStatus {
@@ -4909,6 +4920,60 @@ model UploadSession {
   @@index([professionalId])
   @@index([clientId])
   @@index([bookingId])
+}
+
+// A shot the pro took OUTSIDE a session — the standalone camera behind the pro
+// footer's centre button when no booking is live.
+//
+// Deliberately NOT a MediaAsset. Every MediaAsset is anchored to a bookable
+// `primaryServiceId` "so it can always route to book this", and a practice shot
+// has no service and no booking by definition; giving it a made-up anchor would
+// make it show up in every by-service media query. So practice shots live in
+// their own table, in the private bucket, invisible to the portfolio/Looks/
+// chart surfaces by construction — and become a real MediaAsset only when the
+// pro ATTACHES one to a booking or publishes it as a look, which is exactly the
+// moment a service is actually known.
+//
+// Custody semantics: no booking, nothing owed. Nothing anywhere blocks on a
+// practice shot existing or being attached.
+model PracticeShot {
+  id             String  @id @default(cuid())
+  professionalId String
+  proTenantId    String?
+
+  // Authoritative storage pointer, copied from the consumed UploadSession —
+  // never asserted by the client (same rule as the MediaAsset attach routes).
+  storageBucket String
+  storagePath   String
+  contentType   String
+  mediaType     MediaType @default(IMAGE)
+
+  caption String?
+
+  // Normalized subject focal point (camera C6) in the EXIF-corrected upright
+  // image, both [0,1] from the top-left. Carried through to the MediaAsset if
+  // this shot is ever attached. Null = center.
+  focalX Float?
+  focalY Float?
+
+  // Set once this shot has been promoted into a real MediaAsset (attach-later).
+  // The practice row is KEPT after attaching — the pro's library still shows the
+  // shot, now marked as used — so this is a pointer, not a tombstone.
+  attachedMediaId String?
+  attachedAt      DateTime?
+
+  createdAt DateTime @default(now())
+
+  professional  ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  proTenant     Tenant?             @relation("TenantPracticeShots", fields: [proTenantId], references: [id], onDelete: Restrict)
+  attachedMedia MediaAsset?         @relation("PracticeShotAttachedMedia", fields: [attachedMediaId], references: [id], onDelete: SetNull)
+
+  // One practice shot per stored object (mirrors the MediaAsset rule) so a
+  // retried confirm can never mint two rows over the same bytes.
+  @@unique([storageBucket, storagePath])
+  @@index([professionalId, createdAt])
+  @@index([proTenantId])
+  @@index([attachedMediaId])
 }
 
 model MediaServiceTag {

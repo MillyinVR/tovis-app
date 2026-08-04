@@ -32,6 +32,7 @@ export type ExportedUserData = {
     clientConsentRecords: unknown[]
     clientAllergies: unknown[]
     mediaAssets: unknown[]
+    practiceShots: unknown[]
     messages: unknown[]
     notifications: unknown[]
     clientNotifications: unknown[]
@@ -258,6 +259,24 @@ const mediaAssetExportSelect = {
   createdAt: true,
 } satisfies Prisma.MediaAssetSelect
 
+// The pro's own out-of-session camera shots. Storage pointers are included
+// here (unlike the API wire DTOs) because this IS the subject's own data
+// export — the point is completeness, not a render surface.
+const practiceShotExportSelect = {
+  id: true,
+  professionalId: true,
+  storageBucket: true,
+  storagePath: true,
+  contentType: true,
+  mediaType: true,
+  caption: true,
+  focalX: true,
+  focalY: true,
+  attachedMediaId: true,
+  attachedAt: true,
+  createdAt: true,
+} satisfies Prisma.PracticeShotSelect
+
 const messageExportSelect = {
   id: true,
   threadId: true,
@@ -463,6 +482,7 @@ export async function exportUserData(
     clientConsentRecords,
     clientAllergies,
     mediaAssets,
+    practiceShots,
     messages,
     notifications,
     clientNotifications,
@@ -490,6 +510,7 @@ export async function exportUserData(
       clientProfileId,
       professionalProfileId,
     ),
+    findPracticeShots(input.db, professionalProfileId),
     findMessages(input.db, input.userId, clientProfileId, professionalProfileId),
     findNotifications(input.db, professionalProfileId),
     findClientNotifications(input.db, clientProfileId),
@@ -553,6 +574,7 @@ export async function exportUserData(
       clientConsentRecords: normalizeJsonArray(clientConsentRecords),
       clientAllergies: normalizeJsonArray(clientAllergies),
       mediaAssets: normalizeJsonArray(mediaAssets),
+      practiceShots: normalizeJsonArray(practiceShots),
       messages: normalizeJsonArray(messages),
       notifications: normalizeJsonArray(notifications),
       clientNotifications: normalizeJsonArray(clientNotifications),
@@ -801,6 +823,19 @@ async function findMediaAssets(
     },
     orderBy: { createdAt: 'asc' },
     select: mediaAssetExportSelect,
+  })
+}
+
+async function findPracticeShots(
+  db: PrismaClient | Prisma.TransactionClient,
+  professionalProfileId: string | null,
+): Promise<unknown[]> {
+  if (!professionalProfileId) return []
+
+  return db.practiceShot.findMany({
+    where: { professionalId: professionalProfileId },
+    orderBy: { createdAt: 'asc' },
+    select: practiceShotExportSelect,
   })
 }
 

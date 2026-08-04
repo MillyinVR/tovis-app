@@ -115,6 +115,7 @@ async function executeDeleteUserData(
       clientProfileId,
       professionalProfileId,
     ),
+    await deletePracticeShots(input.db, input.mode, professionalProfileId),
     await anonymizeClientProfile(input.db, input.mode, user),
     await anonymizeProfessionalProfile(input.db, input.mode, user),
     await anonymizeUser(input.db, input.mode, user),
@@ -298,6 +299,47 @@ async function deleteMediaAssets(
 
   return {
     model: 'MediaAsset',
+    action: 'DELETED',
+    count: result.count,
+    notes:
+      'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
+  }
+}
+
+/**
+ * The pro's out-of-session camera shots.
+ *
+ * ⚠️ This is deliberately explicit rather than left to `PracticeShot`'s
+ * `onDelete: Cascade`. Deletion here ANONYMIZES the ProfessionalProfile — it
+ * never deletes the row — so that cascade would never fire, and the shots would
+ * outlive the deletion request. Same reasoning as `deleteMediaAssets`.
+ */
+async function deletePracticeShots(
+  db: PrismaClient | Prisma.TransactionClient,
+  mode: DeleteUserDataMode,
+  professionalProfileId: string | null,
+): Promise<DeleteUserDataActionResult> {
+  if (!professionalProfileId) {
+    return skipped('PracticeShot', 'No professional profile.')
+  }
+
+  const where = { professionalId: professionalProfileId }
+  const count = await db.practiceShot.count({ where })
+
+  if (mode === 'DRY_RUN') {
+    return {
+      model: 'PracticeShot',
+      action: 'WOULD_DELETE',
+      count,
+      notes:
+        'Deletes DB rows only. Storage object deletion must run through the media/storage write boundary.',
+    }
+  }
+
+  const result = await db.practiceShot.deleteMany({ where })
+
+  return {
+    model: 'PracticeShot',
     action: 'DELETED',
     count: result.count,
     notes:

@@ -31,6 +31,12 @@ const FLAG_META: Record<RuntimeFlagName, FlagMeta> = {
     description:
       'Stops verification SMS sends without a deploy. Use this if the SMS provider is misbehaving or under attack.',
   },
+  pro_practice_disabled: {
+    name: 'pro_practice_disabled',
+    title: 'Practice camera disabled',
+    description:
+      'Stops the pro standalone (out-of-session) camera and its Practice library — /api/v1/pro/practice answers 503. Existing practice shots and any media already attached from them are untouched.',
+  },
   nearby_search_index_enabled: {
     name: 'nearby_search_index_enabled',
     title: 'Nearby via search index',
