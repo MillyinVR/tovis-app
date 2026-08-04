@@ -3,6 +3,13 @@ import { requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 import { getCurrentUser } from '@/lib/currentUser'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import {
+  dcaLicenseQueryNumber,
+  isCurrentStatusCode,
+  licenseNumbersMatch,
+  parseDcaLicenseRecord,
+  parseDcaNameDetails,
+} from '@/lib/licensing/caDcaLicense'
 
 // States with automated verification (backed by DCA BreEZe API).
 const AUTOMATED_STATES = new Set(['CA'])
@@ -41,27 +48,6 @@ type DcaLicenseTypesResponse = {
   getAllLicenseTypes?: unknown
 }
 
-type DcaLicenseDetail = {
-  licNumber?: unknown
-  primaryStatusCode?: unknown
-  issueDate?: unknown
-  expDate?: unknown
-}
-
-type DcaNameDetail = {
-  firstName?: unknown
-  lastName?: unknown
-}
-
-type DcaFullLicenseDetail = {
-  getLicenseDetails?: unknown
-  getNameDetails?: unknown
-}
-
-type DcaLicenseDetailsRoot = {
-  getFullLicenseDetail?: unknown
-}
-
 type DcaLicenseSearchResponse = {
   error?: unknown
   licenseDetails?: unknown
@@ -81,33 +67,6 @@ function isDcaLicenseTypeGroup(value: unknown): value is DcaLicenseTypeGroup {
 
 function isDcaLicenseType(value: unknown): value is DcaLicenseType {
   return isRecord(value)
-}
-
-function isDcaLicenseDetailsRoot(
-  value: unknown,
-): value is DcaLicenseDetailsRoot {
-  return isRecord(value)
-}
-
-function isDcaFullLicenseDetail(value: unknown): value is DcaFullLicenseDetail {
-  return isRecord(value)
-}
-
-function isDcaLicenseDetail(value: unknown): value is DcaLicenseDetail {
-  return isRecord(value)
-}
-
-function isDcaNameDetail(value: unknown): value is DcaNameDetail {
-  return isRecord(value)
-}
-
-function firstArrayItem<T>(
-  value: unknown,
-  guard: (entry: unknown) => entry is T,
-): T | null {
-  if (!Array.isArray(value)) return null
-  const first = value[0]
-  return guard(first) ? first : null
 }
 
 // CA BBC license “types” come from DCA’s BreEZe license types list.
@@ -290,7 +249,8 @@ export async function POST(req: Request) {
     const base = 'https://iservices.dca.ca.gov/api/v1/search/v1'
     const url = new URL(`${base}/licenseSearchService/getLicenseNumberSearch`)
     url.searchParams.set('licType', licType)
-    url.searchParams.set('licNumber', licenseNumber)
+    // BreEZe keys on the numeric portion, not the prefix printed on the card.
+    url.searchParams.set('licNumber', dcaLicenseQueryNumber(licenseNumber))
 
     const res = await fetch(url.toString(), {
       headers: { APP_ID, APP_KEY },
@@ -311,33 +271,54 @@ export async function POST(req: Request) {
       )
     }
 
-    const detailsRoot = Array.isArray(data.licenseDetails)
-      ? data.licenseDetails.filter(isDcaLicenseDetailsRoot)
-      : []
+    const record = parseDcaLicenseRecord(data)
 
-    const firstRoot = detailsRoot[0] ?? null
-    const full = firstArrayItem(
-      firstRoot?.getFullLicenseDetail,
-      isDcaFullLicenseDetail,
+    // A 200 we cannot read as a license record — empty body, a 200-shaped
+    // gateway error page, or schema drift — is not evidence that a license is
+    // bad. Say so honestly and send it to manual review instead of reporting a
+    // failure the pro cannot act on.
+    if (!record) {
+      return NextResponse.json({
+        ok: true,
+        status: 'PENDING_MANUAL_REVIEW',
+        source: 'CA_DCA_BREEZE',
+        profession,
+        licenseNumber,
+        state,
+        primaryStatusCode: null,
+        issueDate: null,
+        expDate: null,
+        name: null,
+        message:
+          'We could not read a response from the state license system. Your license will be reviewed manually within 2 business days.',
+      })
+    }
+
+    // A record filed under a different number says nothing about this pro's
+    // license — neither confirming nor disqualifying it.
+    const numberMatches = licenseNumbersMatch(
+      record.licNumber ?? '',
+      licenseNumber,
     )
 
-    const lic = firstArrayItem(full?.getLicenseDetails, isDcaLicenseDetail)
+    if (!numberMatches) {
+      return NextResponse.json({
+        ok: true,
+        status: 'PENDING_MANUAL_REVIEW',
+        source: 'CA_DCA_BREEZE',
+        profession,
+        licenseNumber,
+        state,
+        primaryStatusCode: record.statusCode,
+        issueDate: record.issueDate,
+        expDate: record.expDate,
+        name: null,
+        message:
+          'The state record we found is under a different license number. Your license will be reviewed manually within 2 business days.',
+      })
+    }
 
-    const nameDetailsRoot = firstArrayItem(full?.getNameDetails, isRecord)
-    const nameBlock = firstArrayItem(
-      nameDetailsRoot?.individualNameDetails,
-      isDcaNameDetail,
-    )
-
-    const returnedLicenseNumber = stringFromUnknown(lic?.licNumber).toUpperCase()
-    const primaryStatusCode = stringFromUnknown(
-      lic?.primaryStatusCode,
-    ).toUpperCase()
-
-    const verified =
-      Boolean(returnedLicenseNumber) &&
-      returnedLicenseNumber === licenseNumber &&
-      primaryStatusCode.includes('CURRENT')
+    const verified = isCurrentStatusCode(record.statusCode)
 
     return NextResponse.json({
       ok: true,
@@ -345,21 +326,10 @@ export async function POST(req: Request) {
       source: 'CA_DCA_BREEZE',
       profession,
       licenseNumber,
-      primaryStatusCode: lic?.primaryStatusCode ?? null,
-      issueDate: lic?.issueDate ?? null,
-      expDate: lic?.expDate ?? null,
-      name: nameBlock
-        ? {
-            firstName:
-              typeof nameBlock.firstName === 'string'
-                ? nameBlock.firstName
-                : null,
-            lastName:
-              typeof nameBlock.lastName === 'string'
-                ? nameBlock.lastName
-                : null,
-          }
-        : null,
+      primaryStatusCode: record.statusCode,
+      issueDate: record.issueDate,
+      expDate: record.expDate,
+      name: parseDcaNameDetails(data),
       // NOTE: the full upstream `data` payload is intentionally NOT returned —
       // it carries unredacted government record fields. If an audit snapshot is
       // needed, persist it server-side rather than leaking it to the client.
