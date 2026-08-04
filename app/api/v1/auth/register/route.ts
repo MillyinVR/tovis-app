@@ -54,6 +54,7 @@ import {
   isValidHandle,
   normalizeHandle,
 } from '@/lib/handles'
+import { claimHandle, isHandleAvailable } from '@/lib/handles/registry'
 import { waitUntil } from '@vercel/functions'
 import { TRANSACTIONAL_SMS_POLICY_VERSION } from '@/lib/transactionalSmsPolicy'
 
@@ -1057,13 +1058,13 @@ export async function POST(request: Request) {
       }
     }
 
-    // handle uniqueness
+    // handle uniqueness — against the GLOBAL namespace, not just other pros. A
+    // client can hold a handle too, and the looks feed renders both as the same
+    // `@handle`. This is the friendly pre-check; the registry's primary key is
+    // what actually decides, inside the transaction below.
     if (role === 'PRO' && normalizedHandle) {
-      const handleTaken = await prisma.professionalProfile.findFirst({
-        where: { handleNormalized: normalizedHandle },
-        select: { id: true },
-      })
-      if (handleTaken) {
+      const available = await isHandleAvailable(normalizedHandle)
+      if (!available) {
         return jsonFail(400, 'That handle is already taken.', {
           code: 'HANDLE_IN_USE',
         })
@@ -1311,6 +1312,21 @@ export async function POST(request: Request) {
             data: { userId: user.id, ...clientProfileCreateData },
           })
         }
+      }
+
+      // Lock the handle in the same transaction that creates the profile
+      // holding it. The pre-check above is advisory; this is what actually
+      // refuses a handle a client (or another pro) took in the meantime, and it
+      // rolls the whole signup back rather than half-creating an account.
+      if (role === 'PRO' && normalizedHandle) {
+        const created = await tx.professionalProfile.findUniqueOrThrow({
+          where: { userId: user.id },
+          select: { id: true },
+        })
+        await claimHandle(tx, normalizedHandle, {
+          kind: 'PRO',
+          professionalId: created.id,
+        })
       }
 
       return { user }

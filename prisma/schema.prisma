@@ -1654,10 +1654,14 @@ model ClientProfile {
   // publicly addressable once they opt in (isPublicProfile) and claim a handle;
   // both default off/null so existing clients are unaffected. Mirrors the
   // ProfessionalProfile handle/handleNormalized pattern.
-  handle           String?
-  handleNormalized String? @unique
-  isPublicProfile  Boolean @default(false)
-  publicBio        String?
+  handle             String?
+  handleNormalized   String?             @unique
+  isPublicProfile    Boolean             @default(false)
+  publicBio          String?
+  // See ProfessionalProfile.handleRegistration — the same global-namespace
+  // claim, from the client side. A client and a pro render identically as
+  // `@handle` in the shared looks feed, so the namespace must be one.
+  handleRegistration HandleRegistration?
 
   dateOfBirth            DateTime?
   preferredContactMethod ContactMethod?
@@ -1843,18 +1847,23 @@ model ProfessionalProfile {
   phone           String?
   phoneVerifiedAt DateTime?
 
-  businessName     String?
-  handle           String?
-  handleNormalized String?           @unique
+  businessName       String?
+  handle             String?
+  handleNormalized   String?             @unique
+  // Cross-table claim on the global @handle namespace. `handleNormalized`
+  // above is unique only WITHIN this table; HandleRegistration is what makes it
+  // unique against ClientProfile too. Always written through
+  // lib/handles/registry.ts, never by hand.
+  handleRegistration HandleRegistration?
   // When a not-yet-premium pro reserves a handle. Cleared once the handle goes live
   // under an active subscription; a cron releases stale non-premium reservations.
-  handleReservedAt DateTime?
+  handleReservedAt   DateTime?
   // Pro-chosen public display style; BUSINESS_NAME preserves legacy behavior.
-  nameDisplay      ProNameDisplay    @default(BUSINESS_NAME)
-  isPremium        Boolean           @default(false)
-  clientInvites    ProClientInvite[]
-  bio              String?
-  avatarUrl        String?
+  nameDisplay        ProNameDisplay      @default(BUSINESS_NAME)
+  isPremium          Boolean             @default(false)
+  clientInvites      ProClientInvite[]
+  bio                String?
+  avatarUrl          String?
 
   // Creator-page cover banner (§18): a pro-chosen portfolio photo shown as the
   // profile's cover, with a graceful branded fallback when unset (never the
@@ -6082,4 +6091,38 @@ model Referral {
   @@index([referredClientId, status])
   @@index([professionalId, status])
   @@index([nfcCardId])
+}
+
+/// The ONE global namespace for public `@handle`s.
+///
+/// `ProfessionalProfile.handleNormalized` and `ClientProfile.handleNormalized`
+/// each carry their own `@unique`. That makes a handle unique *within* a table
+/// and says nothing across them, so the same handle could be held by a pro AND
+/// a client at once — which is not cosmetic: the looks feed renders a
+/// client-authored post and a pro-authored post as the same `@handle`, side by
+/// side, with no type marker (`LookOverlays.tsx`). A client could claim a
+/// well-known pro's handle and post under their identity.
+///
+/// Postgres cannot express a unique index spanning two tables, so this registry
+/// IS the constraint: `handleNormalized` is the PRIMARY KEY, and the database
+/// refuses the second claim no matter which table it comes from. The per-table
+/// `handleNormalized` columns stay as the display/lookup source of truth; this
+/// table is purely the lock.
+///
+/// Exactly one owner column is set, enforced by a CHECK constraint — a row
+/// owned by nobody would squat a handle with no way to reach or release it.
+/// Both FKs cascade: a deleted profile must never leave its handle locked.
+///
+/// Write ONLY through lib/handles/registry.ts.
+model HandleRegistration {
+  handleNormalized String @id @db.VarChar(24)
+
+  professionalId  String? @unique
+  clientProfileId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional  ProfessionalProfile? @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  clientProfile ClientProfile?       @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
 }

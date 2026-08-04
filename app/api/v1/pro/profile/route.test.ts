@@ -29,11 +29,19 @@ const mocks = vi.hoisted(() => {
 
   const requirePro = vi.fn()
 
+  // PATCH now writes the handle claim and the profile in ONE transaction, so
+  // the mock must expose $transaction and the registry the claim goes through.
   const prisma = {
     professionalProfile: {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    handleRegistration: {
+      findUnique: vi.fn(),
+      deleteMany: vi.fn(),
+      create: vi.fn(),
+    },
+    $transaction: vi.fn(),
   }
 
   return {
@@ -106,6 +114,14 @@ function makeUpdatedProfile(args?: {
 describe('app/api/v1/pro/profile/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    // Run the transaction body against the same mock client, so the handle
+    // claim inside it is exercised rather than skipped.
+    mocks.prisma.$transaction.mockImplementation(
+      async (fn: (tx: typeof mocks.prisma) => Promise<unknown>) =>
+        fn(mocks.prisma),
+    )
+    mocks.prisma.handleRegistration.findUnique.mockResolvedValue(null)
 
     mocks.requirePro.mockResolvedValue({
       ok: true,

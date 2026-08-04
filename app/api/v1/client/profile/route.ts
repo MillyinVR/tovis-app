@@ -16,6 +16,7 @@ import {
   isValidHandle,
   normalizeHandle,
 } from '@/lib/handles'
+import { claimHandle, releaseHandle } from '@/lib/handles/registry'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -131,10 +132,26 @@ export async function PATCH(req: Request) {
     }
 
     try {
-      const updated = await prisma.clientProfile.update({
-        where: { id: auth.clientId },
-        data,
-        select: clientPublicProfileSelect,
+      // The handle claim and the profile write must land together: a claim that
+      // commits while the profile write rolls back would lock the handle onto a
+      // profile that doesn't display it. A collision with EITHER table throws
+      // P2002 off the registry's primary key, which the mapper below already
+      // turns into 409 "That handle is taken."
+      const updated = await prisma.$transaction(async (tx) => {
+        if (wantsHandleUpdate) {
+          const owner = { kind: 'CLIENT' as const, clientProfileId: auth.clientId }
+          if (nextHandleNormalized) {
+            await claimHandle(tx, nextHandleNormalized, owner)
+          } else {
+            await releaseHandle(tx, owner)
+          }
+        }
+
+        return tx.clientProfile.update({
+          where: { id: auth.clientId },
+          data,
+          select: clientPublicProfileSelect,
+        })
       })
 
       return jsonOk({ ok: true, profile: updated }, 200)
