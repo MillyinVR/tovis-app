@@ -11,6 +11,7 @@ import {
   Gift,
   LogOut,
   Star,
+  Trash2,
   TrendingUp,
   Users,
   type LucideIcon,
@@ -36,6 +37,15 @@ const BUSINESS_ROWS: NavRow[] = [
   { label: 'Clients', href: '/pro/clients', Icon: Users },
   { label: 'Working hours', href: '/pro/calendar', Icon: Clock },
   { label: 'Appointment reminders', href: '/pro/notifications/settings', Icon: BellRing },
+]
+
+const ACCOUNT_ROWS: NavRow[] = [
+  {
+    label: 'Delete account',
+    hint: 'Close your account and remove your details',
+    href: '/pro/account/delete',
+    Icon: Trash2,
+  },
 ]
 
 const GROWTH_ROWS: NavRow[] = [
@@ -105,6 +115,14 @@ export default function ProAccountSection({
           <ThemeToggle />
         </div>
       </section>
+
+      {/*
+        App Store guideline 5.1.1(v): account deletion has to be reachable from
+        inside the app. It sits with the account actions rather than inside a
+        Business/Growth group so it is findable without being a trap next to
+        Sign out.
+      */}
+      <NavGroup label="Account" rows={ACCOUNT_ROWS} />
 
       <button
         type="button"

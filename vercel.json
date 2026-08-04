@@ -6,6 +6,10 @@
   },
   "crons": [
     {
+      "path": "/api/internal/jobs/account-deletion",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/hold-cleanup",
       "schedule": "*/5 * * * *"
     },

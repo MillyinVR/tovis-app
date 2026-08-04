@@ -8,6 +8,7 @@ import ClientAddressesSettings from './ClientAddressesSettings'
 import ClientPaymentMethodsSettings from './ClientPaymentMethodsSettings'
 import ClientChartSharingSettings from './ClientChartSharingSettings'
 import NotificationPreferencesForm from '@/app/_components/NotificationPreferencesForm'
+import DeleteAccountPanel from '@/app/_components/account/DeleteAccountPanel'
 import { getBrandConfig } from '@/lib/brand'
 import ThemeToggle from '@/lib/brand/ThemeToggle'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
@@ -163,6 +164,13 @@ export default function ClientSettingsPage() {
           </div>
         </div>
       </section>
+
+      {/*
+        App Store guideline 5.1.1(v) requires account deletion to be reachable
+        from the app, not buried behind a support request. Settings-level, and
+        the same panel the pro account section renders.
+      */}
+      <DeleteAccountPanel />
     </div>
   )
 }

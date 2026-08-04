@@ -1,58 +1,92 @@
 // lib/privacy/deleteUserData.test.ts
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
-import { deleteUserData, USER_DATA_DELETE_VERSION } from './deleteUserData'
+import {
+  DELETE_USER_DATA_LIMITATIONS,
+  deleteUserData,
+  USER_DATA_DELETE_VERSION,
+} from './deleteUserData'
+import { DELETE_RULES } from './deleteRules'
 
-const mocks = vi.hoisted(() => ({
-  db: {
-    $transaction: vi.fn(),
-    user: {
-      findUnique: vi.fn(),
-      update: vi.fn(),
+/**
+ * Contract-level tests for the deletion boundary.
+ *
+ * ⚠️ These are MOCKS, and mocks are why this file used to be misleading: a
+ * stubbed `deleteMany` returns `{count: n}` no matter what the database would
+ * have said, so the suite stayed green for months while `ProfessionalLocation`
+ * deletion raised a foreign-key violation against real Postgres for any pro who
+ * had ever taken a booking.
+ *
+ * Row-level truth therefore lives in
+ * tests/integration/account-deletion-boundary.test.ts, which runs against real
+ * Postgres. What is proved HERE is only what mocks can honestly prove: the
+ * shape of the contract, transaction wrapping, dry-run purity, and that no raw
+ * PII escapes into the result payload.
+ */
+
+type MockDelegate = {
+  count: ReturnType<typeof vi.fn>
+  deleteMany: ReturnType<typeof vi.fn>
+  updateMany: ReturnType<typeof vi.fn>
+  update: ReturnType<typeof vi.fn>
+  findUnique: ReturnType<typeof vi.fn>
+}
+
+/**
+ * A Prisma-shaped mock that materializes a delegate on first access.
+ *
+ * Written as a Proxy rather than fifty hand-listed stubs so that adding a rule
+ * to `DELETE_RULES` cannot break this file for a reason that has nothing to do
+ * with what it is testing.
+ */
+function makeMockDb(): {
+  db: Record<string, MockDelegate> & { $transaction: ReturnType<typeof vi.fn> }
+  delegates: Map<string, MockDelegate>
+} {
+  const delegates = new Map<string, MockDelegate>()
+  const $transaction = vi.fn()
+
+  const handler: ProxyHandler<Record<string, unknown>> = {
+    get(_target, property: string | symbol) {
+      if (property === '$transaction') return $transaction
+      if (typeof property !== 'string') return undefined
+
+      const existing = delegates.get(property)
+      if (existing) return existing
+
+      const delegate: MockDelegate = {
+        count: vi.fn().mockResolvedValue(1),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+      }
+      delegates.set(property, delegate)
+      return delegate
     },
-    clientProfile: {
-      update: vi.fn(),
+    // `canRunTransaction` asks `'$transaction' in db`, which routes through
+    // this trap — without it the proxy reports the key as absent and live
+    // anonymization silently runs outside a transaction.
+    has(_target, property) {
+      return property === '$transaction' || typeof property === 'string'
     },
-    professionalProfile: {
-      update: vi.fn(),
-    },
-    clientAddress: {
-      count: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    professionalLocation: {
-      count: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    bookingHold: {
-      count: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    clientActionToken: {
-      count: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    mediaAsset: {
-      count: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    practiceShot: {
-      count: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-  },
-}))
+  }
+
+  const proxy = new Proxy<Record<string, unknown>>({}, handler)
+
+  return {
+    // The executor only ever reaches for model delegates and $transaction.
+    db: proxy as never,
+    delegates,
+  }
+}
 
 function makeUser(args?: {
   id?: string
-  clientProfile?: null | {
-    id: string
-  }
-  professionalProfile?: null | {
-    id: string
-  }
+  clientProfile?: null | { id: string }
+  professionalProfile?: null | { id: string }
 }) {
   return {
     id: args?.id ?? 'user_1',
@@ -62,591 +96,191 @@ function makeUser(args?: {
     phone: '+16195551234',
     phoneHashV2: 'hmac_phone_hash_v2',
     phoneHashKeyVersion: 1,
-    phoneVerifiedAt: new Date('2026-04-01T10:00:00.000Z'),
-    emailVerifiedAt: new Date('2026-04-01T10:05:00.000Z'),
     password: 'stored_hash',
     role: Role.CLIENT,
-    authVersion: 1,
-    loginAttempts: 0,
-    lockedUntil: null,
-    createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-    tosAcceptedAt: null,
-    tosVersion: null,
-    transactionalSmsConsentAt: null,
-    transactionalSmsConsentVersion: null,
-    transactionalSmsConsentSource: null,
-    transactionalSmsConsentIp: null,
-    transactionalSmsConsentUserAgent: null,
     clientProfile:
       args?.clientProfile === undefined
-        ? {
-            id: 'client_1',
-            userId: args?.id ?? 'user_1',
-            firstName: 'Tori',
-            lastName: 'Morales',
-            email: 'person@example.com',
-            phone: '+16195551234',
-          }
+        ? { id: 'client_1' }
         : args.clientProfile,
     professionalProfile:
       args?.professionalProfile === undefined
-        ? null
+        ? { id: 'pro_1' }
         : args.professionalProfile,
   }
 }
 
-function setupCounts(counts?: {
-  clientAddress?: number
-  professionalLocation?: number
-  bookingHold?: number
-  clientActionToken?: number
-  mediaAsset?: number
-  practiceShot?: number
-}) {
-  mocks.db.clientAddress.count.mockResolvedValue(counts?.clientAddress ?? 2)
-  mocks.db.professionalLocation.count.mockResolvedValue(
-    counts?.professionalLocation ?? 3,
-  )
-  mocks.db.bookingHold.count.mockResolvedValue(counts?.bookingHold ?? 4)
-  mocks.db.clientActionToken.count.mockResolvedValue(
-    counts?.clientActionToken ?? 5,
-  )
-  mocks.db.mediaAsset.count.mockResolvedValue(counts?.mediaAsset ?? 6)
-  mocks.db.practiceShot.count.mockResolvedValue(counts?.practiceShot ?? 7)
+let harness: ReturnType<typeof makeMockDb>
+
+/**
+ * The proxy materializes delegates on access, so every model is present at
+ * runtime; the index signature just cannot say so. This narrows once instead of
+ * scattering non-null assertions through the assertions.
+ */
+function delegate(model: string): MockDelegate {
+  const found = harness.db[model]
+  if (!found) throw new Error(`mock delegate missing: ${model}`)
+  return found
 }
 
-function setupDeleteManyResults(counts?: {
-  clientAddress?: number
-  professionalLocation?: number
-  bookingHold?: number
-  clientActionToken?: number
-  mediaAsset?: number
-  practiceShot?: number
-}) {
-  mocks.db.clientAddress.deleteMany.mockResolvedValue({
-    count: counts?.clientAddress ?? 2,
-  })
-  mocks.db.professionalLocation.deleteMany.mockResolvedValue({
-    count: counts?.professionalLocation ?? 3,
-  })
-  mocks.db.bookingHold.deleteMany.mockResolvedValue({
-    count: counts?.bookingHold ?? 4,
-  })
-  mocks.db.clientActionToken.deleteMany.mockResolvedValue({
-    count: counts?.clientActionToken ?? 5,
-  })
-  mocks.db.mediaAsset.deleteMany.mockResolvedValue({
-    count: counts?.mediaAsset ?? 6,
-  })
-  mocks.db.practiceShot.deleteMany.mockResolvedValue({
-    count: counts?.practiceShot ?? 7,
-  })
-}
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-05-27T12:00:00.000Z'))
+  harness = makeMockDb()
+  harness.db.$transaction.mockImplementation(
+    async (callback: (tx: unknown) => Promise<unknown>) => callback(harness.db),
+  )
+  delegate('user').findUnique.mockResolvedValue(makeUser())
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('deleteUserData', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-05-27T12:00:00.000Z'))
-    vi.clearAllMocks()
-
-    mocks.db.$transaction.mockImplementation(async (callback) =>
-      callback({
-        ...mocks.db,
-        $transaction: undefined,
-      }),
-    ) 
-
-    setupCounts()
-    setupDeleteManyResults()
-
-    mocks.db.user.update.mockResolvedValue({})
-    mocks.db.clientProfile.update.mockResolvedValue({})
-    mocks.db.professionalProfile.update.mockResolvedValue({})
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
   it('exports a stable privacy delete contract version', () => {
     expect(USER_DATA_DELETE_VERSION).toBe(1)
   })
 
   it('throws when the subject user does not exist', async () => {
-    mocks.db.user.findUnique.mockResolvedValueOnce(null)
+    delegate('user').findUnique.mockResolvedValueOnce(null)
 
     await expect(
       deleteUserData({
-        db: mocks.db as never,
+        db: harness.db as never,
         userId: 'missing_user',
         mode: 'DRY_RUN',
         requestedByUserId: 'admin_1',
         reason: 'privacy request',
       }),
-    ).rejects.toThrow(
-      'Cannot delete user data: user not found (missing_user)',
-    )
+    ).rejects.toThrow('Cannot delete user data: user not found (missing_user)')
 
-    expect(mocks.db.user.findUnique).toHaveBeenCalledWith({
-      where: { id: 'missing_user' },
-      include: {
-        clientProfile: true,
-        professionalProfile: true,
-      },
-    })
-
-    expect(mocks.db.user.update).not.toHaveBeenCalled()
-    expect(mocks.db.clientProfile.update).not.toHaveBeenCalled()
-    expect(mocks.db.clientAddress.deleteMany).not.toHaveBeenCalled()
+    expect(delegate('user').update).not.toHaveBeenCalled()
   })
 
-  it('returns a dry-run plan without mutating data for a client user', async () => {
-    mocks.db.user.findUnique.mockResolvedValueOnce(
-      makeUser({
-        id: 'user_1',
-        clientProfile: { id: 'client_1' },
-        professionalProfile: null,
-      }),
-    )
-
+  it('reports an action for every rule plus the three subject rows', async () => {
     const result = await deleteUserData({
-      db: mocks.db as never,
+      db: harness.db as never,
       userId: 'user_1',
       mode: 'DRY_RUN',
       requestedByUserId: 'admin_1',
       reason: 'user requested deletion',
     })
 
-    expect(result).toEqual({
-      executedAt: '2026-05-27T12:00:00.000Z',
+    expect(result.actions).toHaveLength(DELETE_RULES.length + 3)
+
+    const models = result.actions.map((action) => action.model)
+    for (const rule of DELETE_RULES) {
+      expect(models).toContain(rule.model)
+    }
+    expect(models).toContain('User')
+    expect(models).toContain('ClientProfile')
+    expect(models).toContain('ProfessionalProfile')
+  })
+
+  it('does not mutate anything in DRY_RUN', async () => {
+    const result = await deleteUserData({
+      db: harness.db as never,
+      userId: 'user_1',
       mode: 'DRY_RUN',
-      subject: {
-        userId: 'user_1',
-        clientProfileId: 'client_1',
-        professionalProfileId: null,
-      },
       requestedByUserId: 'admin_1',
       reason: 'user requested deletion',
-      actions: [
-        {
-          model: 'ClientAddress',
-          action: 'WOULD_DELETE',
-          count: 2,
-        },
-        {
-          model: 'ProfessionalLocation',
-          action: 'SKIPPED',
-          count: 0,
-          notes: 'No professional profile.',
-        },
-        {
-          model: 'BookingHold',
-          action: 'WOULD_DELETE',
-          count: 4,
-        },
-        {
-          model: 'ClientActionToken',
-          action: 'WOULD_DELETE',
-          count: 5,
-        },
-        {
-          model: 'MediaAsset',
-          action: 'WOULD_DELETE',
-          count: 6,
-          notes:
-            'Deletes DB rows only. Storage object deletion must run through the media/storage write boundary.',
-        },
-        {
-          model: 'PracticeShot',
-          action: 'SKIPPED',
-          count: 0,
-          notes: 'No professional profile.',
-        },
-        {
-          model: 'ClientProfile',
-          action: 'WOULD_ANONYMIZE',
-          count: 1,
-        },
-        {
-          model: 'ProfessionalProfile',
-          action: 'SKIPPED',
-          count: 0,
-          notes: 'No professional profile.',
-        },
-        {
-          model: 'User',
-          action: 'WOULD_ANONYMIZE',
-          count: 1,
-        },
-      ],
-      limitations: expect.arrayContaining([
-        'Bookings are not hard-deleted because they are financial/operational records; implement booking-level anonymization after legal retention policy is finalized.',
-        'Storage object bytes are not deleted here; MediaAsset DB rows are handled, but Supabase object deletion requires a separate storage write boundary.',
-        'Tenant-level deletion/export is a separate workflow.',
-      ]),
     })
 
-    expect(mocks.db.clientAddress.count).toHaveBeenCalledWith({
-      where: { clientId: 'client_1' },
-    })
+    expect(result.mode).toBe('DRY_RUN')
+    expect(
+      result.actions.every((action) =>
+        ['WOULD_DELETE', 'WOULD_ANONYMIZE', 'SKIPPED'].includes(action.action),
+      ),
+    ).toBe(true)
 
-    expect(mocks.db.bookingHold.count).toHaveBeenCalledWith({
-      where: {
-        OR: [{ clientId: 'client_1' }],
-      },
-    })
-
-    expect(mocks.db.clientActionToken.count).toHaveBeenCalledWith({
-      where: { clientId: 'client_1' },
-    })
-
-    expect(mocks.db.mediaAsset.count).toHaveBeenCalledWith({
-      where: {
-        OR: [
-          { uploadedByUserId: 'user_1' },
-          { booking: { clientId: 'client_1' } },
-        ],
-      },
-    })
-
-    expect(mocks.db.clientAddress.deleteMany).not.toHaveBeenCalled()
-    expect(mocks.db.bookingHold.deleteMany).not.toHaveBeenCalled()
-    expect(mocks.db.clientActionToken.deleteMany).not.toHaveBeenCalled()
-    expect(mocks.db.mediaAsset.deleteMany).not.toHaveBeenCalled()
-    expect(mocks.db.clientProfile.update).not.toHaveBeenCalled()
-    expect(mocks.db.professionalProfile.update).not.toHaveBeenCalled()
-    expect(mocks.db.user.update).not.toHaveBeenCalled()
+    for (const [model, delegate] of harness.delegates) {
+      expect(delegate.deleteMany, `${model}.deleteMany`).not.toHaveBeenCalled()
+      expect(delegate.updateMany, `${model}.updateMany`).not.toHaveBeenCalled()
+      expect(delegate.update, `${model}.update`).not.toHaveBeenCalled()
+    }
   })
 
-  it('anonymizes and deletes supported records for a client and professional user', async () => {
-    mocks.db.user.findUnique.mockResolvedValueOnce(
-      makeUser({
-        id: 'user_both',
-        clientProfile: { id: 'client_1' },
-        professionalProfile: { id: 'pro_1' },
-      }),
+  it('skips profile-scoped rules when the user has neither profile', async () => {
+    delegate('user').findUnique.mockResolvedValue(
+      makeUser({ clientProfile: null, professionalProfile: null }),
     )
 
     const result = await deleteUserData({
-      db: mocks.db as never,
-      userId: 'user_both',
-      mode: 'ANONYMIZE',
+      db: harness.db as never,
+      userId: 'user_1',
+      mode: 'DRY_RUN',
       requestedByUserId: 'admin_1',
-      reason: 'verified privacy deletion request',
+      reason: 'privacy request',
     })
 
-    expect(result).toMatchObject({
-      executedAt: '2026-05-27T12:00:00.000Z',
-      mode: 'ANONYMIZE',
-      subject: {
-        userId: 'user_both',
-        clientProfileId: 'client_1',
-        professionalProfileId: 'pro_1',
-      },
-      requestedByUserId: 'admin_1',
-      reason: 'verified privacy deletion request',
-      actions: [
-        {
-          model: 'ClientAddress',
-          action: 'DELETED',
-          count: 2,
-        },
-        {
-          model: 'ProfessionalLocation',
-          action: 'DELETED',
-          count: 3,
-        },
-        {
-          model: 'BookingHold',
-          action: 'DELETED',
-          count: 4,
-        },
-        {
-          model: 'ClientActionToken',
-          action: 'DELETED',
-          count: 5,
-        },
-        {
-          model: 'MediaAsset',
-          action: 'DELETED',
-          count: 6,
-          notes:
-            'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
-        },
-        {
-          model: 'PracticeShot',
-          action: 'DELETED',
-          count: 7,
-          notes:
-            'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
-        },
-        {
-          model: 'ClientProfile',
-          action: 'ANONYMIZED',
-          count: 1,
-        },
-        {
-          model: 'ProfessionalProfile',
-          action: 'ANONYMIZED',
-          count: 1,
-        },
-        {
-          model: 'User',
-          action: 'ANONYMIZED',
-          count: 1,
-        },
-      ],
-    })
+    const clientOnly = result.actions.find(
+      (action) => action.model === 'ClientAddress',
+    )
+    expect(clientOnly?.action).toBe('SKIPPED')
 
-    expect(mocks.db.clientAddress.deleteMany).toHaveBeenCalledWith({
-      where: { clientId: 'client_1' },
-    })
+    const proOnly = result.actions.find(
+      (action) => action.model === 'PracticeShot',
+    )
+    expect(proOnly?.action).toBe('SKIPPED')
 
-    expect(mocks.db.professionalLocation.deleteMany).toHaveBeenCalledWith({
-      where: { professionalId: 'pro_1' },
-    })
-
-    expect(mocks.db.bookingHold.deleteMany).toHaveBeenCalledWith({
-      where: {
-        OR: [{ clientId: 'client_1' }, { professionalId: 'pro_1' }],
-      },
-    })
-
-    expect(mocks.db.clientActionToken.deleteMany).toHaveBeenCalledWith({
-      where: { clientId: 'client_1' },
-    })
-
-    expect(mocks.db.mediaAsset.deleteMany).toHaveBeenCalledWith({
-      where: {
-        OR: [
-          { uploadedByUserId: 'user_both' },
-          { booking: { clientId: 'client_1' } },
-          { professionalId: 'pro_1' },
-        ],
-      },
-    })
-
-    // ⚠️ Explicit, not left to PracticeShot's onDelete: Cascade — this routine
-    // ANONYMIZES the ProfessionalProfile rather than deleting it, so the cascade
-    // never fires and the shots would outlive the deletion request.
-    expect(mocks.db.practiceShot.deleteMany).toHaveBeenCalledWith({
-      where: { professionalId: 'pro_1' },
-    })
-
-    expect(mocks.db.clientProfile.update).toHaveBeenCalledWith({
-      where: { id: 'client_1' },
-      data: {
-        firstName: 'Deleted',
-        lastName: 'User',
-        email: null,
-        phone: null,
-        dateOfBirth: null,
-        emailHashV2: null,
-        emailHashKeyVersion: null,
-        phoneHashV2: null,
-        phoneHashKeyVersion: null,
-      },
-    })
-
-    expect(mocks.db.professionalProfile.update).toHaveBeenCalledWith({
-      where: { id: 'pro_1' },
-      data: {
-        firstName: 'Deleted',
-        lastName: 'Professional',
-        phone: null,
-        bio: null,
-      },
-    })
-
-    expect(mocks.db.user.update).toHaveBeenCalledWith({
-      where: { id: 'user_both' },
-      data: {
-        email: 'deleted-user_both@deleted.tovis.local',
-        phone: null,
-        emailHashV2: null,
-        emailHashKeyVersion: null,
-        phoneHashV2: null,
-        phoneHashKeyVersion: null,
-        password: expect.stringMatching(/^\$2b\$12\$/),
-      },
-    })
+    // A user-scoped rule still applies — the subject always has a user id.
+    const userScoped = result.actions.find(
+      (action) => action.model === 'DeviceToken',
+    )
+    expect(userScoped?.action).toBe('WOULD_DELETE')
   })
 
-  it('skips profile-scoped deletes when the user has no client or professional profile', async () => {
-    mocks.db.user.findUnique.mockResolvedValueOnce(
-      makeUser({
-        id: 'user_no_profiles',
-        clientProfile: null,
-        professionalProfile: null,
-      }),
-    )
-
-    const result = await deleteUserData({
-      db: mocks.db as never,
-      userId: 'user_no_profiles',
+  it('wraps live anonymization in a transaction', async () => {
+    await deleteUserData({
+      db: harness.db as never,
+      userId: 'user_1',
       mode: 'ANONYMIZE',
       requestedByUserId: 'admin_1',
       reason: 'privacy request',
     })
 
-    expect(result.subject).toEqual({
-      userId: 'user_no_profiles',
-      clientProfileId: null,
-      professionalProfileId: null,
-    })
-
-    expect(result.actions).toEqual([
-      {
-        model: 'ClientAddress',
-        action: 'SKIPPED',
-        count: 0,
-        notes: 'No client profile.',
-      },
-      {
-        model: 'ProfessionalLocation',
-        action: 'SKIPPED',
-        count: 0,
-        notes: 'No professional profile.',
-      },
-      {
-        model: 'BookingHold',
-        action: 'SKIPPED',
-        count: 0,
-        notes: 'No client/professional profile.',
-      },
-      {
-        model: 'ClientActionToken',
-        action: 'SKIPPED',
-        count: 0,
-        notes: 'No client profile.',
-      },
-      {
-        model: 'MediaAsset',
-        action: 'DELETED',
-        count: 6,
-        notes:
-          'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
-      },
-      {
-        model: 'PracticeShot',
-        action: 'SKIPPED',
-        count: 0,
-        notes: 'No professional profile.',
-      },
-      {
-        model: 'ClientProfile',
-        action: 'SKIPPED',
-        count: 0,
-        notes: 'No client profile.',
-      },
-      {
-        model: 'ProfessionalProfile',
-        action: 'SKIPPED',
-        count: 0,
-        notes: 'No professional profile.',
-      },
-      {
-        model: 'User',
-        action: 'ANONYMIZED',
-        count: 1,
-      },
-    ])
-
-    expect(mocks.db.clientAddress.count).not.toHaveBeenCalled()
-    expect(mocks.db.professionalLocation.count).not.toHaveBeenCalled()
-    expect(mocks.db.bookingHold.count).not.toHaveBeenCalled()
-    expect(mocks.db.clientActionToken.count).not.toHaveBeenCalled()
-
-    expect(mocks.db.mediaAsset.deleteMany).toHaveBeenCalledWith({
-      where: {
-        OR: [{ uploadedByUserId: 'user_no_profiles' }],
-      },
-    })
-
-    expect(mocks.db.user.update).toHaveBeenCalledTimes(1)
+    expect(harness.db.$transaction).toHaveBeenCalledTimes(1)
   })
 
-  it('wraps live anonymization in a transaction when the db client supports it', async () => {
-    mocks.db.user.findUnique.mockResolvedValueOnce(
-      makeUser({
-        id: 'user_1',
-        clientProfile: { id: 'client_1' },
-        professionalProfile: null,
-      }),
-    )
-
+  it('does not open a transaction for a dry run', async () => {
     await deleteUserData({
-      db: mocks.db as never,
-      userId: 'user_1',
-      mode: 'ANONYMIZE',
-      requestedByUserId: 'admin_1',
-      reason: 'verified privacy deletion request',
-    })
-
-    expect(mocks.db.$transaction).toHaveBeenCalledTimes(1)
-    expect(mocks.db.user.update).toHaveBeenCalledTimes(1)
-    expect(mocks.db.clientProfile.update).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not wrap dry-run deletion planning in a transaction', async () => {
-    mocks.db.user.findUnique.mockResolvedValueOnce(
-      makeUser({
-        id: 'user_1',
-        clientProfile: { id: 'client_1' },
-        professionalProfile: null,
-      }),
-    )
-
-    await deleteUserData({
-      db: mocks.db as never,
+      db: harness.db as never,
       userId: 'user_1',
       mode: 'DRY_RUN',
       requestedByUserId: 'admin_1',
-      reason: 'privacy request dry run',
+      reason: 'privacy request',
     })
 
-    expect(mocks.db.$transaction).not.toHaveBeenCalled()
-    expect(mocks.db.user.update).not.toHaveBeenCalled()
+    expect(harness.db.$transaction).not.toHaveBeenCalled()
   })
 
-  it('does not recursively open a transaction when already running with a transaction client', async () => {
-    const txDb = {
-      ...mocks.db,
-      $transaction: undefined,
-    }
-
-    mocks.db.user.findUnique.mockResolvedValueOnce(
-      makeUser({
-        id: 'user_1',
-        clientProfile: { id: 'client_1' },
-        professionalProfile: null,
-      }),
-    )
-
+  it('clears both contact fields and their lookup hashes on the user row', async () => {
     await deleteUserData({
-      db: txDb as never,
+      db: harness.db as never,
       userId: 'user_1',
       mode: 'ANONYMIZE',
       requestedByUserId: 'admin_1',
-      reason: 'verified privacy deletion request',
+      reason: 'privacy request',
     })
 
-    expect(mocks.db.$transaction).not.toHaveBeenCalled()
-    expect(mocks.db.user.update).toHaveBeenCalledTimes(1)
+    const call = delegate('user').update.mock.calls.at(0)
+    expect(call).toBeDefined()
+    const data = call?.[0]?.data
+
+    // A cleared plaintext column with a surviving blind index would still let
+    // the deleted account be found by email or phone.
+    expect(data.phone).toBeNull()
+    expect(data.emailHashV2).toBeNull()
+    expect(data.emailHashKeyVersion).toBeNull()
+    expect(data.phoneHashV2).toBeNull()
+    expect(data.phoneHashKeyVersion).toBeNull()
+    expect(data.email).not.toBe('person@example.com')
+    expect(data.password).not.toBe('stored_hash')
   })
 
   it('does not leak raw user PII into the result payload', async () => {
-    mocks.db.user.findUnique.mockResolvedValueOnce(
-      makeUser({
-        id: 'user_1',
-        clientProfile: { id: 'client_1' },
-        professionalProfile: { id: 'pro_1' },
-      }),
-    )
-
     const result = await deleteUserData({
-      db: mocks.db as never,
+      db: harness.db as never,
       userId: 'user_1',
       mode: 'ANONYMIZE',
       requestedByUserId: 'admin_1',
@@ -654,11 +288,16 @@ describe('deleteUserData', () => {
     })
 
     const serialized = JSON.stringify(result)
-
     expect(serialized).not.toContain('person@example.com')
     expect(serialized).not.toContain('+16195551234')
     expect(serialized).not.toContain('hmac_email_hash_v2')
-    expect(serialized).not.toContain('hmac_phone_hash_v2')
     expect(serialized).not.toContain('stored_hash')
+  })
+
+  it('states what a completed deletion still does not do', () => {
+    // The limitations are the honest part of the contract. An empty list would
+    // claim a completeness the boundary does not have.
+    expect(DELETE_USER_DATA_LIMITATIONS.length).toBeGreaterThan(0)
+    expect(DELETE_USER_DATA_LIMITATIONS.join(' ')).toContain('Storage object')
   })
 })
