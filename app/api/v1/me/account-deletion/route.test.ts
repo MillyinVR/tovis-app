@@ -70,6 +70,18 @@ describe('GET /api/v1/me/account-deletion', () => {
     expect(mocks.loadAccountDeletionStatus).not.toHaveBeenCalled()
   })
 
+  it('stays reachable from a session that is not fully verified', async () => {
+    // requireUser() defaults to refusing an unverified session. Applied here
+    // that would mean someone who signed up, never finished verification, and
+    // wants their data gone cannot delete their own account — a direct failure
+    // of App Store guideline 5.1.1(v).
+    await GET()
+
+    expect(mocks.requireUser).toHaveBeenCalledWith(
+      expect.objectContaining({ allowVerificationSession: true }),
+    )
+  })
+
   it('returns the status for the CALLER, never an id from the request', async () => {
     mocks.loadAccountDeletionStatus.mockResolvedValue({
       gracePeriodDays: 14,
