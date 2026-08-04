@@ -434,6 +434,8 @@ export type ExecuteDueDeletionsResult = {
   readonly considered: number
   readonly completed: number
   readonly failed: number
+  /** Due, but an obligation appeared during the window. Left PENDING. */
+  readonly deferred: number
 }
 
 /**
@@ -443,6 +445,14 @@ export type ExecuteDueDeletionsResult = {
  * must not poison the rest of the sweep — a caught error still aborts the
  * surrounding transaction, so batching them would silently roll back the
  * deletions that did succeed.
+ *
+ * ⚠️ Eligibility is re-checked HERE, not just at request time. Nothing stops a
+ * user from booking an appointment during the grace window, so a request that
+ * was eligible on day 0 can be ineligible on day 14 — and executing it anyway
+ * would anonymize a client into an appointment a pro is about to work. A
+ * request that has acquired an obligation stays PENDING and is retried on the
+ * next sweep rather than being failed or forced through: the user still leaves,
+ * just after the appointment they made does.
  */
 export async function executeDueAccountDeletions(args: {
   db: PrismaClient
@@ -464,8 +474,20 @@ export async function executeDueAccountDeletions(args: {
 
   let completed = 0
   let failed = 0
+  let deferred = 0
 
   for (const request of due) {
+    const eligibility = await evaluateAccountDeletionEligibility({
+      db: args.db,
+      userId: request.userId,
+      now,
+    })
+
+    if (!eligibility.eligible) {
+      deferred += 1
+      continue
+    }
+
     try {
       await args.db.$transaction(async (tx) => {
         const result = await deleteUserData({
@@ -503,5 +525,5 @@ export async function executeDueAccountDeletions(args: {
     }
   }
 
-  return { considered: due.length, completed, failed }
+  return { considered: due.length, completed, failed, deferred }
 }

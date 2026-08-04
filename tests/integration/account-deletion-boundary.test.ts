@@ -369,6 +369,73 @@ describe('the grace window', () => {
   })
 })
 
+describe('an obligation that appears DURING the grace window', () => {
+  it('defers the deletion instead of anonymizing a live client', async () => {
+    const opened = await requestAccountDeletion({ db, userId: fx.proUserId })
+    expect(opened.ok).toBe(true)
+
+    // Eligible on day 0 — then the pro takes a booking on day 3. Nothing stops
+    // them: the window does not deactivate the account.
+    const madeDuringWindow = await db.booking.create({
+      data: {
+        clientId: fx.clientProfileId,
+        professionalId: fx.proProfileId,
+        serviceId: fx.serviceId,
+        offeringId: fx.offeringId,
+        scheduledFor: new Date(
+          Date.now() + (ACCOUNT_DELETION_GRACE_PERIOD_DAYS + 5) * DAY_MS,
+        ),
+        status: BookingStatus.ACCEPTED,
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.proLocationId,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal('120.00'),
+        totalDurationMinutes: 60,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
+      },
+      select: { id: true },
+    })
+
+    const afterWindow = new Date(
+      Date.now() + (ACCOUNT_DELETION_GRACE_PERIOD_DAYS + 1) * DAY_MS,
+    )
+    const swept = await executeDueAccountDeletions({ db, now: afterWindow })
+
+    // Deferred, not completed and not failed: the user still leaves, just after
+    // the appointment they made does.
+    expect(swept.completed).toBe(0)
+    expect(swept.failed).toBe(0)
+    expect(swept.deferred).toBe(1)
+
+    // The account is untouched — this is the assertion that matters. Without
+    // the re-check the pro's profile would already be anonymized here, with a
+    // real client booked in five days' time.
+    const stillIntact = await db.user.findUniqueOrThrow({
+      where: { id: fx.proUserId },
+      select: { email: true },
+    })
+    expect(stillIntact.email).toBe(`${tag}_pro@example.com`)
+    expect(
+      await db.deviceToken.count({ where: { userId: fx.proUserId } }),
+    ).toBe(1)
+
+    // The request is still open, so it runs once the obligation clears.
+    expect(
+      await db.accountDeletionRequest.count({
+        where: {
+          userId: fx.proUserId,
+          status: AccountDeletionRequestStatus.PENDING,
+        },
+      }),
+    ).toBe(1)
+
+    // Clear it and cancel the request so the next block starts clean.
+    await db.booking.delete({ where: { id: madeDuringWindow.id } })
+    await cancelAccountDeletion({ db, userId: fx.proUserId })
+  })
+})
+
 describe('executing a due deletion for a pro who has taken a booking', () => {
   // Without this, every "expect(count).toBe(0)" below would pass just as
   // happily against data that was never seeded — a green probe that means NO

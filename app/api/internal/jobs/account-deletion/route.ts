@@ -42,6 +42,7 @@ async function runJob(req: Request) {
       considered: result.considered,
       completed: result.completed,
       failed: result.failed,
+      deferred: result.deferred,
       ranAt: now.toISOString(),
     })
   } catch (error: unknown) {
