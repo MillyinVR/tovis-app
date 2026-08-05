@@ -52,7 +52,6 @@ vi.mock('@/app/api/_utils/readJsonRecord', () => ({
 vi.mock('@/lib/clients/chartShare', () => ({
   respondToChartShare: mocks.respondToChartShare,
   revokeChartShare: mocks.revokeChartShare,
-  listChartSharesForClient: vi.fn(),
 }))
 
 vi.mock('@/lib/live/broadcastAudience', () => ({
