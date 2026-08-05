@@ -11,7 +11,7 @@ import {
   formatInTimeZone,
   getViewerTimeZone,
 } from '@/lib/time'
-import { advertisedEntitlements } from './entitlementCopy'
+import { advertisedEntitlements, feePitchBody } from './entitlementCopy'
 
 type PlanPrice = {
   interval: 'month' | 'year'
@@ -112,43 +112,14 @@ export default function MembershipClient(props: Props) {
       </p>
 
       {/*
-        The commission pitch (membership-value-brief.md §0.4 / §3.1).
-
-        🔴 EVERY CLAIM HERE MUST SURVIVE THE PLANNED FEE MODEL (§8.5), not just
-        today's code. A pro-side fee is coming ($5 flat, once, on a cold match) and
-        the client fee is moving from a flat $5 to 10% of the DEPOSIT. So this copy
-        deliberately does NOT say:
-          • "0% of deposits" / "you keep 100%" — false the day the pro fee ships;
-          • "paid by the client" — the pro will pay one too;
-          • "a flat fee" — the client's side stops being flat;
-          • a dollar amount — both numbers change.
-
-        What it DOES claim, and why each stays true:
-          • "never a percentage of your service" — the pro fee is flat $5 and the
-            client fee is a share of the DEPOSIT, so neither is ever a cut of the
-            service price. This is the actual structural difference from a 20–30%
-            commission, and it is the durable version of the pitch.
-          • "only on the first booking from a brand-new client who found you
-            through Discovery" — mirrors isNewDiscoveryClient() +
-            isDiscoveryProvenance() today, and is explicitly the rule for both
-            future fees (once per client↔pro pair, cold match only).
-          • the 20–30% figure is hedged and unattributed ("many"): a market
-            observation from the brief's competitor scan, and per that scan it
-            applies to a NEW client's first appointment, not to every service.
+        The fee pitch — Tori's chosen wording, verbatim. The string itself lives in
+        entitlementCopy.feePitchBody so it is testable and shared with nothing else;
+        see that function for the ⚠️ about it describing the PLANNED fee model
+        rather than today's code.
       */}
       <div className="mt-4 rounded-card border border-accentPrimary/25 bg-bgSecondary p-4">
-        <div className="text-[13px] font-black text-textPrimary">
-          Never a commission on your work
-        </div>
-        <p className="mt-1 text-[12px] leading-relaxed text-textSecondary">
-          Many booking marketplaces take 20–30% of a new client&apos;s first
-          appointment out of the pro&apos;s payout — every time.{' '}
-          <span className="font-black text-textPrimary">{brand.displayName}</span>{' '}
-          never takes a percentage of your service price. The only platform fee is
-          small and one-time, and it applies solely to the first booking from a
-          brand-new client who found you through Discovery or the Looks feed —
-          never on a returning client, a rebook, or anyone who came from your own
-          link.
+        <p className="text-[13px] font-black leading-relaxed text-textPrimary">
+          {feePitchBody(brand.displayName)}
         </p>
       </div>
 
