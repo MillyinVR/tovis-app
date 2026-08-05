@@ -187,18 +187,48 @@ function buildEntries(trail: BookingMoneyTrail): TrailEntry[] {
     })
   }
 
+  // The two cold-match fees are separate rows on purpose: one is money the CLIENT
+  // paid on top of the deposit, the other comes OUT of the pro's payout. Collapsing
+  // them into a single "platform fee" would tell a pro they were charged the
+  // client's fee too.
   if (trail.discoveryFee) {
     const f = trail.discoveryFee
     entries.push({
       key: 'discovery-fee',
-      label: 'Platform discovery fee',
-      detail: f.refundedAt ? 'Refunded' : null,
+      label: 'Client booking fee',
+      detail: f.refundedAt ? 'Refunded' : 'Paid by the client, on top of the deposit',
       amount: money(f.amountCents, currency),
       flow: 'none',
       tone: f.refundedAt ? 'muted' : 'info',
       status: f.refundedAt ? 'REFUNDED' : 'CHARGED',
       at: null,
     })
+  }
+
+  // 🔴 Rendered only when the pro was actually charged, or when a membership
+  // actively saved them the charge. A plain zero means the platform fees are
+  // switched off (or this was never a cold match) — showing "New-client fee $0.00,
+  // not charged" on every deposit booking would announce a fee that is not live,
+  // which is exactly the sequencing Tori's decision rules out (fees live -> measure
+  // -> only then advertise).
+  if (trail.proDiscoveryFee) {
+    const p = trail.proDiscoveryFee
+    const charged = p.amountCents > 0
+    if (charged || p.waived) {
+      entries.push({
+        key: 'pro-discovery-fee',
+        label: 'New-client fee',
+        detail: p.waived
+          ? 'Waived by your membership'
+          : 'One-time, deducted from your deposit payout',
+        amount: money(p.amountCents, currency),
+        // 'out' only where it was actually deducted — a waived $0 is not a deduction.
+        flow: charged ? 'out' : 'none',
+        tone: charged ? 'warn' : 'success',
+        status: p.waived ? 'WAIVED' : 'CHARGED',
+        at: null,
+      })
+    }
   }
 
   if (trail.noShowFee) {

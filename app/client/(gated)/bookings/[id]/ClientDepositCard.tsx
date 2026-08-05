@@ -3,7 +3,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { formatCents, formatMoneyFromUnknown } from '@/lib/money'
+import { formatCents, formatMoneyFromUnknown, moneyToNumber } from '@/lib/money'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -87,6 +87,11 @@ export default function ClientDepositCard({
   const depositLabel = formatMoneyFromUnknown(depositAmount)
   const feeCents = discoveryFeeCents ?? 0
   const feeLabel = feeCents > 0 ? centsToMoney(feeCents) : null
+  // Parsed through lib/money rather than a local Number() so a serialized Decimal
+  // ("50", "50.00", 50) lands on the same cents the server charged.
+  const depositNumber = moneyToNumber(depositAmount)
+  const depositDueTodayCents =
+    depositNumber == null ? null : Math.round(depositNumber * 100)
 
   async function startDepositCheckout() {
     setError(null)
@@ -207,6 +212,19 @@ export default function ClientDepositCard({
           <div className="flex items-center justify-between">
             <span className="text-textSecondary">One-time booking fee</span>
             <span className="font-semibold text-textPrimary">{feeLabel}</span>
+          </div>
+        ) : null}
+        {/* The fee is no longer a flat amount a client could learn once — it is a
+            percentage of the deposit within a floor and a cap, so the only honest
+            way to show it is beside the deposit WITH the sum. Without this row the
+            itemisation names two numbers and leaves the client to add them up
+            before being sent to Stripe for a third. */}
+        {feeLabel && depositDueTodayCents != null ? (
+          <div className="mt-1 flex items-center justify-between border-t border-white/10 pt-2">
+            <span className="font-semibold text-textPrimary">Total due today</span>
+            <span className="font-black text-textPrimary">
+              {centsToMoney(depositDueTodayCents + feeCents)}
+            </span>
           </div>
         ) : null}
       </div>

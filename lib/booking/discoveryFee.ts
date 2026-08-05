@@ -2,8 +2,8 @@
 //
 // New-client discovery deposit + one-time platform fee policy.
 //
-// The platform charges a small, flat, one-time fee (plus the pro's deposit) ONLY
-// when a brand-new client books a pro they discovered through the Looks feed or the
+// The platform charges its one-time fees (alongside the pro's deposit) ONLY when a
+// brand-new client books a pro they discovered through the Looks feed or the
 // Discovery tab — i.e. a cold match the platform created. Clients who found the pro
 // any other way (searched them by name/email, were invited, messaged them, tapped the
 // pro's NFC card, or have a prior booking) are exempt: the platform takes nothing.
@@ -12,6 +12,15 @@
 // relationship signals (see DiscoveryClientSignals) inside the booking-finalize
 // transaction and pass them in. The Stripe charge / application_fee wiring lives in
 // the finalize route + write boundary, not here.
+//
+// ── The fee model (Tori, 2026-08-04; docs/design/membership-value-brief.md §11.5) ──
+// TWO fees, both once per (client, pro) pair on the first cold-discovery appointment:
+//   • CLIENT convenience fee — 10% of the DEPOSIT, floor $2, cap $10. Paid by the
+//     client ON TOP of the deposit. Never waived by a pro's membership.
+//   • PRO fee — $5 flat, collected OUT OF the pro's deposit payout. Waived entirely
+//     for members — the pitch is that members keep every dollar the platform brings
+//     them (see `feePitchBody` for the brand-resolved wording).
+// This replaced a flat $5 client fee + no pro fee. Expected take ~$8–13 per cold match.
 //
 // Refund-reset rule (product decision 2026-06-17): the discovery fee marks a
 // (client, pro) pair as "known" only while a NON-refunded fee exists. If the client
@@ -23,32 +32,105 @@
 import { BookingDiscoveryProvenance } from '@prisma/client'
 
 /**
- * Default one-time discovery platform fee, in cents. Client pays this on top of the
- * pro's deposit; the pro keeps the full deposit. Flat (not a percentage) so it always
- * clears Stripe's ~2.9% + $0.30 per-transaction cost. Launch value $5; product may
- * raise toward $10 once conversion data exists. Override with TOVIS_DISCOVERY_FEE_CENTS.
+ * Master switch for CHARGING the platform fees. Off (unset) => both fees resolve to
+ * 0 and the deposit is collected on its own, which is the behaviour every booking has
+ * had to date. Flipping this on is a deliberate, Tori-only act: the sequencing decided
+ * in §11.5 is fees live -> measure conversion -> only THEN advertise the pro waiver as
+ * a membership perk.
+ *
+ * Deliberately separate from ENABLE_MEMBERSHIP_ENFORCEMENT: that switch governs what a
+ * membership RESTRICTS, this one governs what the platform CHARGES. The waiver needs
+ * both (there is nothing to waive while the fees are off).
  */
-export const DEFAULT_DISCOVERY_FEE_CENTS = 500
+export function platformFeesEnabled(): boolean {
+  const raw = process.env.ENABLE_PLATFORM_FEES
+  if (typeof raw !== 'string') return false
+  const v = raw.trim().toLowerCase()
+  return v === '1' || v === 'true' || v === 'yes'
+}
 
-/** Hard bounds so a misconfigured env var can't produce a nonsensical fee. */
-export const MIN_DISCOVERY_FEE_CENTS = 0
-export const MAX_DISCOVERY_FEE_CENTS = 1000
+/** Client convenience fee: this percent of the DEPOSIT (not the service price). */
+export const CLIENT_CONVENIENCE_FEE_PERCENT = 10
+/** Floor — below this the fee wouldn't clear Stripe's ~2.9% + $0.30 per-charge cost. */
+export const CLIENT_CONVENIENCE_FEE_MIN_CENTS = 200
+/** Cap — "growth over extraction": the fee never scales past this on a big deposit. */
+export const CLIENT_CONVENIENCE_FEE_MAX_CENTS = 1000
+
+/** The pro's one-time fee on a cold match, taken out of their deposit payout. */
+export const PRO_DISCOVERY_FEE_CENTS = 500
+
+export type PlatformFeeSplit = Readonly<{
+  /** Paid by the client ON TOP of the deposit. Never waived by a pro membership. */
+  clientFeeCents: number
+  /** Taken OUT OF the pro's deposit payout. 0 when waived or when fees are off. */
+  proFeeCents: number
+  /**
+   * Whether a membership waiver actually suppressed a pro fee that would otherwise
+   * have been charged. False when the fees are off or no deposit is due — there was
+   * nothing to waive — so the measurement cohorts stay honest.
+   */
+  proFeeWaived: boolean
+}>
+
+const NO_FEES: PlatformFeeSplit = {
+  clientFeeCents: 0,
+  proFeeCents: 0,
+  proFeeWaived: false,
+}
 
 /**
- * Resolve the configured discovery fee (cents), clamped to [MIN, MAX]. A non-finite or
- * out-of-range env value falls back to the default rather than charging a bad amount.
+ * The client's convenience fee for a deposit of this size: 10% of the deposit,
+ * clamped to [$2, $10]. Exported for the surfaces that quote the fee before a
+ * booking exists; the booking's stamped `discoveryFeeAmount` is the source of truth
+ * once one does.
  */
-export function resolveDiscoveryFeeCents(
-  raw: string | undefined = process.env.TOVIS_DISCOVERY_FEE_CENTS,
-): number {
-  if (raw == null || raw.trim() === '') return DEFAULT_DISCOVERY_FEE_CENTS
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
-    return DEFAULT_DISCOVERY_FEE_CENTS
+export function computeClientConvenienceFeeCents(depositCents: number): number {
+  const deposit = Math.max(0, Math.round(depositCents))
+  if (deposit <= 0) return 0
+
+  const raw = Math.round((deposit * CLIENT_CONVENIENCE_FEE_PERCENT) / 100)
+  if (raw < CLIENT_CONVENIENCE_FEE_MIN_CENTS) {
+    return CLIENT_CONVENIENCE_FEE_MIN_CENTS
   }
-  if (parsed < MIN_DISCOVERY_FEE_CENTS) return MIN_DISCOVERY_FEE_CENTS
-  if (parsed > MAX_DISCOVERY_FEE_CENTS) return MAX_DISCOVERY_FEE_CENTS
-  return parsed
+  if (raw > CLIENT_CONVENIENCE_FEE_MAX_CENTS) {
+    return CLIENT_CONVENIENCE_FEE_MAX_CENTS
+  }
+  return raw
+}
+
+/**
+ * Both platform fees for one booking. Pure; the caller supplies the already-sized
+ * deposit (lib/booking/prepay.ts), the cold-match verdict (isNewDiscoveryClient),
+ * the flag, and whether the pro's membership waives their fee.
+ *
+ * 🔴 No deposit, no fees. The client fee is defined as a percentage OF the deposit and
+ * is charged when the client pays it, and the pro fee is collected OUT OF the deposit
+ * payout — so with `depositCents === 0` there is nothing to take either fee from, and
+ * charging one would bill a client for a payment that does not exist. Reachable: a pro
+ * can have deposits enabled with a flat amount of 0.
+ *
+ * 🔴 The pro fee is clamped to the deposit. Stripe caps `application_fee_amount` at
+ * the charge total, and the pro's payout IS the deposit — we can never collect more
+ * than it. A $5 deposit therefore yields a $5 pro fee and a $0 payout, not a debt.
+ */
+export function computePlatformFees(args: {
+  depositCents: number
+  feeEligible: boolean
+  feesEnabled: boolean
+  proFeeWaived: boolean
+}): PlatformFeeSplit {
+  const depositCents = Math.max(0, Math.round(args.depositCents))
+  if (!args.feeEligible || !args.feesEnabled || depositCents <= 0) {
+    return NO_FEES
+  }
+
+  return {
+    clientFeeCents: computeClientConvenienceFeeCents(depositCents),
+    proFeeCents: args.proFeeWaived
+      ? 0
+      : Math.min(PRO_DISCOVERY_FEE_CENTS, depositCents),
+    proFeeWaived: args.proFeeWaived,
+  }
 }
 
 /**

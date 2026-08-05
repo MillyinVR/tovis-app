@@ -29,7 +29,7 @@ import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
 import {
   hasPriorRelationship,
   isNewDiscoveryClient,
-  resolveDiscoveryFeeCents,
+  platformFeesEnabled,
 } from '@/lib/booking/discoveryFee'
 import {
   resolveDepositRequirement,
@@ -80,7 +80,16 @@ export type FinalizeDiscoveryDirective = Readonly<{
    */
   depositRequirement: DepositRequirement
   depositSettings: DepositSettings
-  discoveryFeeCents: number
+  /**
+   * ENABLE_PLATFORM_FEES, resolved once here inside the trust boundary so the whole
+   * finalize path agrees about whether this booking charges platform fees.
+   */
+  feesEnabled: boolean
+  /**
+   * Whether this pro's membership waives THEIR $5 fee. Never affects the client's
+   * convenience fee — a pro's subscription cannot change what a client is billed.
+   */
+  proFeeWaived: boolean
   /**
    * The validated LookPost this booking was started from (remix attribution),
    * or null. Set ONLY when `lookPostId` resolved to a PUBLISHED + APPROVED look
@@ -108,7 +117,7 @@ export async function resolveDiscoveryFinalize(args: {
   now?: Date
 }): Promise<FinalizeDiscoveryDirective> {
   const now = args.now ?? new Date()
-  const feeCents = resolveDiscoveryFeeCents()
+  const feesEnabled = platformFeesEnabled()
 
   // Pro creation never routes through the client finalize endpoint.
   const baseDirective = (
@@ -122,13 +131,15 @@ export async function resolveDiscoveryFinalize(args: {
       scopeRequired: feeEligible,
       prepayScope: null,
     },
+    proFeeWaived = false,
   ): FinalizeDiscoveryDirective => ({
     provenance,
     relationshipLabel,
     feeEligible,
     depositRequirement,
     depositSettings,
-    discoveryFeeCents: feeCents,
+    feesEnabled,
+    proFeeWaived,
     sourceLookPostId,
   })
 
@@ -326,7 +337,29 @@ export async function resolveDiscoveryFinalize(args: {
     clientPolicyPrepayScope: clientPolicy.prepayScope,
   })
 
-  const directive = baseDirective(
+  // Membership perk (Tori, 2026-08-04): a subscribed pro pays NO $5 pro fee —
+  // members keep every dollar the platform brings them. 🔴 Waives the PRO's fee ONLY.
+  // The client's convenience fee is untouched: a pro's subscription must never
+  // change what their client is billed. The resolved verdict is stamped onto the
+  // booking at finalize, so checkout (application fee), refunds and the
+  // relationship-establishment queries all follow from the stored amounts.
+  //
+  // Needs BOTH switches: the fees must be live (there is nothing to waive
+  // otherwise) and membership enforcement must be on.
+  const proFeeWaived =
+    feesEnabled &&
+    membershipEnforcementEnabled() &&
+    resolveEffectiveEntitlements(
+      {
+        planKey: subscription?.planKey ?? 'free',
+        status: subscription?.status ?? null,
+        compPlanKey: subscription?.compPlanKey ?? null,
+        compUntil: subscription?.compUntil ?? null,
+      },
+      now,
+    ).includes('pro_discovery_fee_waiver')
+
+  return baseDirective(
     provenance,
     deriveClientRelationshipLabel({
       source: args.source,
@@ -337,26 +370,8 @@ export async function resolveDiscoveryFinalize(args: {
     depositSettings,
     validLookPost.sourceLookPostId,
     depositRequirement,
+    proFeeWaived,
   )
-
-  // Membership perk (client-paid-fee model, Option 1): a subscribed pro's new
-  // discovery clients pay NO platform fee — the deposit still applies, so
-  // feeEligible stands and only the fee is zeroed. The 0 is stamped onto the
-  // booking at finalize, so checkout (application fee), refunds, and the
-  // relationship-establishment queries all follow from it.
-  const feeWaived =
-    membershipEnforcementEnabled() &&
-    resolveEffectiveEntitlements(
-      {
-        planKey: subscription?.planKey ?? 'free',
-        status: subscription?.status ?? null,
-        compPlanKey: subscription?.compPlanKey ?? null,
-        compUntil: subscription?.compUntil ?? null,
-      },
-      now,
-    ).includes('discovery_fee_waiver')
-
-  return feeWaived ? { ...directive, discoveryFeeCents: 0 } : directive
 }
 
 type ValidLookPostResult = {

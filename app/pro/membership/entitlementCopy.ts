@@ -24,17 +24,16 @@ const ENTITLEMENT_LABELS: Partial<Record<Entitlement, string>> = {
   advanced_analytics:
     'Retention insights — rebooking rate over time + who’s due back',
   priority_discovery: 'Priority placement in Discovery',
-  // 🔴 `discovery_fee_waiver` is deliberately UNLABELED (Tori, 2026-08-04).
+  // 🔴 `pro_discovery_fee_waiver` is deliberately UNLABELED (Tori, 2026-08-04).
   //
-  // As coded it zeroes the fee the CLIENT pays, which is not the intended perk.
-  // The intended model is two fees on a cold match — a client convenience fee and
-  // a pro-side fee — with membership waiving the PRO's fee only, never the
-  // client's. That model is not built (see membership-value-brief.md §8.5), so
-  // there is nothing honest to advertise here yet.
+  // It now waives the right thing — the PRO's $5 cold-match fee, never the
+  // client's convenience fee (the fee model shipped 2026-08-05, brief §11.5). It is
+  // still not advertised, and that is the decision, not an oversight: the sequencing
+  // Tori locked is fees live -> measure conversion -> ONLY THEN advertise the waiver
+  // as a membership perk. It is also inert until ENABLE_PLATFORM_FEES is flipped, so
+  // a label today would sell a discount on a fee nobody is charged.
   //
-  // The mechanics stay in code, flag-gated and inert. Do NOT add a label back
-  // until the pro-side fee ships AND its conversion impact has been measured —
-  // that sequencing is part of the decision, not an accident.
+  // Do NOT add a label back until BOTH have happened.
 }
 
 /**
@@ -42,16 +41,17 @@ const ENTITLEMENT_LABELS: Partial<Record<Entitlement, string>> = {
  * Extracted so it is one canonical string with a test, mirroring iOS's
  * `ProMembershipCopy.commissionPitchBody`.
  *
- * 🔴 THIS COPY DESCRIBES THE PLANNED FEE MODEL, NOT TODAY'S CODE. Under the model
- * (brief §11.5) the pro pays a flat $5 once per cold-match client and membership
- * waives it — which is what this says, and it stays true when that ships.
+ * ✅ THE CODE NOW MATCHES THIS COPY (fee model shipped 2026-08-05, brief §11.5).
+ * The pro pays a flat $5 once per cold-match client (lib/booking/discoveryFee.ts,
+ * `PRO_DISCOVERY_FEE_CENTS`), never a percentage of the service, and
+ * `pro_discovery_fee_waiver` waives exactly that. The mis-description this comment
+ * used to carry — a $5 charged to the CLIENT and a waiver pointed at the wrong fee —
+ * is gone.
  *
- * Today, however, there is NO pro-side fee: the $5 is charged to the CLIENT, and
- * `discovery_fee_waiver` is flag-gated off. So a pro reading this today is told
- * they pay something they do not, and that membership waives something it does
- * not yet waive. Tori chose this wording knowingly; the safe sequencing is to
- * deploy it WITH the fee-model card, not before it. If the fee model changes,
- * this string changes with it.
+ * ⚠️ One gap remains, by design: both fees are inert until ENABLE_PLATFORM_FEES is
+ * flipped on. Until then a pro reading this is told they pay something they are not
+ * yet charged. Tori chose this wording knowingly and owns the flip; if the fee model
+ * changes, this string changes with it.
  *
  * The brand name is interpolated rather than literal: the white-label guard forbids
  * a hardcoded brand string, so each tenant renders its own `displayName`. Note the

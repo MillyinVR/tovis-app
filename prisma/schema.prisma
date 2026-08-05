@@ -3488,12 +3488,29 @@ model Booking {
   // the sweep falls back to ageing on createdAt.
   depositDueAt                 DateTime?
 
-  // One-time platform discovery fee (cents), captured as the Stripe application
-  // fee on the deposit charge. refundedAt is set when the fee is returned, so a
-  // fee-refunded booking stops counting as an established relationship (the pair
-  // reverts to "new" and the fee re-charges on a later discovery booking).
+  // One-time CLIENT convenience fee (cents) on a cold discovery match: 10% of the
+  // deposit, floor $2, cap $10. Charged to the client ON TOP of the deposit, and
+  // captured as part of the Stripe application fee on the deposit charge.
+  // refundedAt is set when the fee is returned, so a fee-refunded booking stops
+  // counting as an established relationship (the pair reverts to "new" and the
+  // fees re-charge on a later discovery booking).
+  //
+  // 🔴 This column is the CLIENT's fee only — it is what the customer paid, and so
+  // what the refund math may return to them. The pro's fee is proDiscoveryFeeAmount
+  // and never enters the charge total. See lib/booking/discoveryFee.ts.
   discoveryFeeAmount     Int?
   discoveryFeeRefundedAt DateTime?
+
+  // One-time PRO fee (cents) on the same cold match — $5 flat, collected OUT OF the
+  // pro's deposit payout by riding in the same Stripe application fee, so the pro's
+  // net is `deposit - proDiscoveryFeeAmount`. Never charged to the client.
+  //
+  // Both columns are written together at finalize and are the measurement record for
+  // the fee model: they let discovery conversion be compared with and without fees
+  // (0 across a cold match = the fees were off), and `proDiscoveryFeeWaived`
+  // distinguishes a membership waiver from the fees simply being off.
+  proDiscoveryFeeAmount  Int?
+  proDiscoveryFeeWaived  Boolean   @default(false)
 
   // No-show / late-cancel fee (Phase 2 revenue protection). Charged off-session
   // against the client's default saved card and routed to the pro's connected

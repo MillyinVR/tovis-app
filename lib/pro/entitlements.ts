@@ -29,7 +29,7 @@ export type Entitlement =
   | 'tax_export' // transaction ledger + quarterly/CSV tax export
   | 'advanced_analytics' // retention/rebooking insights beyond the monthly dashboard
   | 'priority_discovery' // priority placement on discovery surfaces
-  | 'discovery_fee_waiver' // member's new discovery clients pay no platform fee
+  | 'pro_discovery_fee_waiver' // member pays no $5 pro fee on a cold discovery match
   | 'white_label' // salon white-label / multi-pro — COMP-ONLY, never advertised
 
 const FREE: Entitlement[] = []
@@ -39,7 +39,13 @@ const PRO: Entitlement[] = [
   'tax_export',
   'advanced_analytics',
   'priority_discovery',
-  'discovery_fee_waiver',
+  // 🔴 Waives the PRO's $5 cold-match fee ONLY — never the client's convenience fee
+  // (a pro's subscription must not change what their client is billed). Renamed from
+  // `discovery_fee_waiver` on 2026-08-05 because the old name and its call site
+  // waived the CLIENT's fee, which was never the perk Tori decided
+  // (docs/design/membership-value-brief.md §11.5). Still deliberately unadvertised on
+  // both surfaces until the fees are live and conversion has been measured.
+  'pro_discovery_fee_waiver',
 ]
 
 // Premium's extra value is the full AI-camera allowance (a QUOTA, not a boolean —

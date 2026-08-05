@@ -21,12 +21,12 @@ describe('advertisedEntitlements', () => {
         expect(granted).toContain(item.key)
       }
 
-      // 🔴 discovery_fee_waiver is granted but deliberately NOT advertised: as
+      // 🔴 pro_discovery_fee_waiver is granted but deliberately NOT advertised: as
       // coded it waives the CLIENT's fee, while the intended perk waives a
       // pro-side fee that does not exist yet (brief §8.5). Selling it today would
       // describe a benefit the pro does not actually receive.
-      expect(granted).toContain('discovery_fee_waiver')
-      expect(advertised.map((a) => a.key)).not.toContain('discovery_fee_waiver')
+      expect(granted).toContain('pro_discovery_fee_waiver')
+      expect(advertised.map((a) => a.key)).not.toContain('pro_discovery_fee_waiver')
       for (const item of advertised) {
         expect(item.label.trim().length).toBeGreaterThan(0)
       }

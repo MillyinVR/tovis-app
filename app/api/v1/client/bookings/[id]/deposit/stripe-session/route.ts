@@ -131,8 +131,10 @@ export async function POST(req: NextRequest, props: RouteContext) {
                   currency: prepared.stripe.currency.toLowerCase(),
                   unit_amount: prepared.stripe.totalCents,
                   product_data: {
-                    // Fee can be 0 (membership waiver / env-configured) — don't
-                    // bill a "booking fee" the client isn't paying.
+                    // The client fee can be 0 (platform fees off, or no deposit to
+                    // take a percentage of) — don't bill a "booking fee" the client
+                    // isn't paying. The PRO's fee never appears here: it is not part
+                    // of what the customer is charged.
                     name:
                       prepared.stripe.feeCents > 0
                         ? `Deposit + booking fee — ${prepared.stripe.lineItemDescription}`
@@ -148,11 +150,14 @@ export async function POST(req: NextRequest, props: RouteContext) {
               kind: DISCOVERY_DEPOSIT_CHECKOUT_KIND,
             },
             payment_intent_data: {
-              // The platform keeps the one-time fee; the deposit settles to the
-              // pro. Omit the fee entirely when it's 0 (waived) — Stripe treats
-              // an explicit 0 differently from absent on some paths.
-              ...(prepared.stripe.feeCents > 0
-                ? { application_fee_amount: prepared.stripe.feeCents }
+              // The platform keeps BOTH one-time fees via the application fee: the
+              // client's convenience fee (which the customer paid on top of the
+              // deposit) and the pro's $5 (which comes out of the pro's payout —
+              // Stripe transfers the whole charge to them and pulls this back, so
+              // they net `depositCents - proFeeCents`). Omit it entirely when it's 0
+              // — Stripe treats an explicit 0 differently from absent on some paths.
+              ...(prepared.stripe.applicationFeeCents > 0
+                ? { application_fee_amount: prepared.stripe.applicationFeeCents }
                 : {}),
               transfer_data: {
                 destination: prepared.stripe.connectedAccountId,
@@ -164,6 +169,7 @@ export async function POST(req: NextRequest, props: RouteContext) {
                 kind: DISCOVERY_DEPOSIT_CHECKOUT_KIND,
                 depositCents: String(prepared.stripe.depositCents),
                 feeCents: String(prepared.stripe.feeCents),
+                proFeeCents: String(prepared.stripe.proFeeCents),
               },
             },
           },

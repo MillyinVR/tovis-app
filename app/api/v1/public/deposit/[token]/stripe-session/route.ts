@@ -203,8 +203,12 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
               kind: DISCOVERY_DEPOSIT_CHECKOUT_KIND,
             },
             payment_intent_data: {
-              ...(prepared.stripe.feeCents > 0
-                ? { application_fee_amount: prepared.stripe.feeCents }
+              // Both platform fees ride the application fee — the client's
+              // convenience fee and the pro's $5 (which comes out of the pro's
+              // payout, not the customer's charge). See the client-authenticated
+              // twin route for the full reasoning.
+              ...(prepared.stripe.applicationFeeCents > 0
+                ? { application_fee_amount: prepared.stripe.applicationFeeCents }
                 : {}),
               transfer_data: {
                 destination: prepared.stripe.connectedAccountId,
@@ -216,6 +220,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
                 kind: DISCOVERY_DEPOSIT_CHECKOUT_KIND,
                 depositCents: String(prepared.stripe.depositCents),
                 feeCents: String(prepared.stripe.feeCents),
+                proFeeCents: String(prepared.stripe.proFeeCents),
               },
             },
           },
