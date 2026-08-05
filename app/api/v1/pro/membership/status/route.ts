@@ -10,6 +10,7 @@ import {
   resolveEffectivePlanKey,
 } from '@/lib/pro/entitlements'
 import { getProSubscription } from '@/lib/membership/subscription'
+import { exportsDropPlatformMark } from '@/lib/pro/socialExportMark'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -28,6 +29,7 @@ export async function GET() {
       compUntil: sub?.compUntil ?? null,
     }
     const compPlan = activeCompPlanKey(state, now)
+    const entitlements = resolveEffectiveEntitlements(state, now)
 
     return jsonOk(
       {
@@ -38,7 +40,13 @@ export async function GET() {
           status: state.status,
           compPlanKey: compPlan,
           compUntil: compPlan ? (sub?.compUntil?.toISOString() ?? null) : null,
-          entitlements: resolveEffectiveEntitlements(state, now),
+          entitlements,
+          // Resolved server-side rather than left to the app to re-derive, the
+          // same way the finance payload ships `canExportTaxDocs`. The camera's
+          // social exports are rendered on-device, so the mark is drawn there —
+          // but whether it is drawn is decided here. See lib/pro/socialExportMark.ts
+          // for what this returns while ENABLE_MEMBERSHIP_ENFORCEMENT is off.
+          exportsUnbranded: exportsDropPlatformMark(entitlements),
           currentPeriodEnd: sub?.currentPeriodEnd?.toISOString() ?? null,
           cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
           trialEndsAt: sub?.trialEndsAt?.toISOString() ?? null,

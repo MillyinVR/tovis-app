@@ -107,6 +107,24 @@ describe('resolveEntitlements', () => {
       }),
     ).toBe(false)
   })
+
+  // The camera's social export pack (tovis-ios). Every pro exports; the membership
+  // only removes the small Tovis mark. Asserted at the matrix level so the tier
+  // shape is fixed here, and again in socialExportMark.test.ts for the resolver.
+  it('every paid tier grants social_export_unbranded; free does not', () => {
+    for (const planKey of ['pro', 'premium', 'studio']) {
+      expect(
+        planGrants({
+          planKey,
+          status: SubscriptionStatus.ACTIVE,
+          entitlement: 'social_export_unbranded',
+        }),
+      ).toBe(true)
+    }
+    expect(
+      resolveEntitlements({ planKey: 'free', status: SubscriptionStatus.ACTIVE }),
+    ).not.toContain('social_export_unbranded')
+  })
 })
 
 describe('camera image monthly quota', () => {
@@ -190,6 +208,11 @@ describe('SQL call-site helpers', () => {
       'studio',
     ])
     expect(planKeysGranting('white_label')).toEqual(['studio'])
+    expect(planKeysGranting('social_export_unbranded')).toEqual([
+      'pro',
+      'premium',
+      'studio',
+    ])
   })
 
   it('entitledStatuses is exactly ACTIVE + TRIALING', () => {
