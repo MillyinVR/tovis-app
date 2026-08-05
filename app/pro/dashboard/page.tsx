@@ -9,6 +9,7 @@ import {
   loadProOverviewPage,
   type ProOverviewSearchParams,
 } from '@/lib/analytics/proMonthlyAnalytics'
+import { loadProRetentionInsights } from '@/lib/analytics/proRetentionInsights'
 import { loadCreatorLooksAnalytics } from '@/lib/looks/creatorAnalytics'
 import { loadProVisibilityHealth } from '@/lib/pro/visibilityHealth'
 
@@ -54,6 +55,20 @@ export default async function ProDashboardPage({
     }),
   ])
 
+  // Paid `advanced_analytics` surface. Returns { state: 'locked' } without
+  // touching the DB when the pro is not entitled, so a free pro's dashboard costs
+  // no extra queries.
+  //
+  // 🔴 Sequenced AFTER the overview on purpose: loadProOverviewPage is what
+  // ensures the current month's analytics snapshot, and this loader reads
+  // snapshots without forcing a recompute. Run inside the Promise.all above it
+  // raced that upsert and the current month rendered as "not measured".
+  const retention = await loadProRetentionInsights({
+    professionalId: professionalProfile.id,
+    professionalTimeZone: professionalProfile.timeZone,
+    now,
+  })
+
   return (
     <section
       className="brand-pro-overview-page brand-pro-page-with-fixed-header"
@@ -63,6 +78,7 @@ export default async function ProDashboardPage({
         overview={overview}
         looksAnalytics={looksAnalytics}
         visibility={visibility}
+        retention={retention}
       />
     </section>
   )

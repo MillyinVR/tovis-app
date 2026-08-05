@@ -2,6 +2,7 @@
 import { Role } from '@prisma/client'
 import { redirect } from 'next/navigation'
 
+import { resolveDiscoveryFeeCents } from '@/lib/booking/discoveryFee'
 import { getCurrentUser } from '@/lib/currentUser'
 import {
   activeCompPlanKey,
@@ -48,6 +49,9 @@ export default async function ProMembershipPage() {
       cancelAtPeriodEnd={sub?.cancelAtPeriodEnd ?? false}
       trialEndsAt={sub?.trialEndsAt?.toISOString() ?? null}
       hasBillingAccount={Boolean(sub?.stripeCustomerId)}
+      // Resolved server-side: the fee is env-configurable, so the commission pitch
+      // must render the amount clients are ACTUALLY charged, never a literal $5.
+      discoveryFeeCents={resolveDiscoveryFeeCents()}
       plans={getMembershipPlans().map((p) => ({
         key: p.key,
         name: p.name,
