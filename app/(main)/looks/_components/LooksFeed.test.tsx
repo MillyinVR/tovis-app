@@ -633,6 +633,70 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     ).toBeInTheDocument()
   })
 
+  // Regression: the hide used to look the clicked post up in a ref that a
+  // passive effect refreshed, so a click landing between "card painted" and
+  // "effect flushed" hit the `removedIndex < 0` branch and returned without
+  // ever calling fetch — a permanent no-op, not a slow one. It surfaced as a
+  // chronic CI flake (three sightings) because load widens that window.
+  //
+  // Clicking from a MutationObserver callback pins the race open: that
+  // callback is a microtask queued by the DOM insert, so it runs strictly
+  // before the task that flushes passive effects.
+  it('fires the hide POST even when the click lands at paint time (§2.2)', async () => {
+    const { fetchMock } = installFetchMock({
+      feedByCategory: {
+        all: [makeFeedItem({ id: 'look_paint_race_1' })],
+      },
+    })
+
+    // Clicking outside act(...) is the entire point of this test, so React's
+    // "not wrapped in act" warning is expected here and only here. Swallow
+    // exactly that line; anything else still reaches the console.
+    const realConsoleError = console.error
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation((...args: unknown[]) => {
+        if (
+          typeof args[0] === 'string' &&
+          args[0].includes('was not wrapped in act')
+        ) {
+          return
+        }
+        realConsoleError(...args)
+      })
+
+    const clicked = new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        const notForMe = Array.from(
+          document.querySelectorAll<HTMLButtonElement>(
+            '[data-testid="look-slide-look_paint_race_1"] button',
+          ),
+        ).find((el) => el.textContent?.trim() === 'Not for me')
+
+        if (!notForMe) return
+
+        observer.disconnect()
+        notForMe.click()
+        resolve()
+      })
+
+      observer.observe(document.body, { childList: true, subtree: true })
+    })
+
+    render(<LooksFeed />)
+
+    await clicked
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/looks/look_paint_race_1/hide',
+        { method: 'POST' },
+      )
+    })
+
+    consoleErrorSpy.mockRestore()
+  })
+
   it('opens the comment sheet for the canonical lookPostId and syncs the rail count', async () => {
     installFetchMock({
       feedByCategory: {
