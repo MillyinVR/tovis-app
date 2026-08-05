@@ -66,20 +66,22 @@ export async function loadChartShare(args: {
  */
 export const CHART_SHARE_REREQUEST_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000
 
-export type ChartShareRequestResult =
-  | { ok: true; status: ClientChartShareStatus }
-  | {
-      ok: false
-      code: 'ALREADY_GRANTED' | 'REQUEST_PENDING' | 'DECLINED' | 'COOLDOWN'
-      /** Only on COOLDOWN: when the pro may ask again. */
-      retryAt?: Date
-    }
+export type ChartShareRequestBlockCode =
+  | 'ALREADY_GRANTED'
+  | 'REQUEST_PENDING'
+  | 'DECLINED'
+  | 'COOLDOWN'
 
 export type ChartShareRequestBlock = {
-  code: 'ALREADY_GRANTED' | 'REQUEST_PENDING' | 'DECLINED' | 'COOLDOWN'
+  code: ChartShareRequestBlockCode
   /** Only on COOLDOWN: when the pro may ask again. */
   retryAt?: Date
 }
+
+/** The refusal arm spreads the block, so the codes are declared exactly once. */
+export type ChartShareRequestResult =
+  | { ok: true; status: ClientChartShareStatus }
+  | ({ ok: false } & ChartShareRequestBlock)
 
 /**
  * Why this pro may not ask right now — or null when they may.
