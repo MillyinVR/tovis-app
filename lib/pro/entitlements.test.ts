@@ -110,9 +110,9 @@ describe('resolveEntitlements', () => {
 })
 
 describe('camera image monthly quota', () => {
-  it('grants 20/150/500/500 across the tiers while entitled', () => {
+  it('grants 10/150/500/500 across the tiers while entitled', () => {
     expect(CAMERA_IMAGES_PER_MONTH).toEqual({
-      free: 20,
+      free: 10,
       pro: 150,
       premium: 500,
       studio: 500,

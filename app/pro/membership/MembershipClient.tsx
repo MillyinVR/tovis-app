@@ -25,6 +25,7 @@ type PlanCard = {
   name: string
   blurb: string
   trialDays: number
+  acquisition: 'free' | 'self-serve' | 'contact'
   cameraImagesPerMonth: number
   prices: PlanPrice[]
 }
@@ -41,8 +42,6 @@ type Props = {
   trialEndsAt: string | null
   hasBillingAccount: boolean
   plans: PlanCard[]
-  /** Configured one-time discovery platform fee, in cents (lib/booking/discoveryFee). */
-  discoveryFeeCents: number
 }
 
 function dollars(cents: number): string {
@@ -113,35 +112,43 @@ export default function MembershipClient(props: Props) {
       </p>
 
       {/*
-        The commission pitch (docs/design/membership-value-brief.md §0.4 / §3.1).
-        Every claim here is checkable in code, and must stay that way:
-          • "0% of your services / deposits" — the ONLY application_fee the platform
-            ever charges is the discovery fee below (grep `application_fee_amount`);
-            the deposit settles to the pro's Connect account in full.
-          • the fee amount is the LIVE configured value, not a hardcoded $5 — it is
-            env-overridable up to $10 (lib/booking/discoveryFee.ts).
-          • "brand-new client … from Discovery or the Looks feed" mirrors exactly
-            isNewDiscoveryClient() + isDiscoveryProvenance() — no other booking path
-            is ever charged.
-        The 20–30% figure is deliberately unattributed and hedged ("many"): it is a
-        market observation from the brief's competitor scan, not a claim we can
-        verify per-competitor at render time.
+        The commission pitch (membership-value-brief.md §0.4 / §3.1).
+
+        🔴 EVERY CLAIM HERE MUST SURVIVE THE PLANNED FEE MODEL (§8.5), not just
+        today's code. A pro-side fee is coming ($5 flat, once, on a cold match) and
+        the client fee is moving from a flat $5 to 10% of the DEPOSIT. So this copy
+        deliberately does NOT say:
+          • "0% of deposits" / "you keep 100%" — false the day the pro fee ships;
+          • "paid by the client" — the pro will pay one too;
+          • "a flat fee" — the client's side stops being flat;
+          • a dollar amount — both numbers change.
+
+        What it DOES claim, and why each stays true:
+          • "never a percentage of your service" — the pro fee is flat $5 and the
+            client fee is a share of the DEPOSIT, so neither is ever a cut of the
+            service price. This is the actual structural difference from a 20–30%
+            commission, and it is the durable version of the pitch.
+          • "only on the first booking from a brand-new client who found you
+            through Discovery" — mirrors isNewDiscoveryClient() +
+            isDiscoveryProvenance() today, and is explicitly the rule for both
+            future fees (once per client↔pro pair, cold match only).
+          • the 20–30% figure is hedged and unattributed ("many"): a market
+            observation from the brief's competitor scan, and per that scan it
+            applies to a NEW client's first appointment, not to every service.
       */}
       <div className="mt-4 rounded-card border border-accentPrimary/25 bg-bgSecondary p-4">
         <div className="text-[13px] font-black text-textPrimary">
-          You keep 100% of what you charge
+          Never a commission on your work
         </div>
         <p className="mt-1 text-[12px] leading-relaxed text-textSecondary">
           Many booking marketplaces take 20–30% of a new client&apos;s first
-          appointment out of the pro&apos;s payout.{' '}
+          appointment out of the pro&apos;s payout — every time.{' '}
           <span className="font-black text-textPrimary">{brand.displayName}</span>{' '}
-          takes 0% of your services and 0% of your deposits, on every plan. The one
-          platform fee is a flat{' '}
-          <span className="font-black text-textPrimary">
-            {dollars(props.discoveryFeeCents)}
-          </span>{' '}
-          paid by the <em>client</em>, once, the first time a brand-new client books
-          you from Discovery or the Looks feed.
+          never takes a percentage of your service price. The only platform fee is
+          small and one-time, and it applies solely to the first booking from a
+          brand-new client who found you through Discovery or the Looks feed —
+          never on a returning client, a rebook, or anyone who came from your own
+          link.
         </p>
       </div>
 
@@ -166,12 +173,14 @@ export default function MembershipClient(props: Props) {
         <div className="mt-4 text-[12px] text-toneDanger">{error}</div>
       ) : null}
 
-      <div className="mt-5 grid gap-4 md:grid-cols-3">
+      <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {props.plans.map((plan) => {
           const isCurrent = plan.key === props.currentPlanKey
           const monthly = plan.prices.find((p) => p.interval === 'month')
           const annual = plan.prices.find((p) => p.interval === 'year')
-          const isFree = plan.prices.length === 0
+          // An enterprise tier is priced by arrangement, so it shows neither a
+          // number nor "Free" — the latter would be a straight-up false claim.
+          const isContact = plan.acquisition === 'contact'
           return (
             <div
               key={plan.key}
@@ -185,11 +194,13 @@ export default function MembershipClient(props: Props) {
               <div className="flex items-center justify-between">
                 <div className="text-[14px] font-black">{plan.name}</div>
                 <div className="text-[13px] font-black text-textPrimary">
-                  {isFree
-                    ? 'Free'
-                    : monthly
-                      ? `${dollars(monthly.amountCents)}/mo`
-                      : ''}
+                  {isContact
+                    ? 'Custom'
+                    : plan.acquisition === 'free'
+                      ? 'Free'
+                      : monthly
+                        ? `${dollars(monthly.amountCents)}/mo`
+                        : ''}
                 </div>
               </div>
               <p className="mt-1 text-[12px] text-textSecondary">{plan.blurb}</p>
@@ -216,6 +227,16 @@ export default function MembershipClient(props: Props) {
                   <div className="rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-center text-[12px] font-black text-textSecondary">
                     Current plan
                   </div>
+                ) : isContact ? (
+                  // Routes to the app's existing contact surface (/support), not a
+                  // bespoke mailto — that page already carries the form AND the
+                  // brand-resolved support address, so this stays white-label safe.
+                  <Link
+                    href="/support"
+                    className="w-full rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-center text-[12px] font-black text-textPrimary transition hover:border-white/30"
+                  >
+                    Contact us for more info
+                  </Link>
                 ) : (
                   <>
                     {monthly?.purchasable ? (

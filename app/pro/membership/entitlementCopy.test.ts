@@ -13,13 +13,20 @@ describe('advertisedEntitlements', () => {
       })
       const advertised = advertisedEntitlements(granted)
 
-      // Everything Pro/Premium grants is implemented AND sellable, so the page
-      // must name all of it. A gap here means either a missing label or an
-      // entitlement that slipped into a paid plan without copy.
-      expect(advertised.map((a) => a.key)).toEqual(granted)
-      // ...including advanced_analytics, which is only allowed back on a paid
-      // plan because lib/analytics/proRetentionInsights.ts now implements it.
+      // Everything named must be implemented AND something we intend to sell.
+      // advanced_analytics qualifies (lib/analytics/proRetentionInsights.ts).
       expect(advertised.map((a) => a.key)).toContain('advanced_analytics')
+      expect(advertised.map((a) => a.key)).toContain('tax_export')
+      for (const item of advertised) {
+        expect(granted).toContain(item.key)
+      }
+
+      // 🔴 discovery_fee_waiver is granted but deliberately NOT advertised: as
+      // coded it waives the CLIENT's fee, while the intended perk waives a
+      // pro-side fee that does not exist yet (brief §8.5). Selling it today would
+      // describe a benefit the pro does not actually receive.
+      expect(granted).toContain('discovery_fee_waiver')
+      expect(advertised.map((a) => a.key)).not.toContain('discovery_fee_waiver')
       for (const item of advertised) {
         expect(item.label.trim().length).toBeGreaterThan(0)
       }
