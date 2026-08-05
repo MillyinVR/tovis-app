@@ -28,6 +28,15 @@ type Props = {
   share: ChartShareState
   /** Back to the conversation, which is where the pro almost always came from. */
   messageHref: string
+  /**
+   * The client's PUBLIC `/u/[handle]` page, or null when they have none.
+   *
+   * Separate from the chart in every sense: it is world-readable, it holds
+   * nothing clinical, and refusing it here would refuse a page the pro could
+   * open in a signed-out browser tab. Null for most clients — a private client
+   * has no public page by design — and then nothing renders.
+   */
+  publicProfileHref: string | null
   now: Date
 }
 
@@ -36,6 +45,7 @@ export default function ChartAccessRefusedView({
   clientName,
   share,
   messageHref,
+  publicProfileHref,
   now,
 }: Props) {
   const block = chartShareRequestBlock(share, now)
@@ -67,13 +77,22 @@ export default function ChartAccessRefusedView({
             <RequestChartAccessButton clientId={clientId} block={block?.code ?? null} />
           </div>
 
-          <div className="pt-2">
+          <div className="flex flex-wrap gap-2 pt-2">
             <Link
               href={messageHref}
               className={buttonClassName({ variant: 'ghost', size: 'sm' })}
             >
               Message {clientName}
             </Link>
+
+            {publicProfileHref ? (
+              <Link
+                href={publicProfileHref}
+                className={buttonClassName({ variant: 'ghost', size: 'sm' })}
+              >
+                View public profile
+              </Link>
+            ) : null}
           </div>
         </div>
       </Card>

@@ -1,5 +1,7 @@
 // lib/routes.ts
 
+import { professionalProfileHref } from '@/lib/profiles/profileHrefs'
+
 export const PRO_PUBLIC_PROFILE_PATH = '/pro/profile/public-profile' as const
 
 /**
@@ -10,11 +12,15 @@ export const PRO_PUBLIC_PROFILE_PATH = '/pro/profile/public-profile' as const
  *
  * Returns null for a missing/blank id so callers render inert text instead of a
  * link to `/professionals/`.
+ *
+ * The `/professionals/[id]` shape itself lives in `lib/profiles/profileHrefs` —
+ * this is the nullable, blank-tolerant wrapper the UI links call, not a second
+ * copy of the route. (It was a copy until now; the two could have drifted.)
  */
 export function proPublicProfilePath(
   proId: string | null | undefined,
 ): string | null {
   const trimmed = typeof proId === 'string' ? proId.trim() : ''
   if (!trimmed) return null
-  return `/professionals/${encodeURIComponent(trimmed)}`
+  return professionalProfileHref(trimmed)
 }

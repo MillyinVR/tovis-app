@@ -5,7 +5,12 @@ import { Prisma } from '@prisma/client'
 import type { PhotoReleaseStatus } from '@prisma/client'
 import type { ReactNode } from 'react'
 
-import ClientNameLink from '@/app/_components/ClientNameLink'
+import ClientProfileLink from '@/app/_components/ClientProfileLink'
+import {
+  CLIENT_LINK_SELECT,
+  clientPublicHandle,
+  clientPublicProfileHref,
+} from '@/lib/profiles/profileHrefs'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { prisma } from '@/lib/prisma'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
@@ -1839,6 +1844,7 @@ export default async function ClientDetailPage(props: {
       select: {
         firstName: true, // pii-plaintext-read-ok: CONTACT tier IS "may see who they are"
         lastName: true, // pii-plaintext-read-ok: CONTACT tier IS "may see who they are"
+        ...CLIENT_LINK_SELECT,
       },
     })
 
@@ -1853,6 +1859,11 @@ export default async function ClientDetailPage(props: {
         clientName={formatClientName(contactClient)}
         share={await loadChartShare({ clientId, professionalId: proId })}
         messageHref={buildProToClientMessageHref({ proId, clientId })}
+        // The chart is refused; the client's PUBLIC page is a different thing
+        // and the whole internet can already read it. Offering it here is what
+        // stops this screen being a dead end for a pro who tapped a name — and
+        // it is null, so nothing renders, for a client with no public profile.
+        publicProfileHref={clientPublicProfileHref(contactClient)}
         now={new Date()}
       />
     )
@@ -2088,9 +2099,24 @@ export default async function ClientDetailPage(props: {
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
             <h1 className="text-[22px] font-black text-textPrimary">
-              <ClientNameLink canLink clientId={client.id}>
+              {/* The chart IS this page, so linking the name back to it was a
+                  self-link that did nothing. It now leads to the client's
+                  public profile — or renders as plain text when they have
+                  none, which is most clients. */}
+              <ClientProfileLink
+                href={clientPublicProfileHref(client)}
+                label={formatClientName(client)}
+                // Only when there IS one — `title` is rendered in the inert
+                // case too, and a tooltip promising a profile that doesn't
+                // exist is exactly the dead end this change removes.
+                title={
+                  clientPublicHandle(client)
+                    ? `View @${clientPublicHandle(client)}'s public profile`
+                    : undefined
+                }
+              >
                 {client.firstName} {client.lastName}
-              </ClientNameLink>
+              </ClientProfileLink>
             </h1>
 
             <div className="mt-1 text-[12px] font-semibold text-textSecondary">

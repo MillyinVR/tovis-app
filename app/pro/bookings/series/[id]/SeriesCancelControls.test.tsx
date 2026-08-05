@@ -62,6 +62,7 @@ function detail(
     depositPerOccurrence: false,
     clientId: 'cli_1',
     clientName: 'Dana West',
+    clientPublicProfileHandle: null,
     offeringId: 'off_1',
     serviceName: 'Balayage',
     locationId: 'loc_1',

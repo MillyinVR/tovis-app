@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 
-import ClientNameLink from '@/app/_components/ClientNameLink'
+import ClientProfileLink from '@/app/_components/ClientProfileLink'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import Badge from '@/app/_components/ui/Badge'
 import { Card, buttonClassName } from '@/app/_components/ui'
@@ -22,6 +22,13 @@ export type ProClientRow = {
   searchText: string
   lastBookingLabel: string
   messageHref: string
+  /**
+   * Where this client's name leads, resolved server-side by THE one rule
+   * (resolveClientProfileHref). Every row on THIS list is inside the pro's
+   * visibility window by construction, so today it is always the chart — the
+   * field exists so the roster can't drift from the rule the other surfaces use.
+   */
+  profileHref: string | null
   /**
    * K16-B — the booking requirements this pro has set for this client, from
    * `summarizeProClientPolicy`. Empty for every client when the technical-record
@@ -137,9 +144,12 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <ClientNameLink canLink={true} clientId={client.id}>
-                          {client.displayName}
-                        </ClientNameLink>
+                        <ClientProfileLink
+                          href={client.profileHref}
+                          label={client.displayName}
+                          className="font-black text-textPrimary"
+                          inertClassName="font-black text-textPrimary"
+                        />
                       </div>
 
                       <div className="mt-1 text-[12px] font-semibold text-textSecondary">

@@ -3,7 +3,12 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Prisma } from '@prisma/client'
 
-import ClientNameLink from '@/app/_components/ClientNameLink'
+import ClientProfileLink from '@/app/_components/ClientProfileLink'
+import {
+  clientLinkTarget,
+  resolveClientProfileHref,
+  type ClientLinkViewer,
+} from '@/lib/profiles/profileHrefs'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
@@ -98,6 +103,9 @@ export default async function ProRemindersPage() {
   // Single source of truth for chart linkability — same rule as the clients
   // list and the page gate (includes the 30-day RECENT_COMPLETED window).
   const visibleClientIdSet = await getVisibleClientIdSetForPro(proId)
+  const clientLinkViewer: ClientLinkViewer = {
+    proVisibleClientIds: visibleClientIdSet,
+  }
 
   const reminders = await prisma.reminder.findMany({
     where: { professionalId: proId },
@@ -279,9 +287,12 @@ export default async function ProRemindersPage() {
         ) : (
           <div className="grid gap-3">
             {openReminders.map((reminder) => {
-              const canLink = reminder.client
-                ? visibleClientIdSet.has(String(reminder.client.id))
-                : false
+              // Chart when this pro may open it, else the client's public
+              // page, else nothing — THE one rule.
+              const clientHref = resolveClientProfileHref(
+                clientLinkTarget(reminder.client),
+                clientLinkViewer,
+              )
 
               return (
                 <Card key={reminder.id} variant="glass" padding="md">
@@ -298,12 +309,12 @@ export default async function ProRemindersPage() {
                       {reminder.client ? (
                         <div className="mt-2 text-[12px] font-semibold text-textSecondary">
                           Client:{' '}
-                          <ClientNameLink
-                            canLink={canLink}
-                            clientId={reminder.client.id}
-                          >
-                            {reminderClientDisplayName(reminder.client)}
-                          </ClientNameLink>
+                          <ClientProfileLink
+                            href={clientHref}
+                            label={reminderClientDisplayName(reminder.client)}
+                            className="font-black text-textPrimary"
+                            inertClassName="font-black text-textPrimary"
+                          />
                         </div>
                       ) : null}
 

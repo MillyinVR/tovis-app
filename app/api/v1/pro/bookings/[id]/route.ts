@@ -66,6 +66,7 @@ import {
 } from '@/lib/booking/cancelRefund'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { clientCanBeMessaged } from '@/lib/messages/clientThreadEligibility'
+import { clientPublicHandle } from '@/lib/profiles/profileHrefs'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
@@ -306,6 +307,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
             // leaves the server — an unclaimed profile has none, which is
             // exactly what makes a thread impossible.
             userId: true,
+            handle: true,
+            isPublicProfile: true,
             user: { select: { email: true } },
           },
         },
@@ -470,6 +473,11 @@ export async function GET(_req: Request, ctx: RouteContext) {
             // client" button was offered and then failed silently. Same
             // predicate the resolve route refuses on, never a re-derivation.
             canMessage: clientCanBeMessaged(booking.client),
+            // The client's public `@handle`, or null when they have no public
+            // profile. A SEPARATE axis from chart access — the pro app opens
+            // /u/{handle} for a client whose chart it cannot open, instead of
+            // rendering the name as dead text (web parity, this PR).
+            publicProfileHandle: clientPublicHandle(booking.client),
           },
           timeZone: schedulingContext.appointmentTimeZone,
           timeZoneSource: schedulingContext.timeZoneSource,

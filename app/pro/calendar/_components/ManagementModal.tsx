@@ -7,7 +7,8 @@ import type { MouseEvent, ReactNode } from 'react'
 import { initialsForName } from '@/lib/initials'
 import { formatInTimeZone } from '@/lib/time'
 import { Avatar } from '@/app/_components/ui'
-import ClientNameLink from '@/app/_components/ClientNameLink'
+import ClientProfileLink from '@/app/_components/ClientProfileLink'
+import { clientIdentityHrefFromDto } from '@/lib/profiles/profileHrefs'
 
 import type { CalendarEvent, ManagementKey, ManagementLists } from '../_types'
 
@@ -731,6 +732,15 @@ function ManagementEventRow(props: ManagementEventRowProps) {
 
   const clientProfileId =
     event.kind === 'BOOKING' ? event.clientProfileId ?? null : null
+  // Chart when the pro may open it, else the client's public page, else nothing
+  // — THE one rule. A waitlist client the pro has never booked, and a client
+  // past the 30-day chart window, both arrive here with clientProfileId: null;
+  // until now that meant plain text even when /u/{handle} was world-readable.
+  const clientHref = clientIdentityHrefFromDto({
+    clientProfileId,
+    clientPublicProfileHandle:
+      event.kind === 'BOOKING' ? event.clientPublicProfileHandle ?? null : null,
+  })
 
   const preferenceLabel =
     event.kind === 'BOOKING' ? normalizeText(event.preferenceLabel) : ''
@@ -793,17 +803,11 @@ function ManagementEventRow(props: ManagementEventRowProps) {
             </div>
 
             <p className="brand-pro-calendar-management-row-subtitle">
-              {clientProfileId ? (
-                <ClientNameLink
-                  canLink
-                  clientId={clientProfileId}
-                  className="brand-pro-calendar-management-row-client-link"
-                >
-                  {rowCopy.primaryName}
-                </ClientNameLink>
-              ) : (
-                rowCopy.primaryName
-              )}
+              <ClientProfileLink
+                href={clientHref}
+                label={rowCopy.primaryName}
+                className="brand-pro-calendar-management-row-client-link"
+              />
               {secondaryText ? ` · ${secondaryText}` : ''}
             </p>
           </div>

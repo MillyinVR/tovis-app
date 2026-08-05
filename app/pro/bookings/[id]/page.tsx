@@ -17,7 +17,11 @@ import {
 } from '@prisma/client'
 import { COPY } from '@/lib/copy'
 import ConfirmPaymentReceivedButton from './ConfirmPaymentReceivedButton'
-import ClientNameLink from '@/app/_components/ClientNameLink'
+import ClientProfileLink from '@/app/_components/ClientProfileLink'
+import {
+  clientIdentityHref,
+  clientLinkTarget,
+} from '@/lib/profiles/profileHrefs'
 import { Avatar, Badge } from '@/app/_components/ui'
 import {
   badgeToneForBookingStatus,
@@ -241,7 +245,14 @@ export default async function ProBookingDetailPage(props: {
   }
 
   const visibility = await getProClientVisibility(proId, booking.clientId)
-  const canLinkClient = visibility.canViewClient
+  // Chart when the pro may open it, else the client's public page, else nothing
+  // — THE one rule (resolveClientProfileHref). A client whose chart window has
+  // closed used to render as dead text here even when their /u/[handle] profile
+  // was readable by the whole internet.
+  const clientHref = clientIdentityHref(
+    clientLinkTarget(booking.client),
+    visibility.canViewClient,
+  )
 
   const scheduleTz = await resolveProScheduleTimeZone(
     proId,
@@ -458,12 +469,21 @@ export default async function ProBookingDetailPage(props: {
 
         {/* client */}
         <div className="mt-3.5 flex items-center gap-2.5 border-t border-white/10 pt-3.5">
-          <Avatar name={clientName || undefined} size="md" aria-hidden />
+          <ClientProfileLink
+            href={clientHref}
+            label={clientName || 'Client'}
+            underline={false}
+            className="shrink-0 rounded-full"
+            inertClassName="shrink-0"
+          >
+            <Avatar name={clientName || undefined} size="md" aria-hidden />
+          </ClientProfileLink>
           <div className="min-w-0">
             <div className="font-display text-[14px] font-bold text-textPrimary">
-              <ClientNameLink canLink={canLinkClient} clientId={booking.clientId}>
-                {clientName || 'Client'}
-              </ClientNameLink>
+              <ClientProfileLink
+                href={clientHref}
+                label={clientName || 'Client'}
+              />
             </div>
             {clientContact ? (
               <div className="truncate text-[11.5px] text-textMuted">

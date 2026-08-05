@@ -43,6 +43,10 @@ import {
   type RelationshipBadge,
 } from '@/lib/booking/relationshipLabel'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
+import {
+  CLIENT_LINK_SELECT,
+  clientPublicHandle,
+} from '@/lib/profiles/profileHrefs'
 
 export type BookingsListStatusFilter =
   | 'ALL'
@@ -137,7 +141,7 @@ export const bookingsListSelect = {
 
   client: {
     select: {
-      id: true,
+      ...CLIENT_LINK_SELECT,
       firstName: true,
       lastName: true,
       phone: true,
@@ -407,6 +411,20 @@ export type ProBookingListItemDTO = {
     email: string | null
     phone: string | null
     canViewClient: boolean
+    /**
+     * The client's public `@handle`, or null when they have no public profile.
+     *
+     * This is NOT the same axis as `canViewClient`, and the two are deliberately
+     * independent: `canViewClient` says whether this pro may open the private
+     * CHART, while this says whether the client has a world-readable page at
+     * `/u/{handle}` at all. A pro past their 30-day chart window looking at a
+     * public client gets `canViewClient: false` and a handle — which is exactly
+     * the case that used to render a dead name (web) and "viewable on the web
+     * for now" (iOS).
+     *
+     * null means "no public page exists" — render plain text, never a link.
+     */
+    publicProfileHandle: string | null
   }
   location: BookingLocationMeta
   needsCloseout: boolean
@@ -463,6 +481,7 @@ export function serializeBookingsListRow(
       email: booking.client.user?.email ?? null,
       phone: booking.client.phone ?? null,
       canViewClient: args.visibleClientIdSet.has(String(booking.client.id)),
+      publicProfileHandle: clientPublicHandle(booking.client),
     },
     location: resolveBookingLocationMeta(booking),
     needsCloseout: needsCloseout(booking),

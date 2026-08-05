@@ -11,6 +11,12 @@ import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { prismaRead } from '@/lib/prisma'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 import { liveWaitlistOfferWhere } from '@/lib/waitlist/offerLiveness'
+import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
+import {
+  CLIENT_LINK_SELECT,
+  clientLinkTarget,
+  resolveClientProfileHref,
+} from '@/lib/profiles/profileHrefs'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,6 +33,19 @@ type WaitlistOutreachEntry = {
   avatarUrl: string | null
   preferenceLabel: string
   joinedAt: string
+  /**
+   * Where this client's name/avatar leads, resolved server-side by THE one rule
+   * (resolveClientProfileHref): the chart when this pro may open it, else the
+   * client's public /u/[handle] page, else null.
+   *
+   * 🔴 Waitlist is the surface where this matters most. Joining a waitlist
+   * auto-creates a message thread and nothing else, which is the CONTACT_ONLY
+   * tier — so a waitlist client is almost never chart-visible, and every name on
+   * this list was dead text regardless of whether they had a public profile.
+   *
+   * null → render plain text, never a link.
+   */
+  clientProfileHref: string | null
   // A still-confirmable time already offered to this client, so the row reads
   // "Offered · <time>" instead of inviting another offer. Since F14 that offer
   // also holds the slot, and this is the pro's only surface saying so.
@@ -79,7 +98,12 @@ export async function GET() {
         windowEndMin: true,
         service: { select: { id: true, name: true } },
         client: {
-          select: { firstName: true, lastName: true, avatarUrl: true },
+          select: {
+            ...CLIENT_LINK_SELECT,
+            firstName: true, // pii-plaintext-read-ok: pro reads own waitlist client's name for the outreach row
+            lastName: true, // pii-plaintext-read-ok: pro reads own waitlist client's name for the outreach row
+            avatarUrl: true,
+          },
         },
       },
     })
@@ -115,6 +139,14 @@ export async function GET() {
       ]),
     )
 
+    // One batched read of the clients this pro may open a chart for, so each row
+    // resolves against the same rule the bookings list and calendar use.
+    const clientLinkViewer = {
+      proVisibleClientIds: await getVisibleClientIdSetForPro(
+        auth.professionalId,
+      ),
+    }
+
     const groups = new Map<string, WaitlistOutreachServiceGroup>()
 
     for (const row of rows) {
@@ -140,6 +172,10 @@ export async function GET() {
           row.client?.lastName ?? null,
         ),
         avatarUrl: row.client?.avatarUrl ?? null,
+        clientProfileHref: resolveClientProfileHref(
+          clientLinkTarget(row.client),
+          clientLinkViewer,
+        ),
         preferenceLabel: formatWaitlistPreferenceLabel({
           preferenceType: row.preferenceType,
           specificDate: row.specificDate,
