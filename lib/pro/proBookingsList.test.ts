@@ -15,6 +15,7 @@ import {
   getBaseAndAddOnNames,
   needsCloseout,
   normalizeBookingsStatusFilter,
+  serializeBookingsListRow,
   type BookingsListRow,
 } from './proBookingsList'
 
@@ -67,6 +68,8 @@ function makeRow(overrides: Partial<BookingsListRow> = {}): BookingsListRow {
       firstName: 'Ada',
       lastName: 'Lovelace',
       phone: null,
+      handle: null,
+      isPublicProfile: false,
       user: { email: 'ada@example.com' },
     },
   }
@@ -189,5 +192,79 @@ describe('needsCloseout', () => {
         }),
       ),
     ).toBe(false)
+  })
+})
+
+
+// The two axes the pro-facing client link rides on. They are independent, and
+// the bug this covers was a surface that only knew the first one: a client
+// outside the 30-day chart window rendered as dead text on web and as "viewable
+// on the web for now" on iOS, even when their /u/[handle] page was public.
+describe('serializeBookingsListRow — client link fields', () => {
+  const serialize = (row: BookingsListRow, visible: string[]) =>
+    serializeBookingsListRow(row, {
+      scheduleTz: 'America/Los_Angeles',
+      visibleClientIdSet: new Set(visible),
+    })
+
+  const publicClient = makeRow({
+    client: {
+      id: 'cl_1',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      phone: null,
+      handle: 'ada',
+      isPublicProfile: true,
+      user: { email: 'ada@example.com' },
+    },
+  })
+
+  it('carries the public handle for a client OUTSIDE the chart window', () => {
+    const dto = serialize(publicClient, [])
+    expect(dto.client.canViewClient).toBe(false)
+    expect(dto.client.publicProfileHandle).toBe('ada')
+  })
+
+  it('carries the public handle for a client INSIDE the chart window too', () => {
+    const dto = serialize(publicClient, ['cl_1'])
+    expect(dto.client.canViewClient).toBe(true)
+    expect(dto.client.publicProfileHandle).toBe('ada')
+  })
+
+  it('is null when the client has a handle but has NOT opted in', () => {
+    const dto = serialize(
+      makeRow({
+        client: {
+          id: 'cl_1',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          phone: null,
+          // A reserved-but-private handle must never publish the client.
+          handle: 'ada',
+          isPublicProfile: false,
+          user: { email: 'ada@example.com' },
+        },
+      }),
+      ['cl_1'],
+    )
+    expect(dto.client.publicProfileHandle).toBeNull()
+  })
+
+  it('is null when the client opted in but never claimed a handle', () => {
+    const dto = serialize(
+      makeRow({
+        client: {
+          id: 'cl_1',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          phone: null,
+          handle: null,
+          isPublicProfile: true,
+          user: { email: 'ada@example.com' },
+        },
+      }),
+      ['cl_1'],
+    )
+    expect(dto.client.publicProfileHandle).toBeNull()
   })
 })

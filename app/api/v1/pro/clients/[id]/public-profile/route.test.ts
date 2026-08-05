@@ -13,9 +13,9 @@ const mocks = vi.hoisted(() => {
   )
   const pickString = vi.fn((v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null))
   const requirePro = vi.fn()
-  const assertProCanViewClient = vi.fn()
+  const assertProCanContactClient = vi.fn()
   const loadPublicClientProfileByClientId = vi.fn()
-  return { jsonOk, jsonFail, pickString, requirePro, assertProCanViewClient, loadPublicClientProfileByClientId }
+  return { jsonOk, jsonFail, pickString, requirePro, assertProCanContactClient, loadPublicClientProfileByClientId }
 })
 
 vi.mock('@/app/api/_utils', () => ({
@@ -24,7 +24,9 @@ vi.mock('@/app/api/_utils', () => ({
   pickString: mocks.pickString,
   requirePro: mocks.requirePro,
 }))
-vi.mock('@/lib/clientVisibility', () => ({ assertProCanViewClient: mocks.assertProCanViewClient }))
+vi.mock('@/lib/clientVisibility', () => ({
+  assertProCanContactClient: mocks.assertProCanContactClient,
+}))
 vi.mock('@/app/u/[handle]/_data/loadPublicClientProfile', () => ({
   loadPublicClientProfileByClientId: mocks.loadPublicClientProfileByClientId,
 }))
@@ -61,17 +63,43 @@ describe('GET /api/v1/pro/clients/[id]/public-profile', () => {
     expect(mocks.loadPublicClientProfileByClientId).not.toHaveBeenCalled()
   })
 
-  it('404s when the pro cannot view the client, without loading the profile', async () => {
+  it('404s a pro with NO relationship, without loading the profile', async () => {
     mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
-    mocks.assertProCanViewClient.mockResolvedValue({ ok: false })
+    mocks.assertProCanContactClient.mockResolvedValue({
+      ok: false,
+      visibility: { canViewClient: false, canContactClient: false },
+    })
     const res = await GET(new Request('http://x'), ctx())
     expect(res.status).toBe(404)
     expect(mocks.loadPublicClientProfileByClientId).not.toHaveBeenCalled()
   })
 
+  // 🔴 The whole point of the gate change. This pro is in the CONTACT tier —
+  // they can message the client and see who they are, but the chart is closed
+  // (past the 30-day window, or never shared). They used to get a 404 here,
+  // which the pro app renders as "viewable on the web for now" — a flat lie
+  // about a page anyone can load signed out.
+  it('serves a pro in the CONTACT tier whose CHART access is closed', async () => {
+    mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
+    mocks.assertProCanContactClient.mockResolvedValue({
+      ok: true,
+      visibility: { canViewClient: false, canContactClient: true },
+    })
+    mocks.loadPublicClientProfileByClientId.mockResolvedValue(sampleProfile)
+
+    const res = await GET(new Request('http://x'), ctx('client_9'))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.profile.handle).toBe('ava')
+  })
+
   it('returns the public profile as a neutral viewer (no viewer options passed)', async () => {
     mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
-    mocks.assertProCanViewClient.mockResolvedValue({ ok: true, visibility: { accessUntil: null } })
+    mocks.assertProCanContactClient.mockResolvedValue({
+      ok: true,
+      visibility: { canViewClient: true, canContactClient: true, accessUntil: null },
+    })
     mocks.loadPublicClientProfileByClientId.mockResolvedValue(sampleProfile)
 
     const res = await GET(new Request('http://x'), ctx('client_9'))
@@ -89,7 +117,10 @@ describe('GET /api/v1/pro/clients/[id]/public-profile', () => {
 
   it('returns profile: null (200, not 404) when the client has no public profile', async () => {
     mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
-    mocks.assertProCanViewClient.mockResolvedValue({ ok: true, visibility: { accessUntil: null } })
+    mocks.assertProCanContactClient.mockResolvedValue({
+      ok: true,
+      visibility: { canViewClient: true, canContactClient: true, accessUntil: null },
+    })
     mocks.loadPublicClientProfileByClientId.mockResolvedValue(null)
 
     const res = await GET(new Request('http://x'), ctx())

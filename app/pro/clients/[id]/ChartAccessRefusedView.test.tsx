@@ -28,13 +28,17 @@ const NO_SHARE: ChartShareState = {
   revokedAt: null,
 }
 
-function renderView(share: ChartShareState) {
+function renderView(
+  share: ChartShareState,
+  publicProfileHref: string | null = null,
+) {
   return render(
     <ChartAccessRefusedView
       clientId="client_1"
       clientName="Rae Kim"
       share={share}
       messageHref="/messages/thread/t_1"
+      publicProfileHref={publicProfileHref}
       now={NOW}
     />,
   )
@@ -93,5 +97,29 @@ describe('ChartAccessRefusedView', () => {
     expect(
       screen.getByRole('button', { name: 'Request chart access' }),
     ).toBeInTheDocument()
+  })
+})
+
+
+// The refusal screen is where a pro lands after tapping a client whose chart has
+// closed. It must not be a dead end for a client whose PUBLIC page the pro (and
+// everyone else) can already read — and it must not promise one that isn't there.
+describe('ChartAccessRefusedView — public profile escape hatch', () => {
+  it('offers the public profile when the client has one', () => {
+    renderView(NO_SHARE, '/u/rae')
+
+    expect(
+      screen.getByRole('link', { name: 'View public profile' }),
+    ).toHaveAttribute('href', '/u/rae')
+  })
+
+  it('renders NO public-profile link for a private client', () => {
+    renderView(NO_SHARE, null)
+
+    expect(
+      screen.queryByRole('link', { name: 'View public profile' }),
+    ).toBeNull()
+    // And nothing that merely looks like one.
+    expect(screen.queryByText('View public profile')).toBeNull()
   })
 })

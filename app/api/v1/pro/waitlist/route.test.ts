@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   waitlistFindMany: vi.fn(),
   offerFindMany: vi.fn(),
+  getVisibleClientIdSetForPro: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -26,6 +27,13 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
+// The route resolves each row's client link against the pro's visible-client
+// set. Mocked here rather than mocking `prisma` (which this suite deliberately
+// does not provide) so the test stays about the payload shape.
+vi.mock('@/lib/clientVisibility', () => ({
+  getVisibleClientIdSetForPro: mocks.getVisibleClientIdSetForPro,
+}))
+
 import { GET } from './route'
 
 type Payload = {
@@ -36,6 +44,7 @@ type Payload = {
       rank: number
       waitlistEntryId: string
       clientName: string
+      clientProfileHref: string | null
       preferenceLabel: string
       pendingOffer: { id: string; startsAt: string } | null
     }[]
@@ -52,6 +61,9 @@ function row(over: {
   lastName?: string
   preferenceType?: string
   timeOfDay?: string | null
+  clientId?: string
+  handle?: string | null
+  isPublicProfile?: boolean
 }) {
   return {
     id: over.id,
@@ -63,6 +75,9 @@ function row(over: {
     windowEndMin: null,
     service: { id: over.serviceId, name: over.serviceName },
     client: {
+      id: over.clientId ?? 'cl_1',
+      handle: over.handle ?? null,
+      isPublicProfile: over.isPublicProfile ?? false,
       firstName: over.firstName ?? 'A',
       lastName: over.lastName ?? 'B',
       avatarUrl: null,
@@ -74,6 +89,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro-1' })
   mocks.offerFindMany.mockResolvedValue([])
+  // Default: no chart access — which is the NORMAL waitlist case. Joining a
+  // waitlist auto-creates a thread and nothing else (CONTACT_ONLY), so a
+  // waitlist client is almost never in the pro's visible-client set.
+  mocks.getVisibleClientIdSetForPro.mockResolvedValue(new Set<string>())
   // jsonOk returns the payload so we can assert on it directly.
   mocks.jsonOk.mockImplementation((data: unknown) => data)
   mocks.jsonFail.mockImplementation((status: number, error: string) => ({
@@ -210,5 +229,72 @@ describe('GET /api/v1/pro/waitlist', () => {
 
     expect(res.status).toBe(500)
     expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Failed to load waitlist.')
+  })
+})
+
+
+// The waitlist row's name was dead text for EVERY client, because the surface
+// only ever knew about the chart — and a waitlist client is the one who least
+// often has a chart. Both directions matter.
+describe('GET /api/v1/pro/waitlist — where the client name links', () => {
+  it('links a PUBLIC client to their /u/[handle] page when the chart is closed', async () => {
+    mocks.waitlistFindMany.mockResolvedValue([
+      row({
+        id: 'w1',
+        serviceId: 's1',
+        serviceName: 'Balayage',
+        createdAt: '2026-06-10T00:00:00Z',
+        clientId: 'cl_9',
+        handle: 'maya',
+        isPublicProfile: true,
+      }),
+    ])
+
+    const raw: unknown = await GET()
+    const payload = raw as Payload
+
+    expect(payload.services[0]?.entries[0]?.clientProfileHref).toBe('/u/maya')
+  })
+
+  it('prefers the CHART when the pro may open it', async () => {
+    mocks.getVisibleClientIdSetForPro.mockResolvedValue(new Set(['cl_9']))
+    mocks.waitlistFindMany.mockResolvedValue([
+      row({
+        id: 'w1',
+        serviceId: 's1',
+        serviceName: 'Balayage',
+        createdAt: '2026-06-10T00:00:00Z',
+        clientId: 'cl_9',
+        handle: 'maya',
+        isPublicProfile: true,
+      }),
+    ])
+
+    const raw: unknown = await GET()
+    const payload = raw as Payload
+
+    expect(payload.services[0]?.entries[0]?.clientProfileHref).toBe(
+      '/pro/clients/cl_9',
+    )
+  })
+
+  it('is NULL for a private client with no chart — no dead link', async () => {
+    mocks.waitlistFindMany.mockResolvedValue([
+      row({
+        id: 'w1',
+        serviceId: 's1',
+        serviceName: 'Balayage',
+        createdAt: '2026-06-10T00:00:00Z',
+        clientId: 'cl_9',
+        // Handle reserved but never opted in — must NOT publish them.
+        handle: 'maya',
+        isPublicProfile: false,
+      }),
+    ])
+
+    const raw: unknown = await GET()
+    const payload = raw as Payload
+
+    expect(payload.services[0]?.entries[0]?.clientProfileHref).toBeNull()
   })
 })

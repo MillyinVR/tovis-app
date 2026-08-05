@@ -10,6 +10,11 @@ import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProSchedul
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { PRO_CLIENT_POLICY_SELECT } from '@/lib/proClientPolicy/load'
+import {
+  CLIENT_LINK_SELECT,
+  clientLinkTarget,
+  resolveClientProfileHref,
+} from '@/lib/profiles/profileHrefs'
 import { summarizeProClientPolicy } from '@/lib/proClientPolicy/summary'
 
 import NewClientForm from './NewClientForm'
@@ -62,7 +67,7 @@ export default async function ProClientsPage() {
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     take: 500,
     select: {
-      id: true,
+      ...CLIENT_LINK_SELECT,
       firstName: true,
       lastName: true,
       phone: true,
@@ -104,6 +109,10 @@ export default async function ProClientsPage() {
         })
       : []
 
+  // The roster query already filtered to visible clients, so the visible set IS
+  // this list's ids — no second visibility read.
+  const visibleClientIds = new Set(clients.map((client) => client.id))
+
   const cardOnFileRailEnabled = noShowProtectionEnabled()
   const policyByClientId = new Map(
     policyRows.map(({ clientId, ...policy }) => [clientId, policy]),
@@ -129,6 +138,14 @@ export default async function ProClientsPage() {
         scheduleTz,
       ),
       messageHref: buildProToClientMessageHref({ proId, clientId: client.id }),
+      // Every row here is inside the visibility window by construction (the
+      // query filters on proClientVisibilityWhere), so this resolves to the
+      // chart. Routed through the shared rule anyway so the roster can never
+      // disagree with the bookings list / calendar / waitlist about where a
+      // client's name goes.
+      profileHref: resolveClientProfileHref(clientLinkTarget(client), {
+        proVisibleClientIds: visibleClientIds,
+      }),
       requirements: summarizeProClientPolicy({
         policy: policyByClientId.get(client.id) ?? null,
         cardOnFileRailEnabled,

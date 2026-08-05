@@ -10,6 +10,7 @@ import { bookinglessClaimEnabled } from '@/lib/clients/bookinglessClaimFlag'
 import { proClientVisibilityWhere } from '@/lib/clientVisibility'
 import { formatLastBookingLabel } from '@/lib/clients/lastBookingLabel'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
+import { clientPublicHandle } from '@/lib/profiles/profileHrefs'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -21,6 +22,8 @@ const DIRECTORY_SELECT = {
   phone: true, // pii-plaintext-read-ok: authorized pro client directory; plaintext-by-schema.
   userId: true,
   claimStatus: true,
+  handle: true,
+  isPublicProfile: true,
   user: { select: { email: true } },
 } satisfies Prisma.ClientProfileSelect
 
@@ -101,6 +104,11 @@ export async function GET() {
         email: c.user?.email ?? null,
         phone: c.phone ?? null,
         lastBookingLabel: formatLastBookingLabel(c.bookings[0] ?? null, scheduleTz),
+        // The client's public `@handle`, or null when they have no public
+        // profile. A separate axis from `canViewClient` — see the DTO note in
+        // lib/pro/proBookingsList.ts. Lets the pro app open /u/{handle} for a
+        // client whose chart it cannot open, instead of a dead row.
+        publicProfileHandle: clientPublicHandle(c),
         invitable,
       }
     })

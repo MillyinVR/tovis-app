@@ -6,6 +6,7 @@ import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ClientProfileLink from '@/app/_components/ClientProfileLink'
 import { useLiveChanged } from '@/app/_components/live/LiveRefresh'
 import {
   DEFAULT_TIME_ZONE,
@@ -23,6 +24,12 @@ export type OutreachEntry = {
   waitlistEntryId: string
   clientName: string
   avatarUrl: string | null
+  /**
+   * Where this client's name/avatar leads, already resolved server-side by
+   * GET /api/v1/pro/waitlist (chart → public profile → null). null renders
+   * plain text with no href in the DOM.
+   */
+  clientProfileHref: string | null
   preferenceLabel: string
   joinedAt: string
   // A still-confirmable time already offered to this client. Since F14 that
@@ -117,6 +124,8 @@ function parseEntry(raw: unknown): OutreachEntry | null {
     waitlistEntryId,
     clientName,
     avatarUrl: typeof raw.avatarUrl === 'string' ? raw.avatarUrl : null,
+    clientProfileHref:
+      typeof raw.clientProfileHref === 'string' ? raw.clientProfileHref : null,
     preferenceLabel,
     joinedAt,
     pendingOffer,
@@ -159,27 +168,38 @@ function WaitlistRow({ entry }: { entry: OutreachEntry }) {
         {entry.rank}
       </span>
 
-      <div
-        className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full text-[12px] font-bold text-onAccent"
-        style={{ background: avatarGradient(entry.waitlistEntryId) }}
+      <ClientProfileLink
+        href={entry.clientProfileHref}
+        label={entry.clientName}
+        underline={false}
+        className="shrink-0 rounded-full"
+        inertClassName="shrink-0"
       >
-        {entry.avatarUrl ? (
-          <RemoteImage
-            src={entry.avatarUrl ?? ''}
-            alt={entry.clientName}
-            className="h-full w-full object-cover"
-            width={40}
-            height={40}
-          />
-        ) : (
-          initialsForName(entry.clientName, '?')
-        )}
-      </div>
+        <div
+          className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full text-[12px] font-bold text-onAccent"
+          style={{ background: avatarGradient(entry.waitlistEntryId) }}
+        >
+          {entry.avatarUrl ? (
+            <RemoteImage
+              src={entry.avatarUrl ?? ''}
+              alt={entry.clientName}
+              className="h-full w-full object-cover"
+              width={40}
+              height={40}
+            />
+          ) : (
+            initialsForName(entry.clientName, '?')
+          )}
+        </div>
+      </ClientProfileLink>
 
       <div className="min-w-0 flex-1">
-        <div className="truncate font-display text-[14px] font-bold text-textPrimary">
-          {entry.clientName}
-        </div>
+        <ClientProfileLink
+          href={entry.clientProfileHref}
+          label={entry.clientName}
+          className="block truncate font-display text-[14px] font-bold text-textPrimary"
+          inertClassName="block truncate font-display text-[14px] font-bold text-textPrimary"
+        />
         <div className="mt-0.5 truncate text-[11.5px] text-textMuted">
           {entry.preferenceLabel}
           {joined ? ` · joined ${joined}` : ''}

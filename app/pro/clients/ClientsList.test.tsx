@@ -10,6 +10,7 @@ function row(args: {
   email?: string
   phone?: string
   requirements?: ProClientRow['requirements']
+  profileHref?: string | null
 }): ProClientRow {
   const email = args.email ?? ''
   const phone = args.phone ?? ''
@@ -20,6 +21,10 @@ function row(args: {
     searchText: `${args.displayName} ${email} ${phone}`.toLowerCase().trim(),
     lastBookingLabel: 'No bookings yet',
     messageHref: '/messages/start',
+    profileHref:
+      args.profileHref === undefined
+        ? `/pro/clients/${args.id}`
+        : args.profileHref,
     requirements: args.requirements ?? [],
   }
 }
@@ -187,5 +192,31 @@ describe('ClientsList', () => {
     // Grace matches the search but has no requirements, so both filters apply.
     expect(screen.queryByText('Grace Hopper')).not.toBeInTheDocument()
     expect(screen.getByText(/No clients match/i)).toBeInTheDocument()
+  })
+})
+
+
+// The roster's name is the pro's most-used way into a client. Both directions
+// matter: a resolved href must be a real link, and a null one must leave NO
+// href in the DOM rather than a link that refuses on arrival.
+describe('ClientsList — the client name links', () => {
+  it('links the name to the resolved destination', () => {
+    render(<ClientsList clients={[row({ id: 'c9', displayName: 'Rae Kim' })]} />)
+
+    expect(screen.getByRole('link', { name: 'Rae Kim' })).toHaveAttribute(
+      'href',
+      '/pro/clients/c9',
+    )
+  })
+
+  it('renders plain text — no href — when there is nowhere to go', () => {
+    render(
+      <ClientsList
+        clients={[row({ id: 'c9', displayName: 'Rae Kim', profileHref: null })]}
+      />,
+    )
+
+    expect(screen.queryByRole('link', { name: 'Rae Kim' })).toBeNull()
+    expect(screen.getByText('Rae Kim')).toBeInTheDocument()
   })
 })

@@ -234,6 +234,15 @@ export type BookingCalendarEvent = CalendarEventBase & {
   clientProfileId?: string | null
 
   /**
+   * The client's public `@handle`, present only when they have a public
+   * profile. A SEPARATE axis from `clientProfileId` — see the DTO
+   * (lib/dto/proCalendar.ts). Both absent → inert text; this one present →
+   * `/u/[handle]`, which is what a waitlist client the pro has never booked,
+   * and a client past the 30-day chart window, now get instead of dead text.
+   */
+  clientPublicProfileHandle?: string | null
+
+  /**
    * Waitlist rows only: human label for the client's preferred time
    * (e.g. "Any time", "Morning", "Jun 14"), shown in place of a concrete time.
    */

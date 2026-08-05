@@ -54,6 +54,17 @@ export type ProCalendarBookingEventDTO = {
    * the name renders as plain text for anyone without access.
    */
   clientProfileId: string | null
+  /**
+   * The client's public `@handle`, or null when they have no public profile.
+   *
+   * A SEPARATE axis from `clientProfileId`: that one says "may this pro open the
+   * private chart", this one says "does a world-readable /u/{handle} page exist".
+   * A client outside the pro's 30-day chart window gets `clientProfileId: null`
+   * and a handle — the exact case whose name used to be dead text.
+   *
+   * null means no public page exists: render plain text, never a link.
+   */
+  clientPublicProfileHandle: string | null
   status: BookingStatus
   locationType: ServiceLocationType | null
   locationId: string
@@ -159,6 +170,17 @@ export type ProCalendarWaitlistEventDTO = {
   title: string
   clientName: string
   clientProfileId: string | null
+  /**
+   * The client's public `@handle`, or null when they have no public profile.
+   *
+   * A SEPARATE axis from `clientProfileId`: that one says "may this pro open the
+   * private chart", this one says "does a world-readable /u/{handle} page exist".
+   * A client outside the pro's 30-day chart window gets `clientProfileId: null`
+   * and a handle — the exact case whose name used to be dead text.
+   *
+   * null means no public page exists: render plain text, never a link.
+   */
+  clientPublicProfileHandle: string | null
   status: 'WAITLIST'
   locationType: null
   locationId: null

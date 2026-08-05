@@ -15,7 +15,12 @@ import {
   type BookingLocationMeta,
 } from '@/lib/booking/locationMeta'
 import { mapsHrefFromLocation } from '@/lib/maps'
-import ClientNameLink from '@/app/_components/ClientNameLink'
+import ClientProfileLink from '@/app/_components/ClientProfileLink'
+import {
+  clientLinkTarget,
+  resolveClientProfileHref,
+  type ClientLinkViewer,
+} from '@/lib/profiles/profileHrefs'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { Avatar, Badge } from '@/app/_components/ui'
 import {
@@ -342,12 +347,12 @@ function Section({
   title,
   items,
   scheduleTz,
-  visibleClientIdSet,
+  clientLinkViewer,
 }: {
   title: string
   items: BookingRow[]
   scheduleTz: string
-  visibleClientIdSet: ReadonlySet<string>
+  clientLinkViewer: ClientLinkViewer
 }) {
   return (
     <section className="grid gap-3">
@@ -364,7 +369,14 @@ function Section({
         <div className="grid gap-3">
           {items.map((booking, index) => {
             const dur = durationLabel(booking.totalDurationMinutes)
-            const canLinkClient = visibleClientIdSet.has(String(booking.client.id))
+            // Chart when this pro may open it, else the client's public page,
+            // else nothing — THE one rule (resolveClientProfileHref). Before
+            // this, a client outside the 30-day chart window rendered as dead
+            // text even when their profile was public to the whole internet.
+            const clientHref = resolveClientProfileHref(
+              clientLinkTarget(booking.client),
+              clientLinkViewer,
+            )
             const rowTz = resolveAppointmentDisplayTimeZone(
               booking.locationTimeZone,
               scheduleTz,
@@ -407,19 +419,27 @@ function Section({
                     ) : null}
 
                     <div className="mt-2.5 flex items-center gap-2">
-                      <Avatar
-                        name={clientName || undefined}
-                        index={index}
-                        size="sm"
-                        aria-hidden
-                      />
+                      <ClientProfileLink
+                        href={clientHref}
+                        label={clientName || 'Client'}
+                        underline={false}
+                        className="shrink-0 rounded-full"
+                        inertClassName="shrink-0"
+                      >
+                        <Avatar
+                          name={clientName || undefined}
+                          index={index}
+                          size="sm"
+                          aria-hidden
+                        />
+                      </ClientProfileLink>
                       <div className="min-w-0 text-[12px] text-textSecondary">
-                        <ClientNameLink
-                          canLink={canLinkClient}
-                          clientId={booking.client.id}
-                        >
-                          {clientName || 'Client'}
-                        </ClientNameLink>
+                        <ClientProfileLink
+                          href={clientHref}
+                          label={clientName || 'Client'}
+                          className="font-black text-textPrimary"
+                          inertClassName="font-black text-textPrimary"
+                        />
                         {booking.client.user?.email
                           ? ` • ${booking.client.user.email}`
                           : ''}
@@ -519,7 +539,9 @@ export default async function ProBookingsPage(props: {
   // Single source of truth for chart linkability — same rule as the clients
   // list and the page gate (includes the 30-day RECENT_COMPLETED window).
   // Resolved before the bucket queries so the prisma call order is stable.
-  const visibleClientIdSet = await getVisibleClientIdSetForPro(proId)
+  const clientLinkViewer: ClientLinkViewer = {
+    proVisibleClientIds: await getVisibleClientIdSetForPro(proId),
+  }
 
   const buckets = await loadProBookingsBuckets({
     professionalId: proId,
@@ -592,19 +614,19 @@ export default async function ProBookingsPage(props: {
               title="Today"
               items={todayBookings}
               scheduleTz={scheduleTz}
-              visibleClientIdSet={visibleClientIdSet}
+              clientLinkViewer={clientLinkViewer}
             />
             <Section
               title="Upcoming"
               items={upcomingBookings}
               scheduleTz={scheduleTz}
-              visibleClientIdSet={visibleClientIdSet}
+              clientLinkViewer={clientLinkViewer}
             />
             <Section
               title="Past"
               items={pastBookings}
               scheduleTz={scheduleTz}
-              visibleClientIdSet={visibleClientIdSet}
+              clientLinkViewer={clientLinkViewer}
             />
           </>
         ) : null}
@@ -614,7 +636,7 @@ export default async function ProBookingsPage(props: {
             title="Cancelled"
             items={cancelledBookings}
             scheduleTz={scheduleTz}
-            visibleClientIdSet={visibleClientIdSet}
+            clientLinkViewer={clientLinkViewer}
           />
         ) : null}
       </div>

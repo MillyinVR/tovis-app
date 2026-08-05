@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { MediaType } from '@prisma/client'
-import ProProfileLink from '@/app/_components/ProProfileLink'
+import ProfileIdentityLink from '@/app/_components/ProfileIdentityLink'
 import { Avatar } from '@/app/_components/ui'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -10,6 +10,13 @@ import { liveChannelForUser } from '@/lib/live/broadcast'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 import { resolveThreadContextNav } from '@/lib/messages/contextNav'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
+import {
+  CLIENT_LINK_SELECT,
+  clientIdentityHref,
+  clientLinkTarget,
+  proClientChartHref,
+} from '@/lib/profiles/profileHrefs'
+import { proPublicProfilePath } from '@/lib/routes'
 import { THREAD_MESSAGE_PAGE_SIZE, nextOlderCursor } from '@/lib/messages/paging'
 import {
   MESSAGE_ATTACHMENT_BUCKET,
@@ -68,7 +75,7 @@ export default async function MessageThreadPage(props: PageProps) {
       waitlistEntryId: true,
       client: {
         select: {
-          id: true,
+          ...CLIENT_LINK_SELECT,
           userId: true,
           firstName: true,
           lastName: true,
@@ -186,10 +193,14 @@ export default async function MessageThreadPage(props: PageProps) {
     professional: thread.professional,
   })
 
-  // The counterparty's name/avatar tap through to their public profile whenever
-  // the counterparty is the PRO — i.e. the viewer is the client. When the viewer
-  // is the pro the counterparty is a client, whose equivalent destination is the
-  // chart, which is already offered below as `clientChartHref` (and is gated).
+  // The counterparty's name/avatar tap through to their profile in BOTH
+  // directions now. Viewer is the client → the pro's public profile (#829).
+  // Viewer is the pro → the client's chart when they may open it, else the
+  // client's public /u/[handle] page, else nothing (THE one rule).
+  //
+  // The chart link below is a separate, labelled affordance — it stays, because
+  // it is the one that can also say "Request chart access". This is the
+  // identity tap-through that #829 deliberately left for a follow-up.
   const counterpartyProId = viewerIsThreadPro
     ? null
     : thread.professional?.id ?? null
@@ -211,23 +222,39 @@ export default async function MessageThreadPage(props: PageProps) {
   // The chart page now answers the CONTACT_ONLY tier with an honest refusal and
   // a Request access button, so the link is offered for BOTH tiers and only the
   // label changes. A pro with no relationship still gets nothing.
-  const clientChartLink = await (async () => {
-    if (!viewerIsThreadPro || !thread.professional?.id || !thread.client?.id) {
-      return null
+  //
+  // One visibility read powers BOTH this labelled chart link and the header's
+  // identity tap-through below — they answer different questions off the same
+  // fact, and a second query could only make them disagree.
+  const proClientVisibility =
+    viewerIsThreadPro && thread.professional?.id && thread.client?.id
+      ? await getProClientVisibility(thread.professional.id, thread.client.id)
+      : null
+
+  const clientChartLink = (() => {
+    if (!proClientVisibility || !thread.client?.id) return null
+
+    const href = proClientChartHref(thread.client.id)
+
+    if (proClientVisibility.canViewClient) {
+      return { href, label: 'View client chart →' }
     }
-
-    const visibility = await getProClientVisibility(
-      thread.professional.id,
-      thread.client.id,
-    )
-    const href = `/pro/clients/${encodeURIComponent(thread.client.id)}`
-
-    if (visibility.canViewClient) return { href, label: 'View client chart →' }
-    if (visibility.canContactClient) {
+    if (proClientVisibility.canContactClient) {
       return { href, label: 'Request chart access →' }
     }
     return null
   })()
+
+  // ONE href for the header, whichever way round the thread is: the pro's public
+  // profile when the viewer is the client (#829), and the client's chart — or,
+  // when that is closed, their public page — when the viewer is the pro (this
+  // change). Either may be null, and null renders the name as plain text.
+  const counterpartyHref = viewerIsThreadPro
+    ? clientIdentityHref(
+        clientLinkTarget(thread.client),
+        proClientVisibility?.canViewClient === true,
+      )
+    : proPublicProfilePath(counterpartyProId)
 
   // Header eyebrow uses the SAME resolver as the inbox rows so the label a user
   // tapped never changes shape once the thread opens. Navigation (deep link into
@@ -262,21 +289,25 @@ export default async function MessageThreadPage(props: PageProps) {
             </div>
 
             <div className="mt-[9px] flex min-w-0 items-center gap-3">
-              <ProProfileLink
-                proId={counterpartyProId}
+              <ProfileIdentityLink
+                href={counterpartyHref}
                 label={title}
+                fallbackLabel={viewerIsThreadPro ? 'Client' : 'Professional'}
                 underline={false}
                 className="shrink-0 rounded-full"
+                inertClassName="shrink-0"
               >
                 <Avatar name={title} src={avatarUrl} size="lg" />
-              </ProProfileLink>
+              </ProfileIdentityLink>
 
               <h1 className="min-w-0 truncate font-display text-[24px] font-bold leading-[1.05] tracking-[-0.02em] md:text-[26px] lg:text-[28px]">
-                <ProProfileLink
-                  proId={counterpartyProId}
+                <ProfileIdentityLink
+                  href={counterpartyHref}
                   label={title}
+                  fallbackLabel={viewerIsThreadPro ? 'Client' : 'Professional'}
                   underline={false}
                   className="block truncate transition hover:opacity-80"
+                  inertClassName="block truncate"
                 />
               </h1>
             </div>

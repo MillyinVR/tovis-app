@@ -66,6 +66,10 @@ import {
 } from '@/lib/calendar/serviceSwatch'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import {
+  CLIENT_LINK_SELECT,
+  clientPublicHandle,
+} from '@/lib/profiles/profileHrefs'
+import {
   collectBookingConsentRequirements,
   deriveConsentRequirementBadge,
   loadConsentRequirementsByServiceId,
@@ -212,7 +216,7 @@ const bookingSelect = {
   ...RECURRING_MARK_SELECT,
   client: {
     select: {
-      id: true,
+      ...CLIENT_LINK_SELECT,
       firstName: true,
       lastName: true,
       user: {
@@ -771,6 +775,7 @@ function toBookingEvent(args: {
     title: serviceName,
     clientName: getClientName(booking),
     clientProfileId: linkableClientProfileId(booking.client?.id, visibleClientIds),
+    clientPublicProfileHandle: clientPublicHandle(booking.client),
     status: booking.status,
     locationType: booking.locationType,
     locationId: booking.locationId,
@@ -819,7 +824,7 @@ const waitlistSelect = {
   service: { select: { name: true } },
   client: {
     select: {
-      id: true,
+      ...CLIENT_LINK_SELECT,
       firstName: true,
       lastName: true,
       user: { select: { email: true } },
@@ -917,6 +922,7 @@ function toWaitlistEvent(args: {
     title: serviceName,
     clientName: getWaitlistClientName(entry),
     clientProfileId: linkableClientProfileId(entry.client?.id, visibleClientIds),
+    clientPublicProfileHandle: clientPublicHandle(entry.client),
     status: 'WAITLIST',
     locationType: null,
     locationId: null,

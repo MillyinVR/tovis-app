@@ -415,6 +415,7 @@ function parseBookingEvent(
   const viewLocalDateKey = optionalText(value.viewLocalDateKey)
   const durationMinutes = positiveNumberOrUndefined(value.durationMinutes)
   const clientProfileId = optionalText(value.clientProfileId)
+  const clientPublicProfileHandle = optionalText(value.clientPublicProfileHandle)
   const preferenceLabel = optionalText(value.preferenceLabel)
   const offerHref = optionalText(value.offerHref)
   const waitlistEntryId = optionalText(value.waitlistEntryId)
@@ -497,6 +498,7 @@ function parseBookingEvent(
     ...(consentRequirement ? { consentRequirement } : {}),
     ...(recurring ? { recurring } : {}),
     ...(clientProfileId ? { clientProfileId } : {}),
+    ...(clientPublicProfileHandle ? { clientPublicProfileHandle } : {}),
     ...(preferenceLabel ? { preferenceLabel } : {}),
     ...(offerHref ? { offerHref } : {}),
     ...(waitlistEntryId ? { waitlistEntryId } : {}),

@@ -9835,6 +9835,13 @@
                 "string",
                 "null"
               ]
+            },
+            "publicProfileHandle": {
+              "description": "The client's public `@handle`, or null when they have no public profile.\n\nThis is NOT the same axis as `canViewClient`, and the two are deliberately independent: `canViewClient` says whether this pro may open the private CHART, while this says whether the client has a world-readable page at `/u/{handle}` at all. A pro past their 30-day chart window looking at a public client gets `canViewClient: false` and a handle — which is exactly the case that used to render a dead name (web) and \"viewable on the web for now\" (iOS).\n\nnull means \"no public page exists\" — render plain text, never a link.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -9842,7 +9849,8 @@
             "fullName",
             "email",
             "phone",
-            "canViewClient"
+            "canViewClient",
+            "publicProfileHandle"
           ],
           "type": "object"
         },
@@ -10979,6 +10987,13 @@
             "null"
           ]
         },
+        "clientPublicProfileHandle": {
+          "description": "The client's public `@handle`, or null when they have no public profile.\n\nA SEPARATE axis from `clientProfileId`: that one says \"may this pro open the private chart\", this one says \"does a world-readable /u/{handle} page exist\". A client outside the pro's 30-day chart window gets `clientProfileId: null` and a handle — the exact case whose name used to be dead text.\n\nnull means no public page exists: render plain text, never a link.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "consentRequirement": {
           "$ref": "#/definitions/ConsentRequirementBadge",
           "description": "Unsigned-consent mark (K15) — the client owes a signature on a form the pro requires for one of this booking's services. Derived by the one helper (lib/consentForms/requirement.ts) and rendered as a TEXT CHIP (\"Form due\", warn tone) per K7's channel budget: NOT a colour, and NOT a second warning glyph, because the conflict triangle already owns that shape.\n\nOPTIONAL, and absent unless there is genuinely an unsigned form on an appointment that has not happened yet — `significant` is false once the appointment is over, so a pro setting their first requirement does not light up their whole history in amber. It WARNS, never blocks.\n\n🔴 This field shipped in K15 without being declared here, so it crossed to the device with zero contract coverage — the K4-B/K5-B gap reopened. It was invisible because the route adds it with a conditional SPREAD (`...(badge ? { consentRequirement: badge } : {})`), and TypeScript does not run excess-property checks on spread members. So this file's own header claim — \"a field added to one and not the other is a compile error\" — holds only for fields written as plain properties. Any future optional field must be declared HERE first, or `gen:api-schema` never sees it."
@@ -11058,6 +11073,7 @@
         "title",
         "clientName",
         "clientProfileId",
+        "clientPublicProfileHandle",
         "status",
         "locationType",
         "locationId",
@@ -11405,6 +11421,13 @@
             "null"
           ]
         },
+        "clientPublicProfileHandle": {
+          "description": "The client's public `@handle`, or null when they have no public profile.\n\nA SEPARATE axis from `clientProfileId`: that one says \"may this pro open the private chart\", this one says \"does a world-readable /u/{handle} page exist\". A client outside the pro's 30-day chart window gets `clientProfileId: null` and a handle — the exact case whose name used to be dead text.\n\nnull means no public page exists: render plain text, never a link.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "details": {
           "$ref": "#/definitions/ProCalendarEventDetailsDTO"
         },
@@ -11509,6 +11532,7 @@
         "title",
         "clientName",
         "clientProfileId",
+        "clientPublicProfileHandle",
         "status",
         "locationType",
         "locationId",
