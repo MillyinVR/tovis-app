@@ -5,9 +5,18 @@
 // SubscriptionPlan in the DB only carries pricing + Stripe Billing IDs + display copy.
 //
 // Hard rule: entitlements gate ONLY premium add-ons (custom handle, tax export,
-// advanced analytics, …). Core earning paths — taking bookings, getting paid, basic
-// dashboard — are NEVER gated on a subscription. A lapsed/canceled/past-due pro keeps
-// working and just loses the paid extras (resolved here as the free tier).
+// advanced analytics, …). Core earning paths — taking bookings, getting paid, the
+// basic monthly dashboard — are NEVER gated on a subscription. A lapsed/canceled/
+// past-due pro keeps working and just loses the paid extras (resolved here as the
+// free tier).
+//
+// 🔴 Second hard rule (2026-08-04, docs/design/membership-value-brief.md §5.1.F):
+// an entitlement may only sit in a plan array once it has a real implementation
+// call site. `advanced_analytics` sat on PRO for months with none, so every paying
+// pro was shown "✓ Advanced analytics" for something that did not exist. It now
+// has one — lib/analytics/proRetentionInsights.ts, surfaced as the gated retention
+// section on /pro/dashboard. `white_label` still has none, which is exactly why
+// neither membership surface renders a label for it (see STUDIO below).
 
 import { SubscriptionStatus } from '@prisma/client'
 
@@ -18,10 +27,10 @@ export type PlanKey = 'free' | 'pro' | 'premium' | 'studio'
 export type Entitlement =
   | 'custom_handle' // custom .tovis handle (today's ProfessionalProfile.isPremium)
   | 'tax_export' // transaction ledger + quarterly/CSV tax export
-  | 'advanced_analytics' // retention insights beyond the monthly dashboard
+  | 'advanced_analytics' // retention/rebooking insights beyond the monthly dashboard
   | 'priority_discovery' // priority placement on discovery surfaces
   | 'discovery_fee_waiver' // member's new discovery clients pay no platform fee
-  | 'white_label' // salon white-label / multi-pro
+  | 'white_label' // salon white-label / multi-pro — COMP-ONLY, never advertised
 
 const FREE: Entitlement[] = []
 
@@ -37,6 +46,17 @@ const PRO: Entitlement[] = [
 // see cameraImageMonthlyQuota below), so its boolean entitlements equal Pro's.
 const PREMIUM: Entitlement[] = [...PRO]
 
+// Studio is not in getMembershipPlans() — it can only be granted as an admin comp,
+// so `white_label` is never sold. It also has no implementation call site yet, which
+// is why both membership surfaces deliberately render NO label for it (see
+// app/pro/membership/entitlementCopy.ts). It stays in the matrix so a comped salon
+// partner resolves to the right tier the day the feature lands.
+//
+// 🔴 Product rule (Tori, 2026-08-04) for whenever white-label IS built: it is a
+// SALON-only offering, and a salon must have a minimum number of pros before it may
+// purchase it (threshold TBD). So Studio must never become a self-serve card on
+// /pro/membership for an individual pro — it needs a salon entity + a seat count
+// gate first. Recorded in docs/design/membership-value-brief.md §8.6.
 const STUDIO: Entitlement[] = [...PREMIUM, 'white_label']
 
 const PLAN_ENTITLEMENTS: Record<PlanKey, Entitlement[]> = {
@@ -51,12 +71,26 @@ const PLAN_ENTITLEMENTS: Record<PlanKey, Entitlement[]> = {
  * is the product's viral wedge); Premium/Studio get the working allowance. Each
  * analyzed image counts once (a look-brief = 1, a set-critique = its photo count).
  * Enforced in lib/pro/cameraQuota.ts only while membership enforcement is on.
+ *
+ * Sized 2026-08-04 from the cost floor (docs/design/membership-value-brief.md §5.1.A):
+ * ~$0.04 of Anthropic spend per analyzed image, so Pro's 150 ≈ $6 against $25 (24%
+ * COGS) and Premium's 500 ≈ $20 against $45. The previous 3/6/30 ladder was ~100×
+ * too small — it sold a paid tier that was drastically WORSE than what the daily
+ * rate limiter already gives away for free, so flipping ENABLE_MEMBERSHIP_ENFORCEMENT
+ * against it would have been a catastrophic downgrade for every existing pro.
+ *
+ * 🔴 Two invariants, both red-proofed in entitlements.test.ts because they span
+ * files and nothing else would catch a drift:
+ *   1. strictly increasing free < pro < premium — a paid tier must never buy less.
+ *   2. the daily rate-limit backstop (lib/rateLimit/policies.ts) must still let the
+ *      TOP tier spend its whole month; the limiter is plan-blind, so its floor is
+ *      set by Premium, not by free.
  */
 export const CAMERA_IMAGES_PER_MONTH: Record<PlanKey, number> = {
-  free: 3,
-  pro: 6,
-  premium: 30,
-  studio: 30,
+  free: 20,
+  pro: 150,
+  premium: 500,
+  studio: 500,
 }
 
 /** Subscription states that actually grant the plan's paid entitlements. */

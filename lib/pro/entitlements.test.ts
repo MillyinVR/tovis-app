@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { SubscriptionStatus } from '@prisma/client'
 
+import { CRITIQUE_MAX_PHOTOS } from '@/lib/pro/cameraVision'
+import { RATE_LIMITS } from '@/lib/rateLimit/policies'
 import {
   CAMERA_IMAGES_PER_MONTH,
   activeCompPlanKey,
@@ -108,25 +110,63 @@ describe('resolveEntitlements', () => {
 })
 
 describe('camera image monthly quota', () => {
-  it('grants 3/6/30/30 across the tiers while entitled', () => {
+  it('grants 20/150/500/500 across the tiers while entitled', () => {
     expect(CAMERA_IMAGES_PER_MONTH).toEqual({
-      free: 3,
-      pro: 6,
-      premium: 30,
-      studio: 30,
+      free: 20,
+      pro: 150,
+      premium: 500,
+      studio: 500,
     })
     expect(
       resolveCameraImageMonthlyQuota({
         planKey: 'premium',
         status: SubscriptionStatus.ACTIVE,
       }),
-    ).toBe(30)
+    ).toBe(500)
     expect(
       resolveCameraImageMonthlyQuota({
         planKey: 'pro',
         status: SubscriptionStatus.TRIALING,
       }),
-    ).toBe(6)
+    ).toBe(150)
+  })
+
+  // 🔴 The invariant, not the numbers. Free/Pro/Premium were sized in three
+  // different sessions and drifted into a ladder where paying bought LESS relative
+  // to what the daily limiter already gave away. A paid tier must always buy more.
+  it('is strictly increasing — a paid tier can never buy less than free', () => {
+    expect(CAMERA_IMAGES_PER_MONTH.free).toBeLessThan(CAMERA_IMAGES_PER_MONTH.pro)
+    expect(CAMERA_IMAGES_PER_MONTH.pro).toBeLessThan(
+      CAMERA_IMAGES_PER_MONTH.premium,
+    )
+    expect(CAMERA_IMAGES_PER_MONTH.studio).toBeGreaterThanOrEqual(
+      CAMERA_IMAGES_PER_MONTH.premium,
+    )
+  })
+
+  // 🔴 Cross-file invariant. The daily rate-limit buckets are PLAN-BLIND, so if
+  // they are sized for the free tier a paying Premium pro physically cannot spend
+  // the 500 images they bought. Asserted here because neither file's own tests
+  // would ever see the other one move.
+  it('the daily rate-limit backstop still lets the top tier spend its month', () => {
+    const briefsPerDay = RATE_LIMITS['pro:camera:look-brief'].limit
+    const critiquesPerDay = RATE_LIMITS['pro:camera:set-critique'].limit
+    // A critique bills one request but up to CRITIQUE_MAX_PHOTOS images.
+    const maxImagesPerDay = briefsPerDay + critiquesPerDay * CRITIQUE_MAX_PHOTOS
+
+    // Both buckets are daily windows — the arithmetic above is only meaningful if
+    // that stays true.
+    expect(RATE_LIMITS['pro:camera:look-brief'].windowSeconds).toBe(24 * 60 * 60)
+    expect(RATE_LIMITS['pro:camera:set-critique'].windowSeconds).toBe(24 * 60 * 60)
+
+    // Premium must be able to burn through its month in a reasonable number of
+    // days rather than being throttled below the allowance it paid for.
+    const daysToSpendPremium = CAMERA_IMAGES_PER_MONTH.premium / maxImagesPerDay
+    expect(daysToSpendPremium).toBeLessThanOrEqual(7)
+
+    // ...but the backstop must still be a backstop: no account may burn a top-tier
+    // month inside a single day.
+    expect(maxImagesPerDay).toBeLessThan(CAMERA_IMAGES_PER_MONTH.premium)
   })
 
   it('lapsed or missing subscriptions collapse to the free allowance', () => {
@@ -176,7 +216,7 @@ describe('admin comps (resolveEffective*)', () => {
     expect(resolveEffectiveEntitlements(state, NOW)).toContain(
       'discovery_fee_waiver',
     )
-    expect(resolveCameraImageMonthlyQuota(state, NOW)).toBe(30)
+    expect(resolveCameraImageMonthlyQuota(state, NOW)).toBe(500)
   })
 
   it('a comp survives a lapsed paid subscription', () => {
@@ -212,7 +252,7 @@ describe('admin comps (resolveEffective*)', () => {
         },
         NOW,
       ),
-    ).toBe(30)
+    ).toBe(500)
   })
 
   it('an expired comp is ignored (boundary: compUntil == now is expired)', () => {

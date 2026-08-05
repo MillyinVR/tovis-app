@@ -4,12 +4,14 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import type { SubscriptionStatus } from '@prisma/client'
 import type { Entitlement, PlanKey } from '@/lib/pro/entitlements'
+import { useBrand } from '@/lib/brand/BrandProvider'
 import { formatRoundedDollars } from '@/lib/money'
 import {
   DEFAULT_TIME_ZONE,
   formatInTimeZone,
   getViewerTimeZone,
 } from '@/lib/time'
+import { advertisedEntitlements } from './entitlementCopy'
 
 type PlanPrice = {
   interval: 'month' | 'year'
@@ -39,15 +41,8 @@ type Props = {
   trialEndsAt: string | null
   hasBillingAccount: boolean
   plans: PlanCard[]
-}
-
-const ENTITLEMENT_LABELS: Record<Entitlement, string> = {
-  custom_handle: 'Custom .tovis handle',
-  tax_export: 'Tax exports (CSV + Schedule C) + transaction ledger',
-  advanced_analytics: 'Advanced analytics & retention insights',
-  priority_discovery: 'Priority placement in Discovery',
-  discovery_fee_waiver: 'Your new clients book with no discovery fee',
-  white_label: 'White-label / multi-pro salon',
+  /** Configured one-time discovery platform fee, in cents (lib/booking/discoveryFee). */
+  discoveryFeeCents: number
 }
 
 function dollars(cents: number): string {
@@ -69,6 +64,7 @@ function formatDate(iso: string | null): string | null {
 export default function MembershipClient(props: Props) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const { brand } = useBrand()
 
   async function startUpgrade(planKey: PlanKey, interval: 'month' | 'year') {
     setError(null)
@@ -102,6 +98,8 @@ export default function MembershipClient(props: Props) {
     }
   }
 
+  // Only entitlements we are willing to stand behind get named — see entitlementCopy.
+  const advertised = advertisedEntitlements(props.entitlements)
   const renewLabel = formatDate(props.currentPeriodEnd)
   const trialLabel = formatDate(props.trialEndsAt)
   const compLabel = formatDate(props.compUntil)
@@ -113,6 +111,39 @@ export default function MembershipClient(props: Props) {
         Free covers the essentials — bookings, getting paid, and any payment method.
         Upgrade to unlock business tools.
       </p>
+
+      {/*
+        The commission pitch (docs/design/membership-value-brief.md §0.4 / §3.1).
+        Every claim here is checkable in code, and must stay that way:
+          • "0% of your services / deposits" — the ONLY application_fee the platform
+            ever charges is the discovery fee below (grep `application_fee_amount`);
+            the deposit settles to the pro's Connect account in full.
+          • the fee amount is the LIVE configured value, not a hardcoded $5 — it is
+            env-overridable up to $10 (lib/booking/discoveryFee.ts).
+          • "brand-new client … from Discovery or the Looks feed" mirrors exactly
+            isNewDiscoveryClient() + isDiscoveryProvenance() — no other booking path
+            is ever charged.
+        The 20–30% figure is deliberately unattributed and hedged ("many"): it is a
+        market observation from the brief's competitor scan, not a claim we can
+        verify per-competitor at render time.
+      */}
+      <div className="mt-4 rounded-card border border-accentPrimary/25 bg-bgSecondary p-4">
+        <div className="text-[13px] font-black text-textPrimary">
+          You keep 100% of what you charge
+        </div>
+        <p className="mt-1 text-[12px] leading-relaxed text-textSecondary">
+          Many booking marketplaces take 20–30% of a new client&apos;s first
+          appointment out of the pro&apos;s payout.{' '}
+          <span className="font-black text-textPrimary">{brand.displayName}</span>{' '}
+          takes 0% of your services and 0% of your deposits, on every plan. The one
+          platform fee is a flat{' '}
+          <span className="font-black text-textPrimary">
+            {dollars(props.discoveryFeeCents)}
+          </span>{' '}
+          paid by the <em>client</em>, once, the first time a brand-new client books
+          you from Discovery or the Looks feed.
+        </p>
+      </div>
 
       {props.compPlanKey && compLabel ? (
         <div className="mt-4 rounded-card border border-accentPrimary/30 bg-bgSecondary p-3 text-[12px] text-textSecondary">
@@ -240,18 +271,18 @@ export default function MembershipClient(props: Props) {
         </button>
       ) : null}
 
-      {props.entitlements.length > 0 ? (
+      {advertised.length > 0 ? (
         <div className="mt-6">
           <div className="text-[12px] font-black text-textSecondary">
             Included with your plan
           </div>
           <ul className="mt-2 grid gap-1">
-            {props.entitlements.map((ent) => (
+            {advertised.map(({ key: ent, label }) => (
               <li
                 key={ent}
                 className="flex items-center gap-2 text-[12px] text-textPrimary"
               >
-                ✓ {ENTITLEMENT_LABELS[ent]}
+                ✓ {label}
                 {ent === 'custom_handle' ? (
                   <Link
                     href="/pro/profile/public-profile"

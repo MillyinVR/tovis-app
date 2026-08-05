@@ -2,29 +2,37 @@
 import Link from 'next/link'
 
 import type { ProOverviewPageData } from '@/lib/analytics/proMonthlyAnalytics'
+import type { ProRetentionInsightsDTO } from '@/lib/analytics/proRetentionInsights'
 import type { CreatorLooksAnalyticsDto } from '@/lib/looks/creatorAnalytics'
 import type { ProVisibilityHealthDTO } from '@/lib/pro/visibilityHealth'
 
 import ProLooksInsights from './ProLooksInsights'
 import ProPerformanceSections from './ProPerformanceSections'
+import ProRetentionSection from './ProRetentionSection'
 import ProVisibilitySection from './ProVisibilitySection'
 
 type ProOverviewDashboardProps = {
   overview: ProOverviewPageData
   looksAnalytics: CreatorLooksAnalyticsDto
   visibility: ProVisibilityHealthDTO
+  retention: ProRetentionInsightsDTO
 }
 
 export default function ProOverviewDashboard({
   overview,
   looksAnalytics,
   visibility,
+  retention,
 }: ProOverviewDashboardProps) {
   return (
     <div className="brand-pro-overview-body no-scroll">
       <MonthScroller months={overview.months} />
 
       <ProPerformanceSections overview={overview} />
+
+      {/* The paid retention layer sits directly under the free monthly numbers:
+          "what happened" first, then "who is coming back, and who is not". */}
+      <ProRetentionSection insights={retention} />
 
       <ProLooksInsights analytics={looksAnalytics} />
 

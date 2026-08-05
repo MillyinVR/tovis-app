@@ -3,6 +3,20 @@
 // Membership plan catalog (pricing + Stripe Billing price ids). Entitlements for each
 // plan live in lib/pro/entitlements.ts; this is purely the commercial side. Stripe
 // price ids come from env so test/live use different Billing objects.
+//
+// 🔴 `amountCents` here is DISPLAY ONLY. Checkout sends `line_items: [{ price:
+// stripePriceId }]` (app/api/v1/pro/membership/checkout/route.ts:43), so Stripe
+// charges whatever its Price object says. If the two disagree, the pro is shown one
+// number and billed another — silently, with no error anywhere. Any change to an
+// amount below REQUIRES the matching Stripe Price object to be checked by hand.
+//
+// PRICE DECISION (2026-08-04, docs/design/membership-value-brief.md §7.1 option A):
+// Pro $25/mo · $240/yr, Premium $45/mo · $432/yr. This supersedes the 2026-06-17
+// spec's $29 recommendation, which the brief re-examined against the 2026 competitor
+// set and explicitly advised against changing ("the $4 delta is noise next to fixing
+// the entitlements"). The code was already $25; the spec is the side that moved.
+// Tori must still confirm the live Stripe Price objects match — see the Stripe
+// checklist in membership-value-brief.md §10.
 
 import { CAMERA_IMAGES_PER_MONTH, type PlanKey } from '@/lib/pro/entitlements'
 
@@ -67,8 +81,11 @@ export function getMembershipPlans(): MembershipPlan[] {
     {
       key: 'premium',
       name: 'Premium',
+      // Do NOT re-add "group bookings join here when they ship" — naming an
+      // unshipped feature on a paid card is the same mis-sell class as the
+      // `advanced_analytics` entitlement (membership-value-brief.md §5.1.F).
       blurb:
-        'Everything in Pro plus the full AI photographer allowance. Group bookings join here when they ship.',
+        'Everything in Pro plus the full AI photographer allowance — for a busy chair or a two-chair studio.',
       trialDays: PRO_TRIAL_DAYS,
       cameraImagesPerMonth: CAMERA_IMAGES_PER_MONTH.premium,
       prices: [

@@ -257,17 +257,30 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     prefix: 'rl:pro:finance:expenses:write',
     mode: 'redis-only',
   },
-  // Claude-vision camera features are the daily free allowance (the cost
-  // model is "free with a daily cap"): each Anthropic call costs real money,
-  // so the window is a day, not a burst-smoothing minute. Keyed per user.
+  // Claude-vision camera features. These buckets used to BE the allowance ("free
+  // with a daily cap"). As of 2026-08-04 the allowance is the per-plan monthly
+  // quota (CAMERA_IMAGES_PER_MONTH in lib/pro/entitlements.ts) and these are the
+  // abuse backstop underneath it — see docs/design/membership-value-brief.md §5.1.A.
+  //
+  // 🔴 The limiter is PLAN-BLIND: one bucket serves free and paid alike, so its
+  // floor is set by the TOP tier, not the free one. Premium buys 500 images/month,
+  // so the daily ceiling must clear ~17/day comfortably or a paying pro could not
+  // spend what they bought. 40 briefs + 8 critiques = up to 40 + (8 × 10) = 120
+  // images/day, which no real pro reaches but which stops one account burning a
+  // month's quota in an hour (and caps worst-case Anthropic spend at ~$5/day/pro).
+  //
+  // Net effect vs. the old numbers: the per-day image ceiling drops 125 → 120, but
+  // the cheap single-image call (look-brief) gets more headroom and the expensive
+  // 10-photo call (set-critique) gets less, which is where the cost actually is.
+  // The real tightening for free pros is the 20/month quota, not this bucket.
   'pro:camera:look-brief': {
-    limit: 25,
+    limit: 40,
     windowSeconds: 24 * 60 * 60,
     prefix: 'rl:pro:camera:look-brief',
     mode: 'redis-only',
   },
   'pro:camera:set-critique': {
-    limit: 10,
+    limit: 8,
     windowSeconds: 24 * 60 * 60,
     prefix: 'rl:pro:camera:set-critique',
     mode: 'redis-only',
