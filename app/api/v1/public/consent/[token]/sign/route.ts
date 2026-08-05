@@ -34,6 +34,7 @@ import {
   recordConsentSignature,
   resolveConsentSignatureTokenForRead,
 } from '@/lib/consentForms/signatureTokens'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import { prisma } from '@/lib/prisma'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { tokenActorRateLimitKey } from '@/lib/rateLimit/identity'
@@ -104,6 +105,11 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
     if (!result.written.ok) {
       return jsonFail(409, result.written.error)
     }
+
+    // Live-sync: the pro's session hub warns about outstanding consent forms —
+    // that warning should clear the moment the client signs, not on the pro's
+    // next reload.
+    await broadcastBookingChange(result.resolved.booking.id, 'bookings')
 
     return jsonOk({
       recordId: result.written.recordId,

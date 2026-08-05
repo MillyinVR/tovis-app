@@ -30,11 +30,7 @@ import {
 } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
-import {
-  broadcastLive,
-  liveChannelForPro,
-  liveChannelForUser,
-} from '@/lib/live/broadcast'
+import { broadcastChange } from '@/lib/live/broadcastAudience'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { resolveDiscoveryFinalize } from '@/lib/booking/resolveDiscoveryFinalize'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
@@ -862,13 +858,11 @@ export async function POST(request: Request) {
 
     // Live-sync: ping the pro's + client's devices so an open salon calendar /
     // the client's phone refetch immediately (fail-open; never blocks the write).
-    await broadcastLive(
-      [
-        liveChannelForPro(offering.professionalId),
-        liveChannelForUser(ownership.actorUserId),
-      ],
-      'bookings',
-    )
+    await broadcastChange({
+      topic: 'bookings',
+      professionalId: offering.professionalId,
+      userIds: [ownership.actorUserId],
+    })
 
     return response
   } catch (error: unknown) {

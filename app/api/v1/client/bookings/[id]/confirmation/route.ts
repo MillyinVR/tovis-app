@@ -33,6 +33,7 @@ import {
   recordAppointmentConfirmationFromAuthedClient,
   type AppointmentConfirmationAnswer,
 } from '@/lib/booking/writeBoundary'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
@@ -97,6 +98,11 @@ export async function POST(req: Request, ctx: RouteContext<{ id: string }>) {
     if (answer === 'DECLINE') {
       kickNotificationDrain()
     }
+
+    // Live-sync: same ping as the token twin in
+    // app/api/v1/public/appointment/[token]/answer — the pro sees the answer
+    // wherever the client happened to give it.
+    await broadcastBookingChange(result.booking.id, 'bookings')
 
     return jsonOk({
       state: result.state,

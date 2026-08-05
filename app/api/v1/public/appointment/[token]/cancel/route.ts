@@ -14,6 +14,7 @@
 // legs must not be re-entered by a double tap.
 
 import { Role, type Prisma } from '@prisma/client'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 import { jsonFail, pickString } from '@/app/api/_utils'
@@ -149,6 +150,11 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
 
     // Cancellation (and any auto-refund) committed — deliver the notices now.
     kickNotificationDrain()
+
+    // Live-sync: a slot the pro was holding just freed up. Ping regardless of
+    // whether the idempotency ledger replayed this request — a replay means the
+    // caller never saw the first answer, and the ping carries no data.
+    await broadcastBookingChange(bookingId, 'bookings')
 
     return response
   } catch (error: unknown) {

@@ -103,21 +103,28 @@ export default async function ProRootLayout({
   return (
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
       <RefreshOnFocus />
-      <LiveRefresh channels={liveChannels} />
-      <ProHeader
-        businessName={proDisplayName}
-        subtitle={pro.handle ? `@${pro.handle}` : null}
-        publicUrl={publicUrl}
-        migrationEnabled={isProMigrationEnabled()}
-        formsEnabled={isClientTechnicalRecordEnabled(pro.id)}
-        workspaceOptions={workspaceOptions}
-      />
-      <ProComplianceBanner />
-      <ProReadinessBanner />
+      {/*
+        Wraps the shell (rather than sitting beside it) so client-fetched pro
+        surfaces — the calendar holds its rows in a hook, out of reach of
+        `router.refresh()` — can re-run their own fetch off this same
+        subscription via `useLiveChanged`.
+      */}
+      <LiveRefresh channels={liveChannels}>
+        <ProHeader
+          businessName={proDisplayName}
+          subtitle={pro.handle ? `@${pro.handle}` : null}
+          publicUrl={publicUrl}
+          migrationEnabled={isProMigrationEnabled()}
+          formsEnabled={isClientTechnicalRecordEnabled(pro.id)}
+          workspaceOptions={workspaceOptions}
+        />
+        <ProComplianceBanner />
+        <ProReadinessBanner />
 
-      <main className="brand-pro-layout-main">{children}</main>
+        <main className="brand-pro-layout-main">{children}</main>
 
-      {modal}
+        {modal}
+      </LiveRefresh>
     </div>
   )
 }
