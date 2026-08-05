@@ -44,6 +44,12 @@ import {
   requiresLicense,
   supportsOnlineVerification,
 } from '@/lib/licensing/licenseRequirement'
+import {
+  dcaLicenseQueryNumber,
+  isCurrentStatusCode,
+  licenseNumbersMatch,
+  parseDcaLicenseRecord,
+} from '@/lib/licensing/caDcaLicense'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 import {
   logAuthEvent,
@@ -444,7 +450,19 @@ type CaVerifyResult =
   | {
       ok: false
       error: string
-      reason: 'TIMEOUT' | 'UNAVAILABLE' | 'CONFIG' | 'UNKNOWN'
+      reason:
+        | 'TIMEOUT'
+        | 'UNAVAILABLE'
+        | 'CONFIG'
+        | 'UNKNOWN'
+        // A 200 we could not read as a license record (empty body, a 200-shaped
+        // gateway error page, schema drift). Not evidence — degrade, never reject.
+        | 'UNREADABLE'
+        // A record came back CURRENT under a different number. Ambiguous, so a
+        // human compares the two rather than the signup being refused.
+        | 'NUMBER_MISMATCH'
+      /** Extra context persisted for whoever picks up the manual review. */
+      details?: Prisma.JsonObject
     }
 
 let cachedTypeMap: Record<string, string> | null = null
@@ -551,7 +569,9 @@ async function verifyCaBbcLicense(args: {
       'https://iservices.dca.ca.gov/api/v1/search/v1/licenseSearchService/getLicenseNumberSearch',
     )
     url.searchParams.set('licType', licType)
-    url.searchParams.set('licNumber', args.licenseNumber)
+    // BreEZe keys on the numeric portion; the letter prefix printed on the
+    // physical license is not part of what it searches on.
+    url.searchParams.set('licNumber', dcaLicenseQueryNumber(args.licenseNumber))
 
     const res = await fetch(url.toString(), {
       headers: { APP_ID, APP_KEY },
@@ -573,28 +593,41 @@ async function verifyCaBbcLicense(args: {
       }
     }
 
-    const detailsRoot = isRecord(data) ? asArray(data.licenseDetails) : []
-    const first = detailsRoot.length ? detailsRoot[0] : null
-    const full = isRecord(first) ? asArray(first.getFullLicenseDetail)[0] : null
-    const lic = isRecord(full) ? asArray(full.getLicenseDetails)[0] : null
+    const record = parseDcaLicenseRecord(data)
 
-    const statusCode =
-      isRecord(lic) && lic.primaryStatusCode != null
-        ? String(lic.primaryStatusCode)
-        : null
-    const expDate =
-      isRecord(lic) && lic.expDate != null ? String(lic.expDate) : null
-    const returnedNumber =
-      isRecord(lic) && lic.licNumber != null
-        ? String(lic.licNumber).toUpperCase()
-        : null
+    // A 200 we cannot read is NOT a finding about this license. An empty body,
+    // a gateway error page served with status 200, or BreEZe changing its
+    // schema all land here — and none of them says a pro is unlicensed. Send it
+    // down the same manual-review path as a network failure rather than
+    // refusing a legitimate signup on the strength of an unparseable response.
+    if (!record) {
+      return {
+        ok: false,
+        error: 'DCA returned no readable license record.',
+        reason: 'UNREADABLE',
+        details: { dcaRecordParsed: false },
+      }
+    }
 
-    const numberMatches = Boolean(
-      returnedNumber && returnedNumber === args.licenseNumber,
-    )
-    const isCurrent = statusCode
-      ? statusCode.toUpperCase().includes('CURRENT')
-      : false
+    // Match first: a record filed under a different number tells us nothing
+    // about THIS pro's license, so its status must not condemn them either.
+    //
+    // Note we deliberately do NOT persist the raw payload here — it is the
+    // government record of a DIFFERENT licensee. The admin gets both numbers
+    // and the status, which is what the comparison actually needs.
+    if (!licenseNumbersMatch(record.licNumber ?? '', args.licenseNumber)) {
+      return {
+        ok: false,
+        error: 'The license number did not match the record DCA returned.',
+        reason: 'NUMBER_MISMATCH',
+        details: {
+          dcaRecordParsed: true,
+          dcaReturnedLicenseNumber: record.licNumber,
+          submittedLicenseNumber: args.licenseNumber,
+          statusCode: record.statusCode,
+        },
+      }
+    }
 
     // Prisma wants InputJsonValue for create/update inputs.
     // fetch().json() is JSON-safe; stringify/parse guarantees no Date/functions/undefined.
@@ -602,11 +635,13 @@ async function verifyCaBbcLicense(args: {
       JSON.stringify(data ?? {}),
     )
 
+    // This pro's own record, read cleanly. Only here is `verified: false`
+    // definitive — it is the one case that still hard-rejects at signup.
     return {
       ok: true,
-      verified: Boolean(numberMatches && isCurrent),
-      statusCode,
-      expDate,
+      verified: isCurrentStatusCode(record.statusCode),
+      statusCode: record.statusCode,
+      expDate: record.expDate,
       raw: rawJson,
       source: 'CA_DCA_BREEZE',
     }
@@ -1042,8 +1077,18 @@ export async function POST(request: Request) {
               error: 'AbortError',
             } satisfies Prisma.InputJsonValue
           } else {
-            const err = stageManualReview('DCA unavailable at signup; manual follow-up required', {
+            // Everything that is not a clean read of this pro's own record ends
+            // up in front of an admin instead of bouncing the signup.
+            const note =
+              v.reason === 'NUMBER_MISMATCH'
+                ? 'DCA record did not match the submitted license number; manual review required'
+                : v.reason === 'UNREADABLE'
+                  ? 'DCA response was not a readable license record; manual review required'
+                  : 'DCA unavailable at signup; manual follow-up required'
+
+            const err = stageManualReview(note, {
               error: v.error ?? null,
+              ...(v.details ?? {}),
             })
             if (err) return jsonFail(400, err, { code: 'LICENSE_DOC_INVALID' })
           }

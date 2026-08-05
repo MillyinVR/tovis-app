@@ -457,6 +457,26 @@ function makeJsonResponse(data: unknown, status = 200) {
   })
 }
 
+function fetchUrlOf(input: string | URL | Request): string {
+  if (typeof input === 'string') return input
+  return input instanceof URL ? input.toString() : input.url
+}
+
+/** A well-formed BreEZe `getLicenseNumberSearch` payload for one license. */
+function makeDcaLicenseSearchResponse(detail: {
+  licNumber: string
+  primaryStatusCode: string
+  expDate?: string
+}) {
+  return makeJsonResponse({
+    licenseDetails: [
+      {
+        getFullLicenseDetail: [{ getLicenseDetails: [detail] }],
+      },
+    ],
+  })
+}
+
 describe('app/api/v1/auth/register/route', () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV }
@@ -1893,26 +1913,10 @@ describe('app/api/v1/auth/register/route', () => {
       }
 
       if (url.includes('getLicenseNumberSearch')) {
-        const licenseDetail = {
+        return makeDcaLicenseSearchResponse({
           licNumber: 'Z123456',
           primaryStatusCode: 'EXPIRED',
           expDate: '2025-01-01',
-        }
-
-        return makeJsonResponse({
-          licenseDetails: [
-            {
-              licNumber: 'Z123456',
-              primaryStatusCode: 'EXPIRED',
-              expDate: '2025-01-01',
-              getLicenseDetails: [licenseDetail],
-              getFullLicenseDetail: [
-                {
-                  getLicenseDetails: [licenseDetail],
-                },
-              ],
-            },
-          ],
         })
       }
 
@@ -1940,6 +1944,252 @@ describe('app/api/v1/auth/register/route', () => {
 
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
     expect(mockWaitUntil).not.toHaveBeenCalled()
+  })
+
+  // The integration is unconfigured in every environment today (the keys live
+  // only in .env.example), so this is the path every real CA signup takes right
+  // now. It must be untouched by the safety fixes above.
+  it('leaves the unconfigured-DCA path on PENDING manual review, unchanged', async () => {
+    delete process.env.DCA_SEARCH_APP_ID
+    delete process.env.DCA_SEARCH_APP_KEY
+
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_dca_unconfigured',
+      email: 'pro@example.com',
+      role: Role.PRO,
+    })
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockFetch.mockImplementation(async (input: string | URL | Request) => {
+      throw new Error(`DCA must not be called when unconfigured: ${fetchUrlOf(input)}`)
+    })
+
+    const result = await POST(
+      makeRequest(
+        makeProSignupBody({
+          professionType: 'ESTHETICIAN',
+          licenseState: 'CA',
+          licenseNumber: 'Z123456',
+        }),
+      ),
+    )
+
+    expect(result.status).toBe(201)
+    expect(mockFetch).not.toHaveBeenCalled()
+
+    const createCall = tx.user.create.mock.calls[0]?.[0]
+    expect(createCall?.data?.professionalProfile?.create).toEqual(
+      expect.objectContaining({
+        verificationStatus: 'PENDING',
+        licenseVerified: false,
+        licenseRawJson: expect.objectContaining({
+          note: 'DCA unavailable at signup; manual follow-up required',
+          needsManualUpload: true,
+        }),
+      }),
+    )
+
+    await flushWaitUntilTasks()
+  })
+
+  // A 200 whose body we cannot read is NOT evidence about a license. A gateway
+  // error page served with status 200, or BreEZe changing its schema, used to
+  // land on the same `verified: false` as "found and EXPIRED" and hard-reject a
+  // legitimate pro. It has to degrade to the manual-review path instead.
+  it('degrades an unreadable 200 body from DCA to PENDING manual review instead of rejecting', async () => {
+    process.env.DCA_SEARCH_APP_ID = 'dca_app_id'
+    process.env.DCA_SEARCH_APP_KEY = 'dca_app_key'
+
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_dca_junk_body',
+      email: 'pro@example.com',
+      role: Role.PRO,
+    })
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockFetch.mockImplementation(async (input: string | URL | Request) => {
+      const url = fetchUrlOf(input)
+
+      if (url.includes('getAllLicenseTypes')) {
+        return makeCompleteDcaLicenseTypesResponse()
+      }
+
+      if (url.includes('getLicenseNumberSearch')) {
+        // A 200-shaped gateway error page — well-formed JSON, no license record.
+        return makeJsonResponse({
+          message: 'Service temporarily unavailable, please try again later.',
+        })
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`)
+    })
+
+    const result = await POST(
+      makeRequest(
+        makeProSignupBody({
+          professionType: 'ESTHETICIAN',
+          licenseState: 'CA',
+          licenseNumber: 'Z123456',
+        }),
+      ),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(201)
+    expect(body.ok).toBe(true)
+
+    const createCall = tx.user.create.mock.calls[0]?.[0]
+    expect(createCall?.data?.professionalProfile?.create).toEqual(
+      expect.objectContaining({
+        licenseState: 'CA',
+        licenseNumber: 'Z123456',
+        verificationStatus: 'PENDING',
+        licenseVerified: false,
+        licenseRawJson: expect.objectContaining({
+          needsManualUpload: true,
+          dcaRecordParsed: false,
+        }),
+      }),
+    )
+
+    await flushWaitUntilTasks()
+  })
+
+  // The pro reads "C-123456" off the physical license; BreEZe answers with the
+  // numeric portion only. Same license — it must verify, not hard-reject.
+  it('approves a CURRENT license when the pro typed the printed prefix and DCA returned digits only', async () => {
+    process.env.DCA_SEARCH_APP_ID = 'dca_app_id'
+    process.env.DCA_SEARCH_APP_KEY = 'dca_app_key'
+
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_dca_prefix',
+      email: 'pro@example.com',
+      role: Role.PRO,
+    })
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockFetch.mockImplementation(async (input: string | URL | Request) => {
+      const url = fetchUrlOf(input)
+
+      if (url.includes('getAllLicenseTypes')) {
+        return makeCompleteDcaLicenseTypesResponse()
+      }
+
+      if (url.includes('getLicenseNumberSearch')) {
+        return makeDcaLicenseSearchResponse({
+          licNumber: '123456',
+          primaryStatusCode: 'CURRENT',
+          expDate: '2027-01-01',
+        })
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`)
+    })
+
+    const result = await POST(
+      makeRequest(
+        makeProSignupBody({
+          professionType: 'ESTHETICIAN',
+          licenseState: 'CA',
+          licenseNumber: 'C-123456',
+        }),
+      ),
+    )
+
+    expect(result.status).toBe(201)
+
+    const createCall = tx.user.create.mock.calls[0]?.[0]
+    expect(createCall?.data?.professionalProfile?.create).toEqual(
+      expect.objectContaining({
+        // Stored as the pro entered it — normalization is for matching only.
+        licenseNumber: 'C-123456',
+        verificationStatus: 'APPROVED',
+        licenseVerified: true,
+        licenseVerifiedSource: 'CA_DCA_BREEZE',
+        licenseStatusCode: 'CURRENT',
+      }),
+    )
+
+    // BreEZe keys on the numeric portion: the printed prefix must not be sent.
+    const searchUrl = mockFetch.mock.calls
+      .map((call) => fetchUrlOf(call[0]))
+      .find((url) => url.includes('getLicenseNumberSearch'))
+    expect(searchUrl).toContain('licNumber=123456')
+
+    await flushWaitUntilTasks()
+  })
+
+  // A genuinely different number that still came back CURRENT is ambiguous, not
+  // disqualifying — hand it to an admin with the number DCA actually returned.
+  it('degrades a CURRENT record whose number does not match to PENDING manual review', async () => {
+    process.env.DCA_SEARCH_APP_ID = 'dca_app_id'
+    process.env.DCA_SEARCH_APP_KEY = 'dca_app_key'
+
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_dca_mismatch',
+      email: 'pro@example.com',
+      role: Role.PRO,
+    })
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockFetch.mockImplementation(async (input: string | URL | Request) => {
+      const url = fetchUrlOf(input)
+
+      if (url.includes('getAllLicenseTypes')) {
+        return makeCompleteDcaLicenseTypesResponse()
+      }
+
+      if (url.includes('getLicenseNumberSearch')) {
+        return makeDcaLicenseSearchResponse({
+          licNumber: '999999',
+          primaryStatusCode: 'CURRENT',
+          expDate: '2027-01-01',
+        })
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`)
+    })
+
+    const result = await POST(
+      makeRequest(
+        makeProSignupBody({
+          professionType: 'ESTHETICIAN',
+          licenseState: 'CA',
+          licenseNumber: 'Z123456',
+        }),
+      ),
+    )
+
+    expect(result.status).toBe(201)
+
+    const createCall = tx.user.create.mock.calls[0]?.[0]
+    expect(createCall?.data?.professionalProfile?.create).toEqual(
+      expect.objectContaining({
+        verificationStatus: 'PENDING',
+        licenseVerified: false,
+        licenseRawJson: expect.objectContaining({
+          needsManualUpload: true,
+          // The admin needs both sides to compare.
+          dcaReturnedLicenseNumber: '999999',
+          submittedLicenseNumber: 'Z123456',
+          statusCode: 'CURRENT',
+        }),
+      }),
+    )
+
+    await flushWaitUntilTasks()
   })
 
   it('returns 500 when the app URL cannot be resolved', async () => {
