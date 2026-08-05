@@ -8,11 +8,7 @@ import {
 } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import {
-  broadcastLive,
-  liveChannelForPro,
-  liveChannelForUser,
-} from '@/lib/live/broadcast'
+import { broadcastChange } from '@/lib/live/broadcastAudience'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
@@ -488,13 +484,11 @@ export async function POST(req: Request) {
     kickNotificationDrain()
 
     // Live-sync: refresh the pro's other devices + the client's phone.
-    await broadcastLive(
-      [
-        liveChannelForPro(professionalId),
-        liveChannelForUser(result.clientUserId),
-      ],
-      'bookings',
-    )
+    await broadcastChange({
+      topic: 'bookings',
+      professionalId,
+      userIds: [result.clientUserId],
+    })
 
     return jsonOk(responseBody, 201)
   } catch (error: unknown) {

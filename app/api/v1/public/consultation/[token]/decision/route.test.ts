@@ -82,6 +82,8 @@ const mocks = vi.hoisted(() => ({
   buildPublicConsultationTokenActorKey: vi.fn(),
 
   captureBookingException: vi.fn(),
+
+  broadcastBookingChange: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -140,6 +142,10 @@ vi.mock('@/lib/idempotency', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/live/broadcastBooking', () => ({
+  broadcastBookingChange: mocks.broadcastBookingChange,
 }))
 
 import { POST } from './route'
@@ -368,6 +374,7 @@ describe('POST /api/v1/public/consultation/[token]/decision', () => {
     mocks.clientActionTokenFindUnique.mockResolvedValue({
       id: 'token_row_1',
       kind: ClientActionTokenKind.CONSULTATION_ACTION,
+      bookingId: 'bk_1',
     })
 
     mocks.buildPublicConsultationTokenActorKey.mockImplementation(
@@ -385,6 +392,7 @@ describe('POST /api/v1/public/consultation/[token]/decision', () => {
     mocks.rejectConsultationByClientActionToken.mockResolvedValue(
       mockRejectResult(),
     )
+    mocks.broadcastBookingChange.mockResolvedValue(undefined)
   })
 
   it('returns 400 when token is missing', async () => {
@@ -528,6 +536,7 @@ describe('POST /api/v1/public/consultation/[token]/decision', () => {
       select: {
         id: true,
         kind: true,
+        bookingId: true,
       },
     })
 
@@ -686,6 +695,7 @@ describe('POST /api/v1/public/consultation/[token]/decision', () => {
       select: {
         id: true,
         kind: true,
+        bookingId: true,
       },
     })
 
@@ -715,12 +725,22 @@ describe('POST /api/v1/public/consultation/[token]/decision', () => {
       ok: true,
       ...approvedResponseBody,
     })
+
+    // The pro is on another device when the client taps Approve in a text or
+    // email — without this ping their calendar and session screens sit stale
+    // until a manual reload. The authed in-app twin has always pinged; this
+    // second door onto the same decision did not.
+    expect(mocks.broadcastBookingChange).toHaveBeenCalledWith(
+      'bk_1',
+      'consultation',
+    )
   })
 
   it('forwards REJECT requests, completes idempotency, and returns the result payload', async () => {
     mocks.clientActionTokenFindUnique.mockResolvedValueOnce({
       id: 'token_row_2',
       kind: ClientActionTokenKind.CONSULTATION_ACTION,
+      bookingId: 'bk_2',
     })
 
     expectIdempotencyStarted('idem_reject_1')
@@ -764,6 +784,26 @@ describe('POST /api/v1/public/consultation/[token]/decision', () => {
       ok: true,
       ...rejectedResponseBody,
     })
+
+    // A decline is news the pro needs as fast as an approval.
+    expect(mocks.broadcastBookingChange).toHaveBeenCalledWith(
+      'bk_2',
+      'consultation',
+    )
+  })
+
+  it('does not ping live-sync when the decision never happened', async () => {
+    mocks.clientActionTokenFindUnique.mockResolvedValueOnce(null)
+
+    await POST(
+      makeIdempotentRequest({
+        key: 'idem_invalid_1',
+        body: { action: 'APPROVE' },
+      }),
+      makeCtx('token_bad'),
+    )
+
+    expect(mocks.broadcastBookingChange).not.toHaveBeenCalled()
   })
 
   it('maps booking errors through bookingJsonFail and marks idempotency failed', async () => {

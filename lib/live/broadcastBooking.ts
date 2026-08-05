@@ -1,24 +1,25 @@
 // lib/live/broadcastBooking.ts
 //
-// Convenience over broadcastLive() for the common case: "this booking changed,
-// tell its pro + client". Resolves both channels from the bookingId in one
-// query, so call sites that only have a bookingId stay one line. Fail-open.
+// Convenience over broadcastChange() for the common case: "this booking
+// changed, tell its pro + client". Resolves the parties from the bookingId in
+// one query, so call sites that only have a bookingId stay one line. Fail-open.
+//
+// How a party maps to channels (a pro is the salon channel PLUS their own user
+// channel, so the phone hears it too) belongs to lib/live/broadcastAudience.ts —
+// this module only decides WHO the parties are.
 import 'server-only'
 
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
 
-import {
-  broadcastLive,
-  liveChannelForPro,
-  liveChannelForUser,
-  type LiveTopic,
-} from './broadcast'
+import { type LiveTopic } from './broadcast'
+import { broadcastChange } from './broadcastAudience'
 
 /**
- * Notify a booking's pro (salon) + client (their devices) that it changed.
- * Fully fail-safe: an unresolved/missing booking or any lookup error is
- * swallowed, so a live-sync miss never affects the write that already committed.
+ * Notify a booking's pro (their devices, web + phone) + client (their devices)
+ * that it changed. Fully fail-safe: an unresolved/missing booking or any lookup
+ * error is swallowed, so a live-sync miss never affects the write that already
+ * committed.
  */
 export async function broadcastBookingChange(
   bookingId: string,
@@ -35,13 +36,11 @@ export async function broadcastBookingChange(
 
     if (!booking) return
 
-    await broadcastLive(
-      [
-        liveChannelForPro(booking.professionalId),
-        liveChannelForUser(booking.client?.userId ?? null),
-      ],
+    await broadcastChange({
       topic,
-    )
+      professionalId: booking.professionalId,
+      userIds: [booking.client?.userId ?? null],
+    })
   } catch (error: unknown) {
     console.warn('broadcastBookingChange failed', { error: safeError(error) })
   }

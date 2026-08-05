@@ -23,10 +23,7 @@ import { isBookingError } from '@/lib/booking/errors'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { recurringAppointmentsEnabled } from '@/lib/booking/series/flag'
 import { createBookingSeries } from '@/lib/booking/writeBoundary'
-import {
-  broadcastLive,
-  liveChannelForPro,
-} from '@/lib/live/broadcast'
+import { broadcastChange } from '@/lib/live/broadcastAudience'
 import type { ProBookingSeriesCreateResponseDTO } from '@/lib/dto/proBookingSeries'
 import {
   beginIdempotency,
@@ -237,7 +234,7 @@ export async function POST(req: Request) {
     })
 
     kickNotificationDrain()
-    await broadcastLive([liveChannelForPro(professionalId)], 'bookings')
+    await broadcastChange({ topic: 'bookings', professionalId })
 
     return jsonOk(responseBody, 201)
   } catch (error: unknown) {

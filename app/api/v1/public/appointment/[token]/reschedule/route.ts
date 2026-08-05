@@ -12,6 +12,7 @@
 // silently reads as a confirmed Friday.
 
 import { Role, type Prisma } from '@prisma/client'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 import { jsonFail, pickString } from '@/app/api/_utils'
@@ -145,6 +146,9 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
 
     // Booking rescheduled — deliver the new-time notification now.
     kickNotificationDrain()
+
+    // Live-sync: the appointment moved on the pro's calendar.
+    await broadcastBookingChange(bookingId, 'bookings')
 
     return response
   } catch (error: unknown) {

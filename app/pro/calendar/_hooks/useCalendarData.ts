@@ -35,6 +35,8 @@ import {
   utcFromDayAndMinutesInTimeZone,
 } from '@/lib/timeZone'
 
+import { useLiveChanged } from '@/app/_components/live/LiveRefresh'
+
 import { useCalendarLocations } from './useCalendarLocations'
 import { useCalendarFetch } from './useCalendarFetch'
 import { useManagementPanel } from './useManagementPanel'
@@ -171,6 +173,14 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     setCanMobile: loc.setCanMobile,
     resolveActiveCalendarTimeZone,
   })
+
+  // Live-sync: the calendar's rows live in this hook's state, so the pro shell's
+  // `router.refresh()` never reaches them — a client approving a consultation
+  // (or confirming, declining, rescheduling, cancelling) left the grid stale
+  // until a manual reload. Re-run the same fetch the pro's own actions use.
+  // No-ops when the shell has no live subscription; load-on-mount and the focus
+  // refresh still keep the grid correct, just not instant.
+  useLiveChanged(cal.reload)
 
   useEffect(() => {
     calendarTimeZoneFallbackRef.current = sanitizeFallbackTimeZone(cal.timeZone)

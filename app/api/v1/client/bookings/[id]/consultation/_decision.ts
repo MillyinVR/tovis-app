@@ -22,11 +22,7 @@ import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
-import {
-  broadcastLive,
-  liveChannelForPro,
-  liveChannelForUser,
-} from '@/lib/live/broadcast'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import {
   BookingCloseoutAuditAction,
   ConsultationApprovalStatus,
@@ -371,11 +367,10 @@ const idempotencyRequest = new Request(
       // Client approved the consultation — notify the pro now.
       kickNotificationDrain()
 
-      // Live-sync: pro's + client's open screens refetch immediately.
-      await broadcastLive(
-        [liveChannelForPro(booking.professionalId), liveChannelForUser(user.id)],
-        'consultation',
-      )
+      // Live-sync: pro's + client's open screens refetch immediately. Goes
+      // through the shared booking helper so the pro's phone (which subscribes
+      // by userId, not professional-profile id) is on the audience too.
+      await broadcastBookingChange(bookingId, 'consultation')
 
       return jsonOk(responseBody, 200)
     }
@@ -507,11 +502,9 @@ const idempotencyRequest = new Request(
     // Client rejected the consultation — notify the pro now.
     kickNotificationDrain()
 
-    // Live-sync: pro's + client's open screens refetch immediately.
-    await broadcastLive(
-      [liveChannelForPro(booking.professionalId), liveChannelForUser(user.id)],
-      'consultation',
-    )
+    // Live-sync: pro's + client's open screens refetch immediately. Same shared
+    // helper as the approve branch — a decline must reach the pro's phone too.
+    await broadcastBookingChange(bookingId, 'consultation')
 
     return jsonOk(responseBody, 200)
   } catch (e: unknown) {

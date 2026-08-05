@@ -21,6 +21,7 @@ import {
   approveConsultationByClientActionToken,
   rejectConsultationByClientActionToken,
 } from '@/lib/booking/writeBoundary'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import { prisma } from '@/lib/prisma'
 import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
 import {
@@ -53,6 +54,11 @@ type RequestMeta = {
 const TOKEN_ID_SELECT = {
   id: true,
   kind: true,
+  // Carried so the live-sync ping after the decision knows which booking
+  // changed. The token is resolved before the write anyway (for idempotency),
+  // and `bookingId` is non-nullable on ClientActionToken, so this costs nothing
+  // extra and never needs the write's result shape to grow a field.
+  bookingId: true,
 } satisfies Prisma.ClientActionTokenSelect
 
 type TokenIdRecord = Prisma.ClientActionTokenGetPayload<{
@@ -313,6 +319,12 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
         responseBody,
       })
 
+      // Live-sync: the client approved from the emailed/texted link, so the pro
+      // is on another device entirely. Without this the pro's calendar and
+      // session screens sat stale until a manual reload — the authed in-app
+      // decision route has always pinged, this second door never did.
+      await broadcastBookingChange(tokenRecord.bookingId, 'consultation')
+
       return jsonOk(responseBody, 200)
     }
 
@@ -334,6 +346,9 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
       responseStatus: 200,
       responseBody,
     })
+
+    // A decline is news the pro needs just as fast as an approval.
+    await broadcastBookingChange(tokenRecord.bookingId, 'consultation')
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {

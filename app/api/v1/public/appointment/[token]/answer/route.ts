@@ -10,6 +10,7 @@
 // needed here (unlike the cancel/reschedule routes, which move money/time).
 // D5: DECLINE stamps + notifies the pro and NEVER touches the slot.
 
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
@@ -85,6 +86,10 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
     if (answer === 'DECLINE') {
       kickNotificationDrain()
     }
+
+    // Live-sync: the client answered from a link, so the pro is elsewhere.
+    // Both answers move the booking on the pro's calendar, so both ping.
+    await broadcastBookingChange(result.booking.id, 'bookings')
 
     return jsonOk({
       state: result.state,

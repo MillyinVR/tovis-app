@@ -43,10 +43,7 @@ import type {
 } from '@/lib/dto/proBookingSeries'
 import { asTrimmedString } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
-import {
-  broadcastLive,
-  liveChannelForPro,
-} from '@/lib/live/broadcast'
+import { broadcastChange } from '@/lib/live/broadcastAudience'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { pickInt, pickString } from '@/lib/pick'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -191,7 +188,10 @@ export async function POST(req: Request, ctx: RouteContext) {
     })
 
     kickNotificationDrain()
-    await broadcastLive([liveChannelForPro(auth.professionalId)], 'bookings')
+    await broadcastChange({
+      topic: 'bookings',
+      professionalId: auth.professionalId,
+    })
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
