@@ -10491,6 +10491,13 @@
         "clientName": {
           "type": "string"
         },
+        "clientPublicProfileHandle": {
+          "description": "The client's public `@handle`, or null when they have no public profile.\n\nA SEPARATE axis from chart access: it says only whether a world-readable `/u/{handle}` page exists. null → render the name as plain text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "depositPerOccurrence": {
           "type": "boolean"
         },
@@ -10577,6 +10584,7 @@
         "depositPerOccurrence",
         "clientId",
         "clientName",
+        "clientPublicProfileHandle",
         "offeringId",
         "serviceName",
         "locationId",

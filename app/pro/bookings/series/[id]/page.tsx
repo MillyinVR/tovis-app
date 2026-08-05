@@ -25,6 +25,8 @@ import type {
 } from '@/lib/dto/proBookingSeries'
 import { formatCents } from '@/lib/money'
 import { formatDatedAppointmentWhen, friendlyTimeZoneLabel } from '@/lib/time'
+import ClientProfileLink from '@/app/_components/ClientProfileLink'
+import { clientPublicProfileHref } from '@/lib/profiles/profileHrefs'
 
 import SeriesCancelControls from './SeriesCancelControls'
 
@@ -116,7 +118,16 @@ export default async function ProBookingSeriesPage(props: {
             Studio · Recurring appointment
           </div>
           <h1 className="mt-1.5 font-display text-[28px] font-bold tracking-tight text-textPrimary">
-            {series.clientName}
+            {/* The client's public profile when they have one; plain text
+                otherwise. This page is the pro's own record of the series, so
+                there is no chart arm — the chart has its own entry points. */}
+            <ClientProfileLink
+              href={clientPublicProfileHref({
+                handle: series.clientPublicProfileHandle,
+                isPublicProfile: series.clientPublicProfileHandle != null,
+              })}
+              label={series.clientName}
+            />
           </h1>
           <p className="mt-1.5 text-[13px] text-textSecondary">
             {series.serviceName} · {cadenceLabel(series.intervalWeeks)} ·{' '}

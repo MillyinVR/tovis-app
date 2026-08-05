@@ -36,6 +36,10 @@ import type {
 import { decimalToCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
+import {
+  CLIENT_LINK_SELECT,
+  clientPublicHandle,
+} from '@/lib/profiles/profileHrefs'
 
 function buildLocationLabel(location: {
   type: string
@@ -124,7 +128,7 @@ export async function loadProBookingSeriesDetail(args: {
       offeringId: true,
       locationId: true,
       client: {
-        select: { id: true, firstName: true, lastName: true },
+        select: { ...CLIENT_LINK_SELECT, firstName: true, lastName: true },
       },
       offering: {
         select: {
@@ -290,6 +294,9 @@ export async function loadProBookingSeriesDetail(args: {
     depositPerOccurrence: series.depositPerOccurrence,
     clientId: series.clientId,
     clientName: formatClientName(series.client),
+    // The client's public `@handle`, or null when they have no public profile.
+    // Same separate axis as everywhere else — see lib/pro/proBookingsList.ts.
+    clientPublicProfileHandle: clientPublicHandle(series.client),
     offeringId: series.offeringId,
     serviceName:
       series.offering.title?.trim() ||

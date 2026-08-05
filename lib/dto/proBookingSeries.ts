@@ -214,6 +214,13 @@ export type ProBookingSeriesDetailDTO = {
   depositPerOccurrence: boolean
   clientId: string
   clientName: string
+  /**
+   * The client's public `@handle`, or null when they have no public profile.
+   *
+   * A SEPARATE axis from chart access: it says only whether a world-readable
+   * `/u/{handle}` page exists. null → render the name as plain text.
+   */
+  clientPublicProfileHandle: string | null
   offeringId: string
   serviceName: string
   locationId: string
