@@ -96,16 +96,34 @@ describe('database hardening', () => {
   })
 
   it('pins search_path on every function we define', async () => {
+    // Scoped to OUR functions by name rather than sweeping every non-extension
+    // function in `public`.
+    //
+    // The sweep was the first shape of this test and CI rejected it: the
+    // Postgres image the integration job runs ships 17 loose `svg*` helpers
+    // (svgdoc, svgrect, _svgattr, …) in `public` which are NOT extension-owned,
+    // so `pg_depend deptype='e'` does not filter them out. Production has
+    // exactly the two functions below and none of that; the local docker image
+    // has neither. A guard that goes red because of what the CI base image
+    // happens to contain is noise, not a finding.
+    //
+    // The cost is that this list is maintained by hand: **a migration that adds
+    // a function must add it here too.** That is the same discipline as
+    // RLS_EXEMPT_TABLES above — explicit, and visible in review.
     const rows = await db.$queryRaw<FnRow[]>`
       SELECT p.proname, p.proconfig
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'public'
         AND p.prokind = 'f'
-        AND NOT EXISTS (
-          SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
-        )
+        AND p.proname = ANY(${PINNED_FUNCTIONS})
     `
+
+    // Each one must actually be present — otherwise "all pinned" is vacuously
+    // true against a database where they simply do not exist.
+    expect(rows.map((row) => row.proname).sort()).toEqual(
+      [...PINNED_FUNCTIONS].sort(),
+    )
 
     // An unpinned function resolves unqualified names against the caller's
     // search_path, so a schema earlier in the path can shadow a builtin.
@@ -118,10 +136,6 @@ describe('database hardening', () => {
       'These functions have no pinned search_path:\n' +
         unpinned.map((name) => `  ALTER FUNCTION public.${name}(...) SET search_path = '';`).join('\n'),
     ).toEqual([])
-
-    for (const expected of PINNED_FUNCTIONS) {
-      expect(rows.map((row) => row.proname)).toContain(expected)
-    }
   })
 
   it('leaves the booking overlap exclusion constraints valid and enforcing', async () => {
