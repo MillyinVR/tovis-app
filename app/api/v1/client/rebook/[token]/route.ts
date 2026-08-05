@@ -29,6 +29,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { createClientRebookedBookingFromAftercare } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
+import { broadcastBookingChange } from '@/lib/live/broadcastBooking'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
@@ -365,7 +366,7 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
 
     const { requestId } = readRequestMeta(req)
 
-    return await withRouteIdempotency<RebookResponseBody>(
+    const response = await withRouteIdempotency<RebookResponseBody>(
       {
         request: req,
         actor: {
@@ -413,6 +414,17 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
         return { status: 201, body: responseBody }
       },
     )
+
+    // Live-sync: this is the SECOND door onto an aftercare rebook. The authed
+    // twin (`client/bookings/[id]/aftercare-rebook`) has pinged since #840, but
+    // this is the link the client actually taps in their aftercare text/email —
+    // and it created a booking on the pro's calendar in silence. Keyed on the
+    // SOURCE booking (same pro, same client as the one just created, and it is
+    // guaranteed to exist). Fail-open and after the write, like every other
+    // call site: a miss costs freshness, never correctness.
+    await broadcastBookingChange(resolved.booking.id, 'bookings')
+
+    return response
   } catch (error: unknown) {
     if (isBookingError(error)) {
       return bookingErrorJsonFail(error)
