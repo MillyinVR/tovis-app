@@ -57,10 +57,18 @@ describe('chart-access notification rendering', () => {
       },
     })
 
-    expect(result.title).toBe('Glow Studio asked to see your chart')
-    // The fragment is the whole point — without it the notification lands on
-    // settings and the client has to go find the section that answers it.
-    expect(result.href).toBe(CHART_SHARE_HREF)
+    // Asserted whole rather than by property: the return is a per-channel
+    // union, and the SMS arm has no `title`/`href` to reach for.
+    expect(result).toEqual({
+      channel: NotificationChannel.IN_APP,
+      templateKey: 'chart_access_requested',
+      templateVersion: 1,
+      title: 'Glow Studio asked to see your chart',
+      body: 'Your chart is the private record they keep about you.',
+      // The fragment is the whole point — without it the notification lands on
+      // settings and the client has to go find the section that answers it.
+      href: CHART_SHARE_HREF,
+    })
   })
 
   it('renders the pro-facing grant, linking the chart it just opened', () => {
@@ -78,8 +86,14 @@ describe('chart-access notification rendering', () => {
       },
     })
 
-    expect(result.title).toBe('Rae Kim shared their chart with you')
-    expect(result.href).toBe('/pro/clients/client_1')
+    expect(result).toEqual({
+      channel: NotificationChannel.IN_APP,
+      templateKey: 'chart_access_granted',
+      templateVersion: 1,
+      title: 'Rae Kim shared their chart with you',
+      body: 'You can now open their chart.',
+      href: '/pro/clients/client_1',
+    })
   })
 
   // Neither event earns a text message: nothing expires if the client answers
