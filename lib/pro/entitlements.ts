@@ -30,6 +30,7 @@ export type Entitlement =
   | 'advanced_analytics' // retention/rebooking insights beyond the monthly dashboard
   | 'priority_discovery' // priority placement on discovery surfaces
   | 'pro_discovery_fee_waiver' // member pays no $5 pro fee on a cold discovery match
+  | 'social_export_unbranded' // social exports carry the pro's signature ONLY, no platform mark
   | 'white_label' // salon white-label / multi-pro — COMP-ONLY, never advertised
 
 const FREE: Entitlement[] = []
@@ -46,6 +47,18 @@ const PRO: Entitlement[] = [
   // (docs/design/membership-value-brief.md §11.5). Still deliberately unadvertised on
   // both surfaces until the fees are live and conversion has been measured.
   'pro_discovery_fee_waiver',
+  // The camera's social export pack (tovis-ios): a 4:5 / 9:16 / before-after
+  // diptych render, always signed with the pro's own handle. Members' exports drop
+  // the small platform mark that sits beside that signature — the signature itself is
+  // never a paid feature, because the work is theirs.
+  //
+  // 🔴 Implementation call site is in the OTHER repo (tovis-ios
+  // `SocialExportPolicy` / `SocialExportRenderer`), which is a first for this
+  // matrix. It still satisfies the §5.1.F rule — the rule is "a real call site
+  // exists", not "it exists in this repo" — and the resolver below
+  // (lib/pro/socialExportMark.ts) is what the device reads, so the gate is
+  // exercised on this side too.
+  'social_export_unbranded',
 ]
 
 // Premium's extra value is the full AI-camera allowance (a QUOTA, not a boolean —

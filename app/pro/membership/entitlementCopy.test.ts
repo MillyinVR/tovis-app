@@ -11,12 +11,14 @@ describe('advertisedEntitlements', () => {
         planKey,
         status: SubscriptionStatus.ACTIVE,
       })
-      const advertised = advertisedEntitlements(granted)
+      const advertised = advertisedEntitlements(granted, 'TOVIS')
 
       // Everything named must be implemented AND something we intend to sell.
       // advanced_analytics qualifies (lib/analytics/proRetentionInsights.ts).
       expect(advertised.map((a) => a.key)).toContain('advanced_analytics')
       expect(advertised.map((a) => a.key)).toContain('tax_export')
+      // The camera's social export pack — shipped in tovis-ios, so it is named.
+      expect(advertised.map((a) => a.key)).toContain('social_export_unbranded')
       for (const item of advertised) {
         expect(granted).toContain(item.key)
       }
@@ -47,14 +49,36 @@ describe('advertisedEntitlements', () => {
     })
     expect(studio).toContain('white_label')
 
-    const advertised = advertisedEntitlements(studio)
+    const advertised = advertisedEntitlements(studio, 'TOVIS')
     expect(advertised.map((a) => a.key)).not.toContain('white_label')
     // ...while still showing the real ones a Studio comp does get.
     expect(advertised.map((a) => a.key)).toContain('tax_export')
   })
 
+  // 🔴 Commercial-claim guard. Exporting is NOT a paid feature — every pro gets the
+  // 4:5 / 9:16 / diptych renders, signed with their own handle. The membership
+  // removes the small platform mark and nothing else. A future tidy that shortens
+  // this to "Social exports" would sell a free feature as a paid one.
+  it('the social-export label promises the MARK, never the export', () => {
+    const pro = advertisedEntitlements(
+      resolveEntitlements({ planKey: 'pro', status: SubscriptionStatus.ACTIVE }),
+      'TOVIS',
+    )
+    const label = pro.find((a) => a.key === 'social_export_unbranded')?.label ?? ''
+    expect(label.toLowerCase()).toContain('no tovis mark')
+    expect(label.toLowerCase()).toContain('your handle')
+  })
+
+  // ...and it is the TENANT's name in that label, not a hardcoded one — the same
+  // white-label rule feePitchBody follows.
+  it('names the tenant brand in the social-export label', () => {
+    const salon = advertisedEntitlements(['social_export_unbranded'], 'SALON X')
+    expect(salon[0]?.label).toContain('no SALON X mark')
+    expect(salon[0]?.label).not.toContain('TOVIS')
+  })
+
   it('a free plan advertises nothing', () => {
-    expect(advertisedEntitlements([])).toEqual([])
+    expect(advertisedEntitlements([], 'TOVIS')).toEqual([])
   })
 })
 

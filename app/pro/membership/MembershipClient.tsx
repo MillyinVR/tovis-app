@@ -98,7 +98,7 @@ export default function MembershipClient(props: Props) {
   }
 
   // Only entitlements we are willing to stand behind get named — see entitlementCopy.
-  const advertised = advertisedEntitlements(props.entitlements)
+  const advertised = advertisedEntitlements(props.entitlements, brand.displayName)
   const renewLabel = formatDate(props.currentPeriodEnd)
   const trialLabel = formatDate(props.trialEndsAt)
   const compLabel = formatDate(props.compUntil)

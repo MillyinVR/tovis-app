@@ -18,12 +18,28 @@
 
 import type { Entitlement } from '@/lib/pro/entitlements'
 
-const ENTITLEMENT_LABELS: Partial<Record<Entitlement, string>> = {
+/**
+ * A label is either fixed copy or a function of the tenant's display name — the
+ * white-label guard forbids a hardcoded brand string in user-facing copy, and one
+ * of these perks is precisely "no platform mark on your exports", which cannot be
+ * said without naming the platform.
+ */
+type EntitlementLabel = string | ((brandName: string) => string)
+
+const ENTITLEMENT_LABELS: Partial<Record<Entitlement, EntitlementLabel>> = {
   custom_handle: 'Custom .tovis handle',
   tax_export: 'Tax exports (CSV + Schedule C) + transaction ledger',
   advanced_analytics:
     'Retention insights — rebooking rate over time + who’s due back',
   priority_discovery: 'Priority placement in Discovery',
+  // The camera's social export pack. Deliberately worded around the MARK, not the
+  // export: every pro gets the 4:5 / 9:16 / before-after renders and every export
+  // is signed with the pro's own handle — the membership only removes the small
+  // platform mark sitting beside that signature. Labeled (unlike
+  // `pro_discovery_fee_waiver`) because it has a shipped implementation and
+  // describes exactly one thing, on the same footing as `advanced_analytics`.
+  social_export_unbranded: (brandName) =>
+    `Social exports signed with your handle only — no ${brandName} mark`,
   // 🔴 `pro_discovery_fee_waiver` is deliberately UNLABELED (Tori, 2026-08-04).
   //
   // It now waives the right thing — the PRO's $5 cold-match fee, never the
@@ -71,12 +87,17 @@ export type AdvertisedEntitlement = { key: Entitlement; label: string }
  * The subset of a plan's entitlements that carries customer-facing copy, in the
  * matrix's own order. Anything unlabeled is dropped rather than rendered with a
  * blank or auto-titled name.
+ *
+ * `brandName` is the tenant's display name, for the labels that must name the
+ * platform (see `EntitlementLabel`).
  */
 export function advertisedEntitlements(
   entitlements: readonly Entitlement[],
+  brandName: string,
 ): AdvertisedEntitlement[] {
   return entitlements.flatMap((key) => {
     const label = ENTITLEMENT_LABELS[key]
-    return label ? [{ key, label }] : []
+    if (!label) return []
+    return [{ key, label: typeof label === 'function' ? label(brandName) : label }]
   })
 }
