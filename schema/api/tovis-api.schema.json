@@ -290,6 +290,8 @@
         "DEPOSIT_REMINDER",
         "DEPOSIT_PAYMENT_LINK",
         "CONSENT_SIGNATURE_REQUEST",
+        "CHART_ACCESS_REQUESTED",
+        "CHART_ACCESS_GRANTED",
         "APPOINTMENT_CONFIRMATION_DECLINED",
         "LOOK_FOLLOWER_NEW",
         "CLIENT_FOLLOW",
@@ -9049,6 +9051,7 @@
         "CONSULT_NUDGES",
         "PRICE_ALTERNATIVES",
         "MESSAGES",
+        "CHART_ACCESS",
         "SOCIAL"
       ],
       "type": "string"
