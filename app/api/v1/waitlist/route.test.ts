@@ -431,3 +431,87 @@ describe('POST /api/v1/waitlist', () => {
     expect(mocks.resolveMessageThread).not.toHaveBeenCalled()
   })
 })
+
+describe('DELETE /api/v1/waitlist', () => {
+  function deleteRequest(id = 'wl-1'): Request {
+    return new Request(`https://example.test/api/v1/waitlist?id=${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+
+    mocks.requireClient.mockResolvedValue({
+      ok: true,
+      clientId: 'client-1',
+      user: { id: 'user-1' },
+    })
+    mocks.enforceRateLimit.mockResolvedValue(ALLOWED)
+    mocks.waitlistFindUnique.mockResolvedValue({
+      id: 'wl-1',
+      clientId: 'client-1',
+      status: 'NOTIFIED',
+    })
+  })
+
+  // The pro's WAITLIST_CLIENT_LEFT row is enqueued inside the boundary's
+  // transaction; without the kick it would sit until the next cron tick. The
+  // route cannot know a notification happened except from this flag, which is
+  // exactly why the boundary returns it.
+  it('kicks the notification drain when the boundary notified the pro', async () => {
+    mocks.cancelClientWaitlistEntry.mockResolvedValue({
+      cancelled: true,
+      releasedOffers: 1,
+      notifiedProfessional: true,
+    })
+
+    const res = await DELETE(deleteRequest())
+
+    expect(res.status).toBe(200)
+    expect(mocks.kickNotificationDrain).toHaveBeenCalledTimes(1)
+  })
+
+  // The silent branch: a client leaving with no live offer enqueues nothing, so
+  // there is nothing to drain. Asserted because a kick here would be the tell
+  // that the route stopped reading the flag and started firing unconditionally.
+  it('does NOT kick when the client left with no live offer', async () => {
+    mocks.cancelClientWaitlistEntry.mockResolvedValue({
+      cancelled: true,
+      releasedOffers: 0,
+      notifiedProfessional: false,
+    })
+
+    const res = await DELETE(deleteRequest())
+
+    expect(res.status).toBe(200)
+    expect(mocks.kickNotificationDrain).not.toHaveBeenCalled()
+  })
+
+  it('is a silent 200 for an already-cancelled entry, without touching the boundary', async () => {
+    mocks.waitlistFindUnique.mockResolvedValue({
+      id: 'wl-1',
+      clientId: 'client-1',
+      status: 'CANCELLED',
+    })
+
+    const res = await DELETE(deleteRequest())
+
+    expect(res.status).toBe(200)
+    expect(mocks.cancelClientWaitlistEntry).not.toHaveBeenCalled()
+    expect(mocks.kickNotificationDrain).not.toHaveBeenCalled()
+  })
+
+  it('403s another client’s entry without reaching the boundary', async () => {
+    mocks.waitlistFindUnique.mockResolvedValue({
+      id: 'wl-1',
+      clientId: 'someone-else',
+      status: 'NOTIFIED',
+    })
+
+    const res = await DELETE(deleteRequest())
+
+    expect(res.status).toBe(403)
+    expect(mocks.cancelClientWaitlistEntry).not.toHaveBeenCalled()
+  })
+})

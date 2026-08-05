@@ -74,6 +74,10 @@
       "schedule": "20 * * * *"
     },
     {
+      "path": "/api/internal/jobs/waitlist-offer-expiry",
+      "schedule": "35 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/handle-reservations",
       "schedule": "0 9 * * *"
     },

@@ -59,6 +59,12 @@ const EMIT_SIGNALS = [
   'confirmClientAftercareNextAppointment',
   'declineClientAftercareNextAppointment',
   'refundBookingPayment',
+  // Emits WAITLIST_CLIENT_LEFT to the pro when the departing client had a live
+  // offer out to them. Conditional — a client leaving with nothing pending is
+  // silent — but this guard is a static scan, so "sometimes emits" has to count
+  // as "emits". The route's own kick is gated on the boundary's
+  // `notifiedProfessional` flag, which is the runtime half of the same rule.
+  'cancelClientWaitlistEntry',
 ]
 
 const KICK_TOKEN = 'kickNotificationDrain'

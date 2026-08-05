@@ -645,6 +645,18 @@ enum NotificationEventKey {
   // and only while they happened to be in the app. A new waitlister is a lead,
   // so this one carries email as well as in-app + push.
   WAITLIST_JOINED
+  // A pro's offered time lapsed unanswered — the sweep flipped the offer to
+  // WaitlistOfferStatus.EXPIRED and returned the entry NOTIFIED → ACTIVE. Told
+  // to the PRO, and deliberately QUIET (in-app only): nobody did anything, so
+  // waking the pro for a non-event would be the wrong trade. Its whole job is to
+  // explain why the client reappeared on the waitlist.
+  WAITLIST_OFFER_EXPIRED
+  // A waitlisted client LEFT while the pro had a live offer out to them, so the
+  // slot that offer was reserving just went back on the market. Pro-facing and
+  // in-app + push, because there is now a concrete hole in the calendar the pro
+  // can re-offer. Emitted ONLY when an offer was actually pending — a client
+  // leaving with nothing outstanding is silent by decision.
+  WAITLIST_CLIENT_LEFT
   VIRAL_REQUEST_APPROVED
   PAYMENT_COLLECTED
   PAYMENT_ACTION_REQUIRED

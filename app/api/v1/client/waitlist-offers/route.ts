@@ -1,6 +1,6 @@
 // app/api/v1/client/waitlist-offers/route.ts
 
-import { Prisma, WaitlistOfferStatus } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import { jsonOk, requireClient } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
@@ -10,7 +10,10 @@ import {
 } from '@/lib/privacy/professionalDisplayName'
 import { professionalProfileHref } from '@/lib/profiles/profileHrefs'
 import { filterStillOpenRows } from '@/lib/booking/storedSlotLiveness'
-import { waitlistOfferLivenessCandidate } from '@/lib/waitlist/offerLiveness'
+import {
+  liveWaitlistOfferWhere,
+  waitlistOfferLivenessCandidate,
+} from '@/lib/waitlist/offerLiveness'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,8 +81,7 @@ export async function GET() {
   const rows = await prisma.waitlistOffer.findMany({
     where: {
       clientId: auth.clientId,
-      status: WaitlistOfferStatus.PENDING,
-      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      ...liveWaitlistOfferWhere(now),
     },
     orderBy: { createdAt: 'desc' },
     take: 50,
