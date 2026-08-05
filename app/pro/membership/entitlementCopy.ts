@@ -37,6 +37,34 @@ const ENTITLEMENT_LABELS: Partial<Record<Entitlement, string>> = {
   // that sequencing is part of the decision, not an accident.
 }
 
+/**
+ * The fee pitch, exactly as Tori chose it on 2026-08-04 (option A, verbatim).
+ * Extracted so it is one canonical string with a test, mirroring iOS's
+ * `ProMembershipCopy.commissionPitchBody`.
+ *
+ * 🔴 THIS COPY DESCRIBES THE PLANNED FEE MODEL, NOT TODAY'S CODE. Under the model
+ * (brief §11.5) the pro pays a flat $5 once per cold-match client and membership
+ * waives it — which is what this says, and it stays true when that ships.
+ *
+ * Today, however, there is NO pro-side fee: the $5 is charged to the CLIENT, and
+ * `discovery_fee_waiver` is flag-gated off. So a pro reading this today is told
+ * they pay something they do not, and that membership waives something it does
+ * not yet waive. Tori chose this wording knowingly; the safe sequencing is to
+ * deploy it WITH the fee-model card, not before it. If the fee model changes,
+ * this string changes with it.
+ *
+ * The brand name is interpolated rather than literal: the white-label guard forbids
+ * a hardcoded brand string, so each tenant renders its own `displayName`. Note the
+ * casing therefore follows that field, which is upper-case for the default brand.
+ */
+export function feePitchBody(brandName: string): string {
+  return (
+    'We never take a percentage of your work. Ever. ' +
+    `One flat $5 when ${brandName} brings you a brand-new client ` +
+    '— and members don’t even pay that.'
+  )
+}
+
 export type AdvertisedEntitlement = { key: Entitlement; label: string }
 
 /**
