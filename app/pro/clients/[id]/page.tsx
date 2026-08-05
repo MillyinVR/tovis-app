@@ -43,10 +43,15 @@ import { formatInTimeZone } from '@/lib/time'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { formatProfessionalPublicSearchText } from '@/lib/privacy/professionalDisplayName'
-import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import {
+  formatClientName,
+  formatPublicProfileDisplayName,
+} from '@/lib/profiles/publicProfileFormatting'
+import { loadChartShare } from '@/lib/clients/chartShare'
 import { loadPublicClientProfileByClientId } from '@/app/u/[handle]/_data/loadPublicClientProfile'
 import PublicProfileView from '@/app/u/[handle]/_components/PublicProfileView'
 
+import ChartAccessRefusedView from './ChartAccessRefusedView'
 import EditAlertBannerForm from './EditAlertBannerForm'
 import EditDoNotRebookForm from './EditDoNotRebookForm'
 import EditClientPolicyForm from './EditClientPolicyForm'
@@ -1821,7 +1826,37 @@ export default async function ClientDetailPage(props: {
   const proId = user.professionalProfile.id
 
   const gate = await assertProCanViewClient(proId, clientId)
-  if (!gate.ok) redirect('/pro/clients')
+
+  if (!gate.ok) {
+    // CONTACT_ONLY: this pro knows the client (a thread, a booking) but the
+    // chart isn't shared. They get an honest refusal WITH a way to ask, instead
+    // of the silent bounce this page used to do. A pro with no relationship at
+    // all still gets the flat redirect — naming the client would confirm the id.
+    if (!gate.visibility.canContactClient) redirect('/pro/clients')
+
+    const contactClient = await prisma.clientProfile.findUnique({
+      where: { id: clientId },
+      select: {
+        firstName: true, // pii-plaintext-read-ok: CONTACT tier IS "may see who they are"
+        lastName: true, // pii-plaintext-read-ok: CONTACT tier IS "may see who they are"
+      },
+    })
+
+    // The gate said contact is allowed, so the row exists; a race that deletes
+    // it between the two reads degrades to the stranger path, not to a screen
+    // that names nobody.
+    if (!contactClient) redirect('/pro/clients')
+
+    return (
+      <ChartAccessRefusedView
+        clientId={clientId}
+        clientName={formatClientName(contactClient)}
+        share={await loadChartShare({ clientId, professionalId: proId })}
+        messageHref={buildProToClientMessageHref({ proId, clientId })}
+        now={new Date()}
+      />
+    )
+  }
 
   const accessUntil = gate.visibility.accessUntil
   const messageHref = buildProToClientMessageHref({ proId, clientId })

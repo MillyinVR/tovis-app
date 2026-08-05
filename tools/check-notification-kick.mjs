@@ -37,6 +37,8 @@ const EMIT_SIGNALS = [
   'createClientClaimInviteDelivery',
   'createLookFollowerNewProNotification',
   'createClientFollowNotification',
+  'notifyChartAccessRequested',
+  'notifyChartAccessGranted',
   'notifyLookCommentCreated',
   'notifyLookLiked',
   'notifyLookSaved',

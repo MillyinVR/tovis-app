@@ -14,6 +14,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 import {
+  CHART_SHARE_REREQUEST_COOLDOWN_MS,
   NO_CHART_SHARE,
   loadChartShare,
   requestChartShare,
@@ -83,8 +84,14 @@ describe('requestChartShare', () => {
   // REVOKED is "not right now", DECLINED is "no". Collapsing them would mean a
   // client who revoked once could never be asked again, even if they wanted to
   // re-share after a gap.
-  it('allows a fresh request after a REVOKE', async () => {
-    findUnique.mockResolvedValue({ status: 'REVOKED' })
+  it('allows a fresh request after a REVOKE, once the cooldown is served', async () => {
+    // A real REVOKED row always carries `revokedAt`, so the timestamp is part of
+    // what makes this case reachable — asserting on a bare { status: 'REVOKED' }
+    // would exercise the unreachable null branch instead of the real path.
+    findUnique.mockResolvedValue({
+      status: 'REVOKED',
+      revokedAt: new Date(NOW.getTime() - CHART_SHARE_REREQUEST_COOLDOWN_MS),
+    })
 
     await expect(requestChartShare({ ...PAIR, now: NOW })).resolves.toEqual({
       ok: true,
@@ -95,6 +102,36 @@ describe('requestChartShare', () => {
     expect(upsert.mock.calls[0]?.[0]?.update).toMatchObject({
       status: 'REQUESTED',
       revokedAt: null,
+    })
+  })
+
+  // The nag this cooldown exists to stop: client turns access off, pro presses
+  // the button again the same minute.
+  it('refuses a re-request inside the cooldown after a REVOKE', async () => {
+    const revokedAt = new Date(NOW.getTime() - 60_000)
+    findUnique.mockResolvedValue({ status: 'REVOKED', revokedAt })
+
+    await expect(requestChartShare({ ...PAIR, now: NOW })).resolves.toEqual({
+      ok: false,
+      code: 'COOLDOWN',
+      retryAt: new Date(revokedAt.getTime() + CHART_SHARE_REREQUEST_COOLDOWN_MS),
+    })
+    // The decisive assertion: a refused re-request must not write. If it
+    // upserted a REQUESTED row anyway, the cooldown would be copy over a grant
+    // path that still ran.
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  // Boundary: at exactly the cooldown the wait has been served, not "one more ms".
+  it('allows the re-request at exactly the cooldown boundary', async () => {
+    findUnique.mockResolvedValue({
+      status: 'REVOKED',
+      revokedAt: new Date(NOW.getTime() - CHART_SHARE_REREQUEST_COOLDOWN_MS),
+    })
+
+    await expect(requestChartShare({ ...PAIR, now: NOW })).resolves.toEqual({
+      ok: true,
+      status: 'REQUESTED',
     })
   })
 })

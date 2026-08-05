@@ -408,6 +408,8 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   deposit_reminder: 'Complete your deposit',
   deposit_payment_link: 'Pay your deposit',
   consent_signature_request: 'Read and sign',
+  chart_access_requested: 'Review the request',
+  chart_access_granted: 'Open the chart',
   look_follower_new: 'View your profile',
   client_follow: 'View activity',
   look_commented: 'View comment',
@@ -437,6 +439,12 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   deposit_payment_link: buildStandardTemplateRenderer(
     templateCtaLabels.deposit_payment_link,
+  ),
+  chart_access_requested: buildStandardTemplateRenderer(
+    templateCtaLabels.chart_access_requested,
+  ),
+  chart_access_granted: buildStandardTemplateRenderer(
+    templateCtaLabels.chart_access_granted,
   ),
   consent_signature_request: buildStandardTemplateRenderer(
     templateCtaLabels.consent_signature_request,

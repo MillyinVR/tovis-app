@@ -7,7 +7,7 @@ import { Avatar } from '@/app/_components/ui'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { liveChannelForUser } from '@/lib/live/broadcast'
-import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { getProClientVisibility } from '@/lib/clientVisibility'
 import { resolveThreadContextNav } from '@/lib/messages/contextNav'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import { THREAD_MESSAGE_PAGE_SIZE, nextOlderCursor } from '@/lib/messages/paging'
@@ -200,15 +200,34 @@ export default async function MessageThreadPage(props: PageProps) {
     null
 
   // When the pro is viewing, offer a jump into the client's chart (the pro-only
-  // record), but only when the visibility SSOT actually grants access — so the
-  // link never lands on a denied page.
-  const clientChartHref =
-    viewerIsThreadPro && thread.professional?.id && thread.client?.id
-      ? (await assertProCanViewClient(thread.professional.id, thread.client.id))
-          .ok
-        ? `/pro/clients/${encodeURIComponent(thread.client.id)}`
-        : null
-      : null
+  // record).
+  //
+  // W5 follow-up: this used to render NOTHING whenever the chart was refused —
+  // which is precisely the state a pro needs a way out of. They are mid-thread
+  // with someone whose record they cannot open, and the one surface that could
+  // have offered "ask them" showed a blank space instead. That is what "the pros
+  // don't have a request chart access button in the messages" was.
+  //
+  // The chart page now answers the CONTACT_ONLY tier with an honest refusal and
+  // a Request access button, so the link is offered for BOTH tiers and only the
+  // label changes. A pro with no relationship still gets nothing.
+  const clientChartLink = await (async () => {
+    if (!viewerIsThreadPro || !thread.professional?.id || !thread.client?.id) {
+      return null
+    }
+
+    const visibility = await getProClientVisibility(
+      thread.professional.id,
+      thread.client.id,
+    )
+    const href = `/pro/clients/${encodeURIComponent(thread.client.id)}`
+
+    if (visibility.canViewClient) return { href, label: 'View client chart →' }
+    if (visibility.canContactClient) {
+      return { href, label: 'Request chart access →' }
+    }
+    return null
+  })()
 
   // Header eyebrow uses the SAME resolver as the inbox rows so the label a user
   // tapped never changes shape once the thread opens. Navigation (deep link into
@@ -273,13 +292,13 @@ export default async function MessageThreadPage(props: PageProps) {
               </div>
             ) : null}
 
-            {clientChartHref ? (
+            {clientChartLink ? (
               <div className="mt-2">
                 <Link
-                  href={clientChartHref}
+                  href={clientChartLink.href}
                   className="font-display text-[12px] font-semibold text-accentPrimary hover:opacity-80"
                 >
-                  View client chart →
+                  {clientChartLink.label}
                 </Link>
               </div>
             ) : null}

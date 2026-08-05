@@ -676,6 +676,16 @@ enum NotificationEventKey {
   // waiver their pro's service requires. The link pins ONE ConsentFormVersion;
   // the ask is per booking, because that is when the requirement becomes real.
   CONSENT_SIGNATURE_REQUEST
+  // W5 follow-up: a pro asked to read a client's chart (ClientChartShare →
+  // REQUESTED). Client-facing, and the ONLY way the ask reaches the person who
+  // has to answer it — the request row alone is silent, so a client would have
+  // to happen to open /client/settings to ever learn they were asked.
+  CHART_ACCESS_REQUESTED
+  // W5 follow-up: the client said yes (ClientChartShare → GRANTED). Pro-facing.
+  // Emitted ONLY for a grant — a decline is deliberately not notified, so the
+  // answer a client is most likely to feel awkward about is not also an event
+  // that lands in the asker's inbox.
+  CHART_ACCESS_GRANTED
   // K12: the client answered an appointment-confirmation ask with "can't make
   // it" (Booking.clientConfirmationDeclinedAt). Pro-facing. The slot stays
   // occupied — D5: an unconfirmed appointment NEVER auto-cancels; cancelling
