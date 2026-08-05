@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   enforceRateLimit: vi.fn(),
   tokenActorRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+
+  broadcastBookingChange: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -52,6 +54,10 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
 
 vi.mock('@/lib/guards', () => ({
   isRecord: mocks.isRecord,
+}))
+
+vi.mock('@/lib/live/broadcastBooking', () => ({
+  broadcastBookingChange: mocks.broadcastBookingChange,
 }))
 
 vi.mock('@/lib/booking/errors', () => ({
@@ -368,6 +374,8 @@ describe('app/api/v1/client/rebook/[token]/route.ts', () => {
       useCount: 1,
       singleUse: false,
     })
+
+    mocks.broadcastBookingChange.mockResolvedValue(undefined)
 
     mocks.tokenActorRateLimitKey.mockReturnValue(
       'token:hashed_token_1|ip:unknown-ip',
@@ -974,6 +982,69 @@ describe('app/api/v1/client/rebook/[token]/route.ts', () => {
 
     expect(response.status).toBe(201)
     await expect(response.json()).resolves.toEqual(responseBody)
+
+    // This is the SECOND door onto an aftercare rebook — the link the client
+    // taps in their aftercare text/email. It creates a booking on the pro's
+    // calendar, so it has to ping like the authed twin already does, or the
+    // pro's open calendar shows nothing until a manual reload. Keyed on the
+    // SOURCE booking: same pro, same client, and guaranteed to exist.
+    expect(mocks.broadcastBookingChange).toHaveBeenCalledWith(
+      'booking_1',
+      'bookings',
+    )
+  })
+
+  it('does not ping live-sync when no booking was created', async () => {
+    mocks.resolveAftercareAccessTokenForMutation.mockRejectedValueOnce(
+      Object.assign(new Error('nope'), { code: 'FORBIDDEN' }),
+    )
+
+    await POST(
+      makeIdempotentRequest({
+        key: 'idem_no_booking_1',
+        body: { scheduledFor: '2026-04-25T18:00:00.000Z' },
+      }),
+      makeCtx('token_bad'),
+    )
+
+    expect(mocks.broadcastBookingChange).not.toHaveBeenCalled()
+  })
+
+  it('pings only AFTER the booking write and the token consumption have run', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'started',
+      idempotencyRecordId: 'idem_record_1',
+      idempotencyKey: 'idem_order_1',
+      requestHash: 'hash_1',
+    })
+
+    const calls: string[] = []
+    mocks.createClientRebookedBookingFromAftercare.mockImplementationOnce(
+      async () => {
+        calls.push('write')
+        return makeCreateRebookResult()
+      },
+    )
+    mocks.markAftercareAccessTokenUsed.mockImplementationOnce(async () => {
+      calls.push('markUsed')
+      return { id: 'token_row_1' }
+    })
+    mocks.broadcastBookingChange.mockImplementationOnce(async () => {
+      calls.push('broadcast')
+    })
+
+    await POST(
+      makeIdempotentRequest({
+        key: 'idem_order_1',
+        body: { scheduledFor: '2026-04-25T18:00:00.000Z' },
+      }),
+      makeCtx('token_1'),
+    )
+
+    // Order is the whole point of notify-then-refetch: a ping sent before the
+    // write commits makes every subscriber refetch the OLD row and cache the
+    // staleness this feature exists to remove.
+    expect(calls).toEqual(['write', 'markUsed', 'broadcast'])
   })
 
   it('passes a client-chosen location type through to the rebook write boundary and idempotency body', async () => {

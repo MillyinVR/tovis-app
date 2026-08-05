@@ -22,6 +22,7 @@ import {
   respondToChartShare,
   revokeChartShare,
 } from '@/lib/clients/chartShare'
+import { broadcastChange } from '@/lib/live/broadcastAudience'
 import { notifyChartAccessGranted } from '@/lib/notifications/chartAccessNotifications'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { prisma } from '@/lib/prisma'
@@ -141,6 +142,20 @@ export async function PATCH(req: Request) {
         console.error('PATCH /api/v1/client/chart-shares notify error', error)
       })
       kickNotificationDrain()
+
+      // Live-sync, GRANT ONLY. The pro's client page is server-rendered, so the
+      // shell's `router.refresh()` flips it from "refused" to the real chart
+      // without a manual reload.
+      //
+      // ⚠️ Deliberately NOT sent for DECLINE or REVOKE. A ping is an event the
+      // pro receives the moment the client acts — precisely what the decline
+      // design refuses (see the ⚠️ block in lib/notifications/
+      // chartAccessNotifications.ts: a private "no" must not become something
+      // the asker can act on socially). A grant is already announced to the pro
+      // by the notification above, so the ping discloses nothing new; a refusal
+      // is not, and the pro keeps discovering it the passive way — the chart
+      // still refuses, and GET /chart-share reports it on the next load.
+      await broadcastChange({ topic: 'charts', professionalId })
     }
 
     return jsonOk({ chartShare: { professionalId, status: result.status } }, 200)
