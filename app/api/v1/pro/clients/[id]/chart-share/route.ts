@@ -15,6 +15,8 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { assertProCanContactClient } from '@/lib/clientVisibility'
 import { loadChartShare, requestChartShare } from '@/lib/clients/chartShare'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
+import { notifyChartAccessRequested } from '@/lib/notifications/chartAccessNotifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +24,9 @@ const REQUEST_REFUSAL_MESSAGES: Record<string, string> = {
   ALREADY_GRANTED: 'This client already shares their chart with you.',
   REQUEST_PENDING: 'You already have a request waiting with this client.',
   DECLINED: 'This client declined to share their chart.',
+  // Deliberately does not print the date. "Not right now" is the client's
+  // answer; turning it into a countdown reads as a scheduled retry.
+  COOLDOWN: 'This client recently turned off chart sharing. You can ask again later.',
 }
 
 export async function GET(_req: Request, context: RouteContext) {
@@ -84,6 +89,20 @@ export async function POST(_req: Request, context: RouteContext) {
         { code: result.code },
       )
     }
+
+    // Best-effort: the REQUESTED row already committed, and it is the source of
+    // truth the client's settings page reads. A notification failure must not
+    // fail the ask — a 500 here would leave the pro looking at an error for a
+    // request that exists, and their retry would come back 409 REQUEST_PENDING.
+    await notifyChartAccessRequested({ clientId, professionalId }).catch(
+      (error) => {
+        console.error(
+          'POST /api/v1/pro/clients/[id]/chart-share notify error',
+          error,
+        )
+      },
+    )
+    kickNotificationDrain()
 
     return jsonOk({ chartShare: { status: result.status } }, 201)
   } catch (error) {

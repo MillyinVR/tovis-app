@@ -39,6 +39,8 @@ export type NotificationTemplateKey =
   | 'deposit_reminder'
   | 'deposit_payment_link'
   | 'consent_signature_request'
+  | 'chart_access_requested'
+  | 'chart_access_granted'
   | 'look_follower_new'
   | 'client_follow'
   | 'look_commented'
@@ -211,6 +213,8 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
   NotificationEventKey.MESSAGE_RECEIVED,
+  NotificationEventKey.CHART_ACCESS_REQUESTED,
+  NotificationEventKey.CHART_ACCESS_GRANTED,
   NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED,
   NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED,
   NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING,
@@ -787,6 +791,43 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  // W5 follow-up: a pro asked to read this client's chart. Client-facing.
+  //
+  // IN_APP + PUSH, deliberately no SMS/EMAIL. The ask is not urgent and carries
+  // no deadline — nothing expires if the client answers next week, and the pro
+  // is rate-limited to one open ask — so it does not earn a text message. The
+  // in-app row and the push both land on `/client/settings#chart-sharing`,
+  // which is the surface that can actually answer it.
+  //
+  // Non-transactional and no quiet-hours bypass: a request to read someone's
+  // medical-adjacent record is exactly the thing that should wait until morning.
+  [NotificationEventKey.CHART_ACCESS_REQUESTED]: {
+    key: NotificationEventKey.CHART_ACCESS_REQUESTED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'chart_access_requested',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
+    },
+  },
+
+  // W5 follow-up: the client granted. Pro-facing, IN_APP + PUSH on the same
+  // reasoning. Emitted only on GRANT — see the enum comment: a decline is
+  // never an event in the asker's inbox.
+  [NotificationEventKey.CHART_ACCESS_GRANTED]: {
+    key: NotificationEventKey.CHART_ACCESS_GRANTED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'chart_access_granted',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: {
     key: NotificationEventKey.LOOK_FOLLOWER_NEW,
     defaultPriority: NotificationPriority.NORMAL,
@@ -1085,6 +1126,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_MILESTONE_REACHED,
   NotificationEventKey.MESSAGE_RECEIVED,
   NotificationEventKey.WAITLIST_JOINED,
+  NotificationEventKey.CHART_ACCESS_GRANTED,
 ]
 
 export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -1123,6 +1165,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
   NotificationEventKey.LOOK_MILESTONE_REACHED,
   NotificationEventKey.MESSAGE_RECEIVED,
+  NotificationEventKey.CHART_ACCESS_REQUESTED,
 ]
 
 export const ADMIN_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [

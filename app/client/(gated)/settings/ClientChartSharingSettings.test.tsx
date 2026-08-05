@@ -3,7 +3,7 @@
 // This row names a pro the client has a real relationship with (they asked to
 // read the client's chart) and rendered them as dead text. Covered here rather
 // than in the browser because the local dev DB has no `ClientChartShare` table.
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('next/link', () => ({
@@ -67,6 +67,77 @@ describe('ClientChartSharingSettings', () => {
     expect(
       screen.getByRole('link', { name: "View Glow Studio's profile" }),
     ).toHaveAttribute('href', '/professionals/pro_1')
+  })
+
+  // W5 follow-up. The server has accepted DECLINE since W5, but this row only
+  // ever rendered "Share chart" — so the only answers a client could actually
+  // give an open request were "yes" and silence, and silence leaves the ask
+  // sitting in the pro's UI as still-pending forever.
+  it('offers BOTH answers on an open request', async () => {
+    mockShares([
+      {
+        professionalId: 'pro_1',
+        professionalName: 'Glow Studio',
+        avatarUrl: null,
+        status: 'REQUESTED',
+      },
+    ])
+
+    render(<ClientChartSharingSettings />)
+
+    expect(await screen.findByText('Asked to see your chart')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Share chart' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'No thanks' })).toBeInTheDocument()
+  })
+
+  it('sends DECLINE — not GRANT — when the client says no', async () => {
+    mockShares([
+      {
+        professionalId: 'pro_1',
+        professionalName: 'Glow Studio',
+        avatarUrl: null,
+        status: 'REQUESTED',
+      },
+    ])
+
+    render(<ClientChartSharingSettings />)
+
+    const decline = await screen.findByRole('button', { name: 'No thanks' })
+    fireEvent.click(decline)
+
+    // The whole point: a mis-wired button here would GRANT the chart to a pro
+    // the client just refused, which is the worst possible direction to fail.
+    await vi.waitFor(() => {
+      const patch = vi
+        .mocked(globalThis.fetch)
+        .mock.calls.find(([, init]) => init?.method === 'PATCH')
+      expect(patch).toBeDefined()
+      expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
+        professionalId: 'pro_1',
+        action: 'DECLINE',
+      })
+    })
+  })
+
+  // Only an OPEN ask can be declined. A REVOKED/DECLINED row offering "No
+  // thanks" would be a control that re-answers a question nobody asked.
+  it('does not offer decline when there is no open request', async () => {
+    mockShares([
+      {
+        professionalId: 'pro_1',
+        professionalName: 'Glow Studio',
+        avatarUrl: null,
+        status: 'REVOKED',
+      },
+    ])
+
+    render(<ClientChartSharingSettings />)
+
+    expect(await screen.findByText('You turned this off')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Share chart' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'No thanks' }),
+    ).not.toBeInTheDocument()
   })
 
   it('still renders the revoke control alongside the new links', async () => {

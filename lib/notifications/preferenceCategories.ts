@@ -42,6 +42,7 @@ export type NotificationCategoryKey =
   | 'CONSULT_NUDGES'
   | 'PRICE_ALTERNATIVES'
   | 'MESSAGES'
+  | 'CHART_ACCESS'
   | 'SOCIAL'
 
 /** Stable display order for the three channels. */
@@ -109,6 +110,8 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   // the DEPOSIT_PAYMENT_LINK reasoning — a client must not be able to have
   // pre-silenced the link for a consent form their pro's service requires.
   [NotificationEventKey.CONSENT_SIGNATURE_REQUEST]: 'Consent form to sign',
+  [NotificationEventKey.CHART_ACCESS_REQUESTED]: 'A pro asked to see your chart',
+  [NotificationEventKey.CHART_ACCESS_GRANTED]: 'A client shared their chart',
   [NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED]:
     'Client can’t make it',
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: 'New look follower',
@@ -236,6 +239,18 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     label: 'Messages',
     description: 'New messages in your conversations.',
     eventKeys: [NotificationEventKey.MESSAGE_RECEIVED],
+  },
+  {
+    key: 'CHART_ACCESS',
+    label: 'Chart access',
+    description:
+      'When a pro asks to see your chart, and when a client answers. Muting this does not change who can see anything — the request still appears in your sharing settings, where you answer it.',
+    eventKeys: [
+      // Audience-filtered (`allowed`), like LAST_MINUTE: the client only ever
+      // sees the "a pro asked" row, the pro only the "a client shared" row.
+      NotificationEventKey.CHART_ACCESS_REQUESTED,
+      NotificationEventKey.CHART_ACCESS_GRANTED,
+    ],
   },
   {
     key: 'SOCIAL',

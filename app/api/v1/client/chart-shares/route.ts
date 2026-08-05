@@ -22,6 +22,8 @@ import {
   respondToChartShare,
   revokeChartShare,
 } from '@/lib/clients/chartShare'
+import { notifyChartAccessGranted } from '@/lib/notifications/chartAccessNotifications'
+import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { prisma } from '@/lib/prisma'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
@@ -126,6 +128,20 @@ export async function PATCH(req: Request) {
       professionalId,
       grant: action === 'GRANT',
     })
+
+    // GRANT only. A DECLINE is never announced to the pro who asked — see the
+    // ⚠️ block in lib/notifications/chartAccessNotifications.ts. Best-effort for
+    // the same reason as the request side: the consent row already committed,
+    // and it, not the notification, is what opens the chart.
+    if (action === 'GRANT') {
+      await notifyChartAccessGranted({
+        clientId: auth.clientId,
+        professionalId,
+      }).catch((error) => {
+        console.error('PATCH /api/v1/client/chart-shares notify error', error)
+      })
+      kickNotificationDrain()
+    }
 
     return jsonOk({ chartShare: { professionalId, status: result.status } }, 200)
   } catch (error) {

@@ -96,7 +96,10 @@ export default function ClientChartSharingSettings() {
     void load()
   }, [load])
 
-  async function act(professionalId: string, action: 'GRANT' | 'REVOKE') {
+  async function act(
+    professionalId: string,
+    action: 'GRANT' | 'DECLINE' | 'REVOKE',
+  ) {
     setBusyId(professionalId)
     setError(null)
     try {
@@ -187,14 +190,34 @@ export default function ClientChartSharingSettings() {
                 {busyId === share.professionalId ? 'Turning off…' : 'Turn off'}
               </Button>
             ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busyId === share.professionalId}
-                onClick={() => void act(share.professionalId, 'GRANT')}
-              >
-                {busyId === share.professionalId ? 'Sharing…' : 'Share chart'}
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busyId === share.professionalId}
+                  onClick={() => void act(share.professionalId, 'GRANT')}
+                >
+                  {busyId === share.professionalId ? 'Sharing…' : 'Share chart'}
+                </Button>
+
+                {/*
+                  An open ask needs BOTH answers. The server has always accepted
+                  DECLINE; this row only ever rendered "Share chart", so the only
+                  reachable answers were "yes" and "ignore it forever" — and an
+                  ignored request sits in the pro's UI as still-pending. Saying
+                  no is the answer a consent surface most owes its subject.
+                */}
+                {share.status === 'REQUESTED' ? (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    disabled={busyId === share.professionalId}
+                    onClick={() => void act(share.professionalId, 'DECLINE')}
+                  >
+                    {busyId === share.professionalId ? 'Declining…' : 'No thanks'}
+                  </Button>
+                ) : null}
+              </>
             )}
           </div>
         </div>
