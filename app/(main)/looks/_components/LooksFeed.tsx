@@ -432,9 +432,17 @@ export default function LooksFeed() {
 
   // Mirror the loaded set into a ref so loadMore can read the current seen
   // list without being recreated (and re-triggering prefetch) on every append.
-  useEffect(() => {
-    itemsRef.current = items
-  }, [items])
+  //
+  // Synced during render, NOT from a passive effect. A passive effect flushes
+  // in a task AFTER the commit that paints a card, so in the window between
+  // paint and flush this ref still held the PREVIOUS list — and hideLook, which
+  // looks the clicked post up in it, would take its `removedIndex < 0` branch
+  // and return without ever firing the hide POST. A card the viewer can already
+  // see must be actionable, so the mirror has to move with the render, not a
+  // task behind it. Writing it here is safe: it is an idempotent copy of the
+  // very state being rendered, so a StrictMode double-render writes the same
+  // value twice.
+  itemsRef.current = items
 
   useEffect(() => {
     void loadCategories()
