@@ -35,14 +35,24 @@ export type MembershipPrice = {
   stripePriceId: string | null
 }
 
+/**
+ * How a plan is acquired.
+ * - `free`     — nothing to buy.
+ * - `self-serve` — Stripe Checkout, priced on the card.
+ * - `contact`  — an enterprise tier: shown, but no price and no buy button. It is
+ *   granted by an admin comp after a conversation, never bought in the product.
+ */
+export type MembershipAcquisition = 'free' | 'self-serve' | 'contact'
+
 export type MembershipPlan = {
   key: PlanKey
   name: string
   blurb: string
   trialDays: number
+  acquisition: MembershipAcquisition
   /** Monthly AI-camera image allowance (from the entitlement matrix). */
   cameraImagesPerMonth: number
-  /** Billing options; empty for the free plan. */
+  /** Billing options; empty for free and contact-only plans. */
   prices: MembershipPrice[]
 }
 
@@ -53,15 +63,21 @@ export function getMembershipPlans(): MembershipPlan[] {
       name: 'Free',
       blurb: 'Take bookings, get paid, and accept any payment method.',
       trialDays: 0,
+      acquisition: 'free',
       cameraImagesPerMonth: CAMERA_IMAGES_PER_MONTH.free,
       prices: [],
     },
     {
       key: 'pro',
       name: 'Pro',
+      // 🔴 The discovery-fee waiver was REMOVED from this blurb (Tori, 2026-08-04):
+      // as coded it waives the CLIENT's fee, which is not the intended perk. The
+      // intended perk waives a PRO-side fee that does not exist yet (§8.5). Do not
+      // re-add it until that fee ships and has been measured.
       blurb:
-        'Custom handle, tax exports + receipt inbox, priority in Discovery — and your new clients book with no discovery fee.',
+        'Custom handle, tax exports + receipt inbox, retention insights, and priority in Discovery.',
       trialDays: PRO_TRIAL_DAYS,
+      acquisition: 'self-serve',
       cameraImagesPerMonth: CAMERA_IMAGES_PER_MONTH.pro,
       prices: [
         {
@@ -87,6 +103,7 @@ export function getMembershipPlans(): MembershipPlan[] {
       blurb:
         'Everything in Pro plus the full AI photographer allowance — for a busy chair or a two-chair studio.',
       trialDays: PRO_TRIAL_DAYS,
+      acquisition: 'self-serve',
       cameraImagesPerMonth: CAMERA_IMAGES_PER_MONTH.premium,
       prices: [
         {
@@ -102,6 +119,27 @@ export function getMembershipPlans(): MembershipPlan[] {
           stripePriceId: process.env.STRIPE_PREMIUM_ANNUAL_PRICE_ID ?? null,
         },
       ],
+    },
+    // Studio — an ENTERPRISE card (Tori, 2026-08-04, brief §8.6). Visible so salons
+    // know the tier exists, but with no price and no buy button: it is granted by
+    // admin comp after a conversation.
+    //
+    // 🔴 Copy is limited to what is true today. It must NOT list white-label or any
+    // other unbuilt feature — that is the same mis-sell this whole change removed,
+    // and white-label specifically has no implementation anywhere.
+    //
+    // 🔴 Product rule for the future build: salon-only, and a salon must have a
+    // minimum number of pros before it may purchase (threshold TBD). That is why
+    // there is no self-serve path here and why adding one needs a salon entity and
+    // a seat-count gate first.
+    {
+      key: 'studio',
+      name: 'Studio',
+      blurb: 'For salons and teams — custom setup, billed by arrangement.',
+      trialDays: 0,
+      acquisition: 'contact',
+      cameraImagesPerMonth: CAMERA_IMAGES_PER_MONTH.studio,
+      prices: [],
     },
   ]
 }
@@ -123,14 +161,20 @@ export function configuredPriceIds(): Array<{ planKey: PlanKey; priceId: string 
 
 /**
  * Resolve a purchasable (plan, interval) → its Stripe price. Returns null for free,
- * unknown plans/intervals, or an unconfigured price id.
+ * contact-only tiers, unknown plans/intervals, or an unconfigured price id.
+ *
+ * 🔴 The `acquisition` refusal is deliberate belt-and-braces. Studio has no prices,
+ * so it would already fall through — but Studio is comp-granted and salon-gated, and
+ * "nobody configured a price id" is a weak reason for that to stay true. This makes
+ * the refusal the RULE rather than a side effect of an empty array, so a stray env
+ * var can never turn an enterprise tier into a self-serve checkout.
  */
 export function getPurchasablePrice(
   planKey: string,
   interval: string,
 ): { plan: MembershipPlan; price: MembershipPrice & { stripePriceId: string } } | null {
   const plan = getMembershipPlan(planKey)
-  if (!plan || plan.key === 'free') return null
+  if (!plan || plan.acquisition !== 'self-serve') return null
 
   const normalizedInterval: BillingInterval = interval === 'year' ? 'year' : 'month'
   const price = plan.prices.find((p) => p.interval === normalizedInterval)

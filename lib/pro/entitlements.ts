@@ -46,9 +46,11 @@ const PRO: Entitlement[] = [
 // see cameraImageMonthlyQuota below), so its boolean entitlements equal Pro's.
 const PREMIUM: Entitlement[] = [...PRO]
 
-// Studio is not in getMembershipPlans() — it can only be granted as an admin comp,
-// so `white_label` is never sold. It also has no implementation call site yet, which
-// is why both membership surfaces deliberately render NO label for it (see
+// Studio IS in getMembershipPlans(), but as a contact-only enterprise card
+// (`acquisition: 'contact'`) — shown so salons know the tier exists, never
+// purchasable. It is granted by admin comp after a conversation, so `white_label`
+// is still never sold. It also has no implementation call site, which is why both
+// membership surfaces deliberately render NO label for it (see
 // app/pro/membership/entitlementCopy.ts). It stays in the matrix so a comped salon
 // partner resolves to the right tier the day the feature lands.
 //
@@ -74,7 +76,9 @@ const PLAN_ENTITLEMENTS: Record<PlanKey, Entitlement[]> = {
  *
  * Sized 2026-08-04 from the cost floor (docs/design/membership-value-brief.md §5.1.A):
  * ~$0.04 of Anthropic spend per analyzed image, so Pro's 150 ≈ $6 against $25 (24%
- * COGS) and Premium's 500 ≈ $20 against $45. The previous 3/6/30 ladder was ~100×
+ * COGS) and Premium's 500 ≈ $20 against $45. Free is 10 (Tori's final call — the
+ * brief proposed 20; 10 is still enough to feel the product on a couple of clients
+ * while keeping the free tier's exposure at ~$0.40/pro/month). The old 3/6/30 was ~100×
  * too small — it sold a paid tier that was drastically WORSE than what the daily
  * rate limiter already gives away for free, so flipping ENABLE_MEMBERSHIP_ENFORCEMENT
  * against it would have been a catastrophic downgrade for every existing pro.
@@ -87,7 +91,7 @@ const PLAN_ENTITLEMENTS: Record<PlanKey, Entitlement[]> = {
  *      set by Premium, not by free.
  */
 export const CAMERA_IMAGES_PER_MONTH: Record<PlanKey, number> = {
-  free: 20,
+  free: 10,
   pro: 150,
   premium: 500,
   studio: 500,

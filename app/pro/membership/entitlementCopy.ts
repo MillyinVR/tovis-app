@@ -24,7 +24,17 @@ const ENTITLEMENT_LABELS: Partial<Record<Entitlement, string>> = {
   advanced_analytics:
     'Retention insights — rebooking rate over time + who’s due back',
   priority_discovery: 'Priority placement in Discovery',
-  discovery_fee_waiver: 'Your new clients book with no discovery fee',
+  // 🔴 `discovery_fee_waiver` is deliberately UNLABELED (Tori, 2026-08-04).
+  //
+  // As coded it zeroes the fee the CLIENT pays, which is not the intended perk.
+  // The intended model is two fees on a cold match — a client convenience fee and
+  // a pro-side fee — with membership waiving the PRO's fee only, never the
+  // client's. That model is not built (see membership-value-brief.md §8.5), so
+  // there is nothing honest to advertise here yet.
+  //
+  // The mechanics stay in code, flag-gated and inert. Do NOT add a label back
+  // until the pro-side fee ships AND its conversion impact has been measured —
+  // that sequencing is part of the decision, not an accident.
 }
 
 export type AdvertisedEntitlement = { key: Entitlement; label: string }

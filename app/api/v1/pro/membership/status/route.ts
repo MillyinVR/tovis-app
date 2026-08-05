@@ -4,7 +4,6 @@
 // info. A pro with no subscription row is reported as the free plan.
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { resolveDiscoveryFeeCents } from '@/lib/booking/discoveryFee'
 import {
   activeCompPlanKey,
   resolveEffectiveEntitlements,
@@ -44,14 +43,6 @@ export async function GET() {
           cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
           trialEndsAt: sub?.trialEndsAt?.toISOString() ?? null,
           hasBillingAccount: Boolean(sub?.stripeCustomerId),
-          // The live one-time discovery platform fee, in cents. Sent so the iOS
-          // membership screen can state the real amount in the commission pitch
-          // instead of hardcoding $5 — the fee is env-overridable up to $10
-          // (lib/booking/discoveryFee.ts), and a copy line that drifts from what
-          // clients are actually charged is a mis-sell of the same class this
-          // change removed. Clients treat it as OPTIONAL: an older build reading a
-          // server without this field simply omits the amount.
-          discoveryFeeCents: resolveDiscoveryFeeCents(),
         },
       },
       200,
