@@ -99,6 +99,7 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
   PasswordResetToken: { status: 'DELETE', reason: R_CREDENTIAL },
   EmailVerificationToken: { status: 'DELETE', reason: R_CREDENTIAL },
   PhoneVerification: { status: 'DELETE', reason: R_CREDENTIAL },
+  SessionHandoffToken: { status: 'DELETE', reason: R_CREDENTIAL },
   BookingHold: {
     status: 'DELETE',
     reason:

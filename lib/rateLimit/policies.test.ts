@@ -46,6 +46,14 @@ const AUTH_CRITICAL_BUCKETS = [
   'auth:email:verify',
   'auth:sms-phone-hour',
   'auth:sms-phone-day',
+  // The one-time web sign-in hand-off, both halves. These belong here for the
+  // same reason as login: one MINTS a session credential and the other REDEEMS
+  // it, so if Redis is unavailable they must fall back to the in-memory counter
+  // rather than fail open the way an ordinary read bucket does. `redis-only`
+  // would leave the redeem endpoint completely unthrottled during an outage,
+  // which is precisely when a brute-force against a token id is cheapest.
+  'auth:session-handoff:issue',
+  'auth:session-handoff:exchange',
 ] as const satisfies readonly RateLimitBucket[]
 
 function getBuckets(): RateLimitBucket[] {

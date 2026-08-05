@@ -67,7 +67,10 @@ export const currentUserSelect = {
   },
 } satisfies Prisma.UserSelect
 
-type CurrentUserRecord = Prisma.UserGetPayload<{
+/** A `User` row selected with `currentUserSelect` — the input to acting-role
+ * resolution and `toCurrentUser`. Exported for the session hand-off, which
+ * re-reads the user itself rather than going through a request's cookie. */
+export type CurrentUserRecord = Prisma.UserGetPayload<{
   select: typeof currentUserSelect
 }>
 
@@ -107,8 +110,13 @@ export type CurrentUser = Omit<CurrentUserRecord, 'adminPermissions'> & {
  * if the user is still entitled to it, otherwise fall back to the home role.
  * This re-checks entitlement on every request, so a revoked capability (e.g. a
  * pro license downgraded after switching) safely drops the user back home.
+ *
+ * Exported because the one-time session hand-off (lib/auth/sessionHandoff.ts)
+ * re-mints a session from a STORED acting role rather than one arriving in a
+ * JWT. It must apply the identical entitlement re-check — a second
+ * implementation there would be exactly the place a role escalation hides.
  */
-function resolveActingRole(
+export function resolveActingRole(
   user: CurrentUserRecord,
   tokenRole: AuthRole,
 ): Role {

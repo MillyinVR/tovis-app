@@ -76,6 +76,27 @@ const nextConfig: NextConfig = {
         source: '/(.*)',
         headers: securityHeaders,
       },
+      {
+        // The one-time sign-in hand-off carries a live session credential in its
+        // URL path, so it must never contribute a Referer to anything.
+        //
+        // ⚠️ This override is load-bearing and was found by DRIVING the endpoint,
+        // not by a test: the route handler sets `Referrer-Policy: no-referrer`
+        // itself, and `headers()` above rewrites it back to
+        // `strict-origin-when-cross-origin` on the way out. The route's own
+        // header never survives to the wire. A later, more specific entry wins,
+        // so this restores it.
+        //
+        // (The token does not leak via Referer even under the global policy — a
+        // browser following a redirect carries the ORIGINAL referrer forward
+        // rather than synthesising the redirecting URL. This is the belt to that
+        // braces, and the point is that it should actually be fastened.)
+        source: '/api/v1/auth/session-handoff/:path*',
+        headers: [
+          ...securityHeaders.filter((h) => h.key !== 'Referrer-Policy'),
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      },
     ]
   },
 }

@@ -1562,6 +1562,7 @@ model User {
   passwordResetTokens     PasswordResetToken[]
   phoneVerifications      PhoneVerification[]
   emailVerificationTokens EmailVerificationToken[]
+  sessionHandoffTokens    SessionHandoffToken[]
 
   supportTicketsCreated SupportTicket[]        @relation("SupportTicketCreatedBy")
   supportTicketsHandled SupportTicket[]        @relation("SupportTicketHandledBy")
@@ -6050,6 +6051,65 @@ model PasswordResetToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([expiresAt])
+}
+
+/// One-time sign-in hand-off from an already-authenticated NATIVE session to a
+/// browser one (iOS "Manage plan on the web" → SFSafariViewController, which
+/// shares Safari's cookie jar and therefore has no idea the app is signed in).
+///
+/// Deliberately its OWN model rather than a `ClientActionToken` kind: that table
+/// is booking-scoped (`bookingId` is required) and addresses a CLIENT, usually
+/// unclaimed. This addresses a `User` and mints a real session, so it carries
+/// the session-security fields instead — and keeps the blast radius of a
+/// credential-minting row visibly separate from the client-link table.
+///
+/// Security shape (each property is red-proofed in
+/// lib/auth/sessionHandoff.test.ts):
+///  - `tokenHash` only — the secret is returned once at issuance and never
+///    stored, so a database read cannot mint a session.
+///  - single-use — consumption is a conditional `updateMany` guarded on
+///    `usedAt: null`, so two concurrent redemptions cannot both win.
+///  - ≤60s TTL (SESSION_HANDOFF_TTL_MS) — this is a hand-off, not a link that
+///    gets mailed anywhere.
+///  - `redirectPath` is validated against the /pro allowlist at ISSUANCE and
+///    stored server-side, so the exchange has no attacker-supplied destination
+///    to be tricked by at all.
+///  - `authVersionAtIssue` — a sign-out-everywhere / password reset inside the
+///    60s window bumps `User.authVersion` and the exchange then refuses, so the
+///    hand-off can never outlive the session that authorized it.
+model SessionHandoffToken {
+  id        String @id @default(cuid())
+  userId    String
+  tokenHash String @unique @db.VarChar(128)
+
+  /// Allowlisted internal destination, pinned at issuance. Never read from the
+  /// exchange request.
+  redirectPath String @db.VarChar(512)
+
+  /// The workspace the issuing session was ACTING as (a pro who switched into
+  /// CLIENT and back must land in the same place). Re-checked against live
+  /// entitlement at exchange via resolveActingRole, exactly as every request
+  /// re-checks the acting role in the JWT — so this can never escalate.
+  actingRole Role
+
+  /// `User.authVersion` when this was issued. The exchange refuses on mismatch.
+  authVersionAtIssue Int
+
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  /// Audit only (mirrors PasswordResetToken) — never used for authorization.
+  /// Binding the exchange to the issuing IP/UA would break the actual flow:
+  /// the app issues, and a DIFFERENT agent (SFSafariViewController) redeems.
+  issuedIp        String?
+  issuedUserAgent String? @db.VarChar(512)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
   @@index([expiresAt])
 }
 

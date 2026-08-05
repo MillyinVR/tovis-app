@@ -229,6 +229,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     status: 'OMITTED',
     reason: 'Single-use auth credential; never disclosed.',
   },
+  SessionHandoffToken: {
+    status: 'OMITTED',
+    reason:
+      'Single-use auth credential; never disclosed. Rows are dead within 60s of issuance and hold only a hash, so there is nothing here the subject could learn from that is not already in their own session.',
+  },
   PhoneVerification: {
     status: 'OMITTED',
     reason: 'Single-use auth credential; never disclosed.',

@@ -50,6 +50,24 @@ export type AuthRefreshResponseDTO = {
   token: string
 }
 
+/**
+ * POST /api/v1/auth/session-handoff
+ *
+ * One-time sign-in hand-off for a native client opening a web page. The
+ * response carries the ABSOLUTE exchange URL rather than the bare token, so the
+ * client never assembles an auth URL itself (and so the exchange path can move
+ * without an app release). Opening `url` in a browser consumes the token, sets
+ * the normal session cookie and redirects to `redirectPath`.
+ *
+ * `url` is single-use and expires at `expiresAt` (ISO-8601, ≤60s out) — treat it
+ * as a credential: open it immediately, never persist or log it.
+ */
+export type AuthSessionHandoffResponseDTO = {
+  url: string
+  redirectPath: string
+  expiresAt: string
+}
+
 // POST /api/v1/auth/phone-login/send — always generic (enumeration-safe).
 export type AuthPhoneLoginSendResponseDTO = {
   message: string
