@@ -1,6 +1,10 @@
 // lib/auth/passwordReset.ts
 import { Prisma } from '@prisma/client'
 
+import {
+  buildCompositeToken,
+  parseCompositeToken,
+} from '@/lib/auth/compositeToken'
 import { sha256Hex, generateTokenHex } from '@/lib/auth/timingSafe'
 import { requireEmailEnv } from '@/lib/auth/emailProviderEnv'
 import { readOptionalEnv as envOrNull } from '@/lib/env'
@@ -17,46 +21,17 @@ export const PASSWORD_RESET_EXPIRY_MS = 1000 * 60 * 30 // 30 minutes
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
-type ParsedPasswordResetToken = {
-  tokenId: string
-  secret: string
-}
-
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
 }
 
 export { getAppUrlFromRequest as getPasswordResetAppUrlFromRequest } from '@/lib/appUrl'
 
-export function buildPasswordResetToken(args: {
-  tokenId: string
-  secret: string
-}): string {
-  return `${args.tokenId}.${args.secret}`
-}
-
-export function parsePasswordResetToken(
-  token: string | null | undefined,
-): ParsedPasswordResetToken | null {
-  if (!token) return null
-
-  const trimmed = token.trim()
-  if (!trimmed) return null
-
-  const separatorIndex = trimmed.indexOf('.')
-  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
-    return null
-  }
-
-  const tokenId = trimmed.slice(0, separatorIndex).trim()
-  const secret = trimmed.slice(separatorIndex + 1).trim()
-
-  if (!tokenId || !secret) {
-    return null
-  }
-
-  return { tokenId, secret }
-}
+// The `<rowId>.<secret>` format now lives in lib/auth/compositeToken.ts so the
+// session hand-off can share it. These stay exported under their original names
+// because call sites (and their mocks) reference them by name.
+export const buildPasswordResetToken = buildCompositeToken
+export const parsePasswordResetToken = parseCompositeToken
 
 export function buildPasswordResetUrl(args: {
   appUrl: string

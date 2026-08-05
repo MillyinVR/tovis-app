@@ -54,6 +54,20 @@ const ALLOWLIST = new Set<string>([
   'app/api/v1/auth/login/route.ts',
   'app/api/v1/auth/register/route.ts',
   'app/api/v1/auth/logout/route.ts',
+  // Session-MINTING route, same category as login/register above: there is no
+  // incoming session for `getCurrentUser()` to validate — creating one is the
+  // whole job. It imports from '@/lib/currentUser' for `currentUserSelect` and
+  // `resolveActingRole`, which is what trips the scan.
+  //
+  // ⚠️ This is NOT a hole. The route does its own DB-backed authVersion check,
+  // and a stricter one than the marker would prove: it reads the user fresh and
+  // refuses unless `user.authVersion` still equals the `authVersionAtIssue`
+  // pinned in the token row, so a sign-out-everywhere inside the 60s window
+  // kills the hand-off. That check is pinned by
+  // `app/api/v1/auth/session-handoff/[token]/route.test.ts` ("SESSION REVOKED"
+  // / "…and still succeeds when the authVersion is unchanged"), and removing it
+  // was mutation-tested to turn that suite red.
+  'app/api/v1/auth/session-handoff/[token]/route.ts',
 ])
 
 type Offender = {

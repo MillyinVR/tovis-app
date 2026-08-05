@@ -52,6 +52,8 @@ export type RateLimitBucket =
   | 'auth:email:verify'
   | 'auth:sms-phone-hour'
   | 'auth:sms-phone-day'
+  | 'auth:session-handoff:issue'
+  | 'auth:session-handoff:exchange'
 
 export type RateLimitMode = 'redis-only' | 'auth-critical'
 
@@ -465,6 +467,34 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 6,
     windowSeconds: 24 * 60 * 60,
     prefix: 'rl:auth:sms:phone:day',
+    mode: 'auth-critical',
+  },
+  // Minting a one-time web sign-in hand-off. Keyed per USER (the route is
+  // authenticated, so `rateLimitIdentity(user.id)` always resolves to a user
+  // key, never a shared NAT'd IP). Sized for a human tapping "Manage on the
+  // web": issuing burns the pro's previous unused token, so a loop here cannot
+  // accumulate live credentials — the ceiling is about capping the WRITE and
+  // making an automated mint loop visible, not about correctness.
+  //
+  // `auth-critical`: this mints a session credential, so if Redis is down it
+  // falls back to the in-memory counter rather than failing open the way an
+  // ordinary read bucket does.
+  'auth:session-handoff:issue': {
+    limit: 20,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:auth:handoff:issue',
+    mode: 'auth-critical',
+  },
+  // Redeeming one. Keyed by the token's ID HALF (`tokenRateLimitIdentity`), not
+  // by IP: the thing worth capping is guessing attempts against a specific
+  // token id, and an attacker spreading those across many IPs is the case an
+  // IP key would miss. A legitimate redemption happens exactly once, so this
+  // ceiling is generous by an order of magnitude — anything approaching it is
+  // someone brute-forcing the 32-byte secret half.
+  'auth:session-handoff:exchange': {
+    limit: 10,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:auth:handoff:exchange',
     mode: 'auth-critical',
   },
 }

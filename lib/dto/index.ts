@@ -151,6 +151,7 @@ export type {
   AuthLoginResponseDTO,
   AuthRegisterResponseDTO,
   AuthRefreshResponseDTO,
+  AuthSessionHandoffResponseDTO,
   AuthPhoneLoginSendResponseDTO,
   AuthPhoneVerifyResponseDTO,
   AuthEmailVerifyResponseDTO,

@@ -139,6 +139,11 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     where: (s) => ({ userId: s.userId }),
   }),
   deleteRule({
+    model: 'SessionHandoffToken',
+    delegate: (db) => db.sessionHandoffToken,
+    where: (s) => ({ userId: s.userId }),
+  }),
+  deleteRule({
     model: 'ClientActionToken',
     delegate: (db) => db.clientActionToken,
     where: (s) => {
