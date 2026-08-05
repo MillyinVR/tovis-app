@@ -6,6 +6,7 @@ import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { useLiveChanged } from '@/app/_components/live/LiveRefresh'
 import {
   DEFAULT_TIME_ZONE,
   formatInTimeZone,
@@ -235,32 +236,42 @@ export function WaitlistGroups({
 export default function WaitlistOutreachClient() {
   const [state, setState] = React.useState<LoadState>({ status: 'loading' })
 
-  React.useEffect(() => {
-    let cancelled = false
+  // Hoisted out of the mount effect so a live-sync ping can re-run the very
+  // same fetch. `cancelledRef` replaces the per-effect `cancelled` flag: an
+  // unmount must still be able to stop an in-flight load started by a ping.
+  const cancelledRef = React.useRef(false)
 
-    async function load(): Promise<void> {
-      try {
-        const res = await fetch('/api/v1/pro/waitlist', {
-          headers: { Accept: 'application/json' },
-        })
-        const raw: unknown = await res.json().catch(() => null)
-        if (!res.ok || !isRecord(raw) || raw.ok !== true) {
-          if (!cancelled) setState({ status: 'error' })
-          return
-        }
-        const services = parseServices(raw.services)
-        const total = typeof raw.total === 'number' ? raw.total : 0
-        if (!cancelled) setState({ status: 'ready', services, total })
-      } catch {
-        if (!cancelled) setState({ status: 'error' })
+  const load = React.useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch('/api/v1/pro/waitlist', {
+        headers: { Accept: 'application/json' },
+      })
+      const raw: unknown = await res.json().catch(() => null)
+      if (!res.ok || !isRecord(raw) || raw.ok !== true) {
+        if (!cancelledRef.current) setState({ status: 'error' })
+        return
       }
-    }
-
-    void load()
-    return () => {
-      cancelled = true
+      const services = parseServices(raw.services)
+      const total = typeof raw.total === 'number' ? raw.total : 0
+      if (!cancelledRef.current) setState({ status: 'ready', services, total })
+    } catch {
+      if (!cancelledRef.current) setState({ status: 'error' })
     }
   }, [])
+
+  React.useEffect(() => {
+    cancelledRef.current = false
+    void load()
+    return () => {
+      cancelledRef.current = true
+    }
+  }, [load])
+
+  // Live-sync: these rows live in this component's state, so the pro shell's
+  // `router.refresh()` never reaches them — a client accepting or walking away
+  // from an offer left the list stale until a manual reload. Same subscription
+  // the calendar uses; no-ops when there is no boundary above.
+  useLiveChanged(load)
 
   return (
     <div className="text-textPrimary">
