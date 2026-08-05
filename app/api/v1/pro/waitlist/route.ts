@@ -5,15 +5,12 @@
 // list top-down to fill a spot from the waitlist — so the rank here is honest
 // (it reflects who has been waiting longest), unlike a client-facing "in line"
 // number, which the first-come last-minute engine doesn't honor.
-import {
-  ServiceLocationType,
-  WaitlistOfferStatus,
-  WaitlistStatus,
-} from '@prisma/client'
+import { ServiceLocationType, WaitlistStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { prismaRead } from '@/lib/prisma'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
+import { liveWaitlistOfferWhere } from '@/lib/waitlist/offerLiveness'
 
 export const dynamic = 'force-dynamic'
 
@@ -96,8 +93,7 @@ export async function GET() {
         ? await prismaRead.waitlistOffer.findMany({
             where: {
               waitlistEntryId: { in: entryIds },
-              status: WaitlistOfferStatus.PENDING,
-              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+              ...liveWaitlistOfferWhere(new Date()),
             },
             select: {
               id: true,

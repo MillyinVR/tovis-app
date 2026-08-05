@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,
+  NotificationEventKey,
   Prisma,
   PrismaClient,
   ProfessionalLocationType,
@@ -21,6 +22,7 @@ import {
   createHold,
   createWaitlistOffer,
   declineClientWaitlistOffer,
+  expireLapsedWaitlistOffers,
   releaseHold,
 } from '@/lib/booking/writeBoundary'
 import { WAITLIST_OFFER_TTL_MINUTES } from '@/lib/booking/constants'
@@ -1340,7 +1342,11 @@ describe('waitlist offer → client confirm (real DB)', () => {
         entryId,
         clientId: fx.clientId,
       })
-      expect(result).toEqual({ cancelled: true, releasedOffers: 1 })
+      expect(result).toEqual({
+        cancelled: true,
+        releasedOffers: 1,
+        notifiedProfessional: true,
+      })
 
       const offerRow = await db.waitlistOffer.findUnique({
         where: { id: offer.id },
@@ -1395,7 +1401,11 @@ describe('waitlist offer → client confirm (real DB)', () => {
 
       expect(
         await cancelClientWaitlistEntry({ entryId, clientId: fx.clientId }),
-      ).toEqual({ cancelled: true, releasedOffers: 0 })
+      ).toEqual({
+        cancelled: true,
+        releasedOffers: 0,
+        notifiedProfessional: false,
+      })
 
       const entry = await db.waitlistEntry.findUnique({ where: { id: entryId } })
       expect(entry?.status).toBe(WaitlistStatus.CANCELLED)
@@ -1409,7 +1419,11 @@ describe('waitlist offer → client confirm (real DB)', () => {
       // A double-tap releases nothing and is not an error.
       expect(
         await cancelClientWaitlistEntry({ entryId, clientId: fx.clientId }),
-      ).toEqual({ cancelled: false, releasedOffers: 0 })
+      ).toEqual({
+        cancelled: false,
+        releasedOffers: 0,
+        notifiedProfessional: false,
+      })
 
       // Someone else's entry is indistinguishable from a missing one.
       await expect(
@@ -1459,6 +1473,250 @@ describe('waitlist offer → client confirm (real DB)', () => {
         })
         await db.booking.delete({ where: { id: confirmed.booking.id } })
       }
+    })
+  })
+  // The two ends of an offer's life that nothing used to own: it lapsing, and
+  // the client walking away from a live one.
+  describe('offer expiry + the pro being told (real DB)', () => {
+    /** Force an existing offer past its countdown, exactly as time would. */
+    async function backdateExpiry(offerId: string, expiresAt: Date) {
+      await db.waitlistOffer.update({ where: { id: offerId }, data: { expiresAt } })
+      // The reservation shares the offer's expiry, so time moves both together —
+      // otherwise the hold outlives the offer only in this test.
+      await db.bookingHold.updateMany({
+        where: { waitlistOfferId: offerId },
+        data: { expiresAt },
+      })
+    }
+
+    async function proNotifications(eventKey: NotificationEventKey) {
+      return db.notification.findMany({
+        where: { professionalId: fx.professionalId, eventKey },
+        select: { title: true, body: true, dedupeKey: true, href: true },
+      })
+    }
+
+    /** An offer for a fresh entry at `start`, returning both ids. */
+    async function offerAt(start: Date) {
+      const entryId = await createEntry()
+      const { offer } = await createWaitlistOffer({
+        professionalId: fx.professionalId,
+        actorUserId: fx.proUserId,
+        waitlistEntryId: entryId,
+        scheduledFor: start,
+        endsAt: new Date(start.getTime() + 60 * 60_000),
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        durationMinutes: 60,
+      })
+      return { entryId, offerId: offer.id }
+    }
+
+    // THE assertion this whole card exists for. Before the sweep, an offer the
+    // client never answered stayed PENDING and its entry stayed NOTIFIED
+    // forever — the client silently stopped being offerable, and nothing on
+    // either side said why.
+    it('expires a lapsed offer and revives its entry to ACTIVE', async () => {
+      const start = futureLocal(50, 13, 0)
+      const { entryId, offerId } = await offerAt(start)
+
+      // Pre-state: this is what "stuck" looked like.
+      expect(
+        (await db.waitlistEntry.findUnique({ where: { id: entryId } }))?.status,
+      ).toBe(WaitlistStatus.NOTIFIED)
+
+      const now = new Date()
+      await backdateExpiry(offerId, new Date(now.getTime() - 60_000))
+
+      const result = await expireLapsedWaitlistOffers({ now })
+
+      expect(result.expired).toBeGreaterThanOrEqual(1)
+      expect(result.failed).toBe(0)
+
+      const offerRow = await db.waitlistOffer.findUnique({ where: { id: offerId } })
+      expect(offerRow?.status).toBe(WaitlistOfferStatus.EXPIRED)
+      expect(offerRow?.respondedAt).not.toBeNull()
+
+      // Back on the pro's list, which is the whole point.
+      expect(
+        (await db.waitlistEntry.findUnique({ where: { id: entryId } }))?.status,
+      ).toBe(WaitlistStatus.ACTIVE)
+
+      // F14: the reservation cannot outlive the offer, and the time is bookable
+      // again — checked against real availability, not just the row.
+      expect(await holdForOffer(offerId)).toBeNull()
+      expect(await availabilityOffers(start)).toBe(true)
+
+      const notes = await proNotifications(
+        NotificationEventKey.WAITLIST_OFFER_EXPIRED,
+      )
+      const mine = notes.filter(
+        (n) => n.dedupeKey === `WAITLIST_OFFER_EXPIRED:${offerId}`,
+      )
+      expect(mine).toHaveLength(1)
+      expect(mine[0]?.title).toBe('Wanda Waiter didn’t respond')
+      expect(mine[0]?.body).toContain('they’re back on your list')
+      expect(mine[0]?.href).toBe('/pro/waitlist')
+    })
+
+    // The other direction, and the one a too-eager `expiresAt <= now` gets
+    // wrong: a fresh offer must survive the sweep untouched.
+    it('leaves a FRESH offer completely alone', async () => {
+      const start = futureLocal(51, 13, 0)
+      const { entryId, offerId } = await offerAt(start)
+
+      const before = await db.waitlistOffer.findUnique({ where: { id: offerId } })
+      expect(before?.status).toBe(WaitlistOfferStatus.PENDING)
+      expect(before?.expiresAt?.getTime()).toBeGreaterThan(Date.now())
+
+      await expireLapsedWaitlistOffers({ now: new Date() })
+
+      const after = await db.waitlistOffer.findUnique({ where: { id: offerId } })
+      expect(after?.status).toBe(WaitlistOfferStatus.PENDING)
+      expect(after?.respondedAt).toBeNull()
+      // Still NOTIFIED — the entry is not dragged back while the offer is live.
+      expect(
+        (await db.waitlistEntry.findUnique({ where: { id: entryId } }))?.status,
+      ).toBe(WaitlistStatus.NOTIFIED)
+      // And its reservation still holds the slot.
+      expect(await holdForOffer(offerId)).not.toBeNull()
+      expect(await availabilityOffers(start)).toBe(false)
+
+      const notes = await proNotifications(
+        NotificationEventKey.WAITLIST_OFFER_EXPIRED,
+      )
+      expect(
+        notes.some((n) => n.dedupeKey === `WAITLIST_OFFER_EXPIRED:${offerId}`),
+      ).toBe(false)
+    })
+
+    // Offers written before F14 carry NO expiry and must never lapse. This is
+    // the null case the two obvious spellings of "expired" disagree on, and the
+    // one where getting it wrong expires every legacy row on the first run — so
+    // it is proven against the real query, not just the predicate's shape.
+    it('never expires a legacy offer with a null expiresAt', async () => {
+      const start = futureLocal(55, 13, 0)
+      const { entryId, offerId } = await offerAt(start)
+
+      await db.waitlistOffer.update({
+        where: { id: offerId },
+        data: { expiresAt: null },
+      })
+
+      // `now` far in the FUTURE: nothing about this row is recent, and it still
+      // must not be claimed.
+      await expireLapsedWaitlistOffers({
+        now: new Date(Date.now() + 365 * 24 * 60 * 60_000),
+      })
+
+      expect(
+        (await db.waitlistOffer.findUnique({ where: { id: offerId } }))?.status,
+      ).toBe(WaitlistOfferStatus.PENDING)
+      expect(
+        (await db.waitlistEntry.findUnique({ where: { id: entryId } }))?.status,
+      ).toBe(WaitlistStatus.NOTIFIED)
+    })
+
+    // Re-running the cron over the same window must not stack inbox rows, and
+    // must not re-claim a row it already expired.
+    it('is idempotent across two runs', async () => {
+      const start = futureLocal(52, 13, 0)
+      const { offerId } = await offerAt(start)
+
+      const now = new Date()
+      await backdateExpiry(offerId, new Date(now.getTime() - 60_000))
+
+      await expireLapsedWaitlistOffers({ now })
+      const second = await expireLapsedWaitlistOffers({ now })
+
+      // The row is EXPIRED, so it is no longer PENDING and the query cannot
+      // even see it.
+      expect(
+        second.considered === 0 ||
+          !(await db.waitlistOffer.findMany({
+            where: { id: offerId, status: WaitlistOfferStatus.PENDING },
+            select: { id: true },
+          })).length,
+      ).toBe(true)
+
+      const mine = (
+        await proNotifications(NotificationEventKey.WAITLIST_OFFER_EXPIRED)
+      ).filter((n) => n.dedupeKey === `WAITLIST_OFFER_EXPIRED:${offerId}`)
+      expect(mine).toHaveLength(1)
+    })
+
+    // Leaving WITH a live offer: the pro loses a slot they had deliberately
+    // taken off their calendar, so they hear about it.
+    it('tells the pro when a client leaves while a LIVE offer is out', async () => {
+      const start = futureLocal(53, 13, 0)
+      const { entryId, offerId } = await offerAt(start)
+
+      const result = await cancelClientWaitlistEntry({
+        entryId,
+        clientId: fx.clientId,
+      })
+      expect(result.notifiedProfessional).toBe(true)
+
+      const mine = (
+        await proNotifications(NotificationEventKey.WAITLIST_CLIENT_LEFT)
+      ).filter((n) => n.dedupeKey === `WAITLIST_CLIENT_LEFT:${entryId}`)
+
+      expect(mine).toHaveLength(1)
+      expect(mine[0]?.title).toBe('Wanda Waiter left your waitlist')
+      expect(mine[0]?.body).toContain('free to re-offer')
+
+      // Sanity: the offer really was withdrawn, so this is not a notification
+      // about a slot that is still reserved.
+      expect(
+        (await db.waitlistOffer.findUnique({ where: { id: offerId } }))?.status,
+      ).toBe(WaitlistOfferStatus.CANCELLED)
+    })
+
+    // Leaving WITHOUT one: silent, by explicit decision. This is the assertion
+    // that fails the moment someone "helpfully" notifies on every leave.
+    it('stays silent when a client leaves with no offer pending', async () => {
+      const entryId = await createEntry()
+
+      const result = await cancelClientWaitlistEntry({
+        entryId,
+        clientId: fx.clientId,
+      })
+      expect(result.notifiedProfessional).toBe(false)
+
+      const notes = await proNotifications(
+        NotificationEventKey.WAITLIST_CLIENT_LEFT,
+      )
+      expect(
+        notes.some((n) => n.dedupeKey === `WAITLIST_CLIENT_LEFT:${entryId}`),
+      ).toBe(false)
+    })
+
+    // A PENDING offer that already lapsed is still withdrawn — but it stopped
+    // being a promise when its countdown ran out, so the leave says nothing and
+    // the expiry sweep keeps sole ownership of that story.
+    it('withdraws an already-lapsed offer on leave, silently', async () => {
+      const start = futureLocal(54, 13, 0)
+      const { entryId, offerId } = await offerAt(start)
+
+      await backdateExpiry(offerId, new Date(Date.now() - 60_000))
+
+      const result = await cancelClientWaitlistEntry({
+        entryId,
+        clientId: fx.clientId,
+      })
+
+      expect(result.releasedOffers).toBe(1)
+      expect(result.notifiedProfessional).toBe(false)
+      expect(
+        (await db.waitlistOffer.findUnique({ where: { id: offerId } }))?.status,
+      ).toBe(WaitlistOfferStatus.CANCELLED)
+
+      const notes = await proNotifications(
+        NotificationEventKey.WAITLIST_CLIENT_LEFT,
+      )
+      expect(
+        notes.some((n) => n.dedupeKey === `WAITLIST_CLIENT_LEFT:${entryId}`),
+      ).toBe(false)
     })
   })
 })

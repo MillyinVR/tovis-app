@@ -238,7 +238,12 @@ import {
   syncBookingAppointmentReminders,
 } from '@/lib/notifications/appointmentReminders'
 import { createProNotification } from '@/lib/notifications/proNotifications'
+import { clientNameForProNotification } from '@/lib/notifications/recipientNames'
 import { inferPreferredContactMethod } from '@/lib/notifications/contactMethod'
+import {
+  isWaitlistOfferLapsed,
+  lapsedWaitlistOfferWhere,
+} from '@/lib/waitlist/offerLiveness'
 import { scheduleReviewRequestOnCompletion } from '@/lib/notifications/reviewRequests'
 import {
   buildAuxRefundDiscriminator,
@@ -17379,6 +17384,44 @@ function resolveWaitlistOfferExpiry(args: {
 }
 
 /**
+ * Everything the pro-facing copy for a withdrawn/expired offer needs, read in
+ * the same query that finds the offer. `expiresAt` is here because "was this
+ * offer still LIVE when it was withdrawn?" is the only question that decides
+ * whether the pro hears about it at all.
+ */
+const RELEASED_WAITLIST_OFFER_SELECT = {
+  id: true,
+  startsAt: true,
+  expiresAt: true,
+  location: { select: { timeZone: true } },
+  professional: { select: { timeZone: true } },
+} satisfies Prisma.WaitlistOfferSelect
+
+type ReleasedWaitlistOffer = Prisma.WaitlistOfferGetPayload<{
+  select: typeof RELEASED_WAITLIST_OFFER_SELECT
+}>
+
+/**
+ * The offered slot as a human sentence fragment ("Tue, Mar 4 at 2:00 PM"), in
+ * the zone the appointment would have happened in — the location's, falling back
+ * to the pro's and then the app default, via the standard truth precedence.
+ */
+function formatOfferedSlotWhen(offer: {
+  startsAt: Date
+  location: { timeZone: string | null } | null
+  professional: { timeZone: string | null } | null
+}): string {
+  const resolved = resolveApptTimeZoneFromValues({
+    locationTimeZone: offer.location?.timeZone,
+    professionalTimeZone: offer.professional?.timeZone,
+    fallback: DEFAULT_TIME_ZONE,
+  })
+  const tz = resolved.ok ? resolved.timeZone : DEFAULT_TIME_ZONE
+
+  return `${formatBookingDateLabel(offer.startsAt, tz)} at ${formatBookingTimeLabel(offer.startsAt, tz)}`
+}
+
+/**
  * Cancel every still-PENDING offer for a waitlist entry and drop the slot each
  * one was reserving (F14).
  *
@@ -17393,16 +17436,16 @@ async function releasePendingWaitlistOffersForEntry(args: {
   tx: Prisma.TransactionClient
   waitlistEntryId: string
   now: Date
-}): Promise<{ cancelled: number }> {
+}): Promise<{ cancelled: number; released: ReleasedWaitlistOffer[] }> {
   const pending = await args.tx.waitlistOffer.findMany({
     where: {
       waitlistEntryId: args.waitlistEntryId,
       status: WaitlistOfferStatus.PENDING,
     },
-    select: { id: true },
+    select: RELEASED_WAITLIST_OFFER_SELECT,
   })
 
-  if (pending.length === 0) return { cancelled: 0 }
+  if (pending.length === 0) return { cancelled: 0, released: [] }
 
   const offerIds = pending.map((offer) => offer.id)
 
@@ -17415,7 +17458,7 @@ async function releasePendingWaitlistOffersForEntry(args: {
     data: { status: WaitlistOfferStatus.CANCELLED, respondedAt: args.now },
   })
 
-  return { cancelled: cancelled.count }
+  return { cancelled: cancelled.count, released: pending }
 }
 
 /**
@@ -17884,7 +17927,9 @@ function assertConfirmableWaitlistOffer(
   if (record.status !== WaitlistOfferStatus.PENDING) {
     throw bookingError('WAITLIST_OFFER_NOT_PENDING')
   }
-  if (record.expiresAt && record.expiresAt.getTime() <= now.getTime()) {
+  // Same predicate the readers filter on and the sweep claims rows with, so a
+  // card can never be shown as live by one and refused as expired by another.
+  if (isWaitlistOfferLapsed(record, now)) {
     throw bookingError('WAITLIST_OFFER_NOT_PENDING', {
       message: 'Waitlist offer has expired.',
       userMessage: 'This offer has expired.',
@@ -18109,6 +18154,12 @@ type CancelClientWaitlistEntryResult = {
   cancelled: boolean
   /** PENDING offers withdrawn, each of which handed a reserved slot back. */
   releasedOffers: number
+  /**
+   * True when the pro was told. Strictly narrower than `releasedOffers > 0`: an
+   * already-lapsed PENDING offer is still withdrawn (and still frees its slot on
+   * paper) but was never a live promise, so it earns no notification.
+   */
+  notifiedProfessional: boolean
 }
 
 /**
@@ -18177,14 +18228,19 @@ export async function cancelClientWaitlistEntry(
       // Already gone. Idempotent rather than an error: leaving twice is a
       // double-tap, and there is nothing left to release.
       if (entry.status === WaitlistStatus.CANCELLED) {
-        return { cancelled: false, releasedOffers: 0 }
+        return {
+          cancelled: false,
+          releasedOffers: 0,
+          notifiedProfessional: false,
+        }
       }
 
-      const { cancelled } = await releasePendingWaitlistOffersForEntry({
-        tx,
-        waitlistEntryId: entry.id,
-        now,
-      })
+      const { cancelled, released } =
+        await releasePendingWaitlistOffersForEntry({
+          tx,
+          waitlistEntryId: entry.id,
+          now,
+        })
 
       await tx.waitlistEntry.update({
         where: { id: entry.id },
@@ -18192,7 +18248,53 @@ export async function cancelClientWaitlistEntry(
         select: { id: true },
       })
 
-      return { cancelled: true, releasedOffers: cancelled }
+      // Tell the pro ONLY when the promise they made was still live. Tori's
+      // decision, and the reason is that silence is the correct output for the
+      // common case: a client leaving a list they were never offered a time on
+      // costs the pro nothing and asks nothing of them, so a notification would
+      // be pure noise. A live offer is the opposite — a slot the pro deliberately
+      // took off their calendar just came back, and they are the only person who
+      // can re-offer it.
+      //
+      // `released` and not `cancelled > 0`: a PENDING offer that had already
+      // lapsed is withdrawn here too, but it stopped being a promise when its
+      // countdown ran out — the expiry sweep owns that story, and telling it
+      // twice would double-notify the pro about one slot.
+      const live = released.filter((offer) => !isWaitlistOfferLapsed(offer, now))
+      let notifiedProfessional = false
+
+      if (live.length > 0) {
+        // At most one offer can be PENDING per entry (partial unique index), so
+        // this is a list of one in practice; taking the earliest keeps the copy
+        // deterministic if that ever stops being true.
+        const soonest = live.reduce((earliest, offer) =>
+          offer.startsAt.getTime() < earliest.startsAt.getTime() ? offer : earliest,
+        )
+
+        const client = await tx.clientProfile.findUnique({
+          where: { id: args.clientId },
+          select: { firstName: true, lastName: true },
+        })
+
+        await createProNotification({
+          tx,
+          professionalId: pre.professionalId,
+          eventKey: NotificationEventKey.WAITLIST_CLIENT_LEFT,
+          title: `${clientNameForProNotification(client)} left your waitlist`,
+          body: `Your ${formatOfferedSlotWhen(soonest)} slot is free to re-offer.`,
+          href: '/pro/waitlist',
+          dedupeKey: `WAITLIST_CLIENT_LEFT:${entry.id}`,
+          data: {
+            waitlistEntryId: entry.id,
+            waitlistOfferId: soonest.id,
+            notificationReason: 'WAITLIST_CLIENT_LEFT',
+          },
+        })
+
+        notifiedProfessional = true
+      }
+
+      return { cancelled: true, releasedOffers: cancelled, notifiedProfessional }
     },
   )
 
@@ -18202,6 +18304,174 @@ export async function cancelClientWaitlistEntry(
   // [[cache-is-a-third-query]]).
   if (result.releasedOffers > 0) {
     await bumpProfessionalScheduleVersion(pre.professionalId)
+  }
+
+  return result
+}
+
+export type ExpireLapsedWaitlistOffersResult = {
+  /** Lapsed PENDING offers the query found (before the re-check under lock). */
+  considered: number
+  /** Offers actually flipped to EXPIRED. */
+  expired: number
+  /** Entries returned NOTIFIED → ACTIVE. Never more than `expired`. */
+  revivedEntries: number
+  /** Offers skipped because they stopped being lapsed-and-PENDING under lock. */
+  skipped: number
+  /** Offers whose own transaction threw. Logged, not fatal to the sweep. */
+  failed: number
+}
+
+/** Belt on the per-run batch, so one wedged row can never mean an unbounded job. */
+const WAITLIST_OFFER_EXPIRY_BATCH = 200
+
+/**
+ * Sweep: transition lapsed waitlist offers to EXPIRED and put their clients back
+ * on the pro's list.
+ *
+ * Nothing wrote `WaitlistOfferStatus.EXPIRED`. An offer's `expiresAt` was only
+ * ever enforced defensively — the confirm refused a lapsed one, and both readers
+ * filtered it out — so the row itself stayed PENDING forever and, worse, its
+ * `WaitlistEntry` stayed NOTIFIED forever. DECLINE was the only path back to
+ * ACTIVE, which means a client who simply never answered was silently dropped
+ * out of the waitlist they were still waiting on: invisible to them, and
+ * invisible to the pro, who saw a "already offered" entry they could not re-offer
+ * to and no longer had a reason not to.
+ *
+ * Shape follows the account-deletion sweep: an unlocked query picks candidates,
+ * then each one runs in its OWN locked transaction. Per-item, deliberately —
+ * a caught error still poisons the surrounding transaction
+ * ([[continue-after-a-refusal-needs-its-own-transaction]]), so a single bad row
+ * must not take the batch with it. The lock is required for the same reason
+ * decline takes it: expiring removes occupancy.
+ *
+ * Every candidate is RE-CHECKED under its lock. The gap between the unlocked
+ * query and the lock is exactly where a client confirms or declines, so the
+ * `updateMany` that claims the row carries the full predicate and a zero count
+ * means "someone else got there first" — counted as skipped, not failed.
+ *
+ * `now` is the run's clock, not each transaction's: the claim has to ask the
+ * same question the candidate query asked, or a row that lapsed mid-run would be
+ * claimed on a predicate the query never applied. An offer that lapses during a
+ * run is simply next hour's work.
+ *
+ * Resumable by construction. One transaction per offer means a run cut short —
+ * by the function's `maxDuration`, a deploy, a lock it waited out — keeps every
+ * item it already committed, and the next tick re-queries for whatever is left.
+ * That is what makes the batch cap safe rather than a silent truncation.
+ */
+export async function expireLapsedWaitlistOffers(args: {
+  now: Date
+  limit?: number
+}): Promise<ExpireLapsedWaitlistOffersResult> {
+  const now = args.now
+  const take = clampInt(args.limit, WAITLIST_OFFER_EXPIRY_BATCH, 1, 1000)
+
+  const candidates = await prisma.waitlistOffer.findMany({
+    where: lapsedWaitlistOfferWhere(now),
+    // Oldest expiry first: if a backlog ever exceeds one batch, the longest-
+    // stranded client is the one who gets back on the list first.
+    orderBy: { expiresAt: 'asc' },
+    take,
+    select: {
+      // id/startsAt/expiresAt + the two timezone sources for the copy.
+      ...RELEASED_WAITLIST_OFFER_SELECT,
+      professionalId: true,
+      clientId: true,
+      waitlistEntryId: true,
+    },
+  })
+
+  const result: ExpireLapsedWaitlistOffersResult = {
+    considered: candidates.length,
+    expired: 0,
+    revivedEntries: 0,
+    skipped: 0,
+    failed: 0,
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const outcome = await withLockedProfessionalTransaction(
+        candidate.professionalId,
+        async ({ tx }) => {
+          // The claim. `updateMany` with the whole liveness predicate is what
+          // makes this safe against the confirm/decline that may have landed
+          // since the query above: count 0 means the row is no longer ours.
+          const claimed = await tx.waitlistOffer.updateMany({
+            where: { id: candidate.id, ...lapsedWaitlistOfferWhere(now) },
+            data: {
+              status: WaitlistOfferStatus.EXPIRED,
+              respondedAt: now,
+            },
+          })
+
+          if (claimed.count === 0) return { claimed: false, revived: false }
+
+          // F14: the reservation dies with the offer. The 5-minute hold sweep
+          // has almost certainly taken this already (the hold shares the offer's
+          // `expiresAt`), but "almost certainly" is not a contract — an offer
+          // that is over must not leave a slot dark, whoever gets there first.
+          await tx.bookingHold.deleteMany({
+            where: { waitlistOfferId: candidate.id },
+          })
+
+          // Back on the list. Guarded to NOTIFIED exactly as decline is: an
+          // entry the client already re-booked, or left, must not be dragged
+          // back to ACTIVE by an offer that lapsed afterwards.
+          const revived = await tx.waitlistEntry.updateMany({
+            where: {
+              id: candidate.waitlistEntryId,
+              status: WaitlistStatus.NOTIFIED,
+            },
+            data: { status: WaitlistStatus.ACTIVE },
+          })
+
+          const client = await tx.clientProfile.findUnique({
+            where: { id: candidate.clientId },
+            select: { firstName: true, lastName: true },
+          })
+
+          // Quiet by design: in-app only (see the event definition). The pro is
+          // not being asked to do anything urgently — this exists so the entry's
+          // reappearance on their waitlist has a reason attached to it.
+          await createProNotification({
+            tx,
+            professionalId: candidate.professionalId,
+            eventKey: NotificationEventKey.WAITLIST_OFFER_EXPIRED,
+            title: `${clientNameForProNotification(client)} didn’t respond`,
+            body: `Your ${formatOfferedSlotWhen(candidate)} offer expired — they’re back on your list.`,
+            href: '/pro/waitlist',
+            dedupeKey: `WAITLIST_OFFER_EXPIRED:${candidate.id}`,
+            data: {
+              waitlistOfferId: candidate.id,
+              waitlistEntryId: candidate.waitlistEntryId,
+              notificationReason: 'WAITLIST_OFFER_EXPIRED',
+            },
+          })
+
+          return { claimed: true, revived: revived.count > 0 }
+        },
+      )
+
+      if (!outcome.claimed) {
+        result.skipped += 1
+        continue
+      }
+
+      result.expired += 1
+      if (outcome.revived) result.revivedEntries += 1
+
+      // After the commit, and only for a row this run actually expired: the
+      // freed window has to leave every cached availability surface.
+      await bumpProfessionalScheduleVersion(candidate.professionalId)
+    } catch (error: unknown) {
+      result.failed += 1
+      console.error('expireLapsedWaitlistOffers: offer failed', {
+        waitlistOfferId: candidate.id,
+        error: safeError(error),
+      })
+    }
   }
 
   return result

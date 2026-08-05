@@ -423,6 +423,8 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   referral_converted: 'View referral',
   message_received: 'View message',
   waitlist_joined: 'View waitlist',
+  waitlist_offer_expired: 'View waitlist',
+  waitlist_client_left: 'View waitlist',
   pro_handle_reservation_expiring: 'Keep your handle',
   admin_verification_review_needed: 'Review verification',
   admin_support_ticket_created: 'View ticket',
@@ -574,6 +576,12 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   waitlist_joined: buildStandardTemplateRenderer(
     templateCtaLabels.waitlist_joined,
+  ),
+  waitlist_offer_expired: buildStandardTemplateRenderer(
+    templateCtaLabels.waitlist_offer_expired,
+  ),
+  waitlist_client_left: buildStandardTemplateRenderer(
+    templateCtaLabels.waitlist_client_left,
   ),
   pro_handle_reservation_expiring: buildStandardTemplateRenderer(
     templateCtaLabels.pro_handle_reservation_expiring,

@@ -54,6 +54,8 @@ export type NotificationTemplateKey =
   | 'referral_converted'
   | 'message_received'
   | 'waitlist_joined'
+  | 'waitlist_offer_expired'
+  | 'waitlist_client_left'
   | 'pro_handle_reservation_expiring'
   | 'admin_verification_review_needed'
   | 'admin_support_ticket_created'
@@ -1061,6 +1063,54 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  // An offered time lapsed unanswered. Deliberately the QUIETEST pro event in
+  // the registry — in-app only, no push, no email (Tori's call). The others
+  // report that somebody DID something; this one reports that nobody did, and a
+  // buzz for a non-event is exactly the noise that trains a pro to mute the app.
+  // Its value is the explanation waiting in the inbox when the pro next looks at
+  // their waitlist and wonders why that client is back on it.
+  //
+  // Transactional: it is the durable record of a state transition the sweep
+  // performed on the pro's behalf, not a nudge. Quiet hours are moot with IN_APP
+  // as the only channel, and are left un-bypassed so that stays true if a
+  // channel is ever added.
+  //
+  // Deduped per OFFER, so a re-run of the sweep over the same row refreshes one
+  // inbox entry instead of stacking.
+  [NotificationEventKey.WAITLIST_OFFER_EXPIRED]: {
+    key: NotificationEventKey.WAITLIST_OFFER_EXPIRED,
+    defaultPriority: NotificationPriority.LOW,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'waitlist_offer_expired',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  // A waitlisted client left while a live offer was out to them. In-app + push,
+  // NOT email: unlike WAITLIST_JOINED (a lead, worth an inbox record that
+  // survives a missed push), this is a time-boxed opportunity — a concrete slot
+  // that just reopened and is worth a tap now, but is stale by the time an email
+  // gets read. No email also keeps it from reading as a scolding receipt.
+  //
+  // Transactional, and no quiet-hours bypass: the slot is in the pro's calendar
+  // either way, so this is not worth a 3am buzz.
+  //
+  // Deduped per ENTRY — leaving is terminal for an entry, so at most one.
+  [NotificationEventKey.WAITLIST_CLIENT_LEFT]: {
+    key: NotificationEventKey.WAITLIST_CLIENT_LEFT,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'waitlist_client_left',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+    },
+  },
+
   // Admin operational alerts. Tier B (in-app + email; never SMS). Transactional
   // so they are durable inbox records, but no quiet-hours bypass — admins are an
   // internal audience and these are not time-critical pages.
@@ -1127,6 +1177,8 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.MESSAGE_RECEIVED,
   NotificationEventKey.WAITLIST_JOINED,
   NotificationEventKey.CHART_ACCESS_GRANTED,
+  NotificationEventKey.WAITLIST_OFFER_EXPIRED,
+  NotificationEventKey.WAITLIST_CLIENT_LEFT,
 ]
 
 export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [

@@ -16,9 +16,56 @@
 //   offer hide itself the moment it was made. Null for offers written before
 //   F14, which reserved nothing.
 
-import { ServiceLocationType } from '@prisma/client'
+import { Prisma, ServiceLocationType, WaitlistOfferStatus } from '@prisma/client'
 
 import type { StoredSlotCandidate } from '@/lib/booking/storedSlotLiveness'
+
+/**
+ * Has this offer's own countdown run out?
+ *
+ * `expiresAt: null` is NOT expired — offers written before F14 carry no expiry
+ * and never lapse. That null case is the whole reason this is a named predicate
+ * rather than a `<=` at each call site: the two obvious spellings of "expired"
+ * (`expiresAt <= now`, `!(expiresAt > now)`) disagree on null, and one of them
+ * would quietly expire every legacy offer the first time the sweep ran.
+ */
+export function isWaitlistOfferLapsed(
+  offer: { expiresAt: Date | null },
+  now: Date,
+): boolean {
+  return offer.expiresAt !== null && offer.expiresAt.getTime() <= now.getTime()
+}
+
+/**
+ * A confirmable offer: PENDING and not past its own `expiresAt`. This is the
+ * read-side twin of `assertConfirmableWaitlistOffer` — the client's offer feed
+ * and the pro's waitlist both filter with it, so a card only appears while the
+ * confirm would actually succeed.
+ */
+export function liveWaitlistOfferWhere(now: Date): Prisma.WaitlistOfferWhereInput {
+  return {
+    status: WaitlistOfferStatus.PENDING,
+    OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+  }
+}
+
+/**
+ * The exact complement of `liveWaitlistOfferWhere` within PENDING: still
+ * outstanding, but past its countdown. This is what the expiry sweep claims.
+ *
+ * Written as the complement on purpose. A row must be either live or lapsed and
+ * never both — an offer the readers still show while the sweep is expiring it is
+ * a Confirm button that races a state change — and keeping the two predicates
+ * adjacent is what makes that checkable.
+ */
+export function lapsedWaitlistOfferWhere(
+  now: Date,
+): Prisma.WaitlistOfferWhereInput {
+  return {
+    status: WaitlistOfferStatus.PENDING,
+    expiresAt: { not: null, lte: now },
+  }
+}
 
 export type WaitlistOfferLivenessRow = {
   id: string

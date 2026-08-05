@@ -11,11 +11,11 @@ import {
   appendMessageToThread,
   broadcastThreadMessage,
 } from '@/lib/messages/appendMessage'
-import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import { messageThreadHref } from '@/lib/messages/notifyNewMessage'
 import { resolveMessageThread } from '@/lib/messagesResolve'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { createProNotification } from '@/lib/notifications/proNotifications'
+import { clientNameForProNotification } from '@/lib/notifications/recipientNames'
 import {
   MessageThreadContextType,
   NotificationEventKey,
@@ -89,20 +89,13 @@ async function notifyWaitlistJoined(args: {
   try {
     const client = await prisma.clientProfile.findUnique({
       where: { id: args.clientId },
-      select: { firstName: true, lastName: true, avatarUrl: true },
+      select: { firstName: true, lastName: true },
     })
 
-    // Name resolution stays inside the shared counterparty helper — the same one
-    // the inbox and MESSAGE_RECEIVED use — rather than reading the plaintext
-    // name columns here. `viewerIsThreadPro: true` because the PRO is who reads
-    // this notification, so the counterparty is the client.
-    const { title: resolvedClientName } = resolveThreadCounterparty({
-      viewerIsThreadPro: true,
-      client,
-      professional: null,
-    })
-
-    const clientName = resolvedClientName === 'Client' ? 'Someone' : resolvedClientName
+    // Name resolution + the "Someone" sentence fallback both live in the shared
+    // helper, so this event, WAITLIST_CLIENT_LEFT and WAITLIST_OFFER_EXPIRED all
+    // name a client the same way.
+    const clientName = clientNameForProNotification(client)
 
     await createProNotification({
       professionalId: args.professionalId,
@@ -576,7 +569,18 @@ export async function DELETE(req: Request) {
     // waitlist has to withdraw any outstanding offer and hand back the slot it
     // reserved, under the pro's schedule lock (B4). The checks above are a
     // fail-fast; the boundary re-runs them under that lock.
-    await cancelClientWaitlistEntry({ entryId: id, clientId: auth.clientId })
+    const result = await cancelClientWaitlistEntry({
+      entryId: id,
+      clientId: auth.clientId,
+    })
+
+    // Only when the boundary actually enqueued the pro's WAITLIST_CLIENT_LEFT
+    // row — i.e. a LIVE offer was withdrawn. Leaving a list with nothing pending
+    // is silent by decision, and kicking a drain with nothing to drain is work
+    // for no one.
+    if (result.notifiedProfessional) {
+      kickNotificationDrain()
+    }
 
     return jsonOk({}, 200)
   } catch (e) {
