@@ -150,3 +150,73 @@ describe('MoneyTrailInspector idempotency keys on the wire', () => {
     )
   })
 })
+
+// 🔴 The pro fee row is a claim about the pro's own money, so WHEN it appears is
+// itself a product decision, not a rendering detail. Tori's locked sequencing is
+// fees live -> measure conversion -> only then advertise the waiver; a
+// "New-client fee $0.00 — not charged" row on every deposit booking would
+// announce the fee while it is still switched off.
+describe('MoneyTrailInspector — when the pro fee row appears', () => {
+  const fetchMock = vi.fn()
+
+  function renderWithProFee(
+    proDiscoveryFee: { amountCents: number; waived: boolean } | null,
+  ) {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/money-trail')) {
+        return jsonResponse({ ok: true, trail: { ...TRAIL, proDiscoveryFee } })
+      }
+      return jsonResponse({ ok: true })
+    })
+    render(<MoneyTrailInspector bookingId={BOOKING_ID} />)
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the fee, as money OUT, when the pro was actually charged', async () => {
+    renderWithProFee({ amountCents: 500, waived: false })
+
+    await waitFor(() => {
+      expect(screen.getByText('New-client fee')).toBeTruthy()
+    })
+    expect(
+      screen.getByText('One-time, deducted from your deposit payout'),
+    ).toBeTruthy()
+  })
+
+  it('shows the waiver so a member can see what their membership saved them', async () => {
+    renderWithProFee({ amountCents: 0, waived: true })
+
+    await waitFor(() => {
+      expect(screen.getByText('New-client fee')).toBeTruthy()
+    })
+    expect(screen.getByText('Waived by your membership')).toBeTruthy()
+  })
+
+  it('shows NOTHING for a plain zero — the fees are off, or this was no cold match', async () => {
+    renderWithProFee({ amountCents: 0, waived: false })
+
+    await waitFor(() => {
+      expect(screen.getByText('Money trail')).toBeTruthy()
+    })
+    expect(screen.queryByText('New-client fee')).toBeNull()
+  })
+
+  it('shows nothing on a booking that predates the fee model', async () => {
+    renderWithProFee(null)
+
+    await waitFor(() => {
+      expect(screen.getByText('Money trail')).toBeTruthy()
+    })
+    expect(screen.queryByText('New-client fee')).toBeNull()
+  })
+})

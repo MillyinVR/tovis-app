@@ -9923,7 +9923,8 @@ async function performLockedFinalizeBookingFromHold(args: {
             bookingTotalCents: Math.round(Number(lastMinuteTotal) * 100),
           }),
           feeEligible: args.discovery.feeEligible,
-          discoveryFeeCents: args.discovery.discoveryFeeCents,
+          feesEnabled: args.discovery.feesEnabled,
+          proFeeWaived: args.discovery.proFeeWaived,
         })
       : null
 
@@ -9962,9 +9963,20 @@ async function performLockedFinalizeBookingFromHold(args: {
         depositDueAt: hasUpfrontCharge
           ? computeDiscoveryDepositDueAt(new Date())
           : null,
+        // Both fees are stamped together — the client's convenience fee (what the
+        // customer is billed on top of the deposit) and the pro's $5 (taken out of
+        // their payout). They are the measurement record as well as the charge
+        // instruction: checkout, refunds and the relationship-establishment query
+        // all read back from these columns rather than re-deriving policy.
         discoveryFeeAmount: hasUpfrontCharge
-          ? discoveryPlan.discoveryFeeCents
+          ? discoveryPlan.clientFeeCents
           : null,
+        proDiscoveryFeeAmount: hasUpfrontCharge
+          ? discoveryPlan.proFeeCents
+          : null,
+        proDiscoveryFeeWaived: hasUpfrontCharge
+          ? discoveryPlan.proFeeWaived
+          : false,
         locationType: args.locationType,
         rebookOfBookingId: args.rebookOfBookingId,
         creationIdempotencyKey: args.idempotencyKey ?? null,
@@ -19025,8 +19037,19 @@ type PrepareClientDepositCheckoutResult = {
   booking: { id: string; professionalId: string }
   stripe: {
     depositCents: number
+    /** The CLIENT convenience fee — billed on top of the deposit. */
     feeCents: number
+    /** The PRO's fee — NOT billed to the client; it rides the application fee. */
+    proFeeCents: number
+    /** deposit + client fee — what the customer is charged. */
     totalCents: number
+    /**
+     * client fee + pro fee — the Stripe `application_fee_amount`. Stripe transfers
+     * the full `totalCents` to the pro and pulls this back, so the pro nets
+     * `depositCents - proFeeCents`. Capped at `totalCents` by Stripe; the pro fee is
+     * already clamped to the deposit upstream so it cannot exceed it.
+     */
+    applicationFeeCents: number
     currency: string
     connectedAccountId: string
     lineItemDescription: string
@@ -19064,6 +19087,7 @@ export async function prepareClientDepositCheckout(args: {
           depositStatus: true,
           depositAmount: true,
           discoveryFeeAmount: true,
+          proDiscoveryFeeAmount: true,
           depositPaidAt: true,
           service: { select: { name: true } },
           professional: {
@@ -19111,6 +19135,14 @@ export async function prepareClientDepositCheckout(args: {
 
       const depositCents = decimalToCents(booking.depositAmount)
       const feeCents = Math.max(0, booking.discoveryFeeAmount ?? 0)
+      // The pro's fee is NOT part of what the customer pays — it only widens the
+      // application fee, which is how it comes out of the pro's payout. Clamped to
+      // the deposit here as well as at stamp time: Stripe rejects an application fee
+      // larger than the charge, and a legacy row could carry an unclamped value.
+      const proFeeCents = Math.min(
+        Math.max(0, booking.proDiscoveryFeeAmount ?? 0),
+        depositCents,
+      )
       const totalCents = depositCents + feeCents
 
       if (totalCents <= 0) {
@@ -19125,7 +19157,9 @@ export async function prepareClientDepositCheckout(args: {
         stripe: {
           depositCents,
           feeCents,
+          proFeeCents,
           totalCents,
+          applicationFeeCents: feeCents + proFeeCents,
           currency: STRIPE_DEFAULT_CURRENCY,
           connectedAccountId,
           lineItemDescription: buildStripeLineItemDescription({

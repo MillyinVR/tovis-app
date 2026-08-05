@@ -88,7 +88,7 @@ describe('resolveEntitlements', () => {
       planGrants({
         planKey: 'pro',
         status: SubscriptionStatus.ACTIVE,
-        entitlement: 'discovery_fee_waiver',
+        entitlement: 'pro_discovery_fee_waiver',
       }),
     ).toBe(true)
     expect(
@@ -214,7 +214,7 @@ describe('admin comps (resolveEffective*)', () => {
     expect(activeCompPlanKey(state, NOW)).toBe('premium')
     expect(resolveEffectivePlanKey(state, NOW)).toBe('premium')
     expect(resolveEffectiveEntitlements(state, NOW)).toContain(
-      'discovery_fee_waiver',
+      'pro_discovery_fee_waiver',
     )
     expect(resolveCameraImageMonthlyQuota(state, NOW)).toBe(500)
   })

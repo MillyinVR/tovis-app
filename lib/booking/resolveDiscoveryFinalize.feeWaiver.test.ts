@@ -1,8 +1,9 @@
 // lib/booking/resolveDiscoveryFinalize.feeWaiver.test.ts
 //
-// Membership discovery-fee waiver (Option 1): a subscribed pro's brand-new
-// discovery client pays NO platform fee while enforcement is on — the deposit
-// still applies (feeEligible stands), only discoveryFeeCents is zeroed.
+// Membership pro-fee waiver: a subscribed pro pays NO $5 cold-match fee while the
+// platform fees are live AND enforcement is on. The deposit still applies
+// (feeEligible stands), and the CLIENT's convenience fee is never touched — the
+// waiver is resolved here and the amounts follow from it in the deposit plan.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BookingSource, DepositType, SubscriptionStatus } from '@prisma/client'
 
@@ -76,46 +77,55 @@ function arrangeColdDiscoveryMatch() {
   )
 }
 
-describe('resolveDiscoveryFinalize — membership discovery-fee waiver', () => {
-  const priorFlag = process.env.ENABLE_MEMBERSHIP_ENFORCEMENT
+describe('resolveDiscoveryFinalize — membership pro-fee waiver', () => {
+  const priorEnforcement = process.env.ENABLE_MEMBERSHIP_ENFORCEMENT
+  const priorFees = process.env.ENABLE_PLATFORM_FEES
 
   beforeEach(() => {
     Object.values(mocks).forEach((m) => m.mockReset())
     arrangeColdDiscoveryMatch()
+    // Most cases here are about the WAIVER, so put the fees live; the two cases
+    // that test the fee flag itself override this.
+    process.env.ENABLE_PLATFORM_FEES = '1'
   })
 
   afterEach(() => {
-    if (priorFlag === undefined) {
-      delete process.env.ENABLE_MEMBERSHIP_ENFORCEMENT
-    } else {
-      process.env.ENABLE_MEMBERSHIP_ENFORCEMENT = priorFlag
+    const restore = (k: string, v: string | undefined) => {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
     }
+    restore('ENABLE_MEMBERSHIP_ENFORCEMENT', priorEnforcement)
+    restore('ENABLE_PLATFORM_FEES', priorFees)
   })
 
-  it('subscribed pro + enforcement on → fee 0, still feeEligible (deposit stands)', async () => {
-    process.env.ENABLE_MEMBERSHIP_ENFORCEMENT = '1'
+  const subscribed = () =>
     mocks.subscriptionFindUnique.mockResolvedValue({
       planKey: 'pro',
       status: SubscriptionStatus.ACTIVE,
     })
 
+  it('subscribed pro + both flags on → pro fee waived, still feeEligible (deposit stands)', async () => {
+    process.env.ENABLE_MEMBERSHIP_ENFORCEMENT = '1'
+    subscribed()
+
     const result = await resolveDiscoveryFinalize(BASE)
 
     expect(result.feeEligible).toBe(true)
-    expect(result.discoveryFeeCents).toBe(0)
+    expect(result.feesEnabled).toBe(true)
+    expect(result.proFeeWaived).toBe(true)
   })
 
-  it('free pro + enforcement on → fee unchanged', async () => {
+  it('free pro + enforcement on → no waiver', async () => {
     process.env.ENABLE_MEMBERSHIP_ENFORCEMENT = '1'
     mocks.subscriptionFindUnique.mockResolvedValue(null)
 
     const result = await resolveDiscoveryFinalize(BASE)
 
     expect(result.feeEligible).toBe(true)
-    expect(result.discoveryFeeCents).toBeGreaterThan(0)
+    expect(result.proFeeWaived).toBe(false)
   })
 
-  it('lapsed subscription + enforcement on → fee unchanged', async () => {
+  it('lapsed subscription + enforcement on → no waiver', async () => {
     process.env.ENABLE_MEMBERSHIP_ENFORCEMENT = '1'
     mocks.subscriptionFindUnique.mockResolvedValue({
       planKey: 'pro',
@@ -124,18 +134,38 @@ describe('resolveDiscoveryFinalize — membership discovery-fee waiver', () => {
 
     const result = await resolveDiscoveryFinalize(BASE)
 
-    expect(result.discoveryFeeCents).toBeGreaterThan(0)
+    expect(result.proFeeWaived).toBe(false)
   })
 
-  it('subscribed pro + enforcement OFF → fee unchanged (flag is the master switch)', async () => {
+  it('subscribed pro + enforcement OFF → no waiver (enforcement is a master switch)', async () => {
     delete process.env.ENABLE_MEMBERSHIP_ENFORCEMENT
-    mocks.subscriptionFindUnique.mockResolvedValue({
-      planKey: 'pro',
-      status: SubscriptionStatus.ACTIVE,
-    })
+    subscribed()
 
     const result = await resolveDiscoveryFinalize(BASE)
 
-    expect(result.discoveryFeeCents).toBeGreaterThan(0)
+    expect(result.proFeeWaived).toBe(false)
+  })
+
+  // 🔴 The waiver needs BOTH switches. With the fees off there is no pro fee to
+  // waive, and reporting one would make a member look like they dodged a charge
+  // nobody was charged — poisoning the very cohort the instrumentation exists for.
+  it('subscribed pro + platform fees OFF → no waiver reported', async () => {
+    process.env.ENABLE_MEMBERSHIP_ENFORCEMENT = '1'
+    delete process.env.ENABLE_PLATFORM_FEES
+    subscribed()
+
+    const result = await resolveDiscoveryFinalize(BASE)
+
+    expect(result.feesEnabled).toBe(false)
+    expect(result.proFeeWaived).toBe(false)
+  })
+
+  it('reports feesEnabled straight off the flag', async () => {
+    delete process.env.ENABLE_PLATFORM_FEES
+    mocks.subscriptionFindUnique.mockResolvedValue(null)
+    expect((await resolveDiscoveryFinalize(BASE)).feesEnabled).toBe(false)
+
+    process.env.ENABLE_PLATFORM_FEES = 'true'
+    expect((await resolveDiscoveryFinalize(BASE)).feesEnabled).toBe(true)
   })
 })

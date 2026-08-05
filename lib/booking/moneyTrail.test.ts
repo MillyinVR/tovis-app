@@ -48,6 +48,8 @@ function makeRow(overrides?: Partial<MoneyTrailBookingRow>): MoneyTrailBookingRo
 
     discoveryFeeAmount: null,
     discoveryFeeRefundedAt: null,
+    proDiscoveryFeeAmount: null,
+    proDiscoveryFeeWaived: false,
 
     noShowMarkedAt: null,
     noShowFeeStatus: null,
@@ -184,7 +186,7 @@ describe('assembleMoneyTrail', () => {
     expect(trail.deposit?.disputedAt).toBe('2026-04-05T09:00:00.000Z')
   })
 
-  it('surfaces the discovery fee and its refund state', () => {
+  it('surfaces the client discovery fee and its refund state', () => {
     const trail = assembleMoneyTrail(
       makeRow({
         discoveryFeeAmount: 500,
@@ -195,6 +197,37 @@ describe('assembleMoneyTrail', () => {
       amountCents: 500,
       refundedAt: '2026-04-14T00:00:00.000Z',
     })
+  })
+
+  // The pro's fee is a SEPARATE row from the client's — one comes out of the pro's
+  // payout, the other is money the client paid. A surface that merged them would
+  // tell a pro they were charged the client's fee as well.
+  it('surfaces the pro fee separately from the client fee', () => {
+    const trail = assembleMoneyTrail(
+      makeRow({ discoveryFeeAmount: 500, proDiscoveryFeeAmount: 500 }),
+    )
+    expect(trail.discoveryFee).toEqual({ amountCents: 500, refundedAt: null })
+    expect(trail.proDiscoveryFee).toEqual({ amountCents: 500, waived: false })
+  })
+
+  it('distinguishes a membership waiver from the fees being off', () => {
+    const waived = assembleMoneyTrail(
+      makeRow({
+        discoveryFeeAmount: 500,
+        proDiscoveryFeeAmount: 0,
+        proDiscoveryFeeWaived: true,
+      }),
+    )
+    expect(waived.proDiscoveryFee).toEqual({ amountCents: 0, waived: true })
+
+    const feesOff = assembleMoneyTrail(
+      makeRow({ discoveryFeeAmount: 0, proDiscoveryFeeAmount: 0 }),
+    )
+    expect(feesOff.proDiscoveryFee).toEqual({ amountCents: 0, waived: false })
+  })
+
+  it('reports no pro fee at all on a booking that predates the fee model', () => {
+    expect(assembleMoneyTrail(makeRow({})).proDiscoveryFee).toBeNull()
   })
 
   it('allows waiving a no-show fee only when the charge FAILED', () => {

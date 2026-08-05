@@ -68,6 +68,8 @@ export const MONEY_TRAIL_SELECT = {
 
   discoveryFeeAmount: true,
   discoveryFeeRefundedAt: true,
+  proDiscoveryFeeAmount: true,
+  proDiscoveryFeeWaived: true,
 
   noShowMarkedAt: true,
   noShowFeeStatus: true,
@@ -144,9 +146,24 @@ export type BookingMoneyTrail = {
      */
     disputedAt: string | null
   } | null
+  /**
+   * The CLIENT's one-time convenience fee on a cold discovery match — money the
+   * client paid on top of the deposit, which the platform kept. Never money out of
+   * the pro's pocket. See `proDiscoveryFee` for the pro's side.
+   */
   discoveryFee: {
     amountCents: number
     refundedAt: string | null
+  } | null
+  /**
+   * The PRO's one-time fee on the same cold match — $5 taken OUT of their deposit
+   * payout, so their net is `deposit.amountCents - amountCents`. Null on bookings
+   * that predate the pro fee; `amountCents: 0` with `waived: true` is a membership
+   * waiver, and with `waived: false` means the platform fees were switched off.
+   */
+  proDiscoveryFee: {
+    amountCents: number
+    waived: boolean
   } | null
   noShowFee: {
     status: NoShowFeeStatus
@@ -225,6 +242,14 @@ export function assembleMoneyTrail(row: MoneyTrailBookingRow): BookingMoneyTrail
       : {
           amountCents: row.discoveryFeeAmount,
           refundedAt: toIso(row.discoveryFeeRefundedAt),
+        }
+
+  const proDiscoveryFee =
+    row.proDiscoveryFeeAmount == null
+      ? null
+      : {
+          amountCents: row.proDiscoveryFeeAmount,
+          waived: row.proDiscoveryFeeWaived,
         }
 
   const noShowFee =
@@ -308,6 +333,7 @@ export function assembleMoneyTrail(row: MoneyTrailBookingRow): BookingMoneyTrail
     finalCharge,
     deposit,
     discoveryFee,
+    proDiscoveryFee,
     noShowFee,
     refunds,
     summary: {
