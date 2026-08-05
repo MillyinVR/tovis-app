@@ -14,7 +14,11 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { assertProCanContactClient } from '@/lib/clientVisibility'
-import { loadChartShare, requestChartShare } from '@/lib/clients/chartShare'
+import {
+  chartShareRequestBlock,
+  loadChartShare,
+  requestChartShare,
+} from '@/lib/clients/chartShare'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { notifyChartAccessRequested } from '@/lib/notifications/chartAccessNotifications'
 
@@ -43,6 +47,12 @@ export async function GET(_req: Request, context: RouteContext) {
     if (!gate.ok) return jsonFail(403, 'Forbidden.')
 
     const share = await loadChartShare({ clientId, professionalId })
+    // The SAME predicate the POST runs, so a client rendering "Request access"
+    // can never offer an ask this server would answer with 409. iOS especially
+    // needs this: the re-request cooldown is a duration the app doesn't know,
+    // and mirroring that arithmetic client-side is a second source of truth
+    // that drifts silently the day the cooldown changes.
+    const block = chartShareRequestBlock(share, new Date())
 
     return jsonOk(
       {
@@ -55,6 +65,9 @@ export async function GET(_req: Request, context: RouteContext) {
           // has to re-derive the policy.
           canViewChart: gate.visibility.canViewClient,
           visibilityReason: gate.visibility.reason,
+          canRequest: block === null,
+          /** Why not, when `canRequest` is false. Null when they may ask. */
+          requestBlockedReason: block?.code ?? null,
         },
       },
       200,
