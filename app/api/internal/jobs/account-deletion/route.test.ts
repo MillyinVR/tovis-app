@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getInternalJobSecret: vi.fn(),
   isAuthorizedJobRequest: vi.fn(),
   executeDueAccountDeletions: vi.fn(),
+  capturePrivacyException: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -28,6 +29,10 @@ vi.mock('@/app/api/_utils/auth/internalJob', () => ({
 
 vi.mock('@/lib/privacy/accountDeletion', () => ({
   executeDueAccountDeletions: mocks.executeDueAccountDeletions,
+}))
+
+vi.mock('@/lib/observability/privacyEvents', () => ({
+  capturePrivacyException: mocks.capturePrivacyException,
 }))
 
 vi.mock('@/lib/prisma', () => ({ prisma: {} }))
@@ -107,5 +112,27 @@ describe('the account-deletion sweep endpoint', () => {
 
     expect(res.status).toBe(500)
     expect(JSON.stringify(body)).not.toContain('postgres://')
+  })
+
+  // A sweep run that throws outright must page a human — the JSON 500 body
+  // is only ever read by whatever dispatched the cron, not a person.
+  it('captures a privacy exception when the sweep throws', async () => {
+    const error = new Error('db unreachable')
+    mocks.executeDueAccountDeletions.mockRejectedValue(error)
+
+    await GET(req())
+
+    expect(mocks.capturePrivacyException).toHaveBeenCalledTimes(1)
+    expect(mocks.capturePrivacyException).toHaveBeenCalledWith({
+      error,
+      route: 'GET /api/internal/jobs/account-deletion',
+      event: 'ACCOUNT_DELETION_SWEEP_ERROR',
+    })
+  })
+
+  it('does not capture a privacy exception when the sweep succeeds', async () => {
+    await GET(req())
+
+    expect(mocks.capturePrivacyException).not.toHaveBeenCalled()
   })
 })

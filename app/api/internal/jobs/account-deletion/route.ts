@@ -12,6 +12,7 @@ import {
   getInternalJobSecret,
   isAuthorizedJobRequest,
 } from '@/app/api/_utils/auth/internalJob'
+import { capturePrivacyException } from '@/lib/observability/privacyEvents'
 import { executeDueAccountDeletions } from '@/lib/privacy/accountDeletion'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
@@ -47,6 +48,11 @@ async function runJob(req: Request) {
     })
   } catch (error: unknown) {
     console.error('account-deletion sweep error', { error: safeError(error) })
+    capturePrivacyException({
+      error,
+      route: 'GET /api/internal/jobs/account-deletion',
+      event: 'ACCOUNT_DELETION_SWEEP_ERROR',
+    })
     return jsonFail(500, 'Account deletion sweep failed.')
   }
 }

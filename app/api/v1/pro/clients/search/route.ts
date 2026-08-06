@@ -3,7 +3,10 @@ import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
+import {
+  getChartVisibleClientIdSetForPro,
+  getVisibleClientIdSetForPro,
+} from '@/lib/clientVisibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +30,7 @@ type SearchClientRow = Prisma.ClientProfileGetPayload<{
   select: typeof SELECT_CLIENT
 }>
 
-function mapOut(c: SearchClientRow) {
+function mapOut(c: SearchClientRow, chartVisibleClientIds: Set<string>) {
   const id = String(c.id)
 
   return {
@@ -36,7 +39,13 @@ function mapOut(c: SearchClientRow) {
       `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() ||
       c.user?.email ||
       'Client',
-    canViewClient: true,
+    // Derived, not hardcoded — see the DTO note on the directory route
+    // (/api/v1/pro/clients). This search is booking-scoped-only today (its
+    // `visibleClientIds` never unions in booking-less claims), so every row
+    // it can return already qualifies. Deriving it anyway keeps this route
+    // from silently drifting out of sync with the chart gate the moment that
+    // scoping changes.
+    canViewClient: chartVisibleClientIds.has(id),
     email: c.user?.email ?? null,
     phone: c.phone ?? null,
   }
@@ -143,11 +152,20 @@ export async function GET(req: Request) {
       take: 12,
     })
 
+    const resultClientIds = [
+      ...recentClients.map((c) => c.id),
+      ...otherClients.map((c) => c.id),
+    ]
+    const chartVisibleClientIds = await getChartVisibleClientIdSetForPro(
+      professionalId,
+      resultClientIds,
+    )
+
     return jsonOk(
       {
         query: q,
-        recentClients: recentClients.map(mapOut),
-        otherClients: otherClients.map(mapOut),
+        recentClients: recentClients.map((c) => mapOut(c, chartVisibleClientIds)),
+        otherClients: otherClients.map((c) => mapOut(c, chartVisibleClientIds)),
       },
       200,
     )
