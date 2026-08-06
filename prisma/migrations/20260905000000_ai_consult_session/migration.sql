@@ -7,11 +7,17 @@
 --   • one new enum VALUE on "UploadSurface" ('CLIENT_CONSULT') — unused until
 --     the signed-upload + quality-gate endpoint lands (C3);
 --   • one new enum type, "ConsultSessionStatus";
---   • one new table, "ConsultSession", which starts EMPTY.
+--   • two new tables, "ConsultSession" and "ConsultPhoto", both starting EMPTY.
 -- Nothing existing is altered, backfilled, dropped or re-typed. No existing row
 -- changes, and no existing query's result changes. Rolling it back is a DROP
--- TABLE + DROP TYPE (the UploadSurface enum value would linger harmlessly —
--- Postgres cannot drop an enum value).
+-- TABLE (x2) + DROP TYPE (the UploadSurface enum value would linger harmlessly
+-- — Postgres cannot drop an enum value).
+--
+-- "ConsultPhoto" was added same-PR, before merge (Tori, 2026-08-06): consult
+-- photos are a PERMANENT, dated hair-history record, not ephemeral capture
+-- scaffolding, and cascade from "ConsultSession" rather than reusing
+-- "MediaAsset" — see both models' doc comments in schema.prisma for the full
+-- reasoning.
 
 -- AlterEnum
 ALTER TYPE "UploadSurface" ADD VALUE 'CLIENT_CONSULT';
@@ -62,3 +68,26 @@ ALTER TABLE "ConsultSession" ADD CONSTRAINT "ConsultSession_professionalId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "ConsultSession" ADD CONSTRAINT "ConsultSession_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "Booking"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "ConsultPhoto" (
+    "id" TEXT NOT NULL,
+    "consultSessionId" TEXT NOT NULL,
+    "storageBucket" TEXT NOT NULL,
+    "storagePath" TEXT NOT NULL,
+    "contentType" TEXT NOT NULL,
+    "mediaType" "MediaType" NOT NULL DEFAULT 'IMAGE',
+    "shotKey" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ConsultPhoto_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ConsultPhoto_storageBucket_storagePath_key" ON "ConsultPhoto"("storageBucket", "storagePath");
+
+-- CreateIndex
+CREATE INDEX "ConsultPhoto_consultSessionId_createdAt_idx" ON "ConsultPhoto"("consultSessionId", "createdAt");
+
+-- AddForeignKey
+ALTER TABLE "ConsultPhoto" ADD CONSTRAINT "ConsultPhoto_consultSessionId_fkey" FOREIGN KEY ("consultSessionId") REFERENCES "ConsultSession"("id") ON DELETE CASCADE ON UPDATE CASCADE;

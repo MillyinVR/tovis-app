@@ -6405,6 +6405,39 @@ enum ConsultSessionStatus {
 /// (ai-consult.md: "version everything on the analysis record") — prompts and
 /// output shapes will iterate, and re-runs/A-B need to know which produced a
 /// given row. All three stay null until the analysis engine (C4) runs.
+///
+/// ⚠️ RETENTION (Tori, 2026-08-06): PERMANENT. A consult is a dated hair-
+/// history record, not ephemeral intake — no auto-expiry, no pruning job, ever.
+/// `createdAt` is first-class: any pro with the normal chart-access grant to
+/// this client (not just the anchoring `professionalId`) can read this
+/// client's full consult history by `clientId` — e.g. a client who consulted
+/// with dark hair, then months later books elsewhere claiming "never colored,"
+/// is checkable against the dated record. This is WHY `clientId` (not just
+/// `bookingId`/`professionalId`) is the durable anchor and carries its own
+/// `[clientId, createdAt]` index — a chart-timeline reader queries by
+/// `clientId` directly, gated by the existing chart-access rules, not by
+/// walking through a specific booking. `DELETE_BOUNDARY` still disposes this
+/// as `DELETE` — permanent means "never auto-expires," not "survives the
+/// client deleting their account"; account deletion sweeps it normally, per
+/// Tori's explicit call, and cascades to `ConsultPhoto` below.
+///
+/// ⚠️ TIERING (Tori, 2026-08-06): `analysis` is the ONE stored record both the
+/// client's tiered read AND the pro's `brief` render from — never store a
+/// separate "summary" vs "full" copy. The pro's `brief` is always the FULL
+/// content, every tier, forever (never gated). The client's own view is
+/// tiered at RENDER time from `analysis` (free = summary, full = a future paid
+/// membership perk, C13+) — the render layer decides what to show, not a
+/// second stored payload. Any safety/risk flag in `analysis` (compromised
+/// hair, chemical warnings) must NEVER be tier-gated on the client's side —
+/// whatever shape C4 gives `analysis`, safety flags need to be structurally
+/// distinguishable so the render layer can always surface them regardless of
+/// the viewer's tier.
+///
+/// ⚠️ PER-PRO QUESTIONS (Tori, 2026-08-06): paying pros will eventually add
+/// custom questions on top of the per-category pack (entitlement-gated later,
+/// not built now). Nothing here blocks it: `intakeAnswers` is already a free-
+/// shape `Json?` (can carry pro-added keys alongside the category pack's), and
+/// `professionalId` already identifies which pro's extensions might apply.
 model ConsultSession {
   id String @id @default(cuid())
 
@@ -6426,19 +6459,26 @@ model ConsultSession {
 
   // Answers to the per-vertical question pack (C2), chip-style like
   // Board.answers / selfProfile. Shape validated against the question set for
-  // `serviceCategoryId`, not enforced by the DB.
+  // `serviceCategoryId`, not enforced by the DB. Free-shape enough to also
+  // carry a paying pro's own added questions (C2+, entitlement-gated) keyed
+  // alongside the category pack's — see the PER-PRO QUESTIONS note above.
   intakeAnswers Json?
 
   // Versioned AI analysis output (C4) — traits, confidence ranges,
-  // recommendations. Null until analysis runs.
+  // recommendations, and safety flags. Null until analysis runs. SSOT for
+  // both the client's tiered read and the pro's brief — see the TIERING note
+  // above. Permanent once written; never pruned.
   analysis      Json?
   schemaVersion Int?
   model         String?
   promptVersion String?
 
-  // Pro-facing brief generated from the analysis (C6). Null until analysis
-  // runs and the brief is generated.
+  // Pro-facing brief generated from the analysis (C6). Always the FULL
+  // content — never tiered, never gated behind a client's membership status.
+  // Null until analysis runs and the brief is generated.
   brief Json?
+
+  captures ConsultPhoto[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -6446,4 +6486,50 @@ model ConsultSession {
   @@index([clientId, createdAt])
   @@index([professionalId, status])
   @@index([serviceCategoryId])
+}
+
+/// A photo captured for a consult (C3 wires the actual signed-upload +
+/// quality-gate write path; this table exists now so C3 needs no migration).
+///
+/// Deliberately its OWN table, not a `MediaAsset` row: `MediaAsset` requires a
+/// `primaryServiceId` and is the portfolio/Looks/chart-media surface (its
+/// `isFeaturedInPortfolio`/`isEligibleForLooks` flags and every by-
+/// `professionalId` media query assume that shape). Consult photos are
+/// private, client-initiated, and never portfolio content — reusing
+/// `MediaAsset` would mean every one of those queries has to remember to
+/// filter them back out, which is exactly the leak class
+/// `check:media-render-boundary` exists to catch. `PracticeShot` set this
+/// precedent already for the same reason (a shot with no booking/service
+/// anchor must not surface in by-service media queries); `ConsultPhoto`
+/// follows it.
+///
+/// PERMANENT alongside its `ConsultSession` (see that model's RETENTION note)
+/// — cascades from it (`onDelete: Cascade`), so the existing
+/// `ConsultSession: DELETE` rule in `lib/privacy/deleteRules.ts` already
+/// covers these rows too; no separate delete rule needed. Reachable from the
+/// export/delete privacy guards only TRANSITIVELY through `ConsultSession`
+/// (no direct `clientId`/`professionalId`/`userId` column here on purpose),
+/// which is the same documented, accepted shape `AftercareSummary` (via
+/// `Booking`) already uses — see `lib/privacy/exportBoundary.ts`'s own
+/// "known limitation" docstring.
+model ConsultPhoto {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  storageBucket String
+  storagePath   String
+  contentType   String
+  mediaType     MediaType @default(IMAGE)
+
+  // Which shot-list slot this fulfills (e.g. "back"/"sides"/"crown" for hair
+  // color) — free text now; validated against the vertical's shot list at the
+  // app layer (C3), same pattern as `ConsultSession.intakeAnswers`.
+  shotKey String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([storageBucket, storagePath])
+  @@index([consultSessionId, createdAt])
 }
