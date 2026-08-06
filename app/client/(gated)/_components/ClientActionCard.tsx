@@ -149,6 +149,7 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
             media={beforeAfter}
             serviceName={title}
             className="mb-3.5"
+            clientExportProfessionalId={booking.professional.id}
           />
         ) : null}
 

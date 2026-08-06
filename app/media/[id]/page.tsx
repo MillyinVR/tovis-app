@@ -7,6 +7,7 @@ import {
   type Prisma,
 } from '@prisma/client'
 
+import ClientMediaExportButton from '@/app/_components/media/ClientMediaExportButton'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
@@ -173,6 +174,12 @@ export default async function MediaDetailPage({ params }: PageProps) {
               serviceIds: media.services.map((tag) => tag.serviceId),
               beforeAssetId: media.beforeAssetId ?? null,
             }}
+          />
+        ) : !isVideo ? (
+          <ClientMediaExportButton
+            professionalId={media.professionalId}
+            className="border border-white/10 bg-bgPrimary/25 backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)] hover:bg-white/10"
+            media={{ kind: 'single', url: renderUrl }}
           />
         ) : null
       }

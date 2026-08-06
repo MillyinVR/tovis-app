@@ -23,6 +23,7 @@ import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/A
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
+import ClientMediaExportButton from '@/app/_components/media/ClientMediaExportButton'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
 
 import CommentsDrawer from '../_components/CommentsDrawer'
@@ -348,6 +349,27 @@ export default function LookDetailClient({
               />
             )}
           </div>
+
+          {item.primaryMedia.mediaType !== 'VIDEO' ? (
+            // Signed export/share, crediting the pro — top-left so it never
+            // collides with RightActionRail's own Share (URL) button on the
+            // right. Video export is unbuilt for every path (iOS included).
+            <div className="absolute left-3 top-3">
+              <ClientMediaExportButton
+                professionalId={item.professional.id}
+                className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
+                media={
+                  item.before
+                    ? {
+                        kind: 'pair',
+                        beforeUrl: item.before.thumbUrl ?? item.before.fullUrl ?? item.primaryMedia.url,
+                        afterUrl: item.primaryMedia.url,
+                      }
+                    : { kind: 'single', url: item.primaryMedia.url }
+                }
+              />
+            </div>
+          ) : null}
 
           <RightActionRail
             lookPostId={item.id}

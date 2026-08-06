@@ -120,6 +120,24 @@ vi.mock('@/app/_components/media/OwnerMediaMenu', () => ({
   ),
 }))
 
+vi.mock('@/app/_components/media/ClientMediaExportButton', () => ({
+  default: ({
+    professionalId,
+    media,
+  }: {
+    professionalId: string
+    media: { kind: 'single'; url: string } | { kind: 'pair'; beforeUrl: string; afterUrl: string }
+  }) => (
+    <div
+      data-testid="client-media-export-button"
+      data-professional-id={professionalId}
+      data-media-kind={media.kind}
+    >
+      ClientMediaExportButton
+    </div>
+  ),
+}))
+
 vi.mock('@/app/(main)/ui/layoutConstants', () => ({
   UI_SIZES: {
     footerHeight: 64,
