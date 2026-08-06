@@ -42,6 +42,8 @@ type Props = {
   trialEndsAt: string | null
   hasBillingAccount: boolean
   plans: PlanCard[]
+  /** Whether clients may export/share this pro's media with the pro's handle on it. */
+  clientMediaExportEnabled: boolean
 }
 
 function dollars(cents: number): string {
@@ -64,6 +66,38 @@ export default function MembershipClient(props: Props) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const { brand } = useBrand()
+  const [clientExportEnabled, setClientExportEnabled] = useState(
+    props.clientMediaExportEnabled,
+  )
+  const [savingClientExport, setSavingClientExport] = useState(false)
+  const [clientExportError, setClientExportError] = useState<string | null>(null)
+
+  async function toggleClientExport(next: boolean) {
+    setSavingClientExport(true)
+    setClientExportError(null)
+    const previous = clientExportEnabled
+    setClientExportEnabled(next) // optimistic
+    try {
+      const res = await fetch('/api/v1/pro/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientMediaExportEnabled: next }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(
+          (data as { error?: string } | null)?.error || 'Could not save that.',
+        )
+      }
+    } catch (e: unknown) {
+      setClientExportEnabled(previous)
+      setClientExportError(
+        e instanceof Error ? e.message : 'Could not save that.',
+      )
+    } finally {
+      setSavingClientExport(false)
+    }
+  }
 
   async function startUpgrade(planKey: PlanKey, interval: 'month' | 'year') {
     setError(null)
@@ -288,6 +322,31 @@ export default function MembershipClient(props: Props) {
           </ul>
         </div>
       ) : null}
+
+      <div className="mt-6 rounded-card border border-white/10 bg-bgSecondary p-4">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={clientExportEnabled}
+            disabled={savingClientExport}
+            onChange={(e) => void toggleClientExport(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block text-[13px] font-black text-textPrimary">
+              Let clients export your work
+            </span>
+            <span className="mt-0.5 block text-[12px] leading-relaxed text-textSecondary">
+              Clients can save a signed copy of photos and videos you&apos;ve
+              shared with them — before/afters, portfolio pieces, Looks posts —
+              with your handle on it, so people who see it can find you.
+            </span>
+          </span>
+        </label>
+        {clientExportError ? (
+          <div className="mt-2 text-[12px] text-toneDanger">{clientExportError}</div>
+        ) : null}
+      </div>
     </section>
   )
 }

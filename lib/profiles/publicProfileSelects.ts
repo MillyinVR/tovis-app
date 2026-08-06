@@ -27,6 +27,7 @@ export const publicProfessionalProfileSelect =
     verificationStatus: true,
     handle: true,
     isPremium: true,
+    clientMediaExportEnabled: true,
     businessName: true,
     firstName: true,
     lastName: true,

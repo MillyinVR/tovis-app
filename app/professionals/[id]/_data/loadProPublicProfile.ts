@@ -23,6 +23,8 @@ import {
   type PublicAcceptedMethod,
 } from '@/lib/payments/publicAcceptedMethods'
 import { prisma } from '@/lib/prisma'
+import { exportsDropPlatformMark } from '@/lib/pro/socialExportMark'
+import { getProEntitlements } from '@/lib/pro/entitlements'
 import type { ClientLinkViewer } from '@/lib/profiles/profileHrefs'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import {
@@ -112,6 +114,7 @@ export async function loadProPublicProfileBase(args: {
     favoriteRow,
     paymentSettingsRow,
     coverUrl,
+    entitlements,
   ] = await Promise.all([
     prisma.review.aggregate({
       where: { professionalId: profileRow.id, ...visibleReviewsWhere },
@@ -170,6 +173,12 @@ export async function loadProPublicProfileBase(args: {
     // §18 cover banner: render the pro-chosen cover photo's display URL (null
     // when unset → branded fallback). Parallel with the other base aggregates.
     renderPublicProfileCoverUrl(profileRow),
+
+    // Resolved here (not read from ProfessionalSubscription by the mapper) so
+    // header.clientExport.dropsPlatformMark mirrors exportsDropPlatformMark on
+    // /pro/membership/status without a client-facing caller ever needing the
+    // pro-authed endpoint.
+    getProEntitlements(profileRow.id),
   ])
 
   const reviewCount = reviewStats._count._all
@@ -192,7 +201,11 @@ export async function loadProPublicProfileBase(args: {
     base: {
       professionalId: profileRow.id,
       verificationStatus: profileRow.verificationStatus,
-      header: mapPublicProfileHeaderToDto(profileRow, coverUrl),
+      header: mapPublicProfileHeaderToDto(
+        profileRow,
+        coverUrl,
+        exportsDropPlatformMark(entitlements),
+      ),
       offerings: mapPublicOfferingsToDtos(offeringRows, favoritedServiceIds),
       acceptedPayments: listPublicAcceptedMethods(paymentSettingsRow),
       stats: mapPublicProfileStatsToDto({

@@ -14597,6 +14597,21 @@
             "null"
           ]
         },
+        "clientExport": {
+          "properties": {
+            "dropsPlatformMark": {
+              "type": "boolean"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "dropsPlatformMark"
+          ],
+          "type": "object"
+        },
         "coverUrl": {
           "type": [
             "string",
@@ -14684,6 +14699,7 @@
         "handle",
         "displayHandle",
         "isPremium",
+        "clientExport",
         "isLicenseVerified",
         "displayName",
         "businessName",

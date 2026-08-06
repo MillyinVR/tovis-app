@@ -10,6 +10,7 @@ import {
 } from '@/lib/pro/entitlements'
 import { getProSubscription } from '@/lib/membership/subscription'
 import { getMembershipPlans } from '@/lib/membership/plans'
+import { prisma } from '@/lib/prisma'
 import MembershipClient from './MembershipClient'
 
 export const dynamic = 'force-dynamic'
@@ -27,7 +28,13 @@ export default async function ProMembershipPage() {
     redirect(LOGIN_PATH)
   }
 
-  const sub = await getProSubscription(professionalProfile.id)
+  const [sub, settingsRow] = await Promise.all([
+    getProSubscription(professionalProfile.id),
+    prisma.professionalProfile.findUnique({
+      where: { id: professionalProfile.id },
+      select: { clientMediaExportEnabled: true },
+    }),
+  ])
   const now = new Date()
   const state = {
     planKey: sub?.planKey ?? 'free',
@@ -48,6 +55,7 @@ export default async function ProMembershipPage() {
       cancelAtPeriodEnd={sub?.cancelAtPeriodEnd ?? false}
       trialEndsAt={sub?.trialEndsAt?.toISOString() ?? null}
       hasBillingAccount={Boolean(sub?.stripeCustomerId)}
+      clientMediaExportEnabled={settingsRow?.clientMediaExportEnabled ?? true}
       plans={getMembershipPlans().map((p) => ({
         key: p.key,
         name: p.name,
