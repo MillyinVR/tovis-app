@@ -39,6 +39,9 @@ const mocks = vi.hoisted(() => ({
       count: vi.fn(),
       findUnique: vi.fn(),
     },
+    professionalSubscription: {
+      findUnique: vi.fn(),
+    },
     booking: {
       count: vi.fn(),
     },
@@ -378,6 +381,7 @@ describe('app/professionals/[id] PublicProfileView', () => {
 
     mocks.prisma.professionalFavorite.count.mockResolvedValue(0)
     mocks.prisma.professionalFavorite.findUnique.mockResolvedValue(null)
+    mocks.prisma.professionalSubscription.findUnique.mockResolvedValue(null)
     mocks.prisma.booking.count.mockResolvedValue(0)
     mocks.prisma.proFollow.count.mockResolvedValue(0)
     mocks.prisma.lookPost.count.mockResolvedValue(0)
