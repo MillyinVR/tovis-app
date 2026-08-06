@@ -47,6 +47,15 @@ const ALLOWED_FILES = new Set([
   // (scripts/_safe-script-guard.cjs, ALLOW_SEED_SCRIPT opt-in, destructive
   // mode), and `seed:test` pins DATABASE_URL to the local test Postgres.
   normalize('prisma/test-data/_shared.cjs'),
+  // LOCAL-ONLY perf/visual fixture for the retention-analytics dashboard
+  // section (membership-value-brief.md §10.4). Bulk-creates/deletes
+  // thousands of plain COMPLETED/CANCELLED/upcoming Booking rows for a
+  // dedicated seed pro so lib/analytics/proRetentionInsights.ts can be
+  // profiled and rendered against a realistic roster — no checkout/payment/
+  // notification flow to exercise, so the write boundary's locks and
+  // policies would only add cost, not coverage. Hard-refuses any DATABASE_URL
+  // host outside localhost (own guard, not requireSafeScriptRun).
+  normalize('prisma/scripts/seedRetentionRosterPerf.ts'),
 ])
 
 const TEMP_ALLOWED_FILES = new Set([
