@@ -82,7 +82,11 @@ export function clientLinkTarget(
 
 export type ClientLinkViewer = {
   // ClientProfile ids the viewing pro may open (empty when the viewer is not a
-  // pro, so non-pros never get a chart link). Built from getVisibleClientIdSetForPro.
+  // pro, so non-pros never get a chart link). Built from
+  // getVisibleClientIdSetForPro for a roster that is booking-scoped by
+  // construction, or getChartVisibleClientIdSetForPro when the list can carry
+  // rows outside the booking window (booking-less claims) — see the ⚠️ on those
+  // two, they are NOT the same question.
   proVisibleClientIds: ReadonlySet<string>
 }
 

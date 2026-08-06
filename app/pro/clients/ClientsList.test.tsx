@@ -11,6 +11,7 @@ function row(args: {
   phone?: string
   requirements?: ProClientRow['requirements']
   profileHref?: string | null
+  chartHref?: string | null
 }): ProClientRow {
   const email = args.email ?? ''
   const phone = args.phone ?? ''
@@ -25,6 +26,8 @@ function row(args: {
       args.profileHref === undefined
         ? `/pro/clients/${args.id}`
         : args.profileHref,
+    chartHref:
+      args.chartHref === undefined ? `/pro/clients/${args.id}` : args.chartHref,
     requirements: args.requirements ?? [],
   }
 }
@@ -218,5 +221,44 @@ describe('ClientsList — the client name links', () => {
 
     expect(screen.queryByRole('link', { name: 'Rae Kim' })).toBeNull()
     expect(screen.getByText('Rae Kim')).toBeInTheDocument()
+  })
+})
+
+describe('ClientsList — the "View chart" button is the SAME decision as the name', () => {
+  it('links to the chart the server resolved, not one rebuilt from the id', () => {
+    render(
+      <ClientsList
+        clients={[row({ id: 'c9', displayName: 'Rae Kim', chartHref: '/pro/clients/c9' })]}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'View chart' })).toHaveAttribute(
+      'href',
+      '/pro/clients/c9',
+    )
+  })
+
+  it('is absent for a client this pro may not open', () => {
+    // A booking-less client the pro created: on the roster, name resolves to
+    // their public profile, chart refuses. A "View chart" button here would
+    // navigate to a page that redirects straight back to this list.
+    render(
+      <ClientsList
+        clients={[
+          row({
+            id: 'c9',
+            displayName: 'Rae Kim',
+            profileHref: '/u/raekim',
+            chartHref: null,
+          }),
+        ]}
+      />,
+    )
+
+    expect(screen.queryByRole('link', { name: 'View chart' })).toBeNull()
+    // The row is still useful: the name goes to their public page, and the pro
+    // can still message them.
+    expect(screen.getByRole('link', { name: 'Rae Kim' })).toHaveAttribute('href', '/u/raekim')
+    expect(screen.getByRole('link', { name: 'Message' })).toBeInTheDocument()
   })
 })
