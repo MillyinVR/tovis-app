@@ -1757,8 +1757,9 @@ model ClientProfile {
   referralsAsReferrer Referral[] @relation("ReferrerReferrals")
   referralsAsReferred Referral[] @relation("ReferredReferrals")
 
-  followedPros ProFollow[]
-  boards       Board[]
+  followedPros    ProFollow[]
+  boards          Board[]
+  consultSessions ConsultSession[]
 
   // Cards this client has saved on file (card-on-file / no-show protection).
   paymentMethods ClientPaymentMethod[]
@@ -1921,11 +1922,12 @@ model ProfessionalProfile {
   scheduleConfigVersion Int @default(0)
 
   // Relationships
-  user           User                          @relation(fields: [userId], references: [id])
-  locations      ProfessionalLocation[]
-  offerings      ProfessionalServiceOffering[]
-  bookings       Booking[]
-  calendarBlocks CalendarBlock[]
+  user            User                          @relation(fields: [userId], references: [id])
+  locations       ProfessionalLocation[]
+  offerings       ProfessionalServiceOffering[]
+  bookings        Booking[]
+  calendarBlocks  CalendarBlock[]
+  consultSessions ConsultSession[]
 
   calendarFeedSubscription CalendarFeedSubscription?
 
@@ -2678,6 +2680,7 @@ model ServiceCategory {
   adminActionLogs AdminActionLog[]       @relation("CategoryLogs")
   lookRankStat    LookCategoryRankStat?
   lookTrendStat   LookCategoryTrendStat?
+  consultSessions ConsultSession[]
 }
 
 // Per-service-category engagement-rate aggregate — the data source for the
@@ -3626,6 +3629,9 @@ model Booking {
   // created this appointment.
   aftercareRebookedFromSummary AftercareSummary?             @relation("AftercareRebookedBooking")
   waitlistOffer                WaitlistOffer?
+  // The pre-visit AI consult run for this appointment (ai-consult.md Phase 0).
+  // At most one per booking — self-scoping quota for the founder pilot.
+  consultSession               ConsultSession?
   clientNotifications          ClientNotification[]
   scheduledClientNotifications ScheduledClientNotification[]
   reviews                      Review[]
@@ -4927,6 +4933,11 @@ enum UploadSurface {
   // shot has no booking and no service anchor, so it is deliberately not a
   // MediaAsset until the pro attaches it to one.
   PRO_PRACTICE
+  // A client's pre-visit AI consult capture (ai-consult.md Phase 0). Lands in
+  // media-private; not wired to a signing/attach route yet — the surface
+  // value is added here (C1) so the schema is ready ahead of the actual
+  // signed-upload + quality-gate endpoint (C3).
+  CLIENT_CONSULT
 }
 
 enum UploadSessionStatus {
@@ -6352,4 +6363,87 @@ enum AccountDeletionRequestStatus {
   COMPLETED
   /// Execution errored. Left for an operator rather than retried forever.
   FAILED
+}
+
+// ── AI Consult (ai-consult.md, Phase 0 — C1: schema + route skeleton) ───────
+//
+// ⚠️ NAMING COLLISION, do not confuse: "Consultation" already means the
+// pro-initiated, MID-APPOINTMENT price-approval flow (`ConsultationApproval`,
+// deprecated `BookingConsultation`, guard-protected by
+// tools/check-consultation-canonical.mjs). `ConsultSession` is a completely
+// different concept — a PRE-VISIT client intake that produces an AI analysis
+// and a pro-facing brief. Never read or write the legacy consultation models
+// from this feature, and never let this model's relations/routes collide with
+// theirs.
+
+/// Lifecycle of one AI consult, mirroring the build-plan steps that populate
+/// it: CREATED (just started, no answers yet) -> INTAKE (answering the
+/// per-vertical question pack, C2) -> ANALYZING (capture complete, submitted
+/// for the analysis engine, C3/C4) -> READY (analysis + pro brief exist, C4/C6)
+/// -> CANCELLED (abandoned before completion).
+enum ConsultSessionStatus {
+  CREATED
+  INTAKE
+  ANALYZING
+  READY
+  CANCELLED
+}
+
+/// A client's pre-visit AI consult (ai-consult.md). Phase 0 is booking-attached
+/// and founder-gated (lib/consult/access.ts, the technical-record allowlist
+/// precedent): a client runs a consult tied to an upcoming booking, and the
+/// resulting brief surfaces to the pro before the appointment.
+///
+/// `professionalId` and `bookingId` are nullable on the model even though
+/// Phase 0 always sets both (from the booking) — Phase 0.5's home-card mini
+/// analysis (C11) has no booking anchor yet, and the schema shouldn't need a
+/// migration to support it. `bookingId` is unique: at most one consult per
+/// booking, which is what makes the Phase 0 quota self-scoping (no separate
+/// cap decision needed until C11 — see the pilot brief §2).
+///
+/// `schemaVersion` / `model` / `promptVersion` version the `analysis` payload
+/// (ai-consult.md: "version everything on the analysis record") — prompts and
+/// output shapes will iterate, and re-runs/A-B need to know which produced a
+/// given row. All three stay null until the analysis engine (C4) runs.
+model ConsultSession {
+  id String @id @default(cuid())
+
+  clientId String
+  client   ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // The vertical (hair color, brows, ...) as a real bookable ServiceCategory —
+  // recommendations must resolve to bookable entities, never a bespoke enum.
+  serviceCategoryId String?
+  serviceCategory   ServiceCategory? @relation(fields: [serviceCategoryId], references: [id])
+
+  professionalId String?
+  professional   ProfessionalProfile? @relation(fields: [professionalId], references: [id])
+
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+
+  status ConsultSessionStatus @default(CREATED)
+
+  // Answers to the per-vertical question pack (C2), chip-style like
+  // Board.answers / selfProfile. Shape validated against the question set for
+  // `serviceCategoryId`, not enforced by the DB.
+  intakeAnswers Json?
+
+  // Versioned AI analysis output (C4) — traits, confidence ranges,
+  // recommendations. Null until analysis runs.
+  analysis      Json?
+  schemaVersion Int?
+  model         String?
+  promptVersion String?
+
+  // Pro-facing brief generated from the analysis (C6). Null until analysis
+  // runs and the brief is generated.
+  brief Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId, createdAt])
+  @@index([professionalId, status])
+  @@index([serviceCategoryId])
 }

@@ -550,3 +550,8 @@ export type {
   LooksBoardDeleteResponseDto,
   LooksProProfilePreviewDto,
 } from '@/lib/looks/types'
+
+// ── AI Consult (POST/GET /api/v1/client/consult) ──────────────────────────────
+// Phase 0, C1 (docs/design/ai-consult.md): schema + route skeleton only. See
+// lib/dto/consult.ts for why this DTO is identity/status-only for now.
+export type { ConsultSessionDTO } from '@/lib/dto/consult'

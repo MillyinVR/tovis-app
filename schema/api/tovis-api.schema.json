@@ -98,6 +98,16 @@
       ],
       "type": "string"
     },
+    "$Enums.ConsultSessionStatus": {
+      "enum": [
+        "CREATED",
+        "INTAKE",
+        "ANALYZING",
+        "READY",
+        "CANCELLED"
+      ],
+      "type": "string"
+    },
     "$Enums.ConsultationApprovalProofMethod": {
       "enum": [
         "REMOTE_SECURE_LINK",
@@ -6463,6 +6473,49 @@
         "significant"
       ],
       "type": "object"
+    },
+    "ConsultSessionDTO": {
+      "properties": {
+        "bookingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceCategoryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultSessionStatus"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "bookingId",
+        "professionalId",
+        "serviceCategoryId",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ConsultSessionStatus": {
+      "$ref": "#/definitions/%24Enums.ConsultSessionStatus"
     },
     "ConsultationApprovalProofMethod": {
       "$ref": "#/definitions/%24Enums.ConsultationApprovalProofMethod"
