@@ -146,12 +146,20 @@ function Trend({ trend }: { trend: ProRebookTrendPoint[] }) {
       {trend.map((point) => (
         <li
           key={point.monthKey}
-          className="min-w-[72px] flex-1 rounded-xl border border-textPrimary/10 bg-bgSurface px-3 py-2"
+          // min-w-[96px]: .brand-pro-overview-metric-value hardcodes a 28px
+          // display-font size (lib/brand/proOverview.css) that a Tailwind
+          // text-size utility on the same element can't override — so the tile
+          // has to be wide enough for that font's own metrics, not the
+          // utility's. At 72px, "100%" (worst case) measured ~67px wide
+          // against ~49px of content room and silently ellipsized to "9…" —
+          // real rebook-rate values are almost always 2–3 digits, so this
+          // wasn't an edge case, it broke on every rendered trend tile.
+          className="min-w-[96px] flex-1 rounded-xl border border-textPrimary/10 bg-bgSurface px-3 py-2"
         >
           <div className="brand-cap text-[11px] text-textSecondary">
             {point.monthLabel}
           </div>
-          <div className="brand-pro-overview-metric-value text-base">
+          <div className="brand-pro-overview-metric-value">
             {point.rebookRatePct === null ? '—' : `${point.rebookRatePct}%`}
           </div>
           <div className="brand-pro-overview-muted text-[11px]">
