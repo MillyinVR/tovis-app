@@ -80,6 +80,7 @@ const MANUAL_ONLY = {
     'Load test — can bill real Twilio/Postmark. Run deliberately.',
   'test:load:stripe-webhook-replay':
     'Load test — replays Stripe webhooks; run deliberately.',
+  'test:load:login': 'Load test — run deliberately against staging.',
   'verify:launch-ops':
     'Aggregate of chaos + load suites; both are deliberate, pre-launch runs.',
 }
