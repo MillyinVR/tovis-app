@@ -42,6 +42,10 @@ function hostLooksProduction(host) {
 
   // Conservative default: if someone runs a local script against a hosted
   // Supabase URL without explicitly allowing it, treat it as production.
+  // This is the SAME check prisma-guard.cjs relies on for its own separate
+  // PRISMA_GUARD_ALLOW_PROD gate — it must keep returning true unconditionally
+  // for every hosted host. The narrow staging exemption below only affects
+  // requireSafeScriptRun, not this function.
   if (host.includes('supabase.co')) return true
   if (host.includes('pooler.supabase.com')) return true
 
@@ -50,6 +54,33 @@ function hostLooksProduction(host) {
 
 function databaseLooksProduction() {
   return hostLooksProduction(parseDatabaseHost(process.env.DATABASE_URL))
+}
+
+// The prod Supabase project — never allowlistable, no matter what
+// STAGING_SEED_ALLOWED_REF is set to. See prisma.config.ts / with-test-db.mjs
+// (same ref, same "guard against this literal string" pattern).
+const PROD_PROJECT_REF = 'rqhhvuaoksuvbvlypztn'
+
+function connectionStringMatchesRef(databaseUrl, ref) {
+  if (!ref) return false
+  return normalize(databaseUrl).toLowerCase().includes(ref)
+}
+
+// A destructive script's hard block on a production-looking host may be
+// bypassed ONLY when the raw connection string actually targets the ref
+// named by STAGING_SEED_ALLOWED_REF — an env var that must never default to
+// anything (unset/empty = no exemption, guard stays absolute) — and that
+// target is never the prod project, regardless of what the allowlist var
+// itself is set to. Consulted only from requireSafeScriptRun below; the
+// existing allowEnvVar / CONFIRM_NON_PRODUCTION_DB checks still apply on top
+// of this, unchanged, so the exemption alone is never sufficient.
+function isAllowlistedStagingConnection(databaseUrl) {
+  if (connectionStringMatchesRef(databaseUrl, PROD_PROJECT_REF)) return false
+
+  const allowedRef = normalize(process.env.STAGING_SEED_ALLOWED_REF).toLowerCase()
+  if (!allowedRef || allowedRef === PROD_PROJECT_REF) return false
+
+  return connectionStringMatchesRef(databaseUrl, allowedRef)
 }
 
 function describeDatabaseHost() {
@@ -72,10 +103,11 @@ function requireSafeScriptRun(options = {}) {
   }
 
   if (destructive) {
-    if (databaseLooksProduction()) {
+    if (databaseLooksProduction() && !isAllowlistedStagingConnection(process.env.DATABASE_URL)) {
       throw new Error(
         `[${scriptName}] Refusing destructive script against a production-looking database host. ` +
-          `Set PRODUCTION_DATABASE_HOSTS correctly and use a local/test DB.`,
+          `Set PRODUCTION_DATABASE_HOSTS correctly and use a local/test DB, or set ` +
+          `STAGING_SEED_ALLOWED_REF to the verified-safe staging project ref.`,
       )
     }
 
@@ -99,4 +131,5 @@ module.exports = {
   hostLooksProduction,
   databaseLooksProduction,
   describeDatabaseHost,
+  isAllowlistedStagingConnection,
 }
