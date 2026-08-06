@@ -50,6 +50,10 @@ const mocks = vi.hoisted(() => {
     updateMany: vi.fn(),
   }
 
+  const verificationDocument = {
+    updateMany: vi.fn(),
+  }
+
   const adminActionLog = {
     create: vi.fn(),
   }
@@ -57,6 +61,7 @@ const mocks = vi.hoisted(() => {
   const prisma = {
     professionalProfile,
     professionalLocation,
+    verificationDocument,
     adminActionLog,
     $transaction: vi.fn(),
   }
@@ -69,6 +74,7 @@ const mocks = vi.hoisted(() => {
     refreshProfessional,
     professionalProfile,
     professionalLocation,
+    verificationDocument,
     adminActionLog,
     prisma,
   }
@@ -104,6 +110,7 @@ type RouteCtx = {
 type MockTransactionClient = {
   professionalProfile: typeof mocks.professionalProfile
   professionalLocation: typeof mocks.professionalLocation
+  verificationDocument: typeof mocks.verificationDocument
 }
 
 function makeRequest(
@@ -194,6 +201,10 @@ describe('app/api/v1/admin/professionals/[id]/route.ts', () => {
       count: 1,
     })
 
+    mocks.verificationDocument.updateMany.mockResolvedValue({
+      count: 1,
+    })
+
     mocks.adminActionLog.create.mockResolvedValue({
       id: 'log_1',
     })
@@ -201,6 +212,7 @@ describe('app/api/v1/admin/professionals/[id]/route.ts', () => {
     const transactionClient: MockTransactionClient = {
       professionalProfile: mocks.professionalProfile,
       professionalLocation: mocks.professionalLocation,
+      verificationDocument: mocks.verificationDocument,
     }
 
     mocks.prisma.$transaction.mockImplementation(
@@ -429,6 +441,17 @@ describe('app/api/v1/admin/professionals/[id]/route.ts', () => {
 
     expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
 
+    // The decision anchors the retention clock for this pro's still-pending
+    // docs — reviewedAt/status/reviewedByAdminId are stamped in the same tx.
+    expect(mocks.verificationDocument.updateMany).toHaveBeenCalledWith({
+      where: { professionalId: 'pro_1', status: VerificationStatus.PENDING },
+      data: {
+        status: VerificationStatus.APPROVED,
+        reviewedAt: expect.any(Date),
+        reviewedByAdminId: 'admin_1',
+      },
+    })
+
     expect(mocks.refreshProfessional).toHaveBeenCalledWith(
       'pro_1',
       'verification.status',
@@ -494,6 +517,8 @@ describe('app/api/v1/admin/professionals/[id]/route.ts', () => {
 
     expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
     expect(mocks.refreshProfessional).not.toHaveBeenCalled()
+    // No status transition here — nothing to anchor a retention clock to.
+    expect(mocks.verificationDocument.updateMany).not.toHaveBeenCalled()
 
     expectAdminAuditLogWrite({
       adminUserId: 'admin_1',
@@ -552,6 +577,16 @@ describe('app/api/v1/admin/professionals/[id]/route.ts', () => {
 
     expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
 
+    // REJECTED is a decision too — the retention clock starts either way.
+    expect(mocks.verificationDocument.updateMany).toHaveBeenCalledWith({
+      where: { professionalId: 'pro_1', status: VerificationStatus.PENDING },
+      data: {
+        status: VerificationStatus.REJECTED,
+        reviewedAt: expect.any(Date),
+        reviewedByAdminId: 'admin_1',
+      },
+    })
+
     expect(mocks.refreshProfessional).toHaveBeenCalledWith(
       'pro_1',
       'verification.status',
@@ -575,6 +610,21 @@ describe('app/api/v1/admin/professionals/[id]/route.ts', () => {
         licenseVerified: false,
       },
     })
+  })
+
+  it('does NOT stamp verification docs on a NEEDS_INFO transition — the doc set is still open', async () => {
+    mocks.professionalProfile.update.mockResolvedValue({
+      id: 'pro_1',
+      verificationStatus: VerificationStatus.NEEDS_INFO,
+      licenseVerified: false,
+    })
+
+    await PATCH(
+      makeRequest({ verificationStatus: 'NEEDS_INFO' }),
+      makeCtx(),
+    )
+
+    expect(mocks.verificationDocument.updateMany).not.toHaveBeenCalled()
   })
 
   it('does not fail the request if admin action log write fails', async () => {

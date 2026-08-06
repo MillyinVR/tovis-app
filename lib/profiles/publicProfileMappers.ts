@@ -5,7 +5,7 @@ import { MediaType, VerificationStatus } from '@prisma/client'
 import type { MediaVisibility, ProfessionType } from '@prisma/client'
 
 import { moneyToString } from '@/lib/money'
-import { requiresLicense } from '@/lib/licensing/licenseRequirement'
+import { isProCurrentlyLicensed } from '@/lib/licensing/currentlyLicensed'
 import {
   mapPairedBeforeToDto,
   type PairedBeforeDto,
@@ -401,13 +401,7 @@ export function mapPublicProfileHeaderToDto(
       enabled: profile.clientMediaExportEnabled,
       dropsPlatformMark,
     },
-    isLicenseVerified:
-      profile.verificationStatus === VerificationStatus.APPROVED &&
-      profile.licenseVerified &&
-      Boolean(
-        profile.professionType &&
-          requiresLicense(profile.professionType, profile.licenseState),
-      ),
+    isLicenseVerified: isProCurrentlyLicensed(profile),
     displayName: formatPublicProfileDisplayName({
       businessName,
       firstName: profile.firstName,

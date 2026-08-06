@@ -41,6 +41,7 @@ function makeProfileRow(
     professionType: null,
     licenseState: null,
     licenseVerified: false,
+    licenseExpiry: null,
     location: '',
     timeZone: null,
     instagramHandle: null,

@@ -82,6 +82,14 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/internal/jobs/license-doc-retention",
+      "schedule": "5 9 * * *"
+    },
+    {
+      "path": "/api/internal/jobs/license-expiry",
+      "schedule": "20 9 * * *"
+    },
+    {
       "path": "/api/internal/jobs/membership-comp-expiry",
       "schedule": "15 9 * * *"
     },

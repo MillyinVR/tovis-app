@@ -785,6 +785,15 @@ enum NotificationEventKey {
   // inactivity. Heads-up before the expiry cron reclaims it.
   PRO_HANDLE_RESERVATION_EXPIRING
 
+  // License-expiry lifecycle (Tori approved 2026-08-06). 30 days before
+  // ProfessionalProfile.licenseExpiry, a heads-up to renew before the
+  // verified badge pauses (lib/licensing/licenseExpiryNotifications.ts).
+  PRO_LICENSE_EXPIRING_SOON
+  // Same sweep: fires once the license has actually expired — the verified
+  // badge is now paused (derived; see lib/licensing/currentlyLicensed.ts),
+  // and this tells the pro how to restore it (upload a renewed license).
+  PRO_LICENSE_EXPIRED
+
   // Admin operational alerts — fanned out to all users with role ADMIN.
   // A pro submitted a verification document or edited their license (re-review).
   ADMIN_VERIFICATION_REVIEW_NEEDED
@@ -4342,12 +4351,21 @@ model VerificationDocument {
   reviewedByAdminId String?
   reviewedByAdmin   User?   @relation(fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
 
+  // Retention: the raw file (imageUrl/url) is auto-purged 90 days after
+  // reviewedAt by the license-doc-retention sweep, which nulls both URL
+  // fields and stamps this. Everything else on the row (type, label, status,
+  // reviewedAt, adminNote, reviewedByAdminId) is kept forever as the audit
+  // trail — only the raw bytes are deleted.
+  fileDeletedAt DateTime?
+
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
 
   // ✅ ADD INDEXES (admin queue will thank you)
   @@index([professionalId, createdAt])
   @@index([status, createdAt])
   @@index([type, status, createdAt])
+  // Retention sweep: reviewed docs whose file hasn't been purged yet.
+  @@index([reviewedAt, fileDeletedAt])
 }
 
 /// K16 — one pro's booking policy for ONE client. The "difficult clients" half
