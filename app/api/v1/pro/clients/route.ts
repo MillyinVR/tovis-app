@@ -7,7 +7,10 @@ import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { bookinglessClaimEnabled } from '@/lib/clients/bookinglessClaimFlag'
-import { proClientVisibilityWhere } from '@/lib/clientVisibility'
+import {
+  getChartVisibleClientIdSetForPro,
+  proClientVisibilityWhere,
+} from '@/lib/clientVisibility'
 import { formatLastBookingLabel } from '@/lib/clients/lastBookingLabel'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { clientPublicHandle } from '@/lib/profiles/profileHrefs'
@@ -33,7 +36,10 @@ const DIRECTORY_SELECT = {
  * upcoming / recently-completed), the same scoped set the web page renders,
  * ordered by name, with a "Last booking: …" label per client. Native filters
  * client-side; there is no server search here (the web page has none either).
- * PRO-only; the list IS the visible set, so every row is openable.
+ * PRO-only. Every row carries `canViewClient` derived from the SAME rule
+ * `/pro/clients/[id]` enforces — with booking-less claims on, the roster is
+ * WIDER than the chart gate (it also lists clients this pro created), so a row
+ * being present is not on its own permission to open it.
  */
 export async function GET() {
   try {
@@ -85,6 +91,17 @@ export async function GET() {
       },
     })
 
+    // Which of these rows the pro may actually OPEN. Only asked when the roster
+    // widened past the booking window: without the union every row matched
+    // `visibleBookingWhere`, which is precisely what the chart gate accepts, so
+    // the set IS the row list and a second query would answer a known question.
+    const chartVisibleClientIds = bookinglessClaims
+      ? await getChartVisibleClientIdSetForPro(
+          proId,
+          clients.map((c) => c.id),
+        )
+      : new Set(clients.map((c) => c.id))
+
     const rows = clients.map((c) => {
       const fullName =
         `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || c.user?.email || 'Client' // pii-plaintext-read-ok: authorized pro client directory display name; plaintext-by-schema.
@@ -99,8 +116,11 @@ export async function GET() {
       return {
         id: String(c.id),
         fullName,
-        // The directory is the visible set, so every client is openable.
-        canViewClient: true,
+        // 🔴 NOT `true`. A client this pro merely CREATED (booking-less claim /
+        // migration import) is on the roster with no qualifying booking, and
+        // `assertProCanViewClient` refuses them — a hardcoded `true` made the
+        // phone render a chart link that pushed straight into a refusal.
+        canViewClient: chartVisibleClientIds.has(c.id),
         email: c.user?.email ?? null,
         phone: c.phone ?? null,
         lastBookingLabel: formatLastBookingLabel(c.bookings[0] ?? null, scheduleTz),

@@ -4,7 +4,11 @@ import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { proClientVisibilityWhere } from '@/lib/clientVisibility'
+import {
+  getChartVisibleClientIdSetForPro,
+  proClientVisibilityWhere,
+} from '@/lib/clientVisibility'
+import { bookinglessClaimEnabled } from '@/lib/clients/bookinglessClaimFlag'
 import { formatLastBookingLabel } from '@/lib/clients/lastBookingLabel'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
@@ -13,6 +17,7 @@ import { PRO_CLIENT_POLICY_SELECT } from '@/lib/proClientPolicy/load'
 import {
   CLIENT_LINK_SELECT,
   clientLinkTarget,
+  proClientChartHref,
   resolveClientProfileHref,
 } from '@/lib/profiles/profileHrefs'
 import { summarizeProClientPolicy } from '@/lib/proClientPolicy/summary'
@@ -58,12 +63,21 @@ export default async function ProClientsPage() {
     ...proClientVisibilityWhere(now),
   }
 
+  // With booking-less claims enabled, also surface clients this pro CREATED
+  // (bare directory add / migration import) that have no qualifying booking —
+  // otherwise they're invisible to the pro who made them. Same union as
+  // GET /api/v1/pro/clients, so web and the native app show one roster.
+  const bookinglessClaims = bookinglessClaimEnabled()
+
   const clients = await prisma.clientProfile.findMany({
-    where: {
-      bookings: {
-        some: visibleBookingWhere,
-      },
-    },
+    where: bookinglessClaims
+      ? {
+          OR: [
+            { bookings: { some: visibleBookingWhere } },
+            { createdByProfessionalId: proId },
+          ],
+        }
+      : { bookings: { some: visibleBookingWhere } },
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     take: 500,
     select: {
@@ -109,9 +123,17 @@ export default async function ProClientsPage() {
         })
       : []
 
-  // The roster query already filtered to visible clients, so the visible set IS
-  // this list's ids — no second visibility read.
-  const visibleClientIds = new Set(clients.map((client) => client.id))
+  // Which of these rows the pro may actually OPEN. Without the booking-less
+  // union the roster query already filtered to exactly what the chart gate
+  // accepts, so the visible set IS this list's ids — no second read. With the
+  // union it is not: a created-only client has no qualifying booking, and
+  // `assertProCanViewClient` refuses them.
+  const visibleClientIds = bookinglessClaims
+    ? await getChartVisibleClientIdSetForPro(
+        proId,
+        clients.map((client) => client.id),
+      )
+    : new Set(clients.map((client) => client.id))
 
   const cardOnFileRailEnabled = noShowProtectionEnabled()
   const policyByClientId = new Map(
@@ -138,14 +160,20 @@ export default async function ProClientsPage() {
         scheduleTz,
       ),
       messageHref: buildProToClientMessageHref({ proId, clientId: client.id }),
-      // Every row here is inside the visibility window by construction (the
-      // query filters on proClientVisibilityWhere), so this resolves to the
-      // chart. Routed through the shared rule anyway so the roster can never
-      // disagree with the bookings list / calendar / waitlist about where a
-      // client's name goes.
+      // Chart for a row the pro may open, else the client's public /u/[handle],
+      // else inert text. NOT every row is chartable once booking-less claims
+      // widen the roster past the visibility window — `visibleClientIds` is
+      // derived from the gate's own rule above. Routed through the shared rule
+      // so the roster can never disagree with the bookings list / calendar /
+      // waitlist about where a client's name goes.
       profileHref: resolveClientProfileHref(clientLinkTarget(client), {
         proVisibleClientIds: visibleClientIds,
       }),
+      // The "View chart" button's own door onto the same decision — resolved
+      // here, never rebuilt in the client component from `id`.
+      chartHref: visibleClientIds.has(client.id)
+        ? proClientChartHref(client.id)
+        : null,
       requirements: summarizeProClientPolicy({
         policy: policyByClientId.get(client.id) ?? null,
         cardOnFileRailEnabled,
@@ -162,8 +190,9 @@ export default async function ProClientsPage() {
               Clients
             </h1>
             <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-              Only clients you currently have access to
-              (pending/active/upcoming).
+              {bookinglessClaims
+                ? 'Clients you currently have access to (pending/active/upcoming), plus clients you added yourself.'
+                : 'Only clients you currently have access to (pending/active/upcoming).'}
             </div>
           </div>
         </div>

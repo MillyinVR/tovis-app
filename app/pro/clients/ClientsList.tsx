@@ -24,11 +24,21 @@ export type ProClientRow = {
   messageHref: string
   /**
    * Where this client's name leads, resolved server-side by THE one rule
-   * (resolveClientProfileHref). Every row on THIS list is inside the pro's
-   * visibility window by construction, so today it is always the chart — the
-   * field exists so the roster can't drift from the rule the other surfaces use.
+   * (resolveClientProfileHref): the chart when this pro may open it, else the
+   * client's public /u/[handle], else nothing.
    */
   profileHref: string | null
+  /**
+   * The chart link for the "View chart" button, or null when this pro may not
+   * open this client — the SAME answer `/pro/clients/[id]` will give.
+   *
+   * 🔴 Its own field, not `client.id` interpolated here. This button used to
+   * build `/pro/clients/{id}` itself, which is a SECOND door onto a decision the
+   * server had already made: once booking-less claims widen the roster past the
+   * visibility window, that hardcoded href sent the pro to a page that just
+   * redirects back here.
+   */
+  chartHref: string | null
   /**
    * K16-B — the booking requirements this pro has set for this client, from
    * `summarizeProClientPolicy`. Empty for every client when the technical-record
@@ -82,7 +92,12 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
             Client list
           </h2>
           <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-            Only clients with active access are shown here.
+            {/* Derived from the rows, not from a flag: the moment the roster
+                carries a client whose chart this pro cannot open, the old
+                sentence is a lie sitting directly above the counter-example. */}
+            {clients.some((client) => client.chartHref === null)
+              ? 'Clients you added appear here too — their chart opens once you have a booking, or they share it.'
+              : 'Only clients with active access are shown here.'}
           </div>
         </div>
 
@@ -193,15 +208,17 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
                           Message
                         </Link>
 
-                        <Link
-                          href={`/pro/clients/${encodeURIComponent(client.id)}`}
-                          className={buttonClassName({
-                            variant: 'ghost',
-                            size: 'sm',
-                          })}
-                        >
-                          View chart
-                        </Link>
+                        {client.chartHref ? (
+                          <Link
+                            href={client.chartHref}
+                            className={buttonClassName({
+                              variant: 'ghost',
+                              size: 'sm',
+                            })}
+                          >
+                            View chart
+                          </Link>
+                        ) : null}
                       </div>
                     </div>
                   </div>

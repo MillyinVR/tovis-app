@@ -311,6 +311,61 @@ export async function getVisibleClientIdSetForPro(proId: string): Promise<Set<st
 }
 
 /**
+ * `getProClientVisibility(...).canViewClient`, BATCHED over a known candidate
+ * list — for a roster whose rows are NOT all inside the booking window.
+ *
+ * ⚠️ Not interchangeable with {@link getVisibleClientIdSetForPro}. That one
+ * answers "which clients get a chart LINK in a list" and is booking-based on
+ * purpose. This one answers the CHART GATE's question for a bounded set of ids,
+ * so a list can label each row with the same answer `/pro/clients/[id]` will
+ * give — the invariant that breaks the moment a roster query widens past
+ * `proClientVisibilityWhere` (booking-less claims union in the pro's own
+ * created clients) while its rows still claim to be openable.
+ *
+ * Chart access is exactly: a qualifying booking OR a GRANTED chart share.
+ * A bare thread is deliberately absent — it is CONTACT_ONLY, and
+ * `getProClientVisibility` returns `canViewClient: false` for it, so this
+ * helper must not ask about threads either (clientVisibility.test.ts asserts
+ * the two agree row-for-row).
+ */
+export async function getChartVisibleClientIdSetForPro(
+  proId: string,
+  candidateClientIds: readonly string[],
+): Promise<Set<string>> {
+  if (candidateClientIds.length === 0) return new Set<string>()
+
+  const now = new Date()
+  const clientIdIn = { in: [...candidateClientIds] }
+
+  const [bookingRows, shareRows] = await Promise.all([
+    prisma.booking.findMany({
+      where: {
+        professionalId: proId,
+        clientId: clientIdIn,
+        ...proClientVisibilityWhere(now),
+      },
+      select: { clientId: true },
+      distinct: ['clientId'],
+      take: 5000,
+    }),
+    prisma.clientChartShare.findMany({
+      where: {
+        professionalId: proId,
+        clientId: clientIdIn,
+        status: ClientChartShareStatus.GRANTED,
+      },
+      select: { clientId: true },
+      take: 5000,
+    }),
+  ])
+
+  return new Set([
+    ...bookingRows.map((r) => r.clientId),
+    ...shareRows.map((r) => r.clientId),
+  ])
+}
+
+/**
  * Hard-gate for the CHART — everything clinical. Use this in server pages and
  * API routes. Returns a result so the page can choose redirect vs notFound.
  *

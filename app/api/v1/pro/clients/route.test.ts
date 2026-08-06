@@ -19,7 +19,14 @@ const mocks = vi.hoisted(() => {
   )
   const requirePro = vi.fn()
   const resolveProScheduleTimeZone = vi.fn(async () => 'America/Los_Angeles')
-  const prisma = { clientProfile: { findMany: vi.fn() } }
+  // booking/clientChartShare are read by the REAL getChartVisibleClientIdSetForPro
+  // (the route runs it only when the booking-less union widens the roster).
+  const noClientIds = async (): Promise<Array<{ clientId: string }>> => []
+  const prisma = {
+    clientProfile: { findMany: vi.fn() },
+    booking: { findMany: vi.fn(noClientIds) },
+    clientChartShare: { findMany: vi.fn(noClientIds) },
+  }
   return { jsonOk, jsonFail, requirePro, resolveProScheduleTimeZone, prisma }
 })
 
@@ -126,6 +133,10 @@ describe('GET /api/v1/pro/clients', () => {
         },
       ])
 
+      // Only c_claimed has a booking inside the visibility window; c_unclaimed
+      // is on the roster purely because this pro created it.
+      mocks.prisma.booking.findMany.mockResolvedValueOnce([{ clientId: 'c_claimed' }])
+
       const res = await GET()
       expect(res.status).toBe(200)
 
@@ -139,17 +150,90 @@ describe('GET /api/v1/pro/clients', () => {
       )
 
       const body = (await res.json()) as {
-        clients: Array<{ id: string; invitable: boolean }>
+        clients: Array<{ id: string; invitable: boolean; canViewClient: boolean }>
       }
       const invitable = Object.fromEntries(
         body.clients.map((c) => [c.id, c.invitable]),
       )
       expect(invitable.c_unclaimed).toBe(true)
       expect(invitable.c_claimed).toBe(false)
+
+      // 🔴 The roster is now WIDER than the chart gate, so a row is not its own
+      // permission. `c_unclaimed` was created by this pro and has no qualifying
+      // booking — `/pro/clients/[id]` refuses it, so the row must say so rather
+      // than render a chart link that pushes into a refusal.
+      const canView = Object.fromEntries(
+        body.clients.map((c) => [c.id, c.canViewClient]),
+      )
+      expect(canView.c_unclaimed).toBe(false)
+      expect(canView.c_claimed).toBe(true)
     } finally {
       if (prior === undefined) delete process.env.ENABLE_BOOKINGLESS_CLAIM
       else process.env.ENABLE_BOOKINGLESS_CLAIM = prior
     }
+  })
+
+  it('a booking-less client who GRANTED a chart share is openable', async () => {
+    const prior = process.env.ENABLE_BOOKINGLESS_CLAIM
+    process.env.ENABLE_BOOKINGLESS_CLAIM = '1'
+    try {
+      mocks.requirePro.mockResolvedValue({
+        ok: true,
+        professionalId: 'pro_1',
+        user: { professionalProfile: { timeZone: null } },
+      })
+      mocks.prisma.clientProfile.findMany.mockResolvedValue([
+        {
+          id: 'c_shared',
+          firstName: 'Consented',
+          lastName: 'Client',
+          phone: null,
+          userId: 'u_5',
+          claimStatus: ClientClaimStatus.CLAIMED,
+          user: { email: 's@example.com' },
+          bookings: [],
+        },
+      ])
+      // No qualifying booking, but the client said yes — the gate returns
+      // CHART_SHARE_GRANTED, so under-reporting the row would be just as wrong
+      // as the old over-report: a chart they may open with no way in.
+      mocks.prisma.booking.findMany.mockResolvedValueOnce([])
+      mocks.prisma.clientChartShare.findMany.mockResolvedValueOnce([
+        { clientId: 'c_shared' },
+      ])
+
+      const res = await GET()
+      const body = (await res.json()) as {
+        clients: Array<{ id: string; canViewClient: boolean }>
+      }
+      expect(body.clients[0]?.canViewClient).toBe(true)
+    } finally {
+      if (prior === undefined) delete process.env.ENABLE_BOOKINGLESS_CLAIM
+      else process.env.ENABLE_BOOKINGLESS_CLAIM = prior
+    }
+  })
+
+  it('with the flag OFF the roster IS the visible set — no second visibility read', async () => {
+    delete process.env.ENABLE_BOOKINGLESS_CLAIM
+    mocks.requirePro.mockResolvedValue({
+      ok: true,
+      professionalId: 'pro_1',
+      user: { professionalProfile: { timeZone: null } },
+    })
+    mocks.prisma.clientProfile.findMany.mockResolvedValue([
+      { id: 'c_1', firstName: 'A', lastName: 'B', phone: null, user: null, bookings: [] },
+    ])
+
+    const res = await GET()
+    const body = (await res.json()) as {
+      clients: Array<{ id: string; canViewClient: boolean }>
+    }
+
+    // Every row matched proClientVisibilityWhere, which is exactly what the
+    // chart gate accepts — asking again would answer a known question.
+    expect(body.clients[0]?.canViewClient).toBe(true)
+    expect(mocks.prisma.booking.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.clientChartShare.findMany).not.toHaveBeenCalled()
   })
 
   it('falls back to email then "Client" when the name is blank', async () => {

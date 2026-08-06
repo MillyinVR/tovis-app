@@ -2,11 +2,12 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BookingStatus } from '@prisma/client'
+import { BookingStatus, ClientChartShareStatus } from '@prisma/client'
 
 const findMany = vi.fn()
 const findThread = vi.fn()
 const findChartShare = vi.fn()
+const findChartShares = vi.fn()
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -18,12 +19,14 @@ vi.mock('@/lib/prisma', () => ({
     },
     clientChartShare: {
       findUnique: (...args: unknown[]) => findChartShare(...args),
+      findMany: (...args: unknown[]) => findChartShares(...args),
     },
   },
 }))
 
 import {
   RECENT_COMPLETED_WINDOW_DAYS,
+  getChartVisibleClientIdSetForPro,
   getProClientVisibility,
   getVisibleClientIdSetForPro,
   proClientVisibilityWhere,
@@ -49,6 +52,8 @@ beforeEach(() => {
   findThread.mockResolvedValue(null)
   findChartShare.mockReset()
   findChartShare.mockResolvedValue(null)
+  findChartShares.mockReset()
+  findChartShares.mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -319,6 +324,76 @@ describe('getVisibleClientIdSetForPro is deliberately NARROWER than the per-clie
       where: { professionalId: 'pro1' },
       distinct: ['clientId'],
     })
+  })
+})
+
+describe('getChartVisibleClientIdSetForPro agrees with the per-client chart gate', () => {
+  // The invariant this helper exists for: a roster that lists rows OUTSIDE the
+  // booking window (booking-less claims union in the pro's own created clients)
+  // must label each row with the answer `/pro/clients/[id]` will actually give.
+  // A hardcoded `canViewClient: true` shipped a chart link into a refusal.
+  const CANDIDATES = ['hasBooking', 'sharedOnly', 'threadOnly', 'createdOnly']
+
+  it('returns exactly the candidates whose per-client gate says canViewClient', async () => {
+    findMany.mockResolvedValue([{ clientId: 'hasBooking' }])
+    findChartShares.mockResolvedValue([{ clientId: 'sharedOnly' }])
+
+    const batched = await getChartVisibleClientIdSetForPro('pro1', CANDIDATES)
+    expect([...batched].sort()).toEqual(['hasBooking', 'sharedOnly'])
+
+    // Same four clients, one by one, through the gate the chart page enforces.
+    findMany.mockImplementation(async (args: { where: { clientId: string } }) =>
+      args.where.clientId === 'hasBooking'
+        ? [{ status: BookingStatus.PENDING, startedAt: null, finishedAt: null, scheduledFor: daysFromNow(2) }]
+        : [],
+    )
+    findChartShare.mockImplementation(
+      async (args: { where: { clientId_professionalId: { clientId: string } } }) =>
+        args.where.clientId_professionalId.clientId === 'sharedOnly'
+          ? { status: ClientChartShareStatus.GRANTED }
+          : null,
+    )
+    findThread.mockImplementation(async (args: { where: { clientId: string } }) =>
+      args.where.clientId === 'threadOnly' ? { id: 'thread1' } : null,
+    )
+
+    for (const clientId of CANDIDATES) {
+      const gate = await getProClientVisibility('pro1', clientId)
+      expect(
+        gate.canViewClient,
+        `${clientId}: batched set and the per-client gate must agree`,
+      ).toBe(batched.has(clientId))
+    }
+  })
+
+  it('never asks about threads — a thread is CONTACT_ONLY, not chart access', async () => {
+    findMany.mockResolvedValue([])
+    await getChartVisibleClientIdSetForPro('pro1', CANDIDATES)
+    expect(findThread).not.toHaveBeenCalled()
+  })
+
+  it('only GRANTED shares count, and both reads are bounded to the candidates', async () => {
+    findMany.mockResolvedValue([])
+    await getChartVisibleClientIdSetForPro('pro1', ['a', 'b'])
+
+    expect(findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: { professionalId: 'pro1', clientId: { in: ['a', 'b'] } },
+      distinct: ['clientId'],
+    })
+    expect(findChartShares.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        professionalId: 'pro1',
+        clientId: { in: ['a', 'b'] },
+        status: ClientChartShareStatus.GRANTED,
+      },
+    })
+  })
+
+  it('an empty roster reads nothing at all', async () => {
+    const set = await getChartVisibleClientIdSetForPro('pro1', [])
+    expect(set.size).toBe(0)
+    expect(findMany).not.toHaveBeenCalled()
+    expect(findChartShares).not.toHaveBeenCalled()
   })
 })
 
