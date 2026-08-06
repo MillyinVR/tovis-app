@@ -9,6 +9,7 @@ import {
   type PrismaClient,
 } from '@prisma/client'
 
+import { capturePrivacyException } from '@/lib/observability/privacyEvents'
 import { deleteUserData } from '@/lib/privacy/deleteUserData'
 import { summarizeDeleteUserDataResult } from '@/lib/privacy/deleteUserDataSummary'
 
@@ -511,7 +512,9 @@ export async function executeDueAccountDeletions(args: {
     } catch (error: unknown) {
       failed += 1
       // Recorded, not retried forever: a request that keeps failing is an
-      // operator problem, and a silent retry loop would hide it.
+      // operator problem, and a silent retry loop would hide it. The
+      // Sentry capture below is what actually makes it an operator's
+      // problem — the FAILED row alone has no reader.
       await args.db.accountDeletionRequest.update({
         where: { id: request.id },
         data: {
@@ -521,6 +524,13 @@ export async function executeDueAccountDeletions(args: {
           lastFailureMessage:
             error instanceof Error ? error.message.slice(0, 500) : 'Unknown error',
         },
+      })
+      capturePrivacyException({
+        error,
+        route: 'internal/jobs/account-deletion',
+        event: 'ACCOUNT_DELETION_REQUEST_FAILED',
+        userId: request.userId,
+        requestId: request.id,
       })
     }
   }
