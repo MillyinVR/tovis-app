@@ -75,6 +75,12 @@ export type PublicProfileHeaderDto = {
   handle: string | null
   displayHandle: string | null
   isPremium: boolean
+  // Whether a CLIENT may export/share this pro's media with the pro's handle
+  // watermarked on it — the pro's own opt-out (clientMediaExportEnabled) plus
+  // whether their plan drops the platform mark (mirrors exportsDropPlatformMark
+  // on /pro/membership/status, resolved here so a client-facing read never needs
+  // the pro-authed endpoint). Read by tovis-ios's client media export flow.
+  clientExport: { enabled: boolean; dropsPlatformMark: boolean }
   // True only for an approved pro whose profession actually requires a license
   // and whose license is verified — avoids a false "license verified" badge on
   // exempt professions (e.g. makeup artists) that approval also marks verified.
@@ -379,6 +385,7 @@ export async function renderPublicProfileCoverUrl(
 export function mapPublicProfileHeaderToDto(
   profile: PublicProfessionalProfileRow,
   coverUrl: string | null = null,
+  dropsPlatformMark: boolean = true,
 ): PublicProfileHeaderDto {
   const businessName = formatBusinessName(profile.businessName)
   const handle = pickString(profile.handle)
@@ -390,6 +397,10 @@ export function mapPublicProfileHeaderToDto(
     handle,
     displayHandle: formatDisplayHandle(handle),
     isPremium: profile.isPremium,
+    clientExport: {
+      enabled: profile.clientMediaExportEnabled,
+      dropsPlatformMark,
+    },
     isLicenseVerified:
       profile.verificationStatus === VerificationStatus.APPROVED &&
       profile.licenseVerified &&

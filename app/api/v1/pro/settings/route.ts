@@ -55,22 +55,27 @@ export async function PATCH(req: Request) {
     if (!isPlainObject(body)) return jsonFail(400, 'Invalid body.')
 
     const autoAcceptBookings = pickBoolean(body.autoAcceptBookings)
+    const clientMediaExportEnabled = pickBoolean(body.clientMediaExportEnabled)
 
     const tzResult = normalizeTimeZonePatch(body.timeZone)
     if (!tzResult.ok) return jsonFail(400, tzResult.error)
     const timeZone = tzResult.value // undefined=no change, null=clear, string=set
 
-    if (autoAcceptBookings === undefined && timeZone === undefined) {
-      return jsonFail(400, 'Nothing to update. Provide autoAcceptBookings (boolean) and/or timeZone.')
+    if (autoAcceptBookings === undefined && clientMediaExportEnabled === undefined && timeZone === undefined) {
+      return jsonFail(
+        400,
+        'Nothing to update. Provide autoAcceptBookings (boolean), clientMediaExportEnabled (boolean), and/or timeZone.',
+      )
     }
 
     const professionalProfile = await prisma.professionalProfile.update({
       where: { id: professionalId },
       data: {
         ...(autoAcceptBookings !== undefined ? { autoAcceptBookings } : {}),
+        ...(clientMediaExportEnabled !== undefined ? { clientMediaExportEnabled } : {}),
         ...(timeZone !== undefined ? { timeZone } : {}),
       },
-      select: { id: true, autoAcceptBookings: true, timeZone: true },
+      select: { id: true, autoAcceptBookings: true, clientMediaExportEnabled: true, timeZone: true },
     })
 
     return jsonOk({ ok: true, professionalProfile }, 200)

@@ -14,10 +14,42 @@ vi.mock('@/lib/media/renderUrls', () => ({
 
 import {
   mapPairedBeforeToDto,
+  mapPublicProfileHeaderToDto,
   mapPublicPortfolioTileToDto,
   mapPublicProfileStatsToDto,
   mapPublicReviewMediaAssetToDto,
 } from './publicProfileMappers'
+import type { PublicProfessionalProfileRow } from './publicProfileSelects'
+import { ProNameDisplay, VerificationStatus } from '@prisma/client'
+
+function makeProfileRow(
+  overrides?: Partial<PublicProfessionalProfileRow>,
+): PublicProfessionalProfileRow {
+  return {
+    id: 'pro_1',
+    userId: 'user_1',
+    verificationStatus: VerificationStatus.APPROVED,
+    handle: 'adastudio',
+    isPremium: false,
+    clientMediaExportEnabled: true,
+    businessName: null,
+    firstName: 'Ada',
+    lastName: 'Lovelace',
+    nameDisplay: ProNameDisplay.BUSINESS_NAME,
+    bio: null,
+    avatarUrl: null,
+    professionType: null,
+    licenseState: null,
+    licenseVerified: false,
+    location: '',
+    timeZone: null,
+    instagramHandle: null,
+    tiktokHandle: null,
+    websiteUrl: null,
+    coverMediaAsset: null,
+    ...(overrides ?? {}),
+  }
+}
 
 const beforeImage = {
   id: 'before_1',
@@ -58,6 +90,30 @@ function makePortfolioRow(
     ...(overrides ?? {}),
   }
 }
+
+describe('mapPublicProfileHeaderToDto clientExport', () => {
+  it('reads clientExport.enabled from the pro-owned toggle', () => {
+    const enabled = mapPublicProfileHeaderToDto(
+      makeProfileRow({ clientMediaExportEnabled: true }),
+    )
+    const disabled = mapPublicProfileHeaderToDto(
+      makeProfileRow({ clientMediaExportEnabled: false }),
+    )
+
+    expect(enabled.clientExport.enabled).toBe(true)
+    expect(disabled.clientExport.enabled).toBe(false)
+  })
+
+  it('threads dropsPlatformMark through from the caller-resolved entitlement, defaulting true', () => {
+    const withDefault = mapPublicProfileHeaderToDto(makeProfileRow())
+    const branded = mapPublicProfileHeaderToDto(makeProfileRow(), null, false)
+    const unbranded = mapPublicProfileHeaderToDto(makeProfileRow(), null, true)
+
+    expect(withDefault.clientExport.dropsPlatformMark).toBe(true)
+    expect(branded.clientExport.dropsPlatformMark).toBe(false)
+    expect(unbranded.clientExport.dropsPlatformMark).toBe(true)
+  })
+})
 
 describe('mapPairedBeforeToDto', () => {
   it('renders an image before to thumb + full URLs', async () => {

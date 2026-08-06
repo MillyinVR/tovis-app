@@ -1966,6 +1966,14 @@ model ProfessionalProfile {
 
   autoAcceptBookings Boolean @default(false)
 
+  // Whether a CLIENT may export/share this pro's media with the pro's handle
+  // watermarked on it (client-side counterpart to the pro's own social export).
+  // Independent of exportsDropPlatformMark/social_export_unbranded, which
+  // decides the platform MARK, not whether export is allowed at all. Default
+  // true so existing pros keep today's (nonexistent-but-implied) reach; a pro
+  // can opt out from their settings.
+  clientMediaExportEnabled Boolean @default(true)
+
   // Admin / internal
   adminPermissions           AdminPermission[]
   adminActionLogs            AdminActionLog[]               @relation("ProfessionalLogs")

@@ -15,6 +15,7 @@ function makeSeo(overrides?: Partial<ProProfileSeo>): ProProfileSeo {
       handle: 'tori',
       displayHandle: '@tori',
       isPremium: true,
+      clientExport: { enabled: true, dropsPlatformMark: true },
       isLicenseVerified: true,
       displayName: 'Tori Beauty Studio',
       businessName: 'Tori Beauty Studio',
