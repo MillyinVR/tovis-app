@@ -17,6 +17,7 @@ import type {
   ProRetentionInsightsDTO,
   ProRetentionStatus,
 } from '@/lib/analytics/proRetentionInsights'
+import { proClientChartHref } from '@/lib/profiles/profileHrefs'
 
 type ProRetentionSectionProps = {
   insights: ProRetentionInsightsDTO
@@ -190,8 +191,20 @@ function BucketRow({ bucket }: { bucket: ProRetentionBucket }) {
         <ul className="mt-3 flex list-none flex-col gap-1 p-0">
           {bucket.clients.map((client) => (
             <li key={client.clientId} className="text-[13px] text-textPrimary">
+              {/*
+                Always the chart, and safely so: the loader selects this roster
+                with `bookings: { some: proClientVisibilityWhere(now) }` — the
+                SAME predicate `getProClientVisibility` runs at the page gate —
+                so every named client passes `assertProCanViewClient` by
+                construction. That is why this needs no nullable-href handoff
+                the way the bookings/waitlist/reviews lists do: those name
+                clients the visibility rule has NOT already filtered, so they
+                can hold someone outside the window and must fall back to
+                `/u/[handle]`. Route shape comes from the href SSOT rather than
+                being interpolated here.
+              */}
               <Link
-                href={`/pro/clients/${client.clientId}`}
+                href={proClientChartHref(client.clientId)}
                 prefetch={false}
                 className="brand-focus font-black hover:underline"
               >

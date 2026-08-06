@@ -412,6 +412,13 @@ describe('no re-divergence of the visibility rule', () => {
       'app/pro/clients/page.tsx',
       'app/pro/bookings/page.tsx',
       'app/pro/reminders/page.tsx',
+      // The dashboard's retention buckets name clients and link each one
+      // straight to the chart (ProRetentionSection). That href is unconditional,
+      // and it is only correct because THIS loader scopes its roster with the
+      // SSOT predicate. Drop the import and every "slipping away" client — the
+      // bucket most likely to hold someone past the post-visit window — becomes
+      // a link to a refusal.
+      'lib/analytics/proRetentionInsights.ts',
     ]
     for (const rel of ssotConsumers) {
       const src = readFileSync(join(root, rel), 'utf8')
