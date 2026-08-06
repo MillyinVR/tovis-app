@@ -120,12 +120,17 @@ Default workflow for every session, no need to ask each time:
 - **Keep everything aligned.** When a feature spans web + iOS, land both sides
   together; after merge, fast-forward local `main` to `origin/main` in each repo
   so the next session starts clean (the session-sync rule below still holds).
-- **🚫 NEVER deploy to Vercel until Tori explicitly says so.** Do **not** run
-  `npx vercel --prod` (or any prod deploy) after a merge, even though merged web
-  changes won't be live until then. Merging is fine; deploying is Tori's call.
-  Auto-deploy is off by design (`vercel.json` `git.deploymentEnabled: false`,
-  PR #237) — leave it off. When web work merges, note that a prod deploy is
-  pending Tori's go-ahead and stop there.
+- **🚫 Deploys require Tori's explicit authorization for that specific deploy**
+  (usually relayed via the Dispatch orchestrator in the task prompt) —
+  **production and preview/staging alike.** Merging `main` is fine and does not
+  imply authorization to deploy it; auto-deploy is off by design (`vercel.json`
+  `git.deploymentEnabled: false`, PR #237) — leave it off. When web work merges
+  without a deploy authorization, note that a deploy is pending Tori's
+  go-ahead and stop there.
+  When authorized, follow `docs/runbooks/deploy-and-rollback.md` in full,
+  including its linked-project preflight before running any `vercel` deploy
+  command: confirm `.vercel/project.json` points at the intended Vercel
+  project and `npx vercel whoami` resolves the expected account/scope.
 
 ## Session sync with `origin/main`
 
