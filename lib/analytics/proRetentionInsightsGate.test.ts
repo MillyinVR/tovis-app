@@ -26,6 +26,8 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
+import { proClientVisibilityWhere } from '@/lib/clientVisibility'
+
 import { loadProRetentionInsights } from './proRetentionInsights'
 
 const NOW = new Date('2026-08-04T17:00:00Z')
@@ -93,6 +95,24 @@ describe('loadProRetentionInsights gate', () => {
     const result = await loadProRetentionInsights(ARGS)
 
     expect(result.state).toBe('empty')
+  })
+
+  // 🔴 The link contract behind ProRetentionSection. Every client this section
+  // names is rendered as an unconditional `/pro/clients/[id]` link, with no
+  // public-profile fallback — correct ONLY while the roster is scoped by the
+  // very predicate the page gate re-runs (getProClientVisibility). Widen this
+  // where-clause and the "slipping away" bucket, whose whole population is
+  // clients drifting past their usual gap, starts linking to a refusal.
+  it('scopes the roster to clients the page gate would still admit', async () => {
+    mocks.enforcementEnabled.mockReturnValue(false)
+
+    await loadProRetentionInsights(ARGS)
+
+    const where = mocks.findManyClients.mock.calls[0]?.[0]?.where
+    expect(where?.bookings?.some).toEqual({
+      professionalId: 'pro-1',
+      ...proClientVisibilityWhere(NOW),
+    })
   })
 
   it('reads exactly the six months ending at the current month, in the pro zone', async () => {
