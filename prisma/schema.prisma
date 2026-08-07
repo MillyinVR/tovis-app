@@ -1766,8 +1766,9 @@ model ClientProfile {
   referralsAsReferrer Referral[] @relation("ReferrerReferrals")
   referralsAsReferred Referral[] @relation("ReferredReferrals")
 
-  followedPros ProFollow[]
-  boards       Board[]
+  followedPros    ProFollow[]
+  boards          Board[]
+  consultSessions ConsultSession[]
 
   // Cards this client has saved on file (card-on-file / no-show protection).
   paymentMethods ClientPaymentMethod[]
@@ -1930,11 +1931,12 @@ model ProfessionalProfile {
   scheduleConfigVersion Int @default(0)
 
   // Relationships
-  user           User                          @relation(fields: [userId], references: [id])
-  locations      ProfessionalLocation[]
-  offerings      ProfessionalServiceOffering[]
-  bookings       Booking[]
-  calendarBlocks CalendarBlock[]
+  user            User                          @relation(fields: [userId], references: [id])
+  locations       ProfessionalLocation[]
+  offerings       ProfessionalServiceOffering[]
+  bookings        Booking[]
+  calendarBlocks  CalendarBlock[]
+  consultSessions ConsultSession[]
 
   calendarFeedSubscription CalendarFeedSubscription?
 
@@ -2687,6 +2689,7 @@ model ServiceCategory {
   adminActionLogs AdminActionLog[]       @relation("CategoryLogs")
   lookRankStat    LookCategoryRankStat?
   lookTrendStat   LookCategoryTrendStat?
+  consultSessions ConsultSession[]
 }
 
 // Per-service-category engagement-rate aggregate — the data source for the
@@ -3635,6 +3638,9 @@ model Booking {
   // created this appointment.
   aftercareRebookedFromSummary AftercareSummary?             @relation("AftercareRebookedBooking")
   waitlistOffer                WaitlistOffer?
+  // The pre-visit AI consult run for this appointment (ai-consult.md Phase 0).
+  // At most one per booking — self-scoping quota for the founder pilot.
+  consultSession               ConsultSession?
   clientNotifications          ClientNotification[]
   scheduledClientNotifications ScheduledClientNotification[]
   reviews                      Review[]
@@ -4945,6 +4951,11 @@ enum UploadSurface {
   // shot has no booking and no service anchor, so it is deliberately not a
   // MediaAsset until the pro attaches it to one.
   PRO_PRACTICE
+  // A client's pre-visit AI consult capture (ai-consult.md Phase 0). Lands in
+  // media-private; not wired to a signing/attach route yet — the surface
+  // value is added here (C1) so the schema is ready ahead of the actual
+  // signed-upload + quality-gate endpoint (C3).
+  CLIENT_CONSULT
 }
 
 enum UploadSessionStatus {
@@ -6370,4 +6381,173 @@ enum AccountDeletionRequestStatus {
   COMPLETED
   /// Execution errored. Left for an operator rather than retried forever.
   FAILED
+}
+
+// ── AI Consult (ai-consult.md, Phase 0 — C1: schema + route skeleton) ───────
+//
+// ⚠️ NAMING COLLISION, do not confuse: "Consultation" already means the
+// pro-initiated, MID-APPOINTMENT price-approval flow (`ConsultationApproval`,
+// deprecated `BookingConsultation`, guard-protected by
+// tools/check-consultation-canonical.mjs). `ConsultSession` is a completely
+// different concept — a PRE-VISIT client intake that produces an AI analysis
+// and a pro-facing brief. Never read or write the legacy consultation models
+// from this feature, and never let this model's relations/routes collide with
+// theirs.
+
+/// Lifecycle of one AI consult, mirroring the build-plan steps that populate
+/// it: CREATED (just started, no answers yet) -> INTAKE (answering the
+/// per-vertical question pack, C2) -> ANALYZING (capture complete, submitted
+/// for the analysis engine, C3/C4) -> READY (analysis + pro brief exist, C4/C6)
+/// -> CANCELLED (abandoned before completion).
+enum ConsultSessionStatus {
+  CREATED
+  INTAKE
+  ANALYZING
+  READY
+  CANCELLED
+}
+
+/// A client's pre-visit AI consult (ai-consult.md). Phase 0 is booking-attached
+/// and founder-gated (lib/consult/access.ts, the technical-record allowlist
+/// precedent): a client runs a consult tied to an upcoming booking, and the
+/// resulting brief surfaces to the pro before the appointment.
+///
+/// `professionalId` and `bookingId` are nullable on the model even though
+/// Phase 0 always sets both (from the booking) — Phase 0.5's home-card mini
+/// analysis (C11) has no booking anchor yet, and the schema shouldn't need a
+/// migration to support it. `bookingId` is unique: at most one consult per
+/// booking, which is what makes the Phase 0 quota self-scoping (no separate
+/// cap decision needed until C11 — see the pilot brief §2).
+///
+/// `schemaVersion` / `model` / `promptVersion` version the `analysis` payload
+/// (ai-consult.md: "version everything on the analysis record") — prompts and
+/// output shapes will iterate, and re-runs/A-B need to know which produced a
+/// given row. All three stay null until the analysis engine (C4) runs.
+///
+/// ⚠️ RETENTION (Tori, 2026-08-06): PERMANENT. A consult is a dated hair-
+/// history record, not ephemeral intake — no auto-expiry, no pruning job, ever.
+/// `createdAt` is first-class: any pro with the normal chart-access grant to
+/// this client (not just the anchoring `professionalId`) can read this
+/// client's full consult history by `clientId` — e.g. a client who consulted
+/// with dark hair, then months later books elsewhere claiming "never colored,"
+/// is checkable against the dated record. This is WHY `clientId` (not just
+/// `bookingId`/`professionalId`) is the durable anchor and carries its own
+/// `[clientId, createdAt]` index — a chart-timeline reader queries by
+/// `clientId` directly, gated by the existing chart-access rules, not by
+/// walking through a specific booking. `DELETE_BOUNDARY` still disposes this
+/// as `DELETE` — permanent means "never auto-expires," not "survives the
+/// client deleting their account"; account deletion sweeps it normally, per
+/// Tori's explicit call, and cascades to `ConsultPhoto` below.
+///
+/// ⚠️ TIERING (Tori, 2026-08-06): `analysis` is the ONE stored record both the
+/// client's tiered read AND the pro's `brief` render from — never store a
+/// separate "summary" vs "full" copy. The pro's `brief` is always the FULL
+/// content, every tier, forever (never gated). The client's own view is
+/// tiered at RENDER time from `analysis` (free = summary, full = a future paid
+/// membership perk, C13+) — the render layer decides what to show, not a
+/// second stored payload. Any safety/risk flag in `analysis` (compromised
+/// hair, chemical warnings) must NEVER be tier-gated on the client's side —
+/// whatever shape C4 gives `analysis`, safety flags need to be structurally
+/// distinguishable so the render layer can always surface them regardless of
+/// the viewer's tier.
+///
+/// ⚠️ PER-PRO QUESTIONS (Tori, 2026-08-06): paying pros will eventually add
+/// custom questions on top of the per-category pack (entitlement-gated later,
+/// not built now). Nothing here blocks it: `intakeAnswers` is already a free-
+/// shape `Json?` (can carry pro-added keys alongside the category pack's), and
+/// `professionalId` already identifies which pro's extensions might apply.
+model ConsultSession {
+  id String @id @default(cuid())
+
+  clientId String
+  client   ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // The vertical (hair color, brows, ...) as a real bookable ServiceCategory —
+  // recommendations must resolve to bookable entities, never a bespoke enum.
+  serviceCategoryId String?
+  serviceCategory   ServiceCategory? @relation(fields: [serviceCategoryId], references: [id])
+
+  professionalId String?
+  professional   ProfessionalProfile? @relation(fields: [professionalId], references: [id])
+
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+
+  status ConsultSessionStatus @default(CREATED)
+
+  // Answers to the per-vertical question pack (C2), chip-style like
+  // Board.answers / selfProfile. Shape validated against the question set for
+  // `serviceCategoryId`, not enforced by the DB. Free-shape enough to also
+  // carry a paying pro's own added questions (C2+, entitlement-gated) keyed
+  // alongside the category pack's — see the PER-PRO QUESTIONS note above.
+  intakeAnswers Json?
+
+  // Versioned AI analysis output (C4) — traits, confidence ranges,
+  // recommendations, and safety flags. Null until analysis runs. SSOT for
+  // both the client's tiered read and the pro's brief — see the TIERING note
+  // above. Permanent once written; never pruned.
+  analysis      Json?
+  schemaVersion Int?
+  model         String?
+  promptVersion String?
+
+  // Pro-facing brief generated from the analysis (C6). Always the FULL
+  // content — never tiered, never gated behind a client's membership status.
+  // Null until analysis runs and the brief is generated.
+  brief Json?
+
+  captures ConsultPhoto[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId, createdAt])
+  @@index([professionalId, status])
+  @@index([serviceCategoryId])
+}
+
+/// A photo captured for a consult (C3 wires the actual signed-upload +
+/// quality-gate write path; this table exists now so C3 needs no migration).
+///
+/// Deliberately its OWN table, not a `MediaAsset` row: `MediaAsset` requires a
+/// `primaryServiceId` and is the portfolio/Looks/chart-media surface (its
+/// `isFeaturedInPortfolio`/`isEligibleForLooks` flags and every by-
+/// `professionalId` media query assume that shape). Consult photos are
+/// private, client-initiated, and never portfolio content — reusing
+/// `MediaAsset` would mean every one of those queries has to remember to
+/// filter them back out, which is exactly the leak class
+/// `check:media-render-boundary` exists to catch. `PracticeShot` set this
+/// precedent already for the same reason (a shot with no booking/service
+/// anchor must not surface in by-service media queries); `ConsultPhoto`
+/// follows it.
+///
+/// PERMANENT alongside its `ConsultSession` (see that model's RETENTION note)
+/// — cascades from it (`onDelete: Cascade`), so the existing
+/// `ConsultSession: DELETE` rule in `lib/privacy/deleteRules.ts` already
+/// covers these rows too; no separate delete rule needed. Reachable from the
+/// export/delete privacy guards only TRANSITIVELY through `ConsultSession`
+/// (no direct `clientId`/`professionalId`/`userId` column here on purpose),
+/// which is the same documented, accepted shape `AftercareSummary` (via
+/// `Booking`) already uses — see `lib/privacy/exportBoundary.ts`'s own
+/// "known limitation" docstring.
+model ConsultPhoto {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  storageBucket String
+  storagePath   String
+  contentType   String
+  mediaType     MediaType @default(IMAGE)
+
+  // Which shot-list slot this fulfills (e.g. "back"/"sides"/"crown" for hair
+  // color) — free text now; validated against the vertical's shot list at the
+  // app layer (C3), same pattern as `ConsultSession.intakeAnswers`.
+  shotKey String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([storageBucket, storagePath])
+  @@index([consultSessionId, createdAt])
 }

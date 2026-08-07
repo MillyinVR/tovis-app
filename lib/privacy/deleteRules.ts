@@ -550,6 +550,13 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
   }),
   deleteRule({
+    model: 'ConsultSession',
+    notes:
+      "The client's own pre-visit AI consult (docs/design/ai-consult.md). No other party's record to preserve — the booking/professional fields are just pointers, unaffected by pro anonymization.",
+    delegate: (db) => db.consultSession,
+    where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
+  }),
+  deleteRule({
     model: 'TapIntent',
     delegate: (db) => db.tapIntent,
     where: (s) => ({ userId: s.userId }),

@@ -190,6 +190,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     status: 'DELETE',
     reason: "The client's own saved boards; cascades to their saved items.",
   },
+  ConsultSession: {
+    status: 'DELETE',
+    reason:
+      "The client's own pre-visit AI consult (docs/design/ai-consult.md), matching that design's own privacy note that client deletion cascades photos/analysis/profile. No other party's record — the booking/professional fields are just pointers, unaffected by pro anonymization.",
+  },
   LookPost: {
     status: 'DELETE',
     reason:
