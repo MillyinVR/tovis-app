@@ -179,6 +179,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       }
     }
 
+    const isDecision =
+      status === VerificationStatus.APPROVED || status === VerificationStatus.REJECTED
+    const decidedAt = new Date()
+
     const updated = await prisma.$transaction(async (tx) => {
       const professional = await tx.professionalProfile.update({
         where: { id: professionalId },
@@ -189,10 +193,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           ...(licenseState !== undefined ? { licenseState } : {}),
           ...(licenseExpiry !== undefined ? { licenseExpiry } : {}),
           // Approving or rejecting resolves any pending re-review.
-          ...(status === VerificationStatus.APPROVED ||
-          status === VerificationStatus.REJECTED
-            ? { licenseReviewPending: false }
-            : {}),
+          ...(isDecision ? { licenseReviewPending: false } : {}),
         },
         select: {
           id: true,
@@ -201,6 +202,22 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           licenseReviewPending: true,
         },
       })
+
+      // The verification DECISION anchors the retention clock for this pro's
+      // still-pending docs (lib/licensing/verificationDocRetention.ts purges
+      // the raw file 90 days after reviewedAt). Only APPROVED/REJECTED are
+      // decisions — NEEDS_INFO leaves the doc set open, so its clock must not
+      // start yet.
+      if (status === VerificationStatus.APPROVED || status === VerificationStatus.REJECTED) {
+        await tx.verificationDocument.updateMany({
+          where: { professionalId, status: VerificationStatus.PENDING },
+          data: {
+            status,
+            reviewedAt: decidedAt,
+            reviewedByAdminId: user.id,
+          },
+        })
+      }
 
       if (status != null) {
         await refreshProfessional(professionalId, 'verification.status', tx)

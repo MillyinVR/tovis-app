@@ -131,6 +131,11 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   // Account/billing heads-up — kept out of the toggleable categories below so a pro
   // can't silence the warning that their reserved handle is about to be released.
   [NotificationEventKey.PRO_HANDLE_RESERVATION_EXPIRING]: 'Handle reservation expiring',
+  // Same reasoning as PRO_HANDLE_RESERVATION_EXPIRING — kept out of the
+  // toggleable categories so a pro can't pre-silence the warning that their
+  // verified badge is about to pause (or already has).
+  [NotificationEventKey.PRO_LICENSE_EXPIRING_SOON]: 'License expiring soon',
+  [NotificationEventKey.PRO_LICENSE_EXPIRED]: 'License expired',
   // Admin operational alerts are not user-manageable preferences (admins have no
   // preference surface), so these never appear in a category — labels exist only
   // to keep this map exhaustive over NotificationEventKey.

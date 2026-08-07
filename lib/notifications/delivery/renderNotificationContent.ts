@@ -426,6 +426,8 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   waitlist_offer_expired: 'View waitlist',
   waitlist_client_left: 'View waitlist',
   pro_handle_reservation_expiring: 'Keep your handle',
+  pro_license_expiring_soon: 'Renew your license',
+  pro_license_expired: 'Upload your renewed license',
   admin_verification_review_needed: 'Review verification',
   admin_support_ticket_created: 'View ticket',
   admin_viral_request_pending: 'Review request',
@@ -585,6 +587,12 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   pro_handle_reservation_expiring: buildStandardTemplateRenderer(
     templateCtaLabels.pro_handle_reservation_expiring,
+  ),
+  pro_license_expiring_soon: buildStandardTemplateRenderer(
+    templateCtaLabels.pro_license_expiring_soon,
+  ),
+  pro_license_expired: buildStandardTemplateRenderer(
+    templateCtaLabels.pro_license_expired,
   ),
   admin_verification_review_needed: buildStandardTemplateRenderer(
     templateCtaLabels.admin_verification_review_needed,

@@ -37,6 +37,7 @@ export const publicProfessionalProfileSelect =
     professionType: true,
     licenseState: true,
     licenseVerified: true,
+    licenseExpiry: true,
     location: true,
     timeZone: true,
     instagramHandle: true,

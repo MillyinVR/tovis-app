@@ -57,6 +57,8 @@ export type NotificationTemplateKey =
   | 'waitlist_offer_expired'
   | 'waitlist_client_left'
   | 'pro_handle_reservation_expiring'
+  | 'pro_license_expiring_soon'
+  | 'pro_license_expired'
   | 'admin_verification_review_needed'
   | 'admin_support_ticket_created'
   | 'admin_viral_request_pending'
@@ -1015,6 +1017,40 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: true,
     allowQuietHoursBypass: false,
     templateKey: 'pro_handle_reservation_expiring',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+    },
+  },
+
+  // License-expiry lifecycle: 30 days before ProfessionalProfile.licenseExpiry.
+  // In-app + email, like PRO_HANDLE_RESERVATION_EXPIRING (same shape of
+  // heads-up: a durable account-standing warning, not a live-session nudge).
+  // Transactional; no quiet-hours bypass — a license renewal reminder is not
+  // an emergency and the 30-day window gives ample daytime room.
+  [NotificationEventKey.PRO_LICENSE_EXPIRING_SOON]: {
+    key: NotificationEventKey.PRO_LICENSE_EXPIRING_SOON,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'pro_license_expiring_soon',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+    },
+  },
+
+  // Fires once the license has actually expired — the verified badge is now
+  // paused (derived; lib/licensing/currentlyLicensed.ts). Same channel policy
+  // as the warning; this is the more important of the two, so it stays
+  // in-app + email rather than escalating to SMS (renewing a license is
+  // never a same-day fix, so urgency doesn't buy anything here).
+  [NotificationEventKey.PRO_LICENSE_EXPIRED]: {
+    key: NotificationEventKey.PRO_LICENSE_EXPIRED,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'pro_license_expired',
     supportedRecipients: [NotificationRecipientKind.PRO],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
