@@ -270,16 +270,14 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     status: 'OMITTED',
     reason: 'Derived embedding over exported interactions; not human-readable subject data.',
   },
-  // AI Consult Phase 0 lifecycle/legal foundation. ConsultRevision,
+  // AI Consult Phase 0. ConsultRevision,
   // ConsultAgreementAcceptance, and ConsultAuditEvent are transitively owned
   // through this row and cascade with it; the direct-FK completeness detector
-  // cannot see them. There is still no sensitive intake/media/analysis route,
-  // so the export surface stays closed until it can project the whole family
-  // together without presenting partial consent history as complete.
+  // cannot see them. Export the whole family together so immutable intake and
+  // its exact consent/revocation history cannot be presented partially.
   ConsultSession: {
-    status: 'OMITTED',
-    reason:
-      "Founder-gated AI Consult foundation has no sensitive collection route yet. Before one opens, export ConsultSession with its immutable revisions, version-pinned agreement acceptances/revocations, and audit events together — all are the client's own data.",
+    status: 'EXPORTED',
+    keys: ['consultSessions'],
   },
 
   // ------------------------------------------------- undecided (K16-A backlog)

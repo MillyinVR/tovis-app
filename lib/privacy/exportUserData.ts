@@ -31,6 +31,7 @@ export type ExportedUserData = {
     aftercareSummaries: unknown[]
     clientConsentRecords: unknown[]
     clientAllergies: unknown[]
+    consultSessions: unknown[]
     mediaAssets: unknown[]
     practiceShots: unknown[]
     messages: unknown[]
@@ -444,6 +445,85 @@ const clientAllergyExportSelect = {
   createdAt: true,
 } satisfies Prisma.ClientAllergySelect
 
+const consultSessionExportSelect = {
+  id: true,
+  clientId: true,
+  serviceCategoryId: true,
+  professionalId: true,
+  bookingId: true,
+  status: true,
+  revisionSequence: true,
+  createdAt: true,
+  updatedAt: true,
+  revisions: {
+    select: {
+      id: true,
+      revision: true,
+      kind: true,
+      payload: true,
+      schemaVersion: true,
+      model: true,
+      promptVersion: true,
+      createdAt: true,
+    },
+    orderBy: { revision: 'asc' },
+  },
+  agreementAcceptances: {
+    select: {
+      id: true,
+      kind: true,
+      acceptedAt: true,
+      acceptedByType: true,
+      acceptedById: true,
+      revokedAt: true,
+      revokedByType: true,
+      revokedById: true,
+      revocationReason: true,
+      agreementVersion: {
+        select: {
+          id: true,
+          kind: true,
+          version: true,
+          title: true,
+          body: true,
+          publishedAt: true,
+        },
+      },
+    },
+    orderBy: { acceptedAt: 'asc' },
+  },
+  auditEvents: {
+    select: {
+      id: true,
+      action: true,
+      actorType: true,
+      actorId: true,
+      fromStatus: true,
+      toStatus: true,
+      agreementAcceptanceId: true,
+      revisionId: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  },
+} satisfies Prisma.ConsultSessionSelect
+
+type ConsultSessionExportRow = Prisma.ConsultSessionGetPayload<{
+  select: typeof consultSessionExportSelect
+}>
+
+function normalizeConsultSessions(rows: ConsultSessionExportRow[]): unknown[] {
+  return normalizeJsonArray(
+    rows.map((session) => ({
+      ...session,
+      revisions: session.revisions.map(({ payload, ...revision }) => ({
+        ...revision,
+        content: payload,
+      })),
+    })),
+  )
+}
+
 /**
  * Canonical user data export boundary.
  *
@@ -481,6 +561,7 @@ export async function exportUserData(
     aftercareSummaries,
     clientConsentRecords,
     clientAllergies,
+    consultSessions,
     mediaAssets,
     practiceShots,
     messages,
@@ -504,6 +585,7 @@ export async function exportUserData(
     findAftercareSummaries(input.db, clientProfileId, professionalProfileId),
     findClientConsentRecords(input.db, clientProfileId, professionalProfileId),
     findClientAllergies(input.db, clientProfileId),
+    findConsultSessions(input.db, clientProfileId),
     findMediaAssets(
       input.db,
       input.userId,
@@ -573,6 +655,7 @@ export async function exportUserData(
       aftercareSummaries: normalizeJsonArray(aftercareSummaries),
       clientConsentRecords: normalizeJsonArray(clientConsentRecords),
       clientAllergies: normalizeJsonArray(clientAllergies),
+      consultSessions: normalizeConsultSessions(consultSessions),
       mediaAssets: normalizeJsonArray(mediaAssets),
       practiceShots: normalizeJsonArray(practiceShots),
       messages: normalizeJsonArray(messages),
@@ -596,6 +679,7 @@ export async function exportUserData(
       'Per-client booking requirements (ProClientPolicy) are omitted because the feature requires the client-facing experience to stay neutral — the client feels a requirement without learning a policy record exists about them.',
       'ClientConsentRecord export covers the signature and its scope but excludes professional-authored notes, the author-scoped proof reference, and the single-use signature token id.',
       'ClientAllergy export reads the plaintext columns that are mid encryption dual-write; it must move to the encrypted envelopes before those columns are dropped.',
+      'AI consult export includes the client-owned session, immutable revisions, exact agreement versions and acceptance/revocation evidence, and content-free audit trail; idempotency hashes are omitted.',
       'MediaAsset export includes product-facing URLs and metadata but excludes storage bucket/path internals.',
       'Notification exports include safe inbox/schedule/dispatch/delivery fields and exclude recipient contact snapshots, structured payload/data fields, provider payloads, lease tokens, destination snapshots, provider message details, dedupe keys, and delivery error details.',
       'AttributionEvent export is omitted pending a disclosure decision for attribution/admin-adjacent records.',
@@ -798,6 +882,19 @@ async function findClientAllergies(
     where: { clientId: clientProfileId },
     orderBy: { createdAt: 'asc' },
     select: clientAllergyExportSelect,
+  })
+}
+
+async function findConsultSessions(
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+): Promise<ConsultSessionExportRow[]> {
+  if (!clientProfileId) return []
+
+  return db.consultSession.findMany({
+    where: { clientId: clientProfileId },
+    orderBy: { createdAt: 'asc' },
+    select: consultSessionExportSelect,
   })
 }
 

@@ -41,6 +41,9 @@ const mocks = vi.hoisted(() => ({
     clientAllergy: {
       findMany: vi.fn(),
     },
+    consultSession: {
+      findMany: vi.fn(),
+    },
     mediaAsset: {
       findMany: vi.fn(),
     },
@@ -150,6 +153,7 @@ function resetFindManyMocks() {
   mocks.db.aftercareSummary.findMany.mockResolvedValue([])
   mocks.db.clientConsentRecord.findMany.mockResolvedValue([])
   mocks.db.clientAllergy.findMany.mockResolvedValue([])
+  mocks.db.consultSession.findMany.mockResolvedValue([])
   mocks.db.mediaAsset.findMany.mockResolvedValue([])
   mocks.db.practiceShot.findMany.mockResolvedValue([])
   mocks.db.message.findMany.mockResolvedValue([])
@@ -680,6 +684,7 @@ describe('exportUserData', () => {
         adminActionLogs: [],
         clientConsentRecords: [],
         clientAllergies: [],
+        consultSessions: [],
       },
       limitations: [
         'This export covers user-linked records known to the privacy export boundary.',
@@ -690,6 +695,7 @@ describe('exportUserData', () => {
         'Per-client booking requirements (ProClientPolicy) are omitted because the feature requires the client-facing experience to stay neutral — the client feels a requirement without learning a policy record exists about them.',
         'ClientConsentRecord export covers the signature and its scope but excludes professional-authored notes, the author-scoped proof reference, and the single-use signature token id.',
         'ClientAllergy export reads the plaintext columns that are mid encryption dual-write; it must move to the encrypted envelopes before those columns are dropped.',
+        'AI consult export includes the client-owned session, immutable revisions, exact agreement versions and acceptance/revocation evidence, and content-free audit trail; idempotency hashes are omitted.',
         'MediaAsset export includes product-facing URLs and metadata but excludes storage bucket/path internals.',
         'Notification exports include safe inbox/schedule/dispatch/delivery fields and exclude recipient contact snapshots, structured payload/data fields, provider payloads, lease tokens, destination snapshots, provider message details, dedupe keys, and delivery error details.',
         'AttributionEvent export is omitted pending a disclosure decision for attribution/admin-adjacent records.',
@@ -728,6 +734,54 @@ describe('exportUserData', () => {
     expect(call?.[0]?.where).toEqual({
       OR: [{ clientId: 'client_1' }, { professionalId: 'pro_1' }],
     })
+  })
+
+  it('exports the complete client-owned consult family without retry hashes', async () => {
+    mocks.db.user.findUnique.mockResolvedValueOnce(makeUser({ id: 'user_1' }))
+    mocks.db.consultSession.findMany.mockResolvedValueOnce([
+      {
+        id: 'consult_1',
+        clientId: 'client_1',
+        revisions: [
+          {
+            id: 'revision_1',
+            revision: 1,
+            kind: 'INTAKE',
+            payload: { answers: { current_color: 'brunette' } },
+          },
+        ],
+        agreementAcceptances: [],
+        auditEvents: [],
+      },
+    ])
+
+    const result = await exportUserData({ db: mocks.db as never, userId: 'user_1' })
+
+    expect(result.data.consultSessions).toEqual([
+      expect.objectContaining({
+        id: 'consult_1',
+        revisions: [
+          expect.objectContaining({
+            id: 'revision_1',
+            content: { answers: { current_color: 'brunette' } },
+          }),
+        ],
+      }),
+    ])
+    const [call] = mocks.db.consultSession.findMany.mock.calls
+    expect(call?.[0]).toMatchObject({
+      where: { clientId: 'client_1' },
+      select: {
+        revisions: {
+          select: { payload: true },
+        },
+        agreementAcceptances: expect.any(Object),
+        auditEvents: expect.any(Object),
+      },
+    })
+    const revisionSelect = call?.[0]?.select?.revisions?.select
+    expect(revisionSelect).not.toHaveProperty('idempotencyKey')
+    expect(revisionSelect).not.toHaveProperty('requestHash')
   })
 
   it('exports the client allergy record without raw encryption envelopes', async () => {

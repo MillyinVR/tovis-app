@@ -8,6 +8,11 @@ export type ConsultWriteErrorCode =
   | 'AGREEMENTS_UNAVAILABLE'
   | 'AGREEMENTS_REQUIRED'
   | 'ALREADY_REVOKED'
+  | 'PACK_VERSION_MISMATCH'
+  | 'SCHEMA_VERSION_MISMATCH'
+  | 'INVALID_ANSWERS'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'BOOKING_INELIGIBLE'
 
 export class ConsultWriteError extends Error {
   constructor(

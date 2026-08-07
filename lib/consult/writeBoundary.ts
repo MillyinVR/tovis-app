@@ -6,11 +6,25 @@ import {
   ConsultSessionStatus,
   Prisma,
 } from '@prisma/client'
+import { createHash } from 'node:crypto'
 
 import { prisma } from '@/lib/prisma'
 
-import { requirePublishedConsultAgreementVersions } from './agreementContract'
+import {
+  requireCurrentConsultAgreementAcceptances,
+  requirePublishedConsultAgreementVersions,
+} from './agreementContract'
+import {
+  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
+  evaluateAiConsultBookingEligibility,
+} from './eligibility'
 import { ConsultWriteError } from './errors'
+import {
+  HAIR_COLOR_INTAKE_PACK_ID,
+  HAIR_COLOR_INTAKE_PACK_VERSION,
+  HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+  validateHairColorIntakeAnswers,
+} from './intakePack'
 
 type ClientActor = {
   readonly type: typeof ConsultActorType.CLIENT
@@ -21,6 +35,11 @@ type ConsultActor = {
   readonly type: ConsultActorType
   readonly id: string | null
 }
+
+type NonIntakeRevisionKind = Exclude<
+  ConsultRevisionKind,
+  typeof ConsultRevisionKind.INTAKE
+>
 
 export { ConsultWriteError } from './errors'
 
@@ -73,6 +92,45 @@ async function requireClientOwner(
     throw new ConsultWriteError('NOT_OWNER', 'Consult session not found.')
   }
 
+  return session
+}
+
+async function requireClientIntakeEligibility(
+  tx: Prisma.TransactionClient,
+  consultSessionId: string,
+  actor: ClientActor,
+) {
+  const session = await tx.consultSession.findUnique({
+    where: { id: consultSessionId },
+    select: {
+      clientId: true,
+      professionalId: true,
+      serviceCategoryId: true,
+      client: { select: { userId: true } },
+      booking: {
+        select: {
+          clientId: true,
+          ...AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
+        },
+      },
+    },
+  })
+  if (
+    !session ||
+    session.client.userId !== actor.id ||
+    session.booking.clientId !== session.clientId ||
+    session.booking.professionalId !== session.professionalId ||
+    session.booking.service.categoryId !== session.serviceCategoryId
+  ) {
+    throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
+  }
+  const eligibility = evaluateAiConsultBookingEligibility(session.booking)
+  if (!eligibility.eligible) {
+    throw new ConsultWriteError(
+      eligibility.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
+      'Consult is unavailable for this booking.',
+    )
+  }
   return session
 }
 
@@ -143,7 +201,8 @@ async function transitionLockedSession(
 /**
  * Records one exact legal version. The 18+ attestation and sensitive-data
  * consent are separate rows and BOTH must be active before this function moves
- * the empty shell to INTAKE_READY. There is intentionally no route/UI yet.
+ * the empty shell to INTAKE_READY. Agreement routes own this contract; C2's
+ * intake route may proceed only after both rows are current.
  */
 export async function acceptConsultAgreement(args: {
   consultSessionId: string
@@ -349,13 +408,14 @@ export async function transitionConsultSession(args: {
 }
 
 /**
- * Appends a sensitive immutable revision. This is foundation only: callers for
- * intake/analysis/brief do not exist yet. Both the boundary and a DB trigger
- * fail closed if consent or the 18+ attestation is missing/revoked.
+ * Low-level immutable revision boundary retained for later analysis/brief
+ * writers. Client intake uses appendHairColorIntakeRevision below for strict
+ * payload validation, idempotency, ownership, and lifecycle effects. Both
+ * boundaries and the database fail closed on stale/missing prerequisites.
  */
 export async function appendConsultRevision(args: {
   consultSessionId: string
-  kind: ConsultRevisionKind
+  kind: NonIntakeRevisionKind
   payload: Prisma.InputJsonValue
   schemaVersion: number
   model?: string
@@ -378,13 +438,7 @@ export async function appendConsultRevision(args: {
       )
     }
 
-    const activeKinds = await activeAgreementKinds(tx, args.consultSessionId)
-    if (!hasBothRequiredAgreements(activeKinds)) {
-      throw new ConsultWriteError(
-        'AGREEMENTS_REQUIRED',
-        'Active consent and 18+ attestation are required.',
-      )
-    }
+    await requireCurrentConsultAgreementAcceptances(tx, args.consultSessionId)
 
     const sequenced = await tx.consultSession.update({
       where: { id: args.consultSessionId },
@@ -414,5 +468,182 @@ export async function appendConsultRevision(args: {
     })
 
     return revision
+  })
+}
+
+function intakeRequestHash(args: {
+  packVersion: number
+  schemaVersion: number
+  complete: boolean
+  answers: Readonly<Record<string, string>>
+}): string {
+  const orderedAnswers = Object.entries(args.answers).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  )
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        packId: HAIR_COLOR_INTAKE_PACK_ID,
+        packVersion: args.packVersion,
+        schemaVersion: args.schemaVersion,
+        complete: args.complete,
+        answers: orderedAnswers,
+      }),
+    )
+    .digest('hex')
+}
+
+/**
+ * Canonical C2 intake write. Validation, legal-version checks, idempotency,
+ * immutable revision/audit creation, and lifecycle changes share one locked
+ * transaction so a retry cannot duplicate any effect.
+ */
+export async function appendHairColorIntakeRevision(args: {
+  consultSessionId: string
+  actor: ClientActor
+  loadInput: () => Promise<{
+    packVersion: number
+    schemaVersion: number
+    complete: boolean
+    answers: unknown
+    idempotencyKey: string
+  }>
+}) {
+  return prisma.$transaction(async (tx) => {
+    await lockSession(tx, args.consultSessionId)
+    await requireClientIntakeEligibility(
+      tx,
+      args.consultSessionId,
+      args.actor,
+    )
+    const session = await tx.consultSession.findUniqueOrThrow({
+      where: { id: args.consultSessionId },
+      select: { status: true },
+    })
+    await requireCurrentConsultAgreementAcceptances(tx, args.consultSessionId)
+
+    if (
+      session.status !== ConsultSessionStatus.INTAKE_READY &&
+      session.status !== ConsultSessionStatus.INTAKE_IN_PROGRESS &&
+      session.status !== ConsultSessionStatus.MEDIA_READY
+    ) {
+      throw new ConsultWriteError(
+        'INVALID_STATE',
+        'Consult lifecycle does not permit intake revisions.',
+      )
+    }
+
+    // The caller must not parse/read answer data until this locked transaction
+    // has proven ownership, eligibility, lifecycle, and both current legal
+    // prerequisites. Revocation uses the same row lock, so the two operations
+    // have one deterministic order.
+    const input = await args.loadInput()
+    if (input.packVersion !== HAIR_COLOR_INTAKE_PACK_VERSION) {
+      throw new ConsultWriteError(
+        'PACK_VERSION_MISMATCH',
+        'The intake pack version is stale.',
+      )
+    }
+    if (input.schemaVersion !== HAIR_COLOR_INTAKE_SCHEMA_VERSION) {
+      throw new ConsultWriteError(
+        'SCHEMA_VERSION_MISMATCH',
+        'The intake schema version is stale.',
+      )
+    }
+    const idempotencyKey = input.idempotencyKey.trim()
+    if (!idempotencyKey || idempotencyKey.length > 128) {
+      throw new ConsultWriteError(
+        'INVALID_REQUEST',
+        'A valid idempotency key is required.',
+      )
+    }
+    const validated = validateHairColorIntakeAnswers(
+      input.answers,
+      input.complete,
+    )
+    if (!validated.ok) {
+      throw new ConsultWriteError('INVALID_ANSWERS', validated.message)
+    }
+    const requestHash = intakeRequestHash({
+      packVersion: input.packVersion,
+      schemaVersion: input.schemaVersion,
+      complete: input.complete,
+      answers: validated.answers,
+    })
+
+    const existing = await tx.consultRevision.findFirst({
+      where: { consultSessionId: args.consultSessionId, idempotencyKey },
+    })
+    if (existing) {
+      if (existing.requestHash !== requestHash) {
+        throw new ConsultWriteError(
+          'IDEMPOTENCY_CONFLICT',
+          'The idempotency key was already used for another request.',
+        )
+      }
+      return { revision: existing, status: session.status, replayed: true }
+    }
+
+    if (session.status === ConsultSessionStatus.MEDIA_READY && !input.complete) {
+      throw new ConsultWriteError(
+        'INVALID_STATE',
+        'A completed intake correction must remain complete.',
+      )
+    }
+
+    let status = session.status
+    if (status === ConsultSessionStatus.INTAKE_READY) {
+      await transitionLockedSession(tx, {
+        consultSessionId: args.consultSessionId,
+        actor: args.actor,
+        fromStatus: status,
+        toStatus: ConsultSessionStatus.INTAKE_IN_PROGRESS,
+      })
+      status = ConsultSessionStatus.INTAKE_IN_PROGRESS
+    }
+
+    const sequenced = await tx.consultSession.update({
+      where: { id: args.consultSessionId },
+      data: { revisionSequence: { increment: 1 } },
+      select: { revisionSequence: true },
+    })
+    const revision = await tx.consultRevision.create({
+      data: {
+        consultSessionId: args.consultSessionId,
+        revision: sequenced.revisionSequence,
+        kind: ConsultRevisionKind.INTAKE,
+        payload: {
+          packId: HAIR_COLOR_INTAKE_PACK_ID,
+          packVersion: input.packVersion,
+          schemaVersion: input.schemaVersion,
+          complete: input.complete,
+          answers: validated.answers,
+        },
+        schemaVersion: input.schemaVersion,
+        idempotencyKey,
+        requestHash,
+      },
+    })
+    await tx.consultAuditEvent.create({
+      data: {
+        consultSessionId: args.consultSessionId,
+        action: ConsultAuditAction.REVISION_CREATED,
+        actorType: args.actor.type,
+        actorId: args.actor.id,
+        revisionId: revision.id,
+      },
+    })
+
+    if (input.complete && status === ConsultSessionStatus.INTAKE_IN_PROGRESS) {
+      await transitionLockedSession(tx, {
+        consultSessionId: args.consultSessionId,
+        actor: args.actor,
+        fromStatus: status,
+        toStatus: ConsultSessionStatus.MEDIA_READY,
+      })
+      status = ConsultSessionStatus.MEDIA_READY
+    }
+
+    return { revision, status, replayed: false }
   })
 }

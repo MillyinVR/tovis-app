@@ -186,7 +186,7 @@ beforeAll(async () => {
       serviceId,
       proTenantId: tenantId,
       clientHomeTenantId: tenantId,
-      scheduledFor: new Date('2030-01-01T18:00:00.000Z'),
+      scheduledFor: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       status: BookingStatus.ACCEPTED,
       locationType: ServiceLocationType.SALON,
       locationId,
@@ -474,7 +474,7 @@ describe('client consult agreement API against PostgreSQL', () => {
     await expect(
       appendConsultRevision({
         consultSessionId: sessionId,
-        kind: ConsultRevisionKind.INTAKE,
+        kind: ConsultRevisionKind.ANALYSIS,
         payload: { forbidden: 'only-one-prerequisite' },
         schemaVersion: 1,
         actor: { type: ConsultActorType.CLIENT, id: ownerUserId },
@@ -545,7 +545,7 @@ describe('client consult agreement API against PostgreSQL', () => {
     await expect(
       appendConsultRevision({
         consultSessionId: sessionId,
-        kind: ConsultRevisionKind.INTAKE,
+        kind: ConsultRevisionKind.ANALYSIS,
         payload: { forbidden: 'after-revocation' },
         schemaVersion: 1,
         actor: { type: ConsultActorType.CLIENT, id: ownerUserId },

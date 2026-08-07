@@ -42,6 +42,8 @@ const PINNED_FUNCTIONS = [
   'consult_session_scope_guard',
   'consult_immutable_row',
   'consult_acceptance_guard',
+  'consult_intake_payload_guard',
+  'consult_current_agreements_active',
   'consult_revision_requires_agreements',
   'consult_lifecycle_guard',
 ]

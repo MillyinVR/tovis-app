@@ -134,4 +134,11 @@ describe('privacy export completeness boundary', () => {
     expect(EXPORT_BOUNDARY.ClientConsentRecord?.status).toBe('EXPORTED')
     expect(EXPORT_BOUNDARY.ClientAllergy?.status).toBe('EXPORTED')
   })
+
+  it('exports the client-owned consult family once sensitive intake exists', () => {
+    expect(EXPORT_BOUNDARY.ConsultSession).toEqual({
+      status: 'EXPORTED',
+      keys: ['consultSessions'],
+    })
+  })
 })
