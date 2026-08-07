@@ -51,7 +51,7 @@ const UPCOMING = addElapsedDays(ROUTE_NOW, 7)
 
 const CONSULT_ROW = {
   id: 'consult_1',
-  status: 'CREATED',
+  status: 'CONSENT_REQUIRED',
   bookingId: 'booking_1',
   professionalId: 'pro_allowlisted',
   serviceCategoryId: 'cat_hair_color',
@@ -239,13 +239,21 @@ describe('POST /api/v1/client/consult', () => {
         bookingId: 'booking_1',
         professionalId: 'pro_allowlisted',
         serviceCategoryId: 'cat_hair_color',
+        auditEvents: {
+          create: {
+            action: 'SESSION_CREATED',
+            actorType: 'CLIENT',
+            actorId: 'user_1',
+            toStatus: 'CONSENT_REQUIRED',
+          },
+        },
       },
       update: {},
     })
     expect(res.body).toEqual({
       consult: {
         id: 'consult_1',
-        status: 'CREATED',
+        status: 'CONSENT_REQUIRED',
         bookingId: 'booking_1',
         professionalId: 'pro_allowlisted',
         serviceCategoryId: 'cat_hair_color',

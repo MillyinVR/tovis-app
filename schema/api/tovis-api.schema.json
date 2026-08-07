@@ -100,10 +100,14 @@
     },
     "$Enums.ConsultSessionStatus": {
       "enum": [
-        "CREATED",
-        "INTAKE",
+        "CONSENT_REQUIRED",
+        "INTAKE_READY",
+        "INTAKE_IN_PROGRESS",
+        "MEDIA_READY",
+        "ANALYSIS_PENDING",
         "ANALYZING",
-        "READY",
+        "COMPLETED",
+        "CONSENT_REVOKED",
         "CANCELLED"
       ],
       "type": "string"
@@ -6479,10 +6483,7 @@
     "ConsultSessionDTO": {
       "properties": {
         "bookingId": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "createdAt": {
           "type": "string"
@@ -6491,16 +6492,10 @@
           "type": "string"
         },
         "professionalId": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "serviceCategoryId": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "status": {
           "$ref": "#/definitions/ConsultSessionStatus"

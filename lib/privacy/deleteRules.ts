@@ -552,7 +552,7 @@ export const DELETE_RULES: readonly DeleteRule[] = [
   deleteRule({
     model: 'ConsultSession',
     notes:
-      "The client's own pre-visit AI consult (docs/design/ai-consult.md). No other party's record to preserve — the booking/professional fields are just pointers, unaffected by pro anonymization.",
+      "The client's own booking-attached AI consult. Immutable revisions, agreement evidence, and audit rows cascade; raw consult media is not durable.",
     delegate: (db) => db.consultSession,
     where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
   }),

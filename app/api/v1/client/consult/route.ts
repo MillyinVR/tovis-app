@@ -1,15 +1,17 @@
 // app/api/v1/client/consult/route.ts
 //
-// AI Consult (docs/design/ai-consult.md), Phase 0, C1: schema + route
-// skeleton. Creates (or, on retry, returns) the pre-visit consult for a
+// AI Consult Phase 0 lifecycle foundation. Creates (or, on retry, returns) the
+// empty, consent-required pre-visit consult shell for a
 // booking the client owns. Founder-gated (lib/consult/access.ts) on the
 // booking's professional — dark for everyone else. No intake, capture, or
-// analysis yet; those are C2-C4. `bookingId` is unique on ConsultSession, so
+// sensitive intake/media/analysis yet. `bookingId` is unique on ConsultSession, so
 // this is an upsert: idempotent under a retried create.
 //
 // ⚠️ Unrelated to the existing "Consultation" (ConsultationApproval /
 // BookingConsultation) mid-appointment price-approval flow — never read or
 // write those models from here.
+
+import { ConsultActorType, ConsultAuditAction, ConsultSessionStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickNonEmptyString, requireClient } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
@@ -62,6 +64,14 @@ export async function POST(req: Request) {
         bookingId,
         professionalId: booking.professionalId,
         serviceCategoryId: booking.service.categoryId,
+        auditEvents: {
+          create: {
+            action: ConsultAuditAction.SESSION_CREATED,
+            actorType: ConsultActorType.CLIENT,
+            actorId: auth.user.id,
+            toStatus: ConsultSessionStatus.CONSENT_REQUIRED,
+          },
+        },
       },
       update: {},
     })

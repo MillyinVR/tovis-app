@@ -51,9 +51,9 @@ const PILOT_CATEGORY_SLUGS = new Set<string>(
  *
  * This is deliberately pure apart from the feature-gate read, and accepts
  * `now` so routes, notifications, and tests cannot drift on time semantics.
- * Consent and the 18+ attestation are not representable in C1. The future
- * intake/media writers must require both before collecting sensitive content;
- * creating this empty draft must not pretend either has occurred.
+ * Consent and the 18+ attestation deliberately follow shell creation. The
+ * lifecycle/write boundary requires both before any future sensitive intake
+ * or media writer can proceed; creating the empty shell proves neither.
  */
 export function evaluateAiConsultBookingEligibility(
   booking: AiConsultEligibilityBooking,

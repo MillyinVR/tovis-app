@@ -1,10 +1,9 @@
 // lib/dto/consult.ts
 //
-// Wire DTO for the AI Consult pilot (docs/design/ai-consult.md, Phase 0). C1
-// ships schema + a create/get route skeleton only — no intake, capture, or
-// analysis yet — so this DTO carries just the session's identity and
-// lifecycle status. Intake answers / media / analysis / brief fields land on
-// this DTO as later build-plan steps (C2-C7) wire them up.
+// Wire DTO for the AI Consult Phase 0 foundation. There is no intake, capture,
+// or analysis route yet, so this exposes only the required booking anchors and
+// explicit consent-first lifecycle state. Sensitive content will come from
+// immutable revisions rather than mutable fields on this DTO.
 
 import type { ConsultSessionStatus } from '@prisma/client'
 
@@ -12,8 +11,8 @@ import type { ConsultSessionStatus } from '@prisma/client'
 export type ConsultSessionDTO = {
   id: string
   status: ConsultSessionStatus
-  bookingId: string | null
-  professionalId: string | null
-  serviceCategoryId: string | null
+  bookingId: string
+  professionalId: string
+  serviceCategoryId: string
   createdAt: string
 }
