@@ -24,14 +24,11 @@ import {
   buildClientPaymentOptions,
   clientPaymentOptionsSelect,
 } from '@/lib/payments/clientPaymentOptions'
+import { addElapsedDays } from '@/lib/time'
 
 /** Trim + upper a maybe-string enum value; '' when absent. */
 function upper(v: unknown): string {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
-}
-
-function addDaysUtc(date: Date, days: number): Date {
-  return new Date(date.getTime() + days * 24 * 60 * 60_000)
 }
 
 export function hasPendingConsultationApproval(booking: {
@@ -341,7 +338,7 @@ export async function loadClientBookingBuckets(
   clientId: string,
 ): Promise<LoadedClientBookingBuckets> {
   const now = new Date()
-  const next30 = addDaysUtc(now, 30)
+  const next30 = addElapsedDays(now, 30)
 
   const bookings: ClientBookingRow[] = await prisma.booking.findMany({
     where: { clientId },

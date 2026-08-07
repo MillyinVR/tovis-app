@@ -22,7 +22,8 @@ describe('isAiConsultEnabledForPro', () => {
     for (const v of ['1', 'true', 'YES']) {
       process.env.ENABLE_AI_CONSULT = v
       expect(isAiConsultEnabledForPro('anyone')).toBe(true)
-      expect(isAiConsultEnabledForPro(undefined)).toBe(true)
+      expect(isAiConsultEnabledForPro(undefined)).toBe(false)
+      expect(isAiConsultEnabledForPro(null)).toBe(false)
     }
   })
 

@@ -37,7 +37,7 @@ function globalAiConsultFlag(): boolean {
 export function isAiConsultEnabledForPro(
   professionalId: string | null | undefined,
 ): boolean {
-  if (globalAiConsultFlag()) return true
   if (!professionalId) return false
+  if (globalAiConsultFlag()) return true
   return AI_CONSULT_PRO_ALLOWLIST.includes(professionalId)
 }
