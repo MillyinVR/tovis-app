@@ -114,6 +114,7 @@ export default async function ClientAftercareInboxPage() {
                     <AftercareBeforeAfter
                       media={item.beforeAfter}
                       serviceName={item.title}
+                      clientExportProfessionalId={item.proId}
                     />
                   ) : null}
 

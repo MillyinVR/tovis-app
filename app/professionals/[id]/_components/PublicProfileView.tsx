@@ -155,6 +155,7 @@ export default async function PublicProfileView({
 
         {activeTab === 'reviews' ? (
           <ReviewsSummary
+            professionalId={professionalId}
             stats={stats}
             reviews={reviewsForUI}
             emptyMessage={formatReviewsEmptyMessage()}

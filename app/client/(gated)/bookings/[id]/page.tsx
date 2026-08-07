@@ -699,6 +699,7 @@ function ClientAftercareBeforeAfter(props: {
   beforeMedia: LoadedRenderableMedia[]
   afterMedia: LoadedRenderableMedia[]
   serviceName: string | null
+  professionalId: string | null
 }) {
   const primaryBefore = props.beforeMedia[0] ?? null
   const primaryAfter = props.afterMedia[0] ?? null
@@ -727,6 +728,7 @@ function ClientAftercareBeforeAfter(props: {
           afterFullUrl: mediaFullSrc(primaryAfter),
         }}
         serviceName={props.serviceName}
+        clientExportProfessionalId={props.professionalId}
       />
 
       {props.beforeMedia.length > 1 ? (
@@ -1492,6 +1494,7 @@ export default async function ClientBookingPage(props: {
                             beforeMedia={beforeMedia}
                             afterMedia={afterMedia}
                             serviceName={photoServiceName}
+                            professionalId={booking.professional?.id ?? null}
                           />
                         </ClientAftercareCard>
 

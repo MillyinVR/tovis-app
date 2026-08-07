@@ -6,6 +6,7 @@ import Link from 'next/link'
 
 import { isRecord } from '@/lib/guards'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
+import ClientMediaExportButton from '@/app/_components/media/ClientMediaExportButton'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { Z } from '@/lib/zIndex'
 import {
@@ -102,16 +103,27 @@ function reviewListKey(reviews: ReviewForPanel[]): string {
   return reviews.map((review) => review.id).join('|')
 }
 
+type ReviewMediaBefore = { thumbUrl: string | null; fullUrl: string | null }
+
 function ReviewsPanelInner({
   reviews,
   editable,
+  professionalId,
 }: {
   reviews: ReviewForPanel[]
   editable: boolean
+  /** Who a client-exported copy of this review's media signs with. `null`
+   * when the viewer is the pro looking at their own dashboard (a DIFFERENT
+   * signal from `editable`, which only toggles the portfolio add/remove
+   * buttons and is false here today for unrelated reasons) — self-viewing
+   * your own work isn't this feature; that's the existing pro-side
+   * "Make a post" flow. */
+  professionalId: string | null
 }) {
   const [lightbox, setLightbox] = useState<{
     src: string
     mediaType: MediaType
+    before: ReviewMediaBefore | null
   } | null>(null)
 
   const [busyMediaId, setBusyMediaId] = useState<string | null>(null)
@@ -123,8 +135,8 @@ function ReviewsPanelInner({
 
   const stars = useMemo(() => [1, 2, 3, 4, 5], [])
 
-  function open(src: string, mediaType: MediaType): void {
-    setLightbox({ src, mediaType })
+  function open(src: string, mediaType: MediaType, before: ReviewMediaBefore | null): void {
+    setLightbox({ src, mediaType, before })
   }
 
   function close(): void {
@@ -494,7 +506,7 @@ function ReviewsPanelInner({
                         <div key={item.id} style={{ width: 92 }}>
                           <button
                             type="button"
-                            onClick={() => open(src, item.mediaType)}
+                            onClick={() => open(src, item.mediaType, item.before ?? null)}
                             style={{
                               border: '1px solid rgb(var(--text-primary) / 0.10)',
                               borderRadius: 10,
@@ -628,11 +640,24 @@ function ReviewsPanelInner({
                     afterAlt="After"
                     className="brand-before-after-fill"
                   />
+                  {professionalId ? (
+                    <div style={{ position: 'absolute', top: 10, right: 10 }}>
+                      <ClientMediaExportButton
+                        professionalId={professionalId}
+                        className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
+                        media={{
+                          kind: 'pair',
+                          beforeUrl: pairedBefore.thumbUrl ?? pairedBefore.fullUrl ?? pairedAfterSrc,
+                          afterUrl: pairedAfterSrc,
+                        }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               ) : primary && primarySrc ? (
                 <button
                   type="button"
-                  onClick={() => open(primarySrc, primary.mediaType)}
+                  onClick={() => open(primarySrc, primary.mediaType, primary.before ?? null)}
                   style={{
                     border: '1px solid rgb(var(--text-primary) / 0.10)',
                     borderRadius: 12,
@@ -700,7 +725,11 @@ function ReviewsPanelInner({
       )}
 
       {lightbox ? (
-        <Lightbox lightbox={lightbox} onClose={close} />
+        <Lightbox
+          lightbox={lightbox}
+          onClose={close}
+          professionalId={professionalId}
+        />
       ) : null}
     </section>
   )
@@ -709,9 +738,14 @@ function ReviewsPanelInner({
 function Lightbox({
   lightbox,
   onClose,
+  professionalId,
 }: {
-  lightbox: { src: string; mediaType: MediaType }
+  lightbox: { src: string; mediaType: MediaType; before: ReviewMediaBefore | null }
   onClose: () => void
+  /** null when the viewer is the pro looking at their own dashboard —
+   * exporting/sharing their own work signed with their own handle isn't
+   * this feature; that's the existing pro-side "Make a post" flow. */
+  professionalId: string | null
 }) {
   return (
     <div
@@ -756,9 +790,28 @@ function Lightbox({
           style={{
             padding: 10,
             display: 'flex',
-            justifyContent: 'flex-end',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
           }}
         >
+          {professionalId && lightbox.mediaType !== 'VIDEO' ? (
+            <ClientMediaExportButton
+              variant="pill"
+              professionalId={professionalId}
+              media={
+                lightbox.before
+                  ? {
+                      kind: 'pair',
+                      beforeUrl: lightbox.before.thumbUrl ?? lightbox.before.fullUrl ?? lightbox.src,
+                      afterUrl: lightbox.src,
+                    }
+                  : { kind: 'single', url: lightbox.src }
+              }
+            />
+          ) : (
+            <span />
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -783,11 +836,22 @@ function Lightbox({
 export default function ReviewsPanel({
   reviews,
   editable = false,
+  professionalId = null,
 }: {
   reviews: ReviewForPanel[]
   editable?: boolean
+  /** Who a client-exported copy of this review's media gets signed with, or
+   * `null` on the pro's own dashboard (see `ReviewsPanelInner`'s doc). */
+  professionalId?: string | null
 }) {
   const key = reviewListKey(reviews)
 
-  return <ReviewsPanelInner key={key} reviews={reviews} editable={editable} />
+  return (
+    <ReviewsPanelInner
+      key={key}
+      reviews={reviews}
+      editable={editable}
+      professionalId={professionalId}
+    />
+  )
 }

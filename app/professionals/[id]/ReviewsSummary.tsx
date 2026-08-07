@@ -6,12 +6,14 @@ import type {
 } from '@/lib/profiles/publicProfileMappers'
 
 type ReviewsSummaryProps = {
+  professionalId: string
   stats: PublicProfileStatsDto
   reviews: PublicReviewDto[]
   emptyMessage: string
 }
 
 export default function ReviewsSummary({
+  professionalId,
   stats,
   reviews,
   emptyMessage,
@@ -26,7 +28,7 @@ export default function ReviewsSummary({
         </div>
       ) : (
         <div className="brand-profile-card p-3 sm:p-4">
-          <ReviewsPanel reviews={reviews} />
+          <ReviewsPanel reviews={reviews} professionalId={professionalId} />
         </div>
       )}
     </section>
