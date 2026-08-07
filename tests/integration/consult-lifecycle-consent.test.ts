@@ -134,7 +134,7 @@ beforeAll(async () => {
       serviceId,
       proTenantId: tenantId,
       clientHomeTenantId: tenantId,
-      scheduledFor: new Date('2030-01-01T18:00:00.000Z'),
+      scheduledFor: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       status: BookingStatus.ACCEPTED,
       locationType: ServiceLocationType.SALON,
       locationId,
@@ -352,7 +352,7 @@ describe('AI consult lifecycle and legal foundation', () => {
 
     const revision = await appendConsultRevision({
       consultSessionId: sessionId,
-      kind: ConsultRevisionKind.INTAKE,
+      kind: ConsultRevisionKind.ANALYSIS,
       payload: { fixture: 'revision-one' },
       schemaVersion: 1,
       actor: actor(),
@@ -403,7 +403,7 @@ describe('AI consult lifecycle and legal foundation', () => {
     await expect(
       appendConsultRevision({
         consultSessionId: sessionId,
-        kind: ConsultRevisionKind.INTAKE,
+        kind: ConsultRevisionKind.ANALYSIS,
         payload: { forbidden: true },
         schemaVersion: 1,
         actor: actor(),

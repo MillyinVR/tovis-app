@@ -178,6 +178,31 @@ const HAIR_LENGTH_OPTIONS = [
   ['long', 'Long'],
 ] as const
 
+/** Approved color chips shared by boards, self-profile, and consult intake. */
+export const BOARD_CURRENT_COLOR_OPTIONS = [
+  ['blonde', 'Blonde'],
+  ['brunette', 'Brunette'],
+  ['black', 'Black'],
+  ['red', 'Red'],
+  ['gray', 'Gray / silver'],
+  ['other', 'Something else'],
+] as const
+
+export const BOARD_DREAM_COLOR_OPTIONS = [
+  ['blonde', 'Blonde'],
+  ['brunette', 'Brunette'],
+  ['black', 'Black'],
+  ['red', 'Red'],
+  ['fantasy', 'Fantasy / vivid'],
+  ['not-sure', 'Not sure yet'],
+] as const
+
+export const BOARD_CHANGE_SCALE_OPTIONS = [
+  ['subtle', 'Subtle'],
+  ['noticeable', 'Noticeable'],
+  ['total', 'Total transformation'],
+] as const
+
 /**
  * The 2–3 chip questions asked per board type (spec §7.3) — asked ONCE at
  * creation, always skippable, chips over free text. The date question for
@@ -256,28 +281,18 @@ export const BOARD_QUESTION_SETS: Record<
     ]),
   ],
   COLOR_TRANSFORMATION: [
-    question('current_color', 'Your current color?', [
-      ['blonde', 'Blonde'],
-      ['brunette', 'Brunette'],
-      ['black', 'Black'],
-      ['red', 'Red'],
-      ['gray', 'Gray / silver'],
-      ['other', 'Something else'],
-    ]),
-    question('dream_color', 'Your dream color?', [
-      ['blonde', 'Blonde'],
-      ['brunette', 'Brunette'],
-      ['black', 'Black'],
-      ['red', 'Red'],
-      ['fantasy', 'Fantasy / vivid'],
-      ['not-sure', 'Not sure yet'],
-    ]),
+    question(
+      'current_color',
+      'Your current color?',
+      BOARD_CURRENT_COLOR_OPTIONS,
+    ),
+    question('dream_color', 'Your dream color?', BOARD_DREAM_COLOR_OPTIONS),
     // Maps onto the commitment-tier idea (spec §5.3): subtle vs total change.
-    question('change_scale', 'How big a change are you after?', [
-      ['subtle', 'Subtle'],
-      ['noticeable', 'Noticeable'],
-      ['total', 'Total transformation'],
-    ]),
+    question(
+      'change_scale',
+      'How big a change are you after?',
+      BOARD_CHANGE_SCALE_OPTIONS,
+    ),
   ],
   NAILS: [
     question('length_preference', 'What length do you like?', [

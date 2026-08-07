@@ -6503,11 +6503,17 @@ model ConsultRevision {
   model         String?
   promptVersion String?
 
+  // Client intake retries pin a caller-owned key to the canonical request
+  // hash. Both are null for non-client/internal revision kinds.
+  idempotencyKey String? @db.VarChar(128)
+  requestHash    String? @db.Char(64)
+
   createdAt DateTime @default(now())
 
   auditEvents ConsultAuditEvent[]
 
   @@unique([consultSessionId, revision])
+  @@unique([consultSessionId, idempotencyKey])
   @@index([consultSessionId, createdAt])
 }
 

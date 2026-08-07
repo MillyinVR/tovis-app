@@ -25,6 +25,9 @@ const eslintConfig = defineConfig([
     "test-results/**",
     "blob-report/**",
     "artifacts/**",
+    // Local Claude sibling worktrees are already gitignored and may contain
+    // their own generated .next trees; never lint across checkout boundaries.
+    ".claude/**",
   ]),
 ]);
 

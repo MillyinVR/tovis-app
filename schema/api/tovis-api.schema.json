@@ -6547,7 +6547,13 @@
         "CONSULT_AGREEMENT_VERSION_MISMATCH",
         "CONSULT_INVALID_STATE",
         "CONSULT_ACCEPTANCE_ALREADY_REVOKED",
-        "CONSULT_INVALID_REQUEST"
+        "CONSULT_INVALID_REQUEST",
+        "CONSULT_PREREQUISITES_REQUIRED",
+        "CONSULT_PACK_VERSION_MISMATCH",
+        "CONSULT_SCHEMA_VERSION_MISMATCH",
+        "CONSULT_INVALID_ANSWERS",
+        "CONSULT_IDEMPOTENCY_CONFLICT",
+        "CONSULT_BOOKING_INELIGIBLE"
       ],
       "type": "string"
     },
@@ -6718,6 +6724,299 @@
         "title",
         "body",
         "publishedAt"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeAnswerMapDTO": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "ConsultIntakePrefillProvenanceDTO": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/ConsultIntakePrefillSourceDTO"
+        },
+        "sourceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "sourceId"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakePrefillSignalDTO": {
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/definitions/ConsultIntakePrefillSourceDTO"
+        }
+      },
+      "required": [
+        "source",
+        "available"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakePrefillSourceDTO": {
+      "enum": [
+        "SELF_PROFILE",
+        "BOARD",
+        "SAVED_LOOK",
+        "TASTE_VECTOR",
+        "BOOKING_HISTORY"
+      ],
+      "type": "string"
+    },
+    "ConsultIntakePrefillSuggestionDTO": {
+      "properties": {
+        "provenance": {
+          "items": {
+            "$ref": "#/definitions/ConsultIntakePrefillProvenanceDTO"
+          },
+          "type": "array"
+        },
+        "questionKey": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "questionKey",
+        "value",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeQuestionDTO": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "SINGLE_SELECT",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/definitions/ConsultIntakeQuestionOptionDTO"
+          },
+          "type": "array"
+        },
+        "requirement": {
+          "$ref": "#/definitions/ConsultIntakeQuestionRequirementDTO"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "kind",
+        "requirement",
+        "options"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeQuestionOptionDTO": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeQuestionPackDTO": {
+      "properties": {
+        "categorySlug": {
+          "const": "hair-color",
+          "type": "string"
+        },
+        "id": {
+          "const": "hair-color",
+          "type": "string"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/definitions/ConsultIntakeQuestionDTO"
+          },
+          "type": "array"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "categorySlug",
+        "version",
+        "schemaVersion",
+        "questions"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeQuestionRequirementDTO": {
+      "enum": [
+        "REQUIRED",
+        "SKIPPABLE"
+      ],
+      "type": "string"
+    },
+    "ConsultIntakeRevisionDTO": {
+      "properties": {
+        "answers": {
+          "$ref": "#/definitions/ConsultIntakeAnswerMapDTO"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "packId": {
+          "const": "hair-color",
+          "type": "string"
+        },
+        "packVersion": {
+          "type": "number"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "schemaVersion": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "packId",
+        "packVersion",
+        "schemaVersion",
+        "complete",
+        "answers",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeStateDTO": {
+      "properties": {
+        "consultId": {
+          "type": "string"
+        },
+        "latestRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultIntakeRevisionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prefillSignals": {
+          "items": {
+            "$ref": "#/definitions/ConsultIntakePrefillSignalDTO"
+          },
+          "type": "array"
+        },
+        "prefillSuggestions": {
+          "items": {
+            "$ref": "#/definitions/ConsultIntakePrefillSuggestionDTO"
+          },
+          "type": "array"
+        },
+        "questionPack": {
+          "$ref": "#/definitions/ConsultIntakeQuestionPackDTO"
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultSessionStatus"
+        }
+      },
+      "required": [
+        "consultId",
+        "status",
+        "questionPack",
+        "prefillSuggestions",
+        "prefillSignals",
+        "latestRevision"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeStateResponseDTO": {
+      "properties": {
+        "intake": {
+          "$ref": "#/definitions/ConsultIntakeStateDTO"
+        }
+      },
+      "required": [
+        "intake"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeSubmitRequestDTO": {
+      "properties": {
+        "answers": {
+          "$ref": "#/definitions/ConsultIntakeAnswerMapDTO"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "packVersion": {
+          "type": "number"
+        },
+        "schemaVersion": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "packVersion",
+        "schemaVersion",
+        "complete",
+        "answers"
+      ],
+      "type": "object"
+    },
+    "ConsultIntakeSubmitResponseDTO": {
+      "properties": {
+        "intake": {
+          "$ref": "#/definitions/ConsultIntakeStateDTO"
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "intake",
+        "replayed"
       ],
       "type": "object"
     },

@@ -59,6 +59,33 @@ export async function requirePublishedConsultAgreementVersions(
   return required
 }
 
+/**
+ * Proves both active acceptances point to the exact versions currently
+ * required. Shared by every sensitive read/write boundary so a publication
+ * cannot leave one route accepting stale evidence.
+ */
+export async function requireCurrentConsultAgreementAcceptances(
+  tx: Prisma.TransactionClient,
+  consultSessionId: string,
+): Promise<void> {
+  const required = await requirePublishedConsultAgreementVersions(tx)
+  const active = await tx.consultAgreementAcceptance.findMany({
+    where: { consultSessionId, revokedAt: null },
+    select: { kind: true, agreementVersionId: true },
+  })
+  const current = new Map(
+    active.map((acceptance) => [acceptance.kind, acceptance.agreementVersionId]),
+  )
+  for (const kind of CONSULT_REQUIRED_AGREEMENT_KINDS) {
+    if (current.get(kind) !== required.get(kind)?.id) {
+      throw new ConsultWriteError(
+        'AGREEMENTS_REQUIRED',
+        'Current consent and 18+ attestation are required.',
+      )
+    }
+  }
+}
+
 type OwnedPilotConsult = {
   id: string
 }
