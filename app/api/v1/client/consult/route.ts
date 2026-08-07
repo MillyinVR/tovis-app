@@ -14,7 +14,10 @@
 import { jsonFail, jsonOk, pickNonEmptyString, requireClient } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { requireClientBookingOwnership } from '@/app/api/_utils/auth/requireClientBookingOwnership'
-import { isAiConsultEnabledForPro } from '@/lib/consult/access'
+import {
+  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
+  evaluateAiConsultBookingEligibility,
+} from '@/lib/consult/eligibility'
 import { toConsultSessionDTO } from '@/lib/consult/mapConsultSession'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
@@ -36,15 +39,20 @@ export async function POST(req: Request) {
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      select: {
-        professionalId: true,
-        service: { select: { categoryId: true } },
-      },
+      select: AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
     })
     if (!booking) return jsonFail(404, 'Booking not found.')
 
-    if (!isAiConsultEnabledForPro(booking.professionalId)) {
+    const eligibility = evaluateAiConsultBookingEligibility(booking)
+    if (!eligibility.eligible && eligibility.hidden) {
       return jsonFail(404, 'Not found.')
+    }
+    if (!eligibility.eligible) {
+      return jsonFail(
+        409,
+        'AI consultation is not available for this booking.',
+        { code: eligibility.reason },
+      )
     }
 
     const session = await prisma.consultSession.upsert({
