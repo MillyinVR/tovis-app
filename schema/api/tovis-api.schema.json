@@ -98,6 +98,13 @@
       ],
       "type": "string"
     },
+    "$Enums.ConsultAgreementKind": {
+      "enum": [
+        "SENSITIVE_DATA_CONSENT",
+        "ADULT_18_PLUS_ATTESTATION"
+      ],
+      "type": "string"
+    },
     "$Enums.ConsultSessionStatus": {
       "enum": [
         "CONSENT_REQUIRED",
@@ -6477,6 +6484,240 @@
         "description",
         "tone",
         "significant"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementAcceptRequestDTO": {
+      "properties": {
+        "agreementVersionId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ConsultAgreementKind"
+        }
+      },
+      "required": [
+        "kind",
+        "agreementVersionId"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementAcceptResponseDTO": {
+      "properties": {
+        "agreementState": {
+          "$ref": "#/definitions/ConsultAgreementStateDTO"
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "agreementState",
+        "replayed"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementAcceptanceDTO": {
+      "properties": {
+        "acceptedAt": {
+          "type": "string"
+        },
+        "agreementVersionId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "agreementVersionId",
+        "version",
+        "acceptedAt"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementErrorCode": {
+      "enum": [
+        "CONSULT_NOT_FOUND",
+        "CONSULT_AGREEMENTS_UNAVAILABLE",
+        "CONSULT_AGREEMENT_VERSION_MISMATCH",
+        "CONSULT_INVALID_STATE",
+        "CONSULT_ACCEPTANCE_ALREADY_REVOKED",
+        "CONSULT_INVALID_REQUEST"
+      ],
+      "type": "string"
+    },
+    "ConsultAgreementErrorDTO": {
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ConsultAgreementErrorCode"
+        },
+        "error": {
+          "type": "string"
+        },
+        "ok": {
+          "const": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "error",
+        "code"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementKind": {
+      "$ref": "#/definitions/%24Enums.ConsultAgreementKind"
+    },
+    "ConsultAgreementRequirementDTO": {
+      "properties": {
+        "currentAcceptance": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultAgreementAcceptanceDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/ConsultAgreementKind"
+        },
+        "latestRevocation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultAgreementRevocationDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredVersion": {
+          "$ref": "#/definitions/ConsultAgreementVersionDTO"
+        }
+      },
+      "required": [
+        "kind",
+        "requiredVersion",
+        "currentAcceptance",
+        "latestRevocation"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementRevocationDTO": {
+      "properties": {
+        "acceptanceId": {
+          "type": "string"
+        },
+        "acceptedAt": {
+          "type": "string"
+        },
+        "agreementVersionId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revokedAt": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "acceptanceId",
+        "agreementVersionId",
+        "version",
+        "acceptedAt",
+        "revokedAt",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementRevokeRequestDTO": {
+      "properties": {
+        "acceptanceId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "acceptanceId",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementStateDTO": {
+      "properties": {
+        "consultId": {
+          "type": "string"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/definitions/ConsultAgreementRequirementDTO"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultSessionStatus"
+        }
+      },
+      "required": [
+        "consultId",
+        "status",
+        "requirements"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementStateResponseDTO": {
+      "properties": {
+        "agreementState": {
+          "$ref": "#/definitions/ConsultAgreementStateDTO"
+        }
+      },
+      "required": [
+        "agreementState"
+      ],
+      "type": "object"
+    },
+    "ConsultAgreementVersionDTO": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ConsultAgreementKind"
+        },
+        "publishedAt": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "version",
+        "title",
+        "body",
+        "publishedAt"
       ],
       "type": "object"
     },
