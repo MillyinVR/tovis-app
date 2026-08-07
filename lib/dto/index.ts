@@ -551,7 +551,20 @@ export type {
   LooksProProfilePreviewDto,
 } from '@/lib/looks/types'
 
-// ── AI Consult (POST/GET /api/v1/client/consult) ──────────────────────────────
-// Phase 0, C1 (docs/design/ai-consult.md): schema + route skeleton only. See
-// lib/dto/consult.ts for why this DTO is identity/status-only for now.
-export type { ConsultSessionDTO } from '@/lib/dto/consult'
+// ── AI Consult (client consult + agreement prerequisite routes) ──────────────
+// Phase 0 exposes the non-sensitive session shell and exact-version legal gate
+// only. Intake, media, analysis, and brows remain outside this contract.
+export type {
+  ConsultSessionDTO,
+  ConsultAgreementVersionDTO,
+  ConsultAgreementAcceptanceDTO,
+  ConsultAgreementRevocationDTO,
+  ConsultAgreementRequirementDTO,
+  ConsultAgreementStateDTO,
+  ConsultAgreementAcceptRequestDTO,
+  ConsultAgreementRevokeRequestDTO,
+  ConsultAgreementStateResponseDTO,
+  ConsultAgreementAcceptResponseDTO,
+  ConsultAgreementErrorCode,
+  ConsultAgreementErrorDTO,
+} from '@/lib/dto/consult'

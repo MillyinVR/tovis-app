@@ -9,6 +9,9 @@ import {
 
 import { prisma } from '@/lib/prisma'
 
+import { requirePublishedConsultAgreementVersions } from './agreementContract'
+import { ConsultWriteError } from './errors'
+
 type ClientActor = {
   readonly type: typeof ConsultActorType.CLIENT
   readonly id: string
@@ -19,23 +22,7 @@ type ConsultActor = {
   readonly id: string | null
 }
 
-export type ConsultWriteErrorCode =
-  | 'NOT_FOUND'
-  | 'NOT_OWNER'
-  | 'INVALID_STATE'
-  | 'AGREEMENT_KIND_MISMATCH'
-  | 'AGREEMENTS_REQUIRED'
-  | 'ALREADY_REVOKED'
-
-export class ConsultWriteError extends Error {
-  constructor(
-    readonly code: ConsultWriteErrorCode,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'ConsultWriteError'
-  }
-}
+export { ConsultWriteError } from './errors'
 
 const ACTIVE_CONTENT_STATES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.INTAKE_READY,
@@ -180,18 +167,35 @@ export async function acceptConsultAgreement(args: {
       )
     }
 
-    const version = await tx.consultAgreementVersion.findUnique({
-      where: { id: args.agreementVersionId },
-      select: { kind: true },
-    })
-    if (!version) {
-      throw new ConsultWriteError('NOT_FOUND', 'Agreement version not found.')
-    }
-    if (version.kind !== args.expectedKind) {
+    const requiredVersions = await requirePublishedConsultAgreementVersions(tx)
+    const requiredVersion = requiredVersions.get(args.expectedKind)
+    if (!requiredVersion || requiredVersion.id !== args.agreementVersionId) {
       throw new ConsultWriteError(
-        'AGREEMENT_KIND_MISMATCH',
-        'Agreement kind does not match the selected version.',
+        'AGREEMENT_VERSION_MISMATCH',
+        'Agreement version does not match the current required version.',
       )
+    }
+
+    const activeAcceptance =
+      await tx.consultAgreementAcceptance.findFirst({
+        where: {
+          consultSessionId: args.consultSessionId,
+          kind: args.expectedKind,
+          revokedAt: null,
+        },
+      })
+    if (activeAcceptance) {
+      if (activeAcceptance.agreementVersionId !== args.agreementVersionId) {
+        throw new ConsultWriteError(
+          'INVALID_STATE',
+          'A different agreement version is already active.',
+        )
+      }
+      return {
+        acceptance: activeAcceptance,
+        status: session.status,
+        replayed: true,
+      }
     }
 
     let currentStatus = session.status
@@ -245,7 +249,7 @@ export async function acceptConsultAgreement(args: {
       })
     }
 
-    return { acceptance, status }
+    return { acceptance, status, replayed: false }
   })
 }
 
@@ -258,10 +262,10 @@ export async function revokeConsultAgreement(args: {
   revokedAt?: Date
 }) {
   const reason = args.reason.trim()
-  if (!reason) {
+  if (!reason || reason.length > 500) {
     throw new ConsultWriteError(
-      'INVALID_STATE',
-      'A revocation reason is required.',
+      'INVALID_REQUEST',
+      'A revocation reason between 1 and 500 characters is required.',
     )
   }
 
