@@ -44,7 +44,7 @@ export const RISK_LABEL: Record<ExpenseRiskLevel, string> = {
 //   - Tools & Equipment → line 22 (Supplies) as a de-minimis expense; larger
 //     purchases may be depreciation / §179 (line 13).
 //   - Home Office → line 30 via Form 8829 (not a simple line total).
-//   - Clothing / Appearance → generally NOT deductible (line: null).
+//   - Uniforms & Protective Wear → generally NOT deductible (line: null).
 export type ScheduleCLine = { line: string | null; label: string }
 
 export const SCHEDULE_C_LINE: Record<ExpenseCategory, ScheduleCLine> = {
@@ -147,11 +147,11 @@ export const EXPENSE_CATEGORIES: readonly ExpenseCategoryConfig[] = [
   },
   {
     id: 'CLOTHING_APPEARANCE',
-    label: 'Clothing / Appearance',
+    label: 'Uniforms & Protective Wear',
     risk: 'red',
     riskLabel: RISK_LABEL.red,
     tooltip:
-      "Generally NOT deductible. Nails, hair, haircuts, and clothing you can wear outside work don’t qualify (Hynes v. Commissioner). Exception: a branded apron or uniform that can’t be worn outside work. When in doubt, ask your CPA.",
+      "Everyday clothing usually isn’t tax-deductible, even if you only wear it for work (Hynes v. Commissioner) — nails and haircuts don’t qualify either. Only uniforms, protective gear, or items unsuitable for everyday/street wear typically qualify, like a branded apron you can’t wear outside work. Confirm with a tax professional.",
     examples: ['Branded aprons/uniforms only — not grooming or regular clothes'],
   },
   {
