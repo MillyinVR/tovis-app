@@ -239,6 +239,11 @@ async function runLiveAnonymizeDelete(args: {
 }): Promise<DeleteUserDataResult> {
   const mode: PrivacyDeleteMode = 'ANONYMIZE'
 
+  const { purgeUserConsultRawObjects } = await import(
+    '@/lib/consult/capturePurge'
+  )
+  await purgeUserConsultRawObjects({ db: prisma, userId: args.targetUserId })
+
   return prisma.$transaction(async (tx) => {
     const result = await deleteUserData({
       db: tx,

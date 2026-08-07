@@ -251,7 +251,13 @@ export async function expireStaleUploadSessions(
   now: Date,
 ): Promise<number> {
   const result = await db.uploadSession.updateMany({
-    where: { status: UploadSessionStatus.PENDING, expiresAt: { lte: now } },
+    // CLIENT_CONSULT expiry is coupled to verified raw-object deletion. Its
+    // dedicated sweep marks EXPIRED only after storage confirms absence.
+    where: {
+      status: UploadSessionStatus.PENDING,
+      surface: { not: UploadSurface.CLIENT_CONSULT },
+      expiresAt: { lte: now },
+    },
     data: { status: UploadSessionStatus.EXPIRED },
   })
 

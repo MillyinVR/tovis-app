@@ -490,6 +490,10 @@ export async function executeDueAccountDeletions(args: {
     }
 
     try {
+      const { purgeUserConsultRawObjects } = await import(
+        '@/lib/consult/capturePurge'
+      )
+      await purgeUserConsultRawObjects({ db: args.db, userId: request.userId, now })
       await args.db.$transaction(async (tx) => {
         const result = await deleteUserData({
           db: tx,

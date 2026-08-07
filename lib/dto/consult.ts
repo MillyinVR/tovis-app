@@ -168,6 +168,125 @@ export type ConsultIntakeSubmitResponseDTO = ConsultIntakeStateResponseDTO & {
   replayed: boolean
 }
 
+export type ConsultCaptureShotKeyDTO =
+  | 'hair_back'
+  | 'hair_left'
+  | 'hair_right'
+  | 'hair_crown'
+
+export type ConsultCaptureShotDTO = {
+  key: ConsultCaptureShotKeyDTO
+  title: string
+  instruction: string
+  requirement: 'REQUIRED'
+}
+
+export type ConsultCaptureShotPackDTO = {
+  id: 'hair-color-daylight'
+  categorySlug: 'hair-color'
+  version: number
+  schemaVersion: number
+  shots: readonly ConsultCaptureShotDTO[]
+}
+
+export type ConsultCaptureQualityReasonCodeDTO =
+  | 'PASS'
+  | 'WARM_INDOOR_LIGHT'
+  | 'COLOR_CAST'
+  | 'VIEW_MISMATCH'
+  | 'HAIR_NOT_VISIBLE'
+  | 'BLURRY'
+  | 'TOO_DARK'
+  | 'TOO_BRIGHT'
+  | 'OTHER_QUALITY_FAILURE'
+
+export type ConsultCaptureSlotStateDTO = {
+  shotKey: ConsultCaptureShotKeyDTO
+  state: 'EMPTY' | 'UPLOADED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'PURGED'
+  captureId: string | null
+  qualityReasonCode: ConsultCaptureQualityReasonCodeDTO | null
+  retakeTip: string | null
+  rawExpiresAt: string | null
+  purgedAt: string | null
+}
+
+export type ConsultCaptureStateDTO = {
+  consultId: string
+  status: ConsultSessionStatus
+  shotPack: ConsultCaptureShotPackDTO
+  slots: ConsultCaptureSlotStateDTO[]
+}
+
+export type ConsultCaptureStateResponseDTO = {
+  capture: ConsultCaptureStateDTO
+}
+
+export type ConsultCaptureIssueUploadRequestDTO = {
+  idempotencyKey: string
+  shotKey: ConsultCaptureShotKeyDTO
+  shotPackVersion: number
+  schemaVersion: number
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp'
+  sizeBytes: number
+  checksumSha256?: string
+}
+
+export type ConsultCaptureUploadDTO = {
+  uploadSessionId: string
+  shotKey: ConsultCaptureShotKeyDTO
+  shotPackVersion: number
+  schemaVersion: number
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp'
+  maxBytes: number
+  expiresAt: string
+  rawExpiresAt: string
+  token: string
+  signedUrl: string | null
+}
+
+export type ConsultCaptureIssueUploadResponseDTO = {
+  upload: ConsultCaptureUploadDTO
+  replayed: boolean
+}
+
+export type ConsultCaptureAttachRequestDTO = {
+  idempotencyKey: string
+  uploadSessionId: string
+  shotKey: ConsultCaptureShotKeyDTO
+  shotPackVersion: number
+  schemaVersion: number
+}
+
+export type ConsultCaptureAttachResponseDTO = {
+  capture: ConsultCaptureStateDTO
+  captureId: string
+  replayed: boolean
+}
+
+export type ConsultCaptureQualityRequestDTO = {
+  idempotencyKey: string
+  shotPackVersion: number
+  schemaVersion: number
+}
+
+export type ConsultCaptureQualityResultDTO = {
+  captureId: string
+  accepted: boolean
+  reasonCode: ConsultCaptureQualityReasonCodeDTO
+  retakeTip: string | null
+  checkedAt: string
+}
+
+export type ConsultCaptureQualityResponseDTO = {
+  quality: ConsultCaptureQualityResultDTO
+  capture: ConsultCaptureStateDTO
+  replayed: boolean
+}
+
+export type ConsultCaptureDeleteResponseDTO = {
+  deleted: true
+}
+
 export type ConsultAgreementErrorCode =
   | 'CONSULT_NOT_FOUND'
   | 'CONSULT_AGREEMENTS_UNAVAILABLE'
@@ -181,6 +300,15 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_INVALID_ANSWERS'
   | 'CONSULT_IDEMPOTENCY_CONFLICT'
   | 'CONSULT_BOOKING_INELIGIBLE'
+  | 'CONSULT_CAPTURE_PACK_VERSION_MISMATCH'
+  | 'CONSULT_CAPTURE_SCHEMA_VERSION_MISMATCH'
+  | 'CONSULT_CAPTURE_INVALID_SLOT'
+  | 'CONSULT_CAPTURE_UPLOAD_EXPIRED'
+  | 'CONSULT_CAPTURE_UPLOAD_MISMATCH'
+  | 'CONSULT_CAPTURE_OBJECT_INVALID'
+  | 'CONSULT_CAPTURE_QUALITY_UNAVAILABLE'
+  | 'CONSULT_CAPTURE_QUALITY_FAILED'
+  | 'CONSULT_CAPTURE_STORAGE_UNAVAILABLE'
 
 export type ConsultAgreementErrorDTO = {
   ok: false

@@ -6553,7 +6553,16 @@
         "CONSULT_SCHEMA_VERSION_MISMATCH",
         "CONSULT_INVALID_ANSWERS",
         "CONSULT_IDEMPOTENCY_CONFLICT",
-        "CONSULT_BOOKING_INELIGIBLE"
+        "CONSULT_BOOKING_INELIGIBLE",
+        "CONSULT_CAPTURE_PACK_VERSION_MISMATCH",
+        "CONSULT_CAPTURE_SCHEMA_VERSION_MISMATCH",
+        "CONSULT_CAPTURE_INVALID_SLOT",
+        "CONSULT_CAPTURE_UPLOAD_EXPIRED",
+        "CONSULT_CAPTURE_UPLOAD_MISMATCH",
+        "CONSULT_CAPTURE_OBJECT_INVALID",
+        "CONSULT_CAPTURE_QUALITY_UNAVAILABLE",
+        "CONSULT_CAPTURE_QUALITY_FAILED",
+        "CONSULT_CAPTURE_STORAGE_UNAVAILABLE"
       ],
       "type": "string"
     },
@@ -6724,6 +6733,419 @@
         "title",
         "body",
         "publishedAt"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureAttachRequestDTO": {
+      "properties": {
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "shotKey": {
+          "$ref": "#/definitions/ConsultCaptureShotKeyDTO"
+        },
+        "shotPackVersion": {
+          "type": "number"
+        },
+        "uploadSessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "uploadSessionId",
+        "shotKey",
+        "shotPackVersion",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureAttachResponseDTO": {
+      "properties": {
+        "capture": {
+          "$ref": "#/definitions/ConsultCaptureStateDTO"
+        },
+        "captureId": {
+          "type": "string"
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "capture",
+        "captureId",
+        "replayed"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureDeleteResponseDTO": {
+      "properties": {
+        "deleted": {
+          "const": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleted"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureIssueUploadRequestDTO": {
+      "properties": {
+        "checksumSha256": {
+          "type": "string"
+        },
+        "contentType": {
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "shotKey": {
+          "$ref": "#/definitions/ConsultCaptureShotKeyDTO"
+        },
+        "shotPackVersion": {
+          "type": "number"
+        },
+        "sizeBytes": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "shotKey",
+        "shotPackVersion",
+        "schemaVersion",
+        "contentType",
+        "sizeBytes"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureIssueUploadResponseDTO": {
+      "properties": {
+        "replayed": {
+          "type": "boolean"
+        },
+        "upload": {
+          "$ref": "#/definitions/ConsultCaptureUploadDTO"
+        }
+      },
+      "required": [
+        "upload",
+        "replayed"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureQualityReasonCodeDTO": {
+      "enum": [
+        "PASS",
+        "WARM_INDOOR_LIGHT",
+        "COLOR_CAST",
+        "VIEW_MISMATCH",
+        "HAIR_NOT_VISIBLE",
+        "BLURRY",
+        "TOO_DARK",
+        "TOO_BRIGHT",
+        "OTHER_QUALITY_FAILURE"
+      ],
+      "type": "string"
+    },
+    "ConsultCaptureQualityRequestDTO": {
+      "properties": {
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "shotPackVersion": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "shotPackVersion",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureQualityResponseDTO": {
+      "properties": {
+        "capture": {
+          "$ref": "#/definitions/ConsultCaptureStateDTO"
+        },
+        "quality": {
+          "$ref": "#/definitions/ConsultCaptureQualityResultDTO"
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "quality",
+        "capture",
+        "replayed"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureQualityResultDTO": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "captureId": {
+          "type": "string"
+        },
+        "checkedAt": {
+          "type": "string"
+        },
+        "reasonCode": {
+          "$ref": "#/definitions/ConsultCaptureQualityReasonCodeDTO"
+        },
+        "retakeTip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "captureId",
+        "accepted",
+        "reasonCode",
+        "retakeTip",
+        "checkedAt"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureShotDTO": {
+      "properties": {
+        "instruction": {
+          "type": "string"
+        },
+        "key": {
+          "$ref": "#/definitions/ConsultCaptureShotKeyDTO"
+        },
+        "requirement": {
+          "const": "REQUIRED",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "title",
+        "instruction",
+        "requirement"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureShotKeyDTO": {
+      "enum": [
+        "hair_back",
+        "hair_left",
+        "hair_right",
+        "hair_crown"
+      ],
+      "type": "string"
+    },
+    "ConsultCaptureShotPackDTO": {
+      "properties": {
+        "categorySlug": {
+          "const": "hair-color",
+          "type": "string"
+        },
+        "id": {
+          "const": "hair-color-daylight",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "shots": {
+          "items": {
+            "$ref": "#/definitions/ConsultCaptureShotDTO"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "categorySlug",
+        "version",
+        "schemaVersion",
+        "shots"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureSlotStateDTO": {
+      "properties": {
+        "captureId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "purgedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "qualityReasonCode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultCaptureQualityReasonCodeDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retakeTip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shotKey": {
+          "$ref": "#/definitions/ConsultCaptureShotKeyDTO"
+        },
+        "state": {
+          "enum": [
+            "EMPTY",
+            "UPLOADED",
+            "ACCEPTED",
+            "REJECTED",
+            "EXPIRED",
+            "PURGED"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "shotKey",
+        "state",
+        "captureId",
+        "qualityReasonCode",
+        "retakeTip",
+        "rawExpiresAt",
+        "purgedAt"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureStateDTO": {
+      "properties": {
+        "consultId": {
+          "type": "string"
+        },
+        "shotPack": {
+          "$ref": "#/definitions/ConsultCaptureShotPackDTO"
+        },
+        "slots": {
+          "items": {
+            "$ref": "#/definitions/ConsultCaptureSlotStateDTO"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultSessionStatus"
+        }
+      },
+      "required": [
+        "consultId",
+        "status",
+        "shotPack",
+        "slots"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureStateResponseDTO": {
+      "properties": {
+        "capture": {
+          "$ref": "#/definitions/ConsultCaptureStateDTO"
+        }
+      },
+      "required": [
+        "capture"
+      ],
+      "type": "object"
+    },
+    "ConsultCaptureUploadDTO": {
+      "properties": {
+        "contentType": {
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "maxBytes": {
+          "type": "number"
+        },
+        "rawExpiresAt": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "shotKey": {
+          "$ref": "#/definitions/ConsultCaptureShotKeyDTO"
+        },
+        "shotPackVersion": {
+          "type": "number"
+        },
+        "signedUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token": {
+          "type": "string"
+        },
+        "uploadSessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "uploadSessionId",
+        "shotKey",
+        "shotPackVersion",
+        "schemaVersion",
+        "contentType",
+        "maxBytes",
+        "expiresAt",
+        "rawExpiresAt",
+        "token",
+        "signedUrl"
       ],
       "type": "object"
     },

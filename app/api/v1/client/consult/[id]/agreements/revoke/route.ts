@@ -16,6 +16,7 @@ import {
   loadConsultAgreementState,
 } from '@/lib/consult/agreementContract'
 import { revokeConsultAgreement } from '@/lib/consult/writeBoundary'
+import { purgeConsultSessionRawObjects } from '@/lib/consult/capturePurge'
 import type { ConsultAgreementStateResponseDTO } from '@/lib/dto/consult'
 import { safeError } from '@/lib/security/logging'
 
@@ -53,6 +54,10 @@ export async function POST(req: Request, ctx: RouteContext) {
       reason,
       actor: { type: ConsultActorType.CLIENT, id: auth.user.id },
     })
+    // Revocation's DB trigger stamps every raw object purge-eligible in the
+    // same transaction. Attempt deletion before responding; individual
+    // storage failures remain retriable through the cleanup job.
+    await purgeConsultSessionRawObjects(session.id)
     const agreementState = await loadConsultAgreementState(session.id)
     return jsonOk<ConsultAgreementStateResponseDTO>({ agreementState })
   } catch (error: unknown) {

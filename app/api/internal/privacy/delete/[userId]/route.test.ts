@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   },
   prisma: {
     $transaction: vi.fn(),
+    clientProfile: {
+      findUnique: vi.fn(),
+    },
   },
 }))
 
@@ -199,6 +202,8 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     mocks.writeAdminAuditLog.mockResolvedValue({
       id: 'audit_1',
     })
+
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
 
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (tx: typeof mocks.tx) => Promise<unknown>) =>

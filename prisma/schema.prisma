@@ -4951,9 +4951,9 @@ enum UploadSurface {
   // shot has no booking and no service anchor, so it is deliberately not a
   // MediaAsset until the pro attaches it to one.
   PRO_PRACTICE
-  // Reserved by C1 but intentionally unwired. Any future consult uploader must
-  // first require active consent + 18+, use expiring private storage, and prove
-  // raw-object purge. This enum value alone authorizes no capture/persistence.
+  // C3 hair-color capture only: active current consent + 18+, opaque expiring
+  // private storage, exact consult/booking/category/slot/version binding, and
+  // verified raw-object purge. It never produces a MediaAsset.
   CLIENT_CONSULT
 }
 
@@ -4977,6 +4977,18 @@ model UploadSession {
   bookingId      String?
   phase          MediaPhase?
 
+  // Consult-only binding. CLIENT_CONSULT sessions must populate every field;
+  // other upload surfaces must leave them null. They are immutable snapshots
+  // used by attachment validation and verified cleanup.
+  consultSessionId     String?
+  consultSession       ConsultSession? @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  serviceCategoryId    String?
+  consultShotKey       String? @db.VarChar(64)
+  shotPackVersion      Int?
+  captureSchemaVersion Int?
+  idempotencyKey       String? @db.VarChar(128)
+  requestHash          String? @db.Char(64)
+
   // Authoritative storage pointer minted by the signing route. NEVER supplied by
   // the client on attach — the attach route reads it back from here.
   storageBucket  String
@@ -4986,18 +4998,25 @@ model UploadSession {
   checksumSha256 String?
 
   // Lifecycle.
-  expiresAt    DateTime
-  consumedAt   DateTime?
-  mediaAssetId String?
+  expiresAt       DateTime
+  rawExpiresAt    DateTime?
+  purgeEligibleAt DateTime?
+  purgedAt        DateTime?
+  consumedAt      DateTime?
+  mediaAssetId    String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  consultCapture ConsultCapture?
+
   @@unique([storageBucket, storagePath])
+  @@unique([consultSessionId, idempotencyKey])
   @@index([status, expiresAt])
   @@index([professionalId])
   @@index([clientId])
   @@index([bookingId])
+  @@index([surface, purgedAt, purgeEligibleAt, expiresAt])
 }
 
 // A shot the pro took OUTSIDE a session — the standalone camera behind the pro
@@ -6431,6 +6450,17 @@ enum ConsultAuditAction {
   AGREEMENT_REVOKED
   LIFECYCLE_TRANSITIONED
   REVISION_CREATED
+  CAPTURE_UPLOAD_ISSUED
+  CAPTURE_ATTACHED
+  CAPTURE_QUALITY_CHECKED
+  CAPTURE_DELETED
+  RAW_OBJECT_PURGED
+}
+
+enum ConsultCaptureStatus {
+  ATTACHED
+  ACCEPTED
+  REJECTED
 }
 
 /// A client's pre-visit AI consult (ai-consult.md). Phase 0 is booking-attached
@@ -6476,6 +6506,8 @@ model ConsultSession {
   revisions            ConsultRevision[]
   agreementAcceptances ConsultAgreementAcceptance[]
   auditEvents          ConsultAuditEvent[]
+  captures             ConsultCapture[]
+  uploadSessions       UploadSession[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -6483,6 +6515,57 @@ model ConsultSession {
   @@index([clientId, createdAt])
   @@index([professionalId, status])
   @@index([serviceCategoryId])
+}
+
+/// Ephemeral raw-photo processing state for one hair-color shot. The storage
+/// pointer exists only while processing is permitted and is nulled only after
+/// the private object is confirmed absent. Quality metadata is bounded and
+/// content-free; image bytes never enter PostgreSQL.
+model ConsultCapture {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  uploadSessionId String        @unique
+  uploadSession   UploadSession @relation(fields: [uploadSessionId], references: [id], onDelete: Cascade)
+  shotKey         String        @db.VarChar(64)
+  shotPackVersion Int
+  schemaVersion   Int
+
+  storageBucket  String?
+  storagePath    String?
+  contentType    String  @db.VarChar(64)
+  sizeBytes      Int
+  checksumSha256 String? @db.Char(64)
+
+  status ConsultCaptureStatus @default(ATTACHED)
+
+  qualityReasonCode    String?   @db.VarChar(64)
+  retakeTip            String?   @db.VarChar(160)
+  qualitySchemaVersion Int?
+  qualityPromptVersion String?   @db.VarChar(64)
+  qualityModel         String?   @db.VarChar(128)
+  qualityCheckedAt     DateTime?
+
+  attachIdempotencyKey  String  @db.VarChar(128)
+  attachRequestHash     String  @db.Char(64)
+  qualityIdempotencyKey String? @db.VarChar(128)
+  qualityRequestHash    String? @db.Char(64)
+
+  rawExpiresAt     DateTime
+  purgeEligibleAt  DateTime?
+  purgeRequestedAt DateTime?
+  purgedAt         DateTime?
+
+  auditEvents ConsultAuditEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([consultSessionId, attachIdempotencyKey])
+  @@index([consultSessionId, shotKey, createdAt])
+  @@index([purgedAt, purgeEligibleAt, rawExpiresAt])
 }
 
 /// One immutable payload revision. The session row never contains mutable
@@ -6589,9 +6672,14 @@ model ConsultAuditEvent {
   revisionId String?
   revision   ConsultRevision? @relation(fields: [revisionId], references: [id], onDelete: Cascade)
 
+  captureId String?
+  capture   ConsultCapture? @relation(fields: [captureId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
 
+  @@unique([captureId, action])
   @@index([consultSessionId, createdAt])
   @@index([agreementAcceptanceId])
   @@index([revisionId])
+  @@index([captureId])
 }

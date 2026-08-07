@@ -1048,11 +1048,11 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
     expect(rls.every((row) => row.relrowsecurity)).toBe(true)
   })
 
-  it('rejects intake reads and writes in later lifecycle states', async () => {
+  it('rejects intake reads and writes outside the intake lifecycle states', async () => {
     await transitionConsultSession({
       consultSessionId: sessionId,
       fromStatus: ConsultSessionStatus.MEDIA_READY,
-      toStatus: ConsultSessionStatus.ANALYSIS_PENDING,
+      toStatus: ConsultSessionStatus.CANCELLED,
       actor: { type: ConsultActorType.CLIENT, id: ownerUserId },
     })
 

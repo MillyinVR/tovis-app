@@ -193,7 +193,12 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
   ConsultSession: {
     status: 'DELETE',
     reason:
-      "The client's own booking-attached AI consult. Deleting it cascades the transitive ConsultRevision, ConsultAgreementAcceptance and ConsultAuditEvent family. Raw consult media has no durable table. No other party's record — booking/professional are pointers only.",
+      "The client's own booking-attached AI consult. Deleting it cascades revisions, legal evidence, bounded capture metadata and audits after raw storage objects are verified absent. No other party's record — booking/professional are pointers only.",
+  },
+  ConsultCapture: {
+    status: 'DELETE',
+    reason:
+      'Ephemeral consult capture metadata. Provider bytes are purged before the owning consult can be deleted.',
   },
   LookPost: {
     status: 'DELETE',

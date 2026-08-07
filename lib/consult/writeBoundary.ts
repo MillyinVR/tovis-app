@@ -175,7 +175,7 @@ async function appendLifecycleAudit(
   })
 }
 
-async function transitionLockedSession(
+export async function transitionLockedConsultSession(
   tx: Prisma.TransactionClient,
   args: {
     consultSessionId: string
@@ -259,7 +259,7 @@ export async function acceptConsultAgreement(args: {
 
     let currentStatus = session.status
     if (currentStatus === ConsultSessionStatus.CONSENT_REVOKED) {
-      await transitionLockedSession(tx, {
+      await transitionLockedConsultSession(tx, {
         consultSessionId: args.consultSessionId,
         actor: args.actor,
         fromStatus: currentStatus,
@@ -300,7 +300,7 @@ export async function acceptConsultAgreement(args: {
     let status: ConsultSessionStatus = currentStatus
     if (hasBothRequiredAgreements(activeKinds)) {
       status = ConsultSessionStatus.INTAKE_READY
-      await transitionLockedSession(tx, {
+      await transitionLockedConsultSession(tx, {
         consultSessionId: args.consultSessionId,
         actor: args.actor,
         fromStatus: currentStatus,
@@ -375,7 +375,7 @@ export async function revokeConsultAgreement(args: {
     let status = session.status
     if (REVOCABLE_STATES.has(session.status)) {
       status = ConsultSessionStatus.CONSENT_REVOKED
-      await transitionLockedSession(tx, {
+      await transitionLockedConsultSession(tx, {
         consultSessionId: args.consultSessionId,
         actor: args.actor,
         fromStatus: session.status,
@@ -400,7 +400,7 @@ export async function transitionConsultSession(args: {
 }) {
   return prisma.$transaction(async (tx) => {
     await lockSession(tx, args.consultSessionId)
-    await transitionLockedSession(tx, args)
+    await transitionLockedConsultSession(tx, args)
     return tx.consultSession.findUniqueOrThrow({
       where: { id: args.consultSessionId },
     })
@@ -593,7 +593,7 @@ export async function appendHairColorIntakeRevision(args: {
 
     let status = session.status
     if (status === ConsultSessionStatus.INTAKE_READY) {
-      await transitionLockedSession(tx, {
+      await transitionLockedConsultSession(tx, {
         consultSessionId: args.consultSessionId,
         actor: args.actor,
         fromStatus: status,
@@ -635,7 +635,7 @@ export async function appendHairColorIntakeRevision(args: {
     })
 
     if (input.complete && status === ConsultSessionStatus.INTAKE_IN_PROGRESS) {
-      await transitionLockedSession(tx, {
+      await transitionLockedConsultSession(tx, {
         consultSessionId: args.consultSessionId,
         actor: args.actor,
         fromStatus: status,
