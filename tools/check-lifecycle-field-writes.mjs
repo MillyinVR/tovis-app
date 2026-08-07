@@ -86,6 +86,21 @@ const ALLOWED_FILE_PATTERNS = [
 const BOOKING_WRITE_CALL_PATTERN =
   /\b(?:prisma|tx|db|client)\.booking\.(?:create|createMany|update|updateMany|upsert)\s*\(/g
 
+const CONSULT_SESSION_WRITE_CALL_PATTERN =
+  /\b(?:prisma|tx|db|client)\.consultSession\.(?:create|createMany|update|updateMany|upsert)\s*\(/g
+
+const CONSULT_SENSITIVE_WRITE_CALL_PATTERN =
+  /\b(?:prisma|tx|db|client)\.(?:consultRevision|consultAgreementAcceptance)\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/g
+
+const CONSULT_SESSION_GUARDED_FIELDS = ['status', 'revisionSequence']
+
+function isConsultBoundaryFile(repoPath) {
+  return (
+    repoPath === 'lib/consult/writeBoundary.ts' ||
+    isAllowedFile(repoPath)
+  )
+}
+
 function toRepoPath(absPath) {
   return path.relative(ROOT, absPath).split(path.sep).join('/')
 }
@@ -289,15 +304,87 @@ function hasLifecycleFieldWrite(callSource) {
   })
 }
 
-function findViolationsInFile(absPath) {
-  const repoPath = toRepoPath(absPath)
+function guardedFieldsInCall(callSource, guardedFields) {
+  const sanitized = stripCommentsAndStrings(callSource)
+  return guardedFields.filter((field) => {
+    const propertyPattern = new RegExp(`\\b${field}\\s*:`)
+    return propertyPattern.test(sanitized)
+  })
+}
 
-  if (isAllowedFile(repoPath)) {
-    return []
+function findCallViolations({
+  source,
+  repoPath,
+  pattern,
+  guardedFields,
+  reason,
+}) {
+  const violations = []
+  pattern.lastIndex = 0
+
+  let match
+  while ((match = pattern.exec(source)) !== null) {
+    const callStart = match.index
+    const openParenIndex = source.indexOf('(', callStart)
+    if (openParenIndex === -1) continue
+
+    const closeParenIndex = findMatchingParen(source, openParenIndex)
+    if (closeParenIndex === -1) {
+      violations.push({
+        file: repoPath,
+        line: lineNumberAt(source, callStart),
+        fields: ['unknown'],
+        reason: 'Could not parse consult write call; inspect manually.',
+      })
+      continue
+    }
+
+    const callSource = source.slice(callStart, closeParenIndex + 1)
+    const fields = guardedFields
+      ? guardedFieldsInCall(callSource, guardedFields)
+      : ['sensitive-record']
+    if (fields.length > 0) {
+      violations.push({
+        file: repoPath,
+        line: lineNumberAt(source, callStart),
+        fields,
+        reason,
+      })
+    }
+
+    pattern.lastIndex = closeParenIndex + 1
   }
 
+  return violations
+}
+
+function findViolationsInFile(absPath) {
+  const repoPath = toRepoPath(absPath)
   const source = fs.readFileSync(absPath, 'utf8')
   const violations = []
+
+  if (!isConsultBoundaryFile(repoPath)) {
+    violations.push(
+      ...findCallViolations({
+        source,
+        repoPath,
+        pattern: CONSULT_SESSION_WRITE_CALL_PATTERN,
+        guardedFields: CONSULT_SESSION_GUARDED_FIELDS,
+        reason:
+          'Direct ConsultSession lifecycle write outside lib/consult/writeBoundary.ts.',
+      }),
+      ...findCallViolations({
+        source,
+        repoPath,
+        pattern: CONSULT_SENSITIVE_WRITE_CALL_PATTERN,
+        guardedFields: null,
+        reason:
+          'Direct sensitive consult write outside lib/consult/writeBoundary.ts.',
+      }),
+    )
+  }
+
+  if (isAllowedFile(repoPath)) return violations
 
   BOOKING_WRITE_CALL_PATTERN.lastIndex = 0
 
@@ -358,14 +445,14 @@ function main() {
 
   if (violations.length === 0) {
     console.log(
-      '✅ Lifecycle field write guard passed: no unauthorized Booking lifecycle writes found.',
+      '✅ Lifecycle field write guard passed: no unauthorized Booking or Consult lifecycle writes found.',
     )
     return
   }
 
   console.error(
     [
-      '❌ Unauthorized Booking lifecycle field writes found.',
+      '❌ Unauthorized lifecycle field writes found.',
       '',
       'Lifecycle fields must be mutated through the approved booking write boundary.',
       '',
@@ -377,6 +464,7 @@ function main() {
       'Allowed direct writers:',
       '- lib/booking/writeBoundary.ts',
       '- lib/booking/holdCleanup.ts',
+      '- lib/consult/writeBoundary.ts (consult lifecycle/legal/revisions only)',
       '',
       'Fix:',
       '- Move the mutation into lib/booking/writeBoundary.ts, or',

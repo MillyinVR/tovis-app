@@ -1,7 +1,7 @@
 // app/api/v1/client/consult/[id]/route.ts
 //
-// AI Consult (docs/design/ai-consult.md), Phase 0, C1: schema + route
-// skeleton. Fetches a consult session the client owns. Founder-gated
+// AI Consult Phase 0 lifecycle foundation. Fetches the consent-first consult
+// shell the client owns. Founder-gated
 // (lib/consult/access.ts) on the booking's professional, same as create —
 // checked again here so toggling the pilot off also darkens reads of
 // already-created sessions.

@@ -39,6 +39,11 @@ const RLS_EXEMPT_TABLES = new Set(['spatial_ref_sys'])
 const PINNED_FUNCTIONS = [
   'tovis_booking_overlap_range',
   'consent_form_version_is_append_only',
+  'consult_session_scope_guard',
+  'consult_immutable_row',
+  'consult_acceptance_guard',
+  'consult_revision_requires_agreements',
+  'consult_lifecycle_guard',
 ]
 
 type TableRow = { tablename: string; rowsecurity: boolean }

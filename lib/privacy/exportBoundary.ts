@@ -270,15 +270,16 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     status: 'OMITTED',
     reason: 'Derived embedding over exported interactions; not human-readable subject data.',
   },
-  // AI Consult pilot (docs/design/ai-consult.md), Phase 0, C1: schema + route
-  // skeleton only — not the mid-appointment "Consultation" flow. The row that
-  // exists today carries just identity/status; no intake answers, photos,
-  // analysis, or brief exist yet (those land in C2-C6). Founder-gated
-  // (ENABLE_AI_CONSULT) and dark for everyone else.
+  // AI Consult Phase 0 lifecycle/legal foundation. ConsultRevision,
+  // ConsultAgreementAcceptance, and ConsultAuditEvent are transitively owned
+  // through this row and cascade with it; the direct-FK completeness detector
+  // cannot see them. There is still no sensitive intake/media/analysis route,
+  // so the export surface stays closed until it can project the whole family
+  // together without presenting partial consent history as complete.
   ConsultSession: {
     status: 'OMITTED',
     reason:
-      "Founder-gated AI Consult pilot, C1 schema-only: no intake/photo/analysis/brief content exists yet to export. Revisit as EXPORTED once later build-plan steps (C2-C6) populate real content — it is the client's own data, not pro-authored.",
+      "Founder-gated AI Consult foundation has no sensitive collection route yet. Before one opens, export ConsultSession with its immutable revisions, version-pinned agreement acceptances/revocations, and audit events together — all are the client's own data.",
   },
 
   // ------------------------------------------------- undecided (K16-A backlog)

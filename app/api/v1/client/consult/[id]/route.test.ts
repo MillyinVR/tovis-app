@@ -28,7 +28,7 @@ const NOW = new Date('2026-08-06T10:00:00.000Z')
 
 const CONSULT_ROW = {
   id: 'consult_1',
-  status: 'CREATED' as const,
+  status: 'CONSENT_REQUIRED' as const,
   bookingId: 'booking_1',
   professionalId: 'pro_allowlisted',
   serviceCategoryId: 'cat_hair_color',
@@ -60,7 +60,7 @@ describe('GET /api/v1/client/consult/[id]', () => {
     expect(res.body).toEqual({
       consult: {
         id: 'consult_1',
-        status: 'CREATED',
+        status: 'CONSENT_REQUIRED',
         bookingId: 'booking_1',
         professionalId: 'pro_allowlisted',
         serviceCategoryId: 'cat_hair_color',
