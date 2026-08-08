@@ -287,6 +287,133 @@ export type ConsultCaptureDeleteResponseDTO = {
   deleted: true
 }
 
+export type ConsultAnalysisConfidenceDTO = {
+  min: number
+  max: number
+}
+
+export type ConsultAnalysisEvidenceDTO =
+  | 'hair_back'
+  | 'hair_left'
+  | 'hair_right'
+  | 'hair_crown'
+  | 'intake'
+
+export type ConsultAnalysisObservationDTO<T extends string> = {
+  value: T
+  confidence: ConsultAnalysisConfidenceDTO
+  evidence: ConsultAnalysisEvidenceDTO[]
+}
+
+export type ConsultAnalysisSafetyCodeDTO =
+  | 'PRIOR_REACTION'
+  | 'REACTION_HISTORY_UNKNOWN'
+  | 'RECENT_BOX_DYE'
+  | 'RECENT_LIGHTENING'
+  | 'CHEMICAL_HISTORY_UNKNOWN'
+  | 'ALLERGY_HISTORY_UNKNOWN'
+  | 'VISIBLE_COMPROMISE'
+
+export type ConsultAnalysisServiceIntentDTO =
+  | 'COLOR_CONSULTATION'
+  | 'ROOT_TOUCH_UP'
+  | 'ALL_OVER_COLOR'
+  | 'HIGHLIGHTS'
+  | 'BALAYAGE'
+  | 'COLOR_CORRECTION'
+  | 'TONER_GLOSS'
+  | 'VIVID_COLOR'
+  | 'OTHER_HAIR_COLOR'
+
+export type ConsultAnalysisReferenceDTO =
+  | {
+      type: 'SERVICE'
+      serviceId: string
+      serviceCategoryId: string
+    }
+  | {
+      type: 'SERVICE_CATEGORY'
+      serviceId: null
+      serviceCategoryId: string
+    }
+
+export type ConsultAnalysisPayloadDTO = {
+  core: {
+    currentLevel: {
+      min: number | null
+      max: number | null
+      confidence: ConsultAnalysisConfidenceDTO
+      evidence: ConsultAnalysisEvidenceDTO[]
+    }
+    currentTone: ConsultAnalysisObservationDTO<
+      'ASHY' | 'NEUTRAL' | 'GOLDEN' | 'COPPER' | 'RED' | 'MIXED' | 'UNKNOWN'
+    >
+    visibleCondition: ConsultAnalysisObservationDTO<
+      'NO_VISIBLE_CONCERN' | 'POSSIBLE_COMPROMISE' | 'UNKNOWN'
+    >
+    density: ConsultAnalysisObservationDTO<'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN'>
+    texture: ConsultAnalysisObservationDTO<
+      'STRAIGHT' | 'WAVY' | 'CURLY' | 'COILY' | 'MIXED' | 'UNKNOWN'
+    >
+  }
+  hairColorLens: {
+    goal: string
+    history: string
+    constraints: string
+    maintenance: string
+    appointmentContext: string
+    achievability:
+      | 'LIKELY_SINGLE_APPOINTMENT'
+      | 'LIKELY_MULTI_APPOINTMENT'
+      | 'REQUIRES_PRO_ASSESSMENT'
+      | 'UNKNOWN'
+    achievabilityReason: string
+    discussWithProfessional: true
+  }
+  safetyFlags: Array<{
+    code: ConsultAnalysisSafetyCodeDTO
+    summary: string
+    discussWithProfessional: true
+  }>
+  recommendations: Array<{
+    serviceIntent: ConsultAnalysisServiceIntentDTO
+    title: string
+    rationale: string
+    achievability: string
+    discussWithProfessional: true
+    reference: ConsultAnalysisReferenceDTO
+  }>
+}
+
+export type ConsultAnalysisResultDTO = {
+  revisionId: string
+  revision: number
+  analysis: ConsultAnalysisPayloadDTO
+  createdAt: string
+}
+
+export type ConsultAnalysisStateDTO = {
+  consultId: string
+  status: ConsultSessionStatus
+  schemaVersion: number
+  promptVersion: string
+  result: ConsultAnalysisResultDTO | null
+}
+
+export type ConsultAnalysisStartRequestDTO = {
+  idempotencyKey: string
+  schemaVersion: number
+  promptVersion: string
+}
+
+export type ConsultAnalysisStateResponseDTO = {
+  analysis: ConsultAnalysisStateDTO
+}
+
+export type ConsultAnalysisStartResponseDTO = ConsultAnalysisStateResponseDTO & {
+  replayed: boolean
+}
+
 export type ConsultAgreementErrorCode =
   | 'CONSULT_NOT_FOUND'
   | 'CONSULT_AGREEMENTS_UNAVAILABLE'
@@ -309,6 +436,10 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_CAPTURE_QUALITY_UNAVAILABLE'
   | 'CONSULT_CAPTURE_QUALITY_FAILED'
   | 'CONSULT_CAPTURE_STORAGE_UNAVAILABLE'
+  | 'CONSULT_ANALYSIS_SCHEMA_VERSION_MISMATCH'
+  | 'CONSULT_ANALYSIS_PROMPT_VERSION_MISMATCH'
+  | 'CONSULT_ANALYSIS_PREREQUISITES_REQUIRED'
+  | 'CONSULT_ANALYSIS_UNAVAILABLE'
 
 export type ConsultAgreementErrorDTO = {
   ok: false

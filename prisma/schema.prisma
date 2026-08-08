@@ -6586,8 +6586,8 @@ model ConsultRevision {
   model         String?
   promptVersion String?
 
-  // Client intake retries pin a caller-owned key to the canonical request
-  // hash. Both are null for non-client/internal revision kinds.
+  // Client intake/analysis retries pin a caller-owned key to the canonical
+  // request hash. Both are null for internal BRIEF revisions.
   idempotencyKey String? @db.VarChar(128)
   requestHash    String? @db.Char(64)
 

@@ -152,5 +152,29 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
         'Private capture storage is unavailable.',
         'CONSULT_CAPTURE_STORAGE_UNAVAILABLE',
       )
+    case 'ANALYSIS_SCHEMA_VERSION_MISMATCH':
+      return consultAgreementFail(
+        409,
+        'The analysis schema version is no longer current.',
+        'CONSULT_ANALYSIS_SCHEMA_VERSION_MISMATCH',
+      )
+    case 'ANALYSIS_PROMPT_VERSION_MISMATCH':
+      return consultAgreementFail(
+        409,
+        'The analysis prompt version is no longer current.',
+        'CONSULT_ANALYSIS_PROMPT_VERSION_MISMATCH',
+      )
+    case 'ANALYSIS_PREREQUISITES_REQUIRED':
+      return consultAgreementFail(
+        409,
+        'Current completed intake and captures are required.',
+        'CONSULT_ANALYSIS_PREREQUISITES_REQUIRED',
+      )
+    case 'ANALYSIS_UNAVAILABLE':
+      return consultAgreementFail(
+        503,
+        'Consult analysis is unavailable.',
+        'CONSULT_ANALYSIS_UNAVAILABLE',
+      )
   }
 }
