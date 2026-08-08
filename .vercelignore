@@ -1,0 +1,19 @@
+# Files the Vercel CLI must not upload as part of a deployment.
+#
+# 🔴 Why this file has to exist at all: `.claude/` is already in .gitignore, but
+# the CLI still offered its contents to the API — each Claude Code worktree under
+# .claude/worktrees/ is its OWN git checkout, and a nested .git defeats the root
+# .gitignore walk. With ten worktrees present that turned a 3.1k-file repository
+# into a 31,010-file upload and the deploy failed outright:
+#
+#   Invalid request: `files` should NOT have more than 15000 items, received 31010.
+#
+# So the deploy's file count scaled with how many sibling sessions happened to
+# have worktrees on disk — nothing to do with the commit being shipped.
+#
+# Note this does NOT re-expose node_modules/.git/.next/.env.local: the CLI
+# excludes those unconditionally, independent of this file
+# (https://vercel.com/docs/builds/build-features → default ignored files).
+# Keep entries here to things that genuinely must never ship.
+
+.claude/
