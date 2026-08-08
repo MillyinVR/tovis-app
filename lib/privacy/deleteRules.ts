@@ -550,9 +550,19 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
   }),
   deleteRule({
+    model: 'ConsultCapture',
+    notes:
+      'Raw provider objects are verified absent before this ephemeral metadata row can be deleted.',
+    delegate: (db) => db.consultCapture,
+    where: (s) =>
+      s.clientProfileId
+        ? { consultSession: { clientId: s.clientProfileId } }
+        : null,
+  }),
+  deleteRule({
     model: 'ConsultSession',
     notes:
-      "The client's own booking-attached AI consult. Immutable revisions, agreement evidence, and audit rows cascade; raw consult media is not durable.",
+      "The client's own booking-attached AI consult. Revisions, legal evidence, bounded capture rows and audits cascade only after raw objects are verified absent.",
     delegate: (db) => db.consultSession,
     where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
   }),

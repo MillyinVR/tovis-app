@@ -338,6 +338,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   ServiceFavorite: { status: 'PENDING', note: PENDING_NOTE },
   SupportTicket: { status: 'PENDING', note: PENDING_NOTE },
   UploadSession: { status: 'PENDING', note: PENDING_NOTE },
+  ConsultCapture: {
+    status: 'OMITTED',
+    reason:
+      'Ephemeral raw-processing metadata; never export storage pointers or provider provenance.',
+  },
   VerificationDocument: { status: 'PENDING', note: PENDING_NOTE },
   ViralRequestApprovalFanOut: { status: 'PENDING', note: PENDING_NOTE },
   ViralServiceRequest: { status: 'PENDING', note: PENDING_NOTE },

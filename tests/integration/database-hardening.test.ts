@@ -46,6 +46,16 @@ const PINNED_FUNCTIONS = [
   'consult_current_agreements_active',
   'consult_revision_requires_agreements',
   'consult_lifecycle_guard',
+  'consult_upload_session_guard',
+  'consult_capture_guard',
+  'consult_upload_consumed_requires_capture',
+  'consult_capture_requires_consumed_upload',
+  'consult_capture_c3_contract_guard',
+  'consult_booking_raw_purge_fence',
+  'consult_capture_finalize_fence',
+  'consult_raw_purge_fence',
+  'consult_session_delete_requires_purge',
+  'consult_capture_delete_requires_purge',
 ]
 
 type TableRow = { tablename: string; rowsecurity: boolean }

@@ -98,5 +98,59 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
         'The consult is unavailable for this booking.',
         'CONSULT_BOOKING_INELIGIBLE',
       )
+    case 'CAPTURE_PACK_VERSION_MISMATCH':
+      return consultAgreementFail(
+        409,
+        'The capture pack version is no longer current.',
+        'CONSULT_CAPTURE_PACK_VERSION_MISMATCH',
+      )
+    case 'CAPTURE_SCHEMA_VERSION_MISMATCH':
+      return consultAgreementFail(
+        409,
+        'The capture schema version is no longer current.',
+        'CONSULT_CAPTURE_SCHEMA_VERSION_MISMATCH',
+      )
+    case 'CAPTURE_INVALID_SLOT':
+      return consultAgreementFail(
+        400,
+        'Invalid capture slot.',
+        'CONSULT_CAPTURE_INVALID_SLOT',
+      )
+    case 'CAPTURE_UPLOAD_EXPIRED':
+      return consultAgreementFail(
+        410,
+        'The capture upload has expired.',
+        'CONSULT_CAPTURE_UPLOAD_EXPIRED',
+      )
+    case 'CAPTURE_UPLOAD_MISMATCH':
+      return consultAgreementFail(
+        409,
+        'The capture upload does not match this request.',
+        'CONSULT_CAPTURE_UPLOAD_MISMATCH',
+      )
+    case 'CAPTURE_OBJECT_INVALID':
+      return consultAgreementFail(
+        422,
+        'The uploaded capture is missing or malformed.',
+        'CONSULT_CAPTURE_OBJECT_INVALID',
+      )
+    case 'CAPTURE_QUALITY_UNAVAILABLE':
+      return consultAgreementFail(
+        503,
+        'Capture quality checking is unavailable.',
+        'CONSULT_CAPTURE_QUALITY_UNAVAILABLE',
+      )
+    case 'CAPTURE_QUALITY_FAILED':
+      return consultAgreementFail(
+        422,
+        'The capture did not pass the quality gate.',
+        'CONSULT_CAPTURE_QUALITY_FAILED',
+      )
+    case 'CAPTURE_STORAGE_UNAVAILABLE':
+      return consultAgreementFail(
+        503,
+        'Private capture storage is unavailable.',
+        'CONSULT_CAPTURE_STORAGE_UNAVAILABLE',
+      )
   }
 }

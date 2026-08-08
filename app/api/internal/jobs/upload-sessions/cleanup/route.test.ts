@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   expireStaleUploadSessions: vi.fn(),
+  runConsultCapturePurgeSweep: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -21,6 +22,9 @@ vi.mock('@/lib/prisma', () => ({ prisma: {} }))
 
 vi.mock('@/lib/media/uploadSession', () => ({
   expireStaleUploadSessions: mocks.expireStaleUploadSessions,
+}))
+vi.mock('@/lib/consult/capturePurge', () => ({
+  runConsultCapturePurgeSweep: mocks.runConsultCapturePurgeSweep,
 }))
 
 vi.mock('@/lib/security/logging', () => ({ safeError: (e: unknown) => e }))
@@ -42,6 +46,11 @@ describe('POST /api/internal/jobs/upload-sessions/cleanup', () => {
     vi.clearAllMocks()
     process.env.INTERNAL_JOB_SECRET = 'job-secret'
     mocks.expireStaleUploadSessions.mockResolvedValue(4)
+    mocks.runConsultCapturePurgeSweep.mockResolvedValue({
+      considered: 3,
+      purged: 2,
+      failed: 1,
+    })
   })
 
   afterEach(() => {
@@ -57,8 +66,13 @@ describe('POST /api/internal/jobs/upload-sessions/cleanup', () => {
   it('expires stale sessions when authorized and returns the count', async () => {
     const res = await POST(makeRequest({ authorization: 'Bearer job-secret' }))
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ ok: true, expired: 4 })
+    await expect(res.json()).resolves.toEqual({
+      ok: true,
+      expired: 4,
+      consultRaw: { considered: 3, purged: 2, failed: 1 },
+    })
     expect(mocks.expireStaleUploadSessions).toHaveBeenCalledTimes(1)
+    expect(mocks.runConsultCapturePurgeSweep).toHaveBeenCalledTimes(1)
   })
 
   it('accepts the x-internal-job-secret header too', async () => {
@@ -79,7 +93,11 @@ describe('POST /api/internal/jobs/upload-sessions/cleanup', () => {
       makeRequest({ authorization: 'Bearer job-secret' }, 'GET'),
     )
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ ok: true, expired: 4 })
+    await expect(res.json()).resolves.toEqual({
+      ok: true,
+      expired: 4,
+      consultRaw: { considered: 3, purged: 2, failed: 1 },
+    })
     expect(mocks.expireStaleUploadSessions).toHaveBeenCalledTimes(1)
   })
 })

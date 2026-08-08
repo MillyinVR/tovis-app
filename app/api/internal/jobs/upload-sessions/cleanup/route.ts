@@ -1,9 +1,8 @@
 // app/api/internal/jobs/upload-sessions/cleanup/route.ts
 //
-// Reaps abandoned UploadSessions: rows that were signed (and possibly had bytes
-// pushed to storage) but never attached to a MediaAsset before their TTL. Flips
-// PENDING -> EXPIRED past expiresAt. A storage sweep can then delete the orphan
-// objects those expired sessions point at.
+// Reaps abandoned media UploadSessions and runs the stricter consult raw-object
+// sweep. Generic media behavior remains status-only; CLIENT_CONSULT is marked
+// expired/purged only after private storage confirms the object is absent.
 //
 // Cron: */15 * * * * (every 15 minutes). Scheduled in vercel.json. Vercel cron
 // invokes via GET; the POST export stays for manual/internal triggers.
@@ -14,6 +13,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import { prisma } from '@/lib/prisma'
 import { expireStaleUploadSessions } from '@/lib/media/uploadSession'
+import { runConsultCapturePurgeSweep } from '@/lib/consult/capturePurge'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -26,8 +26,12 @@ async function runJob(req: Request) {
   }
 
   try {
-    const expired = await expireStaleUploadSessions(prisma, new Date())
-    return jsonOk({ expired })
+    const now = new Date()
+    const [expired, consultRaw] = await Promise.all([
+      expireStaleUploadSessions(prisma, now),
+      runConsultCapturePurgeSweep(now),
+    ])
+    return jsonOk({ expired, consultRaw })
   } catch (error: unknown) {
     console.error('/api/internal/jobs/upload-sessions/cleanup error', {
       error: safeError(error),
