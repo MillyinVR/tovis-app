@@ -26,13 +26,8 @@ export default function NavItem({
     <Link
       href={href}
       aria-current={active ? 'page' : undefined}
-      className="no-underline tovis-focus"
+      className="no-underline tovis-focus tovis-navitem"
       style={{
-        display: 'grid',
-        gap: 4,
-        justifyItems: 'center',
-        position: 'relative',
-        padding: '0 6px',
         color: active ? 'rgb(var(--text-primary))' : 'rgb(var(--text-muted))',
       }}
     >
@@ -69,17 +64,14 @@ export default function NavItem({
         ) : null}
       </span>
 
-      <span
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-        }}
-      >
-        {label}
-      </span>
+      {/*
+        Layout and type live in footers.css (.tovis-navitem / -label) rather than
+        inline, because inline styles outrank the stylesheet: the six-tab client
+        bar needs to tighten padding and tracking below 375px to fit, and it
+        cannot do that against an inline rule. Values are unchanged at every
+        width the previous inline styles covered.
+      */}
+      <span className="tovis-navitem-label">{label}</span>
     </Link>
   )
 }

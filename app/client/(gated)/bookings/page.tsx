@@ -9,8 +9,9 @@ import { Role } from '@prisma/client'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { loadClientBookingBuckets } from '@/lib/booking/clientBookingBuckets'
+import { loadClientAftercareInbox } from '@/lib/aftercare/loadClientAftercareInbox'
 
-import AppointmentsList from './AppointmentsList'
+import AppointmentsList, { AFTERCARE_STRIP_SIZE } from './AppointmentsList'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,21 @@ export default async function ClientBookingsPage() {
     redirect('/login?from=/client/bookings')
   }
 
-  const { buckets } = await loadClientBookingBuckets(clientId)
+  // Aftercare rides along with the buckets. Its own inbox page (/client/aftercare)
+  // has no nav entry, so without this strip a client's summaries were reachable
+  // only per-booking via ?step=aftercare. Fetch one past the strip size purely to
+  // learn whether there IS more — the extra row is dropped, never rendered, so
+  // the "See all" door appears only when it leads somewhere new.
+  const [{ buckets }, aftercare] = await Promise.all([
+    loadClientBookingBuckets(clientId),
+    loadClientAftercareInbox(clientId, { limit: AFTERCARE_STRIP_SIZE + 1 }),
+  ])
 
-  return <AppointmentsList buckets={buckets} />
+  return (
+    <AppointmentsList
+      buckets={buckets}
+      aftercare={aftercare.slice(0, AFTERCARE_STRIP_SIZE)}
+      hasMoreAftercare={aftercare.length > AFTERCARE_STRIP_SIZE}
+    />
+  )
 }

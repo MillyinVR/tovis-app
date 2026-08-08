@@ -161,17 +161,31 @@ type InboxItem = Prisma.ClientNotificationGetPayload<{ select: typeof inboxSelec
  * Load the client's aftercare inbox rows, resolved to JSON-safe wire shapes
  * (ISO strings, public pro display name, sanitized timezone, before/after pair).
  * Reverse-chronological, capped at {@link AFTERCARE_INBOX_PAGE_SIZE}.
+ *
+ * `limit` narrows that cap for callers that only want the head of the list — the
+ * Aftercare strip on /client/bookings asks for a handful rather than paying for
+ * 300 booking DTOs and their before/after batch on every appointments render. It
+ * only ever shrinks the page size; it cannot raise it past the inbox cap.
  */
 export async function loadClientAftercareInbox(
   clientId: string,
+  opts: { limit?: number } = {},
 ): Promise<ClientAftercareInboxItemDTO[]> {
+  const requested = opts.limit
+  const take =
+    typeof requested === 'number' && Number.isFinite(requested)
+      ? Math.min(AFTERCARE_INBOX_PAGE_SIZE, Math.max(0, Math.floor(requested)))
+      : AFTERCARE_INBOX_PAGE_SIZE
+
+  if (take === 0) return []
+
   const items: InboxItem[] = await prisma.clientNotification.findMany({
     where: {
       clientId,
       eventKey: NotificationEventKey.AFTERCARE_READY,
     },
     orderBy: { createdAt: 'desc' },
-    take: AFTERCARE_INBOX_PAGE_SIZE,
+    take,
     select: inboxSelect,
   })
 

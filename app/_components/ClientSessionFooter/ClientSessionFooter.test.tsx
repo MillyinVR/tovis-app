@@ -73,6 +73,34 @@ describe('ClientSessionFooter', () => {
     expect(screen.queryByText('4')).not.toBeInTheDocument()
   })
 
+  // The client's own appointments must be reachable with no preconditions.
+  // /client/bookings is the ONLY surface listing PENDING bookings, and before
+  // this tab every route into it was conditional — the home card's link needed
+  // 2+ upcoming bookings, the /client/notifications link only rendered in that
+  // page's zero-notifications empty state. One booking meant no way in.
+  it('always offers a Bookings tab, whatever the client has booked', () => {
+    render(<ClientSessionFooter />)
+
+    expect(screen.getByRole('link', { name: /bookings/i })).toHaveAttribute(
+      'href',
+      '/client/bookings',
+    )
+  })
+
+  // The bar renders as two groups flanking the raised mark, so a slice-off-by-one
+  // in that split would silently swallow a tab rather than fail loudly.
+  it('renders every configured tab exactly once across the split', () => {
+    render(<ClientSessionFooter />)
+
+    for (const tab of CLIENT_TABS) {
+      expect(
+        screen.getAllByRole('link', { name: new RegExp(`^${tab.label}$`, 'i') }),
+      ).toHaveLength(1)
+    }
+
+    expect(screen.getAllByRole('link')).toHaveLength(CLIENT_TABS.length)
+  })
+
   // Exactly one tab may carry the unread badge — that singularity is the whole
   // point of removing the header bell, and it lives in config where a second
   // `hasBadge: true` would be a one-word regression.

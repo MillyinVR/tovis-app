@@ -55,6 +55,62 @@
   border-top: 1px solid var(--line);
 }
 
+/* client: six tabs split around the raised mark.
+   The pro/admin bars are 2|centre|2, so a flat `space-around` row keeps the hero
+   on the middle for free. The client bar is 2|centre|3, where that same row
+   drifts the mark toward the short flank. Matching 1fr tracks fix it at every
+   width — including the `width: max-content` pill from 768px up, where equal
+   flex factors still equalise the two fr tracks under a max-content constraint. */
+.tovis-footer-bar--split {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+}
+
+.tovis-footer-bar--split .tovis-footer-group {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-around;
+}
+
+/* Moved out of FooterNavItem's inline styles so a media query can reach them —
+   an inline rule always wins, and the six-tab bar has to tighten to fit on a
+   narrow phone. Identical values to the inline ones they replace. */
+.tovis-navitem {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  position: relative;
+  padding: 0 6px;
+}
+
+.tovis-navitem-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Below 375px (iPhone SE 1st gen and older) six tabs plus the 66px mark cannot
+   fit at full tracking: measured, the right flank wants 137px and the widest a
+   320px bar can give either flank is 127px. Tighten only the client's split bar
+   — the 2|centre|2 pro/admin bars have room to spare and keep their spacing. */
+@media (max-width: 374px) {
+  .tovis-footer-bar--split {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .tovis-footer-bar--split .tovis-navitem {
+    padding: 0 2px;
+  }
+
+  .tovis-footer-bar--split .tovis-navitem-label {
+    letter-spacing: 0.02em;
+  }
+}
+
 /* admin / utility: wider, evenly spaced, no raised hero */
 .tovis-footer-bar--wide {
   max-width: 1100px;
@@ -98,6 +154,13 @@
   }
   .tovis-center-lift,
   .tovis-center-lift-lg { margin-top: 0; }
+
+  /* The pill centres its own row; the flanks follow so the tabs sit on the
+     mark's axis rather than hanging from the top edge. */
+  .tovis-footer-bar--split .tovis-footer-group {
+    align-items: center;
+    gap: 10px;
+  }
 }
 
 /* Honor reduced-motion: stop the ambient footer animations */
