@@ -42,16 +42,16 @@ export const CONSULT_ANALYSIS_SAFETY_CODES = [
 export type ConsultAnalysisSafetyCode =
   (typeof CONSULT_ANALYSIS_SAFETY_CODES)[number]
 
-const EVIDENCE_KEYS = [
+export const CONSULT_ANALYSIS_EVIDENCE_KEYS = [
   'hair_back',
   'hair_left',
   'hair_right',
   'hair_crown',
   'intake',
 ] as const
-type EvidenceKey = (typeof EVIDENCE_KEYS)[number]
+type EvidenceKey = (typeof CONSULT_ANALYSIS_EVIDENCE_KEYS)[number]
 
-const TONES = [
+export const CONSULT_ANALYSIS_TONES = [
   'ASHY',
   'NEUTRAL',
   'GOLDEN',
@@ -60,10 +60,21 @@ const TONES = [
   'MIXED',
   'UNKNOWN',
 ] as const
-const CONDITIONS = ['NO_VISIBLE_CONCERN', 'POSSIBLE_COMPROMISE', 'UNKNOWN'] as const
-const DENSITIES = ['LOW', 'MEDIUM', 'HIGH', 'UNKNOWN'] as const
-const TEXTURES = ['STRAIGHT', 'WAVY', 'CURLY', 'COILY', 'MIXED', 'UNKNOWN'] as const
-const ACHIEVABILITY = [
+export const CONSULT_ANALYSIS_CONDITIONS = [
+  'NO_VISIBLE_CONCERN',
+  'POSSIBLE_COMPROMISE',
+  'UNKNOWN',
+] as const
+export const CONSULT_ANALYSIS_DENSITIES = ['LOW', 'MEDIUM', 'HIGH', 'UNKNOWN'] as const
+export const CONSULT_ANALYSIS_TEXTURES = [
+  'STRAIGHT',
+  'WAVY',
+  'CURLY',
+  'COILY',
+  'MIXED',
+  'UNKNOWN',
+] as const
+export const CONSULT_ANALYSIS_ACHIEVABILITY = [
   'LIKELY_SINGLE_APPOINTMENT',
   'LIKELY_MULTI_APPOINTMENT',
   'REQUIRES_PRO_ASSESSMENT',
@@ -82,22 +93,22 @@ export type HairColorAnalysisProviderOutput = {
       evidence: Evidence
     }
     currentTone: {
-      value: (typeof TONES)[number]
+      value: (typeof CONSULT_ANALYSIS_TONES)[number]
       confidence: ConfidenceRange
       evidence: Evidence
     }
     visibleCondition: {
-      value: (typeof CONDITIONS)[number]
+      value: (typeof CONSULT_ANALYSIS_CONDITIONS)[number]
       confidence: ConfidenceRange
       evidence: Evidence
     }
     density: {
-      value: (typeof DENSITIES)[number]
+      value: (typeof CONSULT_ANALYSIS_DENSITIES)[number]
       confidence: ConfidenceRange
       evidence: Evidence
     }
     texture: {
-      value: (typeof TEXTURES)[number]
+      value: (typeof CONSULT_ANALYSIS_TEXTURES)[number]
       confidence: ConfidenceRange
       evidence: Evidence
     }
@@ -108,7 +119,7 @@ export type HairColorAnalysisProviderOutput = {
     constraints: string
     maintenance: string
     appointmentContext: string
-    achievability: (typeof ACHIEVABILITY)[number]
+    achievability: (typeof CONSULT_ANALYSIS_ACHIEVABILITY)[number]
     achievabilityReason: string
     discussWithProfessional: true
   }
@@ -172,7 +183,7 @@ function observationSchema(values: readonly string[]) {
         type: 'array',
         maxItems: 5,
         uniqueItems: true,
-        items: { type: 'string', enum: [...EVIDENCE_KEYS] },
+        items: { type: 'string', enum: [...CONSULT_ANALYSIS_EVIDENCE_KEYS] },
       },
     },
   }
@@ -200,14 +211,17 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
               type: 'array',
               maxItems: 4,
               uniqueItems: true,
-              items: { type: 'string', enum: EVIDENCE_KEYS.slice(0, 4) },
+              items: {
+                type: 'string',
+                enum: CONSULT_ANALYSIS_EVIDENCE_KEYS.slice(0, 4),
+              },
             },
           },
         },
-        currentTone: observationSchema(TONES),
-        visibleCondition: observationSchema(CONDITIONS),
-        density: observationSchema(DENSITIES),
-        texture: observationSchema(TEXTURES),
+        currentTone: observationSchema(CONSULT_ANALYSIS_TONES),
+        visibleCondition: observationSchema(CONSULT_ANALYSIS_CONDITIONS),
+        density: observationSchema(CONSULT_ANALYSIS_DENSITIES),
+        texture: observationSchema(CONSULT_ANALYSIS_TEXTURES),
       },
     },
     hairColorLens: {
@@ -229,7 +243,10 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
         constraints: { type: 'string', maxLength: 240 },
         maintenance: { type: 'string', maxLength: 240 },
         appointmentContext: { type: 'string', maxLength: 240 },
-        achievability: { type: 'string', enum: [...ACHIEVABILITY] },
+        achievability: {
+          type: 'string',
+          enum: [...CONSULT_ANALYSIS_ACHIEVABILITY],
+        },
         achievabilityReason: { type: 'string', maxLength: 320 },
         discussWithProfessional: { const: true },
       },
@@ -325,7 +342,9 @@ function evidence(value: unknown, allowIntake: boolean): EvidenceKey[] {
   if (!Array.isArray(value) || value.length > 5) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
-  const allowed = allowIntake ? EVIDENCE_KEYS : EVIDENCE_KEYS.slice(0, 4)
+  const allowed = allowIntake
+    ? CONSULT_ANALYSIS_EVIDENCE_KEYS
+    : CONSULT_ANALYSIS_EVIDENCE_KEYS.slice(0, 4)
   const result: EvidenceKey[] = []
   for (const item of value) {
     const key = allowed.find((candidate) => candidate === item)
@@ -468,10 +487,14 @@ function sanitizeAnalysis(raw: unknown): HairColorAnalysisProviderOutput {
         confidence: levelConfidence,
         evidence: levelEvidence,
       },
-      currentTone: observed(raw.core.currentTone, TONES, 'UNKNOWN'),
-      visibleCondition: observed(raw.core.visibleCondition, CONDITIONS, 'UNKNOWN'),
-      density: observed(raw.core.density, DENSITIES, 'UNKNOWN'),
-      texture: observed(raw.core.texture, TEXTURES, 'UNKNOWN'),
+      currentTone: observed(raw.core.currentTone, CONSULT_ANALYSIS_TONES, 'UNKNOWN'),
+      visibleCondition: observed(
+        raw.core.visibleCondition,
+        CONSULT_ANALYSIS_CONDITIONS,
+        'UNKNOWN',
+      ),
+      density: observed(raw.core.density, CONSULT_ANALYSIS_DENSITIES, 'UNKNOWN'),
+      texture: observed(raw.core.texture, CONSULT_ANALYSIS_TEXTURES, 'UNKNOWN'),
     },
     hairColorLens: {
       goal: cleanText(lens.goal, 240),
@@ -479,7 +502,10 @@ function sanitizeAnalysis(raw: unknown): HairColorAnalysisProviderOutput {
       constraints: cleanText(lens.constraints, 240),
       maintenance: cleanText(lens.maintenance, 240),
       appointmentContext: cleanText(lens.appointmentContext, 240),
-      achievability: enumValue(lens.achievability, ACHIEVABILITY),
+      achievability: enumValue(
+        lens.achievability,
+        CONSULT_ANALYSIS_ACHIEVABILITY,
+      ),
       achievabilityReason: cleanText(lens.achievabilityReason, 320),
       discussWithProfessional: true,
     },

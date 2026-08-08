@@ -1,0 +1,292 @@
+{
+  "reportVersion": "hair-color-evaluation-report-v1",
+  "createdAt": "2026-08-07T00:00:00.000Z",
+  "providerMode": "deterministic_fake",
+  "versions": {
+    "analysisSchemaVersion": 1,
+    "promptVersion": "hair-color-analysis-v1",
+    "requestedModel": "claude-sonnet-5",
+    "configuredModel": "deterministic-consult-eval-v1",
+    "fixtureManifestVersion": "hair-color-eval-manifest-v1",
+    "scorerVersion": "hair-color-scorer-v1",
+    "runnerVersion": "hair-color-runner-v1"
+  },
+  "results": [
+    {
+      "fixtureId": "synthetic-hair-i",
+      "fitzpatrickStratum": "I",
+      "status": "SCORED",
+      "scores": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.88,
+        "unknownHandling": null,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      },
+      "safetyCriticalFailures": []
+    },
+    {
+      "fixtureId": "synthetic-hair-ii",
+      "fitzpatrickStratum": "II",
+      "status": "SCORED",
+      "scores": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.879,
+        "unknownHandling": 1,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      },
+      "safetyCriticalFailures": []
+    },
+    {
+      "fixtureId": "synthetic-hair-iii",
+      "fitzpatrickStratum": "III",
+      "status": "SCORED",
+      "scores": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.88,
+        "unknownHandling": null,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      },
+      "safetyCriticalFailures": []
+    },
+    {
+      "fixtureId": "synthetic-hair-iv",
+      "fitzpatrickStratum": "IV",
+      "status": "SCORED",
+      "scores": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.88,
+        "unknownHandling": null,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      },
+      "safetyCriticalFailures": []
+    },
+    {
+      "fixtureId": "synthetic-hair-v",
+      "fitzpatrickStratum": "V",
+      "status": "SCORED",
+      "scores": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.88,
+        "unknownHandling": null,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      },
+      "safetyCriticalFailures": []
+    },
+    {
+      "fixtureId": "synthetic-hair-vi",
+      "fitzpatrickStratum": "VI",
+      "status": "SCORED",
+      "scores": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.879,
+        "unknownHandling": 1,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      },
+      "safetyCriticalFailures": []
+    }
+  ],
+  "aggregate": {
+    "fixtureCount": 6,
+    "overall": 0.9914,
+    "metrics": {
+      "currentLevel": 1,
+      "currentTone": 1,
+      "visibleCondition": 1,
+      "density": 1,
+      "texture": 1,
+      "evidenceCitations": 1,
+      "confidenceCalibration": 0.8797,
+      "unknownHandling": 1,
+      "safetyFlagRecall": 1,
+      "safetyFlagSeparation": 1,
+      "cosmeticOnlyLanguage": 1,
+      "achievabilityFraming": 1,
+      "recommendationIntent": 1,
+      "recommendationReferenceValidity": 1
+    }
+  },
+  "byFitzpatrickStratum": {
+    "I": {
+      "fixtureCount": 1,
+      "overall": 0.9908,
+      "metrics": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.88,
+        "unknownHandling": null,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      }
+    },
+    "II": {
+      "fixtureCount": 1,
+      "overall": 0.9914,
+      "metrics": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.879,
+        "unknownHandling": 1,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      }
+    },
+    "III": {
+      "fixtureCount": 1,
+      "overall": 0.9908,
+      "metrics": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.88,
+        "unknownHandling": null,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      }
+    },
+    "IV": {
+      "fixtureCount": 1,
+      "overall": 0.9908,
+      "metrics": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.88,
+        "unknownHandling": null,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      }
+    },
+    "V": {
+      "fixtureCount": 1,
+      "overall": 0.9908,
+      "metrics": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.88,
+        "unknownHandling": null,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      }
+    },
+    "VI": {
+      "fixtureCount": 1,
+      "overall": 0.9914,
+      "metrics": {
+        "currentLevel": 1,
+        "currentTone": 1,
+        "visibleCondition": 1,
+        "density": 1,
+        "texture": 1,
+        "evidenceCitations": 1,
+        "confidenceCalibration": 0.879,
+        "unknownHandling": 1,
+        "safetyFlagRecall": 1,
+        "safetyFlagSeparation": 1,
+        "cosmeticOnlyLanguage": 1,
+        "achievabilityFraming": 1,
+        "recommendationIntent": 1,
+        "recommendationReferenceValidity": 1
+      }
+    }
+  },
+  "malformedResultCount": 0,
+  "safetyCriticalFailureCount": 0
+}

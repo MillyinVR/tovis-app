@@ -110,7 +110,8 @@
     "backfill:look-embeddings": "tsx scripts/backfill-look-embeddings.ts",
     "backfill:portfolio-looks": "tsx scripts/backfill-portfolio-looks.ts",
     "import:license-permissions": "tsx scripts/importLicensePermissions.ts",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "eval:consult": "tsx scripts/run-consult-evaluation.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",
