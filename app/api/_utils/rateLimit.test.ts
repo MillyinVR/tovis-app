@@ -174,6 +174,7 @@ describe('app/api/_utils/rateLimit', () => {
         fallbackIdentityKind: 'ip',
         fallbackIdentityId: 'unknown',
         nodeEnv: 'production',
+        occurrences: 1,
       },
     })
 
@@ -187,6 +188,52 @@ describe('app/api/_utils/rateLimit', () => {
       bucket: 'auth:register',
       key: 'ip:unknown',
     })
+  })
+
+  it('reports the shared-bucket fallback at 1, 10 and 100 so one log line is never read as one request', async () => {
+    setNodeEnv('production')
+    mockGetTrustedClientIpFromNextHeaders.mockResolvedValue(null)
+
+    const { rateLimitIdentity } = await loadSubject()
+
+    for (let i = 0; i < 100; i += 1) {
+      await rateLimitIdentity()
+    }
+
+    // 100 affected requests, 3 lines — bounded volume, but the magnitude is
+    // visible. The previous once-only flag logged exactly 1 line here and was
+    // indistinguishable from a single affected request.
+    expect(mockLogAuthEvent).toHaveBeenCalledTimes(3)
+
+    const expectedReports: ReadonlyArray<readonly [number, number]> = [
+      [1, 1],
+      [2, 10],
+      [3, 100],
+    ]
+
+    for (const [nth, occurrences] of expectedReports) {
+      expect(mockLogAuthEvent).toHaveBeenNthCalledWith(
+        nth,
+        expect.objectContaining({
+          event: 'rate_limit_identity_null',
+          meta: expect.objectContaining({ occurrences }),
+        }),
+      )
+    }
+  })
+
+  it('does not re-report between thresholds', async () => {
+    setNodeEnv('production')
+    mockGetTrustedClientIpFromNextHeaders.mockResolvedValue(null)
+
+    const { rateLimitIdentity } = await loadSubject()
+
+    for (let i = 0; i < 9; i += 1) {
+      await rateLimitIdentity()
+    }
+
+    // 9 occurrences: the 1st reports, occurrences 2-9 stay quiet.
+    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
   })
 
   it('builds a phone identity for shared SMS quotas', async () => {
