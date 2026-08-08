@@ -31,6 +31,45 @@ export const OCCUPANCY_WINDOW_PADDING_MINUTES =
  */
 export const MAX_LEAD_MINUTES = 30 * 24 * 60
 
+/**
+ * The client cancellation window: how far ahead of the appointment a CLIENT must
+ * act to count as acting in good time.
+ *
+ * Three rules read it and must read the SAME number. `isAutoCancelRefundEligible`
+ * (lib/booking/cancelRefund) auto-refunds a client cancel only outside it; the
+ * discovery-deposit refund keys off that same answer; and the reschedule commit
+ * stamps `Booking.lateChangeAt` when a client moves a booking from inside it.
+ *
+ * It lives here rather than in cancelRefund so the pure and client-bundled
+ * modules — the lifecycle view-model that writes the disclosure copy — can ask
+ * the question without importing the refund module's Stripe and Sentry deps.
+ */
+export const CLIENT_FULL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Whether `scheduledFor` is already inside the client cancellation window at
+ * `now` — i.e. the client is acting late.
+ *
+ * The exact complement of the refund test: `isAutoCancelRefundEligible` refunds
+ * while `now <= scheduledFor - WINDOW`, this returns true once
+ * `now > scheduledFor - WINDOW`. On the boundary itself the client is still
+ * early, so a cancel there refunds and a reschedule there is not a late change.
+ *
+ * Callers: the reschedule commit (does this move earn a `lateChangeAt` stamp?),
+ * and the lifecycle view-model (does the Reschedule button need the late-change
+ * warning?). Both must agree, or the client is warned about a penalty they do
+ * not get — or worse, charged one they were never shown.
+ */
+export function isInsideClientCancellationWindow(args: {
+  scheduledFor: Date
+  now: Date
+}): boolean {
+  return (
+    args.now.getTime() >
+    args.scheduledFor.getTime() - CLIENT_FULL_REFUND_WINDOW_MS
+  )
+}
+
 export const MAX_ADVANCE_NOTICE_MINUTES = 24 * 60
 export const MAX_DAYS_AHEAD = 3650
 export const HOLD_MINUTES = 10

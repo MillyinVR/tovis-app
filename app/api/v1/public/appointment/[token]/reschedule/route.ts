@@ -33,6 +33,7 @@ import {
 import { clientConfirmationLoopEnabled } from '@/lib/booking/clientConfirmationLoop'
 import { isBookingError } from '@/lib/booking/errors'
 import { rescheduleBookingFromHold } from '@/lib/booking/writeBoundary'
+import { runLateChangeFeeOrchestration } from '@/lib/booking/lateChangeFeeOrchestration'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { tokenActorRateLimitKey } from '@/lib/rateLimit/identity'
@@ -126,6 +127,18 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
           tokenId: resolved.token.id,
         })
 
+        // Same policy as the authed route — the token identifies the CLIENT, so
+        // a move made from an SMS link inside the window owes exactly what one
+        // made in-app owes. Runs inside the idempotency wrapper so a replay
+        // returns the recorded body rather than re-charging.
+        const lateChange = await runLateChangeFeeOrchestration({
+          bookingId,
+          lateChangeApplied: result.lateChangeApplied,
+          previousScheduledFor: result.previousScheduledFor,
+          priorStatus: result.booking.status,
+          operation: ROUTE_OPERATION,
+        })
+
         return {
           status: 200,
           body: {
@@ -137,6 +150,10 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
               locationType: result.booking.locationType,
               totalDurationMinutes: result.booking.totalDurationMinutes,
               locationTimeZone: result.booking.locationTimeZone,
+            },
+            lateChange: {
+              applied: result.lateChangeApplied,
+              feeChargedCents: lateChange.chargedCents,
             },
             meta: result.meta,
           },

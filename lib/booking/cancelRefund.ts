@@ -30,6 +30,7 @@ import {
 } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 
+import { CLIENT_FULL_REFUND_WINDOW_MS } from '@/lib/booking/constants'
 import { formatCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 import {
@@ -41,7 +42,11 @@ import { resolveDepositRefundPlan } from '@/lib/booking/discoveryDepositPlan'
 import { captureLateCaptureOnCancelledBooking } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
 
-export const CLIENT_FULL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000
+// Defined in lib/booking/constants so the pure and client-bundled callers can
+// read the same window without pulling Stripe/Sentry in. Re-exported here
+// because this module is where the window's POLICY lives and every existing
+// importer names it from here.
+export { CLIENT_FULL_REFUND_WINDOW_MS } from '@/lib/booking/constants'
 
 export type CancelRefundActorKind = 'client' | 'pro' | 'admin'
 
@@ -59,17 +64,34 @@ export type AutoCancelRefundResult =
  * This function is the single home of the actor policy — callers must not
  * re-derive it. `scheduledFor` is read only for a client cancel; pass null when
  * the actor kind cannot depend on it.
+ *
+ * `lateChangeAt` is what stops a client laundering a late cancel into a refunded
+ * one. A reschedule moves `scheduledFor` on the same Booking row, so a client
+ * two hours out could push the appointment a month forward and then cancel it
+ * with this test reading the NEW, comfortably-distant time. The reschedule
+ * commit stamps the column when the client moves a booking from inside the
+ * window; once stamped, the good-faith window is spent and no later client
+ * cancel of that booking auto-refunds. Deliberately not time-decaying: the point
+ * is that the pro already lost the short-notice slot.
  */
 export function isAutoCancelRefundEligible(args: {
   actorKind: CancelRefundActorKind
   scheduledFor: Date | null
   now: Date
+  /** Booking.lateChangeAt — set when the CLIENT moved this booking late. */
+  lateChangeAt?: Date | null
 }): boolean {
   if (args.actorKind === 'admin') {
     return true
   }
 
   if (args.actorKind === 'pro') {
+    return false
+  }
+
+  // A pro/admin move never stamps this, so it can only mean the client
+  // themselves moved the booking out of the window they are now claiming.
+  if (args.lateChangeAt) {
     return false
   }
 
@@ -111,7 +133,7 @@ export async function applyAutoCancelRefund(args: {
     if (args.actorKind === 'client') {
       const booking = await prisma.booking.findUnique({
         where: { id: args.bookingId },
-        select: { scheduledFor: true },
+        select: { scheduledFor: true, lateChangeAt: true },
       })
 
       if (
@@ -119,6 +141,7 @@ export async function applyAutoCancelRefund(args: {
         !isAutoCancelRefundEligible({
           actorKind: 'client',
           scheduledFor: booking.scheduledFor,
+          lateChangeAt: booking.lateChangeAt,
           now,
         })
       ) {
@@ -197,6 +220,7 @@ export async function applyDiscoveryDepositCancelRefund(args: {
       where: { id: args.bookingId },
       select: {
         scheduledFor: true,
+        lateChangeAt: true,
         depositStatus: true,
         depositStripePaymentIntentId: true,
         depositAmount: true,
@@ -221,9 +245,15 @@ export async function applyDiscoveryDepositCancelRefund(args: {
       actorKind: args.actorKind,
       depositCents,
       feeCents,
+      // Asked as 'client' regardless of the real actor because this argument is
+      // "was the client in good time", which the plan then combines with the
+      // actual actorKind above. A late change spends that standing, so a client
+      // who moved the booking late forfeits the deposit on any later cancel of
+      // it — which is the whole reason the stamp exists.
       clientWithinFullRefundWindow: isAutoCancelRefundEligible({
         actorKind: 'client',
         scheduledFor: booking.scheduledFor,
+        lateChangeAt: booking.lateChangeAt,
         now,
       }),
     })

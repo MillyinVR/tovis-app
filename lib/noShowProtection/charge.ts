@@ -92,6 +92,18 @@ export async function assessAndChargeNoShowFee(args: {
   reason: NoShowFeeReason
   priorStatus?: BookingStatus
   now?: Date
+  /**
+   * The instant to judge the cancel window against, overriding the booking's own
+   * `scheduledFor`.
+   *
+   * Required for LATE_RESCHEDULE and meaningless for the others. A reschedule
+   * MOVES `scheduledFor` on the same row and this runs post-commit, so reading
+   * the row would ask "is the NEW time within the window" — which is exactly the
+   * comfortably-distant time the client just chose, and the answer would always
+   * be no. The fee is owed for vacating the OLD slot at short notice, so the old
+   * instant is what decides it.
+   */
+  windowAnchor?: Date
 }): Promise<NoShowFeeOutcome> {
   if (!noShowProtectionEnabled()) {
     return { kind: 'NOT_CHARGEABLE', reason: 'flag_off' }
@@ -225,7 +237,17 @@ export async function assessAndChargeNoShowFee(args: {
     }
   }
 
-  if (args.reason === NoShowFeeReason.LATE_CANCEL) {
+  // LATE_RESCHEDULE rides the same policy switch and the same window as
+  // LATE_CANCEL by design: a pro who has turned late-cancel charging off has
+  // said they do not bill for short-notice changes, and moving an appointment
+  // two hours out costs them the same unsellable slot that cancelling it does.
+  // Giving it its own toggle would mean a pro could disable one and be silently
+  // billing for the other. The REASON stays distinct so the ledger and the
+  // client's receipt can tell the two apart.
+  if (
+    args.reason === NoShowFeeReason.LATE_CANCEL ||
+    args.reason === NoShowFeeReason.LATE_RESCHEDULE
+  ) {
     if (!policy.chargeLateCancel) {
       return { kind: 'NOT_CHARGEABLE', reason: 'late_cancel_charging_off' }
     }
@@ -234,9 +256,11 @@ export async function assessAndChargeNoShowFee(args: {
     if (args.priorStatus && args.priorStatus !== BookingStatus.ACCEPTED) {
       return { kind: 'NOT_CHARGEABLE', reason: 'not_confirmed' }
     }
+    // For a reschedule the caller passes the PRE-move instant; the row already
+    // holds the new one. See `windowAnchor`.
     if (
       !isWithinCancelWindow({
-        scheduledFor: booking.scheduledFor,
+        scheduledFor: args.windowAnchor ?? booking.scheduledFor,
         windowHours: policy.cancelWindowHours,
         now,
       })

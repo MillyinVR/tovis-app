@@ -2336,6 +2336,7 @@ enum NoShowFeeType {
 enum NoShowFeeReason {
   NO_SHOW // pro marked the booking as a no-show
   LATE_CANCEL // client cancelled inside the pro's cancel window
+  LATE_RESCHEDULE // client MOVED the booking from inside the pro's cancel window
 }
 
 /// Outcome of a no-show / late-cancel fee off-session charge. Recorded on the
@@ -3386,6 +3387,23 @@ model Booking {
   // path alerts instead of guessing policy for those.
   cancelledAt     DateTime?
   cancelledByRole Role?
+
+  // When the CLIENT moved this booking while it was already inside the
+  // cancellation window. Stamped by the reschedule commit, never cleared.
+  //
+  // Reschedule mutates `scheduledFor` on this same row, and both client refund
+  // rules re-read that column at cancel time — so without this stamp a client
+  // two hours out could push the booking a month forward and then cancel it "in
+  // good time" for a full auto refund, and get a forfeited discovery deposit
+  // back too. isAutoCancelRefundEligible and applyDiscoveryDepositCancelRefund
+  // both read it and judge a later CLIENT cancel as late regardless of where the
+  // booking now sits.
+  //
+  // A pro moving the booking does NOT stamp it: the pro rescheduling their own
+  // calendar is not the arbitrage this closes, and penalising the client for it
+  // would invert the policy. Unrelated to the late-change FEE, which is gated on
+  // ENABLE_NO_SHOW_PROTECTION — this column works with the flag off.
+  lateChangeAt DateTime?
 
   // When true, this booking is exempt from the overlap EXCLUDE constraint
   // (Booking_no_active_professional_overlap). Set only by the write boundary when

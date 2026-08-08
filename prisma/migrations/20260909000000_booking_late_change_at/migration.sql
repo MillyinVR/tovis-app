@@ -1,0 +1,18 @@
+-- Late client reschedule parity — the stamp.
+--
+-- A reschedule mutates `scheduledFor` on the SAME Booking row, and both client
+-- refund rules re-read that column at cancel time. So a client two hours out
+-- could move the appointment a month forward and then cancel it "in good time"
+-- for a full auto refund — laundering a non-refundable late cancel into a
+-- refunded one, and turning a forfeited discovery deposit back into a refund.
+--
+-- `lateChangeAt` records that the CLIENT moved this booking while it was already
+-- inside the cancellation window. The refund rules read it and judge any later
+-- client cancel as late regardless of where the booking now sits, which closes
+-- that hole WITHOUT depending on ENABLE_NO_SHOW_PROTECTION — the late-change fee
+-- is flag-gated, this is not.
+--
+-- Additive and nullable, with no backfill: no existing booking has been through
+-- a late change, and NULL is exactly "hasn't". Nothing reads it until the
+-- application code that ships alongside.
+ALTER TABLE "Booking" ADD COLUMN "lateChangeAt" TIMESTAMP(3);

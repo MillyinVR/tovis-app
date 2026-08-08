@@ -106,6 +106,67 @@ describe('isAutoCancelRefundEligible', () => {
       }),
     ).toBe(false)
   })
+
+  // The reschedule-then-cancel hole, closed. Reschedule rewrites `scheduledFor`
+  // on the SAME row, so without the stamp this test's booking — a month out —
+  // looks like a textbook good-faith cancel, and refunds in full. The client got
+  // there by moving it from two hours away.
+  //
+  // This leg is NOT gated on ENABLE_NO_SHOW_PROTECTION, unlike the late-change
+  // fee: with the flag off it is the only thing standing between a late cancel
+  // and a laundered refund.
+  describe('the lateChangeAt stamp', () => {
+    const farOut = new Date(NOW.getTime() + 30 * 24 * 60 * 60 * 1000)
+
+    it('blocks a client refund on a booking the client moved late, however far out it now sits', () => {
+      expect(
+        isAutoCancelRefundEligible({
+          actorKind: 'client',
+          scheduledFor: farOut,
+          lateChangeAt: new Date(NOW.getTime() - 60 * 1000),
+          now: NOW,
+        }),
+      ).toBe(false)
+    })
+
+    it('still refunds when the booking was never moved late', () => {
+      expect(
+        isAutoCancelRefundEligible({
+          actorKind: 'client',
+          scheduledFor: farOut,
+          lateChangeAt: null,
+          now: NOW,
+        }),
+      ).toBe(true)
+    })
+
+    // Omitting the field must not silently deny refunds to every caller that
+    // hasn't been updated — the stamp only ever takes eligibility AWAY when it
+    // is actually present.
+    it('is a no-op when the caller does not pass it', () => {
+      expect(
+        isAutoCancelRefundEligible({
+          actorKind: 'client',
+          scheduledFor: farOut,
+          now: NOW,
+        }),
+      ).toBe(true)
+    })
+
+    // A pro or admin cancel is decided by actor alone. A pro cancelling a
+    // booking their client once moved late must still refund per pro policy —
+    // the stamp is about the CLIENT's standing, not a mark against the booking.
+    it('does not affect an admin cancellation', () => {
+      expect(
+        isAutoCancelRefundEligible({
+          actorKind: 'admin',
+          scheduledFor: farOut,
+          lateChangeAt: new Date(NOW.getTime() - 60 * 1000),
+          now: NOW,
+        }),
+      ).toBe(true)
+    })
+  })
 })
 
 describe('applyAutoCancelRefund', () => {

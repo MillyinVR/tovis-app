@@ -109,6 +109,7 @@ import {
   BOOKING_OVERLAP_CONSTRAINT_NAME,
   HOLD_MINUTES,
   HOLD_OVERLAP_CONSTRAINT_NAME,
+  isInsideClientCancellationWindow,
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
   WAITLIST_OFFER_TTL_MINUTES,
@@ -581,6 +582,26 @@ type RescheduleBookingFromHoldResult = {
     totalDurationMinutes: number
     locationTimeZone: string | null
   }
+  /**
+   * True when THIS call moved the booking out of the client cancellation window
+   * — i.e. it stamped `lateChangeAt`. The route reads it to run the late-change
+   * fee post-commit, the same shape the cancel routes use for their refund
+   * orchestration (the boundary stays DB-only; Stripe effects happen outside).
+   *
+   * Describes THIS move, not the row's standing history: a client who moves late
+   * a second time gets `true` again, because they have cost the pro a second
+   * short-notice slot. Whether that second move can actually be billed is
+   * assessAndChargeNoShowFee's per-booking idempotency to decide, not this
+   * flag's — mixing the two here would silently under-report the event.
+   */
+  lateChangeApplied: boolean
+  /**
+   * The instant the booking sat at BEFORE this move. The fee assessment needs
+   * it: `isWithinCancelWindow` reads the booking's CURRENT `scheduledFor`, which
+   * post-commit is the new, comfortably-distant time — so assessing against the
+   * row would always find itself outside the window and never charge.
+   */
+  previousScheduledFor: Date
   meta: MutationMeta
 }
 
@@ -8790,10 +8811,37 @@ await enforceBookingOverlapPolicy({
     newStart.getTime() !==
     normalizeToMinute(new Date(booking.scheduledFor)).getTime()
 
+  // A CLIENT moving a booking that is ALREADY inside the cancellation window is
+  // a late change, and carries the same standing a late cancel does: no auto
+  // refund and a forfeited deposit on any later cancel of this booking (both
+  // read the stamp in lib/booking/cancelRefund), plus the late-change fee the
+  // route charges post-commit.
+  //
+  // Measured against where the booking sits NOW, before this update — the whole
+  // exploit is that moving it rewrites the column the refund rules read.
+  // Location-only edits are exempt: nothing about the pro's short-notice slot
+  // changed, so `rescheduleMovedStart` gates it.
+  //
+  // Deliberately NOT conditioned on the booking already carrying a stamp. A
+  // client who moves late twice has cost the pro two short-notice slots, so the
+  // second move is every bit as much a late change as the first — suppressing it
+  // here would quietly under-report. The stamp is refreshed to the latest late
+  // move; the refund rules only test for presence, and whether a SECOND fee can
+  // actually be charged is owned by assessAndChargeNoShowFee's own per-booking
+  // idempotency, which is the right place for that question.
+  const previousScheduledFor = booking.scheduledFor
+  const lateChangeApplied =
+    rescheduleMovedStart &&
+    isInsideClientCancellationWindow({
+      scheduledFor: previousScheduledFor,
+      now: args.now,
+    })
+
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
       scheduledFor: newStart,
+      ...(lateChangeApplied ? { lateChangeAt: args.now } : {}),
       ...(rescheduleMovedStart
         ? {
             clientConfirmationRequestedAt: null,
@@ -8892,6 +8940,8 @@ await enforceBookingOverlapPolicy({
       totalDurationMinutes: updated.totalDurationMinutes ?? 0,
       locationTimeZone: updated.locationTimeZone ?? null,
     },
+    lateChangeApplied,
+    previousScheduledFor,
     meta: buildMeta(true),
   }
 }

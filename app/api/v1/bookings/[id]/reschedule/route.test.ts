@@ -181,6 +181,11 @@ describe('POST /api/v1/bookings/[id]/reschedule', () => {
         totalDurationMinutes: 60,
         locationTimeZone: 'America/Los_Angeles',
       },
+      // The boundary always returns these; the default fixture is the ordinary
+      // in-good-time move, so no stamp and no fee. A mock that omitted them
+      // would have the route report `applied: undefined` to the client.
+      lateChangeApplied: false,
+      previousScheduledFor: new Date('2026-03-04T19:30:00.000Z'),
       meta: {
         mutated: true,
         noOp: false,
@@ -551,6 +556,10 @@ describe('POST /api/v1/bookings/[id]/reschedule', () => {
           totalDurationMinutes: 60,
           locationTimeZone: 'America/Los_Angeles',
         },
+        lateChange: {
+          applied: false,
+          feeChargedCents: 0,
+        },
         meta: {
           mutated: true,
           noOp: false,
@@ -569,6 +578,10 @@ describe('POST /api/v1/bookings/[id]/reschedule', () => {
           bufferMinutes: 15,
           totalDurationMinutes: 60,
           locationTimeZone: 'America/Los_Angeles',
+        },
+        lateChange: {
+          applied: false,
+          feeChargedCents: 0,
         },
         meta: {
           mutated: true,
@@ -591,6 +604,10 @@ describe('POST /api/v1/bookings/[id]/reschedule', () => {
           bufferMinutes: 15,
           totalDurationMinutes: 60,
           locationTimeZone: 'America/Los_Angeles',
+        },
+        lateChange: {
+          applied: false,
+          feeChargedCents: 0,
         },
         meta: {
           mutated: true,

@@ -13,6 +13,7 @@ import {
 } from '@/lib/idempotency/client'
 import {
   buildLifecycleActionViewModel,
+  lateChangeConfirmCopy,
   type LifecycleAction,
 } from '@/lib/booking/lifecycleActionViewModel'
 
@@ -235,7 +236,14 @@ export default function BookingActions({
     }
 
     if (typeof window === 'undefined') return
-    const ok = window.confirm('Use the selected new time for this booking?')
+    // M6: a move inside the cancellation window carries a fee and forfeits the
+    // refund standing on any later cancel, so the client is told BEFORE the
+    // commit — not on a statement afterwards. The copy comes from the shared
+    // builder, which reads the same window the server stamps on.
+    const ok = window.confirm(
+      lateChangeConfirmCopy({ scheduledFor }) ??
+        'Use the selected new time for this booking?',
+    )
     if (!ok) return
 
     try {

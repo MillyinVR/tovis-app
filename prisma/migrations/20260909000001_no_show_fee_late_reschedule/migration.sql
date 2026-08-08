@@ -1,0 +1,11 @@
+-- Late client reschedule parity — the fee reason.
+--
+-- Kept separate from LATE_CANCEL on purpose: the client KEPT the appointment.
+-- Sharing the code would make a moved booking indistinguishable from a cancelled
+-- one in the fee ledger, and the two owe the client different copy on their
+-- receipt ([[one-code-two-meanings-add-a-code]]).
+--
+-- Additive enum value. Postgres cannot add a value to an enum inside a
+-- transaction block that later uses it, but nothing here uses it — Prisma runs
+-- each migration file in its own transaction and this is the only statement.
+ALTER TYPE "NoShowFeeReason" ADD VALUE IF NOT EXISTS 'LATE_RESCHEDULE';

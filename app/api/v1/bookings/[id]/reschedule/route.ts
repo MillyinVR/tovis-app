@@ -21,6 +21,10 @@ import {
 } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { rescheduleBookingFromHold } from '@/lib/booking/writeBoundary'
+import {
+  runLateChangeFeeOrchestration,
+  type LateChangeFeeSummary,
+} from '@/lib/booking/lateChangeFeeOrchestration'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { DEFAULT_TIME_ZONE } from '@/lib/timeZone'
@@ -49,6 +53,7 @@ function buildRescheduleIdempotencyBody(args: {
 
 function toRescheduleResponseBody(
   result: Awaited<ReturnType<typeof rescheduleBookingFromHold>>,
+  lateChange: LateChangeFeeSummary,
 ): RescheduleResponseBody {
   return {
     ok: true,
@@ -60,6 +65,13 @@ function toRescheduleResponseBody(
       bufferMinutes: result.booking.bufferMinutes,
       totalDurationMinutes: result.booking.totalDurationMinutes,
       locationTimeZone: result.booking.locationTimeZone,
+    },
+    // M6: if a card was charged the client is told, in the same response that
+    // confirms the move. `lateChange` reports what the ledger actually did, so a
+    // failed or skipped fee reads as 0 rather than as money taken.
+    lateChange: {
+      applied: result.lateChangeApplied,
+      feeChargedCents: lateChange.chargedCents,
     },
     meta: result.meta,
   }
@@ -152,7 +164,18 @@ export async function POST(req: Request, ctx: RouteContext) {
       fallbackTimeZone: DEFAULT_TIME_ZONE,
     })
 
-    const responseBody = toRescheduleResponseBody(result)
+    // The move is committed. Charge the late-change fee before the idempotency
+    // record is completed, so a replay returns the SAME body — including what
+    // was billed — instead of re-reporting a charge that only happened once.
+    const lateChange = await runLateChangeFeeOrchestration({
+      bookingId,
+      lateChangeApplied: result.lateChangeApplied,
+      previousScheduledFor: result.previousScheduledFor,
+      priorStatus: result.booking.status,
+      operation: 'POST /api/v1/bookings/[id]/reschedule',
+    })
+
+    const responseBody = toRescheduleResponseBody(result, lateChange)
 
     await completeRouteIdempotency({
       idempotencyRecordId,
