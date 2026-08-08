@@ -7846,7 +7846,6 @@ async function performLockedUploadProBookingMedia(args: {
  */
 async function resolveRescheduleHoldDurationMinutes(args: {
   tx: Prisma.TransactionClient
-  now: Date
   bookingId: string
   clientId: string
   offeringId: string
@@ -7876,10 +7875,7 @@ async function resolveRescheduleHoldDurationMinutes(args: {
     })
   }
 
-  return resolveRescheduleCommitDurationMinutes(booking, {
-    now: args.now,
-    actor: 'CLIENT',
-  }).totalDurationMinutes
+  return resolveRescheduleCommitDurationMinutes(booking).totalDurationMinutes
 }
 
 /**
@@ -8082,7 +8078,6 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
   const durationMinutes = rescheduleBookingId
     ? await resolveRescheduleHoldDurationMinutes({
         tx,
-        now,
         bookingId: rescheduleBookingId,
         clientId,
         offeringId: offering.id,
@@ -8620,15 +8615,8 @@ async function performLockedRescheduleBookingFromHold(args: {
 
   // The same guard the HOLD ran when it sized this reservation, so the width
   // reserved and the width committed cannot disagree (B3).
-  // `rescheduleBookingFromHold` is the CLIENT reschedule commit — requireClient()
-  // on the authed route, an appointment token on the public one, and both resolve
-  // to the booking's own clientId. The pro moves a booking through
-  // updateProBooking instead, which never reaches here.
   const { totalDurationMinutes, offeringId: bookingOfferingId } =
-    resolveRescheduleCommitDurationMinutes(booking, {
-      now: args.now,
-      actor: 'CLIENT',
-    })
+    resolveRescheduleCommitDurationMinutes(booking)
 
   const bookingOffering = await args.tx.professionalServiceOffering.findUnique({
     where: { id: bookingOfferingId },

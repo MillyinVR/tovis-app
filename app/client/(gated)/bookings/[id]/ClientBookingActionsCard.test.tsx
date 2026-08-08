@@ -141,51 +141,6 @@ describe('client reschedule idempotency', () => {
     })
   })
 
-  // The view-model owns the cutoff, but this is the card that actually renders —
-  // and the card is what a client touches. Inside the cancellation window the
-  // server refuses a client move (BOOKING_RESCHEDULE_TOO_LATE), so the button
-  // must be gone here, while Cancel stays: the policy tightens, the control does
-  // not disappear.
-  it('hides Reschedule inside the cancellation window, and keeps Cancel', () => {
-    render(
-      <ClientBookingActionsCard
-        bookingId={BOOKING_ID}
-        status={BookingStatus.ACCEPTED}
-        // Two hours out from FROZEN_NOW — well inside the 24h window.
-        scheduledFor={new Date(FROZEN_NOW + 2 * 60 * 60 * 1000).toISOString()}
-        appointmentTz="America/Los_Angeles"
-        locationType="SALON"
-        drawerContext={{ professionalId: 'pro_1' }}
-      />,
-    )
-
-    expect(
-      screen.queryByRole('button', { name: 'Reschedule' }),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Cancel booking' }),
-    ).toBeInTheDocument()
-  })
-
-  it('still offers Reschedule outside the window', () => {
-    render(
-      <ClientBookingActionsCard
-        bookingId={BOOKING_ID}
-        status={BookingStatus.ACCEPTED}
-        scheduledFor={new Date(
-          FROZEN_NOW + 48 * 60 * 60 * 1000,
-        ).toISOString()}
-        appointmentTz="America/Los_Angeles"
-        locationType="SALON"
-        drawerContext={{ professionalId: 'pro_1' }}
-      />,
-    )
-
-    expect(
-      screen.getByRole('button', { name: 'Reschedule' }),
-    ).toBeInTheDocument()
-  })
-
   it('the reschedule key never collides with the cancel key', () => {
     const reschedule = buildClientIdempotencyKey({
       scope: 'booking-lifecycle',

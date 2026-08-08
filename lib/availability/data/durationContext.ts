@@ -169,22 +169,15 @@ export async function resolveAvailabilityDurationMinutes(
   }
 
   try {
-    // The viewer's own role decides whether the cancellation-window cutoff
-    // applies: a client inside it may not move the booking, a pro looking at the
-    // same booking still may. Passing `owner.kind` keeps the grid honest for both
-    // instead of showing one of them slots the commit would refuse.
-    const { totalDurationMinutes } = resolveRescheduleCommitDurationMinutes(
-      booking,
-      { now: new Date(), actor: owner.kind },
-    )
+    const { totalDurationMinutes } =
+      resolveRescheduleCommitDurationMinutes(booking)
 
     return { ok: true, durationMinutes: totalDurationMinutes }
   } catch (error: unknown) {
     // The commit's own guards (cancelled/completed, already started, corrupt
-    // duration, and a client past the cancellation-window cutoff) surface here as
-    // the refusal the reschedule itself would give, rather than as a 500 — the
-    // client learns the booking is unmovable while looking at the grid instead of
-    // after picking a time.
+    // duration) surface here as the refusal the reschedule itself would give,
+    // rather than as a 500 — the client learns the booking is unmovable while
+    // looking at the grid instead of after picking a time.
     if (isBookingError(error)) {
       return {
         ok: false,

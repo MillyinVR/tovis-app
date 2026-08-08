@@ -18,7 +18,6 @@
 
 import { BookingStatus, SessionStep } from '@prisma/client'
 
-import { isClientRescheduleTooLate } from '@/lib/booking/constants'
 import { isTerminalBookingStatus } from '@/lib/booking/lifecycleContract'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
@@ -97,15 +96,6 @@ export type LifecycleViewModelInput = {
   rescheduleHoldId?: string | null
   hasAftercareLink?: boolean
   /**
-   * The booking's current start instant. Drives the client Reschedule button:
-   * inside the cancellation window the server refuses a client-initiated move
-   * (BOOKING_RESCHEDULE_TOO_LATE), so the button must not be offered. Omitted →
-   * the button renders as before, which is why the client detail page passes it.
-   */
-  scheduledFor?: string | Date | null
-  /** Injectable clock for the cutoff above; defaults to now. Tests pin it. */
-  now?: string | Date | null
-  /**
    * Whether Phase 2 revenue protection is live (server-side
    * `noShowProtectionEnabled()`). Gates the pro "Mark no-show" action — the
    * `/no-show` route 404s while the flag is off, so the button must stay hidden.
@@ -121,40 +111,6 @@ export type LifecycleViewModelInput = {
 
 function encodePathSegment(value: string): string {
   return encodeURIComponent(value)
-}
-
-function toDateOrNull(value: string | Date | null | undefined): Date | null {
-  if (!value) return null
-  const date = value instanceof Date ? value : new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-/**
- * Whether the client Reschedule button should be offered at all.
- *
- * Shares `isClientRescheduleTooLate` with the server guard so the button and the
- * commit agree on the cutoff. A caller that passes no `scheduledFor` gets the
- * old behaviour rather than a silently hidden button — this is a UX hint, and a
- * missing field must not remove a control the server would have allowed.
- *
- * `now` falls back to the local clock, which on the client detail page is the
- * BROWSER's. A skewed clock can only mis-render the hint by minutes either way;
- * the server re-checks on both the hold and the commit, so the worst case is a
- * button that 409s rather than a move that slips through.
- *
- * That fallback reads `Date.now()` rather than `new Date()` so it honours the
- * clock freeze the suites already use — `vi.spyOn(Date, 'now')` does not reach
- * the bare `Date` constructor, which would silently leave this one call on the
- * real wall clock while every other date in the test was pinned.
- */
-function clientMayReschedule(input: LifecycleViewModelInput): boolean {
-  const scheduledFor = toDateOrNull(input.scheduledFor)
-  if (!scheduledFor) return true
-
-  return !isClientRescheduleTooLate({
-    scheduledFor,
-    now: toDateOrNull(input.now) ?? new Date(Date.now()),
-  })
 }
 
 function displayLabelFor(
@@ -314,17 +270,11 @@ function clientActions(input: LifecycleViewModelInput): LifecycleAction[] {
     status === BookingStatus.PENDING || status === BookingStatus.ACCEPTED
 
   if (cancellable) {
-    // Cancelling stays available right up to the appointment — it is the
-    // cancellation POLICY that gets stricter inside the window, not the control.
-    // Moving the booking is what the client loses, because a move would reset
-    // the very window that policy is measured against.
-    if (clientMayReschedule(input)) {
-      actions.push({
-        verb: 'CLIENT_RESCHEDULE',
-        label: 'Reschedule',
-        method: 'CALLBACK',
-      })
-    }
+    actions.push({
+      verb: 'CLIENT_RESCHEDULE',
+      label: 'Reschedule',
+      method: 'CALLBACK',
+    })
 
     actions.push({
       verb: 'CLIENT_CANCEL',
@@ -419,9 +369,6 @@ function blockersFor(input: LifecycleViewModelInput): LifecycleBlockerCode[] {
     input.role === 'CLIENT' &&
     (input.status === BookingStatus.PENDING ||
       input.status === BookingStatus.ACCEPTED) &&
-    // No Reschedule button inside the cancellation window, so "you haven't
-    // picked a slot yet" would be a blocker on a control that isn't there.
-    clientMayReschedule(input) &&
     !input.rescheduleHoldId
   ) {
     // Hint for the reschedule button — caller can read this and disable

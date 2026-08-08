@@ -31,51 +31,6 @@ export const OCCUPANCY_WINDOW_PADDING_MINUTES =
  */
 export const MAX_LEAD_MINUTES = 30 * 24 * 60
 
-/**
- * The client cancellation window: how far ahead of the appointment a CLIENT must
- * act to be treated as cancelling in good time.
- *
- * Two rules read it, and they have to read the SAME number or the pair opens a
- * hole. `isAutoCancelRefundEligible` (lib/booking/cancelRefund) auto-refunds a
- * client cancel only outside it; `resolveRescheduleCommitDurationMinutes`
- * (lib/booking/rescheduleWidth) refuses a client SELF-SERVE reschedule inside
- * it. Without the second rule a client 2 hours out could move the appointment a
- * month forward — reschedule mutates `scheduledFor` on the same booking row —
- * and then cancel it comfortably outside the window for a full auto-refund,
- * turning a non-refundable late cancel into a refunded one. The pro can still
- * move a booking at any notice via PATCH /api/v1/pro/bookings/[id]; this bounds
- * what the client may do unilaterally.
- *
- * It lives here rather than in cancelRefund so the availability READ path can
- * ask the question without importing the refund module's Stripe and Sentry
- * dependencies.
- */
-export const CLIENT_FULL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000
-
-/**
- * Whether a CLIENT is past the point of moving this booking themselves.
- *
- * The predicate lives beside the constant, and beside nothing else, so the
- * server guard (`resolveRescheduleCommitDurationMinutes`) and the UI that hides
- * the Reschedule button (`lifecycleActionViewModel`) cannot drift into
- * disagreeing about where the line is — a button offering something the commit
- * refuses is the failure this pair exists to avoid.
- *
- * Deliberately the exact complement of `isAutoCancelRefundEligible`: that one
- * refunds while `now <= scheduledFor - WINDOW`, this one refuses once
- * `now > scheduledFor - WINDOW`. On the boundary itself the client may still
- * both move the booking and cancel it for a refund.
- */
-export function isClientRescheduleTooLate(args: {
-  scheduledFor: Date
-  now: Date
-}): boolean {
-  return (
-    args.now.getTime() >
-    args.scheduledFor.getTime() - CLIENT_FULL_REFUND_WINDOW_MS
-  )
-}
-
 export const MAX_ADVANCE_NOTICE_MINUTES = 24 * 60
 export const MAX_DAYS_AHEAD = 3650
 export const HOLD_MINUTES = 10

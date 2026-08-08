@@ -100,13 +100,8 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
     const booking = resolved.booking
 
     // The same guard + offering the COMMIT will use (B3: promise-site runs the
-    // commit-site gate) — also refuses started/finished/terminal bookings, and a
-    // booking already inside the cancellation window. The token identifies the
-    // CLIENT, so this path is held to the client's cutoff just like the authed one.
-    const { offeringId } = resolveRescheduleCommitDurationMinutes(booking, {
-      now: new Date(),
-      actor: 'CLIENT',
-    })
+    // commit-site gate) — also refuses started/finished/terminal bookings.
+    const { offeringId } = resolveRescheduleCommitDurationMinutes(booking)
 
     const offering = await prisma.professionalServiceOffering.findUnique({
       where: { id: offeringId },
