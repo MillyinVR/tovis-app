@@ -7,6 +7,7 @@ import type {
   ClientBookingBuckets,
   ClientBookingWaitlistRow,
 } from '@/lib/booking/clientBookingBuckets'
+import type { ClientAftercareInboxItemDTO } from '@/lib/dto/clientAftercareInbox'
 
 vi.mock('next/link', () => ({
   default: ({
@@ -128,6 +129,28 @@ function makeBuckets(
     waitlist: [],
     prebooked: [],
     past: [],
+    ...overrides,
+  }
+}
+
+function makeAftercare(
+  overrides?: Partial<ClientAftercareInboxItemDTO>,
+): ClientAftercareInboxItemDTO {
+  return {
+    notificationId: 'notif_1',
+    bookingId: 'past_1',
+    aftercareId: 'after_1',
+    title: 'Balayage',
+    proId: 'pro_1',
+    proName: 'Glow Studio',
+    scheduledFor: '2026-04-01T15:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    beforeAfter: null,
+    rebookMode: null,
+    rebookedFor: null,
+    body: 'Wash with cool water.',
+    unread: false,
+    createdAt: '2026-04-01T18:00:00.000Z',
     ...overrides,
   }
 }
@@ -281,5 +304,85 @@ describe('AppointmentsList', () => {
       'href',
       '/search',
     )
+  })
+
+  // The aftercare inbox page has no nav entry of its own, so this strip is how a
+  // client finds their summaries at all. Each row deep-links to that visit's
+  // aftercare step rather than to the booking overview.
+  it('renders aftercare rows linking to the visit’s aftercare step', () => {
+    render(
+      <AppointmentsList
+        buckets={makeBuckets({ past: [makeBooking({ id: 'past_1' })] })}
+        aftercare={[makeAftercare()]}
+      />,
+    )
+
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Aftercare' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', {
+        name: 'Aftercare for Balayage with Glow Studio',
+      }),
+    ).toHaveAttribute('href', '/client/bookings/past_1?step=aftercare')
+  })
+
+  // A capped strip that stays silent about the cap reads as "that's everything".
+  it('offers the full inbox only when there is more than the strip shows', () => {
+    const { unmount } = render(
+      <AppointmentsList
+        buckets={makeBuckets()}
+        aftercare={[makeAftercare()]}
+        hasMoreAftercare={false}
+      />,
+    )
+
+    expect(
+      screen.queryByRole('link', { name: /All aftercare/ }),
+    ).not.toBeInTheDocument()
+    unmount()
+
+    render(
+      <AppointmentsList
+        buckets={makeBuckets()}
+        aftercare={[makeAftercare()]}
+        hasMoreAftercare
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: /All aftercare/ })).toHaveAttribute(
+      'href',
+      '/client/aftercare',
+    )
+  })
+
+  // A summary whose notification lost its booking link must not build
+  // /client/bookings/null — it falls back to the inbox.
+  it('falls back to the inbox for an aftercare row with no booking', () => {
+    render(
+      <AppointmentsList
+        buckets={makeBuckets()}
+        aftercare={[makeAftercare({ bookingId: null })]}
+      />,
+    )
+
+    expect(
+      screen.getByRole('link', {
+        name: 'Aftercare for Balayage with Glow Studio',
+      }),
+    ).toHaveAttribute('href', '/client/aftercare')
+  })
+
+  // Aftercare outliving its booking row would otherwise sit behind the
+  // "No appointments yet" card, which renders instead of the sections.
+  it('does not show the empty state when only aftercare remains', () => {
+    render(
+      <AppointmentsList buckets={makeBuckets()} aftercare={[makeAftercare()]} />,
+    )
+
+    expect(screen.queryByText('No appointments yet')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Aftercare' }),
+    ).toBeInTheDocument()
   })
 })

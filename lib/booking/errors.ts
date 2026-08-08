@@ -52,6 +52,7 @@ export type BookingErrorCode =
   | "MISSING_MEDIA_ID"
   | "OPENING_NOT_AVAILABLE"
   | "BOOKING_NOT_RESCHEDULABLE"
+  | "BOOKING_RESCHEDULE_TOO_LATE"
   | "BOOKING_ALREADY_STARTED"
   | "BOOKING_MISSING_OFFERING"
   | "RESCHEDULE_BOOKING_MISMATCH"
@@ -526,6 +527,22 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Booking cannot be rescheduled.",
     userMessage: "This booking cannot be rescheduled.",
+  },
+  // Distinct from BOOKING_NOT_RESCHEDULABLE on purpose: that one means the
+  // booking's STATE rules it out for good (completed, cancelled), while this
+  // one is about TIMING and is specific to the client acting alone — the pro can
+  // still move the same booking, and the client could have moved it themselves
+  // an hour earlier. Sharing a code would tell the client "never" when the
+  // answer is "not by you, not now" ([[one-code-two-meanings-add-a-code]]).
+  // The userMessage is the copy iOS shows verbatim, so it has to name the
+  // remedy and not just the refusal ([[a-server-refusal-is-copy-on-every-client]]).
+  BOOKING_RESCHEDULE_TOO_LATE: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Client reschedule attempted inside the cancellation window.",
+    userMessage:
+      "This appointment is too soon to move yourself. Message your pro to reschedule, or cancel — your pro's cancellation policy applies.",
   },
   BOOKING_ALREADY_STARTED: {
     httpStatus: 409,

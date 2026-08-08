@@ -12,10 +12,12 @@ import type {
   ClientBookingBuckets,
   ClientBookingWaitlistRow,
 } from '@/lib/booking/clientBookingBuckets'
+import type { ClientAftercareInboxItemDTO } from '@/lib/dto/clientAftercareInbox'
 import {
   badgeToneForBookingStatus,
   labelForBookingStatus,
 } from '@/lib/booking/statusLabel'
+import { COPY } from '@/lib/copy'
 import { Avatar, Badge, Card, CardLinkOverlay } from '@/app/_components/ui'
 import ProProfileLink from '@/app/_components/ProProfileLink'
 
@@ -24,6 +26,13 @@ import {
   formatDuration,
   professionalName,
 } from '../_components/homeVisuals'
+
+/**
+ * How many aftercare summaries the strip shows before deferring to the full
+ * inbox. The page fetches one MORE than this so it can tell "that's all of them"
+ * from "there are others" without a second count query.
+ */
+export const AFTERCARE_STRIP_SIZE = 3
 
 function ChevronRight() {
   return (
@@ -153,13 +162,73 @@ function WaitlistRow({ entry }: { entry: ClientBookingWaitlistRow }) {
   )
 }
 
+function AftercareRow({ item }: { item: ClientAftercareInboxItemDTO }) {
+  const when = item.scheduledFor
+    ? formatDateTime(new Date(item.scheduledFor), item.timeZone)
+    : null
+
+  // A summary whose notification lost its booking link can't deep-link to the
+  // visit's aftercare step, so it falls back to the inbox rather than to a
+  // /client/bookings/null 404.
+  const href = item.bookingId
+    ? `/client/bookings/${encodeURIComponent(item.bookingId)}?step=aftercare`
+    : '/client/aftercare'
+
+  return (
+    <Card padding="sm" className="relative transition hover:border-textPrimary/20">
+      <CardLinkOverlay
+        href={href}
+        label={`Aftercare for ${item.title} with ${item.proName}`}
+      />
+
+      <div className="pointer-events-none relative z-10 flex items-center gap-3">
+        <ProProfileLink
+          proId={item.proId}
+          label={item.proName}
+          underline={false}
+          className="pointer-events-auto shrink-0 rounded-full"
+        >
+          <Avatar name={item.proName} size="md" />
+        </ProProfileLink>
+
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14.5px] font-semibold text-textPrimary">
+            {item.title}
+          </div>
+          {when ? (
+            <div className="mt-0.5 truncate text-[12.5px] text-textSecondary">
+              {when}
+            </div>
+          ) : null}
+          <div className="mt-0.5 truncate text-[12px] text-textMuted">
+            <ProProfileLink
+              proId={item.proId}
+              label={item.proName}
+              className="pointer-events-auto"
+            />
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {item.unread ? (
+            <Badge tone="info" size="sm">
+              {COPY.aftercareInbox.newPill}
+            </Badge>
+          ) : null}
+          <ChevronRight />
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 function Section({
   title,
   count,
   children,
 }: {
   title: string
-  count: number
+  count: number | null
   children: React.ReactNode
 }) {
   return (
@@ -168,9 +237,11 @@ function Section({
         <h2 className="font-display text-[15px] font-semibold tracking-[-0.01em] text-textPrimary">
           {title}
         </h2>
-        <span className="font-mono text-[11px] tabular-nums text-textMuted">
-          {count}
-        </span>
+        {count === null ? null : (
+          <span className="font-mono text-[11px] tabular-nums text-textMuted">
+            {count}
+          </span>
+        )}
       </div>
       <div className="flex flex-col gap-2">{children}</div>
     </section>
@@ -179,15 +250,22 @@ function Section({
 
 export default function AppointmentsList({
   buckets,
+  aftercare = [],
+  hasMoreAftercare = false,
 }: {
   buckets: ClientBookingBuckets
+  aftercare?: ClientAftercareInboxItemDTO[]
+  hasMoreAftercare?: boolean
 }) {
+  // Aftercare counts toward "is there anything here". A summary outliving its
+  // booking row would otherwise be hidden behind the "No appointments yet" card.
   const isEmpty =
     buckets.upcoming.length === 0 &&
     buckets.pending.length === 0 &&
     buckets.prebooked.length === 0 &&
     buckets.waitlist.length === 0 &&
-    buckets.past.length === 0
+    buckets.past.length === 0 &&
+    aftercare.length === 0
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-7 pb-16 pt-2">
@@ -228,6 +306,28 @@ export default function AppointmentsList({
               {buckets.pending.map((booking) => (
                 <BookingRow key={booking.id} booking={booking} />
               ))}
+            </Section>
+          ) : null}
+
+          {/* count={null} on purpose: the other sections show a complete bucket,
+              so their number IS the total. This one is a capped strip, where a
+              "3" would read as "you have three" when there may be thirty. */}
+          {aftercare.length > 0 ? (
+            <Section title={COPY.aftercareInbox.title} count={null}>
+              {aftercare.map((item) => (
+                <AftercareRow key={item.notificationId} item={item} />
+              ))}
+
+              {/* No silent truncation: the strip caps at AFTERCARE_STRIP_SIZE, so
+                  when more exist say so and hand off to the full inbox. */}
+              {hasMoreAftercare ? (
+                <Link
+                  href="/client/aftercare"
+                  className="self-start font-display text-[13px] font-semibold text-accentPrimary transition hover:opacity-80"
+                >
+                  All aftercare →
+                </Link>
+              ) : null}
             </Section>
           ) : null}
 

@@ -30,6 +30,7 @@ import {
 } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 
+import { CLIENT_FULL_REFUND_WINDOW_MS } from '@/lib/booking/constants'
 import { formatCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 import {
@@ -41,7 +42,11 @@ import { resolveDepositRefundPlan } from '@/lib/booking/discoveryDepositPlan'
 import { captureLateCaptureOnCancelledBooking } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
 
-export const CLIENT_FULL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000
+// Defined in lib/booking/constants so the reschedule guard can share the exact
+// number without pulling Stripe/Sentry into the availability read path. Re-
+// exported here because this module is where the window's POLICY lives, and
+// every existing importer names it from here.
+export { CLIENT_FULL_REFUND_WINDOW_MS } from '@/lib/booking/constants'
 
 export type CancelRefundActorKind = 'client' | 'pro' | 'admin'
 

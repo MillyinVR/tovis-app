@@ -24,6 +24,7 @@ vi.mock('@/lib/media/bookingBeforeAfter', () => ({
 }))
 
 import {
+  AFTERCARE_INBOX_PAGE_SIZE,
   aftercareInboxHintMode,
   loadClientAftercareInbox,
 } from './loadClientAftercareInbox'
@@ -93,6 +94,60 @@ describe('loadClientAftercareInbox', () => {
     const rows = await loadClientAftercareInbox('cl_1')
     expect(rows).toEqual([])
     expect(mocks.loadBookingBeforeAfterThumbs).toHaveBeenCalledWith([])
+  })
+
+  // The Aftercare strip on /client/bookings asks for a handful; paying for 300
+  // booking DTOs and their before/after batch on every appointments render is the
+  // whole reason `limit` exists, so it has to reach the query.
+  it('narrows the page size to `limit`', async () => {
+    mocks.prisma.clientNotification.findMany.mockResolvedValue([])
+
+    await loadClientAftercareInbox('cl_1', { limit: 4 })
+
+    expect(mocks.prisma.clientNotification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 4 }),
+    )
+  })
+
+  it('defaults to the full inbox page size when no limit is given', async () => {
+    mocks.prisma.clientNotification.findMany.mockResolvedValue([])
+
+    await loadClientAftercareInbox('cl_1')
+
+    expect(mocks.prisma.clientNotification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: AFTERCARE_INBOX_PAGE_SIZE }),
+    )
+  })
+
+  // `limit` only ever shrinks the cap — a caller cannot use it to pull the whole
+  // notification table, and a nonsense value cannot produce a negative `take`
+  // (Prisma would throw) or an unbounded read.
+  it('clamps a limit that is oversized, negative, fractional, or not finite', async () => {
+    mocks.prisma.clientNotification.findMany.mockResolvedValue([])
+
+    for (const [limit, take] of [
+      [AFTERCARE_INBOX_PAGE_SIZE + 500, AFTERCARE_INBOX_PAGE_SIZE],
+      [-5, 0],
+      [Number.NaN, AFTERCARE_INBOX_PAGE_SIZE],
+    ] as const) {
+      mocks.prisma.clientNotification.findMany.mockClear()
+      await loadClientAftercareInbox('cl_1', { limit })
+
+      if (take === 0) {
+        // Nothing to ask for — skip the query entirely rather than send take: 0.
+        expect(mocks.prisma.clientNotification.findMany).not.toHaveBeenCalled()
+      } else {
+        expect(mocks.prisma.clientNotification.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ take }),
+        )
+      }
+    }
+
+    mocks.prisma.clientNotification.findMany.mockClear()
+    await loadClientAftercareInbox('cl_1', { limit: 3.7 })
+    expect(mocks.prisma.clientNotification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 3 }),
+    )
   })
 
   it('maps an enriched row using the booking DTO + before/after pair', async () => {

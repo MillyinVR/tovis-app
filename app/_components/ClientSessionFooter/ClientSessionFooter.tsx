@@ -19,40 +19,57 @@ export default function ClientSessionFooter({
   const badge = useUnreadBadge({ initialBadge: messagesBadge ?? null })
   const path = pathname ?? ''
 
+  // The bar is split around the raised mark rather than rendered as one flat
+  // row. With six tabs the flanks are uneven (2 left, 3 right), and a flat
+  // `space-around` row would drift the mark ~20px toward the short side; the
+  // matching 1fr flanks of .tovis-footer-bar--split pin it to the true centre.
+  // Derived from `center` in CLIENT_TABS, so moving the mark in config moves the
+  // split with it.
+  const centerIndex = CLIENT_TABS.findIndex((tab) => tab.center)
+  const hasCenter = centerIndex >= 0
+  const leftTabs = hasCenter ? CLIENT_TABS.slice(0, centerIndex) : CLIENT_TABS
+  const centerTab = hasCenter ? CLIENT_TABS[centerIndex] : null
+  const rightTabs = hasCenter ? CLIENT_TABS.slice(centerIndex + 1) : []
+
+  const renderTab = (tab: (typeof CLIENT_TABS)[number]) => {
+    const Icon = tab.icon
+
+    return (
+      <NavItem
+        key={tab.id}
+        label={tab.label}
+        href={tab.href}
+        icon={<Icon size={24} />}
+        active={isActivePath(path, tab.href)}
+        rightSlot={tab.hasBadge && badge ? <BadgeDot label={badge} /> : null}
+      />
+    )
+  }
+
   return (
     <div className="tovis-footer-root">
-      <nav className="tovis-footer-bar" aria-label="Primary">
-        {CLIENT_TABS.map((tab) => {
-          const active = isActivePath(path, tab.href)
-          const Icon = tab.icon
+      <nav
+        className="tovis-footer-bar tovis-footer-bar--split"
+        aria-label="Primary"
+      >
+        <div className="tovis-footer-group">{leftTabs.map(renderTab)}</div>
 
-          if (tab.center) {
-            return (
-              <Link
-                key={tab.id}
-                href={tab.href}
-                className="tovis-center-lift no-underline tovis-focus"
-                style={{ display: 'grid', placeItems: 'center' }}
-                title={tab.label}
-                aria-label={tab.label}
-                aria-current={active ? 'page' : undefined}
-              >
-                <LooksMark size={66} />
-              </Link>
-            )
-          }
+        {centerTab ? (
+          <Link
+            href={centerTab.href}
+            className="tovis-center-lift no-underline tovis-focus"
+            style={{ display: 'grid', placeItems: 'center' }}
+            title={centerTab.label}
+            aria-label={centerTab.label}
+            aria-current={
+              isActivePath(path, centerTab.href) ? 'page' : undefined
+            }
+          >
+            <LooksMark size={66} />
+          </Link>
+        ) : null}
 
-          return (
-            <NavItem
-              key={tab.id}
-              label={tab.label}
-              href={tab.href}
-              icon={<Icon size={24} />}
-              active={active}
-              rightSlot={tab.hasBadge && badge ? <BadgeDot label={badge} /> : null}
-            />
-          )
-        })}
+        <div className="tovis-footer-group">{rightTabs.map(renderTab)}</div>
       </nav>
     </div>
   )

@@ -272,6 +272,100 @@ describe('buildLifecycleActionViewModel — client role', () => {
     )
     expect(vm.blockerCodes).toContain('NO_RESCHEDULE_HOLD')
   })
+
+  // Inside the cancellation window the server refuses a client-initiated move
+  // (BOOKING_RESCHEDULE_TOO_LATE), so the button must not be offered — otherwise
+  // it opens a slot picker whose commit can only 409.
+  describe('the cancellation-window cutoff on the Reschedule button', () => {
+    const NOW = new Date('2026-08-07T12:00:00.000Z')
+    const DAY_MS = 24 * 60 * 60 * 1000
+
+    it('drops Reschedule inside the window, and KEEPS Cancel', () => {
+      const vm = buildLifecycleActionViewModel(
+        input({
+          status: BookingStatus.ACCEPTED,
+          role: 'CLIENT',
+          now: NOW,
+          scheduledFor: new Date(NOW.getTime() + DAY_MS - 60_000),
+        }),
+      )
+
+      expect(verbs(vm)).toEqual(['CLIENT_CANCEL'])
+    })
+
+    it('keeps Reschedule outside the window', () => {
+      const vm = buildLifecycleActionViewModel(
+        input({
+          status: BookingStatus.ACCEPTED,
+          role: 'CLIENT',
+          now: NOW,
+          scheduledFor: new Date(NOW.getTime() + DAY_MS + 60_000),
+        }),
+      )
+
+      expect(verbs(vm)).toEqual(['CLIENT_RESCHEDULE', 'CLIENT_CANCEL'])
+    })
+
+    // ISO strings are what actually arrive from a server component's props.
+    it('accepts an ISO string as readily as a Date', () => {
+      const vm = buildLifecycleActionViewModel(
+        input({
+          status: BookingStatus.ACCEPTED,
+          role: 'CLIENT',
+          now: NOW.toISOString(),
+          scheduledFor: new Date(NOW.getTime() + 60_000).toISOString(),
+        }),
+      )
+
+      expect(verbs(vm)).toEqual(['CLIENT_CANCEL'])
+    })
+
+    // A caller that doesn't pass the field must keep the old behaviour. Hiding a
+    // control because a prop went missing is worse than the bug it guards.
+    it('offers Reschedule when scheduledFor is absent or unparseable', () => {
+      for (const scheduledFor of [undefined, null, 'not-a-date']) {
+        const vm = buildLifecycleActionViewModel(
+          input({
+            status: BookingStatus.ACCEPTED,
+            role: 'CLIENT',
+            now: NOW,
+            scheduledFor,
+          }),
+        )
+
+        expect(verbs(vm)).toContain('CLIENT_RESCHEDULE')
+      }
+    })
+
+    // The blocker hints at a control that is no longer rendered.
+    it('drops NO_RESCHEDULE_HOLD along with the button', () => {
+      const vm = buildLifecycleActionViewModel(
+        input({
+          status: BookingStatus.ACCEPTED,
+          role: 'CLIENT',
+          rescheduleHoldId: null,
+          now: NOW,
+          scheduledFor: new Date(NOW.getTime() + 60_000),
+        }),
+      )
+
+      expect(vm.blockerCodes).not.toContain('NO_RESCHEDULE_HOLD')
+    })
+
+    // The pro's card is not governed by the client's window at all.
+    it('leaves the pro’s actions untouched inside the window', () => {
+      const vm = buildLifecycleActionViewModel(
+        input({
+          status: BookingStatus.ACCEPTED,
+          role: 'PRO',
+          now: NOW,
+          scheduledFor: new Date(NOW.getTime() + 60_000),
+        }),
+      )
+
+      expect(verbs(vm)).toContain('CANCEL')
+    })
+  })
 })
 
 describe('buildLifecycleActionViewModel — timeline pills', () => {

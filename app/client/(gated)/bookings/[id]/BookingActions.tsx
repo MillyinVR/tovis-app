@@ -129,6 +129,10 @@ export default function BookingActions({
       role: 'CLIENT',
       rescheduleHoldId: rescheduleHoldId ?? null,
       hasAftercareLink: Boolean(hasAftercareLink),
+      // Drives the Reschedule button's own existence: inside the cancellation
+      // window the server refuses a client move (BOOKING_RESCHEDULE_TOO_LATE),
+      // so offering the button would open a slot picker that cannot commit.
+      scheduledFor: scheduledDate,
     })
   }, [
     bookingId,
@@ -136,6 +140,7 @@ export default function BookingActions({
     normalizedStep,
     rescheduleHoldId,
     hasAftercareLink,
+    scheduledDate,
   ])
 
   const [busy, setBusy] = useState(false)
