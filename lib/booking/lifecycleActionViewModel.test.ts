@@ -4,6 +4,7 @@ import { requireDefined } from '@/lib/guards'
 import { BookingStatus, SessionStep } from '@prisma/client'
 import {
   buildLifecycleActionViewModel,
+  lateChangeConfirmCopy,
   type LifecycleActionVerb,
   type LifecycleViewerRole,
   type LifecycleViewModelInput,
@@ -326,4 +327,65 @@ describe('buildLifecycleActionViewModel — timeline pills', () => {
       'cancelled',
     ])
   })
+})
+
+// M6: the client is told what a late move costs BEFORE they commit it, not on a
+// statement afterwards. This copy is what `BookingActions.confirmReschedule`
+// puts in the confirm dialog, and it must appear on exactly the moves the server
+// stamps `lateChangeAt` for — warn on a free move and the warning stops meaning
+// anything; stay silent on a billable one and the client is charged unannounced.
+describe('lateChangeConfirmCopy', () => {
+  const NOW = new Date('2026-08-07T12:00:00.000Z')
+  const DAY_MS = 24 * 60 * 60 * 1000
+
+  it('warns inside the cancellation window', () => {
+    const copy = lateChangeConfirmCopy({
+      scheduledFor: new Date(NOW.getTime() + DAY_MS - 60_000),
+      now: NOW,
+    })
+
+    expect(copy).toContain('late change')
+    // The two consequences must BOTH be named: the fee, and the refund standing
+    // it costs them on any later cancel.
+    expect(copy).toMatch(/fee/i)
+    expect(copy).toMatch(/refund/i)
+  })
+
+  it('says nothing for a move in good time', () => {
+    expect(
+      lateChangeConfirmCopy({
+        scheduledFor: new Date(NOW.getTime() + DAY_MS + 60_000),
+        now: NOW,
+      }),
+    ).toBeNull()
+  })
+
+  // Boundary parity with isAutoCancelRefundEligible: exactly on the line the
+  // client is still early, so the move is free and must not be warned about.
+  it('says nothing exactly on the boundary', () => {
+    expect(
+      lateChangeConfirmCopy({
+        scheduledFor: new Date(NOW.getTime() + DAY_MS),
+        now: NOW,
+      }),
+    ).toBeNull()
+  })
+
+  it('accepts ISO strings, which is what the page props carry', () => {
+    expect(
+      lateChangeConfirmCopy({
+        scheduledFor: new Date(NOW.getTime() + 60_000).toISOString(),
+        now: NOW.toISOString(),
+      }),
+    ).not.toBeNull()
+  })
+
+  // A missing or junk date must not manufacture a warning about a penalty we
+  // cannot know applies.
+  it.each([undefined, null, 'not-a-date'])(
+    'says nothing when scheduledFor is %s',
+    (scheduledFor) => {
+      expect(lateChangeConfirmCopy({ scheduledFor, now: NOW })).toBeNull()
+    },
+  )
 })

@@ -18,6 +18,7 @@
 
 import { BookingStatus, SessionStep } from '@prisma/client'
 
+import { isInsideClientCancellationWindow } from '@/lib/booking/constants'
 import { isTerminalBookingStatus } from '@/lib/booking/lifecycleContract'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
@@ -111,6 +112,47 @@ export type LifecycleViewModelInput = {
 
 function encodePathSegment(value: string): string {
   return encodeURIComponent(value)
+}
+
+/**
+ * The warning a client must see BEFORE committing a reschedule that lands inside
+ * the cancellation window — or null when the move is in good time and costs
+ * nothing.
+ *
+ * M6: the consequence is disclosed at the moment of commit, not discovered on a
+ * later statement. It sits here, next to the cancel confirm copy it deliberately
+ * echoes, and reads the SAME `isInsideClientCancellationWindow` the reschedule
+ * commit uses to decide whether to stamp `lateChangeAt` — so the client is never
+ * warned about a penalty they do not get, nor charged one they were not shown.
+ *
+ * Deliberately vague about the amount: the fee is the pro's own configured flat
+ * or percent value and is not available to this client bundle, so the copy names
+ * the policy rather than inventing a number ([[a-server-refusal-is-copy-on-every-client]]).
+ *
+ * `now` is injectable for tests; the browser clock is fine for a disclosure that
+ * the server independently re-decides.
+ */
+export function lateChangeConfirmCopy(args: {
+  scheduledFor: Date | string | null | undefined
+  now?: Date | string | null
+}): string | null {
+  const scheduledFor = toDateOrNull(args.scheduledFor)
+  if (!scheduledFor) return null
+
+  const now = toDateOrNull(args.now) ?? new Date(Date.now())
+  if (!isInsideClientCancellationWindow({ scheduledFor, now })) return null
+
+  return (
+    'This appointment is less than 24 hours away. Moving it now counts as a ' +
+    'late change: your pro’s late-change fee may apply, and if you cancel ' +
+    'afterwards your deposit and any payment may not be refunded. Continue?'
+  )
+}
+
+function toDateOrNull(value: string | Date | null | undefined): Date | null {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 function displayLabelFor(
