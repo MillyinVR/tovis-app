@@ -1,0 +1,363 @@
+{
+  "manifestVersion": "hair-color-eval-manifest-v1",
+  "analysisSchemaVersion": 1,
+  "promptVersion": "hair-color-analysis-v1",
+  "requestedModel": "claude-sonnet-5",
+  "fixtures": [
+    {
+      "id": "synthetic-hair-i",
+      "diversity": { "fitzpatrickStratum": "I" },
+      "provenance": {
+        "sourceType": "SYNTHETIC",
+        "sourceRef": "openai-imagegen-2026-08-07-synthetic-i",
+        "permittedUse": "repository AI evaluation and redistribution",
+        "deidentified": true,
+        "containsRealClientCapture": false,
+        "reviewStatus": "DOMAIN_REVIEW_REQUIRED"
+      },
+      "captureMediaType": "image/jpeg",
+      "captures": {
+        "hair_back": "fixtures/synthetic-i-hair_back.jpg",
+        "hair_left": "fixtures/synthetic-i-hair_left.jpg",
+        "hair_right": "fixtures/synthetic-i-hair_right.jpg",
+        "hair_crown": "fixtures/synthetic-i-hair_crown.jpg"
+      },
+      "intake": {
+        "current_color": "blonde",
+        "desired_color": "red",
+        "change_scale": "noticeable",
+        "box_dye_history": "never",
+        "prior_lightening": "over-12-months",
+        "last_color_service_timing": "over-12-months",
+        "prior_reaction": "no",
+        "event_timing": "1-3-months",
+        "budget": "251-400"
+      },
+      "expected": {
+        "currentLevel": {
+          "acceptedRange": [8, 9],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "currentTone": {
+          "acceptedValues": ["GOLDEN", "NEUTRAL"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "visibleCondition": {
+          "acceptedValues": ["NO_VISIBLE_CONCERN"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "density": {
+          "acceptedValues": ["MEDIUM"],
+          "allowedEvidence": ["hair_back", "hair_crown"]
+        },
+        "texture": {
+          "acceptedValues": ["STRAIGHT"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "safetyFlags": ["ALLERGY_HISTORY_UNKNOWN"],
+        "achievability": ["LIKELY_MULTI_APPOINTMENT", "REQUIRES_PRO_ASSESSMENT"],
+        "recommendations": {
+          "allowedIntents": ["COLOR_CONSULTATION", "ALL_OVER_COLOR", "TONER_GLOSS"],
+          "resolvableIntents": ["COLOR_CONSULTATION", "ALL_OVER_COLOR", "TONER_GLOSS"]
+        }
+      }
+    },
+    {
+      "id": "synthetic-hair-ii",
+      "diversity": { "fitzpatrickStratum": "II" },
+      "provenance": {
+        "sourceType": "SYNTHETIC",
+        "sourceRef": "openai-imagegen-2026-08-07-synthetic-ii",
+        "permittedUse": "repository AI evaluation and redistribution",
+        "deidentified": true,
+        "containsRealClientCapture": false,
+        "reviewStatus": "DOMAIN_REVIEW_REQUIRED"
+      },
+      "captureMediaType": "image/jpeg",
+      "captures": {
+        "hair_back": "fixtures/synthetic-ii-hair_back.jpg",
+        "hair_left": "fixtures/synthetic-ii-hair_left.jpg",
+        "hair_right": "fixtures/synthetic-ii-hair_right.jpg",
+        "hair_crown": "fixtures/synthetic-ii-hair_crown.jpg"
+      },
+      "intake": {
+        "current_color": "blonde",
+        "desired_color": "blonde",
+        "change_scale": "subtle",
+        "box_dye_history": "not-sure",
+        "prior_lightening": "over-12-months",
+        "last_color_service_timing": "not-sure",
+        "prior_reaction": "not-sure",
+        "event_timing": "no-deadline",
+        "budget": "150-250"
+      },
+      "expected": {
+        "currentLevel": {
+          "acceptedRange": [6, 7],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "currentTone": {
+          "acceptedValues": ["ASHY", "NEUTRAL"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "visibleCondition": {
+          "acceptedValues": ["NO_VISIBLE_CONCERN"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "density": { "acceptedValues": ["UNKNOWN"], "allowedEvidence": [] },
+        "texture": {
+          "acceptedValues": ["WAVY"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "safetyFlags": [
+          "REACTION_HISTORY_UNKNOWN",
+          "CHEMICAL_HISTORY_UNKNOWN",
+          "ALLERGY_HISTORY_UNKNOWN"
+        ],
+        "achievability": ["LIKELY_SINGLE_APPOINTMENT", "REQUIRES_PRO_ASSESSMENT"],
+        "recommendations": {
+          "allowedIntents": ["COLOR_CONSULTATION", "TONER_GLOSS", "HIGHLIGHTS"],
+          "resolvableIntents": ["COLOR_CONSULTATION", "TONER_GLOSS", "HIGHLIGHTS"]
+        }
+      }
+    },
+    {
+      "id": "synthetic-hair-iii",
+      "diversity": { "fitzpatrickStratum": "III" },
+      "provenance": {
+        "sourceType": "SYNTHETIC",
+        "sourceRef": "openai-imagegen-2026-08-07-synthetic-iii",
+        "permittedUse": "repository AI evaluation and redistribution",
+        "deidentified": true,
+        "containsRealClientCapture": false,
+        "reviewStatus": "DOMAIN_REVIEW_REQUIRED"
+      },
+      "captureMediaType": "image/jpeg",
+      "captures": {
+        "hair_back": "fixtures/synthetic-iii-hair_back.jpg",
+        "hair_left": "fixtures/synthetic-iii-hair_left.jpg",
+        "hair_right": "fixtures/synthetic-iii-hair_right.jpg",
+        "hair_crown": "fixtures/synthetic-iii-hair_crown.jpg"
+      },
+      "intake": {
+        "current_color": "brunette",
+        "desired_color": "brunette",
+        "change_scale": "subtle",
+        "box_dye_history": "within-6-months",
+        "prior_lightening": "never",
+        "last_color_service_timing": "1-3-months",
+        "prior_reaction": "no",
+        "event_timing": "2-4-weeks",
+        "budget": "under-150"
+      },
+      "expected": {
+        "currentLevel": {
+          "acceptedRange": [4, 5],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "currentTone": {
+          "acceptedValues": ["NEUTRAL"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "visibleCondition": {
+          "acceptedValues": ["POSSIBLE_COMPROMISE"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "density": {
+          "acceptedValues": ["MEDIUM"],
+          "allowedEvidence": ["hair_back", "hair_crown"]
+        },
+        "texture": {
+          "acceptedValues": ["MIXED", "WAVY"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "safetyFlags": [
+          "RECENT_BOX_DYE",
+          "ALLERGY_HISTORY_UNKNOWN",
+          "VISIBLE_COMPROMISE"
+        ],
+        "achievability": ["REQUIRES_PRO_ASSESSMENT", "LIKELY_MULTI_APPOINTMENT"],
+        "recommendations": {
+          "allowedIntents": ["COLOR_CONSULTATION", "ROOT_TOUCH_UP", "TONER_GLOSS"],
+          "resolvableIntents": ["COLOR_CONSULTATION", "ROOT_TOUCH_UP", "TONER_GLOSS"]
+        }
+      }
+    },
+    {
+      "id": "synthetic-hair-iv",
+      "diversity": { "fitzpatrickStratum": "IV" },
+      "provenance": {
+        "sourceType": "SYNTHETIC",
+        "sourceRef": "openai-imagegen-2026-08-07-synthetic-iv",
+        "permittedUse": "repository AI evaluation and redistribution",
+        "deidentified": true,
+        "containsRealClientCapture": false,
+        "reviewStatus": "DOMAIN_REVIEW_REQUIRED"
+      },
+      "captureMediaType": "image/jpeg",
+      "captures": {
+        "hair_back": "fixtures/synthetic-iv-hair_back.jpg",
+        "hair_left": "fixtures/synthetic-iv-hair_left.jpg",
+        "hair_right": "fixtures/synthetic-iv-hair_right.jpg",
+        "hair_crown": "fixtures/synthetic-iv-hair_crown.jpg"
+      },
+      "intake": {
+        "current_color": "red",
+        "desired_color": "blonde",
+        "change_scale": "total",
+        "box_dye_history": "6-12-months",
+        "prior_lightening": "within-3-months",
+        "last_color_service_timing": "within-4-weeks",
+        "prior_reaction": "yes",
+        "event_timing": "within-2-weeks",
+        "budget": "over-400"
+      },
+      "expected": {
+        "currentLevel": {
+          "acceptedRange": [3, 4],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "currentTone": {
+          "acceptedValues": ["COPPER", "RED", "MIXED"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "visibleCondition": {
+          "acceptedValues": ["POSSIBLE_COMPROMISE"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "density": {
+          "acceptedValues": ["HIGH"],
+          "allowedEvidence": ["hair_back", "hair_crown"]
+        },
+        "texture": {
+          "acceptedValues": ["CURLY"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "safetyFlags": [
+          "PRIOR_REACTION",
+          "RECENT_LIGHTENING",
+          "ALLERGY_HISTORY_UNKNOWN",
+          "VISIBLE_COMPROMISE"
+        ],
+        "achievability": ["REQUIRES_PRO_ASSESSMENT", "LIKELY_MULTI_APPOINTMENT"],
+        "recommendations": {
+          "allowedIntents": ["COLOR_CONSULTATION", "COLOR_CORRECTION"],
+          "resolvableIntents": ["COLOR_CONSULTATION", "COLOR_CORRECTION"]
+        }
+      }
+    },
+    {
+      "id": "synthetic-hair-v",
+      "diversity": { "fitzpatrickStratum": "V" },
+      "provenance": {
+        "sourceType": "SYNTHETIC",
+        "sourceRef": "openai-imagegen-2026-08-07-synthetic-v",
+        "permittedUse": "repository AI evaluation and redistribution",
+        "deidentified": true,
+        "containsRealClientCapture": false,
+        "reviewStatus": "DOMAIN_REVIEW_REQUIRED"
+      },
+      "captureMediaType": "image/jpeg",
+      "captures": {
+        "hair_back": "fixtures/synthetic-v-hair_back.jpg",
+        "hair_left": "fixtures/synthetic-v-hair_left.jpg",
+        "hair_right": "fixtures/synthetic-v-hair_right.jpg",
+        "hair_crown": "fixtures/synthetic-v-hair_crown.jpg"
+      },
+      "intake": {
+        "current_color": "black",
+        "desired_color": "red",
+        "change_scale": "noticeable",
+        "box_dye_history": "never",
+        "prior_lightening": "never",
+        "last_color_service_timing": "never",
+        "prior_reaction": "no",
+        "event_timing": "over-3-months",
+        "budget": "251-400"
+      },
+      "expected": {
+        "currentLevel": {
+          "acceptedRange": [2, 3],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "currentTone": {
+          "acceptedValues": ["NEUTRAL"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "visibleCondition": {
+          "acceptedValues": ["NO_VISIBLE_CONCERN"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "density": {
+          "acceptedValues": ["HIGH"],
+          "allowedEvidence": ["hair_back", "hair_crown"]
+        },
+        "texture": {
+          "acceptedValues": ["COILY"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "safetyFlags": ["ALLERGY_HISTORY_UNKNOWN"],
+        "achievability": ["LIKELY_MULTI_APPOINTMENT", "REQUIRES_PRO_ASSESSMENT"],
+        "recommendations": {
+          "allowedIntents": ["COLOR_CONSULTATION", "ALL_OVER_COLOR", "HIGHLIGHTS"],
+          "resolvableIntents": ["COLOR_CONSULTATION", "ALL_OVER_COLOR", "HIGHLIGHTS"]
+        }
+      }
+    },
+    {
+      "id": "synthetic-hair-vi",
+      "diversity": { "fitzpatrickStratum": "VI" },
+      "provenance": {
+        "sourceType": "SYNTHETIC",
+        "sourceRef": "openai-imagegen-2026-08-07-synthetic-vi",
+        "permittedUse": "repository AI evaluation and redistribution",
+        "deidentified": true,
+        "containsRealClientCapture": false,
+        "reviewStatus": "DOMAIN_REVIEW_REQUIRED"
+      },
+      "captureMediaType": "image/jpeg",
+      "captures": {
+        "hair_back": "fixtures/synthetic-vi-hair_back.jpg",
+        "hair_left": "fixtures/synthetic-vi-hair_left.jpg",
+        "hair_right": "fixtures/synthetic-vi-hair_right.jpg",
+        "hair_crown": "fixtures/synthetic-vi-hair_crown.jpg"
+      },
+      "intake": {
+        "current_color": "black",
+        "desired_color": "not-sure",
+        "change_scale": "subtle",
+        "box_dye_history": "not-sure",
+        "prior_lightening": "not-sure",
+        "last_color_service_timing": "not-sure",
+        "prior_reaction": "no",
+        "event_timing": "no-deadline",
+        "budget": "discuss-with-pro"
+      },
+      "expected": {
+        "currentLevel": {
+          "acceptedRange": [1, 2],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "currentTone": { "acceptedValues": ["UNKNOWN"], "allowedEvidence": [] },
+        "visibleCondition": {
+          "acceptedValues": ["NO_VISIBLE_CONCERN"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right"]
+        },
+        "density": {
+          "acceptedValues": ["LOW"],
+          "allowedEvidence": ["hair_back", "hair_crown"]
+        },
+        "texture": {
+          "acceptedValues": ["COILY"],
+          "allowedEvidence": ["hair_back", "hair_left", "hair_right", "hair_crown"]
+        },
+        "safetyFlags": ["CHEMICAL_HISTORY_UNKNOWN", "ALLERGY_HISTORY_UNKNOWN"],
+        "achievability": ["REQUIRES_PRO_ASSESSMENT", "UNKNOWN"],
+        "recommendations": {
+          "allowedIntents": ["COLOR_CONSULTATION", "OTHER_HAIR_COLOR"],
+          "resolvableIntents": ["COLOR_CONSULTATION", "OTHER_HAIR_COLOR"]
+        }
+      }
+    }
+  ]
+}
