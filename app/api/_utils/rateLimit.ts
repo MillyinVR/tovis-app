@@ -21,11 +21,27 @@ export type RateLimitIdentity =
   | { kind: 'phone'; id: string }
   | { kind: 'token'; id: string }
 
-let hasLoggedNullRateLimitIdentity = false
+// How many times THIS instance has fallen back to the shared `ip:'unknown'`
+// bucket. Deliberately a counter and not a boolean: the fallback is silent to
+// the caller, so after the first occurrence has logged, every later one looks
+// identical in the logs. A once-only flag cannot tell ten affected requests
+// from ten million — and sizing that is the entire point of the signal, since
+// each affected request is one the IP-keyed brute-force guards could not
+// tell apart from any other caller.
+let nullRateLimitIdentityCount = 0
 
-function logNullRateLimitIdentityOnce(): void {
-  if (hasLoggedNullRateLimitIdentity) return
-  hasLoggedNullRateLimitIdentity = true
+// Next count at which to emit: the 1st occurrence, then every power of ten.
+// That bounds a hot instance to ~1 line per 10x of traffic instead of one per
+// request, while still putting the magnitude in the log. Integer-only (never
+// Math.log10, whose float rounding can skip a threshold).
+let nullRateLimitIdentityReportAt = 1
+
+function logNullRateLimitIdentity(): void {
+  nullRateLimitIdentityCount += 1
+
+  if (nullRateLimitIdentityCount < nullRateLimitIdentityReportAt) return
+
+  nullRateLimitIdentityReportAt *= 10
 
   logAuthEvent({
     level: 'error',
@@ -37,6 +53,11 @@ function logNullRateLimitIdentityOnce(): void {
       fallbackIdentityKind: 'ip',
       fallbackIdentityId: 'unknown',
       nodeEnv: process.env.NODE_ENV ?? null,
+      // Occurrences on THIS instance since it started, at the moment of
+      // logging. Because emission is throttled to powers of ten, the value is
+      // a FLOOR on affected requests, not a total: read one line as "at least
+      // this many", and never as "this happened once".
+      occurrences: nullRateLimitIdentityCount,
     },
   })
 }
@@ -193,7 +214,7 @@ export async function rateLimitIdentity(
   }
 
   if (process.env.NODE_ENV === 'production') {
-    logNullRateLimitIdentityOnce()
+    logNullRateLimitIdentity()
     return { kind: 'ip', id: 'unknown' }
   }
 
