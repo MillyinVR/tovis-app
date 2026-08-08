@@ -352,7 +352,7 @@ describe('AI consult lifecycle and legal foundation', () => {
 
     const revision = await appendConsultRevision({
       consultSessionId: sessionId,
-      kind: ConsultRevisionKind.ANALYSIS,
+      kind: ConsultRevisionKind.BRIEF,
       payload: { fixture: 'revision-one' },
       schemaVersion: 1,
       actor: actor(),

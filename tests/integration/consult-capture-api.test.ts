@@ -46,6 +46,9 @@ const fake = vi.hoisted(() => ({
     }
   >(),
   modelCalls: [] as string[],
+  analysisCalls: 0,
+  analysisFails: false,
+  analysisDuring: null as null | (() => Promise<void>),
   pathSequence: 0,
 }))
 
@@ -143,11 +146,74 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
   }
 })
 
+vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/consult/analysisEngine')>()
+  return {
+    ...original,
+    async runHairColorAnalysis() {
+      fake.analysisCalls += 1
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      if (fake.analysisDuring) await fake.analysisDuring()
+      if (fake.analysisFails) {
+        throw new original.ConsultAnalysisProviderError('unavailable')
+      }
+      const observed = (value: string, evidence: string[] = ['hair_back']) => ({
+        value,
+        confidence:
+          value === 'UNKNOWN' ? { min: 0, max: 0.25 } : { min: 0.4, max: 0.7 },
+        evidence,
+      })
+      return {
+        model: 'fake-analysis-model',
+        analysis: {
+          core: {
+            currentLevel: {
+              min: 4,
+              max: 5,
+              confidence: { min: 0.5, max: 0.75 },
+              evidence: ['hair_back', 'hair_crown'],
+            },
+            currentTone: observed('MIXED'),
+            visibleCondition: observed('NO_VISIBLE_CONCERN'),
+            density: observed('UNKNOWN', []),
+            texture: observed('WAVY'),
+          },
+          hairColorLens: {
+            goal: 'A noticeable red direction grounded in the intake goal.',
+            history: 'Prior lightening and box-dye timing affect the range.',
+            constraints: 'Allergy history and other constraints are unknown.',
+            maintenance: 'Maintenance tolerance was not collected and is unknown.',
+            appointmentContext: 'Appointment context uses the intake timing and budget.',
+            achievability: 'REQUIRES_PRO_ASSESSMENT',
+            achievabilityReason: 'The professional should assess condition and history.',
+            discussWithProfessional: true,
+          },
+          safetyFlags: [],
+          recommendations: [
+            {
+              serviceIntent: 'COLOR_CONSULTATION',
+              title: 'Hair color consultation',
+              rationale: 'Review a realistic red direction and chemical history.',
+              achievability: 'The professional should confirm the service plan.',
+              discussWithProfessional: true,
+            },
+          ],
+        },
+      }
+    },
+  }
+})
+
 import { POST as attachCapture } from '@/app/api/v1/client/consult/[id]/capture/attach/route'
 import { GET as getCapture } from '@/app/api/v1/client/consult/[id]/capture/route'
 import { POST as issueUpload } from '@/app/api/v1/client/consult/[id]/capture/uploads/route'
 import { POST as checkQuality } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/quality/route'
 import { DELETE as deleteCapture } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/route'
+import { GET as getAnalysis, POST as startAnalysis } from '@/app/api/v1/client/consult/[id]/analysis/route'
+import {
+  CONSULT_ANALYSIS_PROMPT_VERSION,
+  CONSULT_ANALYSIS_SCHEMA_VERSION,
+} from '@/lib/consult/analysisEngine'
 import {
   HAIR_COLOR_CAPTURE_PACK_VERSION,
   HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
@@ -164,6 +230,7 @@ import {
   acceptConsultAgreement,
   appendHairColorIntakeRevision,
   revokeConsultAgreement,
+  transitionLockedConsultSession,
 } from '@/lib/consult/writeBoundary'
 import {
   HAIR_COLOR_INTAKE_PACK_VERSION,
@@ -413,6 +480,29 @@ async function issueAttach(
   return attachedBody.captureId as string
 }
 
+async function completeCapturePack(consult: ReadyConsult, suffix: string) {
+  for (const shotKey of ['hair_back', 'hair_left', 'hair_right', 'hair_crown'] as const) {
+    const captureId = await issueAttach(consult, shotKey, `${suffix}-${shotKey}`)
+    const response = await quality(
+      consult,
+      captureId,
+      `${suffix}-quality-${shotKey}`,
+    )
+    expect(response.status).toBe(200)
+  }
+}
+
+function analysisRequest(consult: ReadyConsult, idempotencyKey: string) {
+  return startAnalysis(
+    jsonRequest(`/api/v1/client/consult/${consult.sessionId}/analysis`, {
+      idempotencyKey,
+      schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+      promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+    }),
+    context(consult.sessionId),
+  )
+}
+
 beforeAll(async () => {
   process.env.ENABLE_AI_CONSULT = '1'
   const tenant = await db.tenant.create({
@@ -454,7 +544,7 @@ beforeAll(async () => {
   categoryId = category.id
   const service = await db.service.create({
     data: {
-      name: `${tag} color`,
+      name: `${tag} Hair Color Consultation`,
       categoryId,
       defaultDurationMinutes: 60,
       minPrice: new Prisma.Decimal('100.00'),
@@ -462,6 +552,16 @@ beforeAll(async () => {
     select: { id: true },
   })
   serviceId = service.id
+  await db.professionalServiceOffering.create({
+    data: {
+      professionalId,
+      serviceId,
+      isActive: true,
+      offersInSalon: true,
+      salonPriceStartingAt: new Prisma.Decimal('100.00'),
+      salonDurationMinutes: 60,
+    },
+  })
   const [consent, adult] = await Promise.all([
     db.consultAgreementVersion.create({
       data: {
@@ -494,6 +594,9 @@ beforeEach(() => {
   fake.failPurgePaths.clear()
   fake.qualityByShot.clear()
   fake.modelCalls.length = 0
+  fake.analysisCalls = 0
+  fake.analysisFails = false
+  fake.analysisDuring = null
 })
 
 afterAll(async () => {
@@ -506,6 +609,7 @@ afterAll(async () => {
   })
   await db.booking.deleteMany({ where: { id: { in: bookingIds } } })
   await db.professionalLocation.deleteMany({ where: { id: locationId } })
+  await db.professionalServiceOffering.deleteMany({ where: { serviceId } })
   await db.service.deleteMany({ where: { id: serviceId } })
   await db.serviceCategory.deleteMany({ where: { id: categoryId } })
   await db.clientProfile.deleteMany({ where: { id: { in: clientIds } } })
@@ -1133,5 +1237,477 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     await expect(
       db.uploadSession.delete({ where: { id: attached.uploadSessionId } }),
     ).rejects.toThrow()
+  })
+
+  it('runs one canonical C4 analysis for concurrent retries, resolves an active offering, and verifies raw purge', async () => {
+    const consult = await createReadyConsult('analysis-success')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-success')
+    const before = await db.consultSession.findUniqueOrThrow({
+      where: { id: consult.sessionId },
+      select: { revisionSequence: true },
+    })
+
+    const [first, retry] = await Promise.all([
+      analysisRequest(consult, 'canonical-analysis'),
+      analysisRequest(consult, 'canonical-analysis'),
+    ])
+    expect(first.status).toBe(200)
+    expect(retry.status).toBe(200)
+    expect(fake.analysisCalls).toBe(1)
+    expect([await body(first), await body(retry)]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ replayed: false }),
+        expect.objectContaining({ replayed: true }),
+      ]),
+    )
+
+    const session = await db.consultSession.findUniqueOrThrow({
+      where: { id: consult.sessionId },
+      select: { status: true, revisionSequence: true },
+    })
+    expect(session).toEqual({
+      status: ConsultSessionStatus.COMPLETED,
+      revisionSequence: before.revisionSequence + 1,
+    })
+    const revisions = await db.consultRevision.findMany({
+      where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
+    })
+    expect(revisions).toHaveLength(1)
+    expect(revisions[0]).toMatchObject({
+      schemaVersion: 1,
+      promptVersion: 'hair-color-analysis-v1',
+      model: 'fake-analysis-model',
+      idempotencyKey: 'canonical-analysis',
+    })
+    expect(revisions[0]?.payload).toMatchObject({
+      safetyFlags: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'ALLERGY_HISTORY_UNKNOWN',
+          discussWithProfessional: true,
+        }),
+      ]),
+      recommendations: [
+        expect.objectContaining({
+          reference: {
+            type: 'SERVICE',
+            serviceId,
+            serviceCategoryId: categoryId,
+          },
+        }),
+      ],
+    })
+    const captures = await db.consultCapture.findMany({
+      where: { consultSessionId: consult.sessionId, status: ConsultCaptureStatus.ACCEPTED },
+      select: { purgedAt: true, storagePath: true, storageBucket: true },
+    })
+    expect(captures).toHaveLength(4)
+    expect(captures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          purgedAt: expect.any(Date),
+          storagePath: null,
+          storageBucket: null,
+        }),
+      ]),
+    )
+    expect(fake.purgedPaths).toHaveLength(4)
+
+    const audits = await db.consultAuditEvent.findMany({
+      where: { consultSessionId: consult.sessionId },
+    })
+    expect(
+      audits.filter(
+        (event) =>
+          event.fromStatus === ConsultSessionStatus.ANALYSIS_PENDING &&
+          event.toStatus === ConsultSessionStatus.ANALYZING,
+      ),
+    ).toHaveLength(1)
+    expect(
+      audits.filter(
+        (event) =>
+          event.fromStatus === ConsultSessionStatus.ANALYZING &&
+          event.toStatus === ConsultSessionStatus.COMPLETED,
+      ),
+    ).toHaveLength(1)
+    expect(audits.filter((event) => event.revisionId === revisions[0]?.id)).toHaveLength(1)
+    const durable = JSON.stringify({ revisions, audits })
+    for (const forbidden of [
+      'consult-raw',
+      'signed-upload-secret',
+      'aGVsbG8=',
+      'providerRequest',
+      'providerResponse',
+      'hiddenReasoning',
+    ]) {
+      expect(durable).not.toContain(forbidden)
+    }
+
+    const read = await getAnalysis(
+      new Request(`http://test/api/v1/client/consult/${consult.sessionId}/analysis`),
+      context(consult.sessionId),
+    )
+    expect(read.status).toBe(200)
+    expect(await body(read)).toMatchObject({
+      analysis: {
+        status: ConsultSessionStatus.COMPLETED,
+        schemaVersion: 1,
+        promptVersion: 'hair-color-analysis-v1',
+        result: { revisionId: revisions[0]?.id },
+      },
+    })
+  })
+
+  it('keeps provider failures retriable with no analysis revision, sequence effect, or committed transition', async () => {
+    const consult = await createReadyConsult('analysis-provider-failure')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-provider-failure')
+    const before = await db.consultSession.findUniqueOrThrow({
+      where: { id: consult.sessionId },
+      select: { revisionSequence: true },
+    })
+    fake.analysisFails = true
+    const failed = await analysisRequest(consult, 'provider-failure')
+    expect(failed.status).toBe(503)
+    expect(await body(failed)).toMatchObject({ code: 'CONSULT_ANALYSIS_UNAVAILABLE' })
+    expect(
+      await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true, revisionSequence: true },
+      }),
+    ).toEqual({
+      status: ConsultSessionStatus.ANALYSIS_PENDING,
+      revisionSequence: before.revisionSequence,
+    })
+    expect(
+      await db.consultRevision.count({
+        where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
+      }),
+    ).toBe(0)
+    expect(
+      await db.consultAuditEvent.count({
+        where: {
+          consultSessionId: consult.sessionId,
+          fromStatus: ConsultSessionStatus.ANALYSIS_PENDING,
+          toStatus: ConsultSessionStatus.ANALYZING,
+        },
+      }),
+    ).toBe(0)
+
+    fake.analysisFails = false
+    const recovered = await analysisRequest(consult, 'provider-failure')
+    expect(recovered.status).toBe(200)
+    expect(fake.analysisCalls).toBe(2)
+  })
+
+  it('keeps completed analysis durable and lets cleanup retry a failed post-commit purge', async () => {
+    const consult = await createReadyConsult('analysis-purge-retry')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-purge-retry')
+    const capture = await db.consultCapture.findFirstOrThrow({
+      where: {
+        consultSessionId: consult.sessionId,
+        status: ConsultCaptureStatus.ACCEPTED,
+      },
+      select: { id: true, storagePath: true },
+    })
+    if (!capture.storagePath) throw new Error('Expected raw capture fixture path.')
+    fake.failPurgePaths.add(capture.storagePath)
+
+    const response = await analysisRequest(consult, 'purge-retry')
+    expect(response.status).toBe(200)
+    expect(
+      await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: ConsultSessionStatus.COMPLETED })
+    expect(
+      await db.consultRevision.count({
+        where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
+      }),
+    ).toBe(1)
+    expect(
+      await db.consultCapture.findUniqueOrThrow({
+        where: { id: capture.id },
+        select: {
+          purgedAt: true,
+          purgeEligibleAt: true,
+          purgeRequestedAt: true,
+          storagePath: true,
+        },
+      }),
+    ).toMatchObject({
+      purgedAt: null,
+      purgeEligibleAt: expect.any(Date),
+      purgeRequestedAt: expect.any(Date),
+      storagePath: capture.storagePath,
+    })
+
+    expect(await runConsultCapturePurgeSweep(new Date())).toMatchObject({
+      considered: 1,
+      purged: 1,
+      failed: 0,
+    })
+    expect(
+      await db.consultCapture.findUniqueOrThrow({
+        where: { id: capture.id },
+        select: { purgedAt: true, storagePath: true },
+      }),
+    ).toMatchObject({ purgedAt: expect.any(Date), storagePath: null })
+  })
+
+  it('falls back to the authoritative active hair-color category when no active service match exists', async () => {
+    const consult = await createReadyConsult('analysis-category-fallback')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-category-fallback')
+    await db.professionalServiceOffering.update({
+      where: { professionalId_serviceId: { professionalId, serviceId } },
+      data: { isActive: false },
+    })
+    try {
+      const response = await analysisRequest(consult, 'category-fallback')
+      expect(response.status).toBe(200)
+      const revision = await db.consultRevision.findFirstOrThrow({
+        where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
+        select: { payload: true },
+      })
+      expect(revision.payload).toMatchObject({
+        recommendations: [
+          expect.objectContaining({
+            reference: {
+              type: 'SERVICE_CATEGORY',
+              serviceId: null,
+              serviceCategoryId: categoryId,
+            },
+          }),
+        ],
+      })
+    } finally {
+      await db.professionalServiceOffering.update({
+        where: { professionalId_serviceId: { professionalId, serviceId } },
+        data: { isActive: true },
+      })
+    }
+  })
+
+  it('fails analysis closed for foreign ownership, founder disable, and newly published legal versions before provider work', async () => {
+    const owner = await createReadyConsult('analysis-owner-gates')
+    const foreign = await createReadyConsult('analysis-foreign-gates')
+    authenticate(owner)
+    await completeCapturePack(owner, 'analysis-owner-gates')
+
+    authenticate(foreign)
+    const stolen = await analysisRequest(owner, 'foreign-owner')
+    expect(stolen.status).toBe(404)
+    expect(fake.analysisCalls).toBe(0)
+
+    authenticate(owner)
+    delete process.env.ENABLE_AI_CONSULT
+    const darkRequest = jsonRequest(`/api/v1/client/consult/${owner.sessionId}/analysis`, {
+      idempotencyKey: 'dark-analysis',
+      schemaVersion: 1,
+      promptVersion: 'hair-color-analysis-v1',
+    })
+    const darkJson = vi.spyOn(darkRequest, 'json')
+    const dark = await startAnalysis(darkRequest, context(owner.sessionId))
+    process.env.ENABLE_AI_CONSULT = '1'
+    expect(dark.status).toBe(404)
+    expect(darkJson).not.toHaveBeenCalled()
+    expect(fake.analysisCalls).toBe(0)
+
+    const replacement = await db.consultAgreementVersion.create({
+      data: {
+        kind: ConsultAgreementKind.SENSITIVE_DATA_CONSENT,
+        version: versionBase + 2,
+        title: 'Explicit newer analysis consent fixture',
+        body: 'Explicit newer analysis consent fixture only.',
+      },
+      select: { id: true },
+    })
+    try {
+      const stale = await analysisRequest(owner, 'stale-analysis-consent')
+      expect(stale.status).toBe(409)
+      expect(await body(stale)).toMatchObject({
+        code: 'CONSULT_PREREQUISITES_REQUIRED',
+      })
+      expect(fake.analysisCalls).toBe(0)
+    } finally {
+      await db.consultAgreementVersion.delete({ where: { id: replacement.id } })
+    }
+  })
+
+  it('discards an in-flight result when booking cancellation marks captures for purge', async () => {
+    const consult = await createReadyConsult('analysis-cancel-race')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-cancel-race')
+    fake.analysisDuring = async () => {
+      await db.booking.update({
+        where: { id: consult.bookingId },
+        data: { status: BookingStatus.CANCELLED },
+      })
+    }
+    const response = await analysisRequest(consult, 'cancel-race')
+    expect(response.status).toBe(409)
+    expect(fake.analysisCalls).toBe(1)
+    expect(
+      await db.consultRevision.count({
+        where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
+      }),
+    ).toBe(0)
+    expect(
+      await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: ConsultSessionStatus.ANALYSIS_PENDING })
+    expect(
+      await db.consultCapture.count({
+        where: {
+          consultSessionId: consult.sessionId,
+          purgeRequestedAt: { not: null },
+        },
+      }),
+    ).toBe(4)
+  })
+
+  it('rejects a structurally incomplete analysis payload at the direct database guard', async () => {
+    const consult = await createReadyConsult('analysis-payload-guard')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-payload-guard')
+    await db.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id" FROM "ConsultSession"
+        WHERE "id" = ${consult.sessionId}
+        FOR UPDATE
+      `)
+      await transitionLockedConsultSession(tx, {
+        consultSessionId: consult.sessionId,
+        actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+        fromStatus: ConsultSessionStatus.ANALYSIS_PENDING,
+        toStatus: ConsultSessionStatus.ANALYZING,
+      })
+    })
+    const sequenced = await db.consultSession.update({
+      where: { id: consult.sessionId },
+      data: { revisionSequence: { increment: 1 } },
+      select: { revisionSequence: true },
+    })
+
+    await expect(
+      db.consultRevision.create({
+        data: {
+          consultSessionId: consult.sessionId,
+          revision: sequenced.revisionSequence,
+          kind: 'ANALYSIS',
+          payload: {
+            core: {
+              currentLevel: {
+                min: 4,
+                max: 5,
+                confidence: { min: 0.5, max: 0.75 },
+                evidence: ['hair_back'],
+              },
+              currentTone: {
+                value: 'MIXED',
+                confidence: { min: 0.4, max: 0.7 },
+                evidence: ['hair_back'],
+              },
+              visibleCondition: {
+                value: 'NO_VISIBLE_CONCERN',
+                confidence: { min: 0.4, max: 0.7 },
+                evidence: ['hair_back'],
+              },
+              density: {
+                value: 'UNKNOWN',
+                confidence: { min: 0, max: 0.25 },
+                evidence: [],
+              },
+              texture: {
+                value: 'WAVY',
+                confidence: { min: 0.4, max: 0.7 },
+                evidence: ['hair_back'],
+              },
+            },
+            hairColorLens: {
+              // Intentionally missing required `goal`.
+              history: 'Chemical history comes from the intake.',
+              constraints: 'Allergy history and constraints are unknown.',
+              maintenance: 'Maintenance tolerance is unknown.',
+              appointmentContext: 'Appointment context comes from the intake.',
+              achievability: 'REQUIRES_PRO_ASSESSMENT',
+              achievabilityReason: 'A professional should confirm the plan.',
+              discussWithProfessional: true,
+            },
+            safetyFlags: [
+              {
+                code: 'ALLERGY_HISTORY_UNKNOWN',
+                summary: 'Allergy history is unknown; discuss precautions with the professional.',
+                discussWithProfessional: true,
+              },
+            ],
+            recommendations: [
+              {
+                serviceIntent: 'COLOR_CONSULTATION',
+                title: 'Hair color consultation',
+                rationale: 'Confirm a bounded color direction together.',
+                achievability: 'The professional should confirm the appointment plan.',
+                discussWithProfessional: true,
+                reference: {
+                  type: 'SERVICE_CATEGORY',
+                  serviceId: null,
+                  serviceCategoryId: categoryId,
+                },
+              },
+            ],
+          },
+          schemaVersion: 1,
+          promptVersion: 'hair-color-analysis-v1',
+          model: 'direct-guard-test',
+          idempotencyKey: 'direct-payload-guard',
+          requestHash: 'd'.repeat(64),
+        },
+      }),
+    ).rejects.toThrow('invalid versioned hair-color analysis payload')
+  })
+
+  it('rejects conflicting analysis keys and direct database completion/revision bypasses', async () => {
+    const consult = await createReadyConsult('analysis-db-guard')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-db-guard')
+
+    await expect(
+      db.consultSession.update({
+        where: { id: consult.sessionId },
+        data: { status: ConsultSessionStatus.ANALYZING },
+      }),
+    ).rejects.toThrow()
+
+    const succeeded = await analysisRequest(consult, 'db-guard-key')
+    expect(succeeded.status).toBe(200)
+    const conflict = await analysisRequest(consult, 'different-key')
+    expect(conflict.status).toBe(409)
+    expect(await body(conflict)).toMatchObject({ code: 'CONSULT_IDEMPOTENCY_CONFLICT' })
+
+    await expect(
+      db.consultRevision.create({
+        data: {
+          consultSessionId: consult.sessionId,
+          revision: 999,
+          kind: 'ANALYSIS',
+          payload: { raw: 'aGVsbG8=', storagePath: 'consult-raw/private.jpg' },
+          schemaVersion: 1,
+          promptVersion: 'hair-color-analysis-v1',
+          model: 'forged-model',
+          idempotencyKey: 'forged',
+          requestHash: 'f'.repeat(64),
+        },
+      }),
+    ).rejects.toThrow()
+
+    const rls = await db.$queryRaw<Array<{ relrowsecurity: boolean }>>(Prisma.sql`
+      SELECT relrowsecurity FROM pg_class WHERE oid = '"ConsultRevision"'::regclass
+    `)
+    expect(rls).toEqual([{ relrowsecurity: true }])
   })
 })

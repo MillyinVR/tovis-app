@@ -6562,7 +6562,11 @@
         "CONSULT_CAPTURE_OBJECT_INVALID",
         "CONSULT_CAPTURE_QUALITY_UNAVAILABLE",
         "CONSULT_CAPTURE_QUALITY_FAILED",
-        "CONSULT_CAPTURE_STORAGE_UNAVAILABLE"
+        "CONSULT_CAPTURE_STORAGE_UNAVAILABLE",
+        "CONSULT_ANALYSIS_SCHEMA_VERSION_MISMATCH",
+        "CONSULT_ANALYSIS_PROMPT_VERSION_MISMATCH",
+        "CONSULT_ANALYSIS_PREREQUISITES_REQUIRED",
+        "CONSULT_ANALYSIS_UNAVAILABLE"
       ],
       "type": "string"
     },
@@ -6733,6 +6737,490 @@
         "title",
         "body",
         "publishedAt"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisConfidenceDTO": {
+      "properties": {
+        "max": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisEvidenceDTO": {
+      "enum": [
+        "hair_back",
+        "hair_left",
+        "hair_right",
+        "hair_crown",
+        "intake"
+      ],
+      "type": "string"
+    },
+    "ConsultAnalysisObservationDTO<(\"ASHY\"|\"NEUTRAL\"|\"GOLDEN\"|\"COPPER\"|\"RED\"|\"MIXED\"|\"UNKNOWN\")>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "enum": [
+            "ASHY",
+            "NEUTRAL",
+            "GOLDEN",
+            "COPPER",
+            "RED",
+            "MIXED",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<(\"LOW\"|\"MEDIUM\"|\"HIGH\"|\"UNKNOWN\")>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<(\"NO_VISIBLE_CONCERN\"|\"POSSIBLE_COMPROMISE\"|\"UNKNOWN\")>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "enum": [
+            "NO_VISIBLE_CONCERN",
+            "POSSIBLE_COMPROMISE",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<(\"STRAIGHT\"|\"WAVY\"|\"CURLY\"|\"COILY\"|\"MIXED\"|\"UNKNOWN\")>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "enum": [
+            "STRAIGHT",
+            "WAVY",
+            "CURLY",
+            "COILY",
+            "MIXED",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisPayloadDTO": {
+      "properties": {
+        "core": {
+          "properties": {
+            "currentLevel": {
+              "properties": {
+                "confidence": {
+                  "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+                },
+                "evidence": {
+                  "items": {
+                    "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+                  },
+                  "type": "array"
+                },
+                "max": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "min": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "min",
+                "max",
+                "confidence",
+                "evidence"
+              ],
+              "type": "object"
+            },
+            "currentTone": {
+              "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22ASHY%22%7C%22NEUTRAL%22%7C%22GOLDEN%22%7C%22COPPER%22%7C%22RED%22%7C%22MIXED%22%7C%22UNKNOWN%22)%3E"
+            },
+            "density": {
+              "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22LOW%22%7C%22MEDIUM%22%7C%22HIGH%22%7C%22UNKNOWN%22)%3E"
+            },
+            "texture": {
+              "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22STRAIGHT%22%7C%22WAVY%22%7C%22CURLY%22%7C%22COILY%22%7C%22MIXED%22%7C%22UNKNOWN%22)%3E"
+            },
+            "visibleCondition": {
+              "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22NO_VISIBLE_CONCERN%22%7C%22POSSIBLE_COMPROMISE%22%7C%22UNKNOWN%22)%3E"
+            }
+          },
+          "required": [
+            "currentLevel",
+            "currentTone",
+            "visibleCondition",
+            "density",
+            "texture"
+          ],
+          "type": "object"
+        },
+        "hairColorLens": {
+          "properties": {
+            "achievability": {
+              "enum": [
+                "LIKELY_SINGLE_APPOINTMENT",
+                "LIKELY_MULTI_APPOINTMENT",
+                "REQUIRES_PRO_ASSESSMENT",
+                "UNKNOWN"
+              ],
+              "type": "string"
+            },
+            "achievabilityReason": {
+              "type": "string"
+            },
+            "appointmentContext": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "string"
+            },
+            "discussWithProfessional": {
+              "const": true,
+              "type": "boolean"
+            },
+            "goal": {
+              "type": "string"
+            },
+            "history": {
+              "type": "string"
+            },
+            "maintenance": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "goal",
+            "history",
+            "constraints",
+            "maintenance",
+            "appointmentContext",
+            "achievability",
+            "achievabilityReason",
+            "discussWithProfessional"
+          ],
+          "type": "object"
+        },
+        "recommendations": {
+          "items": {
+            "properties": {
+              "achievability": {
+                "type": "string"
+              },
+              "discussWithProfessional": {
+                "const": true,
+                "type": "boolean"
+              },
+              "rationale": {
+                "type": "string"
+              },
+              "reference": {
+                "$ref": "#/definitions/ConsultAnalysisReferenceDTO"
+              },
+              "serviceIntent": {
+                "$ref": "#/definitions/ConsultAnalysisServiceIntentDTO"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "serviceIntent",
+              "title",
+              "rationale",
+              "achievability",
+              "discussWithProfessional",
+              "reference"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "safetyFlags": {
+          "items": {
+            "properties": {
+              "code": {
+                "$ref": "#/definitions/ConsultAnalysisSafetyCodeDTO"
+              },
+              "discussWithProfessional": {
+                "const": true,
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "summary",
+              "discussWithProfessional"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "core",
+        "hairColorLens",
+        "safetyFlags",
+        "recommendations"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisReferenceDTO": {
+      "anyOf": [
+        {
+          "properties": {
+            "serviceCategoryId": {
+              "type": "string"
+            },
+            "serviceId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "SERVICE",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "serviceId",
+            "serviceCategoryId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "serviceCategoryId": {
+              "type": "string"
+            },
+            "serviceId": {
+              "type": "null"
+            },
+            "type": {
+              "const": "SERVICE_CATEGORY",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "serviceId",
+            "serviceCategoryId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ConsultAnalysisResultDTO": {
+      "properties": {
+        "analysis": {
+          "$ref": "#/definitions/ConsultAnalysisPayloadDTO"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "revisionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "revisionId",
+        "revision",
+        "analysis",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisSafetyCodeDTO": {
+      "enum": [
+        "PRIOR_REACTION",
+        "REACTION_HISTORY_UNKNOWN",
+        "RECENT_BOX_DYE",
+        "RECENT_LIGHTENING",
+        "CHEMICAL_HISTORY_UNKNOWN",
+        "ALLERGY_HISTORY_UNKNOWN",
+        "VISIBLE_COMPROMISE"
+      ],
+      "type": "string"
+    },
+    "ConsultAnalysisServiceIntentDTO": {
+      "enum": [
+        "COLOR_CONSULTATION",
+        "ROOT_TOUCH_UP",
+        "ALL_OVER_COLOR",
+        "HIGHLIGHTS",
+        "BALAYAGE",
+        "COLOR_CORRECTION",
+        "TONER_GLOSS",
+        "VIVID_COLOR",
+        "OTHER_HAIR_COLOR"
+      ],
+      "type": "string"
+    },
+    "ConsultAnalysisStartRequestDTO": {
+      "properties": {
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "promptVersion": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "schemaVersion",
+        "promptVersion"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisStartResponseDTO": {
+      "properties": {
+        "analysis": {
+          "$ref": "#/definitions/ConsultAnalysisStateDTO"
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "analysis",
+        "replayed"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisStateDTO": {
+      "properties": {
+        "consultId": {
+          "type": "string"
+        },
+        "promptVersion": {
+          "type": "string"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultAnalysisResultDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultSessionStatus"
+        }
+      },
+      "required": [
+        "consultId",
+        "status",
+        "schemaVersion",
+        "promptVersion",
+        "result"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisStateResponseDTO": {
+      "properties": {
+        "analysis": {
+          "$ref": "#/definitions/ConsultAnalysisStateDTO"
+        }
+      },
+      "required": [
+        "analysis"
       ],
       "type": "object"
     },

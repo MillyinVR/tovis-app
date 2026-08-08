@@ -2,6 +2,7 @@ import {
   ConsultActorType,
   ConsultAgreementKind,
   ConsultAuditAction,
+  ConsultCaptureStatus,
   ConsultRevisionKind,
   ConsultSessionStatus,
   Prisma,
@@ -14,6 +15,11 @@ import {
   requireCurrentConsultAgreementAcceptances,
   requirePublishedConsultAgreementVersions,
 } from './agreementContract'
+import {
+  CONSULT_ANALYSIS_PROMPT_VERSION,
+  CONSULT_ANALYSIS_SCHEMA_VERSION,
+} from './analysisEngine'
+import { HAIR_COLOR_CAPTURE_SHOT_KEYS } from './capturePack'
 import {
   AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
   evaluateAiConsultBookingEligibility,
@@ -422,6 +428,12 @@ export async function appendConsultRevision(args: {
   promptVersion?: string
   actor: ConsultActor
 }) {
+  if (args.kind === ConsultRevisionKind.ANALYSIS) {
+    throw new ConsultWriteError(
+      'INVALID_STATE',
+      'Analysis revisions must use the canonical analysis finalization boundary.',
+    )
+  }
   return prisma.$transaction(async (tx) => {
     await lockSession(tx, args.consultSessionId)
     const session = await tx.consultSession.findUnique({
@@ -469,6 +481,90 @@ export async function appendConsultRevision(args: {
 
     return revision
   })
+}
+
+/**
+ * C4's atomic terminal boundary. The caller owns the already-locked
+ * transaction and post-provider prerequisite re-check; this function keeps
+ * sequence/revision/audit/purge-marker/completion writes indivisible and in
+ * the only source file authorized to mutate sensitive consult lifecycle data.
+ */
+export async function finalizeLockedHairColorAnalysis(
+  tx: Prisma.TransactionClient,
+  args: {
+    consultSessionId: string
+    payload: Prisma.InputJsonValue
+    model: string
+    idempotencyKey: string
+    requestHash: string
+    captureIds: readonly string[]
+    finalizedAt: Date
+    actor: ConsultActor
+  },
+) {
+  if (
+    args.captureIds.length !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length ||
+    new Set(args.captureIds).size !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length
+  ) {
+    throw new ConsultWriteError(
+      'ANALYSIS_PREREQUISITES_REQUIRED',
+      'Analysis captures changed.',
+    )
+  }
+  const sequenced = await tx.consultSession.update({
+    where: { id: args.consultSessionId },
+    data: { revisionSequence: { increment: 1 } },
+    select: { revisionSequence: true },
+  })
+  const revision = await tx.consultRevision.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      revision: sequenced.revisionSequence,
+      kind: ConsultRevisionKind.ANALYSIS,
+      payload: args.payload,
+      schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+      promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+      model: args.model,
+      idempotencyKey: args.idempotencyKey,
+      requestHash: args.requestHash,
+    },
+  })
+  await tx.consultAuditEvent.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      action: ConsultAuditAction.REVISION_CREATED,
+      actorType: args.actor.type,
+      actorId: args.actor.id,
+      revisionId: revision.id,
+    },
+  })
+  const marked = await tx.consultCapture.updateMany({
+    where: {
+      id: { in: [...args.captureIds] },
+      consultSessionId: args.consultSessionId,
+      status: ConsultCaptureStatus.ACCEPTED,
+      purgedAt: null,
+      purgeRequestedAt: null,
+      rawExpiresAt: { gt: args.finalizedAt },
+    },
+    data: {
+      purgeEligibleAt: args.finalizedAt,
+      purgeRequestedAt: args.finalizedAt,
+    },
+  })
+  if (marked.count !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length) {
+    throw new ConsultWriteError(
+      'ANALYSIS_PREREQUISITES_REQUIRED',
+      'Analysis captures changed.',
+    )
+  }
+  await transitionLockedConsultSession(tx, {
+    consultSessionId: args.consultSessionId,
+    actor: args.actor,
+    fromStatus: ConsultSessionStatus.ANALYZING,
+    toStatus: ConsultSessionStatus.COMPLETED,
+  })
+  return revision
 }
 
 function intakeRequestHash(args: {
