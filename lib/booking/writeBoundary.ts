@@ -61,6 +61,7 @@ import {
 } from '@/lib/tenant/bookingAttribution'
 import { upper } from '@/lib/booking/guards'
 import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
+import { isFinalizeConsultAttributionOwned } from '@/lib/booking/consultAttribution'
 import {
   DEPOSIT_CREDIT_SELECT,
   deriveDepositCredit,
@@ -230,6 +231,12 @@ import {
   cancelScheduledClientNotificationsForBooking,
   upsertClientNotification,
 } from '@/lib/notifications/clientNotifications'
+import { maybeCreateAiConsultInvitation } from '@/lib/notifications/aiConsultInvitation'
+import { isAiConsultC6ExposureEnabledForPro } from '@/lib/consult/access'
+import {
+  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
+  evaluateAiConsultBookingEligibility,
+} from '@/lib/consult/eligibility'
 import {
   computeDepositReminderRunAt,
   scheduleDepositReminderOnBooking,
@@ -614,6 +621,7 @@ type FinalizeBookingFromHoldArgs = {
   addOnIds: string[]
   locationType: ServiceLocationType
   source: BookingSource
+  consultId?: string | null
   initialStatus: BookingStatus
   rebookOfBookingId: string | null
   fallbackTimeZone?: string
@@ -635,6 +643,7 @@ type FinalizeBookingFromHoldArgs = {
     id: string
     professionalId: string
     serviceId: string
+    serviceCategoryId?: string
     offersInSalon: boolean
     offersMobile: boolean
     salonPriceStartingAt: Prisma.Decimal | null
@@ -4445,6 +4454,15 @@ async function createUpdateClientNotification(args: {
     data: args.data,
     requestedChannels: args.requestedChannels ?? null,
   })
+
+  if (args.eventKey === NotificationEventKey.BOOKING_CONFIRMED) {
+    await maybeCreateAiConsultInvitation({
+      tx: args.tx,
+      bookingId: args.bookingId,
+      clientId: args.clientId,
+      now: new Date(),
+    })
+  }
 }
 
 
@@ -9462,6 +9480,69 @@ function buildResolvedAddOnServiceItemRows(args: {
   }))
 }
 
+async function resolveFinalizeConsultAttribution(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  consultId: string | null
+  clientId: string
+  professionalId: string
+  serviceCategoryId: string | null
+}): Promise<string | null> {
+  if (!args.consultId) return null
+
+  // C6 is intentionally darker than C1-C5. A founder-gated consult is still
+  // hidden until the explicit live-evaluation ship gate is checked in.
+  if (!isAiConsultC6ExposureEnabledForPro(args.professionalId)) {
+    throw bookingError('CONSULT_NOT_FOUND')
+  }
+
+  // Serialize attribution against lifecycle/revocation writers, which use the
+  // same session lock. The booking is stamped only from a coherent completed
+  // consult state, never a stale pre-revocation read.
+  await args.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "ConsultSession"
+    WHERE "id" = ${args.consultId}
+    FOR UPDATE
+  `)
+
+  const consult = await args.tx.consultSession.findUnique({
+    where: { id: args.consultId },
+    select: {
+      id: true,
+      clientId: true,
+      professionalId: true,
+      serviceCategoryId: true,
+      status: true,
+      booking: { select: AI_CONSULT_ELIGIBILITY_BOOKING_SELECT },
+    },
+  })
+
+  // Keep ownership, tenant, and vertical mismatches indistinguishable.
+  if (
+    !consult ||
+    !isFinalizeConsultAttributionOwned({
+      candidate: consult,
+      clientId: args.clientId,
+      professionalId: args.professionalId,
+      serviceCategoryId: args.serviceCategoryId,
+    })
+  ) {
+    throw bookingError('CONSULT_NOT_FOUND')
+  }
+
+  const eligibility = evaluateAiConsultBookingEligibility(
+    consult.booking,
+    args.now,
+  )
+  if (!eligibility.eligible) {
+    throw bookingError(
+      eligibility.hidden ? 'CONSULT_NOT_FOUND' : 'CONSULT_UNAVAILABLE',
+    )
+  }
+
+  return consult.id
+}
+
 async function performLockedFinalizeBookingFromHold(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -9473,6 +9554,7 @@ async function performLockedFinalizeBookingFromHold(args: {
   addOnIds: string[]
   locationType: ServiceLocationType
   source: BookingSource
+  consultId: string | null
   initialStatus: BookingStatus
   rebookOfBookingId: string | null
   fallbackTimeZone: string
@@ -9511,6 +9593,15 @@ async function performLockedFinalizeBookingFromHold(args: {
     tx: args.tx,
     professionalId: args.offering.professionalId,
     bookingEntryPoint: args.bookingEntryPoint,
+  })
+
+  const sourceConsultSessionId = await resolveFinalizeConsultAttribution({
+    tx: args.tx,
+    now: args.now,
+    consultId: args.consultId,
+    clientId: args.clientId,
+    professionalId: args.offering.professionalId,
+    serviceCategoryId: args.offering.serviceCategoryId ?? null,
   })
 
   // K16: the card-on-file requirement is enforced HERE and not at hold creation,
@@ -9998,6 +10089,7 @@ async function performLockedFinalizeBookingFromHold(args: {
         status: args.initialStatus,
         allowsOverlap: overlapDecision.allowsOverlap,
         source: args.source,
+        sourceConsultSessionId,
         discoveryProvenance,
         // K5 snapshot: derived by the resolver alongside provenance (same
         // established-booking count as the fee), stamped once here, never at
@@ -10228,6 +10320,18 @@ if (args.openingId) {
     tx: args.tx,
     bookingId: created.id,
   })
+
+  // Auto-accepted client finalize is itself the confirmation moment. Pending
+  // requests receive the invitation later through the shared
+  // BOOKING_CONFIRMED notification wrapper when the professional accepts.
+  if (created.status === BookingStatus.ACCEPTED) {
+    await maybeCreateAiConsultInvitation({
+      tx: args.tx,
+      bookingId: created.id,
+      clientId: args.clientId,
+      now: args.now,
+    })
+  }
 
   // M5: nudge the client to finish an unpaid discovery deposit before the
   // auto-release sweep frees the slot. No-ops for non-deposit bookings.
@@ -13221,7 +13325,7 @@ if (validRebookSlot) {
     })
     syncedRebookedBookingId = createdRebook.booking.id
 
-    await upsertClientNotification({
+    await createUpdateClientNotification({
       tx: args.tx,
       clientId: booking.clientId,
       bookingId: createdRebook.booking.id,
@@ -15988,6 +16092,7 @@ export async function finalizeBookingFromHold(
         addOnIds: args.addOnIds,
         locationType: args.locationType,
         source: args.source,
+        consultId: args.consultId ?? null,
         initialStatus: args.initialStatus,
         rebookOfBookingId: args.rebookOfBookingId,
         fallbackTimeZone: args.fallbackTimeZone ?? 'UTC',

@@ -16,9 +16,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   acceptConsultAgreement,
   appendConsultRevision,
+  appendHairColorIntakeRevision,
   revokeConsultAgreement,
   transitionConsultSession,
 } from '@/lib/consult/writeBoundary'
+import {
+  HAIR_COLOR_INTAKE_PACK_VERSION,
+  HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+} from '@/lib/consult/intakePack'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -350,12 +355,21 @@ describe('AI consult lifecycle and legal foundation', () => {
       actor: actor(),
     })
 
-    const revision = await appendConsultRevision({
+    const previousConsultFlag = process.env.ENABLE_AI_CONSULT
+    process.env.ENABLE_AI_CONSULT = '1'
+    const { revision } = await appendHairColorIntakeRevision({
       consultSessionId: sessionId,
-      kind: ConsultRevisionKind.BRIEF,
-      payload: { fixture: 'revision-one' },
-      schemaVersion: 1,
-      actor: actor(),
+      actor: { type: ConsultActorType.CLIENT, id: userId },
+      loadInput: async () => ({
+        packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
+        schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+        complete: false,
+        answers: { current_color: 'brunette' },
+        idempotencyKey: `${tag}-immutable-intake`,
+      }),
+    }).finally(() => {
+      if (previousConsultFlag === undefined) delete process.env.ENABLE_AI_CONSULT
+      else process.env.ENABLE_AI_CONSULT = previousConsultFlag
     })
     expect(revision.revision).toBe(1)
 

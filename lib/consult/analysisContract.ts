@@ -11,11 +11,7 @@ import {
   UploadSurface,
 } from '@prisma/client'
 
-import type {
-  ConsultAnalysisResultDTO,
-  ConsultAnalysisStateDTO,
-} from '@/lib/dto/consult'
-import { isRecord } from '@/lib/guards'
+import type { ConsultAnalysisStateDTO } from '@/lib/dto/consult'
 import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
@@ -56,6 +52,7 @@ import {
   evaluateAiConsultBookingEligibility,
 } from './eligibility'
 import { ConsultWriteError } from './errors'
+import { mapStoredHairColorAnalysisRevision } from './analysisRevision'
 import {
   HAIR_COLOR_INTAKE_PACK_VERSION,
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
@@ -522,84 +519,6 @@ function addRequiredSafetyFlags(
   return { ...analysis, safetyFlags: flags }
 }
 
-function mapStoredAnalysis(
-  revision: { id: string; revision: number; payload: Prisma.JsonValue; createdAt: Date },
-): ConsultAnalysisResultDTO {
-  if (!isRecord(revision.payload) || !Array.isArray(revision.payload.recommendations)) {
-    throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
-  }
-  const references: ConsultAnalysisResultDTO['analysis']['recommendations'][number]['reference'][] = []
-  const providerRecommendations = revision.payload.recommendations.map((item) => {
-    if (!isRecord(item) || !isRecord(item.reference)) {
-      throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
-    }
-    const reference = item.reference
-    const referenceKeys = Object.keys(reference).sort().join(',')
-    if (
-      referenceKeys !== 'serviceCategoryId,serviceId,type' ||
-      typeof reference.serviceCategoryId !== 'string' ||
-      !reference.serviceCategoryId
-    ) {
-      throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
-    }
-    if (
-      reference.type === 'SERVICE' &&
-      typeof reference.serviceId === 'string' &&
-      reference.serviceId
-    ) {
-      references.push({
-        type: 'SERVICE',
-        serviceId: reference.serviceId,
-        serviceCategoryId: reference.serviceCategoryId,
-      })
-    } else if (reference.type === 'SERVICE_CATEGORY' && reference.serviceId === null) {
-      references.push({
-        type: 'SERVICE_CATEGORY',
-        serviceId: null,
-        serviceCategoryId: reference.serviceCategoryId,
-      })
-    } else {
-      throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
-    }
-    return {
-      serviceIntent: item.serviceIntent,
-      title: item.title,
-      rationale: item.rationale,
-      achievability: item.achievability,
-      discussWithProfessional: item.discussWithProfessional,
-    }
-  })
-  let sanitized
-  try {
-    sanitized = validateHairColorAnalysisProviderResult({
-      model: 'stored-analysis',
-      analysis: {
-        core: revision.payload.core,
-        hairColorLens: revision.payload.hairColorLens,
-        safetyFlags: revision.payload.safetyFlags,
-        recommendations: providerRecommendations,
-      },
-    }).analysis
-  } catch {
-    throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
-  }
-  return {
-    revisionId: revision.id,
-    revision: revision.revision,
-    analysis: {
-      ...sanitized,
-      recommendations: sanitized.recommendations.map((recommendation, index) => {
-        const reference = references[index]
-        if (!reference) {
-          throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
-        }
-        return { ...recommendation, reference }
-      }),
-    },
-    createdAt: revision.createdAt.toISOString(),
-  }
-}
-
 async function stateInTransaction(
   tx: Prisma.TransactionClient,
   session: AnalysisScope,
@@ -614,7 +533,7 @@ async function stateInTransaction(
     status: session.status,
     schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
     promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
-    result: revision ? mapStoredAnalysis(revision) : null,
+    result: revision ? mapStoredHairColorAnalysisRevision(revision) : null,
   }
 }
 
@@ -690,7 +609,7 @@ export async function runConsultAnalysis(args: {
               status: session.status,
               schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
               promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
-              result: mapStoredAnalysis(existing),
+              result: mapStoredHairColorAnalysisRevision(existing),
             },
             replayed: true,
           }

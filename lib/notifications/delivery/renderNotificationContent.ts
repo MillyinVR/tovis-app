@@ -397,6 +397,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   event_date_countdown: 'View your board',
   rebook_cadence_due: 'Book again',
   saved_look_consult_nudge: 'Ask a question',
+  ai_consult_invitation: 'Prepare for your appointment',
   saved_look_price_alternative: 'Explore looks',
   viral_request_approved: 'View request',
   payment_collected: 'View payment',
@@ -515,6 +516,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   saved_look_consult_nudge: buildStandardTemplateRenderer(
     templateCtaLabels.saved_look_consult_nudge,
+  ),
+  ai_consult_invitation: buildStandardTemplateRenderer(
+    templateCtaLabels.ai_consult_invitation,
   ),
   saved_look_price_alternative: buildStandardTemplateRenderer(
     templateCtaLabels.saved_look_price_alternative,

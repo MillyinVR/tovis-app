@@ -564,6 +564,42 @@ describe('lib/notifications/channelPolicy', () => {
       ])
     })
 
+    it('keeps the AI consult invitation external channels inside quiet hours even when bypass is requested', () => {
+      const result = resolveChannelPolicy({
+        key: NotificationEventKey.AI_CONSULT_INVITATION,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities(),
+        preference: makePreference({
+          quietHoursStartMinutes: 22 * 60,
+          quietHoursEndMinutes: 8 * 60,
+        }),
+        recipientLocalMinutes: 23 * 60,
+        bypassQuietHours: true,
+      })
+
+      expect(result.transactional).toBe(false)
+      expect(result.allowQuietHoursBypass).toBe(false)
+      expect(result.selectedChannels).toEqual([NotificationChannel.IN_APP])
+      expect(
+        result.evaluations.filter(
+          (evaluation) =>
+            evaluation.channel === NotificationChannel.EMAIL ||
+            evaluation.channel === NotificationChannel.PUSH,
+        ),
+      ).toEqual([
+        {
+          channel: NotificationChannel.EMAIL,
+          enabled: false,
+          reason: 'QUIET_HOURS',
+        },
+        {
+          channel: NotificationChannel.PUSH,
+          enabled: false,
+          reason: 'QUIET_HOURS',
+        },
+      ])
+    })
+
     it('treats equal quiet-hours bounds as disabled', () => {
       const result = resolveChannelPolicy({
         key: NotificationEventKey.APPOINTMENT_REMINDER,

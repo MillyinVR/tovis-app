@@ -140,5 +140,6 @@ describe('privacy export completeness boundary', () => {
       status: 'EXPORTED',
       keys: ['consultSessions'],
     })
+    expect(EXPORT_BOUNDARY.ConsultBriefFeedback?.status).toBe('OMITTED')
   })
 })

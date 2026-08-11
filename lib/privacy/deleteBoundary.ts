@@ -195,6 +195,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     reason:
       "The client's own booking-attached AI consult. Deleting it cascades revisions, legal evidence, bounded capture metadata and audits after raw storage objects are verified absent. No other party's record — booking/professional are pointers only.",
   },
+  ConsultBriefFeedback: {
+    status: 'DELETE',
+    reason:
+      "Deleted through the client-owned consult when the client is the subject. When the professional is the subject, the content-free quality signal remains with the client's consult while the professional profile is anonymized.",
+  },
   ConsultCapture: {
     status: 'DELETE',
     reason:

@@ -620,6 +620,11 @@ enum NotificationRecipientKind {
 enum NotificationEventKey {
   BOOKING_REQUEST_CREATED
   BOOKING_CONFIRMED
+  // C6: a gentle, budgeted invitation attached to an eligible booking
+  // confirmation. Non-transactional and quiet-hours respecting; the explicit
+  // C5 exposure block keeps the emitter dark until a reviewed live baseline
+  // and candidate have passed.
+  AI_CONSULT_INVITATION
   BOOKING_STARTED
   BOOKING_RESCHEDULED
   BOOKING_CANCELLED_BY_CLIENT
@@ -1937,6 +1942,7 @@ model ProfessionalProfile {
   bookings        Booking[]
   calendarBlocks  CalendarBlock[]
   consultSessions ConsultSession[]
+  consultBriefFeedback ConsultBriefFeedback[]
 
   calendarFeedSubscription CalendarFeedSubscription?
 
@@ -3375,6 +3381,12 @@ model Booking {
   sourceLookPostId String?
   sourceLookPost   LookPost? @relation("LookInspiredBookings", fields: [sourceLookPostId], references: [id], onDelete: SetNull)
 
+  // AI-consult attribution: the completed, client-owned consult that informed
+  // this booking. This is distinct from ConsultSession.bookingId, which remains
+  // the required one-to-one anchor for the consult itself.
+  sourceConsultSessionId String?
+  sourceConsultSession   ConsultSession? @relation("ConsultInspiredBookings", fields: [sourceConsultSessionId], references: [id], onDelete: SetNull)
+
   scheduledFor DateTime
   status       BookingStatus @default(PENDING)
 
@@ -3658,7 +3670,7 @@ model Booking {
   waitlistOffer                WaitlistOffer?
   // The pre-visit AI consult run for this appointment (ai-consult.md Phase 0).
   // At most one per booking — self-scoping quota for the founder pilot.
-  consultSession               ConsultSession?
+  consultSession               ConsultSession?               @relation("ConsultAnchorBooking")
   clientNotifications          ClientNotification[]
   scheduledClientNotifications ScheduledClientNotification[]
   reviews                      Review[]
@@ -3720,6 +3732,7 @@ model Booking {
   @@index([proTenantId, scheduledFor])
   @@index([clientHomeTenantId])
   @@index([sourceLookPostId])
+  @@index([sourceConsultSessionId])
   @@index([seriesId])
 }
 
@@ -6473,6 +6486,12 @@ enum ConsultAuditAction {
   CAPTURE_QUALITY_CHECKED
   CAPTURE_DELETED
   RAW_OBJECT_PURGED
+  BRIEF_FEEDBACK_RECORDED
+}
+
+enum ConsultBriefFeedbackRating {
+  ACCURATE_USEFUL
+  OFF
 }
 
 enum ConsultCaptureStatus {
@@ -6510,7 +6529,9 @@ model ConsultSession {
   professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Restrict)
 
   bookingId String  @unique
-  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  booking   Booking @relation("ConsultAnchorBooking", fields: [bookingId], references: [id], onDelete: Restrict)
+
+  inspiredBookings Booking[] @relation("ConsultInspiredBookings")
 
   // An empty booking-attached shell starts here. No sensitive intake or media
   // may be collected until active, version-pinned records exist for BOTH the
@@ -6524,6 +6545,7 @@ model ConsultSession {
   revisions            ConsultRevision[]
   agreementAcceptances ConsultAgreementAcceptance[]
   auditEvents          ConsultAuditEvent[]
+  briefFeedback        ConsultBriefFeedback?
   captures             ConsultCapture[]
   uploadSessions       UploadSession[]
 
@@ -6611,11 +6633,36 @@ model ConsultRevision {
 
   createdAt DateTime @default(now())
 
-  auditEvents ConsultAuditEvent[]
+  auditEvents   ConsultAuditEvent[]
+  briefFeedback ConsultBriefFeedback?
 
   @@unique([consultSessionId, revision])
   @@unique([consultSessionId, idempotencyKey])
   @@index([consultSessionId, createdAt])
+}
+
+/// One immutable one-tap professional assessment of the generated brief.
+/// Corrections never overwrite the original signal; a repeated identical tap
+/// is an idempotent replay and a different tap is refused.
+model ConsultBriefFeedback {
+  id String @id @default(cuid())
+
+  consultSessionId String         @unique
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  briefRevisionId String          @unique
+  briefRevision   ConsultRevision @relation(fields: [briefRevisionId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+
+  rating ConsultBriefFeedbackRating
+
+  auditEvent ConsultAuditEvent?
+
+  createdAt DateTime @default(now())
+
+  @@index([professionalId, createdAt])
 }
 
 /// Immutable, published wording for one prerequisite. Consent and the 18+
@@ -6692,6 +6739,9 @@ model ConsultAuditEvent {
 
   captureId String?
   capture   ConsultCapture? @relation(fields: [captureId], references: [id], onDelete: Cascade)
+
+  briefFeedbackId String?               @unique
+  briefFeedback   ConsultBriefFeedback? @relation(fields: [briefFeedbackId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 

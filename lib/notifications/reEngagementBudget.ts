@@ -102,6 +102,9 @@ export const RE_ENGAGEMENT_EVENT_KEY_TRIGGER: Partial<
   // nudge, and the more speculative of the two (a different pro), so it yields the
   // last pooled slot to every other live trigger.
   [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE]: 'PRICE_ALTERNATIVE',
+  // C6 — optional preparation after a qualifying booking confirmation. It has
+  // no deadline and therefore yields to every purpose-built live trigger.
+  [NotificationEventKey.AI_CONSULT_INVITATION]: 'OTHER',
 }
 
 /**

@@ -271,6 +271,7 @@ const offering = {
   },
   service: {
     minPrice: new Prisma.Decimal('80'),
+    categoryId: 'category_hair_color',
   },
   priceRamps: [],
 }
@@ -279,6 +280,7 @@ const finalizeOffering = {
   id: 'offering_1',
   professionalId: 'pro_123',
   serviceId: 'service_1',
+  serviceCategoryId: 'category_hair_color',
   offersInSalon: true,
   offersMobile: true,
   salonPriceStartingAt: new Prisma.Decimal('100'),
@@ -315,6 +317,7 @@ function makeExpectedFinalizeArgs(
     addOnIds: string[]
     locationType: ServiceLocationType
     source: BookingSource
+    consultId: string | null
     initialStatus: BookingStatus
     rebookOfBookingId: string | null
     fallbackTimeZone: string
@@ -334,6 +337,7 @@ function makeExpectedFinalizeArgs(
     addOnIds: overrides.addOnIds ?? [],
     locationType: overrides.locationType ?? ServiceLocationType.SALON,
     source,
+    consultId: overrides.consultId ?? null,
     initialStatus: overrides.initialStatus ?? BookingStatus.PENDING,
     rebookOfBookingId: overrides.rebookOfBookingId ?? null,
     offering: finalizeOffering,
@@ -723,6 +727,27 @@ describe('POST /api/v1/bookings/finalize', () => {
     )
   })
 
+  it('includes consult attribution in both the idempotency fingerprint and canonical write', async () => {
+    await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+        consultId: 'consult_123',
+      }),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({ consultId: 'consult_123' }),
+      }),
+    )
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      makeExpectedFinalizeArgs({ consultId: 'consult_123' }),
+    )
+  })
+
   it('returns OFFERING_NOT_FOUND when offering is missing before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce(null)
@@ -925,6 +950,7 @@ describe('POST /api/v1/bookings/finalize', () => {
         bookingEntryPoint: 'DIRECT_PROFILE',
         mediaId: null,
         lookPostId: null,
+        consultId: null,
         aftercareToken: null,
         rebookOfBookingId: null,
       },

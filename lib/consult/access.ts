@@ -29,6 +29,34 @@ function globalAiConsultFlag(): boolean {
 }
 
 /**
+ * Checked-in C5 evidence state. Both values intentionally remain false: the
+ * repository has only a deterministic fake baseline, and no domain-reviewed
+ * authorized live candidate has passed. An environment flag cannot override
+ * either missing artifact.
+ */
+export const AI_CONSULT_C5_LIVE_BASELINE_APPROVED = false
+export const AI_CONSULT_C5_LIVE_CANDIDATE_PASSED = false
+
+export function evaluateAiConsultC6Exposure(args: {
+  founderEnabled: boolean
+  liveBaselineApproved: boolean
+  liveCandidatePassed: boolean
+}): boolean {
+  return (
+    args.founderEnabled &&
+    args.liveBaselineApproved &&
+    args.liveCandidatePassed
+  )
+}
+
+export function isAiConsultC6ExposurePossible(): boolean {
+  return (
+    AI_CONSULT_C5_LIVE_BASELINE_APPROVED &&
+    AI_CONSULT_C5_LIVE_CANDIDATE_PASSED
+  )
+}
+
+/**
  * Gate for the entire AI Consult surface (routes + future UI). Enabled when
  * the global flag is on (every pro) OR the anchoring pro is on the pilot
  * allowlist above (just them). Pass the professionalId a consult would be
@@ -40,4 +68,20 @@ export function isAiConsultEnabledForPro(
   if (!professionalId) return false
   if (globalAiConsultFlag()) return true
   return AI_CONSULT_PRO_ALLOWLIST.includes(professionalId)
+}
+
+/**
+ * C6/C7 serve gate. This is deliberately stricter than the C1–C5 founder
+ * development gate: founder eligibility alone cannot expose a brief, rating,
+ * result, or invitation while C5's live evidence is absent.
+ */
+export function isAiConsultC6ExposureEnabledForPro(
+  professionalId: string | null | undefined,
+): boolean {
+  if (!isAiConsultC6ExposurePossible()) return false
+  return evaluateAiConsultC6Exposure({
+    founderEnabled: isAiConsultEnabledForPro(professionalId),
+    liveBaselineApproved: AI_CONSULT_C5_LIVE_BASELINE_APPROVED,
+    liveCandidatePassed: AI_CONSULT_C5_LIVE_CANDIDATE_PASSED,
+  })
 }

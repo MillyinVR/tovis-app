@@ -55,6 +55,12 @@ import {
 import { loadChartShare } from '@/lib/clients/chartShare'
 import { loadPublicClientProfileByClientId } from '@/app/u/[handle]/_data/loadPublicClientProfile'
 import PublicProfileView from '@/app/u/[handle]/_components/PublicProfileView'
+import ProConsultBrief from '@/app/pro/_components/consult/ProConsultBrief'
+import {
+  loadAuthorizedProConsultBriefs,
+  ProConsultBriefError,
+} from '@/lib/consult/proBrief'
+import type { ConsultProBriefDTO } from '@/lib/dto/consult'
 
 import ChartAccessRefusedView from './ChartAccessRefusedView'
 import EditAlertBannerForm from './EditAlertBannerForm'
@@ -1704,6 +1710,7 @@ function tabContent(args: {
   proFeedback: ProFeedbackRow[]
   photoVisits: TimelineVisit[]
   technicalRecord: TechnicalRecordData | null
+  consultBriefs: ConsultProBriefDTO[]
   now: Date
   tz: string
 }): ReactNode {
@@ -1726,25 +1733,46 @@ function tabContent(args: {
       )
     case 'history':
       return (
-        <SectionCard
-          id="history"
-          title="Service history"
-          subtitle="Search and filter all bookings for this client."
-          right={
-            <BookingFilterForm
-              clientId={client.id}
-              bookingFilter={args.bookingFilter}
-              bookingQ={args.bookingQ}
+        <div className="grid gap-6">
+          {args.consultBriefs.length ? (
+            <SectionCard
+              id="consult-history"
+              title="Consult history"
+              subtitle="Dated client-owned consult briefs, newest first."
+            >
+              <div className="grid gap-6">
+                {args.consultBriefs.map((brief) => (
+                  <ProConsultBrief
+                    key={brief.consultId}
+                    brief={brief}
+                    timeZone={tz}
+                    showDate
+                    feedbackEnabled={brief.professionalId === proId}
+                  />
+                ))}
+              </div>
+            </SectionCard>
+          ) : null}
+          <SectionCard
+            id="history"
+            title="Service history"
+            subtitle="Search and filter all bookings for this client."
+            right={
+              <BookingFilterForm
+                clientId={client.id}
+                bookingFilter={args.bookingFilter}
+                bookingQ={args.bookingQ}
+              />
+            }
+          >
+            <ServiceHistoryList
+              bookingRowsFiltered={args.bookingRowsFiltered}
+              bookingRowsAll={args.bookingRowsAll}
+              proId={proId}
+              tz={tz}
             />
-          }
-        >
-          <ServiceHistoryList
-            bookingRowsFiltered={args.bookingRowsFiltered}
-            bookingRowsAll={args.bookingRowsAll}
-            proId={proId}
-            tz={tz}
-          />
-        </SectionCard>
+          </SectionCard>
+        </div>
       )
     case 'products':
       return (
@@ -2050,6 +2078,22 @@ export default async function ClientDetailPage(props: {
   let proFeedback: ProFeedbackRow[] = []
   let photoVisits: TimelineVisit[] = []
   let technicalRecord: TechnicalRecordData | null = null
+  let consultBriefs: ConsultProBriefDTO[] = []
+
+  if (tab === 'history') {
+    consultBriefs = await loadAuthorizedProConsultBriefs({
+      professionalId: proId,
+      clientId,
+    }).catch((error: unknown) => {
+      if (
+        error instanceof ProConsultBriefError &&
+        (error.code === 'HIDDEN' || error.code === 'NOT_FOUND')
+      ) {
+        return []
+      }
+      throw error
+    })
+  }
 
   if (tab === 'products') {
     productRecs = await prisma.productRecommendation.findMany({
@@ -2280,6 +2324,7 @@ export default async function ClientDetailPage(props: {
           proFeedback,
           photoVisits,
           technicalRecord,
+          consultBriefs,
           now,
           tz: scheduleTz,
         })}

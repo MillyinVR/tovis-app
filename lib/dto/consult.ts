@@ -414,6 +414,96 @@ export type ConsultAnalysisStartResponseDTO = ConsultAnalysisStateResponseDTO & 
   replayed: boolean
 }
 
+export type ConsultBriefClientIntakeItemDTO = {
+  questionKey: string
+  question: string
+  answerCode: string
+  answer: string
+}
+
+export type ConsultBriefAiObservationsDTO = {
+  currentLevel: ConsultAnalysisPayloadDTO['core']['currentLevel']
+  currentTone: ConsultAnalysisPayloadDTO['core']['currentTone']
+  visibleCondition: ConsultAnalysisPayloadDTO['core']['visibleCondition']
+  density: ConsultAnalysisPayloadDTO['core']['density']
+  texture: ConsultAnalysisPayloadDTO['core']['texture']
+  goalSummary: string
+  historySummary: string
+  constraintsSummary: string
+  maintenanceSummary: string
+  appointmentContextSummary: string
+}
+
+export type ConsultBriefAchievabilityDirectionDTO = {
+  direction: string
+  assessment: ConsultAnalysisPayloadDTO['hairColorLens']['achievability']
+  context: string
+  discussWithProfessional: true
+}
+
+export type ConsultBriefRecommendationDirectionDTO = {
+  title: string
+  why: string
+  direction: string
+  reference: ConsultAnalysisReferenceDTO
+  discussWithProfessional: true
+}
+
+export type ConsultBriefFeedbackRatingDTO = 'ACCURATE_USEFUL' | 'OFF'
+
+export type ConsultBriefFeedbackDTO = {
+  rating: ConsultBriefFeedbackRatingDTO
+  createdAt: string
+}
+
+export type ConsultProBriefDTO = {
+  consultId: string
+  bookingId: string
+  professionalId: string
+  serviceCategoryId: string
+  briefRevisionId: string
+  briefRevision: number
+  sourceAnalysisRevisionId: string
+  sourceAnalysisRevision: number
+  intakeRevisionId: string
+  clientIntake: ConsultBriefClientIntakeItemDTO[]
+  aiObservations: ConsultBriefAiObservationsDTO
+  safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
+  achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
+  recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
+  feedback: ConsultBriefFeedbackDTO | null
+  createdAt: string
+}
+
+export type ConsultProBriefResponseDTO = {
+  brief: ConsultProBriefDTO
+}
+
+export type ConsultProBriefHistoryResponseDTO = {
+  briefs: ConsultProBriefDTO[]
+}
+
+export type ConsultBriefFeedbackRequestDTO = {
+  rating: ConsultBriefFeedbackRatingDTO
+}
+
+export type ConsultBriefFeedbackResponseDTO = {
+  feedback: ConsultBriefFeedbackDTO
+  replayed: boolean
+}
+
+export type ConsultBriefErrorCode =
+  | 'CONSULT_BRIEF_NOT_FOUND'
+  | 'CONSULT_BRIEF_INVALID_REQUEST'
+  | 'CONSULT_BRIEF_RATING_CONFLICT'
+  | 'CONSULT_BRIEF_UNAVAILABLE'
+
+export type ConsultBriefErrorDTO = {
+  ok: false
+  error: string
+  code: ConsultBriefErrorCode
+}
+
 export type ConsultAgreementErrorCode =
   | 'CONSULT_NOT_FOUND'
   | 'CONSULT_AGREEMENTS_UNAVAILABLE'
