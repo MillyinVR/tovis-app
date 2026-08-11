@@ -251,11 +251,9 @@ function Section({
 export default function AppointmentsList({
   buckets,
   aftercare = [],
-  hasMoreAftercare = false,
 }: {
   buckets: ClientBookingBuckets
   aftercare?: ClientAftercareInboxItemDTO[]
-  hasMoreAftercare?: boolean
 }) {
   // Aftercare counts toward "is there anything here". A summary outliving its
   // booking row would otherwise be hidden behind the "No appointments yet" card.
@@ -318,16 +316,20 @@ export default function AppointmentsList({
                 <AftercareRow key={item.notificationId} item={item} />
               ))}
 
-              {/* No silent truncation: the strip caps at AFTERCARE_STRIP_SIZE, so
-                  when more exist say so and hand off to the full inbox. */}
-              {hasMoreAftercare ? (
-                <Link
-                  href="/client/aftercare"
-                  className="self-start font-display text-[13px] font-semibold text-accentPrimary transition hover:opacity-80"
-                >
-                  All aftercare →
-                </Link>
-              ) : null}
+              {/* UNCONDITIONAL. This is the only entry point to /client/aftercare,
+                  and it used to render only when the client had MORE than
+                  AFTERCARE_STRIP_SIZE summaries — so the common case (one or two
+                  visits) could never open the inbox at all. An entry point to a
+                  client's own records must not depend on how many they have; see
+                  the same rule spelled out in app/config/clientNav.ts. The strip
+                  still caps at AFTERCARE_STRIP_SIZE, so this also remains the
+                  "no silent truncation" hand-off it always was. */}
+              <Link
+                href="/client/aftercare"
+                className="self-start font-display text-[13px] font-semibold text-accentPrimary transition hover:opacity-80"
+              >
+                All aftercare →
+              </Link>
             </Section>
           ) : null}
 

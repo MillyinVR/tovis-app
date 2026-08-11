@@ -25,19 +25,13 @@ export default async function ClientBookingsPage() {
 
   // Aftercare rides along with the buckets. Its own inbox page (/client/aftercare)
   // has no nav entry, so without this strip a client's summaries were reachable
-  // only per-booking via ?step=aftercare. Fetch one past the strip size purely to
-  // learn whether there IS more — the extra row is dropped, never rendered, so
-  // the "See all" door appears only when it leads somewhere new.
+  // only per-booking via ?step=aftercare. The strip caps at AFTERCARE_STRIP_SIZE
+  // and always hands off to that inbox, so there is nothing to learn from a
+  // lookahead row — fetch exactly what gets rendered.
   const [{ buckets }, aftercare] = await Promise.all([
     loadClientBookingBuckets(clientId),
-    loadClientAftercareInbox(clientId, { limit: AFTERCARE_STRIP_SIZE + 1 }),
+    loadClientAftercareInbox(clientId, { limit: AFTERCARE_STRIP_SIZE }),
   ])
 
-  return (
-    <AppointmentsList
-      buckets={buckets}
-      aftercare={aftercare.slice(0, AFTERCARE_STRIP_SIZE)}
-      hasMoreAftercare={aftercare.length > AFTERCARE_STRIP_SIZE}
-    />
-  )
+  return <AppointmentsList buckets={buckets} aftercare={aftercare} />
 }
