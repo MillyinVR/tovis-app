@@ -200,10 +200,21 @@ export default function ClientLastMinuteInvites({
           Last-minute openings
         </span>
         {hasToday(invites) ? (
-          <span className="ml-auto rounded-full bg-gold/15 px-2.5 py-1 font-mono text-[9.5px] font-bold uppercase tracking-[0.06em] text-gold">
+          <span className="rounded-full bg-gold/15 px-2.5 py-1 font-mono text-[9.5px] font-bold uppercase tracking-[0.06em] text-gold">
             Today
           </span>
         ) : null}
+        {/* UNCONDITIONAL, like the iOS card's "See all" (HomeView OpeningsFeedView
+            link): /client/openings is the only surface listing every last-minute
+            opening, and this strip caps at 5. Gating the link on having invites
+            would strand the feed exactly when the strip has nothing to show —
+            the same trap CLIENT_TABS documents for /client/bookings. */}
+        <Link
+          href="/client/openings"
+          className="ml-auto shrink-0 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-accentPrimary transition hover:opacity-80"
+        >
+          See all
+        </Link>
       </div>
 
       {rows.length === 0 ? (
@@ -231,6 +242,19 @@ export default function ClientLastMinuteInvites({
           ))}
         </div>
       )}
+
+      {/* The full claim surface — priority offers with live countdowns PLUS any
+          pro-proposed waitlist times. Outside the empty branch on purpose: those
+          two feeds are different data, so a client can have a pro-proposed time
+          waiting with zero last-minute invites. Until now /client/offers had no
+          in-app entry at all — its only route was the push notification, so a
+          client who dismissed that notification could never get back to it. */}
+      <Link
+        href="/client/offers"
+        className="mt-3.5 flex items-center justify-center gap-1 text-[12.5px] font-semibold text-accentPrimary transition hover:opacity-80"
+      >
+        Your priority offers <span aria-hidden>→</span>
+      </Link>
     </section>
   )
 }

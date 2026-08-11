@@ -327,26 +327,16 @@ describe('AppointmentsList', () => {
     ).toHaveAttribute('href', '/client/bookings/past_1?step=aftercare')
   })
 
-  // A capped strip that stays silent about the cap reads as "that's everything".
-  it('offers the full inbox only when there is more than the strip shows', () => {
-    const { unmount } = render(
-      <AppointmentsList
-        buckets={makeBuckets()}
-        aftercare={[makeAftercare()]}
-        hasMoreAftercare={false}
-      />,
-    )
-
-    expect(
-      screen.queryByRole('link', { name: /All aftercare/ }),
-    ).not.toBeInTheDocument()
-    unmount()
-
+  // This link is the ONLY entry point to /client/aftercare, so it must not depend
+  // on how much aftercare the client happens to have. It used to render only when
+  // there were MORE than AFTERCARE_STRIP_SIZE summaries, which locked the inbox
+  // away from the common case — one or two visits. Same rule as the /client/bookings
+  // tab in app/config/clientNav.ts.
+  it('offers the full inbox from a single aftercare summary', () => {
     render(
       <AppointmentsList
         buckets={makeBuckets()}
         aftercare={[makeAftercare()]}
-        hasMoreAftercare
       />,
     )
 
