@@ -33,6 +33,25 @@ function bookingTimeZone(booking: ClientHomeBooking): string | null {
   )
 }
 
+/**
+ * The client's route to their own appointments list. It lives on Home rather
+ * than in the footer (see CLIENT_TABS), and it is UNCONDITIONAL on purpose:
+ * /client/bookings is the only surface listing PENDING bookings, so a client
+ * whose single booking is still awaiting approval — who therefore sees the empty
+ * card below, not the populated one — must still be able to open, and cancel,
+ * their own request. Rendered by BOTH states for exactly that reason.
+ */
+function AllBookingsLink({ moreCount = 0 }: { moreCount?: number }) {
+  return (
+    <Link
+      href="/client/bookings"
+      className="mt-3 block text-center font-display text-[12.5px] font-semibold text-textMuted transition hover:text-textSecondary"
+    >
+      {moreCount > 0 ? `${moreCount} more upcoming →` : 'All bookings →'}
+    </Link>
+  )
+}
+
 function EmptyUpcomingCard() {
   return (
     <Card>
@@ -58,6 +77,7 @@ function EmptyUpcomingCard() {
       >
         Find a pro
       </Link>
+      <AllBookingsLink />
     </Card>
   )
 }
@@ -173,14 +193,7 @@ export default function UpcomingAppointmentCard({
         </Link>
       </div>
 
-      {moreCount > 0 ? (
-        <Link
-          href="/client/bookings"
-          className="mt-3 block text-center font-display text-[12.5px] font-semibold text-textMuted transition hover:text-textSecondary"
-        >
-          {moreCount} more upcoming →
-        </Link>
-      ) : null}
+      <AllBookingsLink moreCount={moreCount} />
     </Card>
   )
 }

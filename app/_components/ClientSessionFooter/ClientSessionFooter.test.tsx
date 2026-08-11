@@ -73,17 +73,20 @@ describe('ClientSessionFooter', () => {
     expect(screen.queryByText('4')).not.toBeInTheDocument()
   })
 
-  // The client's own appointments must be reachable with no preconditions.
-  // /client/bookings is the ONLY surface listing PENDING bookings, and before
-  // this tab every route into it was conditional — the home card's link needed
-  // 2+ upcoming bookings, the /client/notifications link only rendered in that
-  // page's zero-notifications empty state. One booking meant no way in.
-  it('always offers a Bookings tab, whatever the client has booked', () => {
+  // Bookings deliberately left the footer for the home area. This asserts the
+  // move rather than just the absence: the bar carries no bookings tab, AND the
+  // unconditional route it used to be still exists on Home — pinned in
+  // UpcomingAppointmentCard.test.tsx, which is what must go red if the home link
+  // is ever made conditional again. /client/bookings is the only surface listing
+  // PENDING bookings, so "removed from the footer" must never become "removed".
+  it('carries no bookings tab — that route lives on Home now', () => {
     render(<ClientSessionFooter />)
 
-    expect(screen.getByRole('link', { name: /bookings/i })).toHaveAttribute(
-      'href',
-      '/client/bookings',
+    expect(
+      screen.queryByRole('link', { name: /bookings/i }),
+    ).not.toBeInTheDocument()
+    expect(CLIENT_TABS.some((tab) => tab.href === '/client/bookings')).toBe(
+      false,
     )
   })
 

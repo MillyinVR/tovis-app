@@ -1,5 +1,5 @@
 // app/config/clientNav.ts
-import { Sparkles, CalendarDays, Compass, House, Mail, User } from 'lucide-react'
+import { Sparkles, Compass, House, Mail, User } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface ClientNavTab {
@@ -16,26 +16,22 @@ export interface ClientNavTab {
  * (rendered as the tovis feather — see ClientSessionFooter). The `icon`
  * on the center tab is unused for the feather but kept for completeness.
  *
- * `bookings` is UNCONDITIONAL by design. /client/bookings is the only surface
- * that lists a client's PENDING bookings — the home Upcoming card shows just the
- * next ACCEPTED one, and Me → HISTORY filters to ACCEPTED/IN_PROGRESS/COMPLETED.
- * Before this tab, every route into that list was conditional: the home card's
- * link needed 2+ upcoming bookings, and the /client/notifications link only
- * rendered in that page's zero-notifications empty state. A client with one
- * booking — the common case — could not reach their own appointments at all.
- * An entry point to a client's own bookings must never depend on how many they
- * have. Covered by ClientSessionFooter.test.tsx.
+ * ⚠️ There is deliberately NO `bookings` tab here — bookings live on Home
+ * instead. That moves a load-bearing constraint rather than deleting it:
+ * /client/bookings is the ONLY surface listing a client's PENDING bookings (the
+ * home Upcoming card shows the next ACCEPTED one, Me → HISTORY filters to
+ * ACCEPTED/IN_PROGRESS/COMPLETED), so the route to it must stay UNCONDITIONAL
+ * wherever it lives. It now lives in UpcomingAppointmentCard, which links to the
+ * list from BOTH its populated and its empty state — the empty state being the
+ * one a pending-only client actually sees. Pinned by
+ * UpcomingAppointmentCard.test.tsx; do not make that link conditional (an
+ * earlier "N more upcoming →" link needed 2+ bookings, which stranded the
+ * one-booking client entirely).
  */
 export const CLIENT_TABS: ClientNavTab[] = [
   { id: 'home', label: 'Home', href: '/client', icon: House },
   { id: 'discover', label: 'Discover', href: '/search', icon: Compass },
   { id: 'looks', label: 'Looks', href: '/looks', icon: Sparkles, center: true },
-  {
-    id: 'bookings',
-    label: 'Bookings',
-    href: '/client/bookings',
-    icon: CalendarDays,
-  },
   { id: 'inbox', label: 'Inbox', href: '/messages', icon: Mail, hasBadge: true },
   { id: 'me', label: 'Me', href: '/client/me', icon: User },
 ]

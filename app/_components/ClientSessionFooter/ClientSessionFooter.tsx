@@ -20,11 +20,12 @@ export default function ClientSessionFooter({
   const path = pathname ?? ''
 
   // The bar is split around the raised mark rather than rendered as one flat
-  // row. With six tabs the flanks are uneven (2 left, 3 right), and a flat
-  // `space-around` row would drift the mark ~20px toward the short side; the
-  // matching 1fr flanks of .tovis-footer-bar--split pin it to the true centre.
-  // Derived from `center` in CLIENT_TABS, so moving the mark in config moves the
-  // split with it.
+  // row. Today's five tabs give even flanks (2 left, 2 right), but the split is
+  // what keeps the mark centred when they are NOT — with the six tabs this
+  // carried before, a flat `space-around` row drifted the mark ~20px toward the
+  // short side, while the matching 1fr flanks of .tovis-footer-bar--split pin it
+  // to the true centre at any count. Derived from `center` in CLIENT_TABS, so
+  // moving the mark in config moves the split with it.
   const centerIndex = CLIENT_TABS.findIndex((tab) => tab.center)
   const hasCenter = centerIndex >= 0
   const leftTabs = hasCenter ? CLIENT_TABS.slice(0, centerIndex) : CLIENT_TABS
