@@ -28,6 +28,7 @@ export type NotificationTemplateKey =
   | 'event_date_countdown'
   | 'rebook_cadence_due'
   | 'saved_look_consult_nudge'
+  | 'ai_consult_invitation'
   | 'saved_look_price_alternative'
   | 'viral_request_approved'
   | 'payment_collected'
@@ -196,6 +197,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+  NotificationEventKey.AI_CONSULT_INVITATION,
   NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
@@ -607,6 +609,21 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       // In-app inbox + email + push (push inert until APNs is live). No SMS —
       // re-engagement nudges are not an approved transactional SMS use case.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.AI_CONSULT_INVITATION]: {
+    // C6 booking-confirmation invitation. This is a gentle optional preparation
+    // nudge, never part of the transactional booking receipt: it draws from the
+    // pooled re-engagement budget and external channels respect quiet hours.
+    key: NotificationEventKey.AI_CONSULT_INVITATION,
+    defaultPriority: NotificationPriority.LOW,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'ai_consult_invitation',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
@@ -1236,6 +1253,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+  NotificationEventKey.AI_CONSULT_INVITATION,
   NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,

@@ -49,6 +49,8 @@ export type BookingErrorCode =
   | "ADDONS_INVALID"
   | "INVALID_SERIES_RECURRENCE"
   | "CLIENT_NOT_FOUND"
+  | "CONSULT_NOT_FOUND"
+  | "CONSULT_UNAVAILABLE"
   | "MISSING_MEDIA_ID"
   | "OPENING_NOT_AVAILABLE"
   | "BOOKING_NOT_RESCHEDULABLE"
@@ -505,6 +507,20 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Client not found.",
     userMessage: "Client not found.",
+  },
+  CONSULT_NOT_FOUND: {
+    httpStatus: 404,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Consult not found.",
+    userMessage: "Consult not found.",
+  },
+  CONSULT_UNAVAILABLE: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Consult is unavailable for this booking.",
+    userMessage: "This consult cannot be attached to that booking.",
   },
   MISSING_MEDIA_ID: {
     httpStatus: 400,

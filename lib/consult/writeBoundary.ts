@@ -19,6 +19,13 @@ import {
   CONSULT_ANALYSIS_PROMPT_VERSION,
   CONSULT_ANALYSIS_SCHEMA_VERSION,
 } from './analysisEngine'
+import { normalizeStoredHairColorAnalysisPayload } from './analysisRevision'
+import {
+  buildHairColorProBriefPayload,
+  CONSULT_PRO_BRIEF_PROMPT_VERSION,
+  CONSULT_PRO_BRIEF_SCHEMA_VERSION,
+  toBriefJsonPayload,
+} from './briefContract'
 import { HAIR_COLOR_CAPTURE_SHOT_KEYS } from './capturePack'
 import {
   AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
@@ -30,6 +37,7 @@ import {
   HAIR_COLOR_INTAKE_PACK_VERSION,
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
   validateHairColorIntakeAnswers,
+  normalizeHairColorIntakePayload,
 } from './intakePack'
 
 type ClientActor = {
@@ -428,10 +436,13 @@ export async function appendConsultRevision(args: {
   promptVersion?: string
   actor: ConsultActor
 }) {
-  if (args.kind === ConsultRevisionKind.ANALYSIS) {
+  if (
+    args.kind === ConsultRevisionKind.ANALYSIS ||
+    args.kind === ConsultRevisionKind.BRIEF
+  ) {
     throw new ConsultWriteError(
       'INVALID_STATE',
-      'Analysis revisions must use the canonical analysis finalization boundary.',
+      'Analysis and brief revisions must use their canonical generation boundaries.',
     )
   }
   return prisma.$transaction(async (tx) => {
@@ -563,6 +574,56 @@ export async function finalizeLockedHairColorAnalysis(
     actor: args.actor,
     fromStatus: ConsultSessionStatus.ANALYZING,
     toStatus: ConsultSessionStatus.COMPLETED,
+  })
+
+  const intakeRevision = await tx.consultRevision.findFirst({
+    where: {
+      consultSessionId: args.consultSessionId,
+      kind: ConsultRevisionKind.INTAKE,
+    },
+    select: { id: true, payload: true },
+    orderBy: { revision: 'desc' },
+  })
+  const intake = intakeRevision
+    ? normalizeHairColorIntakePayload(intakeRevision.payload)
+    : null
+  if (!intakeRevision || !intake || !intake.complete) {
+    throw new ConsultWriteError(
+      'ANALYSIS_PREREQUISITES_REQUIRED',
+      'Analysis intake changed.',
+    )
+  }
+
+  const briefPayload = buildHairColorProBriefPayload({
+    intakeRevisionId: intakeRevision.id,
+    intakeAnswers: intake.answers,
+    analysisRevisionId: revision.id,
+    analysisRevision: revision.revision,
+    analysis: normalizeStoredHairColorAnalysisPayload(revision.payload),
+  })
+  const briefSequence = await tx.consultSession.update({
+    where: { id: args.consultSessionId },
+    data: { revisionSequence: { increment: 1 } },
+    select: { revisionSequence: true },
+  })
+  const briefRevision = await tx.consultRevision.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      revision: briefSequence.revisionSequence,
+      kind: ConsultRevisionKind.BRIEF,
+      payload: toBriefJsonPayload(briefPayload),
+      schemaVersion: CONSULT_PRO_BRIEF_SCHEMA_VERSION,
+      promptVersion: CONSULT_PRO_BRIEF_PROMPT_VERSION,
+    },
+  })
+  await tx.consultAuditEvent.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      action: ConsultAuditAction.REVISION_CREATED,
+      actorType: ConsultActorType.SYSTEM,
+      actorId: null,
+      revisionId: briefRevision.id,
+    },
   })
   return revision
 }

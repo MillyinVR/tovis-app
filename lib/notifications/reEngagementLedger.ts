@@ -16,6 +16,7 @@
 import {
   BookingStatus,
   NotificationEventKey,
+  type Prisma,
   type PrismaClient,
 } from '@prisma/client'
 
@@ -28,7 +29,7 @@ import { RE_ENGAGEMENT_EVENT_KEYS } from '@/lib/notifications/reEngagementBudget
  * Cancelled dispatches don't count.
  */
 export async function loadReEngagementBudgetCounts(
-  db: PrismaClient,
+  db: Pick<Prisma.TransactionClient, 'notificationDispatch'>,
   args: { clientIds: string[]; windowStart: Date },
 ): Promise<Map<string, number>> {
   if (args.clientIds.length === 0) return new Map()
@@ -58,7 +59,7 @@ export async function loadReEngagementBudgetCounts(
  * off entirely.
  */
 export async function loadMutedClientsForEvent(
-  db: PrismaClient,
+  db: Pick<Prisma.TransactionClient, 'clientNotificationPreference'>,
   args: { clientIds: string[]; eventKey: NotificationEventKey },
 ): Promise<Set<string>> {
   if (args.clientIds.length === 0) return new Set()

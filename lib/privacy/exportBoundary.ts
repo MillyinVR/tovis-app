@@ -279,6 +279,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     status: 'EXPORTED',
     keys: ['consultSessions'],
   },
+  ConsultBriefFeedback: {
+    status: 'OMITTED',
+    reason:
+      'Pro-authored, content-free quality annotation used for audit and evaluation; it is not client-facing consult content and is not disclosed in either party\'s user export.',
+  },
 
   // ------------------------------------------------- undecided (K16-A backlog)
   // Recorded, not resolved. Each of these links to the subject and is neither

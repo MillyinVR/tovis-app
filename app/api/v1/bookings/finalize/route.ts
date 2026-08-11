@@ -89,6 +89,7 @@ const FINALIZE_OFFERING_SELECT = {
   service: {
     select: {
       minPrice: true,
+      categoryId: true,
     },
   },
   priceRamps: {
@@ -109,6 +110,7 @@ type FinalizeOfferingForBoundary = {
   id: string
   professionalId: string
   serviceId: string
+  serviceCategoryId: string
   offersInSalon: boolean
   offersMobile: boolean
   salonPriceStartingAt: Prisma.Decimal | null
@@ -130,6 +132,7 @@ type ParsedFinalizeBody = {
   holdId: string | null
   mediaId: string | null
   lookPostId: string | null
+  consultId: string | null
   openingId: string | null
   aftercareToken: string | null
   requestedRebookOfBookingId: string | null
@@ -145,6 +148,7 @@ type ValidatedFinalizeBody = {
   holdId: string
   mediaId: string | null
   lookPostId: string | null
+  consultId: string | null
   openingId: string | null
   aftercareToken: string | null
   requestedRebookOfBookingId: string | null
@@ -227,6 +231,7 @@ function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
   const holdId = pickString(body.holdId)
   const mediaId = pickString(body.mediaId)
   const lookPostId = pickString(body.lookPostId)
+  const consultId = pickString(body.consultId)
   const openingId = pickString(body.openingId)
   const aftercareToken = pickString(body.aftercareToken)
   const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
@@ -245,6 +250,7 @@ function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
     holdId,
     mediaId,
     lookPostId,
+    consultId,
     openingId,
     aftercareToken,
     requestedRebookOfBookingId,
@@ -295,6 +301,7 @@ function validateParsedFinalizeBody(
       holdId: body.holdId,
       mediaId: body.mediaId,
       lookPostId: body.lookPostId,
+      consultId: body.consultId,
       openingId: body.openingId,
       aftercareToken: body.aftercareToken,
       requestedRebookOfBookingId: body.requestedRebookOfBookingId,
@@ -312,6 +319,7 @@ function toFinalizeOffering(
     id: offering.id,
     professionalId: offering.professionalId,
     serviceId: offering.serviceId,
+    serviceCategoryId: offering.service.categoryId,
     offersInSalon: offering.offersInSalon,
     offersMobile: offering.offersMobile,
     salonPriceStartingAt: offering.salonPriceStartingAt,
@@ -576,6 +584,7 @@ function buildFinalizeIdempotencyRequestBody(args: {
     bookingEntryPoint: args.bookingEntryPoint,
     mediaId: args.body.mediaId,
     lookPostId: args.body.lookPostId,
+    consultId: args.body.consultId,
     aftercareToken: args.body.aftercareToken,
     rebookOfBookingId: args.rebookOfBookingId,
   }
@@ -776,6 +785,7 @@ export async function POST(request: Request) {
           addOnIds: body.addOnIds,
           locationType: body.locationType,
           source: body.source,
+          consultId: body.consultId,
           initialStatus,
           rebookOfBookingId: ownership.rebookOfBookingId,
           offering: toFinalizeOffering(offering),

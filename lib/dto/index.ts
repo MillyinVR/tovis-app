@@ -551,9 +551,7 @@ export type {
   LooksProProfilePreviewDto,
 } from '@/lib/looks/types'
 
-// ── AI Consult (client consult + agreement prerequisite routes) ──────────────
-// Phase 0 exposes the non-sensitive session shell and exact-version legal gate
-// only. Intake, media, analysis, and brows remain outside this contract.
+// ── AI Consult (client flow + dark C6 pro brief twins) ──────────────────────
 export type {
   ConsultSessionDTO,
   ConsultAgreementVersionDTO,
@@ -607,6 +605,19 @@ export type {
   ConsultAnalysisStartRequestDTO,
   ConsultAnalysisStateResponseDTO,
   ConsultAnalysisStartResponseDTO,
+  ConsultBriefClientIntakeItemDTO,
+  ConsultBriefAiObservationsDTO,
+  ConsultBriefAchievabilityDirectionDTO,
+  ConsultBriefRecommendationDirectionDTO,
+  ConsultBriefFeedbackRatingDTO,
+  ConsultBriefFeedbackDTO,
+  ConsultProBriefDTO,
+  ConsultProBriefResponseDTO,
+  ConsultProBriefHistoryResponseDTO,
+  ConsultBriefFeedbackRequestDTO,
+  ConsultBriefFeedbackResponseDTO,
+  ConsultBriefErrorCode,
+  ConsultBriefErrorDTO,
   ConsultAgreementErrorCode,
   ConsultAgreementErrorDTO,
 } from '@/lib/dto/consult'

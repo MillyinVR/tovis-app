@@ -3,6 +3,7 @@ import {
   ConsultActorType,
   ConsultAgreementKind,
   ConsultAuditAction,
+  ConsultBriefFeedbackRating,
   ConsultCaptureStatus,
   ConsultSessionStatus,
   Prisma,
@@ -1268,7 +1269,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     })
     expect(session).toEqual({
       status: ConsultSessionStatus.COMPLETED,
-      revisionSequence: before.revisionSequence + 1,
+      revisionSequence: before.revisionSequence + 2,
     })
     const revisions = await db.consultRevision.findMany({
       where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
@@ -1296,6 +1297,40 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           },
         }),
       ],
+    })
+    const brief = await db.consultRevision.findFirstOrThrow({
+      where: { consultSessionId: consult.sessionId, kind: 'BRIEF' },
+    })
+    expect(brief).toMatchObject({
+      revision: revisions[0]!.revision + 1,
+      schemaVersion: 1,
+      promptVersion: 'hair-color-pro-brief-v1',
+      model: null,
+      idempotencyKey: null,
+      requestHash: null,
+      payload: {
+        sourceAnalysisRevisionId: revisions[0]!.id,
+        sourceAnalysisRevision: revisions[0]!.revision,
+        intakeRevisionId: expect.any(String),
+        clientIntake: expect.any(Array),
+        aiObservations: expect.any(Object),
+        safetyFlags: expect.arrayContaining([
+          expect.objectContaining({
+            code: 'ALLERGY_HISTORY_UNKNOWN',
+            discussWithProfessional: true,
+          }),
+        ]),
+        achievabilityDirection: expect.objectContaining({
+          discussWithProfessional: true,
+          direction: expect.stringContaining('Discuss'),
+        }),
+        recommendationDirections: expect.arrayContaining([
+          expect.objectContaining({
+            discussWithProfessional: true,
+            direction: expect.stringContaining('discuss'),
+          }),
+        ]),
+      },
     })
     const captures = await db.consultCapture.findMany({
       where: { consultSessionId: consult.sessionId, status: ConsultCaptureStatus.ACCEPTED },
@@ -1331,7 +1366,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       ),
     ).toHaveLength(1)
     expect(audits.filter((event) => event.revisionId === revisions[0]?.id)).toHaveLength(1)
-    const durable = JSON.stringify({ revisions, audits })
+    const durable = JSON.stringify({ revisions, brief, audits })
     for (const forbidden of [
       'consult-raw',
       'signed-upload-secret',
@@ -1339,9 +1374,43 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       'providerRequest',
       'providerResponse',
       'hiddenReasoning',
+      'storagePath',
+      'storageBucket',
+      'skinTone',
+      'undertone',
+      'faceShape',
+      'eyeShape',
+      'ethnicity',
     ]) {
       expect(durable).not.toContain(forbidden)
     }
+
+    const feedback = await db.$transaction(async (tx) => {
+      const created = await tx.consultBriefFeedback.create({
+        data: {
+          consultSessionId: consult.sessionId,
+          briefRevisionId: brief.id,
+          professionalId,
+          rating: ConsultBriefFeedbackRating.ACCURATE_USEFUL,
+        },
+      })
+      await tx.consultAuditEvent.create({
+        data: {
+          consultSessionId: consult.sessionId,
+          action: ConsultAuditAction.BRIEF_FEEDBACK_RECORDED,
+          actorType: ConsultActorType.PROFESSIONAL,
+          actorId: professionalId,
+          briefFeedbackId: created.id,
+        },
+      })
+      return created
+    })
+    await expect(
+      db.consultBriefFeedback.update({
+        where: { id: feedback.id },
+        data: { rating: ConsultBriefFeedbackRating.OFF },
+      }),
+    ).rejects.toThrow()
 
     const read = await getAnalysis(
       new Request(`http://test/api/v1/client/consult/${consult.sessionId}/analysis`),

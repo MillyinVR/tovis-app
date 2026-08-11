@@ -37,6 +37,11 @@ import { pickString } from '@/lib/pick'
 import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { paymentMethodLabel } from '@/lib/payments/acceptedMethods'
+import ProConsultBrief from '@/app/pro/_components/consult/ProConsultBrief'
+import {
+  loadAuthorizedProConsultBriefs,
+  ProConsultBriefError,
+} from '@/lib/consult/proBrief'
 
 export const dynamic = 'force-dynamic'
 
@@ -262,6 +267,18 @@ export default async function ProBookingDetailPage(props: {
     booking.locationTimeZone,
     scheduleTz,
   )
+  const consultBriefs = await loadAuthorizedProConsultBriefs({
+    professionalId: proId,
+    bookingId: booking.id,
+  }).catch((error: unknown) => {
+    if (
+      error instanceof ProConsultBriefError &&
+      (error.code === 'HIDDEN' || error.code === 'NOT_FOUND')
+    ) {
+      return []
+    }
+    throw error
+  })
 
   const serviceName = booking.service?.name ?? 'Booking'
   const paymentBadge = derivePaymentBadge(booking)
@@ -573,6 +590,27 @@ export default async function ProBookingDetailPage(props: {
           />
         </div>
       </section>
+
+      {consultBriefs.length ? (
+        <section className="tovis-glass mb-3.5 rounded-card border border-white/10 bg-bgSecondary p-4">
+          <h2 className="font-display text-[14px] font-bold text-textPrimary">
+            Pre-appointment consult brief
+          </h2>
+          <p className="mt-1 text-[12px] text-textMuted">
+            Client intake first, followed by AI observations to verify together.
+          </p>
+          <div className="mt-4 grid gap-6">
+            {consultBriefs.map((brief) => (
+              <ProConsultBrief
+                key={brief.consultId}
+                brief={brief}
+                timeZone={apptTz}
+                showDate={consultBriefs.length > 1}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {/* K19: this appointment is one occurrence of a standing appointment. The
           card is DATA-gated, not flag-gated — a `seriesId` can only exist if the
