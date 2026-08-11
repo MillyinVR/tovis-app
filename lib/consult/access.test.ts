@@ -8,6 +8,7 @@ import {
   evaluateAiConsultC6Exposure,
   isAiConsultC6ExposureEnabledForPro,
   isAiConsultC6ExposurePossible,
+  isAiConsultC7ExposureEnabledForPro,
   isAiConsultEnabledForPro,
 } from './access'
 
@@ -43,11 +44,12 @@ describe('isAiConsultEnabledForPro', () => {
     }
   })
 
-  it('fails closed for C6 while either required live C5 artifact is absent', () => {
+  it('fails closed for C6 and C7 while either required live C5 artifact is absent', () => {
     expect(AI_CONSULT_C5_LIVE_BASELINE_APPROVED).toBe(false)
     expect(AI_CONSULT_C5_LIVE_CANDIDATE_PASSED).toBe(false)
     process.env.ENABLE_AI_CONSULT = 'true'
     expect(isAiConsultC6ExposureEnabledForPro('anyone')).toBe(false)
+    expect(isAiConsultC7ExposureEnabledForPro('anyone')).toBe(false)
     expect(isAiConsultC6ExposurePossible()).toBe(false)
 
     expect(

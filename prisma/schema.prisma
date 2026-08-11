@@ -6487,6 +6487,11 @@ enum ConsultAuditAction {
   CAPTURE_DELETED
   RAW_OBJECT_PURGED
   BRIEF_FEEDBACK_RECORDED
+  // C7 singular client measurement facts. A partial unique index in the C7
+  // migration permits each action at most once per consult; the session lock
+  // in lib/consult/clientResults.ts makes retries deterministic.
+  CLIENT_RESULTS_SERVED
+  ME_CARD_TEASER_TAPPED
 }
 
 enum ConsultBriefFeedbackRating {
@@ -6746,6 +6751,8 @@ model ConsultAuditEvent {
   createdAt DateTime @default(now())
 
   @@unique([captureId, action])
+  // CLIENT_RESULTS_SERVED and ME_CARD_TEASER_TAPPED additionally have a
+  // partial unique (consultSessionId, action) index in the C7 migration.
   @@index([consultSessionId, createdAt])
   @@index([agreementAcceptanceId])
   @@index([revisionId])

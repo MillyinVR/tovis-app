@@ -21,6 +21,7 @@ import {
 } from '@/lib/consult/captureContract'
 import { ConsultWriteError } from '@/lib/consult/errors'
 import type { ConsultCaptureQualityResponseDTO } from '@/lib/dto/consult'
+import { isTransactionSerializationError } from '@/lib/prismaErrors'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -69,6 +70,12 @@ export async function POST(req: Request, ctx: RouteContext<Params>) {
   } catch (error: unknown) {
     const response = consultWriteErrorResponse(error)
     if (response) return response
+    if (isTransactionSerializationError(error)) {
+      const conflictResponse = consultWriteErrorResponse(
+        new ConsultWriteError('INVALID_STATE', 'Consult state changed.'),
+      )
+      if (conflictResponse) return conflictResponse
+    }
     console.error('POST consult capture quality error', {
       name: error instanceof Error ? error.name : 'UnknownError',
     })

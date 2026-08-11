@@ -543,6 +543,44 @@ export type BrandContact = {
   location?: string // "Encinitas, CA"
 }
 
+export type BrandClientConsultResultsCopy = {
+  backToBooking: string
+  eyebrow: string
+  title: string
+  intro: string
+  clientWordsTitle: string
+  aiObservationsTitle: string
+  aiObservationsBody: string
+  currentLevelLabel: string
+  toneLabel: string
+  conditionLabel: string
+  densityLabel: string
+  textureLabel: string
+  unknownLabel: string
+  levelPrefix: string
+  confidenceSuffix: string
+  safetyTitle: string
+  safetyEmpty: string
+  safetyItemSuffix: string
+  achievabilityTitle: string
+  achievabilityLabels: Record<
+    | 'LIKELY_SINGLE_APPOINTMENT'
+    | 'LIKELY_MULTI_APPOINTMENT'
+    | 'REQUIRES_PRO_ASSESSMENT'
+    | 'UNKNOWN',
+    string
+  >
+  recommendationsTitle: string
+  recommendationDiscussionPrefix: string
+  meCardEyebrow: string
+  meCardTitle: string
+  meCardBody: string
+  meCardTapLabel: string
+  meCardTappedLabel: string
+  meCardSendingLabel: string
+  meCardError: string
+}
+
 export type BrandConfig = {
   id: BrandId
   displayName: string // "TOVIS" — used anywhere the brand name appears in UI
@@ -552,4 +590,5 @@ export type BrandConfig = {
   assets: BrandAssets
   contact: BrandContact
   proCalendar: BrandProCalendarCopy
+  clientConsultResults: BrandClientConsultResultsCopy
 }

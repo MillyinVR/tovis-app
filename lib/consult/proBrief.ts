@@ -1,6 +1,5 @@
 import 'server-only'
 
-import { isDeepStrictEqual } from 'node:util'
 import {
   ConsultActorType,
   ConsultAuditAction,
@@ -15,18 +14,15 @@ import type {
   ConsultBriefFeedbackRatingDTO,
   ConsultProBriefDTO,
 } from '@/lib/dto/consult'
-import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC6ExposureEnabledForPro } from './access'
-import { normalizeStoredHairColorAnalysisPayload } from './analysisRevision'
 import {
-  buildHairColorProBriefPayload,
-  CONSULT_PRO_BRIEF_PROMPT_VERSION,
-  CONSULT_PRO_BRIEF_SCHEMA_VERSION,
-  toBriefJsonPayload,
-} from './briefContract'
-import { normalizeHairColorIntakePayload } from './intakePack'
+  ImmutableConsultResultError,
+  loadLatestImmutableConsultResult,
+} from './immutableResult'
+
+export { selectLatestConsultRevision } from './immutableResult'
 
 export type ProConsultBriefErrorCode =
   | 'HIDDEN'
@@ -50,16 +46,6 @@ type BriefSession = {
   createdAt: Date
 }
 
-export function selectLatestConsultRevision<T extends { revision: number }>(
-  revisions: readonly T[],
-): T | null {
-  let latest: T | null = null
-  for (const revision of revisions) {
-    if (!latest || revision.revision > latest.revision) latest = revision
-  }
-  return latest
-}
-
 export function sortConsultBriefHistory<
   T extends Pick<ConsultProBriefDTO, 'createdAt' | 'consultId'>,
 >(briefs: readonly T[]): T[] {
@@ -70,76 +56,20 @@ export function sortConsultBriefHistory<
   )
 }
 
-function sourceAnalysisId(payload: Prisma.JsonValue): string | null {
-  return isRecord(payload) && typeof payload.sourceAnalysisRevisionId === 'string'
-    ? payload.sourceAnalysisRevisionId
-    : null
-}
-
 async function loadSessionBrief(
   tx: Prisma.TransactionClient,
   session: BriefSession,
 ): Promise<ConsultProBriefDTO> {
-  const revisions = await tx.consultRevision.findMany({
-    where: {
-      consultSessionId: session.id,
-      kind: {
-        in: [
-          ConsultRevisionKind.INTAKE,
-          ConsultRevisionKind.ANALYSIS,
-          ConsultRevisionKind.BRIEF,
-        ],
-      },
-    },
-    select: {
-      id: true,
-      revision: true,
-      kind: true,
-      payload: true,
-      schemaVersion: true,
-      promptVersion: true,
-      createdAt: true,
-    },
-    orderBy: [{ revision: 'desc' }, { id: 'desc' }],
-  })
-  const analysis = selectLatestConsultRevision(
-    revisions.filter((revision) => revision.kind === ConsultRevisionKind.ANALYSIS),
-  )
-  const intake = selectLatestConsultRevision(
-    revisions.filter((revision) => revision.kind === ConsultRevisionKind.INTAKE),
-  )
-  if (!analysis || !intake) throw new ProConsultBriefError('UNAVAILABLE')
-
-  const normalizedIntake = normalizeHairColorIntakePayload(intake.payload)
-  if (!normalizedIntake?.complete) {
-    throw new ProConsultBriefError('UNAVAILABLE')
+  let result
+  try {
+    result = await loadLatestImmutableConsultResult(tx, session.id)
+  } catch (error: unknown) {
+    if (error instanceof ImmutableConsultResultError) {
+      throw new ProConsultBriefError('UNAVAILABLE')
+    }
+    throw error
   }
-  const payload = buildHairColorProBriefPayload({
-    intakeRevisionId: intake.id,
-    intakeAnswers: normalizedIntake.answers,
-    analysisRevisionId: analysis.id,
-    analysisRevision: analysis.revision,
-    analysis: normalizeStoredHairColorAnalysisPayload(analysis.payload),
-  })
-
-  const brief = selectLatestConsultRevision(
-    revisions.filter(
-      (revision) =>
-        revision.kind === ConsultRevisionKind.BRIEF &&
-        revision.schemaVersion === CONSULT_PRO_BRIEF_SCHEMA_VERSION &&
-        revision.promptVersion === CONSULT_PRO_BRIEF_PROMPT_VERSION &&
-        sourceAnalysisId(revision.payload) === analysis.id,
-    ),
-  )
-  if (!brief) {
-    throw new ProConsultBriefError('UNAVAILABLE')
-  }
-  // The immutable revision is authoritative. The DTO is reconstructed only
-  // through the pinned schema normalizer, then served iff it is structurally
-  // identical to what was stored; code drift can never reinterpret history.
-  if (!isDeepStrictEqual(brief.payload, toBriefJsonPayload(payload))) {
-    throw new ProConsultBriefError('UNAVAILABLE')
-  }
+  const { payload } = result
 
   const feedback = await tx.consultBriefFeedback.findUnique({
     where: { consultSessionId: session.id },
@@ -151,8 +81,8 @@ async function loadSessionBrief(
     bookingId: session.bookingId,
     professionalId: session.professionalId,
     serviceCategoryId: session.serviceCategoryId,
-    briefRevisionId: brief.id,
-    briefRevision: brief.revision,
+    briefRevisionId: result.briefRevisionId,
+    briefRevision: result.briefRevision,
     sourceAnalysisRevisionId: payload.sourceAnalysisRevisionId,
     sourceAnalysisRevision: payload.sourceAnalysisRevision,
     intakeRevisionId: payload.intakeRevisionId,
@@ -164,7 +94,7 @@ async function loadSessionBrief(
     feedback: feedback
       ? { rating: feedback.rating, createdAt: feedback.createdAt.toISOString() }
       : null,
-    createdAt: brief.createdAt.toISOString(),
+    createdAt: result.createdAt.toISOString(),
   }
 }
 

@@ -85,3 +85,12 @@ export function isAiConsultC6ExposureEnabledForPro(
     liveCandidatePassed: AI_CONSULT_C5_LIVE_CANDIDATE_PASSED,
   })
 }
+
+/** Explicit C7 name so client-result routes cannot accidentally use C1–C5's
+ * looser founder-development gate. C6 and C7 intentionally share the same
+ * checked-in live-evidence block. */
+export function isAiConsultC7ExposureEnabledForPro(
+  professionalId: string | null | undefined,
+): boolean {
+  return isAiConsultC6ExposureEnabledForPro(professionalId)
+}
