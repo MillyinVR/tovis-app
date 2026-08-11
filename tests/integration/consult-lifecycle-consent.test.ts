@@ -396,6 +396,59 @@ describe('AI consult lifecycle and legal foundation', () => {
     ).rejects.toThrow()
   })
 
+  it('enforces one content-free first-results and teaser-tap fact per consult', async () => {
+    for (const action of [
+      ConsultAuditAction.CLIENT_RESULTS_SERVED,
+      ConsultAuditAction.ME_CARD_TEASER_TAPPED,
+    ]) {
+      await db.consultAuditEvent.create({
+        data: {
+          consultSessionId: sessionId,
+          action,
+          actorType: ConsultActorType.CLIENT,
+          actorId: userId,
+        },
+      })
+      await expect(
+        db.consultAuditEvent.create({
+          data: {
+            consultSessionId: sessionId,
+            action,
+            actorType: ConsultActorType.CLIENT,
+            actorId: userId,
+          },
+        }),
+      ).rejects.toThrow()
+    }
+
+    const events = await db.consultAuditEvent.findMany({
+      where: {
+        consultSessionId: sessionId,
+        action: {
+          in: [
+            ConsultAuditAction.CLIENT_RESULTS_SERVED,
+            ConsultAuditAction.ME_CARD_TEASER_TAPPED,
+          ],
+        },
+      },
+      select: { action: true, actorType: true, actorId: true },
+    })
+    expect(events).toEqual(
+      expect.arrayContaining([
+        {
+          action: ConsultAuditAction.CLIENT_RESULTS_SERVED,
+          actorType: ConsultActorType.CLIENT,
+          actorId: userId,
+        },
+        {
+          action: ConsultAuditAction.ME_CARD_TEASER_TAPPED,
+          actorType: ConsultActorType.CLIENT,
+          actorId: userId,
+        },
+      ]),
+    )
+  })
+
   it('revokes one-way, stops sensitive writes, and preserves the evidence trail', async () => {
     const consent = await db.consultAgreementAcceptance.findFirstOrThrow({
       where: {

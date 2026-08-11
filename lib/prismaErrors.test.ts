@@ -4,16 +4,18 @@ import { describe, expect, it } from 'vitest'
 import { Prisma } from '@prisma/client'
 import {
   isExclusionConstraintError,
+  isTransactionSerializationError,
   isTransientPrismaError,
   isUniqueConstraintError,
 } from './prismaErrors'
 
 const CONSTRAINT = 'BookingHold_no_active_professional_overlap'
 
-function knownError(message: string, code: string) {
+function knownError(message: string, code: string, meta?: Record<string, unknown>) {
   return new Prisma.PrismaClientKnownRequestError(message, {
     code,
     clientVersion: 'test',
+    meta,
   })
 }
 
@@ -34,6 +36,36 @@ describe('isUniqueConstraintError', () => {
 
   it('is false for non-Prisma errors', () => {
     expect(isUniqueConstraintError(new Error('nope'))).toBe(false)
+  })
+})
+
+describe('isTransactionSerializationError', () => {
+  it('recognizes typed Prisma and raw-query PostgreSQL transaction conflicts', () => {
+    expect(isTransactionSerializationError(knownError('conflict', 'P2034'))).toBe(
+      true,
+    )
+    expect(
+      isTransactionSerializationError(
+        knownError('raw conflict', 'P2010', { code: '40001' }),
+      ),
+    ).toBe(true)
+    expect(
+      isTransactionSerializationError(
+        knownError('raw deadlock', 'P2010', { code: '40P01' }),
+      ),
+    ).toBe(true)
+  })
+
+  it('does not classify other raw-query or deterministic failures as conflicts', () => {
+    expect(
+      isTransactionSerializationError(
+        knownError('constraint', 'P2010', { code: '23514' }),
+      ),
+    ).toBe(false)
+    expect(isTransactionSerializationError(knownError('dupe', 'P2002'))).toBe(
+      false,
+    )
+    expect(isTransactionSerializationError(new Error('40001'))).toBe(false)
   })
 })
 

@@ -492,6 +492,52 @@ export type ConsultBriefFeedbackResponseDTO = {
   replayed: boolean
 }
 
+export type ConsultClientResultsDTO = {
+  consultId: string
+  bookingId: string
+  serviceCategoryId: string
+  briefRevisionId: string
+  briefRevision: number
+  analysisRevisionId: string
+  analysisRevision: number
+  intakeRevisionId: string
+  // Client-declared answers intentionally precede AI-derived observations in
+  // both this wire shape and the C7 render order.
+  clientIntake: ConsultBriefClientIntakeItemDTO[]
+  aiObservations: ConsultBriefAiObservationsDTO
+  // Always present and structurally separate, including when empty.
+  safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
+  achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
+  recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
+  meCardTeaser: {
+    locked: true
+    tapped: boolean
+  }
+  createdAt: string
+}
+
+export type ConsultClientResultsResponseDTO = {
+  results: ConsultClientResultsDTO
+}
+
+export type ConsultMeCardTeaserTapResponseDTO = {
+  teaser: {
+    locked: true
+    tapped: true
+  }
+  replayed: boolean
+}
+
+export type ConsultClientResultsErrorCode =
+  | 'CONSULT_RESULTS_NOT_FOUND'
+  | 'CONSULT_RESULTS_UNAVAILABLE'
+
+export type ConsultClientResultsErrorDTO = {
+  ok: false
+  error: string
+  code: ConsultClientResultsErrorCode
+}
+
 export type ConsultBriefErrorCode =
   | 'CONSULT_BRIEF_NOT_FOUND'
   | 'CONSULT_BRIEF_INVALID_REQUEST'

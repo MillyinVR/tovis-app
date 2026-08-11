@@ -7872,6 +7872,150 @@
       ],
       "type": "object"
     },
+    "ConsultClientResultsDTO": {
+      "properties": {
+        "achievabilityDirection": {
+          "$ref": "#/definitions/ConsultBriefAchievabilityDirectionDTO"
+        },
+        "aiObservations": {
+          "$ref": "#/definitions/ConsultBriefAiObservationsDTO"
+        },
+        "analysisRevision": {
+          "type": "number"
+        },
+        "analysisRevisionId": {
+          "type": "string"
+        },
+        "bookingId": {
+          "type": "string"
+        },
+        "briefRevision": {
+          "type": "number"
+        },
+        "briefRevisionId": {
+          "type": "string"
+        },
+        "clientIntake": {
+          "items": {
+            "$ref": "#/definitions/ConsultBriefClientIntakeItemDTO"
+          },
+          "type": "array"
+        },
+        "consultId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "intakeRevisionId": {
+          "type": "string"
+        },
+        "meCardTeaser": {
+          "properties": {
+            "locked": {
+              "const": true,
+              "type": "boolean"
+            },
+            "tapped": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "locked",
+            "tapped"
+          ],
+          "type": "object"
+        },
+        "recommendationDirections": {
+          "items": {
+            "$ref": "#/definitions/ConsultBriefRecommendationDirectionDTO"
+          },
+          "type": "array"
+        },
+        "safetyFlags": {
+          "items": {
+            "properties": {
+              "code": {
+                "$ref": "#/definitions/ConsultAnalysisSafetyCodeDTO"
+              },
+              "discussWithProfessional": {
+                "const": true,
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "summary",
+              "discussWithProfessional"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "serviceCategoryId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "consultId",
+        "bookingId",
+        "serviceCategoryId",
+        "briefRevisionId",
+        "briefRevision",
+        "analysisRevisionId",
+        "analysisRevision",
+        "intakeRevisionId",
+        "clientIntake",
+        "aiObservations",
+        "safetyFlags",
+        "achievabilityDirection",
+        "recommendationDirections",
+        "meCardTeaser",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ConsultClientResultsErrorCode": {
+      "enum": [
+        "CONSULT_RESULTS_NOT_FOUND",
+        "CONSULT_RESULTS_UNAVAILABLE"
+      ],
+      "type": "string"
+    },
+    "ConsultClientResultsErrorDTO": {
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ConsultClientResultsErrorCode"
+        },
+        "error": {
+          "type": "string"
+        },
+        "ok": {
+          "const": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "error",
+        "code"
+      ],
+      "type": "object"
+    },
+    "ConsultClientResultsResponseDTO": {
+      "properties": {
+        "results": {
+          "$ref": "#/definitions/ConsultClientResultsDTO"
+        }
+      },
+      "required": [
+        "results"
+      ],
+      "type": "object"
+    },
     "ConsultIntakeAnswerMapDTO": {
       "additionalProperties": {
         "type": "string"
@@ -8161,6 +8305,35 @@
       },
       "required": [
         "intake",
+        "replayed"
+      ],
+      "type": "object"
+    },
+    "ConsultMeCardTeaserTapResponseDTO": {
+      "properties": {
+        "replayed": {
+          "type": "boolean"
+        },
+        "teaser": {
+          "properties": {
+            "locked": {
+              "const": true,
+              "type": "boolean"
+            },
+            "tapped": {
+              "const": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "locked",
+            "tapped"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "teaser",
         "replayed"
       ],
       "type": "object"

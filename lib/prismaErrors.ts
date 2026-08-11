@@ -46,6 +46,20 @@ export function isTransientPrismaError(error: unknown): boolean {
 }
 
 /**
+ * True only for transaction serialization/deadlock conflicts. Prisma reports
+ * ordinary client transactions as P2034, but a conflict raised by `$queryRaw`
+ * is wrapped as P2010 with the PostgreSQL SQLSTATE in `meta.code`.
+ */
+export function isTransactionSerializationError(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false
+  if (error.code === 'P2034') return true
+  if (error.code !== 'P2010') return false
+
+  const postgresCode = error.meta?.code
+  return postgresCode === '40001' || postgresCode === '40P01'
+}
+
+/**
  * True for a Postgres GIST EXCLUDE constraint violation (SQLSTATE 23P01) raised
  * by the named constraint. Prisma does not map 23P01 to a dedicated error code
  * for typed queries, so it surfaces as a known- or unknown-request error whose
