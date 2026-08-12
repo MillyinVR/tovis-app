@@ -1,7 +1,7 @@
 // app/client/(gated)/activity/ClientActivityFrame.tsx
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   Bookmark,
@@ -18,6 +18,7 @@ import {
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { formatRelativeTimeAgo } from '@/lib/time'
 
+import ClientMarkAllReadButton from '../_components/ClientMarkAllReadButton'
 import ClientPage from '../_components/ClientPage'
 
 import type {
@@ -188,33 +189,20 @@ export default function ClientActivityFrame({
 }: ClientActivityFrameProps) {
   const [rows, setRows] = useState(items)
   const [unread, setUnread] = useState(Math.max(0, unreadCount))
-  const [marking, setMarking] = useState(false)
-  const markedRef = useRef(false)
 
-  const hasUnread = unread > 0
-
-  const markAllRead = useCallback(async () => {
-    if (marking || !hasUnread || markedRef.current) return
-    setMarking(true)
-    // Optimistic: clear the badge + unread dots immediately.
+  // Optimistic: clear the badge + unread dots the moment the button is pressed.
+  // Zeroing `unread` also disables the button, which is what prevents a second
+  // submit while the request is in flight.
+  const clearUnreadOptimistically = useCallback(() => {
     setUnread(0)
     setRows((current) => current.map((row) => ({ ...row, unread: false })))
-    try {
-      const response = await fetch('/api/v1/client/notifications/read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ eventKeys: markReadEventKeys }),
-      })
-      if (!response.ok) throw new Error('failed')
-      markedRef.current = true
-    } catch {
-      // Roll back so the user can retry.
-      setUnread(Math.max(0, unreadCount))
-      setRows(items)
-    } finally {
-      setMarking(false)
-    }
-  }, [hasUnread, items, marking, markReadEventKeys, unreadCount])
+  }, [])
+
+  // Put them back so the client can retry.
+  const restoreUnread = useCallback(() => {
+    setUnread(Math.max(0, unreadCount))
+    setRows(items)
+  }, [items, unreadCount])
 
   const lastIndex = useMemo(() => rows.length - 1, [rows.length])
 
@@ -224,19 +212,15 @@ export default function ClientActivityFrame({
       title="Who engaged with you"
       back={{ href: '/client', label: 'Home' }}
       action={
-        <button
-          type="button"
-          onClick={markAllRead}
-          disabled={!hasUnread || marking}
-          className={[
-            'text-[12.5px] font-bold transition brand-focus',
-            hasUnread
-              ? 'cursor-pointer text-accentPrimary hover:opacity-80'
-              : 'cursor-default text-textSecondary/50',
-          ].join(' ')}
-        >
-          Mark all read
-        </button>
+        <ClientMarkAllReadButton
+          unreadCount={unread}
+          eventKeys={markReadEventKeys}
+          onOptimistic={clearUnreadOptimistically}
+          onRollback={restoreUnread}
+          // The rows are already cleared in state, so a refresh would only
+          // re-fetch what this page is deliberately holding itself.
+          onSuccess={() => {}}
+        />
       }
     >
       {rows.length > 0 ? (

@@ -150,8 +150,8 @@ export async function evaluateAccountDeletionEligibility(args: {
         code: 'UPCOMING_BOOKINGS_AS_CLIENT',
         message:
           upcoming === 1
-            ? 'You have 1 upcoming appointment. Cancel it first, then you can delete your account.'
-            : `You have ${upcoming} upcoming appointments. Cancel them first, then you can delete your account.`,
+            ? 'You have 1 upcoming booking. Cancel it first, then you can delete your account.'
+            : `You have ${upcoming} upcoming bookings. Cancel them first, then you can delete your account.`,
         count: upcoming,
       })
     }
@@ -171,8 +171,8 @@ export async function evaluateAccountDeletionEligibility(args: {
         code: 'UPCOMING_BOOKINGS_AS_PRO',
         message:
           upcoming === 1
-            ? 'You have 1 upcoming client appointment. Cancel or complete it first — deleting your account will not tell your client.'
-            : `You have ${upcoming} upcoming client appointments. Cancel or complete them first — deleting your account will not tell your clients.`,
+            ? 'You have 1 upcoming client booking. Cancel or complete it first — deleting your account will not tell your client.'
+            : `You have ${upcoming} upcoming client bookings. Cancel or complete them first — deleting your account will not tell your clients.`,
         count: upcoming,
       })
     }
@@ -200,8 +200,8 @@ export async function evaluateAccountDeletionEligibility(args: {
         code: 'DEPOSIT_HELD',
         message:
           held === 1
-            ? 'A deposit is still being held on 1 appointment. It needs to settle or be refunded before your account can be deleted.'
-            : `Deposits are still being held on ${held} appointments. They need to settle or be refunded before your account can be deleted.`,
+            ? 'A deposit is still being held on 1 booking. It needs to settle or be refunded before your account can be deleted.'
+            : `Deposits are still being held on ${held} bookings. They need to settle or be refunded before your account can be deleted.`,
         count: held,
       })
     }
