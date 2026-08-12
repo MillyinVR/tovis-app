@@ -82,6 +82,27 @@ const WIDTHS: Record<ClientPageWidth, string> = {
   wide: 'max-w-5xl',
 }
 
+/**
+ * The hero wash is full-bleed by way of `-mx-4`, which only cancels the gated
+ * layout's own `px-4`. That reaches the viewport edge for exactly as long as
+ * the content column still fills the layout container — past that point the
+ * column is centred with slack on both sides and the "full-bleed" wash becomes
+ * a hard-edged rectangle floating in the middle of the page. At 1280 it stopped
+ * 288px short of each edge, which reads as a rendering fault rather than a
+ * treatment (worst in light mode, where the tint is darker than the page).
+ *
+ * So past the crossover the wash stops pretending to be full-bleed and becomes
+ * a rounded panel aligned to the column instead. The breakpoints are derived
+ * from the layout, not picked:
+ *   regular — column is max-w-2xl (672) + the layout's two px-4 gutters (32).
+ *   wide    — the column matches the layout container, so the container's own
+ *             max-w-5xl (1024) is where slack first appears.
+ */
+const HERO_CONTAINED: Record<ClientPageWidth, string> = {
+  regular: 'min-[704px]:mx-0 min-[704px]:mt-0 min-[704px]:rounded-card min-[704px]:px-5',
+  wide: 'min-[1024px]:mx-0 min-[1024px]:mt-0 min-[1024px]:rounded-card min-[1024px]:px-5',
+}
+
 export default function ClientPage({
   eyebrow,
   title,
@@ -104,7 +125,10 @@ export default function ClientPage({
           hero
             // -mt-4 cancels the gated layout's pt-4 so the wash reaches the top
             // edge of the viewport instead of floating below a bare strip.
-            ? '-mx-4 -mt-4 bg-[linear-gradient(180deg,rgb(var(--accent-primary)/0.12),transparent)] px-4 pb-8 pt-6'
+            ? cn(
+                '-mx-4 -mt-4 bg-[linear-gradient(180deg,rgb(var(--accent-primary)/0.12),transparent)] px-4 pb-8 pt-6',
+                HERO_CONTAINED[width],
+              )
             : 'pt-1',
         )}
       >
