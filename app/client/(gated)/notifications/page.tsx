@@ -18,7 +18,7 @@ import { NotificationEventKey, Prisma, Role } from '@prisma/client'
 
 import ClientPage from '../_components/ClientPage'
 import ClientNotificationCard from './ClientNotificationCard'
-import ClientMarkAllReadButton from './ClientMarkAllReadButton'
+import ClientMarkAllReadButton from '../_components/ClientMarkAllReadButton'
 
 export const dynamic = 'force-dynamic'
 

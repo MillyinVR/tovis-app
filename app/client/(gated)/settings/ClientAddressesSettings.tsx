@@ -1123,6 +1123,12 @@ export default function ClientAddressesSettings() {
             <label className="flex items-center gap-2 text-sm font-semibold text-textSecondary">
               <input
                 type="checkbox"
+                // A bare checkbox paints itself in the BROWSER's accent (blue),
+                // which is a raw colour: it ignores [data-mode] and a white-label
+                // tenant's palette entirely. No static guard catches it because
+                // it is not a Tailwind colour class. Same token as the consent
+                // card's checkbox.
+                className="h-4 w-4 accent-accentPrimary"
                 checked={searchDraft.isDefault}
                 onChange={(e) =>
                   setSearchDraft((prev) => ({
@@ -1461,6 +1467,7 @@ export default function ClientAddressesSettings() {
             <label className="flex items-center gap-2 text-sm font-semibold text-textSecondary">
               <input
                 type="checkbox"
+                className="h-4 w-4 accent-accentPrimary"
                 checked={serviceDraft.isDefault}
                 onChange={(e) =>
                   setServiceDraft((prev) => ({

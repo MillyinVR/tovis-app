@@ -204,7 +204,7 @@ export default function DeleteAccountPanel() {
 
           <p className="text-xs font-semibold leading-5 text-textSecondary">
             Your account closes after {status?.gracePeriodDays ?? 14} days. You
-            can sign in and cancel any time before then. Appointment and payment
+            can sign in and cancel any time before then. Booking and payment
             records are kept for accounting and for the people you booked with,
             with your personal details removed.
           </p>
