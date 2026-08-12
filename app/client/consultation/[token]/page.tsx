@@ -294,7 +294,7 @@ function statusPillClass(status: string): string {
     return 'border border-toneWarn/30 bg-toneWarn/10 text-toneWarn'
   }
 
-  return 'border border-white/10 bg-bgPrimary text-textPrimary'
+  return 'border border-textPrimary/10 bg-bgPrimary text-textPrimary'
 }
 
 function friendlyProofMethod(value: string | null | undefined): string | null {
@@ -336,7 +336,7 @@ function SectionCard(props: {
   children: React.ReactNode
 }) {
   return (
-    <section className="rounded-card border border-white/10 p-4 shadow-[0_14px_48px_rgba(0,0,0,0.35)] tovis-glass">
+    <section className="rounded-card border border-textPrimary/10 p-4 shadow-[0_14px_48px_rgb(var(--shadow-color)/0.18)] tovis-glass">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13px] font-black text-textPrimary">{props.title}</div>
@@ -807,7 +807,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
   if (state.kind === 'loading') {
     return (
       <main className="mx-auto w-full max-w-[760px] px-4 pb-20 pt-16 text-textPrimary">
-        <div className="rounded-card border border-white/10 bg-bgSecondary p-5">
+        <div className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
           <div className="text-sm font-black">Loading consultation…</div>
           <div className="mt-2 text-sm text-textSecondary">
             Pulling the proposal details from your secure link.
@@ -861,9 +861,9 @@ export default function PublicConsultationPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto w-full max-w-[760px] px-4 pb-20 pt-16 text-textPrimary">
-      <header className="rounded-card border border-white/10 bg-bgSecondary p-5">
+      <header className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+          <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
             Secure consultation link
           </span>
           <span
@@ -895,7 +895,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
           )}
         </div>
 
-        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary px-4 py-3">
+        <div className="mt-4 rounded-card border border-textPrimary/10 bg-bgPrimary px-4 py-3">
           <div className="text-[12px] font-black text-textPrimary">Status</div>
           <div className="mt-1 text-sm text-textSecondary">{summaryText}</div>
         </div>
@@ -907,7 +907,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
           subtitle="Review the recommended services and pricing"
           right={
             proposalTotalLabel ? (
-              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+              <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
                 Proposed total: {proposalTotalLabel}
               </span>
             ) : null
@@ -918,7 +918,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
               {proposedItems.map((item) => (
                 <div
                   key={item.key}
-                  className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3"
+                  className="rounded-card border border-textPrimary/10 bg-bgPrimary px-4 py-3"
                 >
                   <div className="text-[14px] font-black text-textPrimary">{item.title}</div>
                   {item.subtitle ? (
@@ -1012,14 +1012,14 @@ export default function PublicConsultationPage({ params }: PageProps) {
                   type="button"
                   onClick={() => void submitDecision('REJECT')}
                   disabled={Boolean(submittingAction)}
-                  className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-5 py-2.5 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary px-5 py-2.5 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {rejectBusy ? 'Declining…' : 'Decline consultation'}
                 </button>
               </div>
             </>
           ) : (
-            <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 text-sm text-textSecondary">
+            <div className="rounded-card border border-textPrimary/10 bg-bgPrimary px-4 py-3 text-sm text-textSecondary">
               {summaryText}
             </div>
           )}
@@ -1039,7 +1039,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
             <div className="mt-3">
               <Link
                 href={`/professionals/${encodeURIComponent(data.booking.professional.id)}`}
-                className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
+                className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgSecondary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
               >
                 View professional profile
               </Link>

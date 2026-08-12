@@ -2,7 +2,9 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ClientPage from '../../_components/ClientPage'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { getBoardDetail, getBoardErrorMeta } from '@/lib/boards'
@@ -120,50 +122,28 @@ export default async function ClientBoardDetailPage(props: {
   })
 
   return (
-    <main
-      className="mx-auto w-full max-w-5xl px-4 pb-24 text-textPrimary"
-      style={{
-        paddingTop: 'max(48px, env(safe-area-inset-top, 0px) + 24px)',
-      }}
-    >
-      <header className="mb-6 border-b border-white/10 pb-5">
+    <ClientPage
+      eyebrow="Board"
+      title={board.name}
+      lede={[
+        countLabel(board.itemCount, 'saved look', 'saved looks'),
+        visibilityLabel(board),
+        board.type !== BoardType.GENERAL ? BOARD_TYPE_LABELS[board.type] : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')}
+      back={{ href: '/client/me', label: 'Me' }}
+      width="wide"
+      action={
         <Link
-          href="/client/me"
-          className="inline-flex items-center text-[12px] font-bold text-textSecondary transition hover:text-textPrimary"
+          href="/looks"
+          className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgSecondary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-textPrimary/20"
         >
-          ← Back to Me
+          Browse looks
         </Link>
-
-        <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
-          <div className="min-w-0">
-            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-textSecondary/60">
-              Board
-            </div>
-            <h1 className="mt-1 truncate font-display text-3xl font-semibold italic leading-tight text-textPrimary">
-              {board.name}
-            </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-textSecondary">
-              <span>{countLabel(board.itemCount, 'saved look', 'saved looks')}</span>
-              <span>·</span>
-              <span className="capitalize">{visibilityLabel(board)}</span>
-              {board.type !== BoardType.GENERAL ? (
-                <>
-                  <span>·</span>
-                  <span>{BOARD_TYPE_LABELS[board.type]}</span>
-                </>
-              ) : null}
-            </div>
-          </div>
-
-          <Link
-            href="/looks"
-            className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-white/20"
-          >
-            Browse Looks
-          </Link>
-        </div>
-
-        <div className="mt-5">
+      }
+      headerExtra={
+        <div className="mb-5 flex flex-col gap-3">
           <BoardShareControls
             boardId={board.id}
             slug={board.slug}
@@ -176,25 +156,14 @@ export default async function ClientBoardDetailPage(props: {
             initialEventDate={board.eventDate}
           />
         </div>
-      </header>
-
+      }
+    >
       {board.items.length === 0 ? (
-        <section className="rounded-card border border-white/10 bg-bgSecondary px-5 py-10 text-center">
-          <div className="text-[14px] font-bold text-textPrimary">
-            This board is empty.
-          </div>
-          <div className="mt-2 text-[13px] text-textSecondary">
-            Save looks from the feed to start building it.
-          </div>
-          <div className="mt-4">
-            <Link
-              href="/looks"
-              className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-white/20"
-            >
-              Go to Looks
-            </Link>
-          </div>
-        </section>
+        <EmptyState
+          title="This board is empty"
+          description="Save looks from the feed to start building it."
+          action={{ label: 'Go to Looks', href: '/looks' }}
+        />
       ) : (
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {board.items.map((item) => {
@@ -211,7 +180,7 @@ export default async function ClientBoardDetailPage(props: {
                 aria-label={`Open saved look from ${board.name}`}
               >
                 <div
-                  className="relative overflow-hidden rounded-card border border-white/10 bg-bgSecondary transition group-hover:border-white/20"
+                  className="relative overflow-hidden rounded-card border border-textPrimary/10 bg-bgSecondary transition group-hover:border-textPrimary/20"
                   style={{ aspectRatio: '3 / 4' }}
                 >
                   {imageUrl ? (
@@ -242,6 +211,6 @@ export default async function ClientBoardDetailPage(props: {
       )}
 
       <BoardRecommendations boardId={board.id} boardName={board.name} />
-    </main>
+    </ClientPage>
   )
 }

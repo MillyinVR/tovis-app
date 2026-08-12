@@ -817,7 +817,7 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
   // IN_APP + PUSH, deliberately no SMS/EMAIL. The ask is not urgent and carries
   // no deadline — nothing expires if the client answers next week, and the pro
   // is rate-limited to one open ask — so it does not earn a text message. The
-  // in-app row and the push both land on `/client/settings#chart-sharing`,
+  // in-app row and the push both land on `/client/settings/chart-sharing`,
   // which is the surface that can actually answer it.
   //
   // Non-transactional and no quiet-hours bypass: a request to read someone's

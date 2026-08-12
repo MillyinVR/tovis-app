@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import ClientPage from '../../../_components/ClientPage'
 
 import type { BrandClientConsultResultsCopy } from '@/lib/brand/types'
 import type {
@@ -58,26 +58,17 @@ export default function ClientConsultResults({
       : `${copy.levelPrefix} ${level.min}–${level.max}`
 
   return (
-    <main className="mx-auto grid w-full max-w-3xl gap-6 pb-28 pt-4">
-      <Link
-        href={`/client/bookings/${encodeURIComponent(results.bookingId)}`}
-        className="text-sm font-bold text-textSecondary underline decoration-surfaceGlass/30 underline-offset-4"
-      >
-        {copy.backToBooking}
-      </Link>
-
-      <header>
-        <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-microAccent">
-          {copy.eyebrow}
-        </div>
-        <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-textPrimary sm:text-4xl">
-          {copy.title}
-        </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-textSecondary">
-          {copy.intro}
-        </p>
-      </header>
-
+    <ClientPage
+      eyebrow={copy.eyebrow}
+      title={copy.title}
+      lede={copy.intro}
+      back={{
+        href: `/client/bookings/${encodeURIComponent(results.bookingId)}`,
+        label: copy.backToBooking,
+      }}
+      width="wide"
+    >
+      <div className="grid gap-6">
       <section
         aria-labelledby={`${results.consultId}-client-words`}
         className="rounded-2xl border border-surfaceGlass/10 bg-bgSurface p-5"
@@ -241,6 +232,7 @@ export default function ClientConsultResults({
         copy={copy}
         initiallyTapped={results.meCardTeaser.tapped}
       />
-    </main>
+      </div>
+    </ClientPage>
   )
 }

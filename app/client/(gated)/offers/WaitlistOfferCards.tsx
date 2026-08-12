@@ -199,7 +199,7 @@ export default function WaitlistOfferCards() {
                 <button
                   disabled={isBusy}
                   onClick={() => act(offer, 'DECLINE')}
-                  className="rounded-xl border border-white/20 px-4 py-2.5 text-sm font-medium text-textSecondary disabled:opacity-50"
+                  className="rounded-xl border border-textPrimary/20 px-4 py-2.5 text-sm font-medium text-textSecondary disabled:opacity-50"
                 >
                   Decline
                 </button>

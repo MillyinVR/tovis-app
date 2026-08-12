@@ -59,7 +59,7 @@ function StatusCard(props: {
       ? 'border-toneSuccess/20 bg-toneSuccess/5'
       : props.tone === 'danger'
         ? 'border-toneDanger/20 bg-toneDanger/5'
-        : 'border-white/10 bg-bgSecondary'
+        : 'border-textPrimary/10 bg-bgSecondary'
 
   return (
     <div className={`rounded-card border p-5 ${toneClass}`}>
@@ -93,7 +93,7 @@ function DocumentCard(props: {
   body: string
 }) {
   return (
-    <section className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-5">
+    <section className="mt-4 rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[17px] font-black text-textPrimary">
           {props.title}
@@ -149,8 +149,8 @@ export default async function PublicConsentSigningPage(props: PageProps) {
   const kindLabel = CONSENT_KIND_LABELS[resolved.version.formKind]
 
   const header = (
-    <header className="rounded-card border border-white/10 bg-bgSecondary p-5">
-      <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+    <header className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
+      <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
         Before your appointment
       </span>
 

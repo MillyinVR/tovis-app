@@ -368,7 +368,7 @@ export function RebookCard({
           <div className="mb-1.5 text-[12px] font-black text-textSecondary">
             Where
           </div>
-          <div className="inline-flex gap-1.5 rounded-full border border-white/10 bg-bgPrimary/35 p-1">
+          <div className="inline-flex gap-1.5 rounded-full border border-textPrimary/10 bg-bgPrimary/35 p-1">
             {locationModes.map((mode) => {
               const active = mode.type === locationType
               return (
@@ -385,7 +385,7 @@ export function RebookCard({
                     'rounded-full px-4 py-1.5 text-[12px] font-black transition',
                     active
                       ? 'bg-accentPrimary text-bgPrimary'
-                      : 'text-textSecondary hover:bg-white/10',
+                      : 'text-textSecondary hover:bg-surfaceGlass/10',
                   ].join(' ')}
                 >
                   {mode.label}
@@ -418,7 +418,7 @@ export function RebookCard({
                     'rounded-card border px-3 py-2 text-left transition',
                     active
                       ? 'border-accentPrimary/50 bg-accentPrimary/10'
-                      : 'border-white/10 bg-bgPrimary/35 hover:bg-white/10',
+                      : 'border-textPrimary/10 bg-bgPrimary/35 hover:bg-surfaceGlass/10',
                   ].join(' ')}
                 >
                   <div className="text-[12px] font-black text-textPrimary">
@@ -459,7 +459,7 @@ export function RebookCard({
               setBooking({ kind: 'idle' })
               setDate(e.target.value)
             }}
-            className="rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm font-semibold text-textPrimary"
+            className="rounded-card border border-textPrimary/10 bg-bgPrimary px-3 py-2 text-sm font-semibold text-textPrimary"
           />
         </label>
         <div className="text-[12px] text-textSecondary/75">
@@ -498,7 +498,7 @@ export function RebookCard({
                       'rounded-full border px-0 py-1.75 text-[10px] font-black uppercase tracking-widest transition font-mono',
                       active
                         ? 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary'
-                        : 'border-white/10 bg-bgPrimary/35 text-textSecondary hover:bg-white/10',
+                        : 'border-textPrimary/10 bg-bgPrimary/35 text-textSecondary hover:bg-surfaceGlass/10',
                       disabled
                         ? 'cursor-not-allowed opacity-40 hover:bg-bgPrimary/35'
                         : 'cursor-pointer',
@@ -521,7 +521,7 @@ export function RebookCard({
                       type="button"
                       onClick={() => void handleBook(iso)}
                       disabled={booking.kind === 'submitting'}
-                      className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary px-4 py-2 text-sm font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isSubmitting ? 'Booking…' : formatSlotTime(iso, timeZone)}
                     </button>

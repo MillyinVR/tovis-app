@@ -63,7 +63,7 @@ function StatusCard(props: {
       ? 'border-toneSuccess/20 bg-toneSuccess/5'
       : props.tone === 'danger'
         ? 'border-toneDanger/20 bg-toneDanger/5'
-        : 'border-white/10 bg-bgSecondary'
+        : 'border-textPrimary/10 bg-bgSecondary'
 
   return (
     <div className={`rounded-card border p-5 ${toneClass}`}>
@@ -124,8 +124,8 @@ export default async function PublicAppointmentActionPage(props: PageProps) {
   const tzLabel = friendlyTimeZoneLabel(timeZone) ?? timeZone
 
   const header = (
-    <header className="rounded-card border border-white/10 bg-bgSecondary p-5">
-      <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+    <header className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
+      <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
         Your appointment
       </span>
 

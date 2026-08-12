@@ -87,8 +87,8 @@ function errorFromResponse(res: Response, data: unknown) {
 
 function pillClass(on: boolean) {
   return on
-    ? 'bg-accentPrimary text-bgPrimary border border-white/10'
-    : 'bg-bgPrimary text-textSecondary border border-white/10'
+    ? 'bg-accentPrimary text-bgPrimary border border-textPrimary/10'
+    : 'bg-bgPrimary text-textSecondary border border-textPrimary/10'
 }
 
 export default function BookingActions({
@@ -279,7 +279,7 @@ export default function BookingActions({
 
   if (!viewModel) {
     return (
-      <section className="mt-4 grid gap-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+      <section className="mt-4 grid gap-3 rounded-card border border-textPrimary/10 bg-bgSecondary p-3 text-textPrimary">
         <div className="text-sm font-black">
           Booking status unavailable
         </div>
@@ -288,7 +288,7 @@ export default function BookingActions({
   }
 
   return (
-    <section className="mt-4 grid gap-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+    <section className="mt-4 grid gap-3 rounded-card border border-textPrimary/10 bg-bgSecondary p-3 text-textPrimary">
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-sm font-black">{viewModel.displayLabel}</div>
         <div className="text-xs font-semibold text-textSecondary">
@@ -316,12 +316,12 @@ export default function BookingActions({
           const className = [
             'rounded-full px-4 py-2 text-sm font-black transition',
             busy
-              ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
+              ? 'cursor-not-allowed border border-textPrimary/10 bg-bgPrimary text-textSecondary'
               : action.primary
-                ? 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
+                ? 'border border-textPrimary/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
                 : isDestructive
-                  ? 'border border-white/10 bg-bgPrimary text-microAccent hover:bg-surfaceGlass/10'
-                  : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
+                  ? 'border border-textPrimary/10 bg-bgPrimary text-microAccent hover:bg-surfaceGlass/10'
+                  : 'border border-textPrimary/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
           ].join(' ')
 
           return (
@@ -345,7 +345,7 @@ export default function BookingActions({
       </div>
 
       {mode === 'reschedule' ? (
-        <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3">
+        <div className="grid gap-2 rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
           <div className="text-xs font-black">
             Choose a new time slot before confirming
           </div>
@@ -363,8 +363,8 @@ export default function BookingActions({
                 className={[
                   'rounded-full px-4 py-2 text-sm font-black transition',
                   busy
-                    ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
-                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
+                    ? 'cursor-not-allowed border border-textPrimary/10 bg-bgSecondary text-textSecondary'
+                    : 'border border-textPrimary/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
                 ].join(' ')}
               >
                 Pick new time
@@ -378,8 +378,8 @@ export default function BookingActions({
               className={[
                 'rounded-full px-4 py-2 text-sm font-black transition',
                 busy
-                  ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
-                  : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
+                  ? 'cursor-not-allowed border border-textPrimary/10 bg-bgSecondary text-textSecondary'
+                  : 'border border-textPrimary/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
               ].join(' ')}
             >
               Close
@@ -392,8 +392,8 @@ export default function BookingActions({
               className={[
                 'rounded-full px-4 py-2 text-sm font-black transition',
                 busy || !rescheduleHoldId || !locationType
-                  ? 'cursor-not-allowed border border-white/10 bg-bgSecondary text-textSecondary'
-                  : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+                  ? 'cursor-not-allowed border border-textPrimary/10 bg-bgSecondary text-textSecondary'
+                  : 'border border-textPrimary/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
               ].join(' ')}
             >
               {busy ? 'Saving…' : 'Confirm new time'}

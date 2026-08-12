@@ -113,7 +113,7 @@ export default function ClientPaymentMethodsSettings() {
 
   return (
     <div className="mt-4">
-      <div className="rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-xs leading-5 text-textSecondary">
+      <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-xs leading-5 text-textSecondary">
         Saving a card lets a pro charge a no-show or late-cancellation fee
         according to their booking policy. Your full card number is never stored
         here — only a secure token and the last four digits.
@@ -126,13 +126,13 @@ export default function ClientPaymentMethodsSettings() {
       ) : null}
 
       {loading ? (
-        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-3 text-sm font-semibold text-textSecondary">
+        <div className="mt-4 rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-3 text-sm font-semibold text-textSecondary">
           Loading cards…
         </div>
       ) : (
         <div className="mt-4 flex flex-col gap-2">
           {cards.length === 0 ? (
-            <div className="rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-3 text-sm font-semibold text-textSecondary">
+            <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-3 text-sm font-semibold text-textSecondary">
               No cards saved yet.
             </div>
           ) : (
@@ -141,7 +141,7 @@ export default function ClientPaymentMethodsSettings() {
               return (
                 <div
                   key={card.id}
-                  className="flex items-center justify-between gap-3 rounded-card border border-white/10 bg-bgSecondary/35 px-3 py-3"
+                  className="flex items-center justify-between gap-3 rounded-card border border-textPrimary/10 bg-bgSecondary/35 px-3 py-3"
                 >
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <span className="text-sm font-black text-textPrimary">
@@ -179,7 +179,7 @@ export default function ClientPaymentMethodsSettings() {
       )}
 
       {adding ? (
-        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary/20 p-3 sm:p-4">
+        <div className="mt-4 rounded-card border border-textPrimary/10 bg-bgPrimary/20 p-3 sm:p-4">
           <div className="text-xs font-black tracking-[var(--ls-caps)] text-textSecondary">
             Add a card
           </div>

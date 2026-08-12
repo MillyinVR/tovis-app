@@ -83,7 +83,7 @@ export default function BoardRecommendations(props: {
               aria-label={`Open recommended look for ${boardName}`}
             >
               <div
-                className="relative overflow-hidden rounded-card border border-white/10 bg-bgSecondary transition group-hover:border-white/20"
+                className="relative overflow-hidden rounded-card border border-textPrimary/10 bg-bgSecondary transition group-hover:border-textPrimary/20"
                 style={{ aspectRatio: '3 / 4' }}
               >
                 {imageUrl ? (

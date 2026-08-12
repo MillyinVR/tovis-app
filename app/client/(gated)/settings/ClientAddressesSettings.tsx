@@ -954,7 +954,7 @@ export default function ClientAddressesSettings() {
         </div>
 
         {loading ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary/10 p-3 text-sm font-semibold text-textSecondary">
+          <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/10 p-3 text-sm font-semibold text-textSecondary">
             Loading saved areas…
           </div>
         ) : null}
@@ -964,7 +964,7 @@ export default function ClientAddressesSettings() {
             {searchAreas.map((address) => (
               <div
                 key={address.id}
-                className="rounded-card border border-white/10 bg-bgPrimary/10 p-3"
+                className="rounded-card border border-textPrimary/10 bg-bgPrimary/10 p-3"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -973,7 +973,7 @@ export default function ClientAddressesSettings() {
                         {addressTitle(address)}
                       </div>
                       {address.isDefault ? (
-                        <span className="rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+                        <span className="rounded-full border border-textPrimary/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
                           Default
                         </span>
                       ) : null}
@@ -992,7 +992,7 @@ export default function ClientAddressesSettings() {
                         type="button"
                         onClick={() => void setDefault(address)}
                         disabled={saving}
-                        className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary disabled:opacity-60"
+                        className="rounded-full border border-textPrimary/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary disabled:opacity-60"
                       >
                         Make default
                       </button>
@@ -1002,7 +1002,7 @@ export default function ClientAddressesSettings() {
                       type="button"
                       onClick={() => startEdit(address)}
                       disabled={saving}
-                      className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary disabled:opacity-60"
+                      className="rounded-full border border-textPrimary/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary disabled:opacity-60"
                     >
                       Edit
                     </button>
@@ -1011,7 +1011,7 @@ export default function ClientAddressesSettings() {
                       type="button"
                       onClick={() => void removeAddress(address)}
                       disabled={deletingId === address.id || saving}
-                      className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-toneDanger hover:opacity-80 disabled:opacity-60"
+                      className="rounded-full border border-textPrimary/10 bg-transparent px-3 py-1.5 text-xs font-black text-toneDanger hover:opacity-80 disabled:opacity-60"
                     >
                       {deletingId === address.id ? 'Deleting…' : 'Delete'}
                     </button>
@@ -1021,12 +1021,12 @@ export default function ClientAddressesSettings() {
             ))}
           </div>
         ) : !loading ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary/10 p-3 text-sm font-semibold text-textSecondary">
+          <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/10 p-3 text-sm font-semibold text-textSecondary">
             No saved search areas yet.
           </div>
         ) : null}
 
-        <div className="rounded-card border border-white/10 bg-bgPrimary/10 p-4">
+        <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/10 p-4">
           <div className="text-sm font-black text-textPrimary">
             {editingId && searchDraft.kind === 'SEARCH_AREA'
               ? 'Edit search area'
@@ -1044,7 +1044,7 @@ export default function ClientAddressesSettings() {
                   setSearchDraft((prev) => ({ ...prev, label: e.target.value }))
                 }
                 placeholder='Home area, Work area, "San Diego", etc.'
-                className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
+                className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
               />
             </div>
 
@@ -1056,7 +1056,7 @@ export default function ClientAddressesSettings() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder='ZIP code or city (e.g. "92101" or "San Diego")'
-                className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
+                className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
               />
 
               {isUsZip(searchQuery.trim()) ? (
@@ -1065,7 +1065,7 @@ export default function ClientAddressesSettings() {
                     type="button"
                     onClick={() => void chooseSearchZip()}
                     disabled={searchLoading}
-                    className="rounded-full border border-white/10 bg-bgPrimary/20 px-3 py-1.5 text-xs font-black text-textPrimary hover:bg-white/10 disabled:opacity-60"
+                    className="rounded-full border border-textPrimary/10 bg-bgPrimary/20 px-3 py-1.5 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10 disabled:opacity-60"
                   >
                     {searchLoading ? 'Resolving ZIP…' : `Use ZIP ${searchQuery.trim()}`}
                   </button>
@@ -1085,7 +1085,7 @@ export default function ClientAddressesSettings() {
                       key={prediction.placeId}
                       type="button"
                       onClick={() => void chooseSearchPrediction(prediction)}
-                      className="rounded-card border border-white/10 bg-bgPrimary/15 p-2 text-left hover:bg-white/5"
+                      className="rounded-card border border-textPrimary/10 bg-bgPrimary/15 p-2 text-left hover:bg-surfaceGlass/5"
                     >
                       <div className="text-[13px] font-black text-textPrimary">
                         {prediction.mainText || prediction.description}
@@ -1105,7 +1105,7 @@ export default function ClientAddressesSettings() {
               searchDraft.postalCode ||
               searchDraft.city ||
               searchDraft.state) ? (
-              <div className="rounded-card border border-white/10 bg-bgSecondary p-3">
+              <div className="rounded-card border border-textPrimary/10 bg-bgSecondary p-3">
                 <div className="text-xs font-black uppercase tracking-wide text-textSecondary">
                   Selected area
                 </div>
@@ -1139,7 +1139,7 @@ export default function ClientAddressesSettings() {
                 type="button"
                 onClick={resetSearchDraft}
                 disabled={saving}
-                className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/40 disabled:opacity-60"
+                className="rounded-full border border-textPrimary/10 bg-transparent px-4 py-2 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/40 disabled:opacity-60"
               >
                 Clear
               </button>
@@ -1195,7 +1195,7 @@ export default function ClientAddressesSettings() {
               return (
                 <div
                   key={address.id}
-                  className="rounded-card border border-white/10 bg-bgPrimary/10 p-3"
+                  className="rounded-card border border-textPrimary/10 bg-bgPrimary/10 p-3"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -1204,7 +1204,7 @@ export default function ClientAddressesSettings() {
                           {addressTitle(address)}
                         </div>
                         {address.isDefault ? (
-                          <span className="rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+                          <span className="rounded-full border border-textPrimary/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
                             Default
                           </span>
                         ) : null}
@@ -1223,7 +1223,7 @@ export default function ClientAddressesSettings() {
                           href={mapsUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary"
+                          className="rounded-full border border-textPrimary/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary"
                         >
                           Open in Maps
                         </a>
@@ -1234,7 +1234,7 @@ export default function ClientAddressesSettings() {
                           type="button"
                           onClick={() => void setDefault(address)}
                           disabled={saving}
-                          className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary disabled:opacity-60"
+                          className="rounded-full border border-textPrimary/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary disabled:opacity-60"
                         >
                           Make default
                         </button>
@@ -1244,7 +1244,7 @@ export default function ClientAddressesSettings() {
                         type="button"
                         onClick={() => startEdit(address)}
                         disabled={saving}
-                        className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary disabled:opacity-60"
+                        className="rounded-full border border-textPrimary/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary disabled:opacity-60"
                       >
                         Edit
                       </button>
@@ -1253,7 +1253,7 @@ export default function ClientAddressesSettings() {
                         type="button"
                         onClick={() => void removeAddress(address)}
                         disabled={deletingId === address.id || saving}
-                        className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-toneDanger hover:opacity-80 disabled:opacity-60"
+                        className="rounded-full border border-textPrimary/10 bg-transparent px-3 py-1.5 text-xs font-black text-toneDanger hover:opacity-80 disabled:opacity-60"
                       >
                         {deletingId === address.id ? 'Deleting…' : 'Delete'}
                       </button>
@@ -1264,12 +1264,12 @@ export default function ClientAddressesSettings() {
             })}
           </div>
         ) : (
-          <div className="rounded-card border border-white/10 bg-bgPrimary/10 p-3 text-sm font-semibold text-textSecondary">
+          <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/10 p-3 text-sm font-semibold text-textSecondary">
             No saved service addresses yet.
           </div>
         )}
 
-        <div className="rounded-card border border-white/10 bg-bgPrimary/10 p-4">
+        <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/10 p-4">
           <div className="text-sm font-black text-textPrimary">
             {editingId && serviceDraft.kind === 'SERVICE_ADDRESS'
               ? 'Edit service address'
@@ -1287,7 +1287,7 @@ export default function ClientAddressesSettings() {
                   setServiceDraft((prev) => ({ ...prev, label: e.target.value }))
                 }
                 placeholder='Home, Work, Hotel, Event, etc.'
-                className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
+                className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
               />
             </div>
 
@@ -1299,7 +1299,7 @@ export default function ClientAddressesSettings() {
                 value={serviceQuery}
                 onChange={(e) => setServiceQuery(e.target.value)}
                 placeholder='Street address for at-home service'
-                className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
+                className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
               />
 
               <div className="mt-1 text-[12px] text-textSecondary">
@@ -1320,7 +1320,7 @@ export default function ClientAddressesSettings() {
                       key={prediction.placeId}
                       type="button"
                       onClick={() => void chooseServicePrediction(prediction)}
-                      className="rounded-card border border-white/10 bg-bgPrimary/15 p-2 text-left hover:bg-white/5"
+                      className="rounded-card border border-textPrimary/10 bg-bgPrimary/15 p-2 text-left hover:bg-surfaceGlass/5"
                     >
                       <div className="text-[13px] font-black text-textPrimary">
                         {prediction.mainText || prediction.description}
@@ -1338,7 +1338,7 @@ export default function ClientAddressesSettings() {
 
             {(serviceDraft.formattedAddress ||
               serviceDraft.addressLine1) ? (
-              <div className="rounded-card border border-white/10 bg-bgSecondary p-3">
+              <div className="rounded-card border border-textPrimary/10 bg-bgSecondary p-3">
                 <div className="text-xs font-black uppercase tracking-wide text-textSecondary">
                   Selected address
                 </div>
@@ -1373,7 +1373,7 @@ export default function ClientAddressesSettings() {
                       addressLine1: e.target.value || null,
                     }))
                   }
-                  className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
+                  className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
                 />
               </div>
 
@@ -1389,7 +1389,7 @@ export default function ClientAddressesSettings() {
                       addressLine2: e.target.value || null,
                     }))
                   }
-                  className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
+                  className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
                 />
               </div>
 
@@ -1405,7 +1405,7 @@ export default function ClientAddressesSettings() {
                       city: e.target.value || null,
                     }))
                   }
-                  className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
+                  className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
                 />
               </div>
 
@@ -1421,7 +1421,7 @@ export default function ClientAddressesSettings() {
                       state: e.target.value || null,
                     }))
                   }
-                  className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
+                  className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
                 />
               </div>
 
@@ -1437,7 +1437,7 @@ export default function ClientAddressesSettings() {
                       postalCode: e.target.value || null,
                     }))
                   }
-                  className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
+                  className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
                 />
               </div>
 
@@ -1453,7 +1453,7 @@ export default function ClientAddressesSettings() {
                       countryCode: e.target.value || null,
                     }))
                   }
-                  className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
+                  className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none"
                 />
               </div>
             </div>
@@ -1477,7 +1477,7 @@ export default function ClientAddressesSettings() {
                 type="button"
                 onClick={resetServiceDraft}
                 disabled={saving}
-                className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/40 disabled:opacity-60"
+                className="rounded-full border border-textPrimary/10 bg-transparent px-4 py-2 text-xs font-semibold text-textPrimary hover:bg-bgSecondary/40 disabled:opacity-60"
               >
                 Clear
               </button>

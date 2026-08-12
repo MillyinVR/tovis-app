@@ -1,176 +1,138 @@
-// app/client/settings/page.tsx
-import Image from 'next/image'
-import ClientProfileSettings from './ClientProfileSettings'
-import ClientPublicProfileSettings from './ClientPublicProfileSettings'
-import ClientSelfProfileSettings from './ClientSelfProfileSettings'
-import ClientLocationSettings from './ClientLocationSettings'
-import ClientAddressesSettings from './ClientAddressesSettings'
-import ClientPaymentMethodsSettings from './ClientPaymentMethodsSettings'
-import ClientChartSharingSettings from './ClientChartSharingSettings'
-import NotificationPreferencesForm from '@/app/_components/NotificationPreferencesForm'
-import DeleteAccountPanel from '@/app/_components/account/DeleteAccountPanel'
-import { getBrandConfig } from '@/lib/brand'
+// app/client/(gated)/settings/page.tsx
+//
+// The client settings HUB.
+//
+// This page used to inline every panel: profile, personalization, public
+// profile, discovery location, saved addresses, payment methods, chart
+// sharing, notification preferences and account deletion, all on one route.
+// At 390px that measured 11,847px of scroll with no way to jump — a client
+// looking for quiet hours scrolled past their own home address to find it.
+//
+// iOS never worked that way: ClientSettingsHubView is a list of
+// NavigationLink rows. This is the same screen, and the sub-routes are the
+// same set in the same order, so the two platforms can be reasoned about
+// together.
+//
+// ⚠️ Links minted before the split (`/client/settings#chart-sharing`, stored on
+// already-sent notification rows — see lib/notifications/chartAccessNotifications.ts)
+// still arrive here with a fragment. The rows carry those ids so an old link
+// scrolls to the right row rather than dumping the client at the top.
+import {
+  AtSign,
+  Bell,
+  CreditCard,
+  Eye,
+  MapPin,
+  Search,
+  Sparkles,
+  Trash2,
+  UserCircle,
+} from 'lucide-react'
+
 import ThemeToggle from '@/lib/brand/ThemeToggle'
+import { getBrandConfig } from '@/lib/brand'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 
-export const dynamic = 'force-dynamic'
+import ClientPage from '../_components/ClientPage'
+import SettingsRow from './_components/SettingsRow'
 
-function SectionIntro(props: {
-  title: string
-  description: string
-}) {
-  return (
-    <div className="mb-4">
-      <div className="text-sm font-black tracking-[var(--ls-caps)] text-textPrimary">
-        {props.title}
-      </div>
-      <div className="mt-1 text-xs font-semibold leading-5 text-textSecondary">
-        {props.description}
-      </div>
-    </div>
-  )
-}
+export const dynamic = 'force-dynamic'
 
 export default function ClientSettingsPage() {
   const brand = getBrandConfig()
   const showPaymentMethods = noShowProtectionEnabled()
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-      <section className="brand-glass overflow-hidden p-5 sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-[calc(var(--radius-card)-8px)] border border-white/10 bg-bgSecondary/40">
-              <Image
-                src={brand.assets.mark.src}
-                alt={brand.assets.mark.alt}
-                fill
-                className="object-cover"
-                sizes="48px"
-                priority
-              />
-            </div>
+    <ClientPage
+      eyebrow="Settings"
+      title="Your account"
+      back={{ href: '/client/me', label: 'Me' }}
+    >
+      <div className="flex flex-col gap-7">
+        <section className="flex flex-col gap-2.5">
+          <h2 className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-textMuted">
+            Account
+          </h2>
 
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-xl font-black tracking-[var(--ls-caps)] text-textPrimary">
-                  {brand.assets.wordmark.text}
-                </div>
-                <div className="rounded-full border border-white/10 bg-bgSecondary/35 px-3 py-1 text-[11px] font-black uppercase tracking-[var(--ls-caps)] text-textSecondary">
-                  Client settings
-                </div>
-              </div>
-
-              <div className="mt-2 text-sm font-semibold leading-6 text-textSecondary">
-                Manage your profile, discovery location, and saved addresses.
-                Search areas help you browse nearby salons and pros. Service
-                addresses are used for mobile bookings.
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-full border border-[rgb(var(--accent-primary)/0.22)] bg-[rgb(var(--accent-primary)/0.10)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[var(--ls-caps)] text-textPrimary">
-            Salon = area okay · Mobile = real address required
-          </div>
-        </div>
-      </section>
-
-      <section className="brand-glass p-5 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <SectionIntro
-            title="Appearance"
-            description={`Choose how ${brand.displayName} looks. System follows your device's light or dark setting.`}
+          <SettingsRow
+            href="/client/settings/profile"
+            icon={UserCircle}
+            title="Edit profile"
+            subtitle="Name, phone, birthday & avatar"
           />
-          <ThemeToggle />
-        </div>
-      </section>
-
-      <ClientProfileSettings />
-
-      <ClientSelfProfileSettings />
-
-      <ClientPublicProfileSettings />
-
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <div className="brand-glass p-5 sm:p-6">
-          <SectionIntro
-            title="Discovery location"
-            description="This controls nearby search, salon discovery, and “near me” browsing. It does not replace your saved mobile service addresses."
+          <SettingsRow
+            href="/client/settings/matches"
+            icon={Sparkles}
+            title="Better matches"
+            subtitle="Hair, skin & what you’re into"
           />
-
-          <ClientLocationSettings />
-        </div>
-
-        <div className="brand-glass p-5 sm:p-6">
-          <SectionIntro
+          <SettingsRow
+            href="/client/settings/public-profile"
+            icon={AtSign}
+            title="Public profile"
+            subtitle="Handle, bio & public looks"
+          />
+          <SettingsRow
+            href="/client/settings/addresses"
+            icon={MapPin}
             title="Saved addresses"
-            description="Save multiple areas and service addresses. Use search areas for salon-only browsing. Use service addresses for mobile bookings."
+            subtitle="Addresses for at-home service"
           />
-
-          <ClientAddressesSettings />
-        </div>
-      </section>
-
-      {showPaymentMethods ? (
-        <section className="brand-glass p-5 sm:p-6" id="payment-methods">
-          <SectionIntro
-            title="Payment methods"
-            description="Save a card so a pro can charge a no-show or late-cancellation fee per their booking policy. You stay in control and can remove a card anytime."
+          <SettingsRow
+            href="/client/settings/location"
+            icon={Search}
+            title="Discovery location"
+            subtitle="Where you search for pros"
           />
-
-          <ClientPaymentMethodsSettings />
+          {showPaymentMethods ? (
+            <SettingsRow
+              href="/client/settings/payment"
+              icon={CreditCard}
+              title="Payment methods"
+              subtitle="Saved cards for no-show fees"
+              legacyAnchorId="payment-methods"
+            />
+          ) : null}
+          <SettingsRow
+            href="/client/settings/chart-sharing"
+            icon={Eye}
+            title="Who can see your chart"
+            subtitle="Allergies, formulas & notes your pro keeps"
+            legacyAnchorId="chart-sharing"
+          />
+          <SettingsRow
+            href="/client/settings/notifications"
+            icon={Bell}
+            title="Notifications"
+            subtitle="Channels & quiet hours"
+            legacyAnchorId="notifications"
+          />
+          {/*
+            App Store guideline 5.1.1(v) requires account deletion to be
+            reachable from the app, not buried behind a support request.
+          */}
+          <SettingsRow
+            href="/client/settings/account"
+            icon={Trash2}
+            title="Delete account"
+            subtitle="Close your account & remove your details"
+          />
         </section>
-      ) : null}
 
-      {/*
-        W5: the client's own control over who can read their chart. An API-only
-        revoke is a capability the client has and cannot reach.
-      */}
-      <section className="brand-glass p-5 sm:p-6" id="chart-sharing">
-        <SectionIntro
-          title="Who can see your chart"
-          description="Your chart is the private record a pro keeps about you — allergies, formulas, notes, consent forms. Pros you book with can see the record of the work they do for you. Anyone else has to ask, and you can turn it off at any time."
-        />
+        <section className="flex flex-col gap-2.5">
+          <h2 className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-textMuted">
+            Appearance
+          </h2>
 
-        <ClientChartSharingSettings />
-      </section>
-
-      <section className="brand-glass p-5 sm:p-6">
-        <SectionIntro
-          title="Notifications"
-          description="Choose how you hear from us for each kind of update, and set quiet hours."
-        />
-
-        <NotificationPreferencesForm
-          endpoint="/api/v1/client/notification-preferences"
-          showChannelPreference
-        />
-      </section>
-
-      <section className="brand-glass p-5 sm:p-6">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div className="max-w-3xl">
-            <div className="text-sm font-black tracking-[var(--ls-caps)] text-textPrimary">
-              How this works
-            </div>
-            <div className="mt-1 text-xs font-semibold leading-5 text-textSecondary">
-              Your discovery location helps {brand.displayName} show nearby pros and salons.
-              Your saved service addresses are separate, so mobile bookings can
-              use a real destination without messing up your search preferences.
-            </div>
+          <div className="flex flex-col gap-3 rounded-card border border-textPrimary/10 bg-bgSecondary/60 px-4 py-4">
+            <p className="text-[12px] leading-snug text-textSecondary">
+              Choose how {brand.displayName} looks. System follows your device’s
+              light or dark setting.
+            </p>
+            <ThemeToggle />
           </div>
-
-          <div className="rounded-full border border-white/10 bg-bgSecondary/35 px-3 py-1.5 text-[11px] font-black uppercase tracking-[var(--ls-caps)] text-textSecondary">
-            Account truth + local search context
-          </div>
-        </div>
-      </section>
-
-      {/*
-        App Store guideline 5.1.1(v) requires account deletion to be reachable
-        from the app, not buried behind a support request. Settings-level, and
-        the same panel the pro account section renders.
-      */}
-      <DeleteAccountPanel />
-    </div>
+        </section>
+      </div>
+    </ClientPage>
   )
 }

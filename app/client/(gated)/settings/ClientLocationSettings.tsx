@@ -283,7 +283,7 @@ export default function ClientLocationSettings() {
           <button
             type="button"
             onClick={() => clearViewerLocation()}
-            className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary"
+            className="rounded-full border border-textPrimary/10 bg-transparent px-3 py-1.5 text-xs font-black text-textSecondary hover:text-textPrimary"
           >
             Clear
           </button>
@@ -291,7 +291,7 @@ export default function ClientLocationSettings() {
 
         <Link
           href="/looks"
-          className="ml-auto rounded-full border border-white/10 bg-bgPrimary/20 px-3 py-1.5 text-xs font-black text-textPrimary hover:bg-white/10"
+          className="ml-auto rounded-full border border-textPrimary/10 bg-bgPrimary/20 px-3 py-1.5 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
         >
           Browse Looks
         </Link>
@@ -302,7 +302,7 @@ export default function ClientLocationSettings() {
         <select
           value={viewer?.radiusMiles ?? radiusMiles}
           onChange={(e) => applyRadius(Number(e.target.value))}
-          className="rounded-full border border-white/10 bg-bgPrimary/20 px-3 py-1.5 text-xs font-black text-textPrimary outline-none"
+          className="rounded-full border border-textPrimary/10 bg-bgPrimary/20 px-3 py-1.5 text-xs font-black text-textPrimary outline-none"
         >
           {RADIUS_OPTIONS.map((n) => (
             <option key={n} value={n}>
@@ -317,7 +317,7 @@ export default function ClientLocationSettings() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder='ZIP code or city (e.g. "92101" or "San Diego")'
-          className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
+          className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
         />
 
         {err ? <div className="text-[12px] font-semibold text-toneDanger">{err}</div> : null}
@@ -330,7 +330,7 @@ export default function ClientLocationSettings() {
                 key={p.placeId}
                 type="button"
                 onClick={() => choose(p)}
-                className="rounded-card border border-white/10 bg-bgPrimary/15 p-2 text-left hover:bg-white/5"
+                className="rounded-card border border-textPrimary/10 bg-bgPrimary/15 p-2 text-left hover:bg-surfaceGlass/5"
               >
                 <div className="text-[13px] font-black text-textPrimary">{p.mainText || p.description}</div>
                 {p.secondaryText ? (

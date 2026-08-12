@@ -63,8 +63,8 @@ function Chip({
       className={cn(
         'inline-flex min-h-9 items-center rounded-full border px-3 py-1.5 text-[12px] font-bold transition',
         selected
-          ? 'border-white/40 bg-bgPrimary text-textPrimary'
-          : 'border-white/10 bg-bgPrimary/60 text-textSecondary hover:border-white/20 hover:text-textPrimary',
+          ? 'border-textPrimary/40 bg-bgPrimary text-textPrimary'
+          : 'border-textPrimary/10 bg-bgPrimary/60 text-textSecondary hover:border-textPrimary/20 hover:text-textPrimary',
       )}
     >
       {children}

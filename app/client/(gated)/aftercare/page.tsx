@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { getCurrentUser } from '@/lib/currentUser'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import ProProfileLink from '@/app/_components/ProProfileLink'
+import ClientPage from '../_components/ClientPage'
 import { COPY } from '@/lib/copy'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
@@ -43,23 +45,20 @@ export default async function ClientAftercareInboxPage() {
   const rows = await loadClientAftercareInbox(user.clientProfile.id)
 
   return (
-    <main className="mx-auto w-full max-w-860px px-4 pb-24 pt-7 text-textPrimary">
-      <h1 className="text-[22px] font-black">{COPY.aftercareInbox.title}</h1>
-      <div className="mt-1 text-[13px] font-semibold text-textSecondary">
-        {COPY.aftercareInbox.subtitle}
-      </div>
-
+    <ClientPage
+      eyebrow={COPY.aftercareInbox.pageEyebrow}
+      title={COPY.aftercareInbox.pageTitle}
+      lede={COPY.aftercareInbox.subtitle}
+      back={{ href: '/client', label: 'Home' }}
+    >
       {rows.length === 0 ? (
-        <div className="mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="text-sm font-black text-textPrimary">
-            {COPY.aftercareInbox.emptyTitle}
-          </div>
-          <div className="mt-1 text-[13px] font-semibold text-textSecondary">
-            {COPY.aftercareInbox.emptyBody}
-          </div>
-        </div>
+        <EmptyState
+          title={COPY.aftercareInbox.emptyTitle}
+          description={COPY.aftercareInbox.emptyBody}
+          action={{ label: COPY.aftercareInbox.emptyCta, href: '/search' }}
+        />
       ) : (
-        <div className="mt-4 grid gap-2.5">
+        <div className="grid gap-2.5">
           {rows.map((item) => {
             const href = item.bookingId
               ? `/client/bookings/${encodeURIComponent(item.bookingId)}?step=aftercare`
@@ -82,7 +81,7 @@ export default async function ClientAftercareInboxPage() {
               <div
                 key={item.notificationId}
                 className={[
-                  'rounded-card border border-white/10 bg-bgSecondary p-4',
+                  'rounded-card border border-textPrimary/10 bg-bgSecondary p-4',
                   href ? '' : 'opacity-70',
                 ].join(' ')}
               >
@@ -132,7 +131,7 @@ export default async function ClientAftercareInboxPage() {
                     <Link
                       href={href}
                       aria-label={`Open aftercare: ${item.title}`}
-                      className="mt-1 inline-flex w-fit rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
+                      className="mt-1 inline-flex w-fit rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
                     >
                       {COPY.aftercareInbox.openCta}
                     </Link>
@@ -143,6 +142,6 @@ export default async function ClientAftercareInboxPage() {
           })}
         </div>
       )}
-    </main>
+    </ClientPage>
   )
 }

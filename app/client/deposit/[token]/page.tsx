@@ -60,7 +60,7 @@ function StatusCard(props: {
       ? 'border-toneSuccess/20 bg-toneSuccess/5'
       : props.tone === 'danger'
         ? 'border-toneDanger/20 bg-toneDanger/5'
-        : 'border-white/10 bg-bgSecondary'
+        : 'border-textPrimary/10 bg-bgSecondary'
 
   return (
     <div className={`rounded-card border p-5 ${toneClass}`}>
@@ -122,8 +122,8 @@ export default async function PublicDepositPaymentPage(props: PageProps) {
 
   return (
     <main className="mx-auto w-full max-w-[640px] px-4 pb-20 pt-16 text-textPrimary">
-      <header className="rounded-card border border-white/10 bg-bgSecondary p-5">
-        <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+      <header className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
+        <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
           Secure deposit link
         </span>
 
@@ -162,7 +162,7 @@ export default async function PublicDepositPaymentPage(props: PageProps) {
             body="Thanks! Your payment is processing and your appointment will show as secured shortly. You can close this page."
           />
         ) : isPending ? (
-          <section className="rounded-card border border-white/10 bg-bgSecondary p-5">
+          <section className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
             <div className="text-sm font-black text-textPrimary">
               {amountLabel === 'your'
                 ? 'A deposit is due to secure this appointment'

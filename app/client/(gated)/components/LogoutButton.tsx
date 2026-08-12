@@ -29,7 +29,7 @@ export default function LogoutButton({ className }: { className?: string }) {
       disabled={loading}
       className={cn(
         'inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition',
-        'border-white/10 bg-bgSecondary text-textPrimary hover:border-white/20',
+        'border-textPrimary/10 bg-bgSecondary text-textPrimary hover:border-textPrimary/20',
         loading ? 'opacity-60 cursor-not-allowed' : '',
         className ?? '',
       )}

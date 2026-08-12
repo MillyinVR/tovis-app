@@ -76,7 +76,7 @@ function moneyLabel(v: unknown): string {
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass/10 px-2 py-1 text-[11px] font-black text-textPrimary">
+    <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-surfaceGlass/10 px-2 py-1 text-[11px] font-black text-textPrimary">
       {children}
     </span>
   )
@@ -158,7 +158,7 @@ export default function ConsultationDecisionCard(props: {
   }
 
   return (
-    <section className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+    <section className="mt-3 rounded-card border border-textPrimary/10 bg-bgSecondary p-3 text-textPrimary">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div className="text-sm font-black text-accentPrimary">{COPY.consultationDecisionCard.title}</div>
         <Pill>{appointmentTz}</Pill>
@@ -184,7 +184,7 @@ export default function ConsultationDecisionCard(props: {
             return (
               <div
                 key={key}
-                className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3"
+                className="flex items-start justify-between gap-3 rounded-card border border-textPrimary/10 bg-bgPrimary p-3"
               >
                 <div className="min-w-0">
                   <div className="text-sm font-black text-textPrimary">{label}</div>
@@ -216,8 +216,8 @@ export default function ConsultationDecisionCard(props: {
           className={[
             'rounded-full px-4 py-2 text-sm font-black transition',
             disabled || loading
-              ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
-              : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+              ? 'cursor-not-allowed border border-textPrimary/10 bg-bgPrimary text-textSecondary'
+              : 'border border-textPrimary/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
           ].join(' ')}
         >
           {loading === 'APPROVE' ? COPY.consultationDecisionCard.approving : COPY.consultationDecisionCard.approve}
@@ -230,8 +230,8 @@ export default function ConsultationDecisionCard(props: {
           className={[
             'rounded-full px-4 py-2 text-sm font-black transition',
             disabled || loading
-              ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
-              : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
+              ? 'cursor-not-allowed border border-textPrimary/10 bg-bgPrimary text-textSecondary'
+              : 'border border-textPrimary/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
           ].join(' ')}
         >
           {loading === 'REJECT' ? COPY.consultationDecisionCard.rejecting : COPY.consultationDecisionCard.reject}

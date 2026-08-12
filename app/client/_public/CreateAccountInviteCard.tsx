@@ -107,7 +107,7 @@ export function CreateAccountInviteCard({ actionToken, context }: Props) {
           type="button"
           onClick={() => setDismissed(true)}
           disabled={busy}
-          className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2.5 text-sm font-black text-textSecondary transition hover:text-textPrimary disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary px-4 py-2.5 text-sm font-black text-textSecondary transition hover:text-textPrimary disabled:cursor-not-allowed disabled:opacity-60"
         >
           Maybe later
         </button>

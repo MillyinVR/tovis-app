@@ -33,7 +33,10 @@ import { createClientNotification } from './clientNotifications'
 import { createProNotification } from './proNotifications'
 
 /** Where the client answers. The ONLY surface that can act on the request. */
-export const CHART_SHARE_SETTINGS_HREF = '/client/settings#chart-sharing'
+// Settings is a hub of sub-routes now (it used to be one 11.8k-pixel scroll).
+// Rows minted before the split carry `/client/settings#chart-sharing`; the hub
+// keeps that anchor id, so old notifications still land on the right row.
+export const CHART_SHARE_SETTINGS_HREF = '/client/settings/chart-sharing'
 
 export type ChartAccessRequestedNotificationData = {
   professionalId: string

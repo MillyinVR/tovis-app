@@ -11,13 +11,13 @@ export const metadata = {
 export default async function ClientActivityPage() {
   const data = await loadClientActivityPage()
 
+  // The frame mounts <ClientPage> itself: "Mark all read" is a stateful control
+  // that has to live inside the client component, and it belongs in the header.
   return (
-    <main className="h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] overflow-hidden">
-      <ClientActivityFrame
-        items={data.items}
-        unreadCount={data.unreadCount}
-        markReadEventKeys={data.markReadEventKeys}
-      />
-    </main>
+    <ClientActivityFrame
+      items={data.items}
+      unreadCount={data.unreadCount}
+      markReadEventKeys={data.markReadEventKeys}
+    />
   )
 }

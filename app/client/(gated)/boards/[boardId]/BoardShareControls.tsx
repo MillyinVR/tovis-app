@@ -72,7 +72,7 @@ export default function BoardShareControls({
   }
 
   return (
-    <section className="rounded-card border border-white/10 bg-bgSecondary p-4">
+    <section className="rounded-card border border-textPrimary/10 bg-bgSecondary p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13px] font-bold text-textPrimary">
@@ -85,7 +85,7 @@ export default function BoardShareControls({
           </div>
         </div>
 
-        <div className="inline-flex rounded-full border border-white/15 p-0.5">
+        <div className="inline-flex rounded-full border border-textPrimary/15 p-0.5">
           {(['PRIVATE', 'SHARED'] as const).map((option) => (
             <button
               key={option}
@@ -106,13 +106,13 @@ export default function BoardShareControls({
       </div>
 
       {isShared ? (
-        <div className="mt-4 border-t border-white/10 pt-3">
+        <div className="mt-4 border-t border-textPrimary/10 pt-3">
           {handle ? (
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={copyShareLink}
-                className="inline-flex min-h-11 items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-white/20"
+                className="inline-flex min-h-11 items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-textPrimary/20"
               >
                 {copied ? 'Link copied ✓' : 'Copy share link'}
               </button>

@@ -1,8 +1,8 @@
 // app/client/boards/new/page.tsx
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
+import ClientPage from '../../_components/ClientPage'
 import CreateBoardForm from '../_components/CreateBoardForm'
 import { createBoardAction } from '../_actions/createBoard'
 
@@ -70,38 +70,17 @@ export default async function ClientNewBoardPage(props: {
   const errorMessage = normalizeErrorMessage(searchParams.error)
 
   return (
-    <main
-      className="mx-auto w-full max-w-2xl px-4 pb-24 text-textPrimary"
-      style={{
-        paddingTop: 'max(48px, env(safe-area-inset-top, 0px) + 24px)',
-      }}
+    <ClientPage
+      eyebrow="Boards"
+      title="Create new board"
+      lede="Save your favorite looks in one place so they’re easy to find later."
+      back={{ href: '/client/me', label: 'Me' }}
     >
-      <header className="mb-6 border-b border-white/10 pb-5">
-        <Link
-          href="/client/me"
-          className="inline-flex items-center text-[12px] font-bold text-textSecondary transition hover:text-textPrimary"
-        >
-          ← Back to Me
-        </Link>
-
-        <div className="mt-4">
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-textSecondary/60">
-            Boards
-          </div>
-          <h1 className="mt-1 font-display text-3xl font-semibold italic leading-tight text-textPrimary">
-            Create new board
-          </h1>
-          <p className="mt-2 text-[13px] text-textSecondary">
-            Save your favorite looks in one place so they’re easy to find later.
-          </p>
-        </div>
-      </header>
-
       <CreateBoardForm
         action={createBoardAction}
         errorMessage={errorMessage}
         cancelHref="/client/me"
       />
-    </main>
+    </ClientPage>
   )
 }
