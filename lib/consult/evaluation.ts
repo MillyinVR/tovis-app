@@ -7,9 +7,9 @@ import {
   CONSULT_ANALYSIS_DENSITIES,
   CONSULT_ANALYSIS_EVIDENCE_KEYS,
   CONSULT_ANALYSIS_PROMPT_VERSION,
+  CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
   CONSULT_ANALYSIS_SAFETY_CODES,
   CONSULT_ANALYSIS_SCHEMA_VERSION,
-  CONSULT_ANALYSIS_SERVICE_INTENTS,
   CONSULT_ANALYSIS_TEXTURES,
   CONSULT_ANALYSIS_TONES,
   ConsultAnalysisProviderError,
@@ -22,7 +22,7 @@ import {
   HAIR_COLOR_CAPTURE_SHOT_KEYS,
   type HairColorCaptureShotKey,
 } from './capturePack'
-import { validateHairColorIntakeAnswers } from './intakePack'
+import { validateHairColorC5EvaluationIntakeAnswers } from './intakePack'
 
 export const CONSULT_EVALUATION_SCORER_VERSION = 'hair-color-scorer-v1'
 export const CONSULT_EVALUATION_RUNNER_VERSION = 'hair-color-runner-v1'
@@ -391,12 +391,12 @@ function parseExpected(value: unknown): ConsultEvaluationFixture['expected'] {
 
   const allowedIntents = uniqueEnumArray(
     value.recommendations.allowedIntents,
-    CONSULT_ANALYSIS_SERVICE_INTENTS,
+    CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
     false,
   )
   const resolvableIntents = uniqueEnumArray(
     value.recommendations.resolvableIntents,
-    CONSULT_ANALYSIS_SERVICE_INTENTS,
+    CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
     false,
   )
   if (resolvableIntents.some((intent) => !allowedIntents.includes(intent))) {
@@ -445,7 +445,7 @@ function parseFixture(value: unknown): ConsultEvaluationFixture {
   }
   const id = nonEmptyString(value.id, 80)
   if (!/^[a-z0-9][a-z0-9-]+$/.test(id)) invalidManifest()
-  const intake = validateHairColorIntakeAnswers(value.intake, true)
+  const intake = validateHairColorC5EvaluationIntakeAnswers(value.intake)
   if (!intake.ok) invalidManifest()
   return {
     id,

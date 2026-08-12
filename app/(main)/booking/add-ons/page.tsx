@@ -21,6 +21,7 @@ type AddOnsApiOk = {
   addOns?: AddOnDTO[]
   offeringId?: string
   locationType?: ServiceLocationType
+  selectionPrompt?: string | null
 }
 
 type AddOnsApiFail = {
@@ -29,7 +30,9 @@ type AddOnsApiFail = {
 }
 
 type AddOnsApiResponse = AddOnsApiOk | AddOnsApiFail
-type AddOnsDTOResult = { ok: true; addOns: AddOnDTO[] } | { ok: false; error: string }
+type AddOnsDTOResult =
+  | { ok: true; addOns: AddOnDTO[]; selectionPrompt: string | null }
+  | { ok: false; error: string }
 
 function pickOne(v: string | string[] | undefined | null) {
   if (!v) return null
@@ -109,8 +112,12 @@ function parseAddOnsApiResponse(x: unknown): AddOnsApiResponse | null {
 
     const offeringId = typeof x.offeringId === 'string' ? x.offeringId : undefined
     const locationType = x.locationType === 'MOBILE' || x.locationType === 'SALON' ? x.locationType : undefined
+    const selectionPrompt =
+      typeof x.selectionPrompt === 'string'
+        ? x.selectionPrompt.trim() || null
+        : null
 
-    return { ok: true, offeringId, locationType, addOns }
+    return { ok: true, offeringId, locationType, addOns, selectionPrompt }
   }
 
   if (ok === false) {
@@ -157,7 +164,11 @@ async function fetchAddOns(args: { offeringId: string; locationType: ServiceLoca
     return { ok: false, error: readErrorMessage(body) ?? 'Failed to load add-ons.' }
   }
 
-  return { ok: true, addOns: parsed.addOns ?? [] }
+  return {
+    ok: true,
+    addOns: parsed.addOns ?? [],
+    selectionPrompt: parsed.selectionPrompt ?? null,
+  }
 }
 
 export default async function BookingAddOnsPage({
@@ -178,6 +189,7 @@ export default async function BookingAddOnsPage({
   const urlAddOnIds = parseCommaIds(urlAddOnIdsRaw, 50)
 
   let addOns: AddOnDTO[] = []
+  let selectionPrompt: string | null = null
   let initialError: string | null = null
 
   if (!offeringId) {
@@ -185,7 +197,10 @@ export default async function BookingAddOnsPage({
   } else {
     const res = await fetchAddOns({ offeringId, locationType })
     if (!res.ok) initialError = res.error
-    else addOns = res.addOns
+    else {
+      addOns = res.addOns
+      selectionPrompt = res.selectionPrompt
+    }
   }
 
   // The pro's no-show / late-cancel fee policy the client must agree to before
@@ -227,6 +242,7 @@ export default async function BookingAddOnsPage({
       mediaId={mediaId}
       lookPostId={lookPostId}
       addOns={addOns}
+      selectionPrompt={selectionPrompt}
       initialError={initialError}
       initialSelectedIds={initialSelectedIds}
       cancellationPolicy={cancellationPolicy}

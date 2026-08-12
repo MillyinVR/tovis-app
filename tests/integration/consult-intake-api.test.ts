@@ -77,6 +77,11 @@ const completeAnswers = {
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',
+  henna_plant_dye_history: 'never',
+  perm_history: 'never',
+  relaxer_texturizer_history: 'never',
+  keratin_smoothing_history: 'never',
+  other_chemical_history: 'never',
   last_color_service_timing: '1-3-months',
   prior_reaction: 'no',
   event_timing: '2-4-weeks',
@@ -557,6 +562,11 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
           version: HAIR_COLOR_INTAKE_PACK_VERSION,
           schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
         },
+        progress: {
+          canComplete: false,
+          nextQuestionKey: 'current_color',
+          blocker: 'REQUIRED_ANSWERS_MISSING',
+        },
         latestRevision: null,
         prefillSuggestions: expect.arrayContaining([
           expect.objectContaining({
@@ -631,6 +641,28 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
         intakeRequest('missing-required', partialAnswers, true),
         400,
         'CONSULT_INVALID_ANSWERS',
+      ],
+      [
+        intakeRequest(
+          'goal-direction-required',
+          { ...completeAnswers, desired_color: 'not-sure' },
+          true,
+        ),
+        409,
+        'CONSULT_GOAL_DIRECTION_REQUIRED',
+      ],
+      [
+        intakeRequest(
+          'goal-direction-unresolved',
+          {
+            ...completeAnswers,
+            desired_color: 'not-sure',
+            goal_direction: 'not-sure',
+          },
+          true,
+        ),
+        409,
+        'CONSULT_GOAL_DIRECTION_UNRESOLVED',
       ],
       [
         intakeRequest('stale-pack', partialAnswers, false, { packVersion: 0 }),
@@ -713,6 +745,11 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
       replayed: false,
       intake: {
         status: ConsultSessionStatus.MEDIA_READY,
+        progress: {
+          canComplete: true,
+          nextQuestionKey: null,
+          blocker: null,
+        },
         latestRevision: {
           revision: 2,
           complete: true,

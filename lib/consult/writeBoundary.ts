@@ -719,7 +719,12 @@ export async function appendHairColorIntakeRevision(args: {
       input.complete,
     )
     if (!validated.ok) {
-      throw new ConsultWriteError('INVALID_ANSWERS', validated.message)
+      const code =
+        validated.code === 'GOAL_DIRECTION_REQUIRED' ||
+        validated.code === 'GOAL_DIRECTION_UNRESOLVED'
+          ? validated.code
+          : 'INVALID_ANSWERS'
+      throw new ConsultWriteError(code, validated.message)
     }
     const requestHash = intakeRequestHash({
       packVersion: input.packVersion,

@@ -80,7 +80,10 @@ export type ConsultAgreementAcceptResponseDTO =
     replayed: boolean
   }
 
-export type ConsultIntakeQuestionRequirementDTO = 'REQUIRED' | 'SKIPPABLE'
+export type ConsultIntakeQuestionRequirementDTO =
+  | 'REQUIRED'
+  | 'CONDITIONAL'
+  | 'SKIPPABLE'
 
 export type ConsultIntakeQuestionOptionDTO = {
   value: string
@@ -90,6 +93,7 @@ export type ConsultIntakeQuestionOptionDTO = {
 export type ConsultIntakeQuestionDTO = {
   key: string
   label: string
+  helpText: string | null
   kind: 'SINGLE_SELECT'
   requirement: ConsultIntakeQuestionRequirementDTO
   options: ConsultIntakeQuestionOptionDTO[]
@@ -147,6 +151,15 @@ export type ConsultIntakeStateDTO = {
   consultId: string
   status: ConsultSessionStatus
   questionPack: ConsultIntakeQuestionPackDTO
+  progress: {
+    canComplete: boolean
+    nextQuestionKey: string | null
+    blocker:
+      | 'REQUIRED_ANSWERS_MISSING'
+      | 'GOAL_DIRECTION_REQUIRED'
+      | 'GOAL_DIRECTION_UNRESOLVED'
+      | null
+  }
   prefillSuggestions: ConsultIntakePrefillSuggestionDTO[]
   prefillSignals: ConsultIntakePrefillSignalDTO[]
   latestRevision: ConsultIntakeRevisionDTO | null
@@ -324,6 +337,8 @@ export type ConsultAnalysisServiceIntentDTO =
   | 'TONER_GLOSS'
   | 'VIVID_COLOR'
   | 'OTHER_HAIR_COLOR'
+  | 'STRAND_TEST'
+  | 'PATCH_TEST'
 
 export type ConsultAnalysisReferenceDTO =
   | {
@@ -561,6 +576,8 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_PACK_VERSION_MISMATCH'
   | 'CONSULT_SCHEMA_VERSION_MISMATCH'
   | 'CONSULT_INVALID_ANSWERS'
+  | 'CONSULT_GOAL_DIRECTION_REQUIRED'
+  | 'CONSULT_GOAL_DIRECTION_UNRESOLVED'
   | 'CONSULT_IDEMPOTENCY_CONFLICT'
   | 'CONSULT_BOOKING_INELIGIBLE'
   | 'CONSULT_CAPTURE_PACK_VERSION_MISMATCH'

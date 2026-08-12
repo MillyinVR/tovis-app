@@ -6553,6 +6553,8 @@
         "CONSULT_PACK_VERSION_MISMATCH",
         "CONSULT_SCHEMA_VERSION_MISMATCH",
         "CONSULT_INVALID_ANSWERS",
+        "CONSULT_GOAL_DIRECTION_REQUIRED",
+        "CONSULT_GOAL_DIRECTION_UNRESOLVED",
         "CONSULT_IDEMPOTENCY_CONFLICT",
         "CONSULT_BOOKING_INELIGIBLE",
         "CONSULT_CAPTURE_PACK_VERSION_MISMATCH",
@@ -7142,7 +7144,9 @@
         "COLOR_CORRECTION",
         "TONER_GLOSS",
         "VIVID_COLOR",
-        "OTHER_HAIR_COLOR"
+        "OTHER_HAIR_COLOR",
+        "STRAND_TEST",
+        "PATCH_TEST"
       ],
       "type": "string"
     },
@@ -8089,6 +8093,12 @@
     },
     "ConsultIntakeQuestionDTO": {
       "properties": {
+        "helpText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "key": {
           "type": "string"
         },
@@ -8112,6 +8122,7 @@
       "required": [
         "key",
         "label",
+        "helpText",
         "kind",
         "requirement",
         "options"
@@ -8168,6 +8179,7 @@
     "ConsultIntakeQuestionRequirementDTO": {
       "enum": [
         "REQUIRED",
+        "CONDITIONAL",
         "SKIPPABLE"
       ],
       "type": "string"
@@ -8239,6 +8251,37 @@
           },
           "type": "array"
         },
+        "progress": {
+          "properties": {
+            "blocker": {
+              "enum": [
+                "REQUIRED_ANSWERS_MISSING",
+                "GOAL_DIRECTION_REQUIRED",
+                "GOAL_DIRECTION_UNRESOLVED",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "canComplete": {
+              "type": "boolean"
+            },
+            "nextQuestionKey": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "canComplete",
+            "nextQuestionKey",
+            "blocker"
+          ],
+          "type": "object"
+        },
         "questionPack": {
           "$ref": "#/definitions/ConsultIntakeQuestionPackDTO"
         },
@@ -8250,6 +8293,7 @@
         "consultId",
         "status",
         "questionPack",
+        "progress",
         "prefillSuggestions",
         "prefillSignals",
         "latestRevision"
@@ -11292,6 +11336,13 @@
         },
         "offeringId": {
           "type": "string"
+        },
+        "selectionPrompt": {
+          "description": "Neutral context shown only after the selected base offering is the exact Strand Test safety service and a configured non-chemical option exists.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -11299,6 +11350,7 @@
         "locationType",
         "offering",
         "addOns",
+        "selectionPrompt",
         "cancellationPolicy"
       ],
       "type": "object"

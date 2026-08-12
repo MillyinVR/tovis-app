@@ -32,6 +32,7 @@ import {
 } from './eligibility'
 import { ConsultWriteError } from './errors'
 import {
+  evaluateHairColorIntakeProgress,
   HAIR_COLOR_INTAKE_PACK,
   normalizeHairColorIntakePayload,
 } from './intakePack'
@@ -363,10 +364,14 @@ export async function loadHairColorIntakeState(args: {
         })
       }
 
+      const mappedLatestRevision = mapLatestRevision(latestRevision)
       return {
         consultId: session.id,
         status: session.status,
         questionPack: HAIR_COLOR_INTAKE_PACK,
+        progress: evaluateHairColorIntakeProgress(
+          mappedLatestRevision?.answers ?? {},
+        ),
         prefillSuggestions,
         prefillSignals: [
           signal('SELF_PROFILE', Boolean(selfProfile?.hair_color)),
@@ -375,7 +380,7 @@ export async function loadHairColorIntakeState(args: {
           signal('TASTE_VECTOR', Boolean(tasteVector && tasteVector.signalCount > 0)),
           signal('BOOKING_HISTORY', Boolean(bookingHistory)),
         ],
-        latestRevision: mapLatestRevision(latestRevision),
+        latestRevision: mappedLatestRevision,
       }
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

@@ -86,6 +86,18 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
         'Invalid intake answers.',
         'CONSULT_INVALID_ANSWERS',
       )
+    case 'GOAL_DIRECTION_REQUIRED':
+      return consultAgreementFail(
+        409,
+        'Choose what part of the color you want to change before continuing.',
+        'CONSULT_GOAL_DIRECTION_REQUIRED',
+      )
+    case 'GOAL_DIRECTION_UNRESOLVED':
+      return consultAgreementFail(
+        409,
+        'Your color goal is still unclear. Review the goal question before continuing.',
+        'CONSULT_GOAL_DIRECTION_UNRESOLVED',
+      )
     case 'IDEMPOTENCY_CONFLICT':
       return consultAgreementFail(
         409,

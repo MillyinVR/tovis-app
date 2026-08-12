@@ -7,11 +7,13 @@ import {
   ConsultRevisionKind,
   ConsultSessionStatus,
   Prisma,
+  ServiceLocationType,
   UploadSessionStatus,
   UploadSurface,
 } from '@prisma/client'
 
 import type { ConsultAnalysisStateDTO } from '@/lib/dto/consult'
+import { decimalToCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
@@ -60,6 +62,11 @@ import {
 } from './intakePack'
 import { purgeConsultCaptureRawObject } from './capturePurge'
 import {
+  CONSULT_SAFETY_SERVICE_BOOKING_RULES,
+  determineHairColorSafetyRouting,
+  type ConsultSafetyServiceRequirement,
+} from './safetyRouting'
+import {
   finalizeLockedHairColorAnalysis,
   transitionLockedConsultSession,
 } from './writeBoundary'
@@ -85,6 +92,7 @@ const ANALYSIS_SCOPE_SELECT = {
     select: {
       clientId: true,
       proTenantId: true,
+      locationType: true,
       ...AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
     },
   },
@@ -398,14 +406,19 @@ const INTENT_PATTERNS: Readonly<Record<ConsultAnalysisServiceIntent, RegExp>> = 
   TONER_GLOSS: /toner|gloss|glaze/i,
   VIVID_COLOR: /vivid|fantasy|fashion color/i,
   OTHER_HAIR_COLOR: /color|colour|blond|brunette|copper/i,
+  STRAND_TEST: /^strand test$/i,
+  PATCH_TEST: /^patch test$/i,
 }
 
-async function resolveRecommendations(
+type RecommendationOffering = Awaited<
+  ReturnType<typeof loadRecommendationOfferings>
+>[number]
+
+async function loadRecommendationOfferings(
   tx: Prisma.TransactionClient,
   session: AnalysisScope,
-  recommendations: HairColorAnalysisProviderOutput['recommendations'],
 ) {
-  const offerings = await tx.professionalServiceOffering.findMany({
+  return tx.professionalServiceOffering.findMany({
     where: {
       professionalId: session.professionalId,
       isActive: true,
@@ -417,29 +430,171 @@ async function resolveRecommendations(
     },
     select: {
       serviceId: true,
-      service: { select: { name: true, description: true, categoryId: true } },
+      offersInSalon: true,
+      offersMobile: true,
+      salonPriceStartingAt: true,
+      salonDurationMinutes: true,
+      mobilePriceStartingAt: true,
+      mobileDurationMinutes: true,
+      service: {
+        select: {
+          name: true,
+          description: true,
+          categoryId: true,
+          defaultDurationMinutes: true,
+        },
+      },
     },
     orderBy: { serviceId: 'asc' },
   })
+}
+
+function offeringMode(offering: RecommendationOffering, locationType: ServiceLocationType) {
+  return locationType === ServiceLocationType.SALON
+    ? {
+        enabled: offering.offersInSalon,
+        price: offering.salonPriceStartingAt,
+        durationMinutes:
+          offering.salonDurationMinutes ?? offering.service.defaultDurationMinutes,
+      }
+    : {
+        enabled: offering.offersMobile,
+        price: offering.mobilePriceStartingAt,
+        durationMinutes:
+          offering.mobileDurationMinutes ?? offering.service.defaultDurationMinutes,
+      }
+}
+
+function safetyOffering(
+  offerings: readonly RecommendationOffering[],
+  locationType: ServiceLocationType,
+  requirement: ConsultSafetyServiceRequirement,
+): RecommendationOffering | null {
+  const rule = CONSULT_SAFETY_SERVICE_BOOKING_RULES[requirement]
+  return (
+    offerings.find((offering) => {
+      const mode = offeringMode(offering, locationType)
+      return (
+        offering.service.name.trim().toLowerCase() === rule.name.toLowerCase() &&
+        mode.enabled &&
+        mode.durationMinutes === rule.durationMinutes &&
+        decimalToCents(mode.price) === rule.priceCents
+      )
+    }) ?? null
+  )
+}
+
+function requireSafetyOfferings(
+  offerings: readonly RecommendationOffering[],
+  session: AnalysisScope,
+  requirements: readonly ConsultSafetyServiceRequirement[],
+): Map<ConsultSafetyServiceRequirement, RecommendationOffering> {
+  const resolved = new Map<
+    ConsultSafetyServiceRequirement,
+    RecommendationOffering
+  >()
+  for (const requirement of requirements) {
+    const offering = safetyOffering(
+      offerings,
+      session.booking.locationType,
+      requirement,
+    )
+    if (!offering) {
+      throw new ConsultWriteError(
+        'ANALYSIS_PREREQUISITES_REQUIRED',
+        'A required safety service is unavailable.',
+      )
+    }
+    resolved.set(requirement, offering)
+  }
+  return resolved
+}
+
+function recommendationReference(
+  session: AnalysisScope,
+  offering: RecommendationOffering | undefined,
+) {
+  return offering
+    ? {
+        type: 'SERVICE' as const,
+        serviceId: offering.serviceId,
+        serviceCategoryId: offering.service.categoryId,
+      }
+    : {
+        type: 'SERVICE_CATEGORY' as const,
+        serviceId: null,
+        serviceCategoryId: session.serviceCategoryId,
+      }
+}
+
+function resolveRecommendations(
+  session: AnalysisScope,
+  offerings: readonly RecommendationOffering[],
+  recommendations: HairColorAnalysisProviderOutput['recommendations'],
+  routing: ReturnType<typeof determineHairColorSafetyRouting>,
+) {
+  if (routing.blocksChemicalRecommendations) {
+    const safetyOfferings = requireSafetyOfferings(
+      offerings,
+      session,
+      routing.requirements,
+    )
+    const directions = routing.requirements.map((requirement) => {
+      const offering = safetyOfferings.get(requirement)
+      if (!offering) {
+        throw new ConsultWriteError(
+          'ANALYSIS_PREREQUISITES_REQUIRED',
+          'A required safety service is unavailable.',
+        )
+      }
+      return requirement === 'PATCH_TEST'
+        ? {
+            serviceIntent: requirement,
+            title: 'Patch Test',
+            rationale:
+              'Because a prior reaction was reported, test for sensitivity and review the result with the professional before any chemical color service.',
+            achievability:
+              'The professional must review the reaction history and test result before choosing a chemical service.',
+            discussWithProfessional: true as const,
+            reference: recommendationReference(session, offering),
+          }
+        : {
+            serviceIntent: requirement,
+            title: 'Strand Test',
+            rationale:
+              'A small section should be tested first so the professional can see how the hair responds before recommending a chemical color plan.',
+            achievability:
+              'The professional will use the strand result to recommend what is safely achievable.',
+            discussWithProfessional: true as const,
+            reference: recommendationReference(session, offering),
+          }
+    })
+    const consultation = offerings.find((offering) =>
+      INTENT_PATTERNS.COLOR_CONSULTATION.test(
+        `${offering.service.name} ${offering.service.description ?? ''}`,
+      ),
+    )
+    return [
+      ...directions,
+      {
+        serviceIntent: 'COLOR_CONSULTATION' as const,
+        title: 'Professional color review',
+        rationale:
+          'Review the goal, full treatment history, and any test result with the professional before selecting a color service.',
+        achievability:
+          'The professional will decide the next service after the required review.',
+        discussWithProfessional: true as const,
+        reference: recommendationReference(session, consultation),
+      },
+    ]
+  }
+
   return recommendations.map((recommendation) => {
     const pattern = INTENT_PATTERNS[recommendation.serviceIntent]
     const match = offerings.find((offering) =>
       pattern.test(`${offering.service.name} ${offering.service.description ?? ''}`),
     )
-    return {
-      ...recommendation,
-      reference: match
-        ? {
-            type: 'SERVICE' as const,
-            serviceId: match.serviceId,
-            serviceCategoryId: match.service.categoryId,
-          }
-        : {
-            type: 'SERVICE_CATEGORY' as const,
-            serviceId: null,
-            serviceCategoryId: session.serviceCategoryId,
-          },
-    }
+    return { ...recommendation, reference: recommendationReference(session, match) }
   })
 }
 
@@ -453,7 +608,7 @@ const SAFETY_COPY: Readonly<Record<ConsultAnalysisSafetyCode, string>> = {
   RECENT_LIGHTENING:
     'Recent lightening can affect the next safe, achievable color direction. Discuss timing and strand-condition checks with your professional.',
   CHEMICAL_HISTORY_UNKNOWN:
-    'Some chemical history is uncertain. Review prior color and lightening details with your professional before choosing a service.',
+    'Some chemical history is uncertain. Review prior color, lightening, and treatment details with your professional before choosing a service.',
   ALLERGY_HISTORY_UNKNOWN:
     'Allergy information was not collected in this intake. Discuss known allergies, sensitivities, and appropriate precautions with your professional.',
   VISIBLE_COMPROMISE:
@@ -588,6 +743,17 @@ export async function runConsultAnalysis(args: {
         await requireCurrentConsultAgreementAcceptances(tx, session.id)
         const input = validInput(await args.loadInput())
         const intake = await currentCompletedIntake(tx, session.id)
+        const intakeRouting = determineHairColorSafetyRouting({
+          intake: intake.payload.answers,
+          visibleCondition: 'UNKNOWN',
+        })
+        if (intakeRouting.requirements.length > 0) {
+          requireSafetyOfferings(
+            await loadRecommendationOfferings(tx, session),
+            session,
+            intakeRouting.requirements,
+          )
+        }
         const existing = await tx.consultRevision.findFirst({
           where: { consultSessionId: session.id, kind: ConsultRevisionKind.ANALYSIS },
           select: {
@@ -679,10 +845,15 @@ export async function runConsultAnalysis(args: {
           )
         }
 
-        const recommendations = await resolveRecommendations(
-          tx,
+        const routing = determineHairColorSafetyRouting({
+          intake: intake.payload.answers,
+          visibleCondition: providerResult.analysis.core.visibleCondition.value,
+        })
+        const recommendations = resolveRecommendations(
           session,
+          await loadRecommendationOfferings(tx, session),
           providerResult.analysis.recommendations,
+          routing,
         )
         const payload = {
           ...providerResult.analysis,

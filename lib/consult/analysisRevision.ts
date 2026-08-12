@@ -6,7 +6,7 @@ import type {
 } from '@/lib/dto/consult'
 import { isRecord } from '@/lib/guards'
 
-import { validateHairColorAnalysisProviderResult } from './analysisEngine'
+import { validateHairColorAnalysisResult } from './analysisEngine'
 import { ConsultWriteError } from './errors'
 
 export function normalizeStoredHairColorAnalysisPayload(
@@ -62,7 +62,7 @@ export function normalizeStoredHairColorAnalysisPayload(
 
   let sanitized
   try {
-    sanitized = validateHairColorAnalysisProviderResult({
+    sanitized = validateHairColorAnalysisResult({
       model: 'stored-analysis',
       analysis: {
         core: payload.core,
