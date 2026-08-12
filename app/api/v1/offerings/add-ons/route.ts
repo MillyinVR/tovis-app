@@ -11,6 +11,11 @@ import { DEFAULT_DURATION_MINUTES } from '@/lib/booking/constants'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { getProNoShowSettings } from '@/lib/noShowProtection/settings'
 import { cancellationPolicyDisclosure } from '@/lib/noShowProtection/policyDisclosure'
+import {
+  CONSULT_SAFETY_SERVICE_BOOKING_RULES,
+  isStrandTestOptionalAddOn,
+  STRAND_TEST_ADD_ON_PROMPT,
+} from '@/lib/consult/safetyRouting'
 import type {
   OfferingAddOnItemDTO,
   OfferingAddOnsResponseDTO,
@@ -101,6 +106,7 @@ export async function GET(req: Request) {
             addOnGroup: true,
             defaultDurationMinutes: true,
             minPrice: true,
+            category: { select: { slug: true } },
           },
         },
       },
@@ -136,6 +142,18 @@ export async function GET(req: Request) {
 
     const addOns = addOnLinks.flatMap((link) => {
       const service = link.addOnService
+      const isStrandTest =
+        offering.service?.name ===
+        CONSULT_SAFETY_SERVICE_BOOKING_RULES.STRAND_TEST.name
+      if (
+        isStrandTest &&
+        !isStrandTestOptionalAddOn({
+          categorySlug: service.category.slug,
+          serviceName: service.name,
+        })
+      ) {
+        return []
+      }
       const proOffering = proOfferingByServiceId.get(service.id) ?? null
 
       const durationMinutes = pickModeDurationMinutes({
@@ -212,6 +230,12 @@ export async function GET(req: Request) {
           : null,
       },
       addOns,
+      selectionPrompt:
+        offering.service?.name ===
+          CONSULT_SAFETY_SERVICE_BOOKING_RULES.STRAND_TEST.name &&
+        addOns.length > 0
+          ? STRAND_TEST_ADD_ON_PROMPT
+          : null,
       cancellationPolicy,
     } satisfies OfferingAddOnsResponseDTO)
   } catch (err: unknown) {

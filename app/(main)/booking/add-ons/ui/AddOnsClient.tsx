@@ -29,6 +29,7 @@ type Props = {
   mediaId: string | null
   lookPostId: string | null
   addOns: AddOnDTO[]
+  selectionPrompt?: string | null
   initialError?: string | null
   initialSelectedIds?: string[]
   /**
@@ -228,6 +229,7 @@ export default function AddOnsClient({
   mediaId,
   lookPostId,
   addOns,
+  selectionPrompt,
   initialError,
   initialSelectedIds,
   cancellationPolicy,
@@ -682,6 +684,15 @@ export default function AddOnsClient({
       {error ? (
         <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-toneDanger">
           {error}
+        </div>
+      ) : null}
+
+      {!error && selectionPrompt ? (
+        <div
+          data-testid="booking-selection-prompt"
+          className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold leading-6 text-textPrimary"
+        >
+          {selectionPrompt}
         </div>
       ) : null}
 

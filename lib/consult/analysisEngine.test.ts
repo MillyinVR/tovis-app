@@ -26,6 +26,7 @@ import {
   resetConsultAnalysisClientForTests,
   runHairColorAnalysis,
   validateHairColorAnalysisProviderResult,
+  validateHairColorAnalysisResult,
   type HairColorAnalysisProviderOutput,
 } from './analysisEngine'
 
@@ -201,5 +202,30 @@ describe('hair-color consult analysis provider', () => {
     await expect(
       runHairColorAnalysis({ intake: {}, captures }),
     ).rejects.toMatchObject({ kind: 'refused' } satisfies Partial<ConsultAnalysisProviderError>)
+  })
+
+  it('allows deterministic test intents only after the provider boundary', () => {
+    const routed = validOutput()
+    routed.recommendations = [
+      {
+        serviceIntent: 'STRAND_TEST',
+        title: 'Strand Test',
+        rationale: 'Test a small section before selecting a chemical service.',
+        achievability: 'The professional will review the result.',
+        discussWithProfessional: true,
+      },
+    ]
+    expect(() =>
+      validateHairColorAnalysisProviderResult({
+        analysis: routed,
+        model: 'fake-model',
+      }),
+    ).toThrowError(ConsultAnalysisProviderError)
+    expect(
+      validateHairColorAnalysisResult({
+        analysis: routed,
+        model: 'fake-model',
+      }).analysis.recommendations[0]?.serviceIntent,
+    ).toBe('STRAND_TEST')
   })
 })

@@ -49,6 +49,11 @@ export type OfferingAddOnsResponseDTO = {
   offering: OfferingAddOnsOfferingDTO
   addOns: OfferingAddOnItemDTO[]
   /**
+   * Neutral context shown only after the selected base offering is the exact
+   * Strand Test safety service and a configured non-chemical option exists.
+   */
+  selectionPrompt: string | null
+  /**
    * The pro's no-show / late-cancel fee policy the client must agree to before
    * booking (M15), formatted for display, or null when the pro charges no fees
    * (or the feature flag is off). When non-null, the native confirm flow shows it

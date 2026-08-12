@@ -14,7 +14,7 @@ export const CONSULT_ANALYSIS_PROMPT_VERSION = 'hair-color-analysis-v1'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 export const CONSULT_ANALYSIS_REQUEST_TIMEOUT_MS = 40_000
 
-export const CONSULT_ANALYSIS_SERVICE_INTENTS = [
+export const CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS = [
   'COLOR_CONSULTATION',
   'ROOT_TOUCH_UP',
   'ALL_OVER_COLOR',
@@ -24,6 +24,12 @@ export const CONSULT_ANALYSIS_SERVICE_INTENTS = [
   'TONER_GLOSS',
   'VIVID_COLOR',
   'OTHER_HAIR_COLOR',
+] as const
+
+export const CONSULT_ANALYSIS_SERVICE_INTENTS = [
+  ...CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
+  'STRAND_TEST',
+  'PATCH_TEST',
 ] as const
 
 export type ConsultAnalysisServiceIntent =
@@ -280,7 +286,10 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
           'discussWithProfessional',
         ],
         properties: {
-          serviceIntent: { type: 'string', enum: [...CONSULT_ANALYSIS_SERVICE_INTENTS] },
+          serviceIntent: {
+            type: 'string',
+            enum: [...CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS],
+          },
           title: { type: 'string', maxLength: 120 },
           rationale: { type: 'string', maxLength: 320 },
           achievability: { type: 'string', maxLength: 240 },
@@ -380,7 +389,10 @@ function observed<const T extends readonly string[]>(
   return { value, confidence: range, evidence: cited }
 }
 
-function sanitizeAnalysis(raw: unknown): HairColorAnalysisProviderOutput {
+function sanitizeAnalysis(
+  raw: unknown,
+  serviceIntents: readonly ConsultAnalysisServiceIntent[],
+): HairColorAnalysisProviderOutput {
   if (
     !isRecord(raw) ||
     !exactKeys(raw, ['core', 'hairColorLens', 'safetyFlags', 'recommendations']) ||
@@ -465,7 +477,7 @@ function sanitizeAnalysis(raw: unknown): HairColorAnalysisProviderOutput {
       throw new ConsultAnalysisProviderError('bad_output')
     }
     return {
-      serviceIntent: enumValue(item.serviceIntent, CONSULT_ANALYSIS_SERVICE_INTENTS),
+      serviceIntent: enumValue(item.serviceIntent, serviceIntents),
       title: cleanText(item.title, 120),
       rationale: cleanText(item.rationale, 320),
       achievability: cleanText(item.achievability, 240),
@@ -591,7 +603,13 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
     .join('')
   if (!text) throw new ConsultAnalysisProviderError('bad_output')
   try {
-    return { analysis: sanitizeAnalysis(JSON.parse(text)), model }
+    return {
+      analysis: sanitizeAnalysis(
+        JSON.parse(text),
+        CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
+      ),
+      model,
+    }
   } catch (error) {
     if (error instanceof ConsultAnalysisProviderError) throw error
     throw new ConsultAnalysisProviderError('bad_output')
@@ -605,5 +623,25 @@ export function validateHairColorAnalysisProviderResult(
   if (!model || model !== result.model || model.length > 128) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
-  return { analysis: sanitizeAnalysis(result.analysis), model }
+  return {
+    analysis: sanitizeAnalysis(
+      result.analysis,
+      CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
+    ),
+    model,
+  }
+}
+
+/** Validates the post-routing stored shape, including deterministic test intents. */
+export function validateHairColorAnalysisResult(
+  result: { analysis: unknown; model: string },
+): HairColorAnalysisProviderResult {
+  const model = result.model.trim()
+  if (!model || model !== result.model || model.length > 128) {
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
+  return {
+    analysis: sanitizeAnalysis(result.analysis, CONSULT_ANALYSIS_SERVICE_INTENTS),
+    model,
+  }
 }

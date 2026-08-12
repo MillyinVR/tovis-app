@@ -257,6 +257,7 @@ const userIds: string[] = []
 const clientIds: string[] = []
 const bookingIds: string[] = []
 const sessionIds: string[] = []
+const safetyServiceIds: string[] = []
 let bookingSequence = 0
 
 type ReadyConsult = {
@@ -272,6 +273,11 @@ const completeAnswers = {
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',
+  henna_plant_dye_history: 'never',
+  perm_history: 'never',
+  relaxer_texturizer_history: 'never',
+  keratin_smoothing_history: 'never',
+  other_chemical_history: 'never',
   last_color_service_timing: '1-3-months',
   prior_reaction: 'no',
 }
@@ -310,7 +316,10 @@ function validIssue(idempotencyKey: string, shotKey: string) {
   }
 }
 
-async function createReadyConsult(label: string): Promise<ReadyConsult> {
+async function createReadyConsult(
+  label: string,
+  answerOverrides: Record<string, string> = {},
+): Promise<ReadyConsult> {
   const user = await db.user.create({
     data: { email: `${tag}_${label}@example.com`, password: 'x', role: Role.CLIENT },
     select: { id: true },
@@ -385,10 +394,37 @@ async function createReadyConsult(label: string): Promise<ReadyConsult> {
       packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
       schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
       complete: true,
-      answers: completeAnswers,
+      answers: { ...completeAnswers, ...answerOverrides },
     }),
   })
   return { userId: user.id, clientId: client.id, bookingId: booking.id, sessionId: session.id }
+}
+
+async function createSafetyOffering(args: {
+  name: 'Patch Test' | 'Strand Test'
+  durationMinutes: 10 | 15
+}) {
+  const service = await db.service.create({
+    data: {
+      name: args.name,
+      categoryId,
+      defaultDurationMinutes: args.durationMinutes,
+      minPrice: new Prisma.Decimal('0.00'),
+    },
+    select: { id: true },
+  })
+  safetyServiceIds.push(service.id)
+  await db.professionalServiceOffering.create({
+    data: {
+      professionalId,
+      serviceId: service.id,
+      isActive: true,
+      offersInSalon: true,
+      salonPriceStartingAt: new Prisma.Decimal('0.00'),
+      salonDurationMinutes: args.durationMinutes,
+    },
+  })
+  return service.id
 }
 
 function authenticate(consult: ReadyConsult) {
@@ -610,8 +646,12 @@ afterAll(async () => {
   })
   await db.booking.deleteMany({ where: { id: { in: bookingIds } } })
   await db.professionalLocation.deleteMany({ where: { id: locationId } })
-  await db.professionalServiceOffering.deleteMany({ where: { serviceId } })
-  await db.service.deleteMany({ where: { id: serviceId } })
+  await db.professionalServiceOffering.deleteMany({
+    where: { serviceId: { in: [serviceId, ...safetyServiceIds] } },
+  })
+  await db.service.deleteMany({
+    where: { id: { in: [serviceId, ...safetyServiceIds] } },
+  })
   await db.serviceCategory.deleteMany({ where: { id: categoryId } })
   await db.clientProfile.deleteMany({ where: { id: { in: clientIds } } })
   await db.professionalProfile.deleteMany({ where: { id: professionalId } })
@@ -1425,6 +1465,72 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         result: { revisionId: revisions[0]?.id },
       },
     })
+  })
+
+  it('fails before provider work when a required Patch Test offering is unavailable', async () => {
+    const consult = await createReadyConsult('missing-patch-test', {
+      prior_reaction: 'yes',
+    })
+    authenticate(consult)
+    await completeCapturePack(consult, 'missing-patch-test')
+
+    const response = await analysisRequest(consult, 'missing-patch-test')
+    expect(response.status).toBe(409)
+    expect(await body(response)).toMatchObject({
+      code: 'CONSULT_ANALYSIS_PREREQUISITES_REQUIRED',
+    })
+    expect(fake.analysisCalls).toBe(0)
+  })
+
+  it('replaces chemical directions with exact free Patch/Strand Test services', async () => {
+    const patchTestServiceId = await createSafetyOffering({
+      name: 'Patch Test',
+      durationMinutes: 10,
+    })
+    const strandTestServiceId = await createSafetyOffering({
+      name: 'Strand Test',
+      durationMinutes: 15,
+    })
+    const consult = await createReadyConsult('deterministic-tests', {
+      prior_reaction: 'yes',
+      henna_plant_dye_history: 'within-6-months',
+    })
+    authenticate(consult)
+    await completeCapturePack(consult, 'deterministic-tests')
+
+    const response = await analysisRequest(consult, 'deterministic-tests')
+    expect(response.status).toBe(200)
+    const analysis = await db.consultRevision.findFirstOrThrow({
+      where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
+      select: { payload: true },
+    })
+    expect(analysis.payload).toMatchObject({
+      safetyFlags: expect.arrayContaining([
+        expect.objectContaining({ code: 'PRIOR_REACTION' }),
+      ]),
+      recommendations: [
+        expect.objectContaining({
+          serviceIntent: 'PATCH_TEST',
+          reference: {
+            type: 'SERVICE',
+            serviceId: patchTestServiceId,
+            serviceCategoryId: categoryId,
+          },
+        }),
+        expect.objectContaining({
+          serviceIntent: 'STRAND_TEST',
+          reference: {
+            type: 'SERVICE',
+            serviceId: strandTestServiceId,
+            serviceCategoryId: categoryId,
+          },
+        }),
+        expect.objectContaining({ serviceIntent: 'COLOR_CONSULTATION' }),
+      ],
+    })
+    expect(JSON.stringify(analysis.payload)).not.toContain(
+      'Review a realistic red direction and chemical history.',
+    )
   })
 
   it('keeps provider failures retriable with no analysis revision, sequence effect, or committed transition', async () => {
