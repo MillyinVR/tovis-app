@@ -34,9 +34,9 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
       {...props}
       className={cn(
         'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
-        'border-white/10 bg-bgSecondary/35 text-textPrimary',
+        'border-textPrimary/10 bg-bgSecondary/35 text-textPrimary',
         'placeholder:text-textSecondary/70',
-        'hover:border-white/15',
+        'hover:border-textPrimary/15',
         'focus:border-[rgb(var(--accent-primary)/0.35)] focus:ring-2 focus:ring-[rgb(var(--accent-primary)/0.15)]',
         props.disabled && 'opacity-70',
         props.className ?? '',
@@ -229,14 +229,14 @@ export default function ClientProfileSettings() {
         </div>
 
         {profile?.email ? (
-          <div className="rounded-full border border-white/10 bg-bgSecondary/35 px-3 py-1 text-[11px] font-black text-textSecondary">
+          <div className="rounded-full border border-textPrimary/10 bg-bgSecondary/35 px-3 py-1 text-[11px] font-black text-textSecondary">
             {profile.email}
           </div>
         ) : null}
       </div>
 
       {loading ? (
-        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-3 text-sm font-semibold text-textSecondary">
+        <div className="mt-4 rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-3 text-sm font-semibold text-textSecondary">
           Loading profile…
         </div>
       ) : null}
@@ -325,7 +325,7 @@ export default function ClientProfileSettings() {
             </HelpText>
           </label>
 
-          <div className="rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
+          <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
             <span className="font-black text-textPrimary">Heads up:</span>{' '}
             address management lives in the saved addresses section so discovery
             location and mobile destination don’t get tangled together.
@@ -338,8 +338,8 @@ export default function ClientProfileSettings() {
               disabled={saving || !dirty}
               className={cn(
                 'inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-black transition',
-                'border-white/10 bg-bgPrimary/25 text-textPrimary',
-                'hover:border-white/15 hover:bg-bgPrimary/30',
+                'border-textPrimary/10 bg-bgPrimary/25 text-textPrimary',
+                'hover:border-textPrimary/15 hover:bg-bgPrimary/30',
                 'focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-primary)/0.15)]',
                 (saving || !dirty) && 'cursor-not-allowed opacity-60',
               )}
@@ -353,7 +353,7 @@ export default function ClientProfileSettings() {
               className={cn(
                 'relative inline-flex items-center justify-center overflow-hidden rounded-full px-4 py-2 text-sm font-black transition',
                 'border border-[rgb(var(--accent-primary)/0.35)] bg-[rgb(var(--accent-primary)/0.18)] text-textPrimary',
-                'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
+                'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgb(var(--surface-glass)/0.10),transparent)] before:opacity-0 before:transition',
                 'hover:bg-[rgb(var(--accent-primary)/0.24)] hover:border-[rgb(var(--accent-primary)/0.45)] hover:before:opacity-100',
                 'focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-primary)/0.20)]',
                 (saving || !dirty) ? 'cursor-not-allowed opacity-65' : 'cursor-pointer',
@@ -361,7 +361,7 @@ export default function ClientProfileSettings() {
             >
               <span
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
+                className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgb(var(--surface-glass)/0.22),transparent)]"
               />
               <span className="relative">{saving ? 'Saving…' : 'Save profile'}</span>
             </button>

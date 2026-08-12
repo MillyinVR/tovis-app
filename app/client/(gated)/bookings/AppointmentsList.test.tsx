@@ -173,9 +173,18 @@ describe('AppointmentsList', () => {
       />,
     )
 
+    // "booking", never "appointment" — lib/copy.ts's glossary, and the home
+    // card that links here says "All bookings →".
     expect(
-      screen.getByRole('heading', { level: 1, name: 'Appointments' }),
+      screen.getByRole('heading', { level: 1, name: 'Everything you’ve booked' }),
     ).toBeInTheDocument()
+    expect(screen.queryByText(/Appointments/)).not.toBeInTheDocument()
+
+    // Every non-tab client page routes back to where it came from.
+    expect(screen.getByRole('link', { name: /Home/ })).toHaveAttribute(
+      'href',
+      '/client',
+    )
 
     for (const title of [
       'Upcoming',
@@ -187,8 +196,12 @@ describe('AppointmentsList', () => {
       expect(screen.getByRole('heading', { level: 2, name: title })).toBeInTheDocument()
     }
 
-    const detailLink = screen.getAllByRole('link')[0]
-    expect(detailLink).toHaveAttribute('href', '/client/bookings/up_1')
+    // Match the row by its href, not by link index — the page header now
+    // contributes a back link that would otherwise take position 0.
+    const detailLink = screen
+      .getAllByRole('link')
+      .find((el) => el.getAttribute('href') === '/client/bookings/up_1')
+    expect(detailLink).toBeDefined()
 
     // Waitlist entry renders its service name + a Waitlisted chip.
     expect(screen.getByText('Color correction')).toBeInTheDocument()
@@ -294,10 +307,10 @@ describe('AppointmentsList', () => {
     ).toBe(true)
   })
 
-  it('renders an empty state when there are no appointments', () => {
+  it('renders an empty state when there are no bookings', () => {
     render(<AppointmentsList buckets={makeBuckets()} />)
 
-    expect(screen.getByText('No appointments yet')).toBeInTheDocument()
+    expect(screen.getByText('No bookings yet')).toBeInTheDocument()
     // /discover has never existed as a route — this assertion pinned a 404.
     // Discovery lives at /search (see CLIENT_TABS in app/config/clientNav.ts).
     expect(screen.getByRole('link', { name: /Find a pro/ })).toHaveAttribute(

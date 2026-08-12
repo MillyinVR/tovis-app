@@ -62,7 +62,7 @@ export default function FollowSuggestionsRail() {
   if (!loaded || items.length === 0) return null
 
   return (
-    <section className="mb-5 rounded-card border border-white/10 bg-bgSecondary p-4">
+    <section className="mb-5 rounded-card border border-textPrimary/10 bg-bgSecondary p-4">
       <div className="mb-3 flex items-baseline justify-between">
         <h3 className="text-[13px] font-black uppercase tracking-wide text-textPrimary">
           Creators to follow
@@ -78,10 +78,10 @@ export default function FollowSuggestionsRail() {
           return (
             <div
               key={item.clientId}
-              className="flex w-36 flex-none flex-col items-center rounded-card border border-white/10 bg-bgPrimary p-3 text-center"
+              className="flex w-36 flex-none flex-col items-center rounded-card border border-textPrimary/10 bg-bgPrimary p-3 text-center"
             >
               <Link href={`/u/${item.handle}`} className="block">
-                <div className="mx-auto h-14 w-14 overflow-hidden rounded-full border border-white/10 bg-bgSurface">
+                <div className="mx-auto h-14 w-14 overflow-hidden rounded-full border border-textPrimary/10 bg-bgSurface">
                   {item.avatarUrl ? (
                     <RemoteImage
                       src={item.avatarUrl}

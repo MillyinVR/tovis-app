@@ -1,7 +1,6 @@
 // app/client/bookings/[id]/page.tsx 
 
 import type { ReactNode } from 'react'
-import Link from 'next/link'
 import { formatMoneyFromUnknown } from '@/lib/money'
 import { notFound, redirect } from 'next/navigation'
 
@@ -16,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/_components/ProProfileLink'
+import ClientPage from '../../_components/ClientPage'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import { orderMediaByFeatured } from '@/lib/media/bookingBeforeAfter'
@@ -224,18 +224,18 @@ function friendlyCollectionTiming(value: unknown): string | null {
 function pillClassByVariant(
   _variant: Exclude<StatusVariant, 'neutral'>,
 ): string {
-  return 'border border-white/10 bg-surfaceGlass/10 text-textPrimary'
+  return 'border border-textPrimary/10 bg-surfaceGlass/10 text-textPrimary'
 }
 
 function alertClassByVariant(variant: StatusVariant): string {
-  if (variant === 'neutral') return 'tovis-glass-soft border border-white/10'
-  return 'tovis-glass border border-white/10'
+  if (variant === 'neutral') return 'tovis-glass-soft border border-textPrimary/10'
+  return 'tovis-glass border border-textPrimary/10'
 }
 
 function tabClass(active: boolean): string {
   return cn(
     'inline-flex items-center rounded-full px-4 py-2 text-xs font-black transition',
-    'border border-white/10',
+    'border border-textPrimary/10',
     active
       ? 'bg-accentPrimary text-bgPrimary shadow-sm'
       : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
@@ -245,7 +245,7 @@ function tabClass(active: boolean): string {
 function tabDisabledClass(): string {
   return cn(
     'inline-flex cursor-not-allowed select-none items-center rounded-full px-4 py-2 text-xs font-black opacity-50',
-    'border border-white/10 bg-bgPrimary text-textSecondary',
+    'border border-textPrimary/10 bg-bgPrimary text-textSecondary',
   )
 }
 
@@ -430,7 +430,7 @@ function SectionCard(props: {
   return (
     <section
       className={cn(
-        'rounded-card border border-white/10 p-4 shadow-[0_14px_48px_rgba(0,0,0,0.35)]',
+        'rounded-card border border-textPrimary/10 p-4 shadow-[0_14px_48px_rgb(var(--shadow-color)/0.18)]',
         'tovis-glass',
         props.className,
       )}
@@ -457,7 +457,7 @@ function SectionCard(props: {
 
 function TinyMetaPill({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-2.5 py-1 text-[11px] font-black text-textPrimary">
+    <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-2.5 py-1 text-[11px] font-black text-textPrimary">
       {children}
     </span>
   )
@@ -465,7 +465,7 @@ function TinyMetaPill({ children }: { children: ReactNode }) {
 
 function SummaryRow(props: { label: string; value: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-white/10 py-2 last:border-b-0 last:pb-0 first:pt-0">
+    <div className="flex items-start justify-between gap-3 border-b border-textPrimary/10 py-2 last:border-b-0 last:pb-0 first:pt-0">
       <div className="text-[12px] font-black text-textSecondary">
         {props.label}
       </div>
@@ -513,7 +513,7 @@ function MediaStrip(props: {
                 mediaType={mediaItem.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'}
                 alt={sessionPhotoAlt(props.label, props.serviceName)}
                 caption={sessionPhotoAlt(props.label, props.serviceName)}
-                className="h-32 w-32 shrink-0 rounded-card border border-white/10 bg-bgSecondary"
+                className="h-32 w-32 shrink-0 rounded-card border border-textPrimary/10 bg-bgSecondary"
               />
             )
           })}
@@ -540,7 +540,7 @@ function ServiceBreakdownCard(props: {
         return (
           <div
             key={item.id}
-            className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+            className="rounded-card border border-textPrimary/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.14)]"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -548,7 +548,7 @@ function ServiceBreakdownCard(props: {
                   <div className="text-[14px] font-black text-textPrimary">
                     {itemName}
                   </div>
-                  <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
+                  <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
                     {item.type === 'ADD_ON' ? 'Add-on' : 'Base'}
                   </span>
                   {durationLabel ? (
@@ -587,7 +587,7 @@ function PurchasedProductsCard(props: {
       {props.productSales.map((sale) => (
         <div
           key={sale.id}
-          className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+          className="rounded-card border border-textPrimary/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.14)]"
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -682,7 +682,7 @@ function mediaFullSrc(media: LoadedRenderableMedia | null): string | null {
 
 function AftercarePrivacyNote() {
   return (
-    <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-semibold text-textSecondary">
+    <div className="flex items-start gap-2 rounded-xl border border-textPrimary/10 bg-bgSecondary px-3 py-2 text-[12px] font-semibold text-textSecondary">
       <span aria-hidden className="leading-none">
         🔒
       </span>
@@ -1055,7 +1055,7 @@ export default async function ClientBookingPage(props: {
       subtitle="Notes and consultation details"
       right={
         showConsultationApproval ? (
-          <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+          <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
             {COPY.bookings.consultation.approvalNeeded}
           </span>
         ) : null
@@ -1107,63 +1107,61 @@ export default async function ClientBookingPage(props: {
   )
 
   return (
-    <main className="mx-auto mt-16 w-full max-w-2xl px-4 pb-12 text-textPrimary">
+    // The service name, the status pill and the route back used to live inside
+    // the hero card, where the pill and an absolutely-placed back button sat on
+    // top of the title and squeezed the date into a ~60%-width column. They are
+    // page identity, so they belong in the page header.
+    <ClientPage
+      eyebrow="Booking"
+      title={title}
+      back={{ href: '/client/bookings', label: 'Bookings' }}
+      action={
+        <span
+          className={cn(
+            'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
+            pillClassByVariant(statusVariant),
+          )}
+        >
+          {statusPillLabel}
+        </span>
+      }
+    >
       <section
         className={cn(
-          'rounded-card border border-white/10 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.45)]',
+          'rounded-card border border-textPrimary/10 p-5 shadow-[0_18px_60px_rgb(var(--shadow-color)/0.22)]',
           'tovis-glass',
         )}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[18px] font-black leading-snug text-textPrimary">
-              {title}
-            </div>
+        {/*
+          Full-width now that the status pill and the back link have moved to
+          the page header — the date no longer wraps four times beside them.
+        */}
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold text-textSecondary">
+            {COPY.bookings.withLabel}{' '}
+            <ProProfileLink
+              proId={booking.professional?.id ?? null}
+              label={professionalLabel}
+              className="font-black text-textPrimary hover:opacity-80"
+            />
+          </div>
 
-            <div className="mt-2 text-[13px] font-semibold text-textSecondary">
-              {COPY.bookings.withLabel}{' '}
-              <ProProfileLink
-                proId={booking.professional?.id ?? null}
-                label={professionalLabel}
-                className="font-black text-textPrimary hover:opacity-80"
-              />
-            </div>
-
-            <div className="mt-2 text-[13px] text-textPrimary">
-              <span className="font-black">{whenLabel}</span>
-              <span className="text-textSecondary"> · {friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}</span>
-              {locationLine ? (
-                <span className="text-textSecondary"> · {locationLine}</span>
-              ) : null}
-            </div>
-
-            {proOverrideNote ? (
-              <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">
-                <span className="font-black text-textPrimary">
-                  Note from your pro:
-                </span>{' '}
-                {proOverrideNote}
-              </div>
+          <div className="mt-2 text-[13px] text-textPrimary">
+            <span className="font-black">{whenLabel}</span>
+            <span className="text-textSecondary"> · {friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}</span>
+            {locationLine ? (
+              <span className="text-textSecondary"> · {locationLine}</span>
             ) : null}
           </div>
 
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <span
-              className={cn(
-                'inline-flex items-center rounded-full px-3 py-1 text-xs font-black',
-                pillClassByVariant(statusVariant),
-              )}
-            >
-              {statusPillLabel}
-            </span>
-
-            <Link
-              href="/client/bookings"
-              className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[11px] font-black text-textPrimary hover:bg-surfaceGlass/10"
-            >
-              ← {COPY.bookings.backToBookings}
-            </Link>
-          </div>
+          {proOverrideNote ? (
+            <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">
+              <span className="font-black text-textPrimary">
+                Note from your pro:
+              </span>{' '}
+              {proOverrideNote}
+            </div>
+          ) : null}
         </div>
 
         {(durationMinutes || subtotalLabel || modeLabel || sourceLabel) && (
@@ -1177,7 +1175,7 @@ export default async function ClientBookingPage(props: {
 
             {showConsultationApproval ? (
               <span
-                className="ml-auto inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary"
+                className="ml-auto inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary"
                 title={COPY.bookings.badges.actionRequired}
               >
                 {COPY.bookings.badges.actionRequired}
@@ -1227,7 +1225,7 @@ export default async function ClientBookingPage(props: {
                 }
                 right={
                   booking.display?.addOnCount ? (
-                    <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+                    <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
                       {booking.display.addOnCount} add-on
                       {booking.display.addOnCount === 1 ? '' : 's'}
                     </span>
@@ -1283,7 +1281,7 @@ export default async function ClientBookingPage(props: {
             )}
 
             {step === 'aftercare' && showUnreadAftercareBadge ? (
-              <span className="ml-auto inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[10px] font-black text-textPrimary">
+              <span className="ml-auto inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[10px] font-black text-textPrimary">
                 {COPY.bookings.badges.new}
               </span>
             ) : null}
@@ -1327,7 +1325,7 @@ export default async function ClientBookingPage(props: {
               depositBanner === 'success' ? (
                 <div
                   role="status"
-                  className="rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                  className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
                 >
                   Deposit payment received. We&apos;re confirming it — this page
                   will show your deposit as paid as soon as it finishes
@@ -1361,7 +1359,7 @@ export default async function ClientBookingPage(props: {
                   right={
                     <a
                       href={`${baseHref}?step=consult`}
-                      className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover"
+                      className="inline-flex items-center rounded-full border border-textPrimary/10 bg-accentPrimary px-4 py-2 text-xs font-black text-bgPrimary hover:bg-accentPrimaryHover"
                     >
                       {COPY.bookings.consultation.actionNeededCta}
                     </a>
@@ -1376,7 +1374,7 @@ export default async function ClientBookingPage(props: {
               <div className="flex flex-wrap gap-2">
                 <a
                   href={`/api/v1/calendar?bookingId=${encodeURIComponent(booking.id)}`}
-                  className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
+                  className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-4 py-2 text-xs font-black text-textPrimary hover:bg-surfaceGlass/10"
                 >
                   {COPY.bookings.addToCalendar}
                 </a>
@@ -1613,7 +1611,7 @@ export default async function ClientBookingPage(props: {
                           {checkoutBanner === 'success' ? (
                             <div
                               role="status"
-                              className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                              className="mt-4 rounded-card border border-textPrimary/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
                             >
                               Card payment received. We&apos;re finalizing your booking — this
                               page will reflect the paid status as soon as the
@@ -1624,7 +1622,7 @@ export default async function ClientBookingPage(props: {
                           {checkoutBanner === 'cancelled' ? (
                             <div
                               role="status"
-                              className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                              className="mt-4 rounded-card border border-textPrimary/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
                             >
                               Card checkout was cancelled. You can try again or pick a
                               different payment method below.
@@ -1750,6 +1748,6 @@ export default async function ClientBookingPage(props: {
           ) : null}
         </>
       ) : null}
-    </main>
+    </ClientPage>
   )
 }

@@ -16,9 +16,8 @@ export default async function ShareLookPage({
 
   if (!data) notFound()
 
-  return (
-    <main className="min-h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] bg-bgPrimary">
-      <ShareLookSheet data={data} />
-    </main>
-  )
+  // ShareLookSheet mounts <ClientPage> itself — the sheet is a client component
+  // and its header is part of that component's own state-driven layout.
+  return <ShareLookSheet data={data} />
+
 }

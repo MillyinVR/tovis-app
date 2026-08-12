@@ -39,7 +39,7 @@ const PRIMARY_BUTTON =
   'brand-button-primary brand-focus inline-flex items-center justify-center gap-1 rounded-full px-4 py-2 text-[12px] disabled:cursor-not-allowed disabled:opacity-60'
 
 const SECONDARY_BUTTON =
-  'brand-focus inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60'
+  'brand-focus inline-flex items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60'
 
 function errorFrom(data: unknown): string {
   if (isRecord(data)) {
@@ -110,7 +110,7 @@ export default function ClientConfirmationCard(props: Props) {
   }
 
   return (
-    <div className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
+    <div className="mt-3 rounded-card border border-textPrimary/10 bg-bgSecondary p-4">
       {confirmed ? (
         <div className="rounded-card border border-toneSuccess/20 bg-toneSuccess/5 px-4 py-3">
           <div className="text-sm font-black text-textPrimary">

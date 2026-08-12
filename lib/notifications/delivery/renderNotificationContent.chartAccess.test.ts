@@ -5,9 +5,9 @@
 // `eventKeys.ts` but missing from the renderer map throws at DELIVERY time —
 // long after every unit test has gone green.
 //
-// The href matters as much as the copy: `/client/settings#chart-sharing` is the
+// The href matters as much as the copy: `/client/settings/chart-sharing` is the
 // only surface that can answer the request, and both sanitizers reject anything
-// not starting with a single `/`. A fragment must survive intact.
+// not starting with a single `/`.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { NotificationChannel, NotificationEventKey } from '@prisma/client'
 
@@ -16,7 +16,7 @@ import { rootTenantContext } from '@/lib/tenant/context'
 import { NOTIFICATION_EVENT_DEFINITIONS } from '../eventKeys'
 import { renderNotificationContent } from './renderNotificationContent'
 
-const CHART_SHARE_HREF = '/client/settings#chart-sharing'
+const CHART_SHARE_HREF = '/client/settings/chart-sharing'
 
 describe('chart-access notification rendering', () => {
   const originalAppUrl = process.env.APP_URL

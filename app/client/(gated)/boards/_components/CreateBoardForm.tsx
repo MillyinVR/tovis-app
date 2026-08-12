@@ -30,8 +30,8 @@ function SubmitButton() {
       type="submit"
       disabled={pending}
       className={cn(
-        'inline-flex min-h-11 items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2',
-        'text-[12px] font-bold text-textPrimary transition hover:border-white/20',
+        'inline-flex min-h-11 items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary px-4 py-2',
+        'text-[12px] font-bold text-textPrimary transition hover:border-textPrimary/20',
         'disabled:cursor-not-allowed disabled:opacity-60',
       )}
     >
@@ -62,8 +62,8 @@ function Chip({
       className={cn(
         CHIP_BASE_CLASS,
         selected
-          ? 'border-white/40 bg-bgPrimary text-textPrimary'
-          : 'border-white/10 bg-bgPrimary/60 text-textSecondary hover:border-white/20 hover:text-textPrimary',
+          ? 'border-textPrimary/40 bg-bgPrimary text-textPrimary'
+          : 'border-textPrimary/10 bg-bgPrimary/60 text-textSecondary hover:border-textPrimary/20 hover:text-textPrimary',
       )}
     >
       {children}
@@ -118,7 +118,7 @@ export default function CreateBoardForm({
   return (
     <section
       className={cn(
-        'rounded-card border border-white/10 bg-bgSecondary p-4',
+        'rounded-card border border-textPrimary/10 bg-bgSecondary p-4',
         className,
       )}
     >
@@ -145,9 +145,9 @@ export default function CreateBoardForm({
             autoComplete="off"
             required
             className={cn(
-              'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-3',
+              'w-full rounded-card border border-textPrimary/10 bg-bgPrimary px-3 py-3',
               'text-[14px] text-textPrimary outline-none transition',
-              'placeholder:text-textMuted focus:border-white/20',
+              'placeholder:text-textMuted focus:border-textPrimary/20',
             )}
           />
         </div>
@@ -188,9 +188,9 @@ export default function CreateBoardForm({
               value={eventDate}
               onChange={(event) => setEventDate(event.target.value)}
               className={cn(
-                'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-3',
+                'w-full rounded-card border border-textPrimary/10 bg-bgPrimary px-3 py-3',
                 'text-[14px] text-textPrimary outline-none transition',
-                'focus:border-white/20',
+                'focus:border-textPrimary/20',
               )}
             />
             <p className="mt-2 text-[12px] leading-5 text-textSecondary">
@@ -261,9 +261,9 @@ export default function CreateBoardForm({
             name="visibility"
             defaultValue="PRIVATE"
             className={cn(
-              'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-3',
+              'w-full rounded-card border border-textPrimary/10 bg-bgPrimary px-3 py-3',
               'text-[14px] text-textPrimary outline-none transition',
-              'focus:border-white/20',
+              'focus:border-textPrimary/20',
             )}
           >
             <option value="PRIVATE">Private</option>
@@ -277,7 +277,7 @@ export default function CreateBoardForm({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-white/10 pt-3">
+        <div className="flex flex-wrap items-center gap-3 border-t border-textPrimary/10 pt-3">
           <SubmitButton />
 
           {cancelHref ? (

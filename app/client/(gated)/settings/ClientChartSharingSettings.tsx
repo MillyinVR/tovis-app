@@ -129,7 +129,7 @@ export default function ClientChartSharingSettings() {
   return (
     <div className="flex flex-col gap-3">
       {error ? (
-        <div className="rounded-inner border border-white/10 bg-bgPrimary/25 p-3 text-[13px] font-semibold text-toneDanger">
+        <div className="rounded-inner border border-textPrimary/10 bg-bgPrimary/25 p-3 text-[13px] font-semibold text-toneDanger">
           {error}
         </div>
       ) : null}
@@ -144,7 +144,7 @@ export default function ClientChartSharingSettings() {
       {shares.map((share) => (
         <div
           key={share.professionalId}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-inner border border-white/10 bg-bgPrimary/20 p-3"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-inner border border-textPrimary/10 bg-bgPrimary/20 p-3"
         >
           <div className="flex min-w-0 items-center gap-3">
             <ProProfileLink

@@ -346,7 +346,7 @@ async function createStripeCheckoutSession(args: {
 
 function SummaryRow(props: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-white/10 py-2 last:border-b-0 last:pb-0 first:pt-0">
+    <div className="flex items-start justify-between gap-3 border-b border-textPrimary/10 py-2 last:border-b-0 last:pb-0 first:pt-0">
       <div className="text-[12px] font-black text-textSecondary">
         {props.label}
       </div>
@@ -380,7 +380,7 @@ function CopyChip(props: { label: string; value: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary"
+      className="inline-flex items-center gap-1 rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary"
     >
       <span>{props.label}</span>
       <span className="text-[11px] font-black text-textSecondary">
@@ -692,7 +692,7 @@ export default function ClientCheckoutCard(props: Props) {
 
   return (
     <div className="grid gap-4">
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+      <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
         <div className="text-[12px] font-black text-textPrimary">
           Client checkout
         </div>
@@ -766,7 +766,7 @@ export default function ClientCheckoutCard(props: Props) {
         </div>
       </div>
 
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+      <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
         <div className="text-[12px] font-black text-textPrimary">Tip</div>
 
         {tipsEnabled ? (
@@ -788,8 +788,8 @@ export default function ClientCheckoutCard(props: Props) {
                       className={[
                         'inline-flex items-center rounded-full border px-4 py-2 text-[12px] font-black disabled:cursor-not-allowed disabled:opacity-50',
                         active
-                          ? 'border-white/10 bg-accentPrimary text-bgPrimary'
-                          : 'border-white/10 bg-bgSecondary text-textPrimary',
+                          ? 'border-textPrimary/10 bg-accentPrimary text-bgPrimary'
+                          : 'border-textPrimary/10 bg-bgSecondary text-textPrimary',
                       ].join(' ')}
                     >
                       {percent}% ·{' '}
@@ -814,7 +814,7 @@ export default function ClientCheckoutCard(props: Props) {
                   onChange={(event) => onTipInputChange(event.target.value)}
                   disabled={controlsFrozen || isPending || !allowCustomTip}
                   placeholder="0.00"
-                  className="h-10 w-28 rounded-full border border-white/10 bg-bgSecondary px-4 text-[13px] font-black text-textPrimary outline-none placeholder:text-textSecondary disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 w-28 rounded-full border border-textPrimary/10 bg-bgSecondary px-4 text-[13px] font-black text-textPrimary outline-none placeholder:text-textSecondary disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label="Custom tip amount"
                 />
               </div>
@@ -837,7 +837,7 @@ export default function ClientCheckoutCard(props: Props) {
         )}
       </div>
 
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+      <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
         <div className="text-[12px] font-black text-textPrimary">
           Payment method
         </div>
@@ -856,8 +856,8 @@ export default function ClientCheckoutCard(props: Props) {
                   className={[
                     'flex w-full items-start justify-between gap-3 rounded-card border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-50',
                     active
-                      ? 'border-white/10 bg-accentPrimary text-bgPrimary'
-                      : 'border-white/10 bg-bgSecondary text-textPrimary',
+                      ? 'border-textPrimary/10 bg-accentPrimary text-bgPrimary'
+                      : 'border-textPrimary/10 bg-bgSecondary text-textPrimary',
                   ].join(' ')}
                 >
                   <div className="min-w-0">
@@ -888,7 +888,7 @@ export default function ClientCheckoutCard(props: Props) {
         )}
       </div>
 
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+      <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="text-[12px] font-black text-textPrimary">
@@ -914,7 +914,7 @@ export default function ClientCheckoutCard(props: Props) {
                   type="button"
                   onClick={handleSaveTip}
                   disabled={controlsFrozen || isPending}
-                  className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center justify-center rounded-full border border-textPrimary/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label="Save tip without confirming payment"
                 >
                   {isPending ? 'Saving…' : 'Save tip'}
@@ -958,7 +958,7 @@ export default function ClientCheckoutCard(props: Props) {
                 </div>
               </>
             ) : (
-              <div className="rounded-card border border-white/10 bg-bgSecondary p-3">
+              <div className="rounded-card border border-textPrimary/10 bg-bgSecondary p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <CopyChip label={`Send to ${payAction.handle}`} value={payAction.handle} />
                   <CopyChip label={`Amount $${payAction.amount}`} value={payAction.amount} />

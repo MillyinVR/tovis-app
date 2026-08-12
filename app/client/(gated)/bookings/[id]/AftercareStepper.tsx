@@ -17,7 +17,7 @@ export type AftercareStep = {
 
 function chipClass(active: boolean): string {
   return [
-    'inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs font-black transition',
+    'inline-flex items-center gap-2 rounded-full border border-textPrimary/10 px-4 py-2 text-xs font-black transition',
     active
       ? 'bg-accentPrimary text-bgPrimary shadow-sm'
       : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
@@ -83,7 +83,7 @@ export default function AftercareStepper(props: {
           type="button"
           onClick={() => setActiveIndex(index - 1)}
           disabled={isFirst}
-          className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-40"
         >
           ← Back
         </button>

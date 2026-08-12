@@ -74,13 +74,13 @@ export default function BoardEventCountdown({
   }
 
   const buttonClass = cn(
-    'inline-flex min-h-9 items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1.5',
-    'text-[12px] font-bold text-textPrimary transition hover:border-white/20',
+    'inline-flex min-h-9 items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1.5',
+    'text-[12px] font-bold text-textPrimary transition hover:border-textPrimary/20',
     'disabled:cursor-not-allowed disabled:opacity-60',
   )
 
   return (
-    <section className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
+    <section className="mt-3 rounded-card border border-textPrimary/10 bg-bgSecondary p-4">
       {editing ? (
         <div className="flex flex-wrap items-center gap-3">
           <input
@@ -89,8 +89,8 @@ export default function BoardEventCountdown({
             onChange={(event) => setDraft(event.target.value)}
             aria-label={`Date of ${noun}`}
             className={cn(
-              'rounded-card border border-white/10 bg-bgPrimary px-3 py-2',
-              'text-[13px] text-textPrimary outline-none transition focus:border-white/20',
+              'rounded-card border border-textPrimary/10 bg-bgPrimary px-3 py-2',
+              'text-[13px] text-textPrimary outline-none transition focus:border-textPrimary/20',
             )}
           />
           <button

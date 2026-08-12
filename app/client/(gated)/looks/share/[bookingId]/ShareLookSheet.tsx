@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ClientPage from '../../../_components/ClientPage'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
 import {
@@ -188,16 +189,17 @@ export default function ShareLookSheet({ data }: { data: ShareLookPageData }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[470px] px-5 pb-28 pt-6 text-textPrimary">
-      <header className="mb-5">
-        <h1 className="font-display text-[22px] font-semibold italic leading-none">
-          {copy.title}
-        </h1>
-        <div className="mt-2 text-[11px] font-bold uppercase tracking-[0.12em] text-textSecondary">
-          {copy.subtitlePrefix} · {data.visitDateLabel} · {data.professionalName}
-        </div>
-      </header>
-
+    <ClientPage
+      eyebrow={copy.subtitlePrefix}
+      title={copy.title}
+      // The visit reads as a sentence, not a mono eyebrow — pro names are long
+      // enough to wrap an all-caps tracked line onto two.
+      lede={`${data.visitDateLabel} with ${data.professionalName}.`}
+      back={{
+        href: `/client/bookings/${encodeURIComponent(data.bookingId)}`,
+        label: 'Booking',
+      }}
+    >
       {/* before / after */}
       <div className="mb-5 grid grid-cols-2 gap-2">
         <PhotoSlot
@@ -299,7 +301,7 @@ export default function ShareLookSheet({ data }: { data: ShareLookPageData }) {
           {copy.privateCta}
         </button>
       </div>
-    </div>
+    </ClientPage>
   )
 }
 

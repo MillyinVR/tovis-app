@@ -15,7 +15,10 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { formatRelativeTimeAgo } from '@/lib/time'
+
+import ClientPage from '../_components/ClientPage'
 
 import type {
   ActivityIconKind,
@@ -216,49 +219,43 @@ export default function ClientActivityFrame({
   const lastIndex = useMemo(() => rows.length - 1, [rows.length])
 
   return (
-    <div className="h-full overflow-y-auto bg-bgPrimary text-textPrimary">
-      <div className="mx-auto w-full max-w-[600px] px-[18px] pb-28 pt-6 sm:px-[30px] lg:px-[40px]">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h1 className="text-[26px] font-black tracking-[-0.02em] text-textPrimary">
-            Activity
-          </h1>
-          <button
-            type="button"
-            onClick={markAllRead}
-            disabled={!hasUnread || marking}
-            className={[
-              'text-[12.5px] font-bold transition brand-focus',
-              hasUnread
-                ? 'cursor-pointer text-accentPrimary hover:opacity-80'
-                : 'cursor-default text-textSecondary/50',
-            ].join(' ')}
-          >
-            Mark all read
-          </button>
+    <ClientPage
+      eyebrow="Activity"
+      title="Who engaged with you"
+      back={{ href: '/client', label: 'Home' }}
+      action={
+        <button
+          type="button"
+          onClick={markAllRead}
+          disabled={!hasUnread || marking}
+          className={[
+            'text-[12.5px] font-bold transition brand-focus',
+            hasUnread
+              ? 'cursor-pointer text-accentPrimary hover:opacity-80'
+              : 'cursor-default text-textSecondary/50',
+          ].join(' ')}
+        >
+          Mark all read
+        </button>
+      }
+    >
+      {rows.length > 0 ? (
+        <div className="flex flex-col">
+          {rows.map((item, index) => (
+            <ActivityRow
+              key={item.id}
+              item={item}
+              withDivider={index !== lastIndex}
+            />
+          ))}
         </div>
-
-        {rows.length > 0 ? (
-          <div className="flex flex-col">
-            {rows.map((item, index) => (
-              <ActivityRow
-                key={item.id}
-                item={item}
-                withDivider={index !== lastIndex}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="mt-6 rounded-[22px] border border-textPrimary/10 bg-bgSecondary px-5 py-12 text-center">
-            <div className="text-[15px] font-black text-textPrimary">
-              No activity yet
-            </div>
-            <p className="mx-auto mt-2 max-w-[320px] text-[13px] leading-relaxed text-textSecondary">
-              When someone follows you or engages with your looks, it’ll show up
-              here.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
+      ) : (
+        <EmptyState
+          title="No activity yet"
+          description="When someone follows you or engages with your looks, it’ll show up here."
+          action={{ label: 'Browse looks', href: '/looks' }}
+        />
+      )}
+    </ClientPage>
   )
 }

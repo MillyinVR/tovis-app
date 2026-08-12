@@ -175,7 +175,7 @@ export default function ClientDepositCard({
   }
 
   return (
-    <section className="rounded-card border border-white/10 bg-bgSecondary p-4">
+    <section className="rounded-card border border-textPrimary/10 bg-bgSecondary p-4">
       <div className="text-[13px] font-black text-textPrimary">
         {prepaysInFull ? 'Pay for your appointment' : 'Secure your booking'}
       </div>
@@ -193,7 +193,7 @@ export default function ClientDepositCard({
           : ''}
       </div>
 
-      <div className="mt-3 grid gap-1 rounded-card border border-white/10 bg-bgPrimary p-3 text-[13px]">
+      <div className="mt-3 grid gap-1 rounded-card border border-textPrimary/10 bg-bgPrimary p-3 text-[13px]">
         {depositLabel ? (
           <div className="flex items-center justify-between">
             {/* Not "Service total": the up-front charge can legitimately EXCEED
@@ -220,7 +220,7 @@ export default function ClientDepositCard({
             itemisation names two numbers and leaves the client to add them up
             before being sent to Stripe for a third. */}
         {feeLabel && depositDueTodayCents != null ? (
-          <div className="mt-1 flex items-center justify-between border-t border-white/10 pt-2">
+          <div className="mt-1 flex items-center justify-between border-t border-textPrimary/10 pt-2">
             <span className="font-semibold text-textPrimary">Total due today</span>
             <span className="font-black text-textPrimary">
               {centsToMoney(depositDueTodayCents + feeCents)}
@@ -240,7 +240,7 @@ export default function ClientDepositCard({
         className={[
           'mt-3 w-full rounded-card border px-4 py-3 text-[13px] font-black transition',
           pending
-            ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+            ? 'cursor-not-allowed border-textPrimary/10 bg-bgPrimary text-textSecondary opacity-70'
             : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
         ].join(' ')}
       >

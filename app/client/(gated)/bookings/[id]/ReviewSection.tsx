@@ -94,7 +94,7 @@ function errorFromResponse(res: Response, data: unknown) {
 function btnBase(disabled?: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black transition',
-    'border border-white/10',
+    'border border-textPrimary/10',
     disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-surfaceGlass/10',
   ].join(' ')
 }
@@ -102,7 +102,7 @@ function btnBase(disabled?: boolean) {
 function btnPrimary(disabled?: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black transition',
-    'border border-white/10',
+    'border border-textPrimary/10',
     disabled
       ? 'cursor-not-allowed opacity-70 bg-bgPrimary text-textSecondary'
       : 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
@@ -112,7 +112,7 @@ function btnPrimary(disabled?: boolean) {
 function btnDanger(disabled?: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black transition',
-    'border border-white/10',
+    'border border-textPrimary/10',
     disabled
       ? 'cursor-not-allowed opacity-70 bg-bgPrimary text-textSecondary'
       : 'bg-bgPrimary text-microAccent hover:bg-surfaceGlass/10',
@@ -122,7 +122,7 @@ function btnDanger(disabled?: boolean) {
 function tinyBtn(disabled?: boolean, active?: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-3 py-1 text-[11px] font-black transition',
-    'border border-white/10',
+    'border border-textPrimary/10',
     disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-surfaceGlass/10',
     active ? 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover' : 'bg-bgPrimary text-textPrimary',
   ].join(' ')
@@ -746,7 +746,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
   function SelectedCountPill() {
     if (hasReview) return null
     return (
-      <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+      <div className="inline-flex items-center gap-2 rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
         Added to review: {selectedApptMediaIds.length}/{APPT_SELECT_MAX}
       </div>
     )
@@ -771,7 +771,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
             const isVideo = m.mediaType === 'VIDEO'
 
             return (
-              <div key={m.id} className="overflow-hidden rounded-card border border-white/10 bg-bgPrimary">
+              <div key={m.id} className="overflow-hidden rounded-card border border-textPrimary/10 bg-bgPrimary">
                 <button
                   type="button"
                   onClick={() => setPreview({ url: m.url, mediaType: m.mediaType })}
@@ -837,9 +837,9 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-4xl overflow-hidden rounded-card border border-white/10 bg-bgSecondary shadow-2xl"
+            className="w-full max-w-4xl overflow-hidden rounded-card border border-textPrimary/10 bg-bgSecondary shadow-2xl"
           >
-            <div className="flex items-center justify-between border-b border-white/10 p-3">
+            <div className="flex items-center justify-between border-b border-textPrimary/10 p-3">
               <div className="text-xs font-semibold text-textSecondary">
                 {preview.mediaType === 'VIDEO' ? 'Video preview' : 'Image preview'}
               </div>
@@ -859,7 +859,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
         </div>
       ) : null}
 
-      <section className="mt-5 grid gap-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+      <section className="mt-5 grid gap-3 rounded-card border border-textPrimary/10 bg-bgSecondary p-3 text-textPrimary">
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-black">{hasReview ? 'Your review' : 'Leave a review'}</div>
           {!hasReview ? <SelectedCountPill /> : null}
@@ -896,7 +896,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
           onChange={(e) => setHeadline(e.target.value)}
           placeholder="Headline (optional)"
           disabled={loading}
-          className="w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary outline-none"
+          className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary outline-none"
         />
 
         <textarea
@@ -905,12 +905,12 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
           placeholder="Write your review (optional)"
           rows={4}
           disabled={loading}
-          className="w-full resize-y rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary outline-none"
+          className="w-full resize-y rounded-card border border-textPrimary/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary outline-none"
         />
 
         {/* Appointment media appears AGAIN on review screen */}
         {!hasReview ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+          <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
             <div className="text-xs font-black">Your booking photos (optional)</div>
             <div className="mt-1 text-xs font-semibold text-textSecondary">
               These are visible in your aftercare summary already. If you add them here, they’ll be shown on your public
@@ -927,7 +927,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
 
         {/* Existing review media */}
         {hasReview ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+          <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
             <div className="text-xs font-black">Media on your review</div>
             <div className="mt-1 text-xs font-semibold text-textSecondary">
               These are part of your public review. (Once attached, they can’t be removed.)
@@ -938,7 +938,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
                 {reviewMediaList.map((m) => {
                   const thumb = m.thumbUrl || m.url
                   return (
-                    <div key={m.id} className="overflow-hidden rounded-card border border-white/10 bg-bgSecondary">
+                    <div key={m.id} className="overflow-hidden rounded-card border border-textPrimary/10 bg-bgSecondary">
                       <button
                         type="button"
                         onClick={() => setPreview({ url: m.url, mediaType: m.mediaType })}
@@ -959,7 +959,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
         ) : null}
 
         {/* Upload picker + queue */}
-        <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3">
+        <div className="grid gap-2 rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-black">Upload new photos/videos for your review</div>
@@ -983,7 +983,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
             multiple
             disabled={loading}
             onChange={(e) => onPickFiles(e.target.files)}
-            className="w-full rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none file:mr-3 file:rounded-full file:border file:border-white/10 file:bg-bgPrimary file:px-3 file:py-2 file:text-xs file:font-black file:text-textPrimary"
+            className="w-full rounded-card border border-textPrimary/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none file:mr-3 file:rounded-full file:border file:border-textPrimary/10 file:bg-bgPrimary file:px-3 file:py-2 file:text-xs file:font-black file:text-textPrimary"
           />
 
           {pending.length > 0 ? (
@@ -1015,7 +1015,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
 
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {pending.map((p) => (
-                  <div key={p.id} className="overflow-hidden rounded-card border border-white/10 bg-bgSecondary">
+                  <div key={p.id} className="overflow-hidden rounded-card border border-textPrimary/10 bg-bgSecondary">
                     <button
                       type="button"
                       onClick={() => setPreview({ url: p.localUrl, mediaType: p.mediaType })}
@@ -1046,7 +1046,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
                         type="button"
                         onClick={() => removePending(p.id)}
                         disabled={loading || p.status === 'UPLOADING'}
-                        className="rounded-full border border-white/10 bg-bgPrimary px-2 py-1 text-[11px] font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-70"
+                        className="rounded-full border border-textPrimary/10 bg-bgPrimary px-2 py-1 text-[11px] font-black text-textPrimary transition hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-70"
                         title="Remove"
                         aria-label="Remove photo"
                       >

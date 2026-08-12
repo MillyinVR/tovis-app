@@ -74,20 +74,20 @@ export default async function ClientNewBoardModalPage(props: {
     <div className={`fixed inset-0 ${zClass.modal}`}>
       <DismissModalButton
         ariaLabel="Close create board modal"
-        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-overlay/70 backdrop-blur-[2px]"
       />
 
       <div className="pointer-events-none relative z-10 flex min-h-full items-end justify-center px-4 pb-2 pt-2 sm:items-center sm:p-4">
         <div
           className="
             pointer-events-auto flex w-full max-w-lg flex-col
-            rounded-card border border-white/10 bg-bgSecondary
-            shadow-[0_24px_80px_rgba(0,0,0,0.45)]
+            rounded-card border border-textPrimary/10 bg-bgSecondary
+            shadow-[0_24px_80px_rgb(var(--shadow-color)/0.22)]
             h-[min(760px,calc(100dvh-0.5rem))]
             overflow-hidden
           "
         >
-          <div className="shrink-0 border-b border-white/10 px-4 py-4">
+          <div className="shrink-0 border-b border-textPrimary/10 px-4 py-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-textSecondary/60">
@@ -103,7 +103,7 @@ export default async function ClientNewBoardModalPage(props: {
 
               <DismissModalButton
                 ariaLabel="Close"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-bgPrimary text-textSecondary transition hover:border-white/20 hover:text-textPrimary"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary text-textSecondary transition hover:border-textPrimary/20 hover:text-textPrimary"
               >
                 ×
               </DismissModalButton>

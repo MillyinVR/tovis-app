@@ -123,8 +123,9 @@ export default function SubmitViralLookForm() {
           </label>
           <label className="mb-3 flex items-center gap-2.5 rounded-[12px] border border-textPrimary/10 bg-[rgb(var(--surface-glass)/0.05)] px-3 py-[11px]">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-textMuted">
-              <path d="M4 7h16M7 7l1 13h8l1-13" />
-              <path d="M9 7V4h6v3" />
+              {/* Tag — this field names the look. (It used to be a trash can.) */}
+              <path d="M3 11.5V4a1 1 0 0 1 1-1h7.5a1 1 0 0 1 .7.3l8.5 8.5a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0L3.3 12.2a1 1 0 0 1-.3-.7Z" />
+              <path d="M7.5 7.5h.01" />
             </svg>
             <input
               type="text"

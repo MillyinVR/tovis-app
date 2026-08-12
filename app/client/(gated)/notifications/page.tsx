@@ -9,13 +9,14 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { getCurrentUser } from '@/lib/currentUser'
-import { getBrandConfig } from '@/lib/brand'
 import { prisma } from '@/lib/prisma'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { DEFAULT_TIME_ZONE, getZonedParts } from '@/lib/timeZone'
 import { NotificationEventKey, Prisma, Role } from '@prisma/client'
 
+import ClientPage from '../_components/ClientPage'
 import ClientNotificationCard from './ClientNotificationCard'
 import ClientMarkAllReadButton from './ClientMarkAllReadButton'
 
@@ -217,7 +218,6 @@ export default async function ClientNotificationsPage(props: {
   searchParams?: SearchParams
 }) {
   const user = await getCurrentUser()
-  const brand = getBrandConfig()
 
   if (!user || user.role !== Role.CLIENT || !user.clientProfile?.id) {
     redirect('/login?from=/client/notifications')
@@ -328,48 +328,38 @@ export default async function ClientNotificationsPage(props: {
   ] as const
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 pb-24 pt-4">
-      <div className="sticky top-3 z-30 rounded-card border border-surfaceGlass/10 bg-bgSecondary/85 p-3 shadow-soft backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-textSecondary">
-              {brand.displayName}
-            </div>
-            <h1 className="mt-1 truncate text-[18px] font-black text-textPrimary">
-              Notifications
-            </h1>
-            <div className="mt-1 text-[11px] text-textSecondary">
-              {matchCount ? (
-                <>
-                  Showing{' '}
-                  <span className="font-extrabold text-textPrimary">
-                    {rows.length}
-                  </span>{' '}
-                  of{' '}
-                  <span className="font-extrabold text-textPrimary">
-                    {matchCount}
-                  </span>
-                  {category ? <> • {categoryLabel(category)}</> : null}
-                  {unreadOnly ? <> • Unread only</> : null}
-                </>
-              ) : (
-                'No notifications yet'
-              )}
-            </div>
-          </div>
-
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <Link
-              href="/client/settings#notifications"
-              prefetch={false}
-              className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/35 px-3 py-1 text-[11px] font-black text-textSecondary transition hover:text-textPrimary"
-            >
-              Settings
-            </Link>
-          </div>
+    <ClientPage
+      eyebrow="Notifications"
+      // Short on purpose: this header carries two controls, and at 390px a
+      // longer title pushes them into a cramped two-line stack.
+      title="Your updates"
+      lede={
+        matchCount
+          ? `Showing ${rows.length} of ${matchCount}${
+              category ? ` · ${categoryLabel(category)}` : ''
+            }${unreadOnly ? ' · unread only' : ''}`
+          : undefined
+      }
+      back={{ href: '/client', label: 'Home' }}
+      width="wide"
+      action={
+        <div className="flex items-center gap-2">
+          {rows.length > 0 ? (
+            <ClientMarkAllReadButton unreadCount={unreadCount} />
+          ) : null}
+          <Link
+            href="/client/settings/notifications"
+            prefetch={false}
+            className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/35 px-3 py-1 text-[11px] font-black text-textSecondary transition hover:text-textPrimary"
+          >
+            Settings
+          </Link>
         </div>
-
-        <div className="mt-3 flex flex-wrap gap-2">
+      }
+      headerExtra={
+        // Filters ONLY. "Mark all read" and "Show more" used to sit in this row
+        // too, so four filters read as six.
+        <div className="sticky top-0 z-30 -mx-1 mb-5 flex flex-wrap gap-2 bg-bgPrimary/85 px-1 py-2 backdrop-blur-xl">
           {chips.map((chip) => (
             <Link
               key={chip.label}
@@ -386,48 +376,16 @@ export default async function ClientNotificationsPage(props: {
               {chip.label}
             </Link>
           ))}
-
-          {rows.length > 0 ? (
-            <ClientMarkAllReadButton unreadCount={unreadCount} />
-          ) : null}
-
-          {canShowMore ? (
-            <Link
-              href={buildHref(base, { ...baseQuery, take: String(takeNext) })}
-              prefetch={false}
-              className="ml-auto inline-flex items-center rounded-full border border-accentPrimary/35 bg-accentPrimary/12 px-3 py-1.5 text-[12px] font-extrabold text-textPrimary transition hover:border-accentPrimary/55"
-            >
-              Show more
-            </Link>
-          ) : null}
         </div>
-      </div>
-
-      <div className="mt-4 grid gap-4">
+      }
+    >
+      <div className="grid gap-4">
         {rows.length === 0 ? (
-          <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-5">
-            <div className="text-[15px] font-black text-textPrimary">
-              You’re all caught up.
-            </div>
-            <div className="mt-1 text-[12px] text-textSecondary">
-              Booking confirmations, reminders, payments, and updates from your
-              pros will appear here.
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Link
-                href="/client"
-                className="inline-flex items-center rounded-full border border-surfaceGlass/15 bg-bgPrimary/35 px-3 py-2 text-[12px] font-extrabold text-textPrimary transition hover:border-surfaceGlass/25"
-              >
-                Go home
-              </Link>
-              <Link
-                href="/client/bookings"
-                className="inline-flex items-center rounded-full border border-surfaceGlass/15 bg-bgPrimary/35 px-3 py-2 text-[12px] font-extrabold text-textPrimary transition hover:border-surfaceGlass/25"
-              >
-                My bookings
-              </Link>
-            </div>
-          </div>
+          <EmptyState
+            title="You’re all caught up"
+            description="Booking confirmations, reminders, payments, and updates from your pros will appear here."
+            action={{ label: 'Your bookings', href: '/client/bookings' }}
+          />
         ) : (
           grouped.map((group) => (
             <section key={group.key} className="grid gap-2">
@@ -462,6 +420,20 @@ export default async function ClientNotificationsPage(props: {
           ))
         )}
       </div>
-    </main>
+
+      {/*
+        Load-more belongs under the list it extends, not in the filter row where
+        it used to sit reading as a sixth filter.
+      */}
+      {canShowMore ? (
+        <Link
+          href={buildHref(base, { ...baseQuery, take: String(takeNext) })}
+          prefetch={false}
+          className="mt-4 flex h-11 w-full items-center justify-center rounded-full border border-accentPrimary/35 bg-accentPrimary/12 text-[13px] font-extrabold text-textPrimary transition hover:border-accentPrimary/55"
+        >
+          Show more
+        </Link>
+      ) : null}
+    </ClientPage>
   )
 }

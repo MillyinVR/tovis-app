@@ -19,7 +19,9 @@ import {
 } from '@/lib/booking/statusLabel'
 import { COPY } from '@/lib/copy'
 import { Avatar, Badge, Card, CardLinkOverlay } from '@/app/_components/ui'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import ProProfileLink from '@/app/_components/ProProfileLink'
+import ClientPage from '../_components/ClientPage'
 
 import {
   formatDateTime,
@@ -256,7 +258,7 @@ export default function AppointmentsList({
   aftercare?: ClientAftercareInboxItemDTO[]
 }) {
   // Aftercare counts toward "is there anything here". A summary outliving its
-  // booking row would otherwise be hidden behind the "No appointments yet" card.
+  // booking row would otherwise be hidden behind the "No bookings yet" card.
   const isEmpty =
     buckets.upcoming.length === 0 &&
     buckets.pending.length === 0 &&
@@ -266,26 +268,21 @@ export default function AppointmentsList({
     aftercare.length === 0
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-7 pb-16 pt-2">
-      <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-textPrimary">
-        Appointments
-      </h1>
-
+    // "Bookings", not "Appointments": lib/copy.ts's glossary says user-facing
+    // copy always says booking, and the home card the client tapped to get here
+    // says "All bookings →". iOS AppointmentsView carries the same title change.
+    <ClientPage
+      eyebrow="Your bookings"
+      title="Everything you’ve booked"
+      back={{ href: '/client', label: 'Home' }}
+    >
+      <div className="flex flex-col gap-7">
       {isEmpty ? (
-        <Card className="text-center">
-          <p className="text-[15px] font-semibold text-textPrimary">
-            No appointments yet
-          </p>
-          <p className="mt-1.5 text-[13px] text-textMuted">
-            Once you book, your appointments show up here.
-          </p>
-          <Link
-            href="/search"
-            className="mt-4 inline-block font-display text-[13px] font-semibold text-accentPrimary transition hover:opacity-80"
-          >
-            Find a pro →
-          </Link>
-        </Card>
+        <EmptyState
+          title="No bookings yet"
+          description="Once you book, everything you’ve booked shows up here."
+          action={{ label: 'Find a pro', href: '/search' }}
+        />
       ) : (
         <>
           {buckets.upcoming.length > 0 ? (
@@ -358,6 +355,7 @@ export default function AppointmentsList({
           ) : null}
         </>
       )}
-    </div>
+      </div>
+    </ClientPage>
   )
 }

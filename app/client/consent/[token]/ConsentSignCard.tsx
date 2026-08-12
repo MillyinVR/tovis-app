@@ -89,7 +89,7 @@ export function ConsentSignCard(props: Props) {
   return (
     <form
       onSubmit={submit}
-      className="rounded-card border border-white/10 bg-bgSecondary p-5"
+      className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5"
     >
       <div className="text-sm font-black text-textPrimary">Sign this form</div>
 
@@ -104,7 +104,7 @@ export function ConsentSignCard(props: Props) {
           maxLength={CONSENT_SIGNATURE_NAME_MAX}
           autoComplete="name"
           placeholder="Type your full name"
-          className="w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+          className="w-full rounded-xl border border-textPrimary/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
         />
       </label>
 

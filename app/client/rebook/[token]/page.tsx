@@ -88,7 +88,7 @@ function MediaStrip(props: {
               fullSrc={item.url || item.thumbUrl}
               mediaType={item.mediaType?.toUpperCase() === 'VIDEO' ? 'VIDEO' : 'IMAGE'}
               alt={props.title}
-              className="aspect-square w-full rounded-card border border-white/10 bg-bgPrimary"
+              className="aspect-square w-full rounded-card border border-textPrimary/10 bg-bgPrimary"
             />
           ))}
         </div>
@@ -523,7 +523,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
   return (
     <main className="mx-auto w-full max-w-[720px] px-4 pb-14 pt-16 text-textPrimary">
       <header className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-5">
-        <div className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
+        <div className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
           Secure aftercare link
         </div>
 
@@ -595,7 +595,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
                 has a chargeable Stripe account, card — instead of the old
                 Stripe-only card that simply vanished for every pro without
                 Stripe. No account required. */}
-            <section className="rounded-card border border-white/10 bg-bgSecondary p-5">
+            <section className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
               <div className="text-[14px] font-black text-textPrimary">
                 Complete your payment
               </div>
@@ -731,7 +731,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
           )}
 
           {nextBooking ? (
-            <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-4">
+            <div className="mt-4 rounded-card border border-textPrimary/10 bg-bgPrimary p-4">
               <div className="text-sm font-black text-textPrimary">
                 Your next booking is already confirmed
               </div>
@@ -775,7 +775,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
               </div>
             </div>
           ) : (
-            <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-4">
+            <div className="mt-4 rounded-card border border-textPrimary/10 bg-bgPrimary p-4">
               <div className="text-sm font-black text-textPrimary">
                 Rebooking is not available right now
               </div>

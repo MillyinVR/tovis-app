@@ -140,7 +140,7 @@ export default function ClientPublicProfileSettings() {
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
             <FieldLabel>Handle</FieldLabel>
-            <div className="flex items-center gap-1 rounded-card border border-white/10 bg-bgSecondary/35 px-3 py-2">
+            <div className="flex items-center gap-1 rounded-card border border-textPrimary/10 bg-bgSecondary/35 px-3 py-2">
               <span className="text-sm text-textSecondary">@</span>
               <input
                 value={handle}
@@ -161,14 +161,14 @@ export default function ClientPublicProfileSettings() {
               onChange={(e) => setBio(e.target.value.slice(0, BIO_MAX))}
               rows={3}
               placeholder="What looks are you known for?"
-              className="w-full resize-none rounded-card border border-white/10 bg-bgSecondary/35 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary/70"
+              className="w-full resize-none rounded-card border border-textPrimary/10 bg-bgSecondary/35 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary/70"
             />
             <span className="text-xs text-textSecondary/80">
               {bio.length}/{BIO_MAX}
             </span>
           </label>
 
-          <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-4">
+          <div className="flex items-center justify-between gap-3 border-t border-textPrimary/10 pt-4">
             <div className="min-w-0">
               <div className="text-sm font-bold text-textPrimary">
                 Make my profile public

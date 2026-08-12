@@ -32,13 +32,14 @@ export default async function InviteLinkCard() {
     <section className="rounded-card border border-textPrimary/10 bg-bgSurface p-[18px]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <h2 className="font-display text-[15px] font-semibold text-textPrimary">
-            Invite a friend
-          </h2>
-          <p className="mt-1 max-w-[46ch] text-[12px] leading-relaxed text-textMuted">
-            Share your personal link. When a friend signs up and books, the
-            referral is credited to you automatically — same as a tap on your
-            physical card — and rewards apply wherever your pro offers them.
+          {/*
+            No heading here: /client/referrals now carries "Invite a friend" and
+            the lede in its ClientPage header, so repeating them read as a
+            stutter. What is left is the part only this card can say.
+          */}
+          <p className="max-w-[46ch] text-[12px] leading-relaxed text-textMuted">
+            It works the same as a tap on your physical card, and rewards apply
+            wherever your pro offers them.
           </p>
 
           <div className="mt-3 inline-flex items-center gap-2 rounded-[12px] border border-textPrimary/16 px-3 py-2">

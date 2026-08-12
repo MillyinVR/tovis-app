@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { safeJson } from '@/lib/http'
 import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
 
@@ -151,14 +152,6 @@ export default function OffersListClient() {
 
   return (
     <div className="space-y-4">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-textPrimary">Your priority offers</h1>
-        <p className="text-sm text-textMuted">
-          You&rsquo;re first in line for these last-minute openings. Claim before
-          the timer runs out, or pass to give it to the next person.
-        </p>
-      </header>
-
       {err && (
         <div className="rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-4 py-3 text-sm text-toneDanger">
           {err}
@@ -166,10 +159,11 @@ export default function OffersListClient() {
       )}
 
       {sorted.length === 0 && (
-        <p className="py-10 text-center text-textMuted">
-          No active offers right now. When a spot opens up for a service you&rsquo;re
-          waitlisted for, you&rsquo;ll get first dibs here.
-        </p>
+        <EmptyState
+          title="No offers waiting"
+          description="When a spot opens up for a service you’re waitlisted for, you’ll get first dibs here."
+          action={{ label: 'See open slots', href: '/client/openings' }}
+        />
       )}
 
       <div className="space-y-3">
@@ -188,7 +182,7 @@ export default function OffersListClient() {
               className={`rounded-2xl border p-4 ${
                 isHighlighted
                   ? 'border-accentPrimary/50 bg-accentPrimary/5'
-                  : 'border-white/10 bg-bgSecondary'
+                  : 'border-textPrimary/10 bg-bgSecondary'
               }`}
             >
               <div className="flex items-start justify-between gap-3">
@@ -224,14 +218,14 @@ export default function OffersListClient() {
                     className={`shrink-0 rounded-full px-3 py-1 font-mono text-[12px] font-bold tabular-nums ${
                       isUrgent
                         ? 'bg-toneDanger/15 text-toneDanger'
-                        : 'bg-white/10 text-textPrimary'
+                        : 'bg-surfaceGlass/10 text-textPrimary'
                     }`}
                     aria-label="Time left to claim"
                   >
                     {formatCountdown(remainingMs)}
                   </div>
                 ) : (
-                  <span className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-[12px] font-medium text-textMuted">
+                  <span className="shrink-0 rounded-full bg-surfaceGlass/10 px-3 py-1 text-[12px] font-medium text-textMuted">
                     Expired
                   </span>
                 )}
@@ -249,7 +243,7 @@ export default function OffersListClient() {
                   <button
                     disabled={isBusy}
                     onClick={() => handlePass(offer)}
-                    className="rounded-xl border border-white/20 px-4 py-2.5 text-sm font-medium text-textSecondary disabled:opacity-50"
+                    className="rounded-xl border border-textPrimary/20 px-4 py-2.5 text-sm font-medium text-textSecondary disabled:opacity-50"
                   >
                     Pass
                   </button>

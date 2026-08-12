@@ -459,7 +459,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
             return (
               <div
                 key={recommendation.id}
-                className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+                className="rounded-card border border-textPrimary/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.14)]"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -468,12 +468,12 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                         {productName}
                       </div>
 
-                      <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
+                      <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
                         Booking checkout
                       </span>
 
                       {alreadyPurchased ? (
-                        <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
+                        <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
                           Already purchased: {purchasedQty}
                         </span>
                       ) : null}
@@ -510,7 +510,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                     type="button"
                     onClick={() => decrement(recommendation.id)}
                     disabled={checkoutLocked || isPending || quantity <= 0}
-                    className="tap-target inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgSecondary text-[16px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                    className="tap-target inline-flex h-9 w-9 items-center justify-center rounded-full border border-textPrimary/10 bg-bgSecondary text-[16px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={`Decrease quantity for ${productName}`}
                   >
                     −
@@ -525,7 +525,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                     }
                     disabled={checkoutLocked || isPending}
                     placeholder="0"
-                    className="h-9 w-16 rounded-full border border-white/10 bg-bgSecondary px-3 text-center text-[12px] font-black text-textPrimary outline-none placeholder:text-textSecondary disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-9 w-16 rounded-full border border-textPrimary/10 bg-bgSecondary px-3 text-center text-[12px] font-black text-textPrimary outline-none placeholder:text-textSecondary disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={`Quantity for ${productName}`}
                   />
 
@@ -533,7 +533,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                     type="button"
                     onClick={() => increment(recommendation.id)}
                     disabled={checkoutLocked || isPending}
-                    className="tap-target inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgSecondary text-[16px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                    className="tap-target inline-flex h-9 w-9 items-center justify-center rounded-full border border-textPrimary/10 bg-bgSecondary text-[16px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={`Increase quantity for ${productName}`}
                   >
                     +
@@ -545,7 +545,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                       setQuantity(recommendation.id, quantity > 0 ? 0 : 1)
                     }
                     disabled={checkoutLocked || isPending}
-                    className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[11px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgSecondary px-4 py-2 text-[11px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {quantity > 0 ? 'Remove' : 'Add to checkout'}
                   </button>
@@ -568,7 +568,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                 : null
 
             const content = (
-              <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
+              <div className="rounded-card border border-textPrimary/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.14)]">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -576,7 +576,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                         {productName}
                       </div>
 
-                      <span className="inline-flex items-center rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
+                      <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textPrimary">
                         External link
                       </span>
                     </div>
@@ -614,7 +614,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
       ) : null}
 
       {internalRecommendations.length > 0 ? (
-        <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+        <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="text-[12px] font-black text-textPrimary">
@@ -646,7 +646,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                 type="button"
                 onClick={clearSelection}
                 disabled={checkoutLocked || isPending}
-                className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center justify-center rounded-full border border-textPrimary/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Clear
               </button>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { safeJson } from '@/lib/http'
 import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
 
@@ -36,8 +37,8 @@ const STATUS_COLORS: Record<string, string> = {
   CONFIRMED: 'bg-toneInfo/20 text-toneInfo',
   CONVERTED: 'bg-toneSuccess/20 text-toneSuccess',
   REWARDED: 'bg-accentPrimary/20 text-accentPrimary',
-  DECLINED: 'bg-white/10 text-textMuted',
-  EXPIRED: 'bg-white/10 text-textMuted',
+  DECLINED: 'bg-surfaceGlass/10 text-textMuted',
+  EXPIRED: 'bg-surfaceGlass/10 text-textMuted',
 }
 
 function formatDate(iso: string): string {
@@ -132,9 +133,9 @@ export default function ReferralListClient() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-textPrimary">
-        Your Referrals
-      </h1>
+      <h2 className="font-display text-[17px] font-black tracking-[-0.01em] text-textPrimary">
+        Your referrals
+      </h2>
 
       {err && (
         <div className="rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-4 py-3 text-sm text-toneDanger">
@@ -143,9 +144,10 @@ export default function ReferralListClient() {
       )}
 
       {sorted.length === 0 && (
-        <p className="py-8 text-center text-textMuted">
-          No referrals yet. Share your referral card to get started!
-        </p>
+        <EmptyState
+          title="No referrals yet"
+          description="Share the card above. When a friend joins and books, they’ll show up here."
+        />
       )}
 
       <div className="space-y-3">
@@ -161,7 +163,7 @@ export default function ReferralListClient() {
               className={`rounded-2xl border p-4 ${
                 isHighlighted
                   ? 'border-accentPrimary/50 bg-accentPrimary/5'
-                  : 'border-white/10 bg-bgSecondary'
+                  : 'border-textPrimary/10 bg-bgSecondary'
               }`}
             >
               <div className="flex items-start justify-between gap-3">
@@ -172,7 +174,7 @@ export default function ReferralListClient() {
                     </span>
                     <span
                       className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                        STATUS_COLORS[r.status] ?? 'bg-white/10 text-textMuted'
+                        STATUS_COLORS[r.status] ?? 'bg-surfaceGlass/10 text-textMuted'
                       }`}
                     >
                       {STATUS_LABELS[r.status] ?? r.status}
@@ -211,14 +213,14 @@ export default function ReferralListClient() {
                     <button
                       disabled={isBusy}
                       onClick={() => handleAction(r.id, 'confirm')}
-                      className="rounded-xl bg-[image:var(--cta)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      className="rounded-xl bg-[image:var(--cta)] px-4 py-2 text-sm font-medium text-onCta disabled:opacity-50"
                     >
                       {isBusy ? '…' : 'Confirm'}
                     </button>
                     <button
                       disabled={isBusy}
                       onClick={() => handleAction(r.id, 'decline')}
-                      className="rounded-xl border border-white/20 px-4 py-2 text-sm font-medium text-textSecondary disabled:opacity-50"
+                      className="rounded-xl border border-textPrimary/20 px-4 py-2 text-sm font-medium text-textSecondary disabled:opacity-50"
                     >
                       Decline
                     </button>

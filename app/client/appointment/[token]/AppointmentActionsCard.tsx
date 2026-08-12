@@ -87,7 +87,7 @@ async function postJson(args: {
 const PRIMARY_BUTTON =
   'inline-flex w-full items-center justify-center rounded-card bg-accentPrimary px-4 py-3 text-sm font-black text-bgPrimary transition hover:bg-accentPrimaryHover disabled:cursor-not-allowed disabled:opacity-60'
 const SECONDARY_BUTTON =
-  'inline-flex w-full items-center justify-center rounded-card border border-white/10 bg-bgPrimary px-4 py-3 text-sm font-black text-textPrimary disabled:opacity-60'
+  'inline-flex w-full items-center justify-center rounded-card border border-textPrimary/10 bg-bgPrimary px-4 py-3 text-sm font-black text-textPrimary disabled:opacity-60'
 const DANGER_BUTTON =
   'inline-flex w-full items-center justify-center rounded-card border border-toneDanger/30 bg-toneDanger/10 px-4 py-3 text-sm font-black text-textPrimary disabled:opacity-60'
 
@@ -373,7 +373,7 @@ export function AppointmentActionsCard(props: Props) {
 
   if (view.kind === 'cancelConfirm') {
     return (
-      <div className="rounded-card border border-white/10 bg-bgSecondary p-5">
+      <div className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
         <div className="text-sm font-black text-textPrimary">
           Cancel this appointment?
         </div>
@@ -414,7 +414,7 @@ export function AppointmentActionsCard(props: Props) {
 
   if (view.kind === 'rescheduleConfirm') {
     return (
-      <div className="rounded-card border border-white/10 bg-bgSecondary p-5">
+      <div className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
         <div className="text-sm font-black text-textPrimary">
           Move your appointment to {formatSlotFull(view.slotIso)}?
         </div>
@@ -456,7 +456,7 @@ export function AppointmentActionsCard(props: Props) {
   if (view.kind === 'reschedule') {
     const ctx = props.reschedule
     return (
-      <div className="rounded-card border border-white/10 bg-bgSecondary p-5">
+      <div className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
         <div className="text-sm font-black text-textPrimary">
           Pick a new time
         </div>
@@ -471,7 +471,7 @@ export function AppointmentActionsCard(props: Props) {
             type="date"
             value={date}
             onChange={(event) => setDate(event.target.value)}
-            className="mt-1 w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary"
+            className="mt-1 w-full rounded-card border border-textPrimary/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary"
           />
         </label>
 
@@ -492,7 +492,7 @@ export function AppointmentActionsCard(props: Props) {
                 <button
                   key={slot}
                   type="button"
-                  className="rounded-card border border-white/10 bg-bgPrimary px-2 py-2 text-sm font-black text-textPrimary disabled:opacity-60"
+                  className="rounded-card border border-textPrimary/10 bg-bgPrimary px-2 py-2 text-sm font-black text-textPrimary disabled:opacity-60"
                   disabled={busy != null}
                   onClick={() => void holdSlot(slot)}
                 >
@@ -531,7 +531,7 @@ export function AppointmentActionsCard(props: Props) {
   const declined = answerState === 'DECLINED'
 
   return (
-    <div className="rounded-card border border-white/10 bg-bgSecondary p-5">
+    <div className="rounded-card border border-textPrimary/10 bg-bgSecondary p-5">
       {confirmed ? (
         <div className="rounded-card border border-toneSuccess/20 bg-toneSuccess/5 px-4 py-3">
           <div className="text-sm font-black text-textPrimary">

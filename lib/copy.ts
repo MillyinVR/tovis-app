@@ -159,10 +159,16 @@ export const COPY = {
   },
 
   aftercareInbox: {
+    // `title` is ALSO the section heading inside the client appointments list
+    // (AppointmentsList.tsx), so it stays the short noun. The page header uses
+    // pageEyebrow/pageTitle.
     title: 'Aftercare',
-    subtitle: 'Every aftercare summary you’ve received, all in one place.',
+    pageEyebrow: 'Aftercare',
+    pageTitle: 'Every summary in one place',
+    subtitle: 'What your pro sent you after each visit.',
     emptyTitle: 'Nothing yet',
     emptyBody: 'After your bookings, your pro will post aftercare here.',
+    emptyCta: 'Browse pros',
     serviceFallback: 'Aftercare',
     proFallback: 'Your pro',
     newPill: 'NEW',

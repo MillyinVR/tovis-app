@@ -4,7 +4,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import ProProfileLink from '@/app/_components/ProProfileLink'
+import ClientPage from '../_components/ClientPage'
 import { isRecord } from '@/lib/guards'
 import { moneyToString } from '@/lib/money'
 import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
@@ -242,30 +244,14 @@ export default function OpeningsFeedClient() {
   }, [])
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-bgPrimary text-textPrimary">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-[220px] bg-[linear-gradient(180deg,rgb(var(--accent-primary)/0.12),transparent)]"
-      />
-      <section className="relative mx-auto flex min-h-screen w-full max-w-none flex-col px-[22px] pb-28 pt-12 md:max-w-[520px] md:px-[32px] lg:max-w-[560px] lg:px-[40px]">
-        <header>
-          <div className="flex items-center gap-2">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="text-gold">
-              <path d="M13 2L4.5 13.5H11l-1 8.5L18.5 10.5H12z" />
-            </svg>
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-textMuted">
-              Last-minute openings
-            </span>
-          </div>
-          <h1 className="mt-3 font-display text-[36px] font-bold leading-[0.96] tracking-[-0.04em] md:text-[40px] lg:text-[44px]">
-            Open today.
-          </h1>
-          <p className="mt-3 max-w-[460px] text-[14.5px] leading-relaxed text-textSecondary">
-            Slots that just freed up. Claim one before it&apos;s gone — these go to whoever grabs them first.
-          </p>
-        </header>
-
-        <div className="mt-6 flex flex-col gap-[13px]">
+    <ClientPage
+      eyebrow="Last-minute openings"
+      title="Open today."
+      lede="Slots that just freed up. Claim one before it’s gone — these go to whoever grabs them first."
+      back={{ href: '/client', label: 'Home' }}
+      hero
+    >
+        <div className="flex flex-col gap-[13px]">
           {status.kind === 'loading' ? (
             <div className="rounded-card border border-textPrimary/10 bg-bgSurface px-5 py-8 text-center font-mono text-[11px] uppercase tracking-[0.08em] text-textMuted">
               Loading openings…
@@ -279,17 +265,11 @@ export default function OpeningsFeedClient() {
           ) : null}
 
           {status.kind === 'ready' && status.cards.length === 0 ? (
-            <div className="rounded-card border border-textPrimary/10 bg-bgSurface px-5 py-7">
-              <p className="text-[13px] leading-relaxed text-textMuted">
-                No last-minute openings right now. We&apos;ll ping you the moment a pro frees up a spot you&apos;re waiting on.
-              </p>
-              <Link
-                href="/search"
-                className="mt-4 inline-flex rounded-full border border-textPrimary/15 px-4 py-2 text-[12px] font-bold text-textSecondary transition hover:border-accentPrimary/40 hover:text-accentPrimary"
-              >
-                Browse pros →
-              </Link>
-            </div>
+            <EmptyState
+              title="Nothing open right now"
+              description="We’ll ping you the moment a pro frees up a spot you’re waiting on."
+              action={{ label: 'Browse pros', href: '/search' }}
+            />
           ) : null}
 
           {status.kind === 'ready'
@@ -376,7 +356,6 @@ export default function OpeningsFeedClient() {
               ))
             : null}
         </div>
-      </section>
-    </main>
+    </ClientPage>
   )
 }
