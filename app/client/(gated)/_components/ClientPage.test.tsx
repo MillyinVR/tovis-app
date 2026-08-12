@@ -133,6 +133,36 @@ describe('ClientPage', () => {
     expect(extra.parentElement?.tagName.toLowerCase()).toBe('main')
   })
 
+  // jsdom computes no layout, so this pins the RULE rather than the pixels: the
+  // hero wash keeps its full-bleed escape only while the content column fills
+  // the layout container, and past that width it must stop escaping. Without
+  // the second half the wash renders as a hard-edged rectangle floating in the
+  // page — at 1280 it stopped 288px short of each edge. The two crossovers are
+  // derived from the column: max-w-2xl (672) + the layout's px-4 gutters (32),
+  // and max-w-5xl (1024) for a wide page.
+  it.each([
+    ['regular' as const, 'min-[704px]'],
+    ['wide' as const, 'min-[1024px]'],
+  ])('stops the hero wash escaping once a %s column no longer fills the page', (
+    width,
+    crossover,
+  ) => {
+    const { container } = render(
+      <ClientPage title="Open today." hero width={width}>
+        <p>body</p>
+      </ClientPage>,
+    )
+
+    const className = container.querySelector('header')?.className ?? ''
+    // Mobile: still breaks out of the layout's px-4 / pt-4 to reach the edges.
+    expect(className).toContain('-mx-4')
+    expect(className).toContain('-mt-4')
+    // Past the crossover: aligned to the column instead of half-escaping it.
+    expect(className).toContain(`${crossover}:mx-0`)
+    expect(className).toContain(`${crossover}:mt-0`)
+    expect(className).toContain(`${crossover}:rounded-card`)
+  })
+
   it('only tints the header when hero is opted into', () => {
     const { container, rerender } = render(
       <ClientPage title="Open today.">
