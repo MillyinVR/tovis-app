@@ -1,0 +1,136 @@
+name: ios-wire-contract
+
+# The mirror image of tovis-ios's "Wire contract" job.
+#
+# That one reads THIS repo's generated schema live and validates the iOS
+# fixtures against it — but it only fires on a tovis-ios push. So a web DTO
+# change that adds a REQUIRED field merges green here, reddens tovis-ios main
+# the instant it lands, and the next iOS PR inherits a failure it did not
+# cause (happened with ConsultIntakeStateDTO.progress /
+# ConsultIntakeQuestionDTO.helpText; iOS #300 wore it).
+#
+# This job closes that loop from the other side: the PR that changes the schema
+# is the PR that goes red. Ubuntu, node + ajv only, so it stays on the 1x
+# billing multiplier — the macOS 10x blow-up that shaped tovis-ios's CI does not
+# apply here.
+#
+# 🔴 It is INERT until a web→iOS deploy key exists. Both repos are private and
+# the fixtures live in the other one, so a credential is unavoidable — exactly
+# why this direction went unbuilt. `check:ios-fixture-contract` still runs in
+# static-guards.yml and locally, but with no tovis-ios checkout on the runner it
+# SKIPS there. Until the secret below is set, nothing in CI enforces this.
+#
+# To arm it (read-only key, mirroring tovis-ios's TOVIS_APP_DEPLOY_KEY):
+#
+#   ssh-keygen -t ed25519 -N "" -C "tovis-app CI (read-only fixtures)" \
+#     -f /tmp/tovis-ios-ci
+#   gh repo deploy-key add /tmp/tovis-ios-ci.pub --repo MillyinVR/tovis-ios \
+#     --title "tovis-app CI (read-only fixtures)"     # no --allow-write
+#   gh secret set TOVIS_IOS_DEPLOY_KEY --repo MillyinVR/tovis-app \
+#     < /tmp/tovis-ios-ci
+#   rm /tmp/tovis-ios-ci /tmp/tovis-ios-ci.pub
+#
+# Nothing else needs changing — the job arms itself once the secret is present.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-wire-contract:
+    name: iOS wire contract (schema vs iOS fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      # `secrets` is not available to a job-level `if:`, so gate on a step
+      # output instead. Reading the secret into `env` is the supported way to
+      # test for its presence.
+      - name: Is the cross-repo deploy key provisioned?
+        id: key
+        env:
+          TOVIS_IOS_DEPLOY_KEY: ${{ secrets.TOVIS_IOS_DEPLOY_KEY }}
+        run: |
+          if [ -n "$TOVIS_IOS_DEPLOY_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Read live, never vendored. A snapshot of the fixtures would drift the
+      # moment iOS changed one and this job would stay GREEN while the contract
+      # rotted — the same reasoning that keeps tovis-ios reading our schema live.
+      - name: Fetch tovis-ios wire fixtures (read-only deploy key)
+        if: steps.key.outputs.present == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: MillyinVR/tovis-ios
+          ssh-key: ${{ secrets.TOVIS_IOS_DEPLOY_KEY }}
+          path: .tovis-ios
+          sparse-checkout: |
+            TovisKit/Tests/TovisKitTests/Fixtures
+            scripts/contract
+          persist-credentials: false
+
+      - name: Setup pnpm
+        if: steps.key.outputs.present == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Setup Node
+        if: steps.key.outputs.present == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        if: steps.key.outputs.present == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # The guard runs tovis-ios's OWN validate-fixtures.mjs, so this installs
+      # that package's pinned ajv rather than adding a second copy here.
+      - name: Install the iOS contract validator's ajv
+        if: steps.key.outputs.present == 'true'
+        working-directory: .tovis-ios/scripts/contract
+        run: npm ci
+
+      # TOVIS_IOS_REF=worktree because the checkout above already IS tovis-ios's
+      # default branch — the ref this change would redden. The guard's local
+      # default (origin/main) re-materialises that ref from a full clone, which
+      # a sparse checkout has no need to do.
+      - name: Validate iOS fixtures against this branch's schema
+        if: steps.key.outputs.present == 'true'
+        env:
+          TOVIS_IOS_DIR: ${{ github.workspace }}/.tovis-ios
+          TOVIS_IOS_REF: worktree
+        run: pnpm check:ios-fixture-contract
+
+      # Green-but-inert is exactly the "manufactures confidence" failure, so say
+      # so loudly rather than letting a green tick imply a check that never ran.
+      - name: Not enforcing — deploy key missing
+        if: steps.key.outputs.present != 'true'
+        run: |
+          echo "::warning title=iOS wire contract NOT enforced::secrets.TOVIS_IOS_DEPLOY_KEY is not set, so this PR's schema was NOT checked against the tovis-ios fixtures. A DTO change merging from here can still redden tovis-ios main."
+          {
+            echo "### ⚠️ iOS wire contract did NOT run"
+            echo
+            echo "\`secrets.TOVIS_IOS_DEPLOY_KEY\` is not set on this repo, so the"
+            echo "tovis-ios fixtures could not be fetched and **this PR's schema was"
+            echo "not validated against them**. A required DTO field added here can"
+            echo "still turn tovis-ios \`main\` red the moment it merges."
+            echo
+            echo "See the provisioning commands at the top of"
+            echo "\`.github/workflows/ios-wire-contract.yml\`."
+          } >> "$GITHUB_STEP_SUMMARY"
