@@ -16,6 +16,11 @@ import {
 } from '@/lib/booking/clientConfirmation'
 import { clientConfirmationLoopEnabled } from '@/lib/booking/clientConfirmationLoop'
 import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
+import { isPrepWritableStatus } from '@/lib/booking/prep'
+import {
+  buildPrepCountdown,
+  type PrepCountdownTone,
+} from '@/lib/booking/prepCountdown'
 import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import {
   resolveApptTimeZone,
@@ -132,6 +137,51 @@ export type ClientBookingPaymentOptionsDTO = {
   paymentNote: string | null
   /** "AT_BOOKING" | "AFTER_SERVICE" (or null when the pro has no settings row). */
   collectPaymentAt: string | null
+}
+
+/** One row of the pro's "Before you go" checklist, as the client sees it. */
+export type ClientBookingPrepItemDTO = {
+  id: string
+  text: string
+}
+
+/**
+ * "Tomorrow" / "In 3 days" / "In 6 weeks", counted in CALENDAR days in the
+ * appointment's own zone by `buildPrepCountdown`.
+ *
+ * Served rather than derived per client on purpose: the rule is calendar days,
+ * not 24h blocks (11pm Monday → 9am Wednesday is "in 2 days", not "tomorrow"),
+ * and a second implementation in Swift is a second chance to get that wrong.
+ * `tone` is what changes the screen's shape — see PrepCountdownTone.
+ */
+export type ClientBookingPrepCountdownDTO = {
+  days: number
+  tone: PrepCountdownTone
+  label: string
+}
+
+/**
+ * The client's appointment-prep bundle: the pro's checklist, the note beside
+ * it, and which rows this client has already ticked.
+ *
+ * Present ONLY when the caller loaded prep, which in practice means the booking
+ * is still preparable (`isPrepWritableStatus`) — there is nothing to get ready
+ * for once the appointment has happened or been cancelled. Absent is the honest
+ * answer for "this payload can't say", and keeps every other response
+ * byte-identical to pre-prep.
+ */
+export type ClientBookingPrepDTO = {
+  items: ClientBookingPrepItemDTO[]
+  /** Ids of `items` this client has ticked. Existence IS the tick server-side. */
+  checkedItemIds: string[]
+  note: string | null
+  /**
+   * Whether a tick would be ACCEPTED right now. Derived from the same predicate
+   * the write path re-checks inside its transaction, so a client never draws a
+   * control the server will refuse with `PREP_NOT_WRITABLE`.
+   */
+  writable: boolean
+  countdown: ClientBookingPrepCountdownDTO
 }
 
 export type ClientBookingDTO = {
@@ -264,6 +314,26 @@ export type ClientBookingDTO = {
    * booking — never exposed on public surfaces.
    */
   paymentOptions: ClientBookingPaymentOptionsDTO | null
+
+  /**
+   * "Before you go" — the pro's checklist, their note, this client's ticks and
+   * the countdown. OPTIONAL and absent unless the caller loaded it (the client
+   * bookings list route and the booking-detail loader do, and only for a
+   * booking that can still be prepared for). Tick a row with
+   * POST /api/v1/client/bookings/[id]/prep { prepItemId, checked }.
+   */
+  prep?: ClientBookingPrepDTO
+
+  /**
+   * The boards this client has handed to the pro FOR THIS BOOKING (a
+   * `BookingBoardShare` grant — `Board.visibility` is never touched, so a
+   * private board shared here stays private everywhere else). Toggle with
+   * POST /api/v1/client/bookings/[id]/board { boardId, shared }.
+   *
+   * OPTIONAL and loaded beside `prep`; absent means "this payload can't say",
+   * never "nothing is shared".
+   */
+  sharedBoardIds?: string[]
 }
 
 function mapTimeZoneTruthSourceToClientDtoSource(
@@ -541,6 +611,21 @@ export async function buildClientBookingDTO(input: {
    * omit it and the DTO carries null.
    */
   paymentOptions?: ClientBookingPaymentOptionsDTO | null
+  /**
+   * The resolved prep checklist + note + this client's ticks. Callers that
+   * loaded prep pass it; everyone else omits it and the `prep` key is absent.
+   *
+   * `writable` and `countdown` are derived HERE rather than handed in, so a
+   * caller cannot hand this DTO a tick control the write path would refuse, or
+   * a countdown computed against the wrong timezone.
+   */
+  prep?: {
+    items: ClientBookingPrepItemDTO[]
+    checkedItemIds: string[]
+    note: string | null
+  } | null
+  /** Board ids this client has shared to this booking; omit when not loaded. */
+  sharedBoardIds?: string[] | null
 }): Promise<ClientBookingDTO> {
   const { booking: b } = input
 
@@ -826,5 +911,23 @@ export async function buildClientBookingDTO(input: {
     ...(clientConfirmation?.significant ? { clientConfirmation } : {}),
 
     paymentOptions: input.paymentOptions ?? null,
+
+    // "Before you go". Spread-in like `clientConfirmation` above so a caller
+    // that didn't load prep serialises exactly as it did before this field
+    // existed — which is also what keeps the iOS fixtures valid against both
+    // the old and the new schema, in either merge order.
+    ...(input.prep
+      ? {
+          prep: {
+            items: input.prep.items,
+            checkedItemIds: input.prep.checkedItemIds,
+            note: input.prep.note,
+            writable: isPrepWritableStatus(b.status),
+            countdown: buildPrepCountdown(b.scheduledFor, timeZone),
+          },
+        }
+      : {}),
+
+    ...(input.sharedBoardIds ? { sharedBoardIds: input.sharedBoardIds } : {}),
   }
 }

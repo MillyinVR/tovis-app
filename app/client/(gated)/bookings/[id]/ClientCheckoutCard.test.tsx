@@ -203,6 +203,98 @@ describe('ClientCheckoutCard — Venmo hands off to the app on mobile', () => {
   })
 })
 
+// Choosing a payment method hands off to that provider's app immediately
+// (Tori, 2026-08-14) instead of waiting for a second tap on "Pay with X".
+//
+// 🔴 This fires off a SELECTION rather than a button that says "pay", so the
+// guards matter as much as the behaviour: only on an actual change, and only on
+// a device where an app could resolve. On a desktop the select must stay inert.
+describe('ClientCheckoutCard — choosing a method opens its app', () => {
+  const realUserAgent = navigator.userAgent
+  let assigned: string | null
+
+  function setUserAgent(value: string) {
+    Object.defineProperty(navigator, 'userAgent', { value, configurable: true })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    assigned = null
+    Object.defineProperty(window, 'location', {
+      value: {
+        set href(value: string) {
+          assigned = value
+        },
+        get href() {
+          return 'http://localhost/'
+        },
+      },
+      configurable: true,
+      writable: true,
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+    setUserAgent(realUserAgent)
+  })
+
+  function renderCard() {
+    render(
+      <ClientCheckoutCard
+        bookingId="booking_1"
+        checkoutStatus="READY"
+        paymentCollectedAt={null}
+        selectedPaymentMethod="CASH"
+        serviceSubtotalSnapshot="65.00"
+        totalAmount="65.00"
+        acceptedMethods={[
+          { key: 'cash', label: 'Cash', handle: null },
+          { key: 'venmo', label: 'Venmo', handle: '@tovispro' },
+        ]}
+      />,
+    )
+    return screen.getByLabelText('Payment method') as HTMLSelectElement
+  }
+
+  it('opens Venmo the moment the client picks it, on a phone', () => {
+    setUserAgent(
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+    )
+
+    const select = renderCard()
+    fireEvent.change(select, { target: { value: 'venmo' } })
+
+    expect(assigned).toBe(
+      'venmo://paycharge?txn=pay&recipients=tovispro&amount=65.00&note=TOVIS',
+    )
+  })
+
+  it('stays put on desktop, where there is no app to open', () => {
+    setUserAgent(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+    )
+
+    const select = renderCard()
+    fireEvent.change(select, { target: { value: 'venmo' } })
+
+    expect(assigned).toBeNull()
+  })
+
+  it('does nothing for a method with no app to hand off to', () => {
+    setUserAgent(
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+    )
+
+    const select = renderCard()
+    // Cash is already selected; re-picking it is not a request to pay again,
+    // and cash has no scheme even if it were.
+    fireEvent.change(select, { target: { value: 'cash' } })
+
+    expect(assigned).toBeNull()
+  })
+})
+
 // Regression guard for CHK-tip-live (origin 9ec115fb0). The persisted
 // `totalAmount` snapshot is almost always non-null, so the old
 // `totalSnapshot ?? livePreviewTotal` short-circuit froze the on-screen Total and

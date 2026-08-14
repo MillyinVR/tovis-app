@@ -16,6 +16,11 @@ const mocks = vi.hoisted(() => ({
   prismaClientNotificationFindMany: vi.fn(),
   prismaWaitlistEntryFindMany: vi.fn(),
   prismaProfessionalPaymentSettingsFindMany: vi.fn(),
+  // Appointment prep rides the same load (one batched query each), so the mock
+  // has to answer them or the route rejects before it ever builds a DTO.
+  prismaProPrepItemFindMany: vi.fn(),
+  prismaBookingPrepCheckFindMany: vi.fn(),
+  prismaBookingBoardShareFindMany: vi.fn(),
 
   buildClientBookingDTO: vi.fn(),
   safeError: vi.fn(),
@@ -34,6 +39,15 @@ vi.mock('@/lib/prisma', () => ({
     },
     professionalPaymentSettings: {
       findMany: mocks.prismaProfessionalPaymentSettingsFindMany,
+    },
+    proPrepItem: {
+      findMany: mocks.prismaProPrepItemFindMany,
+    },
+    bookingPrepCheck: {
+      findMany: mocks.prismaBookingPrepCheckFindMany,
+    },
+    bookingBoardShare: {
+      findMany: mocks.prismaBookingBoardShareFindMany,
     },
   },
 }))
@@ -190,6 +204,13 @@ describe('GET /api/v1/client/bookings', () => {
       ok: true,
       clientId: 'client_1',
     })
+
+    // Prep loads for every still-preparable booking in the set. Default them to
+    // empty so a suite about BUCKETING isn't also asserting a checklist; the
+    // route still exercises the batched path either way.
+    mocks.prismaProPrepItemFindMany.mockResolvedValue([])
+    mocks.prismaBookingPrepCheckFindMany.mockResolvedValue([])
+    mocks.prismaBookingBoardShareFindMany.mockResolvedValue([])
 
     mocks.upper.mockImplementation((value: unknown) => {
       if (typeof value !== 'string') return ''

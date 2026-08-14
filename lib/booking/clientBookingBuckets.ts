@@ -21,6 +21,10 @@ import {
   type ClientBookingPaymentOptionsDTO,
 } from '@/lib/dto/clientBooking'
 import {
+  isPrepWritableStatus,
+  resolvePrepForBookings,
+} from '@/lib/booking/prep'
+import {
   buildClientPaymentOptions,
   clientPaymentOptionsSelect,
 } from '@/lib/payments/clientPaymentOptions'
@@ -121,6 +125,14 @@ export const clientBookingListSelect = {
   clientAddressLatSnapshot: true,
   clientAddressLngSnapshot: true,
 
+  // Resolves the prep checklist: an offering's own rows REPLACE the pro's
+  // default list for bookings of that service. `offering.prepNote` rides the
+  // same relation so the note costs no extra query — and so prep resolution
+  // never has to query ProfessionalProfile directly, which would be a Pro
+  // enumeration outside a tenant-scoped discovery surface.
+  offeringId: true,
+  offering: { select: { prepNote: true } },
+
   service: {
     select: {
       id: true,
@@ -138,6 +150,9 @@ export const clientBookingListSelect = {
       nameDisplay: true,
       location: true,
       timeZone: true,
+      // The pro's DEFAULT "Before you go" note, read off the relation the
+      // booking already joins rather than by enumerating ProfessionalProfile.
+      prepNote: true,
     },
   },
 
@@ -305,6 +320,95 @@ export type LoadedClientBookingBuckets = {
   meta: { now: string; next30: string }
 }
 
+/** What the "Before you go" half of each DTO needs, keyed by booking id. */
+type PrepBundleByBooking = Map<
+  string,
+  {
+    prep: { items: { id: string; text: string }[]; checkedItemIds: string[]; note: string | null }
+    sharedBoardIds: string[]
+  }
+>
+
+/**
+ * Load appointment prep for every booking in the set that can still be prepared
+ * for, in a FIXED number of queries regardless of how many bookings there are.
+ *
+ * 🔴 The per-booking `resolvePrepForBooking` is ~4 queries and this list carries
+ * up to 300 rows, so calling it in a loop would turn one appointments render
+ * into a thousand round trips. `resolvePrepForBookings` batches while reusing
+ * the same two rules, and the ticks + board shares are one `IN` query each.
+ *
+ * Terminal bookings are excluded on the same predicate the web page gates its
+ * render on and the write path re-checks — so a client is never handed a tick
+ * control the server would refuse with `PREP_NOT_WRITABLE`.
+ */
+async function loadPrepForBookings(
+  bookings: readonly ClientBookingRow[],
+): Promise<PrepBundleByBooking> {
+  const byBooking: PrepBundleByBooking = new Map()
+
+  const preparable = bookings.flatMap((booking) => {
+    const professionalId = booking.professional?.id
+    if (!professionalId) return []
+    if (booking.status == null || !isPrepWritableStatus(booking.status)) return []
+    return [
+      {
+        bookingId: booking.id,
+        professionalId,
+        offeringId: booking.offeringId ?? null,
+        // Both notes ride relations the booking query already joined.
+        offeringPrepNote: booking.offering?.prepNote ?? null,
+        professionalPrepNote: booking.professional?.prepNote ?? null,
+      },
+    ]
+  })
+  if (preparable.length === 0) return byBooking
+
+  const bookingIds = preparable.map((booking) => booking.bookingId)
+
+  const [prepByBooking, checks, shares] = await Promise.all([
+    resolvePrepForBookings(prisma, preparable),
+    prisma.bookingPrepCheck.findMany({
+      where: { bookingId: { in: bookingIds } },
+      select: { bookingId: true, prepItemId: true },
+    }),
+    prisma.bookingBoardShare.findMany({
+      where: { bookingId: { in: bookingIds } },
+      select: { bookingId: true, boardId: true },
+    }),
+  ])
+
+  const checkedByBooking = new Map<string, string[]>()
+  for (const row of checks) {
+    const list = checkedByBooking.get(row.bookingId)
+    if (list) list.push(row.prepItemId)
+    else checkedByBooking.set(row.bookingId, [row.prepItemId])
+  }
+
+  const sharedByBooking = new Map<string, string[]>()
+  for (const row of shares) {
+    const list = sharedByBooking.get(row.bookingId)
+    if (list) list.push(row.boardId)
+    else sharedByBooking.set(row.bookingId, [row.boardId])
+  }
+
+  for (const { bookingId } of preparable) {
+    const resolved = prepByBooking.get(bookingId)
+    if (!resolved) continue
+
+    byBooking.set(bookingId, {
+      prep: {
+        items: resolved.items.map((item) => ({ id: item.id, text: item.text })),
+        checkedItemIds: checkedByBooking.get(bookingId) ?? [],
+        note: resolved.note,
+      },
+      sharedBoardIds: sharedByBooking.get(bookingId) ?? [],
+    })
+  }
+
+  return byBooking
+}
+
 /**
  * Resolve each distinct pro's client checkout payment options in one query, keyed
  * by professionalId. Pros without a saved settings row simply have no map entry
@@ -379,23 +483,33 @@ export async function loadClientBookingBuckets(
   // fold them into the DTO. One batched query for the distinct pros in the set;
   // handles stay gated to the client's own bookings. A pro with no settings row
   // gets the Cash-only default (buildClientPaymentOptions(null)).
-  const paymentOptionsByPro = await loadPaymentOptionsByPro(
-    bookings
-      .map((booking) => booking.professional?.id)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0),
-  )
+  const [paymentOptionsByPro, prepByBooking] = await Promise.all([
+    loadPaymentOptionsByPro(
+      bookings
+        .map((booking) => booking.professional?.id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+    // "Before you go" for every still-preparable booking in the set — batched,
+    // so the native appointment detail gets the checklist without a second
+    // round trip and without a per-booking query fan-out.
+    loadPrepForBookings(bookings),
+  ])
 
   const bookingDtos: ClientBookingDTO[] = await Promise.all(
-    bookings.map((booking) =>
-      buildClientBookingDTO({
+    bookings.map((booking) => {
+      const prepBundle = prepByBooking.get(booking.id) ?? null
+
+      return buildClientBookingDTO({
         booking,
         unreadAftercare: unreadBookingIds.has(booking.id),
         hasPendingConsultationApproval: hasPendingConsultationApproval(booking),
         paymentOptions: booking.professional?.id
           ? paymentOptionsByPro.get(booking.professional.id) ?? null
           : null,
-      }),
-    ),
+        prep: prepBundle?.prep ?? null,
+        sharedBoardIds: prepBundle?.sharedBoardIds ?? null,
+      })
+    }),
   )
 
   const waitlist: ClientBookingWaitlistRow[] = await prisma.waitlistEntry.findMany({

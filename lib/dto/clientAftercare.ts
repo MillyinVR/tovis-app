@@ -26,11 +26,33 @@ import { isBookingReviewEligible } from '@/lib/booking/closeoutState'
 import type { BookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 import { moneyToString } from '@/lib/money'
 
+/**
+ * One labelled block of the pro's care plan.
+ *
+ * 🔴 `label` is TEXT THE PRO WROTE, never an enum. The design frame drew a
+ * colourist's plan ("Wash", "Heat & styling"), and this app is for every beauty
+ * pro — a nail tech's headings are their own. Per-profession suggestions exist
+ * as editor PREFILL only (`lib/aftercare/careSectionSuggestions.ts`); nothing
+ * validates against them, so adding a profession never needs a migration.
+ * Render the label verbatim.
+ */
+export type ClientAftercareCareSectionDTO = {
+  id: string
+  label: string
+  body: string
+}
+
 /** The care-notes slice of a SENT aftercare summary the client may read. */
 export type ClientAftercareSummaryDTO = {
   id: string
   /** Free-text care instructions the pro wrote for the client. */
   notes: string | null
+  /**
+   * The pro's labelled care-plan blocks, in the order they wrote them. Empty
+   * when they only left a closing note. Rendered ABOVE `notes` on both clients:
+   * the sections are the plan, `notes` is the sign-off beside it.
+   */
+  careSections: ClientAftercareCareSectionDTO[]
   /** ISO instant the pro sent this aftercare to the client. */
   sentToClientAt: string | null
 }
@@ -277,6 +299,8 @@ export function buildClientAftercareDetailDTO(input: {
         id: string
         notes: string | null
         sentToClientAt: Date | null
+        /** Already ordered by (sortOrder, createdAt) by the caller's select. */
+        careSections: ClientAftercareCareSectionDTO[]
         recommendedProducts: AftercareRecommendedProductInput[]
         rebookMode: AftercareRebookMode
         rebookedFor: Date | null
@@ -321,6 +345,7 @@ export function buildClientAftercareDetailDTO(input: {
     ? {
         id: input.aftercare.id,
         notes: input.aftercare.notes,
+        careSections: input.aftercare.careSections,
         sentToClientAt: input.aftercare.sentToClientAt?.toISOString() ?? null,
       }
     : null

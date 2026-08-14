@@ -36,6 +36,7 @@ import {
   MediaType,
   MediaVisibility,
   ModerationStatus,
+  PaymentCollectionTiming,
   Prisma,
   PrismaClient,
   ProNameDisplay,
@@ -366,6 +367,37 @@ const CARE_PLAN = {
   /** Weeks after the appointment that the pro wants her back. */
   rebookWindowStartWeeks: 7,
   rebookWindowEndWeeks: 9,
+  /**
+   * The pro's own labelled blocks — the care PLAN, above the closing note.
+   *
+   * 🔴 The labels are TEXT NOOR WROTE, not an enum, and the fixture says so on
+   * purpose: "First 48 hours" is a heading any beauty pro could write, while
+   * "Washing" and "Heat" are hers. A fixture whose every label happened to be a
+   * hairdressing term would make a schema'd version look correct.
+   */
+  sections: [
+    {
+      key: '1-first-48',
+      label: 'First 48 hours',
+      body:
+        'Cool water only, and no dry shampoo. If you can skip the gym until ' +
+        'Thursday, the toner sets that much harder.',
+    },
+    {
+      key: '2-washing',
+      label: 'Washing',
+      body:
+        'Twice a week, sulfate-free, and rinse cooler than feels nice. ' +
+        'Anything else strips the toner and we chase brass in six weeks.',
+    },
+    {
+      key: '3-heat',
+      label: 'Heat & styling',
+      body:
+        'Heat protectant every single time, iron no hotter than 350°F. ' +
+        'Air-dry when you can — the ends are the newest part of the colour.',
+    },
+  ],
   // ⚠️ Keys are ORDER-PREFIXED. Both clients read
   // `recommendedProducts` with `orderBy: { id: 'asc' }`, which on real cuids is
   // creation order — but on a fixture's hand-written ids it is alphabetical, so
@@ -501,6 +533,7 @@ async function clean(): Promise<void> {
   }
   await prisma.booking.deleteMany({ where: { professionalId: idPrefix } })
   await prisma.proNoShowSettings.deleteMany({ where: { id: idPrefix } })
+  await prisma.professionalPaymentSettings.deleteMany({ where: { id: idPrefix } })
   await prisma.boardItem.deleteMany({ where: { id: idPrefix } })
   await prisma.board.deleteMany({ where: { id: idPrefix } })
   await prisma.clientFollow.deleteMany({ where: { id: idPrefix } })
@@ -1358,6 +1391,19 @@ async function main(): Promise<void> {
       sentToClientAt: finalizedAt,
       lastEditedAt: finalizedAt,
       createdAt: finalizedAt,
+      // Order-prefixed keys for the same reason as the products below: both
+      // clients read these with a (sortOrder, createdAt) order, and a fixture
+      // written in one statement shares a createdAt to the millisecond — so
+      // sortOrder is the only thing keeping the pro's plan in the order she
+      // wrote it.
+      careSections: {
+        create: CARE_PLAN.sections.map((section, index) => ({
+          id: `${P}care-section-${section.key}`,
+          label: section.label,
+          body: section.body,
+          sortOrder: index,
+        })),
+      },
       recommendedProducts: {
         create: CARE_PLAN.products.map((product) => ({
           id: `${P}product-rec-${product.key}`,
@@ -1387,6 +1433,37 @@ async function main(): Promise<void> {
       rating,
       createdAt: new Date(NOW.getTime() - (i + 1) * 5 * 24 * 60 * 60 * 1000),
     })),
+  })
+
+  // ── the pro's accepted payment methods + tip config ───────────────────────
+  //
+  // 🔴 Without this row the fixture could not demo the client checkout at all.
+  // `buildClientPaymentOptions(null)` falls back to CASH ONLY, so the method
+  // picker rendered a single row on both platforms and looked like a product
+  // that offers no choice — when in fact WHICH methods appear, and which tip
+  // percentages, are entirely the pro's settings
+  // (/pro/profile/public-profile → Payments).
+  //
+  // Deliberately more than one method, and two of them carrying HANDLES, so the
+  // off-platform deep-link/copy affordance is exercised rather than merely
+  // present. The tip percentages are NOT the 15/20/25 fallback either — a
+  // fixture that matches the default can't tell "the pro configured this" from
+  // "nobody configured anything".
+  await prisma.professionalPaymentSettings.create({
+    data: {
+      id: `${P}payment-settings-noor`,
+      professionalId: proId(ownProKey),
+      collectPaymentAt: PaymentCollectionTiming.AFTER_SERVICE,
+      acceptCash: true,
+      acceptVenmo: true,
+      venmoHandle: '@noor-haddad',
+      acceptZelle: true,
+      zelleHandle: 'noor@studiolumen.example',
+      tipsEnabled: true,
+      allowCustomTip: true,
+      tipSuggestions: [{ label: '18%', percent: 18 }, { label: '22%', percent: 22 }, { label: '25%', percent: 25 }],
+      paymentNote: 'Cash or Venmo is easiest for me — Zelle works too.',
+    },
   })
 
   // Charging a late-cancel fee is what GIVES the pro a free-cancellation window

@@ -67,6 +67,13 @@ export async function GET(_req: Request, ctx: RouteContext) {
           id: true,
           notes: true,
           sentToClientAt: true,
+          // The pro's own labelled blocks. The LABEL is their text, never an
+          // enum — "Wash" for a colourist, "Cuticle oil" for a nail tech. Same
+          // ordering as the web detail loader's `aftercareSummarySelect`.
+          careSections: {
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            select: { id: true, label: true, body: true },
+          },
           // Rebook recommendation (§5 A3-rebook) — mirrors the web detail loader's
           // `aftercareSummarySelect`; drives the native rebook-window card.
           rebookMode: true,

@@ -2761,6 +2761,26 @@
     "ClientAddressKind": {
       "$ref": "#/definitions/%24Enums.ClientAddressKind"
     },
+    "ClientAftercareCareSectionDTO": {
+      "description": "One labelled block of the pro's care plan.\n\n🔴 `label` is TEXT THE PRO WROTE, never an enum. The design frame drew a colourist's plan (\"Wash\", \"Heat & styling\"), and this app is for every beauty pro — a nail tech's headings are their own. Per-profession suggestions exist as editor PREFILL only (`lib/aftercare/careSectionSuggestions.ts`); nothing validates against them, so adding a profession never needs a migration. Render the label verbatim.",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "body"
+      ],
+      "type": "object"
+    },
     "ClientAftercareCheckoutProductDTO": {
       "description": "The client's current booking-checkout product selection — one line per recommendation they've added, with the snapshotted unit price. Mirrors `BookingCheckoutProductItem`.",
       "properties": {
@@ -3238,6 +3258,13 @@
     "ClientAftercareSummaryDTO": {
       "description": "The care-notes slice of a SENT aftercare summary the client may read.",
       "properties": {
+        "careSections": {
+          "description": "The pro's labelled care-plan blocks, in the order they wrote them. Empty when they only left a closing note. Rendered ABOVE `notes` on both clients: the sections are the plan, `notes` is the sign-off beside it.",
+          "items": {
+            "$ref": "#/definitions/ClientAftercareCareSectionDTO"
+          },
+          "type": "array"
+        },
         "id": {
           "type": "string"
         },
@@ -3259,6 +3286,7 @@
       "required": [
         "id",
         "notes",
+        "careSections",
         "sentToClientAt"
       ],
       "type": "object"
@@ -3638,6 +3666,10 @@
           ],
           "description": "The pro's accepted payment methods (with off-platform handles) + tip config + payment note for this booking's checkout. Populated only where the caller loads the pro's payment settings (the client bookings list route, for the native checkout); null elsewhere. Handles are gated to the client's own booking — never exposed on public surfaces."
         },
+        "prep": {
+          "$ref": "#/definitions/ClientBookingPrepDTO",
+          "description": "\"Before you go\" — the pro's checklist, their note, this client's ticks and the countdown. OPTIONAL and absent unless the caller loaded it (the client bookings list route and the booking-detail loader do, and only for a booking that can still be prepared for). Tick a row with POST /api/v1/client/bookings/[id]/prep { prepItemId, checked }."
+        },
         "productSales": {
           "items": {
             "$ref": "#/definitions/ClientBookingProductSaleDTO"
@@ -3737,6 +3769,13 @@
             "string",
             "null"
           ]
+        },
+        "sharedBoardIds": {
+          "description": "The boards this client has handed to the pro FOR THIS BOOKING (a `BookingBoardShare` grant — `Board.visibility` is never touched, so a private board shared here stays private everywhere else). Toggle with POST /api/v1/client/bookings/[id]/board { boardId, shared }.\n\nOPTIONAL and loaded beside `prep`; absent means \"this payload can't say\", never \"nothing is shared\".",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "source": {
           "type": [
@@ -3910,6 +3949,81 @@
         "tipSuggestions",
         "paymentNote",
         "collectPaymentAt"
+      ],
+      "type": "object"
+    },
+    "ClientBookingPrepCountdownDTO": {
+      "description": "\"Tomorrow\" / \"In 3 days\" / \"In 6 weeks\", counted in CALENDAR days in the appointment's own zone by `buildPrepCountdown`.\n\nServed rather than derived per client on purpose: the rule is calendar days, not 24h blocks (11pm Monday → 9am Wednesday is \"in 2 days\", not \"tomorrow\"), and a second implementation in Swift is a second chance to get that wrong. `tone` is what changes the screen's shape — see PrepCountdownTone.",
+      "properties": {
+        "days": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "tone": {
+          "$ref": "#/definitions/PrepCountdownTone"
+        }
+      },
+      "required": [
+        "days",
+        "tone",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ClientBookingPrepDTO": {
+      "description": "The client's appointment-prep bundle: the pro's checklist, the note beside it, and which rows this client has already ticked.\n\nPresent ONLY when the caller loaded prep, which in practice means the booking is still preparable (`isPrepWritableStatus`) — there is nothing to get ready for once the appointment has happened or been cancelled. Absent is the honest answer for \"this payload can't say\", and keeps every other response byte-identical to pre-prep.",
+      "properties": {
+        "checkedItemIds": {
+          "description": "Ids of `items` this client has ticked. Existence IS the tick server-side.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "countdown": {
+          "$ref": "#/definitions/ClientBookingPrepCountdownDTO"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ClientBookingPrepItemDTO"
+          },
+          "type": "array"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "writable": {
+          "description": "Whether a tick would be ACCEPTED right now. Derived from the same predicate the write path re-checks inside its transaction, so a client never draws a control the server will refuse with `PREP_NOT_WRITABLE`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "items",
+        "checkedItemIds",
+        "note",
+        "writable",
+        "countdown"
+      ],
+      "type": "object"
+    },
+    "ClientBookingPrepItemDTO": {
+      "description": "One row of the pro's \"Before you go\" checklist, as the client sees it.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
       ],
       "type": "object"
     },
@@ -12016,6 +12130,16 @@
         "lng"
       ],
       "type": "object"
+    },
+    "PrepCountdownTone": {
+      "description": "\"Tomorrow\" / \"In 3 days\" / \"In 6 weeks\" for the appointment-prep hero.\n\n🔴 COUNTED IN CALENDAR DAYS IN THE APPOINTMENT'S OWN ZONE, not in 24h blocks. An 11pm-Monday \"now\" and a 9am-Wednesday appointment is 34 hours apart, which `Math.floor(hours / 24)` calls \"tomorrow\" and a human calls \"in 2 days\". The zone matters for the same reason a booking's time does: the appointment happens where the pro is, not where the phone is.\n\nThe design's three shapes hang off `tone`:   urgent — today or tomorrow: the gold-bordered hero.   near   — inside a fortnight: the standard hero.   far    — beyond that: a single quiet line, and the board card is promoted            above the checklist, because the useful thing to do six weeks out            is send the pro your looks.",
+      "enum": [
+        "urgent",
+        "near",
+        "far",
+        "past"
+      ],
+      "type": "string"
     },
     "ProAvailabilityBusyDaysOk": {
       "properties": {
