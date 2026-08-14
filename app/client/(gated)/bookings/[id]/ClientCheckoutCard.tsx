@@ -2,7 +2,7 @@
 
 'use client'
 
-import { type MouseEvent, useMemo, useState, useTransition } from 'react'
+import { type MouseEvent, useId, useMemo, useState, useTransition } from 'react'
 import { formatMoneyFromUnknown } from '@/lib/money'
 import { useRouter } from 'next/navigation'
 import {
@@ -10,6 +10,11 @@ import {
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { buildPaymentDeepLink } from '@/lib/payments/paymentDeepLink'
+// 🔴 The SHARED reading of the pro's saved suggestions. This file used to carry
+// its own copy that only understood bare numbers, so a pro who configured
+// 18/22/25 was silently served the platform's 15/20/25 on web while iOS — which
+// goes through the server-side normalizer — showed the real thing.
+import { resolveTipPresetPercents } from '@/lib/payments/tipSuggestions'
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { COPY } from '@/lib/copy'
 
@@ -172,34 +177,6 @@ function normalizePaymentMethodKey(value: unknown): string {
 function methodKeyToRequestValue(value: string): string | null {
   const normalized = value.trim().toUpperCase()
   return normalized ? normalized : null
-}
-
-function normalizeTipSuggestionPercents(value: unknown): number[] {
-  if (value === false) return []
-
-  if (Array.isArray(value)) {
-    const parsed = value
-      .map((item) => {
-        if (typeof item === 'number') return item
-        if (typeof item === 'string') {
-          const numeric = Number(item.trim())
-          return Number.isFinite(numeric) ? numeric : Number.NaN
-        }
-        return Number.NaN
-      })
-      .filter((item) => Number.isFinite(item))
-      .map((item) => Math.round(item))
-      .filter((item) => item >= 0 && item <= 100)
-
-    const unique = Array.from(new Set(parsed))
-    return unique
-  }
-
-  if (value === true || value == null) {
-    return [15, 20, 25]
-  }
-
-  return [15, 20, 25]
 }
 
 function toTipAmountString(serviceSubtotal: number, percent: number): string {
@@ -444,7 +421,7 @@ export default function ClientCheckoutCard(props: Props) {
   )
 
   const configuredTipSuggestions = useMemo(
-    () => normalizeTipSuggestionPercents(props.tipSuggestions),
+    () => resolveTipPresetPercents(props.tipSuggestions),
     [props.tipSuggestions],
   )
 
@@ -470,6 +447,9 @@ export default function ClientCheckoutCard(props: Props) {
     if (!Number.isFinite(parsed) || parsed < 0) return 0
     return parsed
   }, [tipInput])
+
+  // Stable id so the <select> keeps its own <label> across SSR/hydration.
+  const methodSelectId = useId()
 
   const selectedMethod = useMemo(
     () =>
@@ -569,7 +549,38 @@ export default function ClientCheckoutCard(props: Props) {
   function handleMethodSelect(nextKey: string) {
     setError(null)
     setSuccess(null)
+
+    // Picking the method they're ALREADY on isn't a request to pay again.
+    const changed = nextKey !== selectedMethodKey
     setSelectedMethodKey(nextKey)
+    if (!changed) return
+
+    // 🔴 Choosing the method hands off to that provider's app straight away
+    // (Tori, 2026-08-14) — the client shouldn't have to find a second button to
+    // do the thing they just said they wanted to do. The explicit "Pay with X"
+    // link below STAYS: they have to come back here to confirm, and after
+    // returning it is the only way to reopen the app.
+    //
+    // Only on a phone/tablet, and only for a method with a real app scheme.
+    // There is no app to pop up on a desktop, so the link is still the honest
+    // affordance there — and a select's onChange spawning a blocked popup would
+    // be worse than nothing.
+    if (!isMobileBrowser()) return
+
+    const method = props.acceptedMethods.find((m) => m.key === nextKey)
+    if (!method) return
+
+    // Same amount the "Pay with X" link quotes — the live total less any
+    // deposit already held, never the raw total.
+    const action = buildPaymentDeepLink({
+      methodKey: method.key,
+      handle: method.handle,
+      amountDue,
+      note: brand.displayName,
+    })
+    if (action?.kind === 'link' && action.appHref) {
+      window.location.href = action.appHref
+    }
   }
 
   function handlePrimaryCta() {
@@ -838,49 +849,48 @@ export default function ClientCheckoutCard(props: Props) {
       </div>
 
       <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">
-        <div className="text-[12px] font-black text-textPrimary">
+        {/* The visible heading IS the select's label — a second sr-only one
+            would just announce "Payment method" twice. */}
+        <label
+          htmlFor={methodSelectId}
+          className="text-[12px] font-black text-textPrimary"
+        >
           Payment method
-        </div>
+        </label>
 
+        {/*
+          A DROPDOWN, not a stack of full-width rows (Tori, 2026-08-14). A pro
+          who takes five methods used to push the Pay button most of a screen
+          down, and every unpicked option shouted as loudly as the picked one.
+          The native twin is a Menu + Picker in BookingDetailView.swift — the
+          two clients are a parity of each other.
+        */}
         {props.acceptedMethods.length > 0 ? (
-          <div className="mt-3 grid gap-2">
-            {props.acceptedMethods.map((method) => {
-              const active = method.key === selectedMethodKey
+          <>
+            <select
+              id={methodSelectId}
+              value={selectedMethodKey}
+              onChange={(event) => handleMethodSelect(event.target.value)}
+              disabled={controlsFrozen || isPending}
+              className="mt-3 w-full rounded-card border border-textPrimary/10 bg-bgSecondary px-4 py-3 text-[13px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {props.acceptedMethods.map((method) => (
+                <option key={method.key} value={method.key}>
+                  {/* The handle belongs ON the option: it is what tells the
+                      client WHICH account they are about to pay. */}
+                  {method.handle
+                    ? `${method.label} · ${method.handle}`
+                    : method.label}
+                </option>
+              ))}
+            </select>
 
-              return (
-                <button
-                  key={method.key}
-                  type="button"
-                  onClick={() => handleMethodSelect(method.key)}
-                  disabled={controlsFrozen || isPending}
-                  className={[
-                    'flex w-full items-start justify-between gap-3 rounded-card border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-50',
-                    active
-                      ? 'border-textPrimary/10 bg-accentPrimary text-bgPrimary'
-                      : 'border-textPrimary/10 bg-bgSecondary text-textPrimary',
-                  ].join(' ')}
-                >
-                  <div className="min-w-0">
-                    <div className="text-[13px] font-black">{method.label}</div>
-                    {method.handle ? (
-                      <div
-                        className={[
-                          'mt-1 text-[12px] font-semibold',
-                          active ? 'text-bgPrimary/80' : 'text-textSecondary',
-                        ].join(' ')}
-                      >
-                        {method.handle}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="shrink-0 text-[11px] font-black">
-                    {active ? 'Selected' : 'Choose'}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+            {selectedMethod?.handle ? (
+              <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                {selectedMethod.handle}
+              </div>
+            ) : null}
+          </>
         ) : (
           <div className="mt-2 text-[12px] font-semibold text-textSecondary">
             No payment methods are enabled yet for this provider.

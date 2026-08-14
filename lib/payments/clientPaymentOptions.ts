@@ -12,7 +12,7 @@
 // here so the two never drift.
 import { PaymentMethod, type Prisma } from '@prisma/client'
 
-import { isRecord } from '@/lib/guards'
+import { normalizeTipSuggestionPercents } from '@/lib/payments/tipSuggestions'
 import {
   buildClientSelfServePaymentMethods,
   paymentMethodKey,
@@ -181,35 +181,13 @@ export function buildClientAcceptedMethods(
  * numeric array (defensive) so a legacy shape can't blank the presets. Percents
  * are truncated, clamped to 0–100, and de-duplicated in order. Tip presets are
  * a services-subtotal percentage; the client prepends its own 0% option.
+ *
+ * Re-exported from `lib/payments/tipSuggestions` rather than implemented twice:
+ * this module can't be imported by a client component (it pulls Prisma), which
+ * is exactly why `ClientCheckoutCard` grew a weaker private copy that ignored
+ * the `{ percent }` shape the pro editor actually saves.
  */
-export function normalizeTipSuggestionPercents(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
-
-  const percents: number[] = []
-
-  for (const item of value) {
-    let raw: number
-
-    if (typeof item === 'number') {
-      raw = item
-    } else if (typeof item === 'string') {
-      raw = Number(item.trim())
-    } else if (isRecord(item) && typeof item.percent === 'number') {
-      raw = item.percent
-    } else {
-      continue
-    }
-
-    if (!Number.isFinite(raw)) continue
-
-    const percent = Math.trunc(raw)
-    if (percent < 0 || percent > 100) continue
-
-    if (!percents.includes(percent)) percents.push(percent)
-  }
-
-  return percents
-}
+export { normalizeTipSuggestionPercents }
 
 /**
  * Build the full client payment options block for a committed booking from a raw
