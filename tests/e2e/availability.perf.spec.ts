@@ -106,8 +106,15 @@ const ADD_ONS_LIST_TEST_ID = 'booking-add-ons-list'
 const REFRESH_BUTTON_TEST_ID = 'availability-refresh-button'
 
 const SLOT_TEST_ID_PREFIX = 'availability-slot-'
+const DAY_TEST_ID_PREFIX = 'availability-day-'
 const SLOT_LIST_TEST_ID = 'availability-slot-list'
-const DAY_BUTTON_TEXT = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\d{1,2}$/i
+// Last-resort text scan for `findDayButtons`; the testid selector above is what
+// actually matches. The chip stacks weekday / day-of-month / remaining supply,
+// which collapses to "Fri1412 open" — so this can no longer be anchored at the
+// day number, and a bare prefix match would also catch slot chips ("Fri 2:15
+// PM"). Require the supply suffix, since every chip now carries one.
+const DAY_BUTTON_TEXT =
+  /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\d{1,2}(?:\s*(?:\d+\s*(?:open|left)|Full))?$/i
 const SLOT_BUTTON_NAME =
   /(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat).*?\d{1,2}(?::\d{2})?\s?(?:AM|PM)/i
 const CONTINUE_BUTTON_NAME = /continue(?:\s+to\s+add-ons)?/i
@@ -210,7 +217,10 @@ const SELECTORS = {
     'button:has-text("Availability")',
     'button:has-text("Book")',
   ]),
-  dayButton: compactSelectors([process.env.PERF_DAY_BUTTON_SELECTOR]),
+  dayButton: compactSelectors([
+    process.env.PERF_DAY_BUTTON_SELECTOR,
+    `[data-testid^="${DAY_TEST_ID_PREFIX}"]`,
+  ]),
   slotButton: compactSelectors([
     process.env.PERF_SLOT_BUTTON_SELECTOR,
     `[data-testid^="${SLOT_TEST_ID_PREFIX}"]:not([data-testid="${SLOT_LIST_TEST_ID}"])`,

@@ -28,6 +28,18 @@ type DayButtonProps = {
   onSelectDay: (ymd: string) => void
 }
 
+/**
+ * The day chip's test hook.
+ *
+ * ⚠️ The e2e suite restates this prefix in `tests/e2e/utils/selectors.ts`
+ * (`testIds.availability.dayChipPrefix`) rather than importing it — pulling a
+ * React component module into the Playwright process to read one string is a
+ * worse trade. Rename in both places.
+ */
+function dayChipTestId(ymd: string): string {
+  return `availability-day-${ymd}`
+}
+
 const DayButton = memo(function DayButton({
   day,
   active,
@@ -36,7 +48,15 @@ const DayButton = memo(function DayButton({
   return (
     <button
       type="button"
+      // A STABLE hook. This button's accessible name is assembled from its
+      // visible lines, so it changed the moment the supply line was added and
+      // took every name-matching e2e selector with it. The testid does not move
+      // when the copy does.
+      data-testid={dayChipTestId(day.ymd)}
       onClick={() => onSelectDay(day.ymd)}
+      // Spelled out rather than left to the three stacked text nodes, which
+      // would announce as "Fri1412 open".
+      aria-label={`${day.labelTop} ${day.labelBottom}, ${day.supplyLabel}`}
       aria-pressed={active}
       style={{
         flexShrink: 0,
