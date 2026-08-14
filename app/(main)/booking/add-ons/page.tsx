@@ -10,6 +10,7 @@ import { cancellationPolicyDisclosure } from '@/lib/noShowProtection/policyDiscl
 // Shared wire DTO for GET /api/v1/offerings/add-ons — single source of truth for
 // the add-on shape (web + native). The `id` is the OfferingAddOn link id.
 import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
+import { loadAddOnsContext } from '@/lib/booking/addOnsContext'
 
 export const dynamic = 'force-dynamic'
 
@@ -185,6 +186,9 @@ export default async function BookingAddOnsPage({
   const mediaId = cleanString(pickOne(sp.mediaId) ?? null)
   const lookPostId = cleanString(pickOne(sp.lookPostId) ?? null)
 
+  // The look/pro/time/hold the sheet already knew — see lib/booking/addOnsContext.
+  const addOnsContext = await loadAddOnsContext({ holdId, mediaId })
+
   const urlAddOnIdsRaw = cleanString(pickOne(sp.addOnIds) ?? null)
   const urlAddOnIds = parseCommaIds(urlAddOnIdsRaw, 50)
 
@@ -235,6 +239,7 @@ export default async function BookingAddOnsPage({
 
   return (
     <AddOnsClient
+      context={addOnsContext}
       holdId={holdId}
       offeringId={offeringId}
       locationType={locationType}
