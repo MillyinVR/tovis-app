@@ -17,13 +17,11 @@ function currentStepIndex(status: ClientHomeViralPending['status']): number {
   return status === 'IN_REVIEW' ? 2 : 0
 }
 
-function LiveLookHero({
-  live,
-  moreCount,
-}: {
-  live: ClientHomeViralLive
-  moreCount: number
-}) {
+/**
+ * The single-look treatment. Only reached when there is exactly ONE live look —
+ * two or more list as strips — so it carries no "+N more" line of its own.
+ */
+function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
   const platform = platformFromUrl(live.sourceUrl)
   const proCount = live._count.approvalFanOuts
 
@@ -104,14 +102,6 @@ function LiveLookHero({
             <span className="text-[9px] leading-none text-accentPrimary">✦</span>
             Hard to book? Join a pro&apos;s waitlist →
           </Link>
-          {moreCount > 0 ? (
-            <Link
-              href="/looks"
-              className="mt-2 block text-center font-display text-[12px] font-semibold text-textSecondary transition hover:text-textPrimary"
-            >
-              +{moreCount} more live in the feed →
-            </Link>
-          ) : null}
         </div>
       </div>
     </div>
@@ -340,7 +330,10 @@ export default function ViralLooksBand({
   /** Board-style rows, used only once there is more than one live look. */
   const MAX_LIVE_STRIPS = 4
   const liveStrips = viralLive.length > 1 ? viralLive.slice(0, MAX_LIVE_STRIPS) : []
-  const liveOverflow = Math.max(0, viralLive.length - liveStrips.length)
+  // Zero when there are no strips at all, not "everything" — the count is only
+  // meaningful beside the list it overflows from.
+  const liveOverflow =
+    liveStrips.length > 0 ? viralLive.length - liveStrips.length : 0
 
   return (
     <section className="relative mx-auto max-w-[1040px] px-4 pt-[34px] md:px-8">
@@ -386,7 +379,7 @@ export default function ViralLooksBand({
             ) : null}
           </div>
         ) : live ? (
-          <LiveLookHero live={live} moreCount={0} />
+          <LiveLookHero live={live} />
         ) : (
           <LiveLookEmpty />
         )}

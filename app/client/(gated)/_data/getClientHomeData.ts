@@ -685,13 +685,15 @@ export async function getClientHomeData({
     }),
   ])
 
-  const rankedWaitlists = await withQueuePositions(waitlists)
-
-  // Only when there is a card to put it on — a client with no upcoming booking
-  // pays nothing for it.
-  const upcomingProRating = upcoming
-    ? await loadProRating(upcoming.professional.id)
-    : null
+  // Both depend on the fan-out above, so they cannot join it — but they do not
+  // depend on EACH OTHER, and this is a page-load path: serialising them would
+  // put two round-trips end to end for no reason. The rating is loaded only when
+  // there is a card to put it on, so a client with no upcoming booking pays
+  // nothing for it.
+  const [rankedWaitlists, upcomingProRating] = await Promise.all([
+    withQueuePositions(waitlists),
+    upcoming ? loadProRating(upcoming.professional.id) : Promise.resolve(null),
+  ])
 
   // Tori's rule (F15): a stored time the pro's schedule can no longer serve is
   // not shown at all. These are the same opening rows /api/v1/client/openings
