@@ -13,6 +13,7 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import CalendarSwatchPicker from '@/app/pro/services/CalendarSwatchPicker'
 import PrepayScopePicker from '@/app/pro/services/PrepayScopePicker'
 import ConsentRequirementPicker from '@/app/pro/services/ConsentRequirementPicker'
+import PrepChecklistEditor from '@/app/pro/services/PrepChecklistEditor'
 import type { CalendarSwatchId } from '@/lib/calendar/eventColor'
 import type { OfferingPrepayScope } from '@prisma/client'
 type Offering = {
@@ -850,13 +851,18 @@ function OfferingEditor(props: {
       </div>
 
       {addonsOpen ? (
-        <AddOnsManager
-          offeringId={o.id}
-          disabled={disabledForEdit}
-          onError={(msg) => setError(msg)}
-          onSuccess={(msg) => setSuccess(msg)}
-          onRefresh={() => refresh()}
-        />
+        <>
+          <AddOnsManager
+            offeringId={o.id}
+            disabled={disabledForEdit}
+            onError={(msg) => setError(msg)}
+            onSuccess={(msg) => setSuccess(msg)}
+            onRefresh={() => refresh()}
+          />
+          {/* Sibling of the add-on rows, per the walkthrough: the pro is
+              already here configuring what this one service means. */}
+          <PrepChecklistEditor offeringId={o.id} serviceName={o.serviceName} />
+        </>
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
