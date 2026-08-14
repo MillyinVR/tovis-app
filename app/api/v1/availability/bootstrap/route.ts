@@ -910,7 +910,7 @@ export async function GET(req: Request) {
         // only on a cache miss, and every signal here changes far more slowly
         // than the 120s TTL — a booked count up to two minutes behind is not a
         // wrong number, and none of them affect what can be booked.
-        trust: await loadBookingTrustSignals(professionalId),
+        trust: await loadBookingTrustSignals(professionalId, prismaRead),
 
         ...(debug
           ? {
@@ -969,7 +969,7 @@ export async function GET(req: Request) {
       // Outside the cache with `mediaId`: the cache is scoped to the PRO, and
       // two clients booking the same pro from two different looks must not be
       // served each other's cover.
-      cover: await loadBookingCover(mediaId),
+      cover: await loadBookingCover(mediaId, prismaRead),
       availableDays: refreshedAvailableDays,
       selectedDay: refreshedSelectedDay,
     }

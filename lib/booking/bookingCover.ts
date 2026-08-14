@@ -6,7 +6,7 @@
 //
 // Resolved from the `mediaId` the booking flow already threads through every
 // surface, so nothing new has to be plumbed from the look feed.
-import { MediaVisibility } from '@prisma/client'
+import { MediaVisibility, type Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
@@ -29,11 +29,12 @@ export type BookingCover = {
  */
 export async function loadBookingCover(
   mediaId: string | null | undefined,
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<BookingCover | null> {
   const id = typeof mediaId === 'string' ? mediaId.trim() : ''
   if (!id) return null
 
-  const media = await prisma.mediaAsset.findFirst({
+  const media = await db.mediaAsset.findFirst({
     where: { id, visibility: MediaVisibility.PUBLIC },
     select: {
       storageBucket: true,
