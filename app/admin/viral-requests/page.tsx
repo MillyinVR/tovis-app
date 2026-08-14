@@ -26,11 +26,15 @@ import {
   isViralRequestAwaitingReview,
   listAdminViralRequests,
 } from '@/lib/viralRequests'
-import { resolveViralCoverImage } from '@/lib/viralRequests/contracts'
+import {
+  readViralSubmitterMedia,
+  resolveViralCoverImage,
+} from '@/lib/viralRequests/contracts'
 
 import AdminGuard from '../_components/AdminGuard'
 import ViralRequestActions from './ViralRequestActions'
 import ViralRequestCoverUploader from './ViralRequestCoverUploader'
+import ViralRequestSubmitterMedia from './ViralRequestSubmitterMedia'
 
 export const dynamic = 'force-dynamic'
 
@@ -103,8 +107,10 @@ export default async function AdminViralRequestsPage() {
             </div>
           ) : (
             rows.map((row) => {
+              // What the client sent, and what a reviewer chose to publish —
+              // two different things, and only the second reaches a client.
               const cover = resolveViralCoverImage(row)
-              const submitterAttached = !row.coverImageUrl && cover !== null
+              const submitted = readViralSubmitterMedia(row)
               const canAct = isViralRequestAwaitingReview(row.status)
 
               return (
@@ -177,6 +183,11 @@ export default async function AdminViralRequestsPage() {
                           Notes: {row.adminNotes}
                         </p>
                       ) : null}
+
+                      <ViralRequestSubmitterMedia
+                        requestId={row.id}
+                        media={submitted}
+                      />
                     </div>
 
                     <div className="flex shrink-0 flex-col items-end gap-2">
@@ -195,12 +206,6 @@ export default async function AdminViralRequestsPage() {
                           </span>
                         )}
                       </div>
-
-                      {submitterAttached ? (
-                        <span className="text-[10.5px] text-textMuted">
-                          From the submitter — replace to override
-                        </span>
-                      ) : null}
 
                       <ViralRequestCoverUploader
                         requestId={row.id}

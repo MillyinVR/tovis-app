@@ -66,17 +66,33 @@ export type ViralRequestDto = {
  * The one place that decides which picture a viral look is shown by, so the
  * admin queue, the client home and every future surface cannot disagree.
  *
- * The REVIEWER's pick wins over the submitter's attachment — that is the whole
- * point of having both: an admin can replace a bad photo without destroying
- * what the client sent.
+ * 🔴 ONLY the reviewer's `coverImageUrl` — never the submitter's attachment
+ * (Tori, 2026-08-14: *"the client can upload an image or video but only the
+ * admin can set it app wide"*).
+ *
+ * It is tempting to fall back to `mediaUrls[0]` so a look has a picture sooner,
+ * and that was the first cut of this function. It is wrong: a client attaches
+ * whatever they photographed or found, and approving the look would then publish
+ * that image across the platform with nobody having chosen it — someone else's
+ * copyrighted shot, or worse, on a surface every client sees. The submitter's
+ * media is EVIDENCE for the reviewer, shown in the queue; a reviewer promotes it
+ * with one tap ("Use this"), which copies it here. Nothing reaches a client
+ * surface until that happens.
  */
 export function resolveViralCoverImage(row: {
   coverImageUrl: string | null
-  mediaUrlsJson: ViralRequestListRow['mediaUrlsJson']
 }): string | null {
-  const chosen = row.coverImageUrl?.trim()
-  if (chosen) return chosen
-  return readStringArray(row.mediaUrlsJson)[0] ?? null
+  return row.coverImageUrl?.trim() || null
+}
+
+/**
+ * What the SUBMITTER attached — reviewer-facing only. Never rendered on a client
+ * surface; see `resolveViralCoverImage`.
+ */
+export function readViralSubmitterMedia(row: {
+  mediaUrlsJson: ViralRequestListRow['mediaUrlsJson']
+}): string[] {
+  return readStringArray(row.mediaUrlsJson)
 }
 
 export function toViralRequestDto(row: ViralRequestListRow): ViralRequestDto {
