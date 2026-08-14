@@ -56,6 +56,15 @@ const ALLOWED_FILES = new Set([
   // policies would only add cost, not coverage. Hard-refuses any DATABASE_URL
   // host outside localhost (own guard, not requireSafeScriptRun).
   normalize('prisma/scripts/seedRetentionRosterPerf.ts'),
+  // LOCAL-ONLY demo fixture for the client-surface design walkthrough
+  // (prisma/scripts/seedDemoClientProfile.ts). Its only Booking write is a
+  // createMany of plain COMPLETED, past-dated rows whose sole purpose is to
+  // carry `sourceLookPostId`, so the public profile's "N recreated this" count
+  // is derived from real attribution rather than a hand-typed number. No
+  // checkout, payment or notification flow is involved, so the write boundary's
+  // locks and policies would add cost without coverage. Hard-refuses any
+  // DATABASE_URL host outside localhost (own guard, not requireSafeScriptRun).
+  normalize('prisma/scripts/seedDemoClientProfile.ts'),
 ])
 
 const TEMP_ALLOWED_FILES = new Set([

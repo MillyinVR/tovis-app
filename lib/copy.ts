@@ -277,6 +277,41 @@ export const COPY = {
 
   // Pro-side "Confirm payment received" action — closes out a booking whose
   // checkout is AWAITING_CONFIRMATION (client paid off-platform). Confirming
+  /**
+   * `/u/[handle]` — a client's public creator profile, as seen by a stranger.
+   *
+   * ⚠️ Prices on the look cards are STARTING prices, composed by the loader as
+   * `${bookingConfirmation.priceFrom} ${amount}` — never a bare figure.
+   *
+   * ⚠️ `spotlightBadge` is deliberately NOT "Viral", which is what the design
+   * frame calls it. The flag behind it is `LookPost.featuredAt` — a SUPER_ADMIN
+   * promoting a look editorially. Labelling an editor's pick "Viral" would claim
+   * an engagement event that never happened.
+   */
+  publicProfile: {
+    tabLooks: 'LOOKS',
+    tabBoards: 'BOARDS',
+    followersLabel: 'Followers',
+    followingLabel: 'Following',
+    looksLabel: 'Looks',
+    follow: 'Follow',
+    following: 'Following',
+    /** Composed as `${topPercentPrefix} N${topPercentSuffix}` → "top 5% saver". */
+    topPercentPrefix: 'top',
+    topPercentSuffix: '% saver',
+    tierTastemaker: 'Tastemaker',
+    tierRising: 'Rising',
+    spotlightBadge: 'Spotlight',
+    /** Composed as `${count} ${recreatedSuffix}` → "12 recreated this". */
+    recreatedSuffix: 'recreated this',
+    /** Composed as `${count} ${savedSuffix}` → "24 saved". */
+    savedSuffix: 'saved',
+    savesLabel: 'saves',
+    recreateCta: 'Recreate this look',
+    emptyLooks: 'No public looks yet.',
+    emptyBoards: 'No shared boards yet.',
+  },
+
   // also auto-approves any aftercare next booking coupled to this payment.
   proBookingCheckout: {
     awaitingConfirmationTitle: 'Confirm payment received',

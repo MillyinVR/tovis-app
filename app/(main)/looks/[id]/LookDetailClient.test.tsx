@@ -8,6 +8,8 @@ import { isRecord } from '@/lib/guards'
 
 const mockPush = vi.hoisted(() => vi.fn())
 const mockWriteText = vi.hoisted(() => vi.fn())
+/** Query string the component sees; a case sets it to drive `?book=1`. */
+const mockSearchParams = vi.hoisted(() => ({ value: '' }))
 
 type MockViewerLocation = {
   lat: number
@@ -29,6 +31,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({
     push: mockPush,
   }),
+  // `?book=1` drives the auto-open of the availability drawer ("Recreate this
+  // look" arriving from a public creator profile). Default to no params so
+  // these cases exercise the ordinary, non-auto-booking render.
+  useSearchParams: () => new URLSearchParams(mockSearchParams.value),
 }))
 
 vi.mock('@/lib/brand/BrandProvider', () => ({
@@ -453,6 +459,7 @@ function installFetchMock(args?: {
 describe('app/(main)/looks/[id]/LookDetailClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSearchParams.value = ''
 
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -558,6 +565,32 @@ describe('app/(main)/looks/[id]/LookDetailClient', () => {
       'data-viewer-location-label',
       'San Diego, CA',
     )
+  })
+
+  // "Recreate this look" on a public creator profile links here with `?book=1`.
+  // Without the auto-open the CTA would just re-open the page the look tile
+  // already opened, and the frame's promise ("tap Recreate to get the same look
+  // near you") would land the visitor one silent step short of booking.
+  it('opens availability on arrival when ?book=1 is present', async () => {
+    installFetchMock()
+    mockSearchParams.value = 'book=1'
+
+    render(<LookDetailClient initialItem={makeDetailItem()} />)
+
+    const drawer = await screen.findByTestId('availability-drawer')
+    expect(drawer).toHaveAttribute('data-professional-id', 'pro_1')
+    expect(drawer).toHaveAttribute('data-source', 'DISCOVERY')
+  })
+
+  it('does not open availability without the flag', async () => {
+    installFetchMock()
+
+    render(<LookDetailClient initialItem={makeDetailItem()} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Open availability' })).toBeTruthy()
+    })
+    expect(screen.queryByTestId('availability-drawer')).toBeNull()
   })
 
   it('shares the canonical post detail URL', async () => {

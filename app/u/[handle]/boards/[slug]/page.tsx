@@ -66,7 +66,7 @@ export default async function PublicBoardPage({
       aria-labelledby="public-board-heading"
     >
       <div className="mx-auto w-full max-w-5xl px-4 pb-24 pt-6 md:px-8">
-        <header className="mb-6 border-b border-white/10 pb-5">
+        <header className="mb-6 border-b border-textPrimary/10 pb-5">
           {data.ownerProfilePublic ? (
             <Link
               href={`/u/${data.handle}`}
@@ -107,7 +107,7 @@ export default async function PublicBoardPage({
         </header>
 
         {data.looks.length === 0 ? (
-          <section className="rounded-card border border-white/10 bg-bgSecondary px-5 py-10 text-center">
+          <section className="rounded-card border border-textPrimary/10 bg-bgSecondary px-5 py-10 text-center">
             <div className="text-[14px] font-bold text-textPrimary">
               Nothing to see here yet.
             </div>
@@ -125,7 +125,7 @@ export default async function PublicBoardPage({
                 aria-label={`Open ${look.name}`}
               >
                 <div
-                  className="relative overflow-hidden rounded-card border border-white/10 bg-bgSecondary transition group-hover:border-white/20"
+                  className="relative overflow-hidden rounded-card border border-textPrimary/10 bg-bgSecondary transition group-hover:border-textPrimary/20"
                   style={{ aspectRatio: '3 / 4' }}
                 >
                   {look.imageUrl ? (

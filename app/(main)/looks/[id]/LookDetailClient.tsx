@@ -2,8 +2,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { isRecord } from '@/lib/guards'
@@ -129,6 +129,28 @@ export default function LookDetailClient({
     setDrawerCtx(context)
     setAvailabilityOpen(true)
   }, [item, viewerLoc])
+
+  // `?book=1` — arrive with the availability drawer already open. This is what
+  // makes "Recreate this look" on a public creator profile a booking action
+  // rather than a relabelled link to the same page the tile already opened.
+  //
+  // Fires ONCE per mount: `openAvailability` is rebuilt whenever the viewer's
+  // location resolves, so an effect that simply depended on it would re-open the
+  // drawer after the visitor dismissed it.
+  //
+  // It must be an EFFECT rather than a lazy `useState` initializer: the drawer
+  // context embeds the viewer's stored location, which `useViewerLocation` reads
+  // from localStorage. Seeding it during render would produce a null context on
+  // the server and a populated one on the client — hydration drift inside the
+  // drawer. Opening after mount reads one consistent value.
+  const autoBookRequested = useSearchParams()?.get('book') === '1'
+  const autoBookedRef = useRef(false)
+  useEffect(() => {
+    if (!autoBookRequested || autoBookedRef.current) return
+    autoBookedRef.current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-only drawer open; seeding it during render would hydrate-mismatch on the localStorage-backed viewer location
+    openAvailability()
+  }, [autoBookRequested, openAvailability])
 
   const handleCommentCountChange = useCallback(
     (_lookPostId: string, commentsCount: number) => {

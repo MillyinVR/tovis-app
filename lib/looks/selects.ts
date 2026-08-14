@@ -26,6 +26,24 @@ export const boardVisibleLookItemWhere =
     },
   })
 
+// What makes ANY look publicly visible, independent of who authored it:
+// PUBLISHED + PUBLIC + APPROVED + actually published + not removed.
+//
+// Extracted because the pro-portfolio clause below and the client creator
+// profile's own grid (app/u/[handle]/_data/loadPublicClientProfile.ts) each
+// stated this separately, and had already drifted apart on `publishedAt`. The
+// two differ only in which side of the `clientAuthorId` split they want, so the
+// publicity rule itself belongs in one place — if it drifts again, a look can be
+// public on one surface and hidden on the other.
+export const publicLookVisibilityWhere =
+  Prisma.validator<Prisma.LookPostWhereInput>()({
+    status: LookPostStatus.PUBLISHED,
+    moderationStatus: ModerationStatus.APPROVED,
+    visibility: LookPostVisibility.PUBLIC,
+    publishedAt: { not: null },
+    removedAt: null,
+  })
+
 // A pro's OWN publicly-visible looks: PUBLISHED + APPROVED + PUBLIC + not
 // removed, authored by the pro rather than by a client. Client-authored looks
 // keep `professionalId` pointing at the tagged pro but belong on that client's
@@ -41,11 +59,7 @@ export const boardVisibleLookItemWhere =
 export const proOwnPublicLooksWhere =
   Prisma.validator<Prisma.LookPostWhereInput>()({
     clientAuthorId: null,
-    status: LookPostStatus.PUBLISHED,
-    moderationStatus: ModerationStatus.APPROVED,
-    visibility: LookPostVisibility.PUBLIC,
-    publishedAt: { not: null },
-    removedAt: null,
+    ...publicLookVisibilityWhere,
   })
 
 const looksServiceCategorySelect =

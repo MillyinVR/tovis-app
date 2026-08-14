@@ -126,6 +126,10 @@
       "schedule": "40 * * * *"
     },
     {
+      "path": "/api/internal/jobs/client-creator-stats",
+      "schedule": "55 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/event-countdown",
       "schedule": "5 10 * * *"
     },

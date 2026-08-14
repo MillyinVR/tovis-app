@@ -186,6 +186,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     status: 'DELETE',
     reason: `${R_ENGAGEMENT} Both directions (follower and followed).`,
   },
+  ClientCreatorStat: {
+    status: 'DELETE',
+    reason:
+      "The deleted client's derived creator standing. Nothing else references it, and leaving a tier row keyed to a removed profile would let a deleted account keep occupying a rank.",
+  },
   Board: {
     status: 'DELETE',
     reason: "The client's own saved boards; cascades to their saved items.",

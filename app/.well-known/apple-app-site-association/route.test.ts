@@ -26,10 +26,10 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(detail.appIDs).toEqual(['SB3J675LNU.app.tovis.Tovis'])
 
     // The emailed reset link, the §27 account-claim link, the client referral
-    // short-link (`/c/*`, opened in the in-app browser), a shared look, and a
-    // shared public board (`/u/*/boards/*`) open in-app; everything else stays in
-    // the browser. `components` mirrors `paths` one-for-one (legacy "NOT " prefix
-    // ↔ modern `exclude: true`).
+    // short-link (`/c/*`, opened in the in-app browser), a shared look, a shared
+    // public board (`/u/*/boards/*`) and a shared creator profile (`/u/*`) open
+    // in-app; everything else stays in the browser. `components` mirrors `paths`
+    // one-for-one (legacy "NOT " prefix ↔ modern `exclude: true`).
     expect(detail.paths).toEqual([
       '/reset-password/*',
       '/claim/*',
@@ -38,6 +38,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
       'NOT /looks/tags/*',
       '/looks/*',
       '/u/*/boards/*',
+      '/u/*',
     ])
     expect(detail.components).toEqual([
       { '/': '/reset-password/*' },
@@ -47,6 +48,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
       { '/': '/looks/tags/*', exclude: true },
       { '/': '/looks/*' },
       { '/': '/u/*/boards/*' },
+      { '/': '/u/*' },
     ])
   })
 
@@ -68,18 +70,23 @@ describe('GET /.well-known/apple-app-site-association', () => {
     }
   })
 
-  // The board association is deliberately SCOPED to the board detail the app
-  // routes (`PublicBoardLink` → PublicBoardView). The bare `/u/<handle>` profile
-  // is NOT routed natively, so it must stay in the browser — associating a broad
-  // `/u/*` would turn every profile tap into the silent no-op the header warns
-  // about.
-  it('associates the board detail but NOT the bare /u/<handle> profile', async () => {
+  // Both `/u/` shapes are now routed natively — the board detail by
+  // `PublicBoardLink` → PublicBoardView, the bare profile by
+  // `PushDeepLink.Target.publicClient` → PublicClientViewerView — so both are
+  // associated. The specific board pattern is listed first so it is the one iOS
+  // matches for a board link.
+  it('associates the board detail BEFORE the broader /u/<handle> profile', async () => {
     const res = GET()
     const body = await res.json()
     const { paths } = body.applinks.details[0]
 
-    expect(paths).toContain('/u/*/boards/*')
-    expect(paths).not.toContain('/u/*')
+    const board = paths.indexOf('/u/*/boards/*')
+    const profile = paths.indexOf('/u/*')
+    expect(board).toBeGreaterThan(-1)
+    expect(profile).toBeGreaterThan(-1)
+    expect(board).toBeLessThan(profile)
+    // There is no `/u/<handle>/boards` index route, so nothing between the two
+    // patterns goes unhandled.
     expect(paths).not.toContain('/u/*/boards')
   })
 })
