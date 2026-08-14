@@ -2,10 +2,20 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { Prisma } from '@prisma/client'
+import {
+  BellRing,
+  CalendarPlus,
+  Check,
+  Clock,
+  MessageCircle,
+  ShieldCheck,
+  type LucideIcon,
+} from 'lucide-react'
 import ProProfileLink from '@/app/_components/ProProfileLink'
 import { prisma } from '@/lib/prisma'
+import { COPY } from '@/lib/copy'
 import { getCurrentUser } from '@/lib/currentUser'
-import { moneyToString } from '@/lib/money'
+import { formatRoundedDollars, moneyToString } from '@/lib/money'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { messageStartHref } from '@/lib/messages'
 import {
@@ -14,10 +24,13 @@ import {
 } from '@/lib/privacy/professionalDisplayName'
 import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/time'
-import { isRecord } from '@/lib/guards'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
+import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
 
 export const dynamic = 'force-dynamic'
+
+/** One icon per "what happens next" step, in the order COPY lists them. */
+const NEXT_STEP_ICONS: readonly LucideIcon[] = [Clock, BellRing, ShieldCheck]
 
 type PageProps = {
   params: { id: string } | Promise<{ id: string }>
@@ -50,6 +63,12 @@ const bookingReceiptSelect = {
   locationAddressSnapshot: true,
   locationLatSnapshot: true,
   locationLngSnapshot: true,
+
+  // MOBILE bookings happen at the CLIENT's address, not the pro's — see
+  // resolveBookedPlace.
+  clientAddressSnapshot: true,
+  clientAddressLatSnapshot: true,
+  clientAddressLngSnapshot: true,
 
   location: {
     select: {
@@ -100,14 +119,29 @@ type BookingReceiptRow = Prisma.BookingGetPayload<{
 type ServiceItemRow = BookingReceiptRow['serviceItems'][number]
 
 function fmtInTimeZone(dateUtc: Date, timeZone: string) {
+  // No year: this is a confirmation for a booking days away, and the year pushed
+  // the value onto a second line at 390px. No IANA id either — "America/
+  // Los_Angeles" is a database key, not something a client reads. The short zone
+  // name below carries the only part that matters when they're travelling.
   return formatInTimeZone(dateUtc, timeZone, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+/** "PDT" / "EST" — the human half of the timezone, for the muted second line. */
+function fmtZoneAbbreviation(dateUtc: Date, timeZone: string) {
+  const formatted = formatInTimeZone(dateUtc, timeZone, {
+    hour: 'numeric',
+    timeZoneName: 'short',
+  })
+
+  // "2 PM PDT" → "PDT". Falls back to the IANA id only if that shape changes.
+  const parts = formatted.trim().split(/\s+/)
+  return parts.length > 1 ? parts[parts.length - 1] : timeZone
 }
 
 function upper(v: unknown) {
@@ -180,13 +214,6 @@ function decimalToNumber(v: unknown): number | null {
   return null
 }
 
-function pickFormattedAddress(snapshot: Prisma.JsonValue | null | undefined): string | null {
-  if (!isRecord(snapshot)) return null
-
-  const raw = snapshot.formattedAddress
-  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
-}
-
 function resolveReceiptTimeZone(args: {
   bookingLocationTimeZone: string | null
   bookedLocationTimeZone: string | null | undefined
@@ -204,41 +231,57 @@ function resolveReceiptTimeZone(args: {
   return DEFAULT_TIME_ZONE
 }
 
-function buildBookedLocationLabel(booking: BookingReceiptRow) {
-  const snapshotAddress = pickFormattedAddress(booking.locationAddressSnapshot)
-  if (snapshotAddress) return snapshotAddress
+/**
+ * The place this booking actually happens, and a maps link to it.
+ *
+ * This page used to hand-roll the resolution and only ever read the SALON
+ * snapshot, so a MOBILE booking — which happens at the CLIENT's address —
+ * rendered no location at all, and would have shown the *pro's* address had
+ * that pro carried a `location` string. `resolveBookingLocationMeta` is the
+ * shared helper the pro bookings list and detail already use; it picks the
+ * client-address snapshot for MOBILE and the pro-location snapshot for SALON.
+ *
+ * The salon-only fallbacks (booked location's own address / name / city+state,
+ * then the pro's location text) stay, because a SALON booking predating the
+ * snapshot still has them. They are deliberately NOT applied to MOBILE: every
+ * one of them describes the pro's premises, which is the wrong place.
+ */
+function resolveBookedPlace(booking: BookingReceiptRow): {
+  label: string | null
+  mapsHref: string | null
+} {
+  const meta = resolveBookingLocationMeta({
+    locationType: booking.locationType,
+    locationAddressSnapshot: booking.locationAddressSnapshot,
+    locationLatSnapshot: decimalToNumber(booking.locationLatSnapshot),
+    locationLngSnapshot: decimalToNumber(booking.locationLngSnapshot),
+    clientAddressSnapshot: booking.clientAddressSnapshot,
+    clientAddressLatSnapshot: decimalToNumber(booking.clientAddressLatSnapshot),
+    clientAddressLngSnapshot: decimalToNumber(booking.clientAddressLngSnapshot),
+  })
 
-  const bookedLocation = booking.location
-  if (bookedLocation?.formattedAddress?.trim()) return bookedLocation.formattedAddress.trim()
-  if (bookedLocation?.name?.trim()) return bookedLocation.name.trim()
+  const bookedLocation = meta.isMobile ? null : booking.location
 
-  const cityState = [bookedLocation?.city, bookedLocation?.state].filter(Boolean).join(', ')
-  if (cityState) return cityState
+  const label =
+    meta.formattedAddress ??
+    bookedLocation?.formattedAddress?.trim() ??
+    bookedLocation?.name?.trim() ??
+    ([bookedLocation?.city, bookedLocation?.state].filter(Boolean).join(', ') || null) ??
+    (meta.isMobile ? null : booking.professional?.location?.trim() ?? null)
 
-  const professionalLocation = booking.professional?.location?.trim()
-  if (professionalLocation) return professionalLocation
+  // Coordinates beat a place id: the snapshot is what was booked, the pro's
+  // ProfessionalLocation may have moved since.
+  const hasSnapshotTruth = Boolean(meta.formattedAddress) || meta.lat != null || meta.lng != null
 
-  return null
-}
-
-function buildMapsHref(booking: BookingReceiptRow) {
-  const isSalon = upper(booking.locationType) === 'SALON'
-  if (!isSalon) return null
-
-  const snapshotAddress = pickFormattedAddress(booking.locationAddressSnapshot)
-  const snapshotLat = decimalToNumber(booking.locationLatSnapshot)
-  const snapshotLng = decimalToNumber(booking.locationLngSnapshot)
-  const hasSnapshotTruth = snapshotAddress || snapshotLat != null || snapshotLng != null
-
-  const bookedLocation = booking.location
-
-  return mapsHrefFromLocation({
+  const mapsHref = mapsHrefFromLocation({
     placeId: hasSnapshotTruth ? null : bookedLocation?.placeId ?? null,
-    lat: snapshotLat ?? decimalToNumber(bookedLocation?.lat),
-    lng: snapshotLng ?? decimalToNumber(bookedLocation?.lng),
-    formattedAddress: snapshotAddress ?? bookedLocation?.formattedAddress ?? null,
+    lat: meta.lat ?? decimalToNumber(bookedLocation?.lat),
+    lng: meta.lng ?? decimalToNumber(bookedLocation?.lng),
+    formattedAddress: meta.formattedAddress ?? bookedLocation?.formattedAddress ?? label,
     name: hasSnapshotTruth ? null : bookedLocation?.name ?? null,
   })
+
+  return { label, mapsHref }
 }
 
 export default async function BookingReceiptPage(props: PageProps) {
@@ -275,11 +318,10 @@ export default async function BookingReceiptPage(props: PageProps) {
   })
 
   const when = fmtInTimeZone(new Date(booking.scheduledFor), appointmentTz)
-  const locationLabel = buildBookedLocationLabel(booking)
-  const mapsHref = buildMapsHref(booking)
+  const whenZone = fmtZoneAbbreviation(new Date(booking.scheduledFor), appointmentTz)
+  const { label: locationLabel, mapsHref } = resolveBookedPlace(booking)
 
   const calendarHref = `/api/v1/calendar?bookingId=${encodeURIComponent(booking.id)}`
-  const proProfileHref = professional?.id ? `/professionals/${encodeURIComponent(professional.id)}` : null
   const messageHref =
     isClientViewer || isProViewer
       ? messageStartHref({ kind: 'BOOKING', bookingId: booking.id })
@@ -314,93 +356,253 @@ export default async function BookingReceiptPage(props: PageProps) {
     booking.subtotalSnapshot ??
     (items.length ? sumDecimal(items.map((item) => item.priceSnapshot)) : null)
 
-  const subtotalLabel = subtotalDecimal ? moneyToString(subtotalDecimal) : null
+  // ⚠️ STARTING price, never a settled one — the snapshot is fed by
+  // salonPriceStartingAt / service.minPrice, and a consultation can revise the
+  // total before the service happens. Always rendered behind COPY's "From".
+  const subtotalLabel = formatRoundedDollars(subtotalDecimal)
+
+  const CONFIRM = COPY.bookingConfirmation
+
+  // The hero is the CLIENT's moment. A pro opening the same URL is looking at a
+  // request someone sent *them*, so they keep a plain header — "Request sent"
+  // would be addressed to the wrong person.
+  //
+  // Only PENDING and the two live states earn a celebratory hero. COMPLETED,
+  // CANCELLED and NO_SHOW get a neutral one: the mark reads as "this is good
+  // news", and putting it over a cancelled booking would be a lie. Derived by
+  // listing the celebratory statuses, so a NEW BookingStatus lands in the
+  // neutral arm rather than silently inheriting the check.
+  const bookingStatus = upper(booking.status)
+  const isLive = bookingStatus === 'ACCEPTED' || bookingStatus === 'IN_PROGRESS'
+  const showCelebration = isWaiting || isLive
+
+  const heroTitle = isWaiting
+    ? CONFIRM.title
+    : isLive
+      ? CONFIRM.titleSettled
+      : CONFIRM.titleClosed
+  const heroBody = isWaiting
+    ? `${proName} ${CONFIRM.hasYourRequest}`
+    : isLive
+      ? CONFIRM.settledBody
+      : CONFIRM.closedBody
+
+  const addOnNames = addOnItems.map((item) => item.service.name).filter(Boolean)
+
+  const nextSteps: string[] = [
+    `${proName} ${CONFIRM.stepReviews}`,
+    CONFIRM.stepNotify,
+    CONFIRM.stepNoCharge,
+  ]
+
+  const bookingDetailHref = isProViewer
+    ? `/pro/bookings/${encodeURIComponent(booking.id)}`
+    : `/client/bookings/${encodeURIComponent(booking.id)}`
 
   return (
     <main className="mx-auto max-w-180 px-4 pb-24 pt-10 text-textPrimary">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <div className="text-[12px] font-black text-textSecondary">Booking receipt</div>
+      {isClientViewer ? (
+        <header className="flex flex-col items-center text-center">
+          {showCelebration ? (
+            <span
+              aria-hidden="true"
+              className="grid h-[76px] w-[76px] place-items-center rounded-full bg-[image:var(--cta)]"
+            >
+              <Check className="h-9 w-9 text-onCta" strokeWidth={3} />
+            </span>
+          ) : null}
 
-          <h1 className="mt-1 text-[26px] font-black">
-            {serviceName} with{' '}
-            <ProProfileLink proId={professional?.id ?? null} label={proName} />
+          <h1
+            className={`font-display text-[30px] font-semibold tracking-[-0.02em] ${
+              showCelebration ? 'mt-5' : ''
+            }`}
+          >
+            {heroTitle}
           </h1>
 
-          <div className="mt-1 text-[13px]">
-            <span className="font-black">{when}</span>
-            <span className="text-textSecondary"> · {appointmentTz}</span>
-
-            {locationLabel ? (
-              mapsHref ? (
-                <a
-                  href={mapsHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-textSecondary hover:opacity-80"
-                >
-                  {' · '}
-                  {locationLabel}
-                </a>
-              ) : (
-                <span className="text-textSecondary"> · {locationLabel}</span>
-              )
-            ) : null}
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-3 text-[12px] text-textSecondary">
-            <span>
-              <span className="font-black text-textPrimary">Status:</span> {statusLabel}
-            </span>
-
-            {locationTypeLabel ? (
-              <span>
-                <span className="font-black text-textPrimary">Mode:</span> {locationTypeLabel}
-              </span>
-            ) : null}
-
-            {duration ? (
-              <span>
-                <span className="font-black text-textPrimary">Duration:</span> {duration} min
-              </span>
-            ) : null}
-
-            {subtotalLabel ? (
-              <span>
-                <span className="font-black text-textPrimary">Est. subtotal:</span> ${subtotalLabel}
-              </span>
-            ) : null}
-
-            {sourceLabel ? (
-              <span>
-                <span className="font-black text-textPrimary">Source:</span> {sourceLabel}
-              </span>
-            ) : null}
-          </div>
-
-          {overrideNote ? (
-            <div className="tovis-glass-soft mt-3 whitespace-pre-wrap rounded-card p-3 text-[12px] font-semibold text-textSecondary">
-              <span className="font-black text-textPrimary">
-                {isClientViewer ? 'Note from your pro:' : 'Note shared with your client:'}
-              </span>{' '}
-              {overrideNote}
-            </div>
-          ) : null}
+          <p className="mt-2 max-w-[34ch] text-[14.5px] leading-snug text-textSecondary">
+            {heroBody}
+          </p>
 
           {isWaiting ? (
-            <div className="tovis-glass-soft mt-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
-              No charge yet. Once the pro confirms, your booking updates automatically in your dashboard.
-            </div>
+            <span className="mt-4 inline-flex items-center gap-2 rounded-full border border-gold/40 bg-gold/12 px-3.5 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-gold">
+              <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-gold" />
+              {CONFIRM.pendingPill}
+            </span>
+          ) : !isLive ? (
+            // A closed booking must still say WHICH closed state it is — the
+            // neutral header alone can't distinguish completed from cancelled.
+            <span className="mt-4 inline-flex items-center rounded-full border border-textPrimary/15 bg-bgSurface px-3.5 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-textSecondary">
+              {statusLabel}
+            </span>
           ) : null}
+        </header>
+      ) : (
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div>
+            <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-textMuted">
+              {CONFIRM.eyebrow}
+            </div>
+            <h1 className="mt-1 font-display text-[26px] font-semibold tracking-[-0.02em]">
+              {serviceName}
+            </h1>
+            <div className="mt-1 text-[13px] text-textSecondary">
+              {statusLabel}
+              {sourceLabel ? ` · ${sourceLabel}` : null}
+            </div>
+          </div>
+
+          <Link
+            href={dashboardHref}
+            className="text-[12px] font-black text-textPrimary hover:opacity-80"
+          >
+            ← Back
+          </Link>
+        </div>
+      )}
+
+      {/* Summary — the booking itself, led by what it is rather than its fields. */}
+      <section className="mt-7 overflow-hidden rounded-card border border-textPrimary/12 bg-bgSurface">
+        <div className="flex items-start justify-between gap-4 px-4 py-4">
+          <div className="min-w-0">
+            <div className="truncate font-display text-[17px] font-semibold tracking-[-0.01em]">
+              {serviceName}
+            </div>
+            <div className="mt-1 truncate text-[12.5px] text-textSecondary">
+              {COPY.bookings.withLabel.toLowerCase()}{' '}
+              <ProProfileLink proId={professional?.id ?? null} label={proName} />
+            </div>
+          </div>
+
+          <div className="shrink-0 text-right">
+            {subtotalLabel ? (
+              <div className="font-display text-[19px] font-bold tracking-[-0.02em] text-accentPrimary">
+                {CONFIRM.priceFrom} {subtotalLabel}
+              </div>
+            ) : null}
+            {duration ? (
+              <div className="mt-0.5 font-mono text-[11px] text-textMuted">{duration} min</div>
+            ) : null}
+          </div>
         </div>
 
-        <Link href={dashboardHref} className="text-[12px] font-black text-textPrimary hover:opacity-80">
-          ← Back
+        {/* Label left, value right — but the value column keeps its own left edge
+            so a long address wraps as a block instead of ragging off the label. */}
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5 border-t border-textPrimary/10 px-4 py-3.5 text-[13px]">
+          <dt className="pt-px font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-textMuted">
+            {CONFIRM.whenLabel}
+          </dt>
+          <dd className="text-right font-semibold text-textPrimary">
+            {when}
+            <span className="ml-1.5 font-normal text-textMuted">{whenZone}</span>
+          </dd>
+
+          {locationLabel ? (
+            <>
+              <dt className="pt-px font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-textMuted">
+                {CONFIRM.whereLabel}
+              </dt>
+              <dd className="text-right font-semibold text-textPrimary">
+                {locationTypeLabel ? (
+                  <span className="text-textSecondary">{locationTypeLabel} · </span>
+                ) : null}
+                {mapsHref ? (
+                  <a href={mapsHref} target="_blank" rel="noreferrer" className="hover:opacity-80">
+                    {locationLabel}
+                  </a>
+                ) : (
+                  locationLabel
+                )}
+              </dd>
+            </>
+          ) : null}
+
+          {addOnNames.length ? (
+            <>
+              <dt className="pt-px font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-textMuted">
+                {CONFIRM.addOnsLabel}
+              </dt>
+              <dd className="text-right font-semibold text-textPrimary">
+                {addOnNames.join(' + ')}
+              </dd>
+            </>
+          ) : null}
+        </dl>
+      </section>
+
+      {isClientViewer && isWaiting ? (
+        <section className="mt-4 rounded-card border border-textPrimary/12 bg-bgSurface px-4 py-4">
+          <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-textMuted">
+            {CONFIRM.whatHappensNext}
+          </h2>
+
+          <ol className="mt-3 grid gap-3">
+            {nextSteps.map((step, index) => {
+              const Icon = NEXT_STEP_ICONS[index] ?? Clock
+              return (
+                <li key={step} className="flex items-center gap-3">
+                  <span
+                    aria-hidden="true"
+                    className="grid h-8 w-8 flex-none place-items-center rounded-full bg-accentPrimary/12 text-accentPrimary"
+                  >
+                    <Icon className="h-[17px] w-[17px]" strokeWidth={2} />
+                  </span>
+                  <span className="text-[13.5px] leading-snug text-textSecondary">{step}</span>
+                </li>
+              )
+            })}
+          </ol>
+        </section>
+      ) : null}
+
+      {overrideNote ? (
+        <div className="mt-4 whitespace-pre-wrap rounded-card border border-textPrimary/12 bg-bgSurface p-4 text-[13px] font-semibold text-textSecondary">
+          <span className="font-black text-textPrimary">
+            {isClientViewer ? 'Note from your pro:' : 'Note shared with your client:'}
+          </span>{' '}
+          {overrideNote}
+        </div>
+      ) : null}
+
+      {/* Actions — one primary, the rest quiet beside it. */}
+      <div className="mt-5 grid gap-2.5">
+        <Link
+          href={bookingDetailHref}
+          className="flex h-[50px] items-center justify-center rounded-[15px] bg-[image:var(--cta)] font-display text-[15px] font-bold text-onCta transition hover:opacity-95"
+        >
+          {CONFIRM.viewBooking}
+        </Link>
+
+        <div className="grid gap-2.5 sm:grid-cols-2">
+          {messageHref ? (
+            <Link
+              href={messageHref}
+              className="flex h-[46px] items-center justify-center gap-2 rounded-[14px] border border-textPrimary/15 bg-bgSurface text-[13.5px] font-bold text-textPrimary transition hover:border-textPrimary/30"
+            >
+              <MessageCircle className="h-[17px] w-[17px]" strokeWidth={2} aria-hidden="true" />
+              {isClientViewer ? CONFIRM.message : 'Message client'}
+            </Link>
+          ) : null}
+
+          <a
+            href={calendarHref}
+            className="flex h-[46px] items-center justify-center gap-2 rounded-[14px] border border-textPrimary/15 bg-bgSurface text-[13.5px] font-bold text-textPrimary transition hover:border-textPrimary/30"
+          >
+            <CalendarPlus className="h-[17px] w-[17px]" strokeWidth={2} aria-hidden="true" />
+            {COPY.bookings.addToCalendar}
+          </a>
+        </div>
+
+        <Link
+          href={isClientViewer ? '/looks' : dashboardHref}
+          className="mt-1 text-center text-[13px] font-semibold text-textSecondary transition hover:text-textPrimary"
+        >
+          {isClientViewer ? CONFIRM.backToLooks : dashboardLabel}
         </Link>
       </div>
 
       {items.length ? (
-        <div className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
+        <div className="mt-4 rounded-card border border-textPrimary/12 bg-bgSurface p-4">
           <div className="text-[12px] font-black text-textSecondary">Service breakdown</div>
 
           <div className="mt-3 grid gap-2">
@@ -411,7 +613,7 @@ export default async function BookingReceiptPage(props: PageProps) {
               return (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between rounded-card border border-white/10 bg-bgPrimary/35 px-4 py-3"
+                  className="flex items-center justify-between rounded-card border border-textPrimary/10 bg-bgPrimary/35 px-4 py-3"
                 >
                   <div className="min-w-0">
                     <div className="truncate text-[13px] font-black text-textPrimary">
@@ -431,7 +633,7 @@ export default async function BookingReceiptPage(props: PageProps) {
           </div>
 
           {addOnItems.length ? (
-            <div className="mt-4 border-t border-white/10 pt-4">
+            <div className="mt-4 border-t border-textPrimary/10 pt-4">
               <div className="text-[12px] font-black text-textSecondary">Add-ons</div>
 
               <div className="mt-3 grid gap-2">
@@ -442,7 +644,7 @@ export default async function BookingReceiptPage(props: PageProps) {
                   return (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between rounded-card border border-white/10 bg-bgPrimary/35 px-4 py-3"
+                      className="flex items-center justify-between rounded-card border border-textPrimary/10 bg-bgPrimary/35 px-4 py-3"
                     >
                       <div className="min-w-0">
                         <div className="truncate text-[13px] font-black text-textPrimary">
@@ -461,7 +663,7 @@ export default async function BookingReceiptPage(props: PageProps) {
                 })}
               </div>
 
-              <div className="tovis-glass-soft mt-3 rounded-card border border-white/10 px-4 py-3 text-[12px] font-semibold text-textSecondary">
+              <div className="mt-3 rounded-card border border-textPrimary/10 bg-bgPrimary/35 px-4 py-3 text-[12px] font-semibold text-textSecondary">
                 Add-ons total:{' '}
                 <span className="font-black text-textPrimary">
                   ${moneyToString(addOnPrice) ?? '0.00'}
@@ -474,59 +676,6 @@ export default async function BookingReceiptPage(props: PageProps) {
         </div>
       ) : null}
 
-      <div className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
-        <div className="text-[12px] font-black text-textSecondary">Next moves</div>
-
-        <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-          {isWaiting
-            ? 'Most pros confirm quickly. You’ll see it update automatically.'
-            : 'You’re all set. Keep this handy for day-of details.'}
-        </div>
-
-        <div className="mt-3 grid gap-2">
-          <a
-            href={calendarHref}
-            className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
-          >
-            Add to calendar
-          </a>
-
-          {messageHref ? (
-            <Link
-              href={messageHref}
-              className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
-            >
-              {isClientViewer ? `Message ${proName}` : 'Message client'}
-            </Link>
-          ) : null}
-
-          {proProfileHref ? (
-            <Link
-              href={proProfileHref}
-              className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
-            >
-              View {proName} profile
-            </Link>
-          ) : null}
-
-          <Link
-            href={dashboardHref}
-            className="rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-center text-[13px] font-black text-textPrimary hover:border-white/20"
-          >
-            {dashboardLabel}
-          </Link>
-
-          <div className="text-[12px] text-textSecondary">
-            Screenshot this if you’re the type to forget things. Statistically speaking: you are.
-          </div>
-        </div>
-      </div>
-
-      {service?.category?.name ? (
-        <div className="mt-4 text-[12px] text-textSecondary">
-          Category: <span className="font-black text-textPrimary">{service.category.name}</span>
-        </div>
-      ) : null}
     </main>
   )
 }
