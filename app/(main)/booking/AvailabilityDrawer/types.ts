@@ -186,6 +186,23 @@ export type ProCard = {
   slots?: string[]
 }
 
+export type AvailabilityCover = {
+  imageUrl: string | null
+  lookName: string | null
+}
+
+/**
+ * Wire twin of `BookingTrustSignals` (lib/booking/trustSignals.ts). Every field
+ * is nullable on purpose: a chip whose signal is unknown is not rendered, rather
+ * than rendered as a zero.
+ */
+export type AvailabilityTrust = {
+  verified: boolean
+  completedBookings: number | null
+  rating: { average: number; count: number } | null
+  freeCancellationHours: number | null
+}
+
 export type AvailabilityPrimaryPro = ProCard & {
   offeringId: string
   isCreator: true
@@ -252,6 +269,17 @@ export type AvailabilityBootstrapOk = ApiOk<
     mediaId: string | null
     serviceName: string | null
     serviceCategoryName: string | null
+
+    /**
+     * The look this booking started from — the sheet's cover photo and the
+     * add-ons step's context thumbnail. Null when the flow was entered from a
+     * pro's profile rather than from a look, which the sheet renders as its
+     * cover-less header rather than an empty photo well.
+     */
+    cover: AvailabilityCover | null
+
+    /** Reassurance chips under the service line. See lib/booking/trustSignals. */
+    trust: AvailabilityTrust
 
     /**
      * Transitional duplicate fields.

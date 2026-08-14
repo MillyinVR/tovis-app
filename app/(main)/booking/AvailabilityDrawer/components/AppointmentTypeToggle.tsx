@@ -1,6 +1,7 @@
 // app/(main)/booking/AvailabilityDrawer/components/AppointmentTypeToggle.tsx
 'use client'
 
+import { formatRoundedDollars } from '@/lib/money'
 import type { AvailabilityOffering, ServiceLocationType } from '../types'
 
 type Props = {
@@ -31,10 +32,10 @@ const MODE_META: Record<
   },
 }
 
-function formatMoneyString(raw: string | null | undefined): string | null {
-  const value = raw?.trim() ?? ''
-  return value ? value : null
-}
+// ⚠️ This used to be a local no-op that trimmed the raw decimal string and
+// returned it, so the toggle rendered "From 250" — a price with no currency
+// symbol. `formatRoundedDollars` is the repo's one money formatter and was
+// already imported two files away; there was never a second rule to implement.
 
 function getModePrice(
   offering: AvailabilityOffering | undefined,
@@ -43,8 +44,8 @@ function getModePrice(
   if (!offering) return null
 
   return mode === 'MOBILE'
-    ? formatMoneyString(offering.mobilePriceStartingAt)
-    : formatMoneyString(offering.salonPriceStartingAt)
+    ? formatRoundedDollars(offering.mobilePriceStartingAt)
+    : formatRoundedDollars(offering.salonPriceStartingAt)
 }
 
 function getAvailableModes(args: {
@@ -83,7 +84,7 @@ export default function AppointmentTypeToggle({
   if (isSingleMode) {
     return (
       <div className="mb-3 flex items-center gap-2">
-        <div className="rounded-full border border-white/10 bg-bgPrimary/35 px-3 py-1 text-[12px] font-extrabold text-textPrimary">
+        <div className="rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-3 py-1 text-[12px] font-extrabold text-textPrimary">
           {activeMeta.label}
         </div>
 
@@ -122,9 +123,9 @@ export default function AppointmentTypeToggle({
                 'flex h-[54px] flex-col items-center justify-center gap-[2px] rounded-[14px] border px-2 transition',
                 selected
                   ? 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary'
-                  : 'border-white/10 bg-bgPrimary/35 text-textPrimary hover:border-white/20 hover:bg-white/10',
+                  : 'border-textPrimary/10 bg-bgPrimary/35 text-textPrimary hover:border-textPrimary/20 hover:bg-textPrimary/10',
                 disabled
-                  ? 'cursor-not-allowed opacity-60 hover:border-white/10 hover:bg-bgPrimary/35'
+                  ? 'cursor-not-allowed opacity-60 hover:border-textPrimary/10 hover:bg-bgPrimary/35'
                   : 'cursor-pointer',
               ].join(' ')}
             >

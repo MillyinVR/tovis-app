@@ -136,6 +136,9 @@ export default async function ClientMePage() {
     itemCount: board.itemCount,
     href: buildBoardHref(board.id),
     previewImageUrls: buildBoardPreviewImageUrls(board),
+    // The DTO has carried this all along; the card shape simply dropped it, so
+    // a private board and a shared one were indistinguishable to their owner.
+    visibility: board.visibility,
   }))
 
   const following = data.following.items.map((item) => ({

@@ -3,7 +3,7 @@ import { MediaPhase } from '@prisma/client'
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { safeError } from '@/lib/security/logging'
 import type { MediaUploadInitDTO } from '@/lib/dto/media'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { prisma } from '@/lib/prisma'
 import { extensionForContentType } from '@/lib/media/contentType'
 import {
@@ -100,7 +100,7 @@ export async function POST(req: Request) {
     const bucket = 'media-public'
     const path = buildPath({ clientId, kind, contentType })
 
-    const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(path)
+    const { data, error } = await getSupabaseAdmin().storage.from(bucket).createSignedUploadUrl(path)
 
     if (error) return jsonFail(500, error.message || 'Failed to create signed upload URL')
     if (!data || typeof data !== 'object' || !('token' in data) || typeof (data as { token?: unknown }).token !== 'string') {

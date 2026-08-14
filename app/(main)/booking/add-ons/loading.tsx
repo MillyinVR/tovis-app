@@ -22,13 +22,13 @@ export default function BookingAddOnsLoading() {
         {[0, 1, 2].map((index) => (
           <div
             key={index}
-            className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4"
+            className="tovis-glass rounded-card border border-textPrimary/10 bg-bgSecondary p-4"
           >
-            <div className="h-3 w-24 animate-pulse rounded-full bg-white/10" />
+            <div className="h-3 w-24 animate-pulse rounded-full bg-textPrimary/10" />
 
             <div className="mt-3 grid gap-2">
-              <div className="h-16 animate-pulse rounded-card border border-white/10 bg-bgPrimary/35" />
-              <div className="h-16 animate-pulse rounded-card border border-white/10 bg-bgPrimary/35" />
+              <div className="h-16 animate-pulse rounded-card border border-textPrimary/10 bg-bgPrimary/35" />
+              <div className="h-16 animate-pulse rounded-card border border-textPrimary/10 bg-bgPrimary/35" />
             </div>
           </div>
         ))}

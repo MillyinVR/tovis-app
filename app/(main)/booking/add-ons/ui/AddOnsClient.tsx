@@ -6,6 +6,8 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { endAvailabilityMetric } from '../../AvailabilityDrawer/perf/availabilityPerf'
 import { formatRoundedDollars } from '@/lib/money'
+import RemoteImage from '@/app/_components/media/RemoteImage'
+import type { AddOnsContext } from '@/lib/booking/addOnsContext'
 import { zClass } from '@/lib/zIndex'
 import type {
   BookingSource,
@@ -22,6 +24,8 @@ import SaveCardStep from '@/app/_components/payments/SaveCardStep'
 import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
 
 type Props = {
+  /** Look / pro / time / hold carried over from the sheet. */
+  context: AddOnsContext
   holdId: string | null
   offeringId: string | null
   locationType: ServiceLocationType
@@ -222,6 +226,7 @@ function getFinalizeBookingId(raw: unknown): string | null {
 }
 
 export default function AddOnsClient({
+  context,
   holdId,
   offeringId,
   locationType,
@@ -645,8 +650,59 @@ export default function AddOnsClient({
     }
   }, [holdId, offeringId, locationType, source, mediaId, lookPostId, addOns.length])
 
+  const contextTitle = [context?.cover?.lookName, context?.proName]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
-    <main className="mx-auto max-w-180 px-4 pb-28 pt-10 text-textPrimary">
+    <main className="mx-auto max-w-180 px-4 pb-28 pt-6 text-textPrimary">
+      {/* CONTEXT STRIP — the look, pro, time and hold timer follow you from the
+          sheet, so this reads as step two rather than a new screen. Rendered
+          only when something survived; a strip with nothing in it is worse than
+          no strip. */}
+      {contextTitle || context?.whenLabel || holdLabel ? (
+        <div
+          data-testid="add-ons-context-strip"
+          className="mb-5 flex items-center gap-3 rounded-[14px] border border-textPrimary/10 bg-textPrimary/[0.03] px-[11px] py-[9px]"
+        >
+          {context?.cover?.imageUrl ? (
+            <RemoteImage
+              src={context.cover.imageUrl}
+              alt=""
+              className="h-[38px] w-[38px] shrink-0 rounded-[10px] object-cover"
+              width={76}
+              height={76}
+            />
+          ) : null}
+
+          <div className="min-w-0 flex-1">
+            {contextTitle ? (
+              <div className="truncate text-[13px] font-black text-textPrimary">
+                {contextTitle}
+              </div>
+            ) : null}
+            {context?.whenLabel ? (
+              <div className="mt-[2px] truncate text-[11px] font-semibold text-textSecondary">
+                {context.whenLabel}
+              </div>
+            ) : null}
+          </div>
+
+          {holdLabel ? (
+            <span
+              className={[
+                'shrink-0 text-[11px] font-black tabular-nums',
+                holdSecondsLeft != null && holdSecondsLeft < 60
+                  ? 'text-toneDanger'
+                  : 'text-toneWarn',
+              ].join(' ')}
+            >
+              {holdLabel}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[12px] font-black text-textSecondary">
@@ -656,18 +712,6 @@ export default function AddOnsClient({
 
           <div className="mt-2 text-[12px] font-semibold text-textSecondary">
             Optional upgrades that improve results + longevity.
-            {holdLabel ? (
-              <span
-                className={[
-                  'ml-2 font-black',
-                  holdSecondsLeft != null && holdSecondsLeft < 60
-                    ? 'text-toneDanger'
-                    : 'text-textPrimary',
-                ].join(' ')}
-              >
-                {holdLabel}
-              </span>
-            ) : null}
           </div>
         </div>
 
@@ -675,7 +719,7 @@ export default function AddOnsClient({
           type="button"
           onClick={() => router.back()}
           disabled={submitting}
-          className="shrink-0 rounded-full border border-white/10 bg-bgPrimary/35 px-4 py-3 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+          className="shrink-0 rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-4 py-3 text-[12px] font-black text-textPrimary hover:bg-textPrimary/10 disabled:opacity-70"
         >
           ← Back
         </button>
@@ -702,7 +746,7 @@ export default function AddOnsClient({
       {needsCard ? (
         <div
           data-testid="booking-card-on-file-step"
-          className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4"
+          className="tovis-glass mt-4 rounded-card border border-textPrimary/10 bg-bgSecondary p-4"
         >
           <div className="text-[13px] font-black text-textPrimary">
             Add a card to finish booking
@@ -734,7 +778,7 @@ export default function AddOnsClient({
           {grouped.map(({ group, items }) => (
             <div
               key={group}
-              className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4"
+              className="tovis-glass rounded-card border border-textPrimary/10 bg-bgSecondary p-4"
             >
               <div className="text-[12px] font-black text-textSecondary">
                 {group}
@@ -759,10 +803,10 @@ export default function AddOnsClient({
                       }}
                       className={[
                         'rounded-card border px-4 py-3 text-left transition',
-                        'border-white/10',
+                        'border-textPrimary/10',
                         active
                           ? 'bg-accentPrimary text-bgPrimary'
-                          : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+                          : 'bg-bgPrimary/35 text-textPrimary hover:bg-textPrimary/10',
                       ].join(' ')}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -778,7 +822,7 @@ export default function AddOnsClient({
                                   'rounded-full border px-2 py-1 text-[10px] font-black',
                                   active
                                     ? 'border-bgPrimary/25 bg-bgPrimary/15 text-bgPrimary'
-                                    : 'border-white/10 bg-bgPrimary/35 text-textPrimary',
+                                    : 'border-textPrimary/10 bg-bgPrimary/35 text-textPrimary',
                                 ].join(' ')}
                               >
                                 Recommended
@@ -804,7 +848,7 @@ export default function AddOnsClient({
                               'grid h-6 w-6 place-items-center rounded-full border text-[12px] font-black',
                               active
                                 ? 'border-bgPrimary/25 bg-bgPrimary/15 text-bgPrimary'
-                                : 'border-white/10 bg-bgPrimary/35 text-textPrimary',
+                                : 'border-textPrimary/10 bg-bgPrimary/35 text-textPrimary',
                             ].join(' ')}
                             aria-hidden="true"
                           >
@@ -819,7 +863,7 @@ export default function AddOnsClient({
             </div>
           ))}
 
-          <div className="tovis-glass-soft rounded-card border border-white/10 px-4 py-3 text-[12px] font-semibold text-textSecondary">
+          <div className="tovis-glass-soft rounded-card border border-textPrimary/10 px-4 py-3 text-[12px] font-semibold text-textSecondary">
             {selectedIds.length ? (
               <>
                 Add-ons:{' '}
@@ -852,11 +896,11 @@ export default function AddOnsClient({
         </div>
       ) : null}
 
-      <div className={`fixed bottom-0 left-0 right-0 ${zClass.sticky} border-t border-white/10 bg-bgPrimary/70 backdrop-blur`}>
+      <div className={`fixed bottom-0 left-0 right-0 ${zClass.sticky} border-t border-textPrimary/10 bg-bgPrimary/70 backdrop-blur`}>
         <div className="mx-auto max-w-180 px-4 py-3">
-          <div className="tovis-glass-soft rounded-card border border-white/10 px-4 py-3">
+          <div className="tovis-glass-soft rounded-card border border-textPrimary/10 px-4 py-3">
             {cancellationPolicy ? (
-              <label className="mb-3 flex items-start gap-2 rounded-card border border-white/10 bg-bgPrimary/35 px-3 py-2 text-left">
+              <label className="mb-3 flex items-start gap-2 rounded-card border border-textPrimary/10 bg-bgPrimary/35 px-3 py-2 text-left">
                 <input
                   data-testid="booking-cancellation-policy-checkbox"
                   type="checkbox"
@@ -882,7 +926,7 @@ export default function AddOnsClient({
                 (holdSecondsLeft != null && holdSecondsLeft <= 0) ||
                 (cancellationPolicy != null && !policyAccepted)
               }
-              className="flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-accentPrimary text-[14px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-70"
+              className="flex h-12 w-full items-center justify-center rounded-full border border-textPrimary/10 bg-accentPrimary text-[14px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-70"
             >
               {submitting
                 ? 'Booking…'
@@ -896,7 +940,7 @@ export default function AddOnsClient({
               type="button"
               onClick={() => router.back()}
               disabled={submitting}
-              className="mt-2 flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 text-[14px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+              className="mt-2 flex h-12 w-full items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary/35 text-[14px] font-black text-textPrimary hover:bg-textPrimary/10 disabled:opacity-70"
             >
               Skip
             </button>

@@ -274,7 +274,7 @@ export default function ClientAddressCreateModal(props: Props) {
 
       <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center sm:p-4">
         <div
-          className="tovis-glass-soft relative w-full max-w-lg rounded-[26px] border border-white/10 bg-bgPrimary/90 p-4 shadow-2xl"
+          className="tovis-glass-soft relative w-full max-w-lg rounded-[26px] border border-textPrimary/10 bg-bgPrimary/90 p-4 shadow-2xl"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
@@ -295,7 +295,7 @@ export default function ClientAddressCreateModal(props: Props) {
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/30 text-textPrimary hover:bg-white/10 disabled:opacity-60"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary/30 text-textPrimary hover:bg-textPrimary/10 disabled:opacity-60"
               aria-label="Close"
             >
               ✕
@@ -320,7 +320,7 @@ export default function ClientAddressCreateModal(props: Props) {
                   setSelectedPlace(null)
                 }}
                 placeholder="Start typing an address..."
-                className="w-full rounded-card border border-white/10 bg-bgPrimary/25 px-3 py-3 text-[14px] font-semibold text-textPrimary outline-none transition placeholder:text-textSecondary/70 focus:border-accentPrimary/35"
+                className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/25 px-3 py-3 text-[14px] font-semibold text-textPrimary outline-none transition placeholder:text-textSecondary/70 focus:border-accentPrimary/35"
               />
               <span className="text-[12px] text-textSecondary">
                 Start typing and pick your address from the list for the most
@@ -329,13 +329,13 @@ export default function ClientAddressCreateModal(props: Props) {
             </label>
 
             {searching ? (
-              <div className="rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-3 text-[12px] font-semibold text-textSecondary">
+              <div className="rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-3 text-[12px] font-semibold text-textSecondary">
                 Searching...
               </div>
             ) : null}
 
             {!searching && predictions.length > 0 ? (
-              <div className="max-h-56 overflow-y-auto rounded-card border border-white/10 bg-bgPrimary/20">
+              <div className="max-h-56 overflow-y-auto rounded-card border border-textPrimary/10 bg-bgPrimary/20">
                 {predictions.map((prediction) => (
                   <button
                     key={prediction.placeId}
@@ -343,7 +343,7 @@ export default function ClientAddressCreateModal(props: Props) {
                     onClick={() => {
                       void selectPrediction(prediction)
                     }}
-                    className="block w-full border-b border-white/8 px-3 py-3 text-left last:border-b-0 hover:bg-white/6"
+                    className="block w-full border-b border-textPrimary/8 px-3 py-3 text-left last:border-b-0 hover:bg-textPrimary/6"
                   >
                     <div className="text-[13px] font-black text-textPrimary">
                       {prediction.mainText}
@@ -375,7 +375,7 @@ export default function ClientAddressCreateModal(props: Props) {
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
                 placeholder="Home, Mom's house, Hotel..."
-                className="w-full rounded-card border border-white/10 bg-bgPrimary/25 px-3 py-3 text-[14px] font-semibold text-textPrimary outline-none transition placeholder:text-textSecondary/70 focus:border-accentPrimary/35"
+                className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/25 px-3 py-3 text-[14px] font-semibold text-textPrimary outline-none transition placeholder:text-textSecondary/70 focus:border-accentPrimary/35"
               />
             </label>
 
@@ -387,7 +387,7 @@ export default function ClientAddressCreateModal(props: Props) {
                 value={addressLine2}
                 onChange={(e) => setAddressLine2(e.target.value)}
                 placeholder="Apt, suite, gate code..."
-                className="w-full rounded-card border border-white/10 bg-bgPrimary/25 px-3 py-3 text-[14px] font-semibold text-textPrimary outline-none transition placeholder:text-textSecondary/70 focus:border-accentPrimary/35"
+                className="w-full rounded-card border border-textPrimary/10 bg-bgPrimary/25 px-3 py-3 text-[14px] font-semibold text-textPrimary outline-none transition placeholder:text-textSecondary/70 focus:border-accentPrimary/35"
               />
             </label>
 
@@ -407,7 +407,7 @@ export default function ClientAddressCreateModal(props: Props) {
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="rounded-full border border-white/10 bg-bgPrimary/20 px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-white/8 disabled:opacity-60"
+              className="rounded-full border border-textPrimary/10 bg-bgPrimary/20 px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-textPrimary/8 disabled:opacity-60"
             >
               Cancel
             </button>

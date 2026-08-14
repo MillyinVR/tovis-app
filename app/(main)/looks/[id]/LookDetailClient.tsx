@@ -61,7 +61,7 @@ function buildAvailabilityDrawerContext(args: {
   return {
     professionalId,
     lookPostId: args.item.id,
-    mediaId: null,
+    mediaId: args.item.primaryMedia?.id ?? null,
     serviceId: args.item.service?.id ?? null,
     source: 'DISCOVERY',
     ...viewerLocationToDrawerContextFields(args.viewerLoc),

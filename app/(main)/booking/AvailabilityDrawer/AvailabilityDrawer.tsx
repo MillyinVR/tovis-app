@@ -20,10 +20,9 @@ import type {
   ServiceLocationType,
 } from './types'
 
-import RemoteImage from '@/app/_components/media/RemoteImage'
+import SheetCover from './components/SheetCover'
 import type { BookingErrorCode } from '@/lib/booking/errors'
 import { asTrimmedString, getRecordProp, isRecord } from '@/lib/guards'
-import { formatRoundedDollars } from '@/lib/money'
 
 import AppointmentTypeToggle from './components/AppointmentTypeToggle'
 import ClientAddressCreateModal from './components/ClientAddressCreateModal'
@@ -495,7 +494,7 @@ function InlineRetryCard(props: {
   return (
     <div
       data-testid="availability-error"
-      className="mb-[14px] rounded-[14px] border border-white/10 bg-bgPrimary/35 p-3.5"
+      className="mb-[14px] rounded-[14px] border border-textPrimary/10 bg-bgPrimary/35 p-3.5"
     >
       <div className="mb-2.5 text-[13px] font-semibold text-toneDanger">
         {props.message}
@@ -505,7 +504,7 @@ function InlineRetryCard(props: {
         type="button"
         data-testid="availability-retry-button"
         onClick={props.onRetry}
-        className="h-[34px] rounded-full border border-white/10 bg-bgPrimary/35 px-[14px] text-[12px] font-extrabold text-textPrimary transition hover:bg-white/10"
+        className="h-[34px] rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-[14px] text-[12px] font-extrabold text-textPrimary transition hover:bg-textPrimary/10"
       >
         Retry
       </button>
@@ -706,26 +705,24 @@ export default function AvailabilityDrawer(props: {
     summary?.waitlistSupported && context.professionalId && effectiveServiceId,
   )
 
-  const proHeaderMeta = useMemo(() => {
-    if (!summary) return null
-
-    const parts: string[] = []
-
-    if (summary.serviceName?.trim()) {
-      parts.push(summary.serviceName.trim())
-    }
-
-    const rawPrice =
+  /**
+   * The sheet header's starting price for the ACTIVE mode, as a raw money
+   * string — `SheetCover` formats it and prefixes "From", so the rule that
+   * prices are starting prices lives in one place rather than at each caller.
+   */
+  const headerPriceStartingAt = useMemo(() => {
+    const raw =
       activeLocationType === 'MOBILE'
         ? offering.mobilePriceStartingAt
         : offering.salonPriceStartingAt
 
-    if (rawPrice) {
-      const n = Number(rawPrice)
-      if (Number.isFinite(n) && n > 0) {
-        parts.push(formatRoundedDollars(n) ?? `$${Math.round(n)}`)
-      }
-    }
+    if (!raw) return null
+    const n = Number(raw)
+    return Number.isFinite(n) && n > 0 ? raw : null
+  }, [offering, activeLocationType])
+
+  const headerDurationMinutes = useMemo(() => {
+    if (!summary) return null
 
     // On a RESCHEDULE the grid is sized from the booking's committed width, not
     // the offering's base — the two drift whenever a pro edits a duration, and
@@ -744,11 +741,7 @@ export default function AvailabilityDrawer(props: {
         ? offering.mobileDurationMinutes
         : offering.salonDurationMinutes)
 
-    if (typeof duration === 'number' && duration > 0) {
-      parts.push(`${duration}min`)
-    }
-
-    return parts.length ? parts.join(' · ') : null
+    return typeof duration === 'number' && duration > 0 ? duration : null
   }, [summary, offering, activeLocationType, rescheduleBookingId])
 
   const resolvedOfferingId = useMemo(() => {
@@ -1653,26 +1646,31 @@ export default function AvailabilityDrawer(props: {
           onClose()
         }}
         header={
-          <div className="flex items-center justify-between px-4 pb-[10px] pt-3">
-            <button
-              type="button"
-              data-testid="availability-close-button"
-              onClick={() => {
-                if (navigatingToAddOns) return
-                void hardResetUi({ deleteHold: true })
-                onClose()
-              }}
-              aria-label="Close"
-              className="tap-target flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 text-[14px] text-textSecondary transition hover:bg-white/10"
-            >
-              ✕
-            </button>
-
-            <div className="flex items-center gap-[5px]">
-              <div className="h-2 w-6 rounded-full bg-accentPrimary opacity-70" />
-              <div className="h-2 w-2 rounded-full bg-white/15" />
-            </div>
-          </div>
+          <SheetCover
+            cover={summary?.cover ?? null}
+            trust={
+              summary?.trust ?? {
+                verified: false,
+                completedBookings: null,
+                rating: null,
+                freeCancellationHours: null,
+              }
+            }
+            serviceName={summary?.serviceName ?? null}
+            proName={primary ? formatProfessionalPublicDisplayName(primary) : ''}
+            proAvatarUrl={primary?.avatarUrl ?? null}
+            proHref={
+              primary ? `/professionals/${encodeURIComponent(primary.id)}` : '#'
+            }
+            priceStartingAt={headerPriceStartingAt}
+            durationMinutes={headerDurationMinutes}
+            closeDisabled={navigatingToAddOns}
+            onClose={() => {
+              if (navigatingToAddOns) return
+              void hardResetUi({ deleteHold: true })
+              onClose()
+            }}
+          />
         }
         footer={
           <StickyCTA
@@ -1689,50 +1687,6 @@ export default function AvailabilityDrawer(props: {
           className="looksNoScrollbar overflow-y-auto px-5"
           style={{ paddingBottom: 16 }}
         >
-          {summary && primary ? (
-            <div className="mb-[14px] flex items-center gap-3">
-              <a
-                href={`/professionals/${encodeURIComponent(primary.id)}`}
-                className="shrink-0 no-underline"
-              >
-                <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-full border border-white/10 bg-bgPrimary/40">
-                  {primary.avatarUrl ? (
-                    <RemoteImage
-                      src={primary.avatarUrl ?? ''}
-                      alt={primary.businessName || ''}
-                      className="block h-full w-full object-cover"
-                      width={48}
-                      height={48}
-                    />
-                  ) : (
-                    <span className="text-[18px] font-black text-textSecondary">
-                      {(primary.businessName || 'P').slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-                </div>
-              </a>
-
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-[6px] truncate text-[16px] font-black text-textPrimary">
-                  <span className="truncate">
-                    {formatProfessionalPublicDisplayName(primary)}
-                  </span>
-
-                  {primary.isCreator ? (
-                    <span className="text-[12px] leading-none text-accentPrimary">
-                      ●
-                    </span>
-                  ) : null}
-                </div>
-
-                {proHeaderMeta ? (
-                  <div className="mt-[3px] truncate text-[12px] font-semibold text-textSecondary">
-                    {proHeaderMeta}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
 
           {/* Constant margin: the countdown lives in the held-time banner below
               the picker (and the sticky footer), so nothing inserts above the
@@ -1742,6 +1696,7 @@ export default function AvailabilityDrawer(props: {
             style={{
               fontFamily: 'var(--font-display-face, "Fraunces"), Georgia, serif',
               fontStyle: 'italic',
+              marginTop: 16,
               marginBottom: 18,
             }}
           >
@@ -1949,7 +1904,7 @@ export default function AvailabilityDrawer(props: {
 
               {holding ? (
                 <div
-                  className="mb-[14px] rounded-[14px] border border-white/10 bg-bgPrimary/35 p-[12px_14px]"
+                  className="mb-[14px] rounded-[14px] border border-textPrimary/10 bg-bgPrimary/35 p-[12px_14px]"
                 >
                   <div className="text-[13px] font-black text-textPrimary">
                     Holding your time…
@@ -2017,7 +1972,7 @@ export default function AvailabilityDrawer(props: {
                       'bg-transparent p-0 text-[13px] font-bold underline underline-offset-[3px] transition',
                       holding || loadingAlternates || !selectedDayYMD
                         ? 'cursor-not-allowed text-textSecondary opacity-40'
-                        : 'cursor-pointer text-textSecondary decoration-white/20 hover:text-textPrimary',
+                        : 'cursor-pointer text-textSecondary decoration-textPrimary/20 hover:text-textPrimary',
                     ].join(' ')}
                   >
                     See other pros nearby
@@ -2032,14 +1987,14 @@ export default function AvailabilityDrawer(props: {
               ) : null}
 
               {otherProsInlineError ? (
-                <div className="mb-[14px] rounded-[12px] border border-white/10 bg-bgPrimary/35 p-[10px_12px]">
+                <div className="mb-[14px] rounded-[12px] border border-textPrimary/10 bg-bgPrimary/35 p-[10px_12px]">
                   <div className="text-[12px] font-semibold text-toneDanger">
                     {otherProsInlineError}
                   </div>
                   <button
                     type="button"
                     onClick={() => refreshAlternates()}
-                    className="mt-2 h-8 rounded-full border border-white/10 bg-bgPrimary/35 px-3 text-[12px] font-extrabold text-textPrimary transition hover:bg-white/10"
+                    className="mt-2 h-8 rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-3 text-[12px] font-extrabold text-textPrimary transition hover:bg-textPrimary/10"
                   >
                     Retry
                   </button>

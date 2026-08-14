@@ -52,6 +52,7 @@ function makeFeedDto(
 ) {
   return {
     id: 'look_1',
+    primaryMediaId: 'look_1',
     url: 'https://cdn.example.com/media.jpg',
     thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
     mediaType: MediaType.IMAGE,
@@ -162,6 +163,7 @@ describe('lib/looks/parsers.ts', () => {
       expect(result).toEqual([
         {
           id: 'look_1',
+          primaryMediaId: 'look_1',
           url: 'https://cdn.example.com/media.jpg',
           thumbUrl: null,
           mediaType: MediaType.IMAGE,

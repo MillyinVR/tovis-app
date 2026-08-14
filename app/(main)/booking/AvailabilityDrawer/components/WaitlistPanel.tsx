@@ -449,16 +449,16 @@ export default function WaitlistPanel({
           onClick={openForm}
           className={[
             'flex h-11 w-full items-center justify-center gap-2 rounded-full',
-            'border border-white/10 bg-white/5',
+            'border border-textPrimary/10 bg-textPrimary/5',
             'text-[13px] font-bold text-textSecondary',
-            'transition hover:bg-white/10 hover:text-textPrimary',
+            'transition hover:bg-textPrimary/10 hover:text-textPrimary',
           ].join(' ')}
         >
           <span className="text-[10px] leading-none text-accentPrimary">✦</span>
           Nothing works? Join the waitlist
         </button>
       ) : (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="rounded-2xl border border-textPrimary/10 bg-textPrimary/5 p-4">
           <div className="grid gap-3">
             <div className="grid gap-2">
               <div className="text-[12px] font-black text-textPrimary">
@@ -470,7 +470,7 @@ export default function WaitlistPanel({
                   type="button"
                   onClick={() => applyQuickPick('TONIGHT')}
                   disabled={posting}
-                  className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+                  className="h-10 rounded-full border border-textPrimary/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-textPrimary/10 disabled:opacity-70"
                 >
                   Tonight
                 </button>
@@ -479,7 +479,7 @@ export default function WaitlistPanel({
                   type="button"
                   onClick={() => applyQuickPick('TOMORROW')}
                   disabled={posting}
-                  className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+                  className="h-10 rounded-full border border-textPrimary/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-textPrimary/10 disabled:opacity-70"
                 >
                   Tomorrow
                 </button>
@@ -488,7 +488,7 @@ export default function WaitlistPanel({
                   type="button"
                   onClick={() => applyQuickPick('WEEKEND')}
                   disabled={posting}
-                  className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+                  className="h-10 rounded-full border border-textPrimary/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-textPrimary/10 disabled:opacity-70"
                 >
                   This weekend
                 </button>
@@ -525,7 +525,7 @@ export default function WaitlistPanel({
                   setMessage(false, null)
                 }}
                 disabled={posting}
-                className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
+                className="mt-2 h-11 w-full rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
               >
                 <option value="ANY_TIME">Any time</option>
                 <option value="TIME_OF_DAY">Time of day</option>
@@ -543,7 +543,7 @@ export default function WaitlistPanel({
                     setMessage(false, null)
                   }}
                   disabled={posting}
-                  className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
+                  className="mt-2 h-11 w-full rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
                 >
                   <option value="">Choose one</option>
                   <option value="MORNING">Morning</option>
@@ -571,7 +571,7 @@ export default function WaitlistPanel({
                     setMessage(false, null)
                   }}
                   disabled={posting}
-                  className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
+                  className="mt-2 h-11 w-full rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
                 />
               </label>
             ) : null}
@@ -586,7 +586,7 @@ export default function WaitlistPanel({
                 }}
                 disabled={posting}
                 placeholder="Ex: after work, weekends, short bookings preferred"
-                className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none placeholder:text-textSecondary/70 disabled:opacity-70"
+                className="mt-2 h-11 w-full rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none placeholder:text-textSecondary/70 disabled:opacity-70"
               />
 
               <div className="mt-1 text-[11px] font-semibold text-textSecondary">
@@ -600,7 +600,7 @@ export default function WaitlistPanel({
                 onClick={() => void submit()}
                 disabled={posting}
                 className={[
-                  'h-11 rounded-full border border-white/10 text-[13px] font-black transition',
+                  'h-11 rounded-full border border-textPrimary/10 text-[13px] font-black transition',
                   posting
                     ? 'cursor-not-allowed bg-bgPrimary/20 text-textPrimary/70'
                     : 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
@@ -613,7 +613,7 @@ export default function WaitlistPanel({
                 type="button"
                 onClick={closeForm}
                 disabled={posting}
-                className="h-11 rounded-full border border-white/10 bg-bgPrimary/35 text-[13px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+                className="h-11 rounded-full border border-textPrimary/10 bg-bgPrimary/35 text-[13px] font-black text-textPrimary hover:bg-textPrimary/10 disabled:opacity-70"
               >
                 Cancel
               </button>

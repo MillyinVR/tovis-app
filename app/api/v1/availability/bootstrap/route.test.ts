@@ -39,6 +39,25 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
+// The route's own concern is routing + caching; what the trust chips and the
+// cover resolve TO is `lib/booking/*`'s concern and is tested there. Stubbing
+// them here also keeps this suite from needing a Prisma surface it never had.
+vi.mock('@/lib/booking/trustSignals', () => ({
+  loadBookingTrustSignals: vi.fn(async () => ({
+    verified: true,
+    completedBookings: 41,
+    rating: { average: 4.8, count: 12 },
+    freeCancellationHours: 24,
+  })),
+}))
+
+vi.mock('@/lib/booking/bookingCover', () => ({
+  loadBookingCover: vi.fn(async () => ({
+    imageUrl: 'https://cdn.example.com/look.jpg',
+    lookName: 'Lived-in blonde',
+  })),
+}))
+
 vi.mock('@/lib/availability/data/cache', () => ({
   buildSummaryCacheKey: mocks.buildSummaryCacheKey,
 }))

@@ -80,6 +80,10 @@ const DEMO_LOCAL_BUCKET = 'local-demo-seed'
 const TIME_ZONE = 'America/New_York'
 const NOW = new Date('2026-08-13T12:00:00.000Z')
 
+// `User.phone` is @unique, so this must not collide with the numbers
+// `prisma/seed.cjs` hands the standing dev accounts (+1555555010x).
+const DEMO_PHONE = '+15555550190'
+
 const CREATOR = {
   id: `${P}client-maya`,
   handle: 'maya-reyes',
@@ -91,6 +95,15 @@ const CREATOR = {
     'is bookable — tap Recreate to get the same look near you. ✦',
   avatarUrl: 'http://localhost:3000/seed-demo/avatar-maya.jpg',
 }
+
+/** Every Nth seeded fan has a public profile, so remix rows mix "@handle" with "Someone". */
+const PUBLIC_FAN_EVERY = 3
+
+/** Fan indices below this are the ones that actually book — see `bookingRows`. */
+const publicFanIndices = (attributedBookings: number): number[] =>
+  Array.from({ length: attributedBookings }, (_, i) => i).filter(
+    (i) => i % PUBLIC_FAN_EVERY === 0,
+  )
 
 const FOLLOWER_COUNT = 312
 const FOLLOWING_COUNT = 18
@@ -159,6 +172,63 @@ const SERVICES: DemoService[] = [
   { key: 'brow', name: 'Brow Lamination', categoryName: 'Brow', categorySlug: 'brow', minPrice: 70, durationMinutes: 45 },
 ]
 
+// Add-ons for the balayage offering — the booking flow's second step renders
+// nothing at all without them, and the dev DB has zero `OfferingAddOn` rows.
+// Two are `isRecommended` and two are not, because the design groups them into
+// "Recommended for you" vs "Make it a moment": a fixture where every add-on is
+// recommended would never exercise the second group.
+//
+// `group` on the wire DTO is the add-on service's `addOnGroup`, and
+// `GET /api/v1/offerings/add-ons` only returns services with
+// `isAddOnEligible: true` — both are set below. Without the flag the endpoint
+// returns an empty list and the step renders "No add-ons for this service right
+// now" with the rows sitting in the database, which is indistinguishable from a
+// pro who simply offers none.
+//
+// ⚠️ An add-on's duration cannot be under 15 minutes. The route drops anything
+// resolving to <= 0, and `normalizePositiveMinutesOrNull` then
+// `clampInt(minutes, 15, …)` raises everything else to a 15-minute floor — seed
+// the kit at 5 and the API returns 15, so the fixture would silently disagree
+// with the screen. Consequence for the design: a pure retail item (its
+// "Take-home gloss kit", priced with no "+N min" line) cannot be expressed
+// today; it is seeded at the floor and flagged in the PR rather than papered
+// over.
+type DemoAddOn = {
+  key: string
+  name: string
+  /** Heading the add-on is filed under on the step (wire DTO's `group`). */
+  group: string
+  categoryName: string
+  categorySlug: string
+  /** Starting price for the add-on, rendered "From $X" like every other price. */
+  priceStartingAt: number
+  minutes: number
+  isRecommended: boolean
+  sortOrder: number
+}
+
+const ADD_ONS: DemoAddOn[] = [
+  { key: 'bond-builder', name: 'Olaplex bond builder', group: 'Treatment', categoryName: 'Treatment', categorySlug: 'treatment', priceStartingAt: 30, minutes: 15, isRecommended: true, sortOrder: 1 },
+  { key: 'toner-gloss', name: 'Toner & gloss', group: 'Treatment', categoryName: 'Treatment', categorySlug: 'treatment', priceStartingAt: 40, minutes: 30, isRecommended: true, sortOrder: 2 },
+  { key: 'scalp-massage', name: 'Scalp + neck massage', group: 'Make it a moment', categoryName: 'Extras', categorySlug: 'extras', priceStartingAt: 20, minutes: 15, isRecommended: false, sortOrder: 3 },
+  { key: 'gloss-kit', name: 'Take-home gloss kit', group: 'Make it a moment', categoryName: 'Extras', categorySlug: 'extras', priceStartingAt: 35, minutes: 15, isRecommended: false, sortOrder: 4 },
+]
+
+/** Which offering (`proKey:serviceKey`) the add-ons above hang off. */
+const ADD_ON_OFFERING_KEY = 'noor:balayage'
+
+// Offerings that also travel, keyed `proKey:serviceKey`. Only one does, which is
+// the point: the booking sheet's in-salon/mobile toggle only renders when a pro
+// can host BOTH modes, so with a salon-only fixture the toggle — and the "From
+// $X" line inside it — is never seen. Mobile costs more and runs longer, as a
+// travelling appointment really does.
+const MOBILE_OFFERINGS: Record<
+  string,
+  { priceStartingAt: number; durationMinutes: number }
+> = {
+  [ADD_ON_OFFERING_KEY]: { priceStartingAt: 290, durationMinutes: 195 },
+}
+
 // The frame's six look cards, verbatim.
 type DemoLook = {
   key: string
@@ -186,23 +256,83 @@ const LOOKS: DemoLook[] = [
 // Board covers render as a strip of up to FOUR looks, so the fixture carries
 // boards on both sides of that: two full four-look boards and two smaller ones,
 // which is what proves the strip narrows honestly instead of leaving dead cells.
-const BOARDS: { key: string; name: string; lookKeys: string[] }[] = [
+//
+// `shared` is explicit per board because the client's OWN boards screen badges
+// the SHARED ones. Every board being shared would make that badge true of every
+// row — a fixture that flatters the product and proves nothing — so exactly one
+// board here is PRIVATE. It is a FIFTH board rather than a demotion of one of
+// the four, which keeps the public profile (screen 2) showing the same four it
+// already shipped against.
+const BOARDS: {
+  key: string
+  name: string
+  lookKeys: string[]
+  shared: boolean
+}[] = [
   {
     key: 'lived-in-blonde',
     name: 'Lived-in blonde',
     lookKeys: ['lived-in-blonde', 'money-piece-blonde', 'cherry-cola-balayage', 'brow-lamination'],
+    shared: true,
   },
   {
     key: 'viral-looks',
     name: 'Viral looks',
     lookKeys: ['cherry-cola-balayage', 'lived-in-blonde', 'glazed-almond-set', 'lash-lift-tint'],
+    shared: true,
   },
-  { key: 'wedding-hair', name: 'Wedding hair', lookKeys: ['money-piece-blonde', 'lived-in-blonde'] },
-  { key: 'nails-2025', name: 'Nails 2025', lookKeys: ['glazed-almond-set'] },
+  {
+    key: 'wedding-hair',
+    name: 'Wedding hair',
+    lookKeys: ['money-piece-blonde', 'lived-in-blonde'],
+    shared: true,
+  },
+  { key: 'nails-2025', name: 'Nails 2025', lookKeys: ['glazed-almond-set'], shared: true },
+  {
+    key: 'maybe-someday',
+    name: 'Maybe someday',
+    lookKeys: ['lash-lift-tint', 'brow-lamination'],
+    shared: false,
+  },
 ]
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2))
+
+/**
+ * The one Brooklyn address every demo location sits at.
+ *
+ * 🔴 `lat`/`lng` are NOT decoration. `evaluateProReadinessForEntryPoint` drops
+ * any bookable location missing them from `readyLocationIds`, so a geo-less
+ * fixture reports NO_BOOKABLE_LOCATION and every `POST /api/v1/holds` comes back
+ * 409 "This professional is not currently accepting bookings" — while the
+ * availability drawer still lists slots perfectly happily, because reading a
+ * day's grid never runs the readiness check. The fixture looks bookable right up
+ * to the moment someone clicks a time.
+ */
+const BROOKLYN = {
+  formattedAddress: '215 Bedford Ave, Brooklyn, NY 11211',
+  addressLine1: '215 Bedford Ave',
+  city: 'Brooklyn',
+  state: 'NY',
+  postalCode: '11211',
+  countryCode: 'US',
+  lat: 40.7143,
+  lng: -73.9613,
+}
+
+function brooklynAddress() {
+  return {
+    formattedAddress: BROOKLYN.formattedAddress,
+    addressLine1: BROOKLYN.addressLine1,
+    city: BROOKLYN.city,
+    state: BROOKLYN.state,
+    postalCode: BROOKLYN.postalCode,
+    countryCode: BROOKLYN.countryCode,
+    lat: new Prisma.Decimal(BROOKLYN.lat),
+    lng: new Prisma.Decimal(BROOKLYN.lng),
+  }
+}
 
 /**
  * The shape `prisma/seed.cjs` writes and the availability engine reads: three-
@@ -234,6 +364,16 @@ function workingHoursJson() {
 async function clean(): Promise<void> {
   const idPrefix = { startsWith: P }
 
+  // Holds are NOT id-prefixed — they are created at runtime by whoever drives
+  // the booking flow against this fixture, and both their offering and their
+  // location are RESTRICT-referenced. Leaving them behind makes the fixture
+  // permanently un-cleanable the first time anyone actually picks a time
+  // ("BookingHold_offeringId_fkey"), so they are keyed on the demo pros instead.
+  await prisma.bookingHold.deleteMany({
+    where: { professionalId: idPrefix },
+  })
+  await prisma.review.deleteMany({ where: { id: idPrefix } })
+  await prisma.proNoShowSettings.deleteMany({ where: { id: idPrefix } })
   await prisma.booking.deleteMany({ where: { id: idPrefix } })
   await prisma.boardItem.deleteMany({ where: { id: idPrefix } })
   await prisma.board.deleteMany({ where: { id: idPrefix } })
@@ -242,6 +382,10 @@ async function clean(): Promise<void> {
   // The look's primary MediaAsset is @unique + cascades TO the look, so the
   // looks above are already gone; drop the assets themselves now.
   await prisma.mediaAsset.deleteMany({ where: { id: idPrefix } })
+  // Before the offerings they hang off (they would cascade, but the links also
+  // hold a RESTRICT reference to their add-on Service, which is deleted below —
+  // so they have to be gone before that runs either way).
+  await prisma.offeringAddOn.deleteMany({ where: { id: idPrefix } })
   await prisma.professionalServiceOffering.deleteMany({ where: { id: idPrefix } })
   await prisma.professionalLocation.deleteMany({ where: { id: idPrefix } })
   await prisma.handleRegistration.deleteMany({
@@ -327,6 +471,10 @@ async function main(): Promise<void> {
   const locationIdByKey = new Map<string, string>()
 
   for (const pro of PROS) {
+    const travels = Object.keys(MOBILE_OFFERINGS).some((key) =>
+      key.startsWith(`${pro.key}:`),
+    )
+
     await prisma.user.create({
       data: {
         id: `${P}user-pro-${pro.key}`,
@@ -358,6 +506,12 @@ async function main(): Promise<void> {
         licenseState: 'NY',
         licenseVerified: true,
         verificationStatus: VerificationStatus.APPROVED,
+        // Required by `evaluateProReadinessForEntryPoint` the moment the pro has
+        // a bookable MOBILE_BASE location — without both, readiness reports
+        // MOBILE_MISSING_BASE_CONFIG and every hold on this pro 409s.
+        ...(travels
+          ? { mobileBasePostalCode: BROOKLYN.postalCode, mobileRadiusMiles: 12 }
+          : {}),
       },
       select: { id: true },
     })
@@ -372,18 +526,37 @@ async function main(): Promise<void> {
         isPrimary: true,
         isBookable: true,
         isAddressPublic: true,
-        formattedAddress: '215 Bedford Ave, Brooklyn, NY 11211',
-        addressLine1: '215 Bedford Ave',
-        city: 'Brooklyn',
-        state: 'NY',
-        postalCode: '11211',
-        countryCode: 'US',
+        ...brooklynAddress(),
         timeZone: TIME_ZONE,
         workingHours: workingHoursJson(),
       },
       select: { id: true },
     })
     locationIdByKey.set(pro.key, location.id)
+
+    // A MOBILE offering is only bookable when the pro has a bookable
+    // MOBILE_BASE location — `narrowOfferingModes` derives capability from the
+    // locations that exist, not from the offering's flags, so `offersMobile`
+    // alone would be narrowed straight back off and the toggle would never
+    // appear. Only the pro whose offering travels gets one.
+    if (travels) {
+      await prisma.professionalLocation.create({
+        data: {
+          id: `${P}location-${pro.key}-mobile`,
+          professionalId: professional.id,
+          type: ProfessionalLocationType.MOBILE_BASE,
+          name: `${pro.firstName} — mobile`,
+          isPrimary: false,
+          isBookable: true,
+          // A mobile base is where the pro travels FROM; the appointment happens
+          // at the client's address, so this one is never shown as the venue.
+          isAddressPublic: false,
+          ...brooklynAddress(),
+          timeZone: TIME_ZONE,
+          workingHours: workingHoursJson(),
+        },
+      })
+    }
   }
 
   const proId = (key: string): string => {
@@ -408,6 +581,8 @@ async function main(): Promise<void> {
     const svc = SERVICES.find((s) => s.key === look.serviceKey)
     if (!svc) throw new Error(`[seedDemoClientProfile] unknown service key "${look.serviceKey}"`)
 
+    const mobile = MOBILE_OFFERINGS[key] ?? null
+
     await prisma.professionalServiceOffering.create({
       data: {
         id: `${P}offering-${look.proKey}-${look.serviceKey}`,
@@ -416,8 +591,77 @@ async function main(): Promise<void> {
         salonPriceStartingAt: money(look.priceStartingAt),
         salonDurationMinutes: svc.durationMinutes,
         offersInSalon: true,
-        offersMobile: false,
+        offersMobile: mobile !== null,
+        mobilePriceStartingAt: mobile ? money(mobile.priceStartingAt) : null,
+        mobileDurationMinutes: mobile?.durationMinutes ?? null,
         isActive: true,
+      },
+    })
+  }
+
+  // ── add-ons ────────────────────────────────────────────────────────────────
+  // The add-on services first (global catalog rows, reused by name like the
+  // service catalog above), then the per-offering links the booking flow reads.
+  for (const addOn of ADD_ONS) {
+    const existing = await prisma.service.findUnique({
+      where: { name: addOn.name },
+      select: { id: true, isAddOnEligible: true },
+    })
+
+    // `Service.name` is @unique, so a same-named row from another fixture is
+    // reused rather than recreated — but if it is not add-on eligible the
+    // endpoint filters it out and the step renders "No add-ons for this service
+    // right now" with four perfectly good links in the database. Fail loudly
+    // instead of seeding something that silently shows nothing.
+    if (existing && !existing.isAddOnEligible) {
+      throw new Error(
+        `[seedDemoClientProfile] service "${addOn.name}" already exists and is ` +
+          'not isAddOnEligible — GET /api/v1/offerings/add-ons would filter it ' +
+          'out. Remove that row, or flag it eligible, then re-run.',
+      )
+    }
+
+    const addOnServiceId =
+      existing?.id ??
+      (
+        await prisma.service.create({
+          data: {
+            id: `${P}service-addon-${addOn.key}`,
+            name: addOn.name,
+            categoryId: (
+              (await prisma.serviceCategory.findUnique({
+                where: { slug: addOn.categorySlug },
+                select: { id: true },
+              })) ??
+              (await prisma.serviceCategory.create({
+                data: {
+                  id: `${P}category-${addOn.categorySlug}`,
+                  name: addOn.categoryName,
+                  slug: addOn.categorySlug,
+                },
+                select: { id: true },
+              }))
+            ).id,
+            defaultDurationMinutes: addOn.minutes,
+            minPrice: money(addOn.priceStartingAt),
+            isActive: true,
+            isAddOnEligible: true,
+            addOnGroup: addOn.group,
+          },
+          select: { id: true },
+        })
+      ).id
+
+    await prisma.offeringAddOn.create({
+      data: {
+        id: `${P}addon-${addOn.key}`,
+        offeringId: `${P}offering-${ADD_ON_OFFERING_KEY.replace(':', '-')}`,
+        addOnServiceId,
+        isActive: true,
+        isRecommended: addOn.isRecommended,
+        sortOrder: addOn.sortOrder,
+        priceOverride: money(addOn.priceStartingAt),
+        durationOverrideMinutes: addOn.minutes,
       },
     })
   }
@@ -429,6 +673,15 @@ async function main(): Promise<void> {
       email: 'demo-maya@tovis.app',
       password: 'demo-seed-no-login',
       role: Role.CLIENT,
+      // Verified, or the demo creator cannot reach a single one of her own
+      // screens: `app/client/(gated)/layout` sends an unverified user to
+      // "Complete your verification". The server still RENDERS /client/me — a
+      // curl of it returns 200 with the board names in the HTML — so this is
+      // invisible to anything but an actual browser, and it silently turned the
+      // whole gated client surface into a screenshot of the verification page.
+      phone: DEMO_PHONE,
+      phoneVerifiedAt: NOW,
+      emailVerifiedAt: NOW,
     },
   })
 
@@ -524,7 +777,7 @@ async function main(): Promise<void> {
         clientId: creator.id,
         name: board.name,
         slug: board.key,
-        visibility: BoardVisibility.SHARED,
+        visibility: board.shared ? BoardVisibility.SHARED : BoardVisibility.PRIVATE,
       },
     })
 
@@ -544,6 +797,9 @@ async function main(): Promise<void> {
   // pro-created unclaimed client has), so the follow counts are real rows rather
   // than a hand-written number on the profile.
   const fanCount = FOLLOWER_COUNT + FOLLOWING_COUNT
+  const attributedBookings = LOOKS.reduce((sum, look) => sum + look.recreated, 0)
+  const publicFans = new Set(publicFanIndices(attributedBookings))
+
   await prisma.clientProfile.createMany({
     data: Array.from({ length: fanCount }, (_, i) => ({
       id: `${P}fan-${String(i).padStart(4, '0')}`,
@@ -551,6 +807,29 @@ async function main(): Promise<void> {
       firstName: 'Demo',
       lastName: `Fan ${i + 1}`,
       claimStatus: ClientClaimStatus.UNCLAIMED,
+      // "Your looks, remixed" names a booker only when their profile is public
+      // ("@handle"), and says "Someone" otherwise — the activity-feed PII model.
+      // With every fan private the card renders 43 identical "Someone" rows and
+      // the handle branch is never exercised, so a visible minority are public.
+      // A minority, not all: "Someone" is the common case in the real product
+      // and the card has to look right when it dominates.
+      ...(publicFans.has(i)
+        ? {
+            handle: `demo-fan-${i}`,
+            handleNormalized: normalizeHandle(`demo-fan-${i}`),
+            isPublicProfile: true,
+          }
+        : {}),
+    })),
+  })
+
+  // A handle is not a per-table column, it is a claim on ONE global namespace
+  // shared with pros — `HandleRegistration` is that namespace. Cleaned up by the
+  // cascade from ClientProfile, so `clean()` needs no extra step.
+  await prisma.handleRegistration.createMany({
+    data: [...publicFans].map((i) => ({
+      handleNormalized: normalizeHandle(`demo-fan-${i}`),
+      clientProfileId: `${P}fan-${String(i).padStart(4, '0')}`,
     })),
   })
 
@@ -634,6 +913,10 @@ async function main(): Promise<void> {
       // Booking is @@unique([professionalId, scheduledFor]) — a pro can't be in
       // two places at once. Spacing off the GLOBAL sequence (not the per-look
       // index) keeps every instant distinct across looks that share a pro.
+      const scheduledFor = new Date(
+        NOW.getTime() - (bookingSeq + 1) * 24 * 60 * 60 * 1000,
+      )
+
       bookingRows.push({
         id: `${P}booking-${String(bookingSeq).padStart(4, '0')}`,
         clientId: `${P}fan-${String(bookingSeq % fanCount).padStart(4, '0')}`,
@@ -644,7 +927,13 @@ async function main(): Promise<void> {
         sourceLookPostId: lookId(look.key),
         source: BookingSource.DISCOVERY,
         status: BookingStatus.COMPLETED,
-        scheduledFor: new Date(NOW.getTime() - (bookingSeq + 1) * 24 * 60 * 60 * 1000),
+        // "Your looks, remixed" times each row off `createdAt` — when the
+        // booking was MADE, not when it was served. Left to default it is
+        // `now()` for all 43 rows and every line in the card reads "today",
+        // which is the one thing a recency list must not do. Booked a few days
+        // before the appointment, like a real one.
+        createdAt: new Date(scheduledFor.getTime() - 3 * 24 * 60 * 60 * 1000),
+        scheduledFor,
         locationType: ServiceLocationType.SALON,
         locationId: locationId(look.proKey),
         locationTimeZone: TIME_ZONE,
@@ -656,6 +945,40 @@ async function main(): Promise<void> {
   }
   await prisma.booking.createMany({ data: bookingRows })
 
+  // ── reviews + cancellation policy (the booking sheet's trust row) ──────────
+  // The sheet's three chips read `lib/booking/trustSignals`: an approved
+  // verification, a COMPLETED-booking count, and the pro's own late-cancel
+  // window. Without reviews the rating is honestly null and the star never
+  // renders, so a handful are seeded on the pro the demo look books.
+  //
+  // Ratings are NOT all 5★ — an aggregate that can only ever round to 5.0 is a
+  // fixture flattering the product, and it never exercises the one-decimal
+  // formatting the frame shows ("4.9★").
+  const REVIEW_RATINGS = [5, 5, 5, 4, 5, 5, 4, 5, 5, 5]
+  await prisma.review.createMany({
+    data: REVIEW_RATINGS.map((rating, i) => ({
+      id: `${P}review-${String(i).padStart(3, '0')}`,
+      clientId: `${P}fan-${String(i).padStart(4, '0')}`,
+      professionalId: proId('noor'),
+      rating,
+      createdAt: new Date(NOW.getTime() - (i + 1) * 5 * 24 * 60 * 60 * 1000),
+    })),
+  })
+
+  // Charging a late-cancel fee is what GIVES the pro a free-cancellation window
+  // to advertise; with fees off the chip honestly reads "Free cancellation".
+  await prisma.proNoShowSettings.create({
+    data: {
+      id: `${P}noshow-noor`,
+      professionalId: proId('noor'),
+      enabled: true,
+      feeFlatAmount: money(25),
+      cancelWindowHours: 24,
+      chargeNoShow: true,
+      chargeLateCancel: true,
+    },
+  })
+
   // Score the creator tier from the rows just written, using the SAME job the
   // hourly cron runs. Seeding a tier directly would let the fixture disagree
   // with what production would actually compute from this data.
@@ -663,7 +986,8 @@ async function main(): Promise<void> {
 
   console.log(
     `[seedDemoClientProfile] seeded @${CREATOR.handle}: ` +
-      `${LOOKS.length} looks, ${BOARDS.length} boards, ` +
+      `${LOOKS.length} looks, ${BOARDS.length} boards ` +
+      `(${BOARDS.filter((b) => b.shared).length} shared), ${ADD_ONS.length} add-ons, ` +
       `${FOLLOWER_COUNT} followers, ${bookingRows.length} attributed bookings; ` +
       `creator tiers: ${stats.ranked} ranked of ${stats.scored} scored.`,
   )

@@ -518,5 +518,8 @@ export async function checkProReadinessForEntryPoint(args: {
 export {
   evaluateProReadiness,
   evaluateProReadinessForEntryPoint,
+  // Exported so the booking sheet's "Verified pro" chip asks the SAME question
+  // readiness asks, rather than restating the status list and drifting from it.
+  isBlockedVerificationStatus,
   proReadinessSelect,
 }

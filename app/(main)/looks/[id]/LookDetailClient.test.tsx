@@ -542,7 +542,7 @@ describe('app/(main)/looks/[id]/LookDetailClient', () => {
     })
   })
 
-  it('opens availability with post-derived context and leaves legacy mediaId empty', async () => {
+  it('opens availability with post-derived context, carrying the primary media id', async () => {
     installFetchMock()
 
     render(<LookDetailClient initialItem={makeDetailItem()} />)
@@ -556,7 +556,7 @@ describe('app/(main)/looks/[id]/LookDetailClient', () => {
     expect(drawer).toHaveAttribute('data-professional-id', 'pro_1')
     expect(drawer).toHaveAttribute('data-service-id', 'service_1')
     expect(drawer).toHaveAttribute('data-source', 'DISCOVERY')
-    expect(drawer).toHaveAttribute('data-media-id', '')
+    expect(drawer).toHaveAttribute('data-media-id', 'media_1')
     expect(drawer).toHaveAttribute('data-viewer-lat', '32.7157')
     expect(drawer).toHaveAttribute('data-viewer-lng', '-117.1611')
     expect(drawer).toHaveAttribute('data-viewer-radius', '15')
