@@ -187,6 +187,12 @@ const bookingPageBookingSelect = {
 const aftercareSummarySelect = {
   id: true,
   notes: true,
+  // The pro's own labelled blocks. The LABEL is their text, never an enum —
+  // "Wash" for a colourist, "Cuticle oil" for a nail tech.
+  careSections: {
+    orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
+    select: { id: true, label: true, body: true },
+  },
   rebookMode: true,
   rebookedFor: true,
   rebookWindowStart: true,

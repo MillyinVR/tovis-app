@@ -619,6 +619,11 @@ async function main(): Promise<void> {
         // be signed into. No seeded password hash is shared with a real login.
         password: 'demo-seed-no-login',
         role: Role.PRO,
+        // Verified, because an unverified pro is refused by every pro-side API
+        // (VERIFICATION_REQUIRED) — which made the whole pro half of this
+        // fixture undemoable. A real approved pro has both of these.
+        emailVerifiedAt: NOW,
+        phoneVerifiedAt: NOW,
       },
     })
 

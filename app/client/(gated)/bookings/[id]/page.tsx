@@ -1616,6 +1616,30 @@ export default async function ClientBookingPage(props: {
                           </ClientAftercareCard>
                         ) : null}
 
+                        {/* The pro's own labelled blocks. Their headings, in
+                            their vocabulary — a colourist writes "Wash", a nail
+                            tech "Cuticle oil". Rendered above the closing note,
+                            which is what `notes` has always been. */}
+                        {(aftercare?.careSections ?? []).length > 0 ? (
+                          <ClientAftercareCard>
+                            <ClientAftercareSectionTitle
+                              title={`${professionalLabel}'s plan for you`}
+                            />
+                            <div className="mt-2 flex flex-col gap-4">
+                              {(aftercare?.careSections ?? []).map((section) => (
+                                <div key={section.id}>
+                                  <div className="text-[14px] font-black text-textPrimary">
+                                    {section.label}
+                                  </div>
+                                  <div className="brand-pro-session-card-body mt-1 whitespace-pre-wrap">
+                                    {section.body}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </ClientAftercareCard>
+                        ) : null}
+
                         <ClientAftercareCard>
                           <ClientAftercareSectionTitle title="Care notes" />
 
