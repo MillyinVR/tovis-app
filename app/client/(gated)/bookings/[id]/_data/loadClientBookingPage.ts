@@ -1,13 +1,14 @@
 // app/client/bookings/[id]/_data/loadClientBookingPage.ts
 import { notFound, redirect } from 'next/navigation'
 import type { Prisma } from '@prisma/client'
+import type { BoardVisibility } from '@prisma/client'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { CLIENT_CONFIRMATION_SELECT } from '@/lib/booking/clientConfirmation'
 import { deriveDepositCredit } from '@/lib/booking/depositCredit'
-import { resolvePrepForBooking } from '@/lib/booking/prep'
+import { isPrepWritableStatus, resolvePrepForBooking } from '@/lib/booking/prep'
 import {
   BOARD_SHARE_TILE_COUNT,
   sharedBoardIdsForBooking,
@@ -379,6 +380,86 @@ async function requireAuthedClientUser(
   return user
 }
 
+
+const clientBoardSelect = {
+  id: true,
+  name: true,
+  visibility: true,
+  _count: { select: { items: true } },
+  items: {
+    orderBy: { createdAt: 'desc' },
+    take: BOARD_SHARE_TILE_COUNT,
+    select: {
+      lookPost: {
+        select: { primaryMediaAsset: { select: { thumbUrl: true, url: true } } },
+      },
+    },
+  },
+} satisfies Prisma.BoardSelect
+
+type AppointmentPrepBundle = {
+  prep: Awaited<ReturnType<typeof resolvePrepForBooking>>
+  checkedItemIds: string[]
+  sharedBoardIds: string[]
+  boards: {
+    id: string
+    name: string
+    visibility: BoardVisibility
+    itemCount: number
+    tileImageUrls: string[]
+  }[]
+}
+
+/** What the page gets for a booking that can no longer be prepared for. */
+const EMPTY_PREP_BUNDLE: AppointmentPrepBundle = {
+  prep: { items: [], source: 'NONE', note: null },
+  checkedItemIds: [],
+  sharedBoardIds: [],
+  boards: [],
+}
+
+async function loadAppointmentPrep(
+  bookingId: string,
+  professionalId: string,
+  offeringId: string | null,
+  clientProfileId: string,
+): Promise<AppointmentPrepBundle> {
+  const [prep, checks, sharedBoardIds, boards] = await Promise.all([
+    resolvePrepForBooking(prisma, { professionalId, offeringId }),
+    prisma.bookingPrepCheck.findMany({
+      where: { bookingId },
+      select: { prepItemId: true },
+    }),
+    sharedBoardIdsForBooking(prisma, bookingId),
+    prisma.board.findMany({
+      where: { clientId: clientProfileId },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+      select: clientBoardSelect,
+    }),
+  ])
+
+  return {
+    prep,
+    checkedItemIds: checks.map((row) => row.prepItemId),
+    sharedBoardIds,
+    boards: boards.map((board) => ({
+      id: board.id,
+      name: board.name,
+      visibility: board.visibility,
+      itemCount: board._count.items,
+      tileImageUrls: board.items
+        .map(
+          (item) =>
+            item.lookPost?.primaryMediaAsset?.thumbUrl ??
+            item.lookPost?.primaryMediaAsset?.url ??
+            null,
+        )
+        .filter((url): url is string => typeof url === 'string' && url.length > 0),
+    })),
+  }
+}
+
 export async function loadClientBookingPage(bookingId: string) {
   const user = await requireAuthedClientUser(bookingId)
 
@@ -439,40 +520,18 @@ export async function loadClientBookingPage(bookingId: string) {
     ])
 
   // Appointment prep — the pro's checklist, their note, the client's ticks, and
-  // the boards already handed over. Loaded for every booking rather than only
-  // upcoming ones: the screen decides what to show, and a completed booking
-  // still renders its checklist read-only rather than having the block vanish.
-  const [prep, prepChecks, sharedBoardIds, clientBoards] = await Promise.all([
-    resolvePrepForBooking(prisma, {
-      professionalId: raw.professional.id,
-      offeringId: raw.offeringId ?? null,
-    }),
-    prisma.bookingPrepCheck.findMany({
-      where: { bookingId: raw.id },
-      select: { prepItemId: true },
-    }),
-    sharedBoardIdsForBooking(prisma, raw.id),
-    prisma.board.findMany({
-      where: { clientId: user.clientProfile.id },
-      orderBy: { createdAt: 'desc' },
-      take: 12,
-      select: {
-        id: true,
-        name: true,
-        visibility: true,
-        _count: { select: { items: true } },
-        items: {
-          orderBy: { createdAt: 'desc' },
-          take: BOARD_SHARE_TILE_COUNT,
-          select: {
-            lookPost: {
-              select: { primaryMediaAsset: { select: { thumbUrl: true, url: true } } },
-            },
-          },
-        },
-      },
-    }),
-  ])
+  // the boards already handed over.
+  //
+  // Skipped entirely once the appointment can no longer be prepared for. This
+  // is ~6 queries (one with a nested media read), and the page renders none of
+  // it for a COMPLETED or CANCELLED booking — which is most of what a client
+  // opens. `isPrepWritableStatus` is the SAME predicate the page gates its
+  // render on and the write path re-checks, so the three cannot drift.
+  const prepApplies = isPrepWritableStatus(raw.status)
+
+  const prepBundle = prepApplies
+    ? await loadAppointmentPrep(raw.id, raw.professional.id, raw.offeringId ?? null, user.clientProfile.id)
+    : EMPTY_PREP_BUNDLE
 
   const media = await renderBookingMedia(rawMedia)
 
@@ -501,27 +560,14 @@ export async function loadClientBookingPage(bookingId: string) {
     depositCredit,
     checkoutProductItems: raw.checkoutProductItems,
     prep: {
-      items: prep.items,
-      source: prep.source,
-      note: prep.note,
-      checkedItemIds: prepChecks.map((row) => row.prepItemId),
+      items: prepBundle.prep.items,
+      source: prepBundle.prep.source,
+      note: prepBundle.prep.note,
+      checkedItemIds: prepBundle.checkedItemIds,
     },
     boards: {
-      sharedBoardIds,
-      mine: clientBoards.map((board) => ({
-        id: board.id,
-        name: board.name,
-        visibility: board.visibility,
-        itemCount: board._count.items,
-        tileImageUrls: board.items
-          .map(
-            (item) =>
-              item.lookPost?.primaryMediaAsset?.thumbUrl ??
-              item.lookPost?.primaryMediaAsset?.url ??
-              null,
-          )
-          .filter((url): url is string => typeof url === 'string' && url.length > 0),
-      })),
+      sharedBoardIds: prepBundle.sharedBoardIds,
+      mine: prepBundle.boards,
     },
   }
 }
