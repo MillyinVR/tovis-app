@@ -7,6 +7,11 @@ import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { CLIENT_CONFIRMATION_SELECT } from '@/lib/booking/clientConfirmation'
 import { deriveDepositCredit } from '@/lib/booking/depositCredit'
+import { resolvePrepForBooking } from '@/lib/booking/prep'
+import {
+  BOARD_SHARE_TILE_COUNT,
+  sharedBoardIdsForBooking,
+} from '@/lib/boards/bookingShare'
 import { loadProfessionalPaymentSettings } from './loadProfessionalPaymentSettings'
 
 type CurrentUserResult = Awaited<ReturnType<typeof getCurrentUser>>
@@ -81,6 +86,10 @@ const bookingPageBookingSelect = {
   clientAddressSnapshot: true,
   clientAddressLatSnapshot: true,
   clientAddressLngSnapshot: true,
+
+  // Needed to resolve the prep checklist: an offering's own rows replace the
+  // pro's default list for bookings of that service.
+  offeringId: true,
 
   service: {
     select: {
@@ -423,6 +432,42 @@ export async function loadClientBookingPage(bookingId: string) {
       }),
     ])
 
+  // Appointment prep — the pro's checklist, their note, the client's ticks, and
+  // the boards already handed over. Loaded for every booking rather than only
+  // upcoming ones: the screen decides what to show, and a completed booking
+  // still renders its checklist read-only rather than having the block vanish.
+  const [prep, prepChecks, sharedBoardIds, clientBoards] = await Promise.all([
+    resolvePrepForBooking(prisma, {
+      professionalId: raw.professional.id,
+      offeringId: raw.offeringId ?? null,
+    }),
+    prisma.bookingPrepCheck.findMany({
+      where: { bookingId: raw.id },
+      select: { prepItemId: true },
+    }),
+    sharedBoardIdsForBooking(prisma, raw.id),
+    prisma.board.findMany({
+      where: { clientId: user.clientProfile.id },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+      select: {
+        id: true,
+        name: true,
+        visibility: true,
+        _count: { select: { items: true } },
+        items: {
+          orderBy: { createdAt: 'desc' },
+          take: BOARD_SHARE_TILE_COUNT,
+          select: {
+            lookPost: {
+              select: { primaryMediaAsset: { select: { thumbUrl: true, url: true } } },
+            },
+          },
+        },
+      },
+    }),
+  ])
+
   const media = await renderBookingMedia(rawMedia)
 
   const existingReview =
@@ -449,5 +494,28 @@ export async function loadClientBookingPage(bookingId: string) {
     rebookedNextBooking,
     depositCredit,
     checkoutProductItems: raw.checkoutProductItems,
+    prep: {
+      items: prep.items,
+      source: prep.source,
+      note: prep.note,
+      checkedItemIds: prepChecks.map((row) => row.prepItemId),
+    },
+    boards: {
+      sharedBoardIds,
+      mine: clientBoards.map((board) => ({
+        id: board.id,
+        name: board.name,
+        visibility: board.visibility,
+        itemCount: board._count.items,
+        tileImageUrls: board.items
+          .map(
+            (item) =>
+              item.lookPost?.primaryMediaAsset?.thumbUrl ??
+              item.lookPost?.primaryMediaAsset?.url ??
+              null,
+          )
+          .filter((url): url is string => typeof url === 'string' && url.length > 0),
+      })),
+    },
   }
 }

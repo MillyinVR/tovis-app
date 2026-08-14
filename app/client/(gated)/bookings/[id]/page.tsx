@@ -14,6 +14,8 @@ import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
+import { buildPrepCountdown } from '@/lib/booking/prepCountdown'
+import { isPrepWritableStatus } from '@/lib/booking/prep'
 import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/_components/ProProfileLink'
 import ClientPage from '../../_components/ClientPage'
@@ -27,6 +29,7 @@ import AftercareNextAppointmentCard from './AftercareNextAppointmentCard'
 import MediaConsentCard from './MediaConsentCard'
 import AftercareRebookButton from './AftercareRebookButton'
 import AftercareStepper from './AftercareStepper'
+import AppointmentPrepSection from './AppointmentPrepSection'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
 import ClientConfirmationCard from './ClientConfirmationCard'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
@@ -789,6 +792,8 @@ export default async function ClientBookingPage(props: {
     rebookedNextBooking,
     depositCredit,
     checkoutProductItems,
+    prep,
+    boards,
   } = await loadClientBookingPage(bookingId)
 
   const clientId = user.clientProfile?.id
@@ -860,6 +865,19 @@ export default async function ClientBookingPage(props: {
   const whenLabel = scheduled
     ? formatWhenInTimeZone(scheduled, appointmentTimeZone)
     : COPY.common.unknownTime
+
+  // Appointment prep — the "Before you go" layer. Shown while the appointment
+  // is still ahead of the client; once it is done the care plan is the screen
+  // that matters and the prep blocks would be noise.
+  const prepCountdown = scheduled
+    ? buildPrepCountdown(scheduled, appointmentTimeZone)
+    : null
+  const prepWritable = isPrepWritableStatus(raw.status)
+  const showPrep =
+    prepCountdown != null &&
+    prepCountdown.tone !== 'past' &&
+    prepWritable &&
+    (prep.items.length > 0 || prep.note != null || boards.mine.length > 0)
 
   const statusVariant = clientStatusPillVariant(booking.status)
   const statusInfo = clientStatusMessage(booking.status)
@@ -1336,6 +1354,30 @@ export default async function ClientBookingPage(props: {
 
           {step === 'overview' ? (
             <div className="mt-4 grid gap-4">
+              {showPrep && prepCountdown ? (
+                <AppointmentPrepSection
+                  bookingId={booking.id}
+                  proDisplayName={professionalLabel}
+                  countdown={prepCountdown}
+                  whenLabel={whenLabel}
+                  items={prep.items.map((item) => ({
+                    id: item.id,
+                    text: item.text,
+                  }))}
+                  checkedItemIds={prep.checkedItemIds}
+                  note={prep.note}
+                  boards={boards.mine.map((board) => ({
+                    id: board.id,
+                    name: board.name,
+                    itemCount: board.itemCount,
+                    visibility: board.visibility,
+                    tileImageUrls: board.tileImageUrls,
+                  }))}
+                  sharedBoardIds={boards.sharedBoardIds}
+                  writable={prepWritable}
+                />
+              ) : null}
+
               {String(raw.depositStatus ?? '').toUpperCase() === 'PENDING' &&
               depositBanner === 'cancelled' ? (
                 <div
