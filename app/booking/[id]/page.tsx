@@ -24,8 +24,8 @@ import {
 } from '@/lib/privacy/professionalDisplayName'
 import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/time'
-import { isRecord } from '@/lib/guards'
 import { labelForBookingStatus } from '@/lib/booking/statusLabel'
+import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,6 +63,12 @@ const bookingReceiptSelect = {
   locationAddressSnapshot: true,
   locationLatSnapshot: true,
   locationLngSnapshot: true,
+
+  // MOBILE bookings happen at the CLIENT's address, not the pro's — see
+  // resolveBookedPlace.
+  clientAddressSnapshot: true,
+  clientAddressLatSnapshot: true,
+  clientAddressLngSnapshot: true,
 
   location: {
     select: {
@@ -208,13 +214,6 @@ function decimalToNumber(v: unknown): number | null {
   return null
 }
 
-function pickFormattedAddress(snapshot: Prisma.JsonValue | null | undefined): string | null {
-  if (!isRecord(snapshot)) return null
-
-  const raw = snapshot.formattedAddress
-  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
-}
-
 function resolveReceiptTimeZone(args: {
   bookingLocationTimeZone: string | null
   bookedLocationTimeZone: string | null | undefined
@@ -232,41 +231,57 @@ function resolveReceiptTimeZone(args: {
   return DEFAULT_TIME_ZONE
 }
 
-function buildBookedLocationLabel(booking: BookingReceiptRow) {
-  const snapshotAddress = pickFormattedAddress(booking.locationAddressSnapshot)
-  if (snapshotAddress) return snapshotAddress
+/**
+ * The place this booking actually happens, and a maps link to it.
+ *
+ * This page used to hand-roll the resolution and only ever read the SALON
+ * snapshot, so a MOBILE booking — which happens at the CLIENT's address —
+ * rendered no location at all, and would have shown the *pro's* address had
+ * that pro carried a `location` string. `resolveBookingLocationMeta` is the
+ * shared helper the pro bookings list and detail already use; it picks the
+ * client-address snapshot for MOBILE and the pro-location snapshot for SALON.
+ *
+ * The salon-only fallbacks (booked location's own address / name / city+state,
+ * then the pro's location text) stay, because a SALON booking predating the
+ * snapshot still has them. They are deliberately NOT applied to MOBILE: every
+ * one of them describes the pro's premises, which is the wrong place.
+ */
+function resolveBookedPlace(booking: BookingReceiptRow): {
+  label: string | null
+  mapsHref: string | null
+} {
+  const meta = resolveBookingLocationMeta({
+    locationType: booking.locationType,
+    locationAddressSnapshot: booking.locationAddressSnapshot,
+    locationLatSnapshot: decimalToNumber(booking.locationLatSnapshot),
+    locationLngSnapshot: decimalToNumber(booking.locationLngSnapshot),
+    clientAddressSnapshot: booking.clientAddressSnapshot,
+    clientAddressLatSnapshot: decimalToNumber(booking.clientAddressLatSnapshot),
+    clientAddressLngSnapshot: decimalToNumber(booking.clientAddressLngSnapshot),
+  })
 
-  const bookedLocation = booking.location
-  if (bookedLocation?.formattedAddress?.trim()) return bookedLocation.formattedAddress.trim()
-  if (bookedLocation?.name?.trim()) return bookedLocation.name.trim()
+  const bookedLocation = meta.isMobile ? null : booking.location
 
-  const cityState = [bookedLocation?.city, bookedLocation?.state].filter(Boolean).join(', ')
-  if (cityState) return cityState
+  const label =
+    meta.formattedAddress ??
+    bookedLocation?.formattedAddress?.trim() ??
+    bookedLocation?.name?.trim() ??
+    ([bookedLocation?.city, bookedLocation?.state].filter(Boolean).join(', ') || null) ??
+    (meta.isMobile ? null : booking.professional?.location?.trim() ?? null)
 
-  const professionalLocation = booking.professional?.location?.trim()
-  if (professionalLocation) return professionalLocation
+  // Coordinates beat a place id: the snapshot is what was booked, the pro's
+  // ProfessionalLocation may have moved since.
+  const hasSnapshotTruth = Boolean(meta.formattedAddress) || meta.lat != null || meta.lng != null
 
-  return null
-}
-
-function buildMapsHref(booking: BookingReceiptRow) {
-  const isSalon = upper(booking.locationType) === 'SALON'
-  if (!isSalon) return null
-
-  const snapshotAddress = pickFormattedAddress(booking.locationAddressSnapshot)
-  const snapshotLat = decimalToNumber(booking.locationLatSnapshot)
-  const snapshotLng = decimalToNumber(booking.locationLngSnapshot)
-  const hasSnapshotTruth = snapshotAddress || snapshotLat != null || snapshotLng != null
-
-  const bookedLocation = booking.location
-
-  return mapsHrefFromLocation({
+  const mapsHref = mapsHrefFromLocation({
     placeId: hasSnapshotTruth ? null : bookedLocation?.placeId ?? null,
-    lat: snapshotLat ?? decimalToNumber(bookedLocation?.lat),
-    lng: snapshotLng ?? decimalToNumber(bookedLocation?.lng),
-    formattedAddress: snapshotAddress ?? bookedLocation?.formattedAddress ?? null,
+    lat: meta.lat ?? decimalToNumber(bookedLocation?.lat),
+    lng: meta.lng ?? decimalToNumber(bookedLocation?.lng),
+    formattedAddress: meta.formattedAddress ?? bookedLocation?.formattedAddress ?? label,
     name: hasSnapshotTruth ? null : bookedLocation?.name ?? null,
   })
+
+  return { label, mapsHref }
 }
 
 export default async function BookingReceiptPage(props: PageProps) {
@@ -304,8 +319,7 @@ export default async function BookingReceiptPage(props: PageProps) {
 
   const when = fmtInTimeZone(new Date(booking.scheduledFor), appointmentTz)
   const whenZone = fmtZoneAbbreviation(new Date(booking.scheduledFor), appointmentTz)
-  const locationLabel = buildBookedLocationLabel(booking)
-  const mapsHref = buildMapsHref(booking)
+  const { label: locationLabel, mapsHref } = resolveBookedPlace(booking)
 
   const calendarHref = `/api/v1/calendar?bookingId=${encodeURIComponent(booking.id)}`
   const messageHref =
